@@ -1,5 +1,5 @@
 import { requireAuth } from '@/lib/auth'
-import { getZohoLocations } from '@/lib/zoho'
+import { getZohoLocation } from '@/lib/zoho'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 
@@ -9,8 +9,7 @@ interface Props {
 
 export default async function LocationDetailPage({ params }: Props) {
   await requireAuth()
-  const locations = await getZohoLocations()
-  const location = locations.find((l: any) => l.Location_ID === params.id)
+const location = await getZohoLocation(params.id)
 
   if (!location) notFound()
 
@@ -72,10 +71,10 @@ export default async function LocationDetailPage({ params }: Props) {
                 <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{location.Last_Sync_Status || '—'}</p>
               </div>
               <div style={{ marginTop: '0.75rem' }}>
-                <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Token Expiry</p>
-                <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                  {location.Token_Expiry_Display ? new Date(location.Token_Expiry_Display).toLocaleString() : '—'}
-                </p>
+<p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Token Expiry</p>
+<p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+  {location.Token_Expiry ? new Date(parseInt(location.Token_Expiry)).toLocaleString() : '—'}
+</p>
               </div>
             </div>
           ) : (

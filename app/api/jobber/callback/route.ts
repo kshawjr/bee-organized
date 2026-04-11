@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getZohoLocations, zohoUpdate } from '@/lib/zoho'
+import { getZohoLocation, zohoUpdate } from '@/lib/zoho'
 
 const JOBBER_TOKEN_URL = 'https://api.getjobber.com/api/oauth/token'
 const JOBBER_GRAPHQL_URL = 'https://api.getjobber.com/api/graphql'
@@ -20,8 +20,7 @@ export async function GET(request: NextRequest) {
   const locationId = state.split(':')[0]
 
   try {
-    const locations = await getZohoLocations()
-    const location = locations.find((l: any) => l.Location_ID === locationId)
+    const location = await getZohoLocation(locationId)
 
     if (!location) {
       return NextResponse.redirect(new URL('/dashboard/locations?error=not_found', request.url))
@@ -29,7 +28,6 @@ export async function GET(request: NextRequest) {
 
     const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL}/api/jobber/callback`
 
-    // Exchange code for tokens
     const tokenRes = await fetch(JOBBER_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -42,11 +40,23 @@ export async function GET(request: NextRequest) {
       }),
     })
 
-    const tokens = await tokenRes.json()
+    const tokenText = await tokenRes.text()
+    console.log('Token response:', tokenText)
+
+    let tokens
+    try {
+      tokens = JSON.parse(tokenText)
+    } catch {
+      console.error('Token parse error:', tokenText)
+      return NextResponse.redirect(
+        new URL(`/dashboard/locations/${locationId}?error=token_parse_failed`, request.url)
+      )
+    }
 
     if (!tokens.access_token) {
+      console.error('No access token:', tokens)
       return NextResponse.redirect(
-        new URL(`/dashboard/locations/${locationId}?error=token_failed`, request.url)
+        new URL(`/dashboard/locations/${locationId}?error=no_access_token`, request.url)
       )
     }
 
@@ -64,17 +74,18 @@ export async function GET(request: NextRequest) {
     const accountData = await accountRes.json()
     const accountId = accountData.data?.account?.id
 
-    // Calculate expiry
     const expiryMs = Date.now() + 55 * 60 * 1000
-    const expiryDisplay = new Date(expiryMs).toISOString()
 
-    // Write tokens back to Zoho
+    console.log('Account data:', JSON.stringify(accountData))
+console.log('Account ID:', accountId)
+console.log('Attempting zoho update for record:', location.id)
+
     await zohoUpdate('Locations', location.id, {
       Jobber_Access_Token: tokens.access_token,
       Jobber_Refresh_Token: tokens.refresh_token,
       Jobber_Account_ID: accountId,
       Token_Expiry: expiryMs.toString(),
-      Token_Expiry_Display: expiryDisplay,
+      Token_Expiry_Display: new Date(expiryMs).toISOString().slice(0, 19),
       Last_Sync_Status: `Connected via Hub: ${new Date().toLocaleString()}`,
     })
 
