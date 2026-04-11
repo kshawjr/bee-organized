@@ -33,8 +33,8 @@ export async function GET(request: NextRequest) {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
-        client_id: location.Jobber_Client_ID_App,
-        client_secret: location.Jobber_Secret_App,
+        client_id: process.env.JOBBER_CLIENT_ID!,
+        client_secret: process.env.JOBBER_CLIENT_SECRET!,
         code,
         redirect_uri: redirectUri,
       }),
@@ -60,7 +60,6 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Get Jobber account ID
     const accountRes = await fetch(JOBBER_GRAPHQL_URL, {
       method: 'POST',
       headers: {
@@ -74,11 +73,10 @@ export async function GET(request: NextRequest) {
     const accountData = await accountRes.json()
     const accountId = accountData.data?.account?.id
 
-    const expiryMs = Date.now() + 55 * 60 * 1000
+    console.log('Account ID:', accountId)
+    console.log('Attempting zoho update for record:', location.id)
 
-    console.log('Account data:', JSON.stringify(accountData))
-console.log('Account ID:', accountId)
-console.log('Attempting zoho update for record:', location.id)
+    const expiryMs = Date.now() + 55 * 60 * 1000
 
     await zohoUpdate('Locations', location.id, {
       Jobber_Access_Token: tokens.access_token,

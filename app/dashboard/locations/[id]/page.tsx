@@ -80,13 +80,11 @@ const location = await getZohoLocation(params.id)
           ) : (
             <div>
               <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '1rem' }}>
-                {location.Configure_Location_to_Jobber ? 'Configured but not connected.' : 'Not configured for Jobber.'}
+This location is not connected to Jobber.
               </p>
-              {location.Configure_Location_to_Jobber && (
-                <a href={`/api/jobber/connect?location_id=${location.Location_ID}`} style={{ display: 'inline-block', padding: '8px 16px', background: 'var(--brand)', color: '#000', borderRadius: '6px', textDecoration: 'none', fontSize: '13px', fontWeight: 600 }}>
-                  Connect Jobber
-                </a>
-              )}
+<a href={`/api/jobber/connect?location_id=${location.Location_ID}`} style={{ display: 'inline-block', padding: '8px 16px', background: 'var(--brand)', color: '#000', borderRadius: '6px', textDecoration: 'none', fontSize: '13px', fontWeight: 600 }}>
+  Connect Jobber
+</a>
             </div>
           )}
         </div>
