@@ -34,10 +34,12 @@ export default function LocationsPage() {
     Inactive: true,
   })
 
-  useEffect(() => {
+ useEffect(() => {
     fetch('/api/zoho/locations')
       .then(r => r.json())
       .then(d => {
+        console.log('locations data:', d)
+        console.log('first location:', d.locations?.[0])
         setLocations(d.locations || [])
         setLoading(false)
       })
