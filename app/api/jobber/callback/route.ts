@@ -78,14 +78,21 @@ export async function GET(request: NextRequest) {
 
     const expiryMs = Date.now() + 55 * 60 * 1000
 
-    await zohoUpdate('Locations', location.id, {
-      Jobber_Access_Token: tokens.access_token,
-      Jobber_Refresh_Token: tokens.refresh_token,
-      Jobber_Account_ID: accountId,
-      Token_Expiry: expiryMs.toString(),
-      Token_Expiry_Display: new Date(expiryMs).toISOString().slice(0, 19),
-      Last_Sync_Status: `Connected via Hub: ${new Date().toLocaleString()}`,
-    })
+    console.log('Update payload:', JSON.stringify({
+  Jobber_Client_ID_App: process.env.JOBBER_CLIENT_ID,
+  Jobber_Secret_App: process.env.JOBBER_CLIENT_SECRET,
+}))
+
+await zohoUpdate('Locations', location.id, {
+  Jobber_Access_Token: tokens.access_token,
+  Jobber_Refresh_Token: tokens.refresh_token,
+  Jobber_Account_ID: accountId,
+  Jobber_Client_ID_App: process.env.JOBBER_CLIENT_ID,
+  Jobber_Secret_App: process.env.JOBBER_CLIENT_SECRET,
+  Token_Expiry: expiryMs.toString(),
+  Token_Expiry_Display: new Date(expiryMs).toISOString().slice(0, 19),
+  Last_Sync_Status: `Connected via Hub: ${new Date().toLocaleString()}`,
+})
 
     return NextResponse.redirect(
       new URL(`/dashboard/locations/${locationId}?success=connected`, request.url)
