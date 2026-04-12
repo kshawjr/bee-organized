@@ -1,22 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getZohoLocation } from '@/lib/zoho'
-
-const JOBBER_GRAPHQL_URL = 'https://api.getjobber.com/api/graphql'
-const JOBBER_API_VERSION = '2025-04-16'
-
-async function jobberQuery(accessToken: string, query: string) {
-  const res = await fetch(JOBBER_GRAPHQL_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      'X-JOBBER-GRAPHQL-VERSION': JOBBER_API_VERSION,
-    },
-    body: JSON.stringify({ query }),
-    cache: 'no-store',
-  })
-  return res.json()
-}
+import { jobberQuery, getValidJobberToken } from '@/lib/jobber'
 
 async function getZohoAccessToken(): Promise<string> {
   const res = await fetch(
@@ -46,52 +30,75 @@ async function zohoFetch(url: string, token: string, options: RequestInit = {}) 
   return safeJson(res)
 }
 
-async function refreshJobberToken(location: any, zohoToken: string): Promise<string> {
+async function fetchAllPages(token: string, query: string, dataKey: string): Promise<any[]> {
+  const all: any[] = []
+  let hasNextPage = true
+  let cursor: string | null = null
+
+  while (hasNextPage) {
+    const result = await jobberQuery(token, query, cursor ? { after: cursor } : {})
+    const page = result?.data?.[dataKey]
+    if (!page) {
+      console.log('No page data for', dataKey, JSON.stringify(result).slice(0, 200))
+      break
+    }
+    all.push(...page.nodes)
+    hasNextPage = page.pageInfo.hasNextPage
+    cursor = page.pageInfo.endCursor
+    if (hasNextPage) await new Promise(r => setTimeout(r, 1000))
+  }
+
+  return all
+}
+
+async function fetchExistingJobberRequestIds(zohoToken: string, locationId: string): Promise<Set<string>> {
   const ZOHO_API_BASE = process.env.ZOHO_API_BASE!
-  const expiry = parseInt(location.Token_Expiry || '0')
-  const bufferMs = 5 * 60 * 1000
+  const ids = new Set<string>()
+  let page = 1
+  let hasMore = true
 
-  if (expiry && Date.now() < expiry - bufferMs) {
-    return location.Jobber_Access_Token
+  while (hasMore) {
+    const result = await zohoFetch(
+      `${ZOHO_API_BASE}/Deals/search?criteria=(Location_ID:equals:${locationId})&fields=Jobber_Request_ID&per_page=200&page=${page}`,
+      zohoToken
+    )
+    const records = result.data || []
+    for (const rec of records) {
+      if (rec.Jobber_Request_ID) ids.add(rec.Jobber_Request_ID)
+    }
+    hasMore = records.length === 200
+    page++
+    if (hasMore) await new Promise(r => setTimeout(r, 100))
   }
 
-  const res = await fetch('https://api.getjobber.com/api/oauth/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: process.env.JOBBER_CLIENT_ID!,
-      client_secret: process.env.JOBBER_CLIENT_SECRET!,
-      refresh_token: location.Jobber_Refresh_Token,
-    }),
-    cache: 'no-store',
-  })
-
-  const tokens = await res.json()
-
-  if (!tokens.access_token) {
-    throw new Error('Failed to refresh Jobber token')
+  page = 1
+  hasMore = true
+  while (hasMore) {
+    const result = await zohoFetch(
+      `${ZOHO_API_BASE}/Requests/search?criteria=(Location_ID:equals:${locationId})&fields=Jobber_Request_ID&per_page=200&page=${page}`,
+      zohoToken
+    )
+    const records = result.data || []
+    for (const rec of records) {
+      if (rec.Jobber_Request_ID) ids.add(rec.Jobber_Request_ID)
+    }
+    hasMore = records.length === 200
+    page++
+    if (hasMore) await new Promise(r => setTimeout(r, 100))
   }
 
-  const expiryMs = Date.now() + 55 * 60 * 1000
-  await zohoFetch(`${ZOHO_API_BASE}/Locations`, zohoToken, {
-    method: 'PUT',
-    body: JSON.stringify({ data: [{
-      id: location.id,
-      Jobber_Access_Token: tokens.access_token,
-      Jobber_Refresh_Token: tokens.refresh_token,
-      Token_Expiry: expiryMs.toString(),
-      Token_Expiry_Display: new Date(expiryMs).toISOString().slice(0, 19),
-      Last_Sync_Status: `Token refreshed by Hub: ${new Date().toLocaleString()}`,
-    }] }),
-  })
+  return ids
+}
 
-  return tokens.access_token
+function hasContactInfo(client: any): boolean {
+  const email = client.emails?.find((e: any) => e.primary)?.address || client.emails?.[0]?.address || ''
+  const phone = client.phones?.find((p: any) => p.primary)?.number || client.phones?.[0]?.number || ''
+  return !!(email || phone)
 }
 
 const CLIENTS_QUERY = `
-  query {
-    clients(first: 50) {
+  query GetClients($after: String) {
+    clients(first: 50, after: $after) {
       nodes {
         id
         firstName
@@ -107,8 +114,8 @@ const CLIENTS_QUERY = `
 `
 
 const REQUESTS_QUERY = `
-  query {
-    requests(first: 50) {
+  query GetRequests($after: String) {
+    requests(first: 50, after: $after) {
       nodes {
         id
         createdAt
@@ -176,10 +183,9 @@ async function createZohoRequest(client: any, request: any, location: any, zohoT
   const email = client.emails?.find((e: any) => e.primary)?.address || client.emails?.[0]?.address || ''
   const phone = client.phones?.find((p: any) => p.primary)?.number || client.phones?.[0]?.number || ''
   const { stage, date, assessmentDate, jobberJobId, jobberQuoteId, jobberRequestUrl, jobberQuoteUrl, jobberJobUrl } = determineStageAndDate(request)
+  const hasContact = !!(email || phone)
 
   let existingContactId = null
-
-  // Search contact by email then phone
   let contactSearch = null
   if (email) {
     contactSearch = await zohoFetch(`${ZOHO_API_BASE}/Contacts/search?criteria=(Email:equals:${encodeURIComponent(email)})&fields=id,Email`, zohoToken)
@@ -191,38 +197,9 @@ async function createZohoRequest(client: any, request: any, location: any, zohoT
     existingContactId = contactSearch.data[0].id
   }
 
-  // Search for existing deal by Jobber_Request_ID specifically
-  let existingDealId = null
-  if (request.id) {
-    const dealResult = await zohoFetch(
-      `${ZOHO_API_BASE}/Deals/search?criteria=(Jobber_Request_ID:equals:${encodeURIComponent(request.id)})&fields=id,Stage,Jobber_Client_ID`,
-      zohoToken
-    )
-    if (dealResult.data?.[0]) {
-      existingDealId = dealResult.data[0].id
-      // Sync all fields with latest Jobber data
-      const syncData: any = {
-        Jobber_Client_ID: client.id,
-        Jobber_Request_ID: request.id,
-        Jobber_Request_URL: jobberRequestUrl,
-        Imported_from_Jobber: true,
-        Original_Jobber_Date: formatDate(date),
-        Request_Created_in_Jobber: formatDateTime(request.createdAt),
-        Lead_Source: 'Jobber Import',
-      }
-      if (assessmentDate) syncData.Scheduled_Assessment = formatDateTime(assessmentDate)
-      if (jobberQuoteId) { syncData.Jobber_Quote_ID = jobberQuoteId; syncData.Jobber_Quote_URL = jobberQuoteUrl; syncData.Estimate_Sent = formatDateTime(request.quotes?.nodes?.[0]?.createdAt) }
-      if (jobberJobId) { syncData.Jobber_Job_ID = jobberJobId; syncData.Jobber_Job_URL = jobberJobUrl; syncData.Job_in_Progress = formatDateTime(request.jobs?.nodes?.[0]?.startAt) }
-      if (stage) syncData.Stage = stage
-      await zohoFetch(`${ZOHO_API_BASE}/Deals`, zohoToken, { method: 'PUT', body: JSON.stringify({ data: [{ id: existingDealId, ...syncData }] }) })
-      return { success: true, action: 'synced', dealId: existingDealId, stage }
-    }
-  }
-
-  // Create new Request in Zoho
   const requestData: any = {
-    Name: `${client.firstName} ${client.lastName || '(unknown)'}`,
-    Request_First_Name: client.firstName,
+    Name: `${client.firstName} ${client.lastName || '(unknown)'}`.trim(),
+    Request_First_Name: client.firstName || '(unknown)',
     Request_Last_Name: client.lastName || '(unknown)',
     Request_Phone: phone,
     Email: email,
@@ -233,7 +210,7 @@ async function createZohoRequest(client: any, request: any, location: any, zohoT
     Original_Jobber_Date: formatDate(date),
     Jobber_Client_ID: client.id,
     Jobber_Request_ID: request.id,
-    Request_Status: stage ? 'New' : 'Stagnant',
+    Request_Status: (stage && hasContact) ? 'New' : 'Stagnant',
     Request_Created_in_Jobber: formatDateTime(request.createdAt),
     Request_Source: 'Jobber Import',
   }
@@ -247,12 +224,12 @@ async function createZohoRequest(client: any, request: any, location: any, zohoT
     return { success: false, action: 'failed', error: 'Failed to create request', details: createResult }
   }
 
-  if (!stage) {
-    return { success: true, action: 'created_stagnant', reqId }
+  if (!stage || !hasContact) {
+    return { success: true, action: 'created_stagnant', reqId, reason: !hasContact ? 'no contact info' : 'no activity' }
   }
 
   const dealData: any = {
-    Deal_Name: `${client.firstName} ${client.lastName}`,
+    Deal_Name: `${client.firstName} ${client.lastName || ''}`.trim(),
     Phone: phone,
     Email: email,
     Type: 'Zee Bee Client',
@@ -285,13 +262,13 @@ async function createZohoRequest(client: any, request: any, location: any, zohoT
     accountId = acctResult.data?.[0]?.id
   }
   if (!accountId) {
-    const newAcctResult = await zohoFetch(`${ZOHO_API_BASE}/Accounts`, zohoToken, { method: 'POST', body: JSON.stringify({ data: [{ Account_Name: `${client.firstName} ${client.lastName}`, Phone: phone, Primary_Email: email, Account_Type: 'Zee Bee Client', Owner: '6426180000000482001' }] }) })
+    const newAcctResult = await zohoFetch(`${ZOHO_API_BASE}/Accounts`, zohoToken, { method: 'POST', body: JSON.stringify({ data: [{ Account_Name: `${client.firstName} ${client.lastName || ''}`.trim(), Phone: phone, Primary_Email: email, Account_Type: 'Zee Bee Client', Owner: '6426180000000482001' }] }) })
     accountId = newAcctResult.data?.[0]?.details?.id
   }
 
   let contactId = existingContactId
   if (!contactId) {
-    const newContactResult = await zohoFetch(`${ZOHO_API_BASE}/Contacts`, zohoToken, { method: 'POST', body: JSON.stringify({ data: [{ First_Name: client.firstName, Last_Name: client.lastName || '(unknown)', Phone: phone, Email: email, Contact_Type: 'Zee Bee Client', Account_Name: accountId, Owner: '6426180000000482001' }] }) })
+    const newContactResult = await zohoFetch(`${ZOHO_API_BASE}/Contacts`, zohoToken, { method: 'POST', body: JSON.stringify({ data: [{ First_Name: client.firstName || '(unknown)', Last_Name: client.lastName || '(unknown)', Phone: phone, Email: email, Contact_Type: 'Zee Bee Client', Account_Name: accountId, Owner: '6426180000000482001' }] }) })
     contactId = newContactResult.data?.[0]?.details?.id
   }
 
@@ -316,7 +293,7 @@ export async function POST(request: NextRequest) {
   try {
     let body: any = {}
     try { body = await request.json() } catch { return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }) }
-    const { location_id, dry_run } = body
+    const { location_id, dry_run, batch_size = 100 } = body
 
     if (!location_id) return NextResponse.json({ error: 'location_id required' }, { status: 400 })
 
@@ -326,13 +303,13 @@ export async function POST(request: NextRequest) {
     if (!location.Jobber_Access_Token) return NextResponse.json({ error: 'No Jobber token' }, { status: 400 })
 
     const zohoToken = await getZohoAccessToken()
-    const token = await refreshJobberToken(location, zohoToken)
+    const token = await getValidJobberToken(location, zohoToken)
 
-    const clientResult = await jobberQuery(token, CLIENTS_QUERY)
-    const clients = clientResult?.data?.clients?.nodes || []
-
-    const requestResult = await jobberQuery(token, REQUESTS_QUERY)
-    const requests = requestResult?.data?.requests?.nodes || []
+    const clients = await fetchAllPages(token, CLIENTS_QUERY, 'clients')
+    console.log('Clients fetched:', clients.length)
+    await new Promise(r => setTimeout(r, 3000))
+    const requests = await fetchAllPages(token, REQUESTS_QUERY, 'requests')
+    console.log('Requests fetched:', requests.length)
 
     const requestsByClient: Record<string, any[]> = {}
     for (const req of requests) {
@@ -343,44 +320,90 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const workItems: Array<{ client: any; request: any }> = []
+    for (const client of clients) {
+      const clientRequests = requestsByClient[client.id] || []
+      if (clientRequests.length === 0) {
+        workItems.push({ client, request: { id: null, createdAt: client.createdAt, jobberWebUri: null, assessment: null, quotes: { nodes: [] }, jobs: { nodes: [] } } })
+      } else {
+        for (const req of clientRequests) {
+          workItems.push({ client, request: req })
+        }
+      }
+    }
+
     if (dry_run) {
+      const stageCounts: Record<string, number> = {
+        'Final Processing': 0,
+        'Job in Progress': 0,
+        'Quote': 0,
+        'Assessment Scheduled': 0,
+        'Stagnant': 0,
+        'No contact info': 0,
+      }
+
+      for (const item of workItems) {
+        const { stage } = determineStageAndDate(item.request)
+        const hasContact = hasContactInfo(item.client)
+        if (!hasContact) {
+          stageCounts['No contact info']++
+        } else if (!stage) {
+          stageCounts['Stagnant']++
+        } else {
+          stageCounts[stage] = (stageCounts[stage] || 0) + 1
+        }
+      }
+
+      const stageBreakdown = Object.entries(stageCounts)
+        .filter(([, count]) => count > 0)
+        .sort((a, b) => b[1] - a[1])
+
       return NextResponse.json({
         dry_run: true,
         location: location.Name,
         client_count: clients.length,
         request_count: requests.length,
-        preview: clients.map((c: any) => ({
+        total_work_items: workItems.length,
+        stage_breakdown: stageBreakdown,
+        preview: clients.slice(0, 20).map((c: any) => ({
           name: `${c.firstName} ${c.lastName}`,
-          email: c.emails?.[0]?.address,
+          email: c.emails?.find((e: any) => e.primary)?.address || c.emails?.[0]?.address || '',
+          phone: c.phones?.find((p: any) => p.primary)?.number || c.phones?.[0]?.number || '',
+          has_contact: hasContactInfo(c),
           requests: (requestsByClient[c.id] || []).map((r: any) => ({ id: r.id, ...determineStageAndDate(r) }))
         }))
       })
     }
 
+    const existingIds = await fetchExistingJobberRequestIds(zohoToken, location.Location_ID)
+
+    const remaining = workItems.filter(item => {
+      if (!item.request.id) return !existingIds.has(item.client.id)
+      return !existingIds.has(item.request.id)
+    })
+
+    const batch = remaining.slice(0, batch_size)
     const results = []
 
-    for (const client of clients) {
-      const clientRequests = requestsByClient[client.id] || []
-      if (clientRequests.length === 0) {
-        try {
-          const result = await createZohoRequest(client, { id: null, createdAt: client.createdAt, jobberWebUri: null, assessment: null, quotes: { nodes: [] }, jobs: { nodes: [] } }, location, zohoToken)
-          results.push({ client: `${client.firstName} ${client.lastName}`, ...result })
-        } catch (err) {
-          results.push({ client: `${client.firstName} ${client.lastName}`, success: false, error: String(err) })
-        }
-      } else {
-        for (const req of clientRequests) {
-          try {
-            const result = await createZohoRequest(client, req, location, zohoToken)
-            results.push({ client: `${client.firstName} ${client.lastName}`, ...result })
-          } catch (err) {
-            results.push({ client: `${client.firstName} ${client.lastName}`, success: false, error: String(err) })
-          }
-        }
+    for (const item of batch) {
+      try {
+        const result = await createZohoRequest(item.client, item.request, location, zohoToken)
+        results.push({ client: `${item.client.firstName} ${item.client.lastName}`, ...result })
+      } catch (err) {
+        results.push({ client: `${item.client.firstName} ${item.client.lastName}`, success: false, error: String(err) })
       }
     }
 
-    return NextResponse.json({ success: true, location: location.Name, imported: results.length, results })
+    return NextResponse.json({
+      success: true,
+      location: location.Name,
+      total_in_jobber: workItems.length,
+      already_imported: existingIds.size,
+      remaining_before: remaining.length,
+      remaining_after: remaining.length - batch.length,
+      batch_size: batch.length,
+      results,
+    })
 
   } catch (error) {
     console.error('Import error:', error)
