@@ -8,6 +8,33 @@ interface Props {
   params: { id: string }
 }
 
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+      <p style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.6px', fontWeight: 500 }}>{label}</p>
+      <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{children}</div>
+    </div>
+  )
+}
+
+function LinkField({ label, url }: { label: string; url?: string | null }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+      <span style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 500 }}>{label}</span>
+      {url
+        ? <a href={url} target="_blank" rel="noopener noreferrer" style={{
+            fontSize: '13px', color: '#1a2e2b', background: 'rgba(168,201,196,0.15)',
+            border: '1px solid rgba(168,201,196,0.3)', padding: '3px 10px',
+            borderRadius: '20px', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 500
+          }}>
+            Open <span>↗</span>
+          </a>
+        : <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>—</span>
+      }
+    </div>
+  )
+}
+
 export default async function LocationDetailPage({ params }: Props) {
   await requireAuth()
   const location = await getZohoLocation(params.id)
@@ -15,132 +42,171 @@ export default async function LocationDetailPage({ params }: Props) {
 
   const tokenExpiry = location.Token_Expiry ? parseInt(location.Token_Expiry) : 0
   const remaining = tokenExpiry - Date.now()
+  const tokenValid = tokenExpiry && remaining > 0
   const tokenColor = !tokenExpiry ? 'var(--text-muted)' : remaining < 5 * 60 * 1000 ? '#ef4444' : remaining < 15 * 60 * 1000 ? '#f59e0b' : '#22c55e'
+  const isActive = location.CRM_Status === 'Active'
+  const isConnected = !!location.Jobber_Account_ID
+
+  // Get initials for avatar
+  const initials = location.Name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()
 
   return (
-    <div style={{ maxWidth: '860px' }}>
-      <Link href="/dashboard/locations" style={{ fontSize: '13px', color: 'var(--text-muted)', textDecoration: 'none', marginBottom: '1.5rem', display: 'block' }}>
+    <div style={{ maxWidth: '900px' }}>
+      <Link href="/dashboard/locations" style={{ fontSize: '13px', color: 'var(--text-muted)', textDecoration: 'none', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '6px', width: 'fit-content' }}>
         ← Back to locations
       </Link>
 
-      <div style={{ marginBottom: '2rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '6px' }}>
-          <h1 style={{ fontSize: '24px', fontWeight: 700 }}>{location.Name}</h1>
-          <span style={{
-            fontSize: '12px',
-            padding: '2px 8px',
-            borderRadius: '20px',
-            background: location.CRM_Status === 'Active' ? 'rgba(34,197,94,0.1)' : location.CRM_Status === 'Pending' ? 'rgba(245,158,11,0.1)' : 'var(--bg-elevated)',
-            color: location.CRM_Status === 'Active' ? '#22c55e' : location.CRM_Status === 'Pending' ? '#f59e0b' : 'var(--text-muted)',
+      {/* Hero Header */}
+      <div style={{
+        background: 'linear-gradient(135deg, #1a2e2b 0%, #2a4a46 100%)',
+        borderRadius: '12px',
+        padding: '2rem',
+        marginBottom: '1.25rem',
+        position: 'relative',
+        overflow: 'hidden',
+      }}>
+        {/* Hex pattern background */}
+        <div style={{
+          position: 'absolute', inset: 0, opacity: 0.05,
+          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='70' viewBox='0 0 60 70'%3E%3Cpolygon points='30,2 58,17 58,47 30,62 2,47 2,17' fill='none' stroke='%23a8c9c4' stroke-width='1'/%3E%3C/svg%3E")`,
+          backgroundSize: '60px 70px',
+        }} />
+
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '1.25rem' }}>
+          {/* Avatar */}
+          <div style={{
+            width: '56px', height: '56px', borderRadius: '12px',
+            background: 'rgba(168,201,196,0.2)', border: '1px solid rgba(168,201,196,0.3)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '20px', fontWeight: 700, color: '#a8c9c4', flexShrink: 0,
+            fontFamily: 'Playfair Display, serif',
           }}>
-            {location.CRM_Status}
-          </span>
+            {initials}
+          </div>
+
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px', flexWrap: 'wrap' }}>
+              <h1 style={{ fontSize: '22px', fontWeight: 700, color: 'white', margin: 0 }}>{location.Name}</h1>
+              <span style={{
+                fontSize: '11px', padding: '2px 10px', borderRadius: '20px', fontWeight: 500,
+                background: isActive ? 'rgba(34,197,94,0.2)' : 'rgba(245,158,11,0.2)',
+                color: isActive ? '#4ade80' : '#fbbf24',
+                border: `1px solid ${isActive ? 'rgba(34,197,94,0.3)' : 'rgba(245,158,11,0.3)'}`,
+              }}>
+                {location.CRM_Status}
+              </span>
+            </div>
+            {location.Owner?.name && (
+              <p style={{ fontSize: '13px', color: 'rgba(168,201,196,0.7)', margin: 0 }}>{location.Owner.name}</p>
+            )}
+          </div>
+
+          {/* Right side stats */}
+          <div style={{ display: 'flex', gap: '1.5rem', flexShrink: 0 }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '10px', color: 'rgba(168,201,196,0.5)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Jobber</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: isConnected ? '#4ade80' : '#6b7280', display: 'inline-block' }} />
+                <span style={{ fontSize: '13px', color: isConnected ? '#4ade80' : '#9ca3af', fontWeight: 500 }}>{isConnected ? 'Connected' : 'Not set up'}</span>
+              </div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '10px', color: 'rgba(168,201,196,0.5)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Token</div>
+              <span style={{ fontSize: '13px', color: tokenValid ? '#4ade80' : '#f87171', fontWeight: 500 }}>
+                {!tokenExpiry ? '—' : tokenValid ? `${Math.round(remaining / 60000)}m` : 'Expired'}
+              </span>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '10px', color: 'rgba(168,201,196,0.5)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Zone</div>
+              <span style={{ fontSize: '13px', color: 'rgba(255,255,255,0.8)' }}>{location.Time_Zone?.replace('America/', '') || '—'}</span>
+            </div>
+          </div>
         </div>
-        {location.Group_Email && (
-          <p style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{location.Group_Email}</p>
-        )}
       </div>
 
+      {/* Details + Paths row */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
 
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '8px', padding: '1.25rem' }}>
-          <h2 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '1rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Details</h2>
-          <div style={{ display: 'grid', gap: '0.75rem' }}>
-            <div>
-              <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Location ID</p>
-              <code style={{ fontSize: '12px', background: 'var(--bg-elevated)', padding: '2px 6px', borderRadius: '4px', color: 'var(--text-secondary)' }}>{location.Location_ID}</code>
-            </div>
-            <div>
-              <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Phone</p>
-              <p style={{ fontSize: '13px' }}>{location.Phone_Number || '—'}</p>
-            </div>
-            <div>
-              <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Timezone</p>
-              <p style={{ fontSize: '13px' }}>{location.Time_Zone || '—'}</p>
-            </div>
-            <div>
-              <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Group Email</p>
-              <p style={{ fontSize: '13px' }}>{location.Group_Email || '—'}</p>
-            </div>
+        {/* Details card */}
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ width: '3px', height: '14px', background: '#a8c9c4', borderRadius: '2px' }} />
+            <h2 style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: 0 }}>Details</h2>
+          </div>
+          <div style={{ padding: '16px', display: 'grid', gap: '12px' }}>
+            <Field label="Location ID">
+              <code style={{ fontSize: '12px', background: 'var(--bg-elevated)', padding: '2px 8px', borderRadius: '4px', color: 'var(--text-secondary)' }}>{location.Location_ID}</code>
+            </Field>
+            <Field label="Phone">{location.Phone_Number || '—'}</Field>
+            <Field label="Group Email">{location.Group_Email || '—'}</Field>
+            <Field label="Group ID">{location.Group_ID || '—'}</Field>
           </div>
         </div>
 
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '8px', padding: '1.25rem' }}>
-          <h2 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '1rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Jobber</h2>
-          {location.Jobber_Account_ID ? (
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '1rem' }}>
-                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e', display: 'inline-block' }}></span>
-                <span style={{ fontSize: '14px', color: '#22c55e', fontWeight: 500 }}>Connected</span>
-              </div>
-              <div style={{ display: 'grid', gap: '0.75rem' }}>
-                <div>
-                  <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Last Sync</p>
-                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{location.Last_Sync_Status || '—'}</p>
-                </div>
-                <div>
-                  <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Token Expiry</p>
-                  <p style={{ fontSize: '12px', color: tokenColor, fontWeight: 500 }}>
-                    {tokenExpiry ? new Date(tokenExpiry).toLocaleString() : '—'}
-                  </p>
-                </div>
-                <div>
-                  <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Account ID</p>
-                  <code style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{location.Jobber_Account_ID.slice(0, 30)}...</code>
-                </div>
-                <div>
-                  <a href={`/api/jobber/connect?location_id=${location.Location_ID}`} style={{ fontSize: '12px', color: 'var(--text-muted)', textDecoration: 'none', borderBottom: '1px solid var(--border)' }}>
-                    Reconnect
-                  </a>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div>
-              <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '1rem' }}>
-                This location is not connected to Jobber.
-              </p>
-              <a href={`/api/jobber/connect?location_id=${location.Location_ID}`} style={{ display: 'inline-block', padding: '8px 16px', background: 'var(--brand)', color: '#000', borderRadius: '6px', textDecoration: 'none', fontSize: '13px', fontWeight: 600 }}>
-                Connect Jobber
-              </a>
-            </div>
+        {/* Paths & Links card */}
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ width: '3px', height: '14px', background: '#d4a046', borderRadius: '2px' }} />
+            <h2 style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: 0 }}>Paths & Links</h2>
+          </div>
+          <div style={{ padding: '0 16px 8px' }}>
+            <LinkField label="Booking Link" url={location.Booking_Link} />
+            <LinkField label="Google Reviews" url={location.Google_Reviews} />
+            <LinkField label="Jobber URL" url={location.Jobber_URL} />
+            <LinkField label="Website" url={location.Website} />
+            <LinkField label="FAQ Doc" url={location.FAQ_Doc} />
+          </div>
+        </div>
+      </div>
+
+      {/* Jobber card */}
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ width: '3px', height: '14px', background: isConnected ? '#22c55e' : '#6b7280', borderRadius: '2px' }} />
+            <h2 style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: 0 }}>Jobber</h2>
+          </div>
+          {isConnected && (
+<a href={`/api/jobber/connect?location_id=${location.Location_ID}`} style={{ fontSize: '12px', color: 'white', textDecoration: 'none', padding: '5px 12px', background: '#1a2e2b', borderRadius: '7px', fontWeight: 500 }}>
+  Reconnect
+</a>
           )}
         </div>
-      </div>
 
-      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '8px', padding: '1.25rem', marginBottom: '1rem' }}>
-        <h2 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '1rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Paths & Links</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-          <div>
-            <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Booking Link</p>
-            {location.Booking_Link ? <a href={location.Booking_Link} target="_blank" rel="noopener noreferrer" style={{ fontSize: '13px', color: 'var(--brand)', textDecoration: 'none' }}>Open ↗</a> : <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>—</p>}
-          </div>
-          <div>
-            <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Google Reviews</p>
-            {location.Google_Reviews ? <a href={location.Google_Reviews} target="_blank" rel="noopener noreferrer" style={{ fontSize: '13px', color: 'var(--brand)', textDecoration: 'none' }}>Open ↗</a> : <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>—</p>}
-          </div>
-          <div>
-            <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Jobber URL</p>
-            {location.Jobber_URL ? <a href={location.Jobber_URL} target="_blank" rel="noopener noreferrer" style={{ fontSize: '13px', color: 'var(--brand)', textDecoration: 'none' }}>Open ↗</a> : <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>—</p>}
-          </div>
-          <div>
-            <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Website</p>
-            {location.Website ? <a href={location.Website} target="_blank" rel="noopener noreferrer" style={{ fontSize: '13px', color: 'var(--brand)', textDecoration: 'none' }}>Open ↗</a> : <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>—</p>}
-          </div>
-          <div>
-            <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>FAQ Doc</p>
-            {location.FAQ_Doc ? <a href={location.FAQ_Doc} target="_blank" rel="noopener noreferrer" style={{ fontSize: '13px', color: 'var(--brand)', textDecoration: 'none' }}>Open ↗</a> : <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>—</p>}
-          </div>
-          <div>
-            <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Group ID</p>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{location.Group_ID || '—'}</p>
-          </div>
-        </div>
-      </div>
+        {isConnected ? (
+          <div style={{ padding: '16px' }}>
+            {/* Token/connection summary bar */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1px', background: 'var(--border)', borderRadius: '8px', overflow: 'hidden', marginBottom: '1.25rem' }}>
+              {[
+                { label: 'Account ID', value: <code style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{location.Jobber_Account_ID?.slice(0, 20)}...</code> },
+                { label: 'Token', value: <span style={{ color: tokenColor, fontWeight: 500 }}>{!tokenExpiry ? '—' : tokenValid ? `Valid · ${Math.round(remaining / 60000)}m left` : 'Expired'}</span> },
+                { label: 'Last Sync', value: <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{location.Last_Sync_Status?.slice(0, 35) || '—'}</span> },
+              ].map(item => (
+                <div key={item.label} style={{ padding: '12px 14px', background: 'var(--bg-elevated)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <span style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 500 }}>{item.label}</span>
+                  <div style={{ fontSize: '13px' }}>{item.value}</div>
+                </div>
+              ))}
+            </div>
 
-      {location.Jobber_Account_ID && (
-        <ImportSection locationId={location.Location_ID} />
-      )}
+            {/* Import section */}
+            <ImportSection locationId={location.Location_ID} />
+          </div>
+        ) : (
+          <div style={{ padding: '24px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <p style={{ fontSize: '14px', fontWeight: 500, marginBottom: '4px' }}>Not connected to Jobber</p>
+              <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Connect to enable imports and sync.</p>
+            </div>
+            <a
+              href={`/api/jobber/connect?location_id=${location.Location_ID}`}
+              style={{ padding: '9px 20px', background: '#1a2e2b', color: 'white', borderRadius: '8px', textDecoration: 'none', fontSize: '13px', fontWeight: 500, whiteSpace: 'nowrap', boxShadow: '0 2px 8px rgba(26,46,43,0.3)' }}
+            >
+              Connect Jobber →
+            </a>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

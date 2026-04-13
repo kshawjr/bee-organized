@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getZohoLocation } from '@/lib/zoho'
 import { jobberQuery, getValidJobberToken } from '@/lib/jobber'
+import { writeSyncLog } from '@/lib/sync-log'
 
 async function getZohoAccessToken(): Promise<string> {
   const res = await fetch(
@@ -386,11 +387,31 @@ export async function POST(request: NextRequest) {
     const results = []
 
     for (const item of batch) {
+      const clientName = `${item.client.firstName} ${item.client.lastName}`.trim()
       try {
         const result = await createZohoRequest(item.client, item.request, location, zohoToken)
-        results.push({ client: `${item.client.firstName} ${item.client.lastName}`, ...result })
+        results.push({ client: clientName, ...result })
+
+        await writeSyncLog({
+          location_id: location.Location_ID,
+          entity_id: clientName,
+          zoho_record_id: result.dealId || result.reqId,
+          jobber_record_id: item.request.id || undefined,
+          status: result.success ? 'success' : 'error',
+          message: result.action
+            + (result.stage ? ` — ${result.stage}` : '')
+            + (result.reason ? ` (${result.reason})` : '')
+            + (result.error ? ` — ${result.error}` : ''),
+        })
       } catch (err) {
-        results.push({ client: `${item.client.firstName} ${item.client.lastName}`, success: false, error: String(err) })
+        results.push({ client: clientName, success: false, error: String(err) })
+        await writeSyncLog({
+          location_id: location.Location_ID,
+          entity_id: clientName,
+          jobber_record_id: item.request.id || undefined,
+          status: 'error',
+          message: String(err),
+        })
       }
     }
 
