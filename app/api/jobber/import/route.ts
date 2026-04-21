@@ -122,24 +122,12 @@ const REQUESTS_QUERY = `
         createdAt
         jobberWebUri
         client { id }
-        assessment {
-          id
-          startAt
-          completedAt
-        }
-        quotes(first: 1) {
-          nodes { id createdAt jobberWebUri }
-        }
+        assessment { id startAt completedAt }
+        quotes(first: 1) { nodes { id createdAt jobberWebUri } }
         jobs(first: 1) {
           nodes {
-            id
-            createdAt
-            jobStatus
-            startAt
-            jobberWebUri
-            invoices(first: 1) {
-              nodes { id createdAt }
-            }
+            id createdAt jobStatus startAt jobberWebUri
+            invoices(first: 1) { nodes { id createdAt } }
           }
         }
       }
@@ -154,18 +142,10 @@ function determineStageAndDate(request: any) {
   const quote = request.quotes?.nodes?.[0]
   const invoice = job?.invoices?.nodes?.[0]
 
-  if (invoice) {
-    return { stage: 'Final Processing', date: invoice.createdAt, assessmentDate: assessment?.startAt || null, jobberJobId: job?.id, jobberQuoteId: quote?.id, jobberInvoiceId: invoice.id, jobberRequestUrl: request.jobberWebUri, jobberQuoteUrl: quote?.jobberWebUri, jobberJobUrl: job?.jobberWebUri }
-  }
-  if (job) {
-    return { stage: 'Job in Progress', date: job.startAt || job.createdAt, assessmentDate: assessment?.startAt || null, jobberJobId: job.id, jobberQuoteId: quote?.id, jobberInvoiceId: null, jobberRequestUrl: request.jobberWebUri, jobberQuoteUrl: quote?.jobberWebUri, jobberJobUrl: job?.jobberWebUri }
-  }
-  if (quote) {
-    return { stage: 'Quote', date: quote.createdAt, assessmentDate: assessment?.startAt || null, jobberJobId: null, jobberQuoteId: quote.id, jobberInvoiceId: null, jobberRequestUrl: request.jobberWebUri, jobberQuoteUrl: quote?.jobberWebUri, jobberJobUrl: null }
-  }
-  if (assessment) {
-    return { stage: 'Assessment Scheduled', date: assessment.startAt, assessmentDate: assessment.startAt, jobberJobId: null, jobberQuoteId: null, jobberInvoiceId: null, jobberRequestUrl: request.jobberWebUri, jobberQuoteUrl: null, jobberJobUrl: null }
-  }
+  if (invoice) return { stage: 'Final Processing', date: invoice.createdAt, assessmentDate: assessment?.startAt || null, jobberJobId: job?.id, jobberQuoteId: quote?.id, jobberInvoiceId: invoice.id, jobberRequestUrl: request.jobberWebUri, jobberQuoteUrl: quote?.jobberWebUri, jobberJobUrl: job?.jobberWebUri }
+  if (job) return { stage: 'Job in Progress', date: job.startAt || job.createdAt, assessmentDate: assessment?.startAt || null, jobberJobId: job.id, jobberQuoteId: quote?.id, jobberInvoiceId: null, jobberRequestUrl: request.jobberWebUri, jobberQuoteUrl: quote?.jobberWebUri, jobberJobUrl: job?.jobberWebUri }
+  if (quote) return { stage: 'Quote', date: quote.createdAt, assessmentDate: assessment?.startAt || null, jobberJobId: null, jobberQuoteId: quote.id, jobberInvoiceId: null, jobberRequestUrl: request.jobberWebUri, jobberQuoteUrl: quote?.jobberWebUri, jobberJobUrl: null }
+  if (assessment) return { stage: 'Assessment Scheduled', date: assessment.startAt, assessmentDate: assessment.startAt, jobberJobId: null, jobberQuoteId: null, jobberInvoiceId: null, jobberRequestUrl: request.jobberWebUri, jobberQuoteUrl: null, jobberJobUrl: null }
   return { stage: null, date: request.createdAt, assessmentDate: null, jobberJobId: null, jobberQuoteId: null, jobberInvoiceId: null, jobberRequestUrl: request.jobberWebUri, jobberQuoteUrl: null, jobberJobUrl: null }
 }
 
@@ -188,15 +168,9 @@ async function createZohoRequest(client: any, request: any, location: any, zohoT
 
   let existingContactId = null
   let contactSearch = null
-  if (email) {
-    contactSearch = await zohoFetch(`${ZOHO_API_BASE}/Contacts/search?criteria=(Email:equals:${encodeURIComponent(email)})&fields=id,Email`, zohoToken)
-  }
-  if (!contactSearch?.data?.[0] && phone) {
-    contactSearch = await zohoFetch(`${ZOHO_API_BASE}/Contacts/search?criteria=(Phone:equals:${encodeURIComponent(phone)})&fields=id,Phone`, zohoToken)
-  }
-  if (contactSearch?.data?.[0]) {
-    existingContactId = contactSearch.data[0].id
-  }
+  if (email) contactSearch = await zohoFetch(`${ZOHO_API_BASE}/Contacts/search?criteria=(Email:equals:${encodeURIComponent(email)})&fields=id,Email`, zohoToken)
+  if (!contactSearch?.data?.[0] && phone) contactSearch = await zohoFetch(`${ZOHO_API_BASE}/Contacts/search?criteria=(Phone:equals:${encodeURIComponent(phone)})&fields=id,Phone`, zohoToken)
+  if (contactSearch?.data?.[0]) existingContactId = contactSearch.data[0].id
 
   const requestData: any = {
     Name: `${client.firstName} ${client.lastName || '(unknown)'}`.trim(),
@@ -215,24 +189,17 @@ async function createZohoRequest(client: any, request: any, location: any, zohoT
     Request_Created_in_Jobber: formatDateTime(request.createdAt),
     Request_Source: 'Jobber Import',
   }
-
   if (assessmentDate) requestData.Scheduled_Assessment = formatDateTime(assessmentDate)
 
   const createResult = await zohoFetch(`${ZOHO_API_BASE}/Requests`, zohoToken, { method: 'POST', body: JSON.stringify({ data: [requestData] }) })
   const reqId = createResult.data?.[0]?.details?.id
 
-  if (!reqId) {
-    return { success: false, action: 'failed', error: 'Failed to create request', details: createResult }
-  }
-
-  if (!stage || !hasContact) {
-    return { success: true, action: 'created_stagnant', reqId, reason: !hasContact ? 'no contact info' : 'no activity' }
-  }
+  if (!reqId) return { success: false, action: 'failed', error: 'Failed to create request', details: createResult }
+  if (!stage || !hasContact) return { success: true, action: 'created_stagnant', reqId, reason: !hasContact ? 'no contact info' : 'no activity' }
 
   const dealData: any = {
     Deal_Name: `${client.firstName} ${client.lastName || ''}`.trim(),
-    Phone: phone,
-    Email: email,
+    Phone: phone, Email: email,
     Type: 'Zee Bee Client',
     Owner: '6426180000000482001',
     Layout: { id: '6426180000010735010' },
@@ -248,30 +215,17 @@ async function createZohoRequest(client: any, request: any, location: any, zohoT
     Request_Created_in_Jobber: formatDateTime(request.createdAt),
     Lead_Source: 'Jobber Import',
   }
-
   if (assessmentDate) dealData.Scheduled_Assessment = formatDateTime(assessmentDate)
   if (jobberQuoteId) { dealData.Jobber_Quote_ID = jobberQuoteId; dealData.Jobber_Quote_URL = jobberQuoteUrl; dealData.Estimate_Sent = formatDateTime(request.quotes?.nodes?.[0]?.createdAt) }
   if (jobberJobId) { dealData.Jobber_Job_ID = jobberJobId; dealData.Jobber_Job_URL = jobberJobUrl; dealData.Job_in_Progress = formatDateTime(request.jobs?.nodes?.[0]?.startAt) }
 
   let accountId = null
-  if (email) {
-    const acctResult = await zohoFetch(`${ZOHO_API_BASE}/Accounts/search?criteria=(Primary_Email:equals:${encodeURIComponent(email)})&fields=id`, zohoToken)
-    accountId = acctResult.data?.[0]?.id
-  }
-  if (!accountId && phone) {
-    const acctResult = await zohoFetch(`${ZOHO_API_BASE}/Accounts/search?criteria=(Phone:equals:${encodeURIComponent(phone)})&fields=id`, zohoToken)
-    accountId = acctResult.data?.[0]?.id
-  }
-  if (!accountId) {
-    const newAcctResult = await zohoFetch(`${ZOHO_API_BASE}/Accounts`, zohoToken, { method: 'POST', body: JSON.stringify({ data: [{ Account_Name: `${client.firstName} ${client.lastName || ''}`.trim(), Phone: phone, Primary_Email: email, Account_Type: 'Zee Bee Client', Owner: '6426180000000482001' }] }) })
-    accountId = newAcctResult.data?.[0]?.details?.id
-  }
+  if (email) { const r = await zohoFetch(`${ZOHO_API_BASE}/Accounts/search?criteria=(Primary_Email:equals:${encodeURIComponent(email)})&fields=id`, zohoToken); accountId = r.data?.[0]?.id }
+  if (!accountId && phone) { const r = await zohoFetch(`${ZOHO_API_BASE}/Accounts/search?criteria=(Phone:equals:${encodeURIComponent(phone)})&fields=id`, zohoToken); accountId = r.data?.[0]?.id }
+  if (!accountId) { const r = await zohoFetch(`${ZOHO_API_BASE}/Accounts`, zohoToken, { method: 'POST', body: JSON.stringify({ data: [{ Account_Name: `${client.firstName} ${client.lastName || ''}`.trim(), Phone: phone, Primary_Email: email, Account_Type: 'Zee Bee Client', Owner: '6426180000000482001' }] }) }); accountId = r.data?.[0]?.details?.id }
 
   let contactId = existingContactId
-  if (!contactId) {
-    const newContactResult = await zohoFetch(`${ZOHO_API_BASE}/Contacts`, zohoToken, { method: 'POST', body: JSON.stringify({ data: [{ First_Name: client.firstName || '(unknown)', Last_Name: client.lastName || '(unknown)', Phone: phone, Email: email, Contact_Type: 'Zee Bee Client', Account_Name: accountId, Owner: '6426180000000482001' }] }) })
-    contactId = newContactResult.data?.[0]?.details?.id
-  }
+  if (!contactId) { const r = await zohoFetch(`${ZOHO_API_BASE}/Contacts`, zohoToken, { method: 'POST', body: JSON.stringify({ data: [{ First_Name: client.firstName || '(unknown)', Last_Name: client.lastName || '(unknown)', Phone: phone, Email: email, Contact_Type: 'Zee Bee Client', Account_Name: accountId, Owner: '6426180000000482001' }] }) }); contactId = r.data?.[0]?.details?.id }
 
   dealData.Account_Name = accountId
   dealData.Contact_Name = contactId
@@ -279,13 +233,8 @@ async function createZohoRequest(client: any, request: any, location: any, zohoT
   const dealResult = await zohoFetch(`${ZOHO_API_BASE}/Deals`, zohoToken, { method: 'POST', body: JSON.stringify({ data: [dealData], trigger: ['workflow'] }) })
   const dealId = dealResult.data?.[0]?.details?.id
 
-  if (reqId) {
-    await zohoFetch(`${ZOHO_API_BASE}/Requests`, zohoToken, { method: 'PUT', body: JSON.stringify({ data: [{ id: reqId, Converted: true, Request_Status: 'Converted', Account: accountId, Contact: contactId, Opportunity: dealId, Job_Slug: dealId, Account_Slug: accountId, Contact_Slug: contactId }] }) })
-  }
-
-  if (dealId && stage) {
-    await zohoFetch(`${ZOHO_API_BASE}/Deals`, zohoToken, { method: 'PUT', body: JSON.stringify({ data: [{ id: dealId, Stage: stage }] }) })
-  }
+  if (reqId) await zohoFetch(`${ZOHO_API_BASE}/Requests`, zohoToken, { method: 'PUT', body: JSON.stringify({ data: [{ id: reqId, Converted: true, Request_Status: 'Converted', Account: accountId, Contact: contactId, Opportunity: dealId, Job_Slug: dealId, Account_Slug: accountId, Contact_Slug: contactId }] }) })
+  if (dealId && stage) await zohoFetch(`${ZOHO_API_BASE}/Deals`, zohoToken, { method: 'PUT', body: JSON.stringify({ data: [{ id: dealId, Stage: stage }] }) })
 
   return { success: true, action: 'created', reqId, dealId, stage, accountId, contactId }
 }
@@ -294,13 +243,12 @@ export async function POST(request: NextRequest) {
   try {
     let body: any = {}
     try { body = await request.json() } catch { return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }) }
-    const { location_id, dry_run, batch_size = 100 } = body
+    const { location_id, dry_run, batch_size = 50, dev_mode = false } = body
 
     if (!location_id) return NextResponse.json({ error: 'location_id required' }, { status: 400 })
 
     const location = await getZohoLocation(location_id)
     if (!location) return NextResponse.json({ error: 'Location not found' }, { status: 404 })
-
     if (!location.Jobber_Access_Token) return NextResponse.json({ error: 'No Jobber token' }, { status: 400 })
 
     const zohoToken = await getZohoAccessToken()
@@ -335,29 +283,17 @@ export async function POST(request: NextRequest) {
 
     if (dry_run) {
       const stageCounts: Record<string, number> = {
-        'Final Processing': 0,
-        'Job in Progress': 0,
-        'Quote': 0,
-        'Assessment Scheduled': 0,
-        'Stagnant': 0,
-        'No contact info': 0,
+        'Final Processing': 0, 'Job in Progress': 0, 'Quote': 0,
+        'Assessment Scheduled': 0, 'Stagnant': 0, 'No contact info': 0,
       }
 
       for (const item of workItems) {
         const { stage } = determineStageAndDate(item.request)
         const hasContact = hasContactInfo(item.client)
-        if (!hasContact) {
-          stageCounts['No contact info']++
-        } else if (!stage) {
-          stageCounts['Stagnant']++
-        } else {
-          stageCounts[stage] = (stageCounts[stage] || 0) + 1
-        }
+        if (!hasContact) stageCounts['No contact info']++
+        else if (!stage) stageCounts['Stagnant']++
+        else stageCounts[stage] = (stageCounts[stage] || 0) + 1
       }
-
-      const stageBreakdown = Object.entries(stageCounts)
-        .filter(([, count]) => count > 0)
-        .sort((a, b) => b[1] - a[1])
 
       return NextResponse.json({
         dry_run: true,
@@ -365,7 +301,7 @@ export async function POST(request: NextRequest) {
         client_count: clients.length,
         request_count: requests.length,
         total_work_items: workItems.length,
-        stage_breakdown: stageBreakdown,
+        stage_breakdown: Object.entries(stageCounts).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]),
         preview: clients.slice(0, 20).map((c: any) => ({
           name: `${c.firstName} ${c.lastName}`,
           email: c.emails?.find((e: any) => e.primary)?.address || c.emails?.[0]?.address || '',
@@ -378,12 +314,30 @@ export async function POST(request: NextRequest) {
 
     const existingIds = await fetchExistingJobberRequestIds(zohoToken, location.Location_ID)
 
-    const remaining = workItems.filter(item => {
+    let remaining = workItems.filter(item => {
       if (!item.request.id) return !existingIds.has(item.client.id)
       return !existingIds.has(item.request.id)
     })
 
-    const batch = remaining.slice(0, batch_size)
+    // Dev mode: take 10 newest per stage
+    if (dev_mode) {
+      const stageGroups: Record<string, Array<{ client: any; request: any; date: string }>> = {}
+      for (const item of remaining) {
+        const { stage, date } = determineStageAndDate(item.request)
+        const key = stage || (hasContactInfo(item.client) ? 'Stagnant' : 'No contact info')
+        if (!stageGroups[key]) stageGroups[key] = []
+        stageGroups[key].push({ ...item, date: date || item.client.createdAt })
+      }
+      // Sort each group by date desc, take 10
+      const devItems: Array<{ client: any; request: any }> = []
+      for (const group of Object.values(stageGroups)) {
+        group.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        devItems.push(...group.slice(0, 10).map(({ client, request }) => ({ client, request })))
+      }
+      remaining = devItems
+    }
+
+    const batch = remaining.slice(0, dev_mode ? remaining.length : batch_size)
     const results = []
 
     for (const item of batch) {
@@ -391,17 +345,13 @@ export async function POST(request: NextRequest) {
       try {
         const result = await createZohoRequest(item.client, item.request, location, zohoToken)
         results.push({ client: clientName, ...result })
-
         await writeSyncLog({
           location_id: location.Location_ID,
           entity_id: clientName,
           zoho_record_id: result.dealId || result.reqId,
           jobber_record_id: item.request.id || undefined,
           status: result.success ? 'success' : 'error',
-          message: result.action
-            + (result.stage ? ` — ${result.stage}` : '')
-            + (result.reason ? ` (${result.reason})` : '')
-            + (result.error ? ` — ${result.error}` : ''),
+          message: result.action + (result.stage ? ` — ${result.stage}` : '') + (result.reason ? ` (${result.reason})` : '') + (result.error ? ` — ${result.error}` : ''),
         })
       } catch (err) {
         results.push({ client: clientName, success: false, error: String(err) })
@@ -421,8 +371,9 @@ export async function POST(request: NextRequest) {
       total_in_jobber: workItems.length,
       already_imported: existingIds.size,
       remaining_before: remaining.length,
-      remaining_after: remaining.length - batch.length,
+      remaining_after: dev_mode ? 0 : remaining.length - batch.length,
       batch_size: batch.length,
+      dev_mode,
       results,
     })
 

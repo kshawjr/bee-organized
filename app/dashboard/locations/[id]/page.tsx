@@ -1,4 +1,4 @@
-import { requireAuth } from '@/lib/auth'
+import { requireAuth, getHubUser, isSuperAdmin } from '@/lib/auth'
 import { getZohoLocation } from '@/lib/zoho'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
@@ -37,6 +37,9 @@ function LinkField({ label, url }: { label: string; url?: string | null }) {
 
 export default async function LocationDetailPage({ params }: Props) {
   await requireAuth()
+  const hubUser = await getHubUser()
+  const superAdmin = isSuperAdmin(hubUser?.role || '')
+
   const location = await getZohoLocation(params.id)
   if (!location) notFound()
 
@@ -47,7 +50,6 @@ export default async function LocationDetailPage({ params }: Props) {
   const isActive = location.CRM_Status === 'Active'
   const isConnected = !!location.Jobber_Account_ID
 
-  // Get initials for avatar
   const initials = location.Name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()
 
   return (
@@ -65,7 +67,6 @@ export default async function LocationDetailPage({ params }: Props) {
         position: 'relative',
         overflow: 'hidden',
       }}>
-        {/* Hex pattern background */}
         <div style={{
           position: 'absolute', inset: 0, opacity: 0.05,
           backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='70' viewBox='0 0 60 70'%3E%3Cpolygon points='30,2 58,17 58,47 30,62 2,47 2,17' fill='none' stroke='%23a8c9c4' stroke-width='1'/%3E%3C/svg%3E")`,
@@ -73,7 +74,6 @@ export default async function LocationDetailPage({ params }: Props) {
         }} />
 
         <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '1.25rem' }}>
-          {/* Avatar */}
           <div style={{
             width: '56px', height: '56px', borderRadius: '12px',
             background: 'rgba(168,201,196,0.2)', border: '1px solid rgba(168,201,196,0.3)',
@@ -101,7 +101,6 @@ export default async function LocationDetailPage({ params }: Props) {
             )}
           </div>
 
-          {/* Right side stats */}
           <div style={{ display: 'flex', gap: '1.5rem', flexShrink: 0 }}>
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: '10px', color: 'rgba(168,201,196,0.5)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Jobber</div>
@@ -126,8 +125,6 @@ export default async function LocationDetailPage({ params }: Props) {
 
       {/* Details + Paths row */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-
-        {/* Details card */}
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <div style={{ width: '3px', height: '14px', background: '#a8c9c4', borderRadius: '2px' }} />
@@ -143,7 +140,6 @@ export default async function LocationDetailPage({ params }: Props) {
           </div>
         </div>
 
-        {/* Paths & Links card */}
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <div style={{ width: '3px', height: '14px', background: '#d4a046', borderRadius: '2px' }} />
@@ -167,15 +163,17 @@ export default async function LocationDetailPage({ params }: Props) {
             <h2 style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: 0 }}>Jobber</h2>
           </div>
           {isConnected && (
-<a href={`/api/jobber/connect?location_id=${location.Location_ID}`} style={{ fontSize: '12px', color: 'white', textDecoration: 'none', padding: '5px 12px', background: '#1a2e2b', borderRadius: '7px', fontWeight: 500 }}>
-  Reconnect
-</a>
+            <a
+              href={`/api/jobber/connect?location_id=${location.Location_ID}`}
+              style={{ fontSize: '12px', color: 'white', textDecoration: 'none', padding: '5px 12px', background: '#1a2e2b', borderRadius: '7px', fontWeight: 500 }}
+            >
+              Reconnect
+            </a>
           )}
         </div>
 
         {isConnected ? (
           <div style={{ padding: '16px' }}>
-            {/* Token/connection summary bar */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1px', background: 'var(--border)', borderRadius: '8px', overflow: 'hidden', marginBottom: '1.25rem' }}>
               {[
                 { label: 'Account ID', value: <code style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{location.Jobber_Account_ID?.slice(0, 20)}...</code> },
@@ -189,8 +187,7 @@ export default async function LocationDetailPage({ params }: Props) {
               ))}
             </div>
 
-            {/* Import section */}
-            <ImportSection locationId={location.Location_ID} />
+            <ImportSection locationId={location.Location_ID} isSuperAdmin={superAdmin} />
           </div>
         ) : (
           <div style={{ padding: '24px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
