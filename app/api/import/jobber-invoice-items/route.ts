@@ -26,8 +26,8 @@ const JOB_INVOICE_ITEMS_QUERY = `
                 name
                 description
                 quantity
-                unitCost { amount }
-                totalPrice { amount }
+                unitPrice { amount }
+                totalPrice
                 taxable
               }
             }
@@ -99,8 +99,8 @@ export async function POST(req: NextRequest) {
             name:        item.name        || '',
             description: item.description || null,
             quantity:    item.quantity    || 1,
-            unit_cost:   item.unitCost?.amount    ? parseFloat(item.unitCost.amount)    : null,
-            total_price: item.totalPrice?.amount  ? parseFloat(item.totalPrice.amount)  : null,
+            unit_cost:   item.unitPrice?.amount   ? parseFloat(item.unitPrice.amount)   : null,
+            total_price: item.totalPrice ? parseFloat(item.totalPrice) : null,
             taxable:     item.taxable ?? false,
           }))
 
