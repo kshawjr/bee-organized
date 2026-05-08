@@ -120,10 +120,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
+  // Log full payload for debugging
+  console.log('[webhook] Full payload:', JSON.stringify(payload))
+
   const event = payload.webHookEvent
-  if (!event) return NextResponse.json({ ok: true }) // ignore unknown format
+  if (!event) {
+    console.log('[webhook] No webHookEvent in payload — keys:', Object.keys(payload))
+    return NextResponse.json({ ok: true })
+  }
 
   const { topic, accountId, itemId } = event
+  console.log('[webhook] Event:', topic, '| account:', accountId, '| item:', itemId)
   console.log(`[webhook] ${topic} — account: ${accountId} — item: ${itemId}`)
 
   // Find location by Jobber account ID
