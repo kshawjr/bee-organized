@@ -13,24 +13,19 @@ import { supabaseService } from '@/lib/supabase-service'
 import { writeSyncLog } from '@/lib/sync-log'
 
 // Jobs with invoice line items — focused query, minimal nesting
-const JOB_INVOICE_ITEMS_QUERY = `
-  query GetJobInvoiceItems($after: String) {
-    jobs(first: 50, after: $after) {
+const INVOICE_LINE_ITEMS_QUERY = `
+  query GetInvoiceLineItems($after: String) {
+    invoices(first: 50, after: $after) {
       nodes {
         id
-        invoices(first: 10) {
+        lineItems {
           nodes {
-            id
-            lineItems {
-              nodes {
-                name
-                description
-                quantity
-                unitPrice
-                totalPrice
-                taxable
-              }
-            }
+            name
+            description
+            quantity
+            unitPrice
+            totalPrice
+            taxable
           }
         }
       }
@@ -62,8 +57,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, message: 'No jobs found for this location', invoices_updated: 0 })
     }
 
-    const jobberJobIds = new Set(storedJobs.map(j => j.jobber_job_id))
-
     // Get all stored invoices for this location
     const { data: storedInvoices } = await supabaseService
       .from('invoices')
@@ -80,45 +73,41 @@ export async function POST(req: NextRequest) {
     let pages:   number        = 0
 
     while (hasMore) {
-      const res = await jobberQuery(jobberToken, JOB_INVOICE_ITEMS_QUERY, cursor ? { after: cursor } : {})
+      const res = await jobberQuery(jobberToken, INVOICE_LINE_ITEMS_QUERY, cursor ? { after: cursor } : {})
 
       if (res.errors) throw new Error(`Line items query error: ${JSON.stringify(res.errors)}`)
 
-      const page = res.data?.jobs
+      const page = res.data?.invoices
       if (!page) break
 
-      for (const job of page.nodes) {
-        // Only process jobs we've already stored
-        if (!jobberJobIds.has(job.id)) continue
+      for (const invoice of page.nodes) {
+        // Only process invoices we've already stored
+        const supabaseInvoiceId = invoiceMap.get(invoice.id)
+        if (!supabaseInvoiceId) continue
 
-        for (const invoice of (job.invoices?.nodes || [])) {
-          const supabaseInvoiceId = invoiceMap.get(invoice.id)
-          if (!supabaseInvoiceId) continue
+        const lineItems = (invoice.lineItems?.nodes || []).map((item: any) => ({
+          name:        item.name        || '',
+          description: item.description || null,
+          quantity:    item.quantity    || 1,
+          unit_price:  item.unitPrice   ? parseFloat(item.unitPrice)   : null,
+          total_price: item.totalPrice  ? parseFloat(item.totalPrice)  : null,
+          taxable:     item.taxable     ?? false,
+        }))
 
-          const lineItems = (invoice.lineItems?.nodes || []).map((item: any) => ({
-            name:        item.name        || '',
-            description: item.description || null,
-            quantity:    item.quantity    || 1,
-            unit_cost:   item.unitPrice ? parseFloat(item.unitPrice) : null,
-            total_price: item.totalPrice ? parseFloat(item.totalPrice) : null,
-            taxable:     item.taxable ?? false,
-          }))
+        try {
+          await supabaseService
+            .from('invoices')
+            .update({
+              line_items:       lineItems,
+              jobber_synced_at: new Date().toISOString(),
+              updated_at:       new Date().toISOString(),
+            })
+            .eq('id', supabaseInvoiceId)
 
-          try {
-            await supabaseService
-              .from('invoices')
-              .update({
-                line_items:       lineItems,
-                jobber_synced_at: new Date().toISOString(),
-                updated_at:       new Date().toISOString(),
-              })
-              .eq('id', supabaseInvoiceId)
-
-            stats.invoices_updated++
-            stats.line_items_total += lineItems.length
-          } catch (err: any) {
-            stats.errors.push(`Invoice ${invoice.id}: ${err.message}`)
-          }
+          stats.invoices_updated++
+          stats.line_items_total += lineItems.length
+        } catch (err: any) {
+          stats.errors.push(`Invoice ${invoice.id}: ${err.message}`)
         }
       }
 
