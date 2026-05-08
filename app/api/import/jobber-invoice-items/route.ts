@@ -3,8 +3,7 @@
 // (root-level invoices query not supported by Jobber)
 
 import { NextRequest, NextResponse } from 'next/server'
-import { getValidJobberToken, jobberQuery } from '@/lib/jobber'
-import { getZohoLocation, getZohoToken } from '@/lib/zoho'
+import { getValidJobberToken, jobberQuery, getLocation } from '@/lib/jobber'
 import { supabaseService } from '@/lib/supabase-service'
 import { writeSyncLog } from '@/lib/sync-log'
 
@@ -38,12 +37,10 @@ export async function POST(req: NextRequest) {
     const { location_id, mode = 'full' } = await req.json()
     if (!location_id) return NextResponse.json({ error: 'location_id required' }, { status: 400 })
 
-    const location = await getZohoLocation(location_id)
-    if (!location) return NextResponse.json({ error: `Location ${location_id} not found` }, { status: 404 })
-    if (!location.Jobber_Access_Token) return NextResponse.json({ error: 'Location not connected to Jobber' }, { status: 400 })
+    const location = await getLocation(location_id)
+    if (!location.jobber_access_token) return NextResponse.json({ error: 'Location not connected to Jobber' }, { status: 400 })
 
-    const zohoToken   = await getZohoToken()
-    const jobberToken = await getValidJobberToken(location, zohoToken)
+    const jobberToken = await getValidJobberToken(location)
 
     // Get stored invoices for this location to match against
     const { data: storedInvoices } = await supabaseService
@@ -108,7 +105,7 @@ export async function POST(req: NextRequest) {
       message: `Line items: ${stats.invoices_updated} invoices updated, ${stats.line_items_total} items. Errors: ${stats.errors.length}`,
     })
 
-    return NextResponse.json({ success: true, location: location.Name, mode, ...stats })
+    return NextResponse.json({ success: true, location: location.name, mode, ...stats })
   } catch (err: any) {
     console.error('[invoice-items]', err)
     return NextResponse.json({ error: err.message }, { status: 500 })

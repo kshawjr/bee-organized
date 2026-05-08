@@ -1,3 +1,17 @@
+// lib/jobber.ts
+// ─────────────────────────────────────────────────────────────
+// Jobber GraphQL client + token management.
+// Reads/writes tokens from Supabase locations table.
+// Fully independent of Zoho.
+// ─────────────────────────────────────────────────────────────
+
+import { createClient } from '@supabase/supabase-js'
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+)
+
 export const JOBBER_GRAPHQL_URL = 'https://api.getjobber.com/api/graphql'
 export const JOBBER_API_VERSION = '2025-04-16'
 
@@ -15,70 +29,78 @@ export async function jobberQuery(accessToken: string, query: string, variables?
   return res.json()
 }
 
-async function doRefresh(location: any, zohoToken: string): Promise<string> {
-  const ZOHO_API_BASE = process.env.ZOHO_API_BASE!
-  console.log('Refreshing Jobber token for:', location.Location_ID)
+// ── Get location from Supabase ────────────────────────────────
+export async function getLocation(locationId: string) {
+  const { data, error } = await supabase
+    .from('locations')
+    .select('*')
+    .eq('location_id', locationId)
+    .single()
+
+  if (error || !data) throw new Error(`Location ${locationId} not found in Supabase`)
+  return data
+}
+
+// ── Refresh token via Jobber OAuth ────────────────────────────
+async function doRefresh(location: any): Promise<string> {
+  console.log('Refreshing Jobber token for:', location.location_id)
 
   const res = await fetch('https://api.getjobber.com/api/oauth/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: process.env.JOBBER_CLIENT_ID!,
+      grant_type:    'refresh_token',
+      client_id:     process.env.JOBBER_CLIENT_ID!,
       client_secret: process.env.JOBBER_CLIENT_SECRET!,
-      refresh_token: location.Jobber_Refresh_Token,
+      refresh_token: location.jobber_refresh_token,
     }),
     cache: 'no-store',
   })
 
   const tokens = await res.json()
   if (!tokens.access_token) throw new Error('Token refresh failed: ' + JSON.stringify(tokens))
-  console.log('Token refresh: success')
 
-  await fetch(`${ZOHO_API_BASE}/Locations`, {
-    method: 'PUT',
-    headers: {
-      Authorization: `Zoho-oauthtoken ${zohoToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ data: [{
-      id: location.id,
-      Jobber_Access_Token: tokens.access_token,
-      Jobber_Refresh_Token: tokens.refresh_token,
-      Last_Sync_Status: `Token refreshed by Hub: ${new Date().toISOString().slice(0, 19)}`,
-    }] }),
-    cache: 'no-store',
-  })
+  const expiryMs = Date.now() + 55 * 60 * 1000
 
+  // Write refreshed tokens back to Supabase
+  await supabase.from('locations').update({
+    jobber_access_token:  tokens.access_token,
+    jobber_refresh_token: tokens.refresh_token,
+    token_expiry:         expiryMs,
+    token_expiry_display: new Date(expiryMs).toISOString().slice(0, 19),
+    last_sync_status:     `Token refreshed: ${new Date().toISOString().slice(0, 19)}`,
+    updated_at:           new Date().toISOString(),
+  }).eq('location_id', location.location_id)
+
+  console.log('Token refreshed and saved to Supabase')
   return tokens.access_token
 }
 
-// Three-path token strategy — minimizes GraphQL API calls to avoid rate limits:
-// 1. Token clearly valid (expiry > 5min away)  → use directly, zero API calls
-// 2. Token clearly expired (past expiry)        → refresh via OAuth directly, zero GraphQL calls
-// 3. Expiry unknown or within 5min window       → validate via GraphQL, refresh if needed
-export async function getValidJobberToken(location: any, zohoToken: string): Promise<string> {
-  const expiry      = location.Token_Expiry ? parseInt(location.Token_Expiry) : 0
+// ── Three-path token validation ───────────────────────────────
+// 1. Token valid (expiry > 5min)   → use directly, no API calls
+// 2. Token expired (past expiry)   → refresh via OAuth directly
+// 3. Expiry unknown / 5min buffer  → validate via GraphQL
+export async function getValidJobberToken(location: any): Promise<string> {
+  const expiry      = location.token_expiry ? parseInt(location.token_expiry) : 0
   const now         = Date.now()
   const fiveMinutes = 5 * 60 * 1000
 
   if (expiry && now < expiry - fiveMinutes) {
-    console.log('Jobber token valid — using directly (no API call)')
-    return location.Jobber_Access_Token
+    console.log('Jobber token valid — using directly')
+    return location.jobber_access_token
   }
 
   if (expiry && now >= expiry) {
-    console.log('Jobber token expired — refreshing via OAuth directly')
-    return doRefresh(location, zohoToken)
+    console.log('Jobber token expired — refreshing via OAuth')
+    return doRefresh(location)
   }
 
-  console.log('Jobber token expiry unclear — validating via API')
-  const test = await jobberQuery(location.Jobber_Access_Token, '{ account { id } }')
-
+  // Expiry unknown — validate via API
+  const test = await jobberQuery(location.jobber_access_token, '{ account { id } }')
   if (test?.data?.account?.id) {
     console.log('Jobber token valid (API confirmed)')
-    return location.Jobber_Access_Token
+    return location.jobber_access_token
   }
 
-  return doRefresh(location, zohoToken)
+  return doRefresh(location)
 }

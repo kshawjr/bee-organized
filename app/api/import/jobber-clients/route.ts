@@ -3,8 +3,7 @@
 // clients → requests → assessments → quotes → jobs → invoices
 
 import { NextRequest, NextResponse } from 'next/server'
-import { getValidJobberToken, jobberQuery } from '@/lib/jobber'
-import { getZohoLocation, getZohoToken } from '@/lib/zoho'
+import { getValidJobberToken, jobberQuery, getLocation } from '@/lib/jobber'
 import { supabaseService } from '@/lib/supabase-service'
 import { writeSyncLog } from '@/lib/sync-log'
 
@@ -100,12 +99,10 @@ export async function POST(req: NextRequest) {
     const { location_id, mode = 'full' } = await req.json()
     if (!location_id) return NextResponse.json({ error: 'location_id required' }, { status: 400 })
 
-    const location = await getZohoLocation(location_id)
-    if (!location) return NextResponse.json({ error: `Location ${location_id} not found` }, { status: 404 })
-    if (!location.Jobber_Access_Token) return NextResponse.json({ error: 'Location not connected to Jobber' }, { status: 400 })
+    const location = await getLocation(location_id)
+    if (!location.jobber_access_token) return NextResponse.json({ error: 'Location not connected to Jobber' }, { status: 400 })
 
-    const zohoToken   = await getZohoToken()
-    const jobberToken = await getValidJobberToken(location, zohoToken)
+    const jobberToken = await getValidJobberToken(location)
     const devMode     = mode === 'dev'
 
     // Fetch all entities with delay between queries
@@ -196,7 +193,7 @@ export async function POST(req: NextRequest) {
       message: `Leads:${stats.leads_created}+${stats.leads_updated} Requests:${stats.requests_created}+${stats.requests_updated} Jobs:${stats.jobs_created}+${stats.jobs_updated} Invoices:${stats.invoices_created}+${stats.invoices_updated} Errors:${stats.errors.length}`,
     })
 
-    return NextResponse.json({ success: true, location: location.Name, mode,
+    return NextResponse.json({ success: true, location: location.name, mode,
       total_clients: clients.length, total_requests: requests.length,
       total_quotes: quotes.length, total_jobs: jobs.length,
       ...stats })
