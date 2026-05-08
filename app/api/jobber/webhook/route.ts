@@ -14,7 +14,7 @@ import { writeSyncLog }              from '@/lib/sync-log'
 // ── Jobber entity queries ─────────────────────────────────────
 
 const CLIENT_QUERY = `
-  query GetClient($id: ID!) {
+  query GetClient($id: EncodedId!) {
     client(id: $id) {
       id firstName lastName companyName createdAt
       emails { address primary }
@@ -25,7 +25,7 @@ const CLIENT_QUERY = `
 `
 
 const REQUEST_QUERY = `
-  query GetRequest($id: ID!) {
+  query GetRequest($id: EncodedId!) {
     request(id: $id) {
       id createdAt jobberWebUri
       client { id }
@@ -35,7 +35,7 @@ const REQUEST_QUERY = `
 `
 
 const QUOTE_QUERY = `
-  query GetQuote($id: ID!) {
+  query GetQuote($id: EncodedId!) {
     quote(id: $id) {
       id createdAt jobberWebUri
       request { id }
@@ -45,7 +45,7 @@ const QUOTE_QUERY = `
 `
 
 const JOB_QUERY = `
-  query GetJob($id: ID!) {
+  query GetJob($id: EncodedId!) {
     job(id: $id) {
       id createdAt jobberWebUri title jobStatus startAt completedAt total
       request { id }
@@ -54,7 +54,7 @@ const JOB_QUERY = `
 `
 
 const INVOICE_QUERY = `
-  query GetInvoice($id: ID!) {
+  query GetInvoice($id: EncodedId!) {
     invoice(id: $id) {
       id createdAt jobberWebUri
       job { nodes { id } }
