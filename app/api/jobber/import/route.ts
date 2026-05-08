@@ -252,7 +252,7 @@ export async function POST(request: NextRequest) {
     if (!location.Jobber_Access_Token) return NextResponse.json({ error: 'No Jobber token' }, { status: 400 })
 
     const zohoToken = await getZohoAccessToken()
-    const token = await getValidJobberToken(location, zohoToken)
+    const token = await getValidJobberToken(location)
 
     const clients = await fetchAllPages(token, CLIENTS_QUERY, 'clients')
     console.log('Clients fetched:', clients.length)
