@@ -34,8 +34,7 @@ const CLIENTS_QUERY = `
             startAt
             completedAt
             createdAt
-            total { amount }
-            assignedTo { name { full } }
+            total
           }
         }
       }
@@ -227,8 +226,8 @@ async function upsertJobs(jobs: any[], lead_id: string, location_id: string) {
       status:          JOB_STATUS[job.jobStatus?.toUpperCase()] ?? job.jobStatus ?? 'Unknown',
       scheduled_date:  job.startAt     ? job.startAt.split('T')[0]     : null,
       completed_date:  job.completedAt ? job.completedAt.split('T')[0] : null,
-      amount:          job.total?.amount ? parseFloat(job.total.amount) : null,
-      assigned_team:   job.assignedTo ? [job.assignedTo.name.full] : [],
+      amount:          job.total ? parseFloat(job.total) : null,
+      assigned_team:   [],
       jobber_synced_at: new Date().toISOString(),
       updated_at:       new Date().toISOString(),
     }
