@@ -56,19 +56,12 @@ const JOBS_QUERY = `
       nodes {
         id createdAt jobberWebUri title jobStatus startAt completedAt total
         request { id }
-      }
-      pageInfo { hasNextPage endCursor }
-    }
-  }
-`
-
-const INVOICES_QUERY = `
-  query GetInvoices($after: String) {
-    invoices(first: 50, after: $after) {
-      nodes {
-        id createdAt jobberWebUri
-        jobs { nodes { id } }
-        amounts { subtotal taxAmount discountAmount total }
+        invoices(first: 10) {
+          nodes {
+            id createdAt jobberWebUri
+            amounts { subtotal taxAmount discountAmount total }
+          }
+        }
       }
       pageInfo { hasNextPage endCursor }
     }
@@ -123,16 +116,11 @@ export async function POST(req: NextRequest) {
     const quotes   = await fetchAll(jobberToken, QUOTES_QUERY,   'quotes',   false)
     await new Promise(r => setTimeout(r, 800))
     const jobs     = await fetchAll(jobberToken, JOBS_QUERY,     'jobs',     false)
-    await new Promise(r => setTimeout(r, 800))
-    const invoices = await fetchAll(jobberToken, INVOICES_QUERY, 'invoices', false)
-
     // Build lookup maps
     const clientIds    = new Set(clients.map((c: any) => c.id))
     const reqByClient: Record<string, any[]> = {}
     const quotesByReq: Record<string, any[]> = {}
     const jobsByReq:   Record<string, any[]> = {}
-    const invByJob:    Record<string, any[]> = {}
-
     for (const r of requests) {
       const cid = r.client?.id
       if (cid && clientIds.has(cid)) {
@@ -156,15 +144,6 @@ export async function POST(req: NextRequest) {
         jobsByReq[rid].push(j)
       }
     }
-    const jobIds = new Set(jobs.map((j: any) => j.id))
-    for (const inv of invoices) {
-      const jid = inv.jobs?.nodes?.[0]?.id
-      if (jid && jobIds.has(jid)) {
-        if (!invByJob[jid]) invByJob[jid] = []
-        invByJob[jid].push(inv)
-      }
-    }
-
     const stats = {
       leads_created: 0, leads_updated: 0,
       requests_created: 0, requests_updated: 0,
@@ -199,7 +178,8 @@ export async function POST(req: NextRequest) {
             const jRes = await upsertJob(job, reqDbId, leadId, location_id)
             jRes.created ? stats.jobs_created++ : stats.jobs_updated++
 
-            for (const inv of (invByJob[job.id] || [])) {
+            // Invoices nested inside jobs
+            for (const inv of (job.invoices?.nodes || [])) {
               const iRes = await upsertInvoice(inv, jRes.id, reqDbId, leadId, location_id)
               iRes.created ? stats.invoices_created++ : stats.invoices_updated++
             }
@@ -218,7 +198,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, location: location.Name, mode,
       total_clients: clients.length, total_requests: requests.length,
-      total_quotes: quotes.length, total_jobs: jobs.length, total_invoices: invoices.length,
+      total_quotes: quotes.length, total_jobs: jobs.length,
       ...stats })
   } catch (err: any) {
     console.error('[jobber-import]', err)
