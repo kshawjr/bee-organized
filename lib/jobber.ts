@@ -35,8 +35,7 @@ async function doRefresh(location: any, zohoToken: string): Promise<string> {
   if (!tokens.access_token) throw new Error('Token refresh failed: ' + JSON.stringify(tokens))
   console.log('Token refresh: success')
 
-  // Save tokens only — do NOT write Token_Expiry (Deluge owns that field)
-  const zohoRes = await fetch(`${ZOHO_API_BASE}/Locations`, {
+  await fetch(`${ZOHO_API_BASE}/Locations`, {
     method: 'PUT',
     headers: {
       Authorization: `Zoho-oauthtoken ${zohoToken}`,
@@ -50,34 +49,36 @@ async function doRefresh(location: any, zohoToken: string): Promise<string> {
     }] }),
     cache: 'no-store',
   })
-  const updateResult = await zohoRes.json()
-  console.log('Token saved to Zoho:', updateResult?.data?.[0]?.code)
 
   return tokens.access_token
 }
 
-// Validates token — checks expiry locally first to avoid unnecessary API calls.
-// Only makes a Jobber API call if expiry is unknown or within 5 minutes.
-// Does NOT write Token_Expiry — Deluge owns that field.
+// Three-path token strategy — minimizes GraphQL API calls to avoid rate limits:
+// 1. Token clearly valid (expiry > 5min away)  → use directly, zero API calls
+// 2. Token clearly expired (past expiry)        → refresh via OAuth directly, zero GraphQL calls
+// 3. Expiry unknown or within 5min window       → validate via GraphQL, refresh if needed
 export async function getValidJobberToken(location: any, zohoToken: string): Promise<string> {
-  // Check expiry locally first — avoids burning rate limit on a valid token
-  const expiry = location.Token_Expiry ? parseInt(location.Token_Expiry) : 0
+  const expiry      = location.Token_Expiry ? parseInt(location.Token_Expiry) : 0
+  const now         = Date.now()
   const fiveMinutes = 5 * 60 * 1000
 
-  if (expiry && Date.now() < expiry - fiveMinutes) {
-    console.log('Jobber token valid (local expiry check) — skipping API call')
+  if (expiry && now < expiry - fiveMinutes) {
+    console.log('Jobber token valid — using directly (no API call)')
     return location.Jobber_Access_Token
   }
 
-  // Expiry unknown or close — validate via actual API call
-  console.log('Jobber token expiry unknown or near — validating via API')
+  if (expiry && now >= expiry) {
+    console.log('Jobber token expired — refreshing via OAuth directly')
+    return doRefresh(location, zohoToken)
+  }
+
+  console.log('Jobber token expiry unclear — validating via API')
   const test = await jobberQuery(location.Jobber_Access_Token, '{ account { id } }')
 
   if (test?.data?.account?.id) {
-    console.log('Jobber token valid — skipping refresh')
+    console.log('Jobber token valid (API confirmed)')
     return location.Jobber_Access_Token
   }
 
-  console.log('Jobber token invalid — refreshing')
   return doRefresh(location, zohoToken)
 }
