@@ -56,9 +56,21 @@ async function doRefresh(location: any, zohoToken: string): Promise<string> {
   return tokens.access_token
 }
 
-// Test token validity, refresh only if needed
-// Does NOT write Token_Expiry — Deluge owns that field
+// Validates token — checks expiry locally first to avoid unnecessary API calls.
+// Only makes a Jobber API call if expiry is unknown or within 5 minutes.
+// Does NOT write Token_Expiry — Deluge owns that field.
 export async function getValidJobberToken(location: any, zohoToken: string): Promise<string> {
+  // Check expiry locally first — avoids burning rate limit on a valid token
+  const expiry = location.Token_Expiry ? parseInt(location.Token_Expiry) : 0
+  const fiveMinutes = 5 * 60 * 1000
+
+  if (expiry && Date.now() < expiry - fiveMinutes) {
+    console.log('Jobber token valid (local expiry check) — skipping API call')
+    return location.Jobber_Access_Token
+  }
+
+  // Expiry unknown or close — validate via actual API call
+  console.log('Jobber token expiry unknown or near — validating via API')
   const test = await jobberQuery(location.Jobber_Access_Token, '{ account { id } }')
 
   if (test?.data?.account?.id) {
