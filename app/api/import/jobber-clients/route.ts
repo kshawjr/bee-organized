@@ -1,4 +1,5 @@
 // app/api/import/jobber-clients/route.ts
+// Stage 1: leads + service_requests
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getValidJobberToken, jobberQuery } from '@/lib/jobber'
@@ -24,7 +25,6 @@ const CLIENTS_QUERY = `
   }
 `
 
-// Root-level requests with client reference — proven to work in existing import
 const REQUESTS_QUERY = `
   query GetRequests($after: String) {
     requests(first: 50, after: $after) {
@@ -38,7 +38,6 @@ const REQUESTS_QUERY = `
           nodes {
             id
             createdAt
-            jobberWebUri
             amounts { total }
           }
         }
@@ -48,7 +47,6 @@ const REQUESTS_QUERY = `
             createdAt
             jobStatus
             startAt
-            jobberWebUri
             invoices(first: 1) {
               nodes {
                 id
@@ -83,14 +81,13 @@ async function fetchAllPages(token: string, query: string, key: string, devMode 
 
   while (hasMore) {
     const res = await jobberQuery(token, query, cursor ? { after: cursor } : {})
-    if (res.errors) throw new Error(`${key} query error: ${JSON.stringify(res.errors)}`)
+    if (res.errors) throw new Error(`${key} error: ${JSON.stringify(res.errors)}`)
     const page = res.data?.[key]
     if (!page) break
     all.push(...page.nodes)
     hasMore = page.pageInfo.hasNextPage
     cursor  = page.pageInfo.endCursor
     pages++
-    // Dev mode: limit clients to 1 page, but always fetch ALL requests
     if (devMode && key === 'clients' && pages >= 1) break
     if (hasMore) await new Promise(r => setTimeout(r, 300))
   }
@@ -110,15 +107,11 @@ export async function POST(req: NextRequest) {
     const jobberToken = await getValidJobberToken(location, zohoToken)
     const devMode     = mode === 'dev'
 
-    // Fetch clients (limited in dev), then ALL requests
     const clients  = await fetchAllPages(jobberToken, CLIENTS_QUERY,  'clients',  devMode)
     await new Promise(r => setTimeout(r, 1000))
-    const requests = await fetchAllPages(jobberToken, REQUESTS_QUERY, 'requests', false) // always fetch all
+    const requests = await fetchAllPages(jobberToken, REQUESTS_QUERY, 'requests', false)
 
-    // Build client ID set for quick lookup
     const clientIds = new Set(clients.map((c: any) => c.id))
-
-    // Map requests by client ID — only for clients we fetched
     const requestsByClient: Record<string, any[]> = {}
     for (const r of requests) {
       const cid = r.client?.id
@@ -129,11 +122,11 @@ export async function POST(req: NextRequest) {
     }
 
     const stats = {
-      leads_created:   0,
-      leads_updated:   0,
-      history_created: 0,
-      history_updated: 0,
-      errors:          [] as string[],
+      leads_created:    0,
+      leads_updated:    0,
+      requests_created: 0,
+      requests_updated: 0,
+      errors:           [] as string[],
     }
 
     for (const client of clients) {
@@ -141,10 +134,9 @@ export async function POST(req: NextRequest) {
         const { id: leadId, created } = await upsertLead(client, location_id)
         created ? stats.leads_created++ : stats.leads_updated++
 
-        const clientRequests = requestsByClient[client.id] || []
-        for (const request of clientRequests) {
-          const result = await upsertServiceHistory(request, leadId, location_id)
-          result.created ? stats.history_created++ : stats.history_updated++
+        for (const request of (requestsByClient[client.id] || [])) {
+          const result = await upsertServiceRequest(request, leadId, location_id)
+          result.created ? stats.requests_created++ : stats.requests_updated++
         }
       } catch (err: any) {
         stats.errors.push(`${client.firstName} ${client.lastName}: ${err.message}`)
@@ -154,10 +146,15 @@ export async function POST(req: NextRequest) {
     await writeSyncLog({
       location_id, entity_id: location_id,
       status: stats.errors.length > 0 ? 'error' : 'success',
-      message: `Imported ${clients.length} clients, ${requests.length} total requests. Leads: +${stats.leads_created}/~${stats.leads_updated}. History: +${stats.history_created}/~${stats.history_updated}.`,
+      message: `Leads: +${stats.leads_created}/~${stats.leads_updated}. Requests: +${stats.requests_created}/~${stats.requests_updated}. Errors: ${stats.errors.length}`,
     })
 
-    return NextResponse.json({ success: true, location: location.Name, total_clients: clients.length, total_requests: requests.length, mode, ...stats })
+    return NextResponse.json({
+      success: true, location: location.Name,
+      total_clients: clients.length,
+      total_requests: requests.length,
+      mode, ...stats,
+    })
   } catch (err: any) {
     console.error('[jobber-import]', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
@@ -195,40 +192,33 @@ async function upsertLead(client: any, location_id: string) {
   return { id: data.id, created: true }
 }
 
-async function upsertServiceHistory(request: any, lead_id: string, location_id: string) {
-  const quote   = request.quotes?.nodes?.[0] || null
+async function upsertServiceRequest(request: any, lead_id: string, location_id: string) {
   const job     = request.jobs?.nodes?.[0]   || null
+  const quote   = request.quotes?.nodes?.[0] || null
   const invoice = job?.invoices?.nodes?.[0]  || null
 
   const payload = {
-    lead_id, location_id,
-    jobber_request_id:  request.id,
-    jobber_quote_id:    quote?.id   || null,
-    jobber_job_id:      job?.id     || null,
-    jobber_invoice_id:  invoice?.id || null,
-    request_url:        request.jobberWebUri || null,
-    quote_url:          quote?.jobberWebUri  || null,
-    job_url:            job?.jobberWebUri    || null,
-    stage:              determineStage(request),
-    assessment_date:    request.assessment?.startAt || null,
-    estimate_sent_date: quote?.createdAt || null,
-    estimate_amount:    quote?.amounts?.total ? parseFloat(quote.amounts.total) : null,
-    job_created_date:   job?.createdAt || job?.startAt || null,
-    job_completed_date: job?.jobStatus === 'COMPLETED' ? (job?.startAt || null) : null,
-    invoice_date:       invoice?.createdAt || null,
-    invoice_amount:     invoice?.amounts?.total ? parseFloat(invoice.amounts.total) : null,
-    jobber_synced_at:   new Date().toISOString(),
-    updated_at:         new Date().toISOString(),
+    lead_id,
+    location_id,
+    jobber_request_id: request.id,
+    request_url:       request.jobberWebUri || null,
+    stage:             determineStage(request),
+    status:            'active',
+    source:            'jobber',
+    jobber_synced_at:  new Date().toISOString(),
+    updated_at:        new Date().toISOString(),
   }
 
-  const { data: existing } = await supabaseService.from('service_history').select('id')
+  const { data: existing } = await supabaseService.from('service_requests').select('id')
     .eq('jobber_request_id', request.id).maybeSingle()
 
   if (existing) {
-    await supabaseService.from('service_history').update(payload).eq('id', existing.id)
-    return { created: false }
+    await supabaseService.from('service_requests').update(payload).eq('id', existing.id)
+    return { id: existing.id, created: false }
   }
-  await supabaseService.from('service_history')
+  const { data, error } = await supabaseService.from('service_requests')
     .insert({ ...payload, created_at: request.createdAt || new Date().toISOString() })
-  return { created: true }
+    .select('id').single()
+  if (error) throw new Error(error.message)
+  return { id: data.id, created: true }
 }
