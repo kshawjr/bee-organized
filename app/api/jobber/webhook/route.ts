@@ -247,8 +247,12 @@ async function handleClient(itemId: string, location: any, token: string) {
 
 async function handleRequest(itemId: string, location: any, token: string) {
   const res = await jobberQuery(token, REQUEST_QUERY, { id: itemId })
+  console.log('[webhook] Request query result:', JSON.stringify(res).slice(0, 300))
   const request = res.data?.request
-  if (!request) return
+  if (!request) {
+    console.warn('[webhook] No request data returned for id:', itemId)
+    return
+  }
 
   // Find the parent lead
   const { data: lead } = await supabaseService.from('leads').select('id')
