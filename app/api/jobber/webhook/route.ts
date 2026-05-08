@@ -66,11 +66,28 @@ const INVOICE_QUERY = `
 // ── Signature verification ────────────────────────────────────
 
 function verifySignature(body: string, signature: string | null): boolean {
-  if (!signature || !process.env.JOBBER_WEBHOOK_SECRET) return false
-  const expected = createHmac('sha256', process.env.JOBBER_WEBHOOK_SECRET)
-    .update(body)
-    .digest('hex')
-  return signature === expected
+  if (!signature) return false
+  const secret = process.env.JOBBER_CLIENT_SECRET
+  if (!secret) return false
+
+  // Jobber signs with client secret as string, digest as base64
+  const expectedBase64 = createHmac('sha256', secret).update(body).digest('base64')
+  if (signature === expectedBase64) return true
+
+  // Also try with secret decoded from hex (raw bytes)
+  try {
+    const secretBytes = Buffer.from(secret, 'hex')
+    const expectedHexBytes = createHmac('sha256', secretBytes).update(body).digest('base64')
+    if (signature === expectedHexBytes) return true
+  } catch {}
+
+  // Try hex digest
+  const expectedHex = createHmac('sha256', secret).update(body).digest('hex')
+  if (signature === expectedHex) return true
+
+  console.log('[webhook] Signature debug — received:', signature)
+  console.log('[webhook] Expected (base64/string):', expectedBase64)
+  return false
 }
 
 // ── Find location by Jobber account ID ───────────────────────
