@@ -3,7 +3,7 @@ const ZOHO_API_BASE = process.env.ZOHO_API_BASE!
 let cachedToken: string | null = null
 let tokenExpiry = 0
 
-async function getZohoToken(): Promise<string> {
+export async function getZohoToken(): Promise<string> {
   if (cachedToken && Date.now() < tokenExpiry) return cachedToken
 
   const res = await fetch(
