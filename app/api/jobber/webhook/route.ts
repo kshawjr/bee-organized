@@ -151,52 +151,67 @@ export async function POST(req: NextRequest) {
 
   // Route to handler based on topic
   try {
+    let detail = ''
+
     switch (topic) {
       case 'CLIENT_CREATE':
       case 'CLIENT_UPDATE':
-        await handleClient(itemId, location, jobberToken)
+        detail = await handleClient(itemId, location, jobberToken)
         break
 
       case 'REQUEST_CREATE':
       case 'REQUEST_UPDATE':
-        await handleRequest(itemId, location, jobberToken)
+        detail = await handleRequest(itemId, location, jobberToken)
         break
 
       case 'QUOTE_CREATE':
       case 'QUOTE_UPDATE':
       case 'QUOTE_APPROVED':
-        await handleQuote(itemId, location, jobberToken)
+        detail = await handleQuote(itemId, location, jobberToken)
         break
 
       case 'JOB_CREATE':
       case 'JOB_UPDATE':
       case 'JOB_COMPLETE':
-        await handleJob(itemId, location, jobberToken)
+        detail = await handleJob(itemId, location, jobberToken)
         break
 
       case 'INVOICE_CREATE':
       case 'INVOICE_SENT':
       case 'INVOICE_PAID':
-        await handleInvoice(itemId, location, jobberToken)
+        detail = await handleInvoice(itemId, location, jobberToken)
         break
 
       default:
         console.log(`[webhook] Unhandled topic: ${topic}`)
+        detail = `Unhandled topic: ${topic}`
     }
 
+    const entityType: 'client' | 'request' | 'quote' | 'job' | 'invoice' = topic.startsWith('CLIENT') ? 'client'
+      : topic.startsWith('REQUEST') ? 'request'
+      : topic.startsWith('QUOTE')   ? 'quote'
+      : topic.startsWith('JOB')     ? 'job'
+      : topic.startsWith('INVOICE') ? 'invoice'
+      : 'client'
+
     await writeSyncLog({
-      location_id: location.location_id,
-      entity_id:   itemId,
-      status:      'success',
-      message:     `Webhook: ${topic}`,
+      location_id:      location.location_id,
+      entity_id:        itemId,
+      entity_type:      entityType,
+      direction:        'inbound',
+      jobber_record_id: itemId,
+      status:           'success',
+      message:          `${topic} | ${detail || 'processed'}`,
     })
   } catch (err: any) {
     console.error(`[webhook] Handler error for ${topic}:`, err.message)
     await writeSyncLog({
-      location_id: location.location_id,
-      entity_id:   itemId,
-      status:      'error',
-      message:     `Webhook ${topic} failed: ${err.message}`,
+      location_id:      location.location_id,
+      entity_id:        itemId,
+      direction:        'inbound',
+      jobber_record_id: itemId,
+      status:           'error',
+      message:          `${topic} failed: ${err.message}`,
     })
   }
 
@@ -206,10 +221,10 @@ export async function POST(req: NextRequest) {
 
 // ── Handlers ──────────────────────────────────────────────────
 
-async function handleClient(itemId: string, location: any, token: string) {
+async function handleClient(itemId: string, location: any, token: string): Promise<string> {
   const res = await jobberQuery(token, CLIENT_QUERY, { id: itemId })
   const client = res.data?.client
-  if (!client) return
+  if (!client) return ''
 
   const email = client.emails?.find((e: any) => e.primary)?.address ?? client.emails?.[0]?.address ?? null
   const phone = client.phones?.find((p: any) => p.primary)?.number  ?? client.phones?.[0]?.number  ?? null
@@ -242,15 +257,17 @@ async function handleClient(itemId: string, location: any, token: string) {
       .insert({ ...payload, created_at: client.createdAt || new Date().toISOString() })
   }
 
-  console.log(`[webhook] Client upserted: ${client.firstName} ${client.lastName}`)
+  const action = `Client: ${client.firstName} ${client.lastName}${client.companyName ? ' (' + client.companyName + ')' : ''}`
+  console.log('[webhook]', action)
+  return action
 }
 
-async function handleRequest(itemId: string, location: any, token: string) {
+async function handleRequest(itemId: string, location: any, token: string): Promise<string> {
   const res = await jobberQuery(token, REQUEST_QUERY, { id: itemId })
   const request = res.data?.request
   if (!request) {
     console.warn('[webhook] No request data returned for id:', itemId)
-    return
+    return ''
   }
 
   // Find or create the parent lead
@@ -268,7 +285,7 @@ async function handleRequest(itemId: string, location: any, token: string) {
       .eq('jobber_client_id', request.client.id).eq('location_id', location.location_id).maybeSingle()
     if (!newLead) {
       console.warn('[webhook] Could not create lead for request', itemId)
-      return
+      return ''
     }
     leadId = newLead.id
   }
@@ -295,18 +312,20 @@ async function handleRequest(itemId: string, location: any, token: string) {
       .insert({ ...payload, created_at: request.createdAt || new Date().toISOString() })
   }
 
-  console.log('[webhook] Request upserted:', request.id)
+  const action = `Request ${request.id.slice(-8)} | Stage: ${payload.stage}`
+  console.log('[webhook]', action)
+  return action
 }
 
-async function handleQuote(itemId: string, location: any, token: string) {
+async function handleQuote(itemId: string, location: any, token: string): Promise<string> {
   const res = await jobberQuery(token, QUOTE_QUERY, { id: itemId })
   const quote = res.data?.quote
-  if (!quote) return
+  if (!quote) return ''
 
   const { data: serviceReq } = await supabaseService.from('service_requests').select('id, lead_id')
     .eq('jobber_request_id', quote.request?.id).maybeSingle()
 
-  if (!serviceReq) return
+  if (!serviceReq) return ''
 
   const payload = {
     service_request_id: serviceReq.id,
@@ -334,10 +353,12 @@ async function handleQuote(itemId: string, location: any, token: string) {
       .insert({ ...payload, created_at: quote.createdAt || new Date().toISOString() })
   }
 
-  console.log(`[webhook] Quote upserted: ${quote.id}`)
+  const action = `Quote ${quote.id.slice(-8)} | Total: ${payload.total ?? 'N/A'}`
+  console.log('[webhook]', action)
+  return action
 }
 
-async function handleJob(itemId: string, location: any, token: string) {
+async function handleJob(itemId: string, location: any, token: string): Promise<string> {
   const JOB_STATUS: Record<string, string> = {
     ACTIVE: 'in_progress', COMPLETED: 'completed',
     REQUIRES_INVOICING: 'completed', LATE: 'late',
@@ -346,12 +367,12 @@ async function handleJob(itemId: string, location: any, token: string) {
 
   const res = await jobberQuery(token, JOB_QUERY, { id: itemId })
   const job = res.data?.job
-  if (!job) return
+  if (!job) return ''
 
   const { data: serviceReq } = await supabaseService.from('service_requests').select('id, lead_id')
     .eq('jobber_request_id', job.request?.id).maybeSingle()
 
-  if (!serviceReq) return
+  if (!serviceReq) return ''
 
   const payload = {
     service_request_id: serviceReq.id,
@@ -384,21 +405,23 @@ async function handleJob(itemId: string, location: any, token: string) {
     updated_at: new Date().toISOString(),
   }).eq('id', serviceReq.id)
 
-  console.log(`[webhook] Job upserted: ${job.id}`)
+  const action = `Job: ${job.title || 'Untitled'} | Status: ${payload.status} | Total: ${payload.total ?? 'N/A'}`
+  console.log('[webhook]', action)
+  return action
 }
 
-async function handleInvoice(itemId: string, location: any, token: string) {
+async function handleInvoice(itemId: string, location: any, token: string): Promise<string> {
   const res = await jobberQuery(token, INVOICE_QUERY, { id: itemId })
   const invoice = res.data?.invoice
-  if (!invoice) return
+  if (!invoice) return ''
 
   const jobId = invoice.job?.nodes?.[0]?.id
-  if (!jobId) return
+  if (!jobId) return ''
 
   const { data: job } = await supabaseService.from('jobs').select('id, service_request_id, lead_id')
     .eq('jobber_job_id', jobId).maybeSingle()
 
-  if (!job) return
+  if (!job) return ''
 
   const payload = {
     job_id:             job.id,
@@ -438,5 +461,7 @@ async function handleInvoice(itemId: string, location: any, token: string) {
     stage: 'Final Processing', updated_at: new Date().toISOString(),
   }).eq('id', job.service_request_id)
 
-  console.log(`[webhook] Invoice upserted: ${invoice.id}`)
+  const action = `Invoice ${invoice.id.slice(-8)} | Total: ${payload.total ?? 'N/A'} | Status: ${payload.status}`
+  console.log('[webhook]', action)
+  return action
 }
