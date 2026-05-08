@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
   // Log full payload for debugging
   console.log('[webhook] Full payload:', JSON.stringify(payload))
 
-  const event = payload.webHookEvent
+  const event = payload.webHookEvent || payload.data?.webHookEvent
   if (!event) {
     console.log('[webhook] No webHookEvent in payload — keys:', Object.keys(payload))
     return NextResponse.json({ ok: true })
