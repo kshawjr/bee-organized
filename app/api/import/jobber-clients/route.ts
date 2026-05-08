@@ -47,13 +47,16 @@ const REQUESTS_QUERY = `
             }
           }
         }
-        jobs(first: 1) {
+        jobs(first: 10) {
           nodes {
             id
             createdAt
+            jobberWebUri
+            title
             jobStatus
             startAt
-            invoices(first: 1) {
+            completedAt
+            invoices(first: 5) {
               nodes {
                 id
                 createdAt
@@ -136,6 +139,8 @@ export async function POST(req: NextRequest) {
       assessments_updated:  0,
       quotes_created:       0,
       quotes_updated:       0,
+      jobs_created:         0,
+      jobs_updated:         0,
       errors:               [] as string[],
     }
 
@@ -158,6 +163,12 @@ export async function POST(req: NextRequest) {
           for (const quote of (request.quotes?.nodes || [])) {
             const qResult = await upsertQuote(quote, result.id, leadId, location_id)
             qResult.created ? stats.quotes_created++ : stats.quotes_updated++
+          }
+
+          // Jobs (all of them)
+          for (const job of (request.jobs?.nodes || [])) {
+            const jResult = await upsertJob(job, result.id, leadId, location_id)
+            jResult.created ? stats.jobs_created++ : stats.jobs_updated++
           }
         }
       } catch (err: any) {
@@ -303,5 +314,44 @@ async function upsertQuote(quote: any, service_request_id: string, lead_id: stri
     .insert({ ...payload, created_at: quote.createdAt || new Date().toISOString() })
     .select('id').single()
   if (error) throw new Error(`Quote: ${error.message}`)
+  return { id: data.id, created: true }
+}
+
+const JOB_STATUS: Record<string, string> = {
+  ACTIVE:             'in_progress',
+  COMPLETED:          'completed',
+  REQUIRES_INVOICING: 'completed',
+  LATE:               'late',
+  TODAY:              'today',
+  UPCOMING:           'upcoming',
+  ARCHIVED:           'archived',
+}
+
+async function upsertJob(job: any, service_request_id: string, lead_id: string, location_id: string) {
+  const payload = {
+    service_request_id,
+    lead_id,
+    location_id,
+    jobber_job_id:   job.id,
+    job_url:         job.jobberWebUri  || null,
+    title:           job.title         || null,
+    status:          JOB_STATUS[job.jobStatus?.toUpperCase()] ?? job.jobStatus ?? 'unknown',
+    scheduled_start: job.startAt       || null,
+    completed_at:    job.completedAt   || null,
+    jobber_synced_at: new Date().toISOString(),
+    updated_at:       new Date().toISOString(),
+  }
+
+  const { data: existing } = await supabaseService.from('jobs').select('id')
+    .eq('jobber_job_id', job.id).maybeSingle()
+
+  if (existing) {
+    await supabaseService.from('jobs').update(payload).eq('id', existing.id)
+    return { id: existing.id, created: false }
+  }
+  const { data, error } = await supabaseService.from('jobs')
+    .insert({ ...payload, created_at: job.createdAt || new Date().toISOString() })
+    .select('id').single()
+  if (error) throw new Error(`Job: ${error.message}`)
   return { id: data.id, created: true }
 }
