@@ -24,42 +24,42 @@ const CLIENTS_QUERY = `
   }
 `
 
-// Fetch requests for a specific client — guarantees history matches our clients
-const CLIENT_REQUESTS_QUERY = `
-  query GetClientRequests($clientId: ID!) {
-    client(id: $clientId) {
-      requests(first: 50) {
-        nodes {
-          id
-          createdAt
-          jobberWebUri
-          assessment { startAt }
-          quotes(first: 1) {
-            nodes {
-              id
-              createdAt
-              jobberWebUri
-              amounts { total }
-            }
+// Root-level requests with client reference — proven to work in existing import
+const REQUESTS_QUERY = `
+  query GetRequests($after: String) {
+    requests(first: 50, after: $after) {
+      nodes {
+        id
+        createdAt
+        jobberWebUri
+        client { id }
+        assessment { startAt }
+        quotes(first: 1) {
+          nodes {
+            id
+            createdAt
+            jobberWebUri
+            amounts { total }
           }
-          jobs(first: 1) {
-            nodes {
-              id
-              createdAt
-              jobStatus
-              startAt
-              jobberWebUri
-              invoices(first: 1) {
-                nodes {
-                  id
-                  createdAt
-                  amounts { total }
-                }
+        }
+        jobs(first: 1) {
+          nodes {
+            id
+            createdAt
+            jobStatus
+            startAt
+            jobberWebUri
+            invoices(first: 1) {
+              nodes {
+                id
+                createdAt
+                amounts { total }
               }
             }
           }
         }
       }
+      pageInfo { hasNextPage endCursor }
     }
   }
 `
@@ -68,11 +68,33 @@ function determineStage(request: any): string {
   const job     = request.jobs?.nodes?.[0]
   const quote   = request.quotes?.nodes?.[0]
   const invoice = job?.invoices?.nodes?.[0]
-  if (invoice)              return 'Final Processing'
-  if (job)                  return 'Job in Progress'
-  if (quote)                return 'Estimate Sent'
-  if (request.assessment)   return 'Assessment Scheduled'
+  if (invoice)            return 'Final Processing'
+  if (job)                return 'Job in Progress'
+  if (quote)              return 'Estimate Sent'
+  if (request.assessment) return 'Assessment Scheduled'
   return 'New Request'
+}
+
+async function fetchAllPages(token: string, query: string, key: string, devMode = false): Promise<any[]> {
+  const all: any[] = []
+  let cursor:  string | null = null
+  let hasMore: boolean       = true
+  let pages:   number        = 0
+
+  while (hasMore) {
+    const res = await jobberQuery(token, query, cursor ? { after: cursor } : {})
+    if (res.errors) throw new Error(`${key} query error: ${JSON.stringify(res.errors)}`)
+    const page = res.data?.[key]
+    if (!page) break
+    all.push(...page.nodes)
+    hasMore = page.pageInfo.hasNextPage
+    cursor  = page.pageInfo.endCursor
+    pages++
+    // Dev mode: limit clients to 1 page, but always fetch ALL requests
+    if (devMode && key === 'clients' && pages >= 1) break
+    if (hasMore) await new Promise(r => setTimeout(r, 300))
+  }
+  return all
 }
 
 export async function POST(req: NextRequest) {
@@ -86,27 +108,26 @@ export async function POST(req: NextRequest) {
 
     const zohoToken   = await getZohoToken()
     const jobberToken = await getValidJobberToken(location, zohoToken)
+    const devMode     = mode === 'dev'
 
-    // ── Fetch clients ─────────────────────────────────────────
-    const clients: any[] = []
-    let cursor:  string | null = null
-    let hasMore: boolean       = true
-    let pages:   number        = 0
+    // Fetch clients (limited in dev), then ALL requests
+    const clients  = await fetchAllPages(jobberToken, CLIENTS_QUERY,  'clients',  devMode)
+    await new Promise(r => setTimeout(r, 1000))
+    const requests = await fetchAllPages(jobberToken, REQUESTS_QUERY, 'requests', false) // always fetch all
 
-    while (hasMore) {
-      const res = await jobberQuery(jobberToken, CLIENTS_QUERY, cursor ? { after: cursor } : {})
-      if (res.errors) throw new Error(`Clients error: ${JSON.stringify(res.errors)}`)
-      const page = res.data?.clients
-      if (!page) break
-      clients.push(...page.nodes)
-      hasMore = page.pageInfo.hasNextPage
-      cursor  = page.pageInfo.endCursor
-      pages++
-      if (mode === 'dev' && pages >= 1) break
-      if (hasMore) await new Promise(r => setTimeout(r, 300))
+    // Build client ID set for quick lookup
+    const clientIds = new Set(clients.map((c: any) => c.id))
+
+    // Map requests by client ID — only for clients we fetched
+    const requestsByClient: Record<string, any[]> = {}
+    for (const r of requests) {
+      const cid = r.client?.id
+      if (cid && clientIds.has(cid)) {
+        if (!requestsByClient[cid]) requestsByClient[cid] = []
+        requestsByClient[cid].push(r)
+      }
     }
 
-    // ── Process each client: upsert lead + fetch their requests ──
     const stats = {
       leads_created:   0,
       leads_updated:   0,
@@ -117,43 +138,26 @@ export async function POST(req: NextRequest) {
 
     for (const client of clients) {
       try {
-        // 1. Upsert lead
         const { id: leadId, created } = await upsertLead(client, location_id)
         created ? stats.leads_created++ : stats.leads_updated++
 
-        // 2. Fetch this client's requests directly — no pagination mismatch
-        await new Promise(r => setTimeout(r, 250))
-        const reqRes = await jobberQuery(jobberToken, CLIENT_REQUESTS_QUERY, { clientId: client.id })
-
-        if (reqRes.errors) {
-          console.warn('Requests error for client', client.id, reqRes.errors)
-          continue
-        }
-
-        const requests = reqRes.data?.client?.requests?.nodes || []
-
-        // 3. Upsert service history for each request
-        for (const request of requests) {
+        const clientRequests = requestsByClient[client.id] || []
+        for (const request of clientRequests) {
           const result = await upsertServiceHistory(request, leadId, location_id)
           result.created ? stats.history_created++ : stats.history_updated++
         }
       } catch (err: any) {
-        const name = `${client.firstName} ${client.lastName}`.trim()
-        stats.errors.push(`${name}: ${err.message}`)
+        stats.errors.push(`${client.firstName} ${client.lastName}: ${err.message}`)
       }
     }
 
     await writeSyncLog({
-      location_id,
-      entity_id: location_id,
+      location_id, entity_id: location_id,
       status: stats.errors.length > 0 ? 'error' : 'success',
-      message: `Imported ${clients.length} clients. Leads: +${stats.leads_created}/~${stats.leads_updated}. History: +${stats.history_created}/~${stats.history_updated}. Errors: ${stats.errors.length}`,
+      message: `Imported ${clients.length} clients, ${requests.length} total requests. Leads: +${stats.leads_created}/~${stats.leads_updated}. History: +${stats.history_created}/~${stats.history_updated}.`,
     })
 
-    return NextResponse.json({
-      success: true, location: location.Name,
-      total_clients: clients.length, mode, ...stats,
-    })
+    return NextResponse.json({ success: true, location: location.Name, total_clients: clients.length, total_requests: requests.length, mode, ...stats })
   } catch (err: any) {
     console.error('[jobber-import]', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
@@ -199,9 +203,9 @@ async function upsertServiceHistory(request: any, lead_id: string, location_id: 
   const payload = {
     lead_id, location_id,
     jobber_request_id:  request.id,
-    jobber_quote_id:    quote?.id    || null,
-    jobber_job_id:      job?.id      || null,
-    jobber_invoice_id:  invoice?.id  || null,
+    jobber_quote_id:    quote?.id   || null,
+    jobber_job_id:      job?.id     || null,
+    jobber_invoice_id:  invoice?.id || null,
     request_url:        request.jobberWebUri || null,
     quote_url:          quote?.jobberWebUri  || null,
     job_url:            job?.jobberWebUri    || null,
