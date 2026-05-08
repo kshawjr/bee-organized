@@ -1,10 +1,6 @@
 // app/api/import/jobber-invoice-items/route.ts
-// ─────────────────────────────────────────────────────────────
-// Fetches line items for all stored invoices.
-// Run after the main import to populate line_items JSONB.
-// Separate from main import to avoid Jobber complexity limits.
-// Critical for royalty calculation — services vs products.
-// ─────────────────────────────────────────────────────────────
+// Fetches invoice line items via jobs → invoices → lineItems
+// (root-level invoices query not supported by Jobber)
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getValidJobberToken, jobberQuery } from '@/lib/jobber'
@@ -12,20 +8,23 @@ import { getZohoLocation, getZohoToken } from '@/lib/zoho'
 import { supabaseService } from '@/lib/supabase-service'
 import { writeSyncLog } from '@/lib/sync-log'
 
-// Jobs with invoice line items — focused query, minimal nesting
-const INVOICE_LINE_ITEMS_QUERY = `
-  query GetInvoiceLineItems($after: String) {
-    invoices(first: 50, after: $after) {
+const JOB_INVOICE_ITEMS_QUERY = `
+  query GetJobInvoiceItems($after: String) {
+    jobs(first: 50, after: $after) {
       nodes {
         id
-        lineItems {
+        invoices(first: 10) {
           nodes {
-            name
-            description
-            quantity
-            unitPrice
-            totalPrice
-            taxable
+            id
+            lineItems {
+              nodes {
+                name
+                quantity
+                unitPrice
+                totalPrice
+                taxable
+              }
+            }
           }
         }
       }
@@ -46,68 +45,52 @@ export async function POST(req: NextRequest) {
     const zohoToken   = await getZohoToken()
     const jobberToken = await getValidJobberToken(location, zohoToken)
 
-    // Get all Jobber job IDs we have stored for this location
-    const { data: storedJobs } = await supabaseService
-      .from('jobs')
-      .select('id, jobber_job_id')
-      .eq('location_id', location_id)
-      .not('jobber_job_id', 'is', null)
-
-    if (!storedJobs?.length) {
-      return NextResponse.json({ success: true, message: 'No jobs found for this location', invoices_updated: 0 })
-    }
-
-    // Get all stored invoices for this location
+    // Get stored invoices for this location to match against
     const { data: storedInvoices } = await supabaseService
       .from('invoices')
       .select('id, jobber_invoice_id')
       .eq('location_id', location_id)
       .not('jobber_invoice_id', 'is', null)
 
-    const invoiceMap = new Map(storedInvoices?.map(i => [i.jobber_invoice_id, i.id]) || [])
+    if (!storedInvoices?.length) {
+      return NextResponse.json({ success: true, message: 'No invoices stored for this location', invoices_updated: 0 })
+    }
 
-    // Paginate through Jobber jobs fetching their invoice line items
+    const invoiceMap = new Map(storedInvoices.map(i => [i.jobber_invoice_id, i.id]))
+
     const stats = { invoices_updated: 0, line_items_total: 0, errors: [] as string[] }
     let cursor:  string | null = null
     let hasMore: boolean       = true
     let pages:   number        = 0
 
     while (hasMore) {
-      const res = await jobberQuery(jobberToken, INVOICE_LINE_ITEMS_QUERY, cursor ? { after: cursor } : {})
+      const res = await jobberQuery(jobberToken, JOB_INVOICE_ITEMS_QUERY, cursor ? { after: cursor } : {})
+      if (res.errors) throw new Error(`Query error: ${JSON.stringify(res.errors)}`)
 
-      if (res.errors) throw new Error(`Line items query error: ${JSON.stringify(res.errors)}`)
-
-      const page = res.data?.invoices
+      const page = res.data?.jobs
       if (!page) break
 
-      for (const invoice of page.nodes) {
-        // Only process invoices we've already stored
-        const supabaseInvoiceId = invoiceMap.get(invoice.id)
-        if (!supabaseInvoiceId) continue
+      for (const job of page.nodes) {
+        for (const invoice of (job.invoices?.nodes || [])) {
+          const supabaseId = invoiceMap.get(invoice.id)
+          if (!supabaseId) continue
 
-        const lineItems = (invoice.lineItems?.nodes || []).map((item: any) => ({
-          name:        item.name        || '',
-          description: item.description || null,
-          quantity:    item.quantity    || 1,
-          unit_price:  item.unitPrice   ? parseFloat(item.unitPrice)   : null,
-          total_price: item.totalPrice  ? parseFloat(item.totalPrice)  : null,
-          taxable:     item.taxable     ?? false,
-        }))
+          const lineItems = (invoice.lineItems?.nodes || []).map((item: any) => ({
+            name:        item.name       || '',
+            quantity:    item.quantity   || 1,
+            unit_price:  item.unitPrice  ? parseFloat(item.unitPrice)  : null,
+            total_price: item.totalPrice ? parseFloat(item.totalPrice) : null,
+            taxable:     item.taxable    ?? false,
+          }))
 
-        try {
-          await supabaseService
-            .from('invoices')
-            .update({
-              line_items:       lineItems,
-              jobber_synced_at: new Date().toISOString(),
-              updated_at:       new Date().toISOString(),
-            })
-            .eq('id', supabaseInvoiceId)
+          await supabaseService.from('invoices').update({
+            line_items:       lineItems,
+            jobber_synced_at: new Date().toISOString(),
+            updated_at:       new Date().toISOString(),
+          }).eq('id', supabaseId)
 
           stats.invoices_updated++
           stats.line_items_total += lineItems.length
-        } catch (err: any) {
-          stats.errors.push(`Invoice ${invoice.id}: ${err.message}`)
         }
       }
 
@@ -120,15 +103,14 @@ export async function POST(req: NextRequest) {
     }
 
     await writeSyncLog({
-      location_id,
-      entity_id: location_id,
+      location_id, entity_id: location_id,
       status: stats.errors.length > 0 ? 'error' : 'success',
-      message: `Invoice line items: updated ${stats.invoices_updated} invoices, ${stats.line_items_total} line items. Errors: ${stats.errors.length}`,
+      message: `Line items: ${stats.invoices_updated} invoices updated, ${stats.line_items_total} items. Errors: ${stats.errors.length}`,
     })
 
     return NextResponse.json({ success: true, location: location.Name, mode, ...stats })
   } catch (err: any) {
-    console.error('[invoice-items import]', err)
+    console.error('[invoice-items]', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
