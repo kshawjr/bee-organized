@@ -67,7 +67,7 @@ const INVOICES_QUERY = `
     invoices(first: 50, after: $after) {
       nodes {
         id createdAt jobberWebUri
-        job { id }
+        jobs { nodes { id } }
         amounts { subtotal taxAmount discountAmount total }
       }
       pageInfo { hasNextPage endCursor }
@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
     }
     const jobIds = new Set(jobs.map((j: any) => j.id))
     for (const inv of invoices) {
-      const jid = inv.job?.id
+      const jid = inv.jobs?.nodes?.[0]?.id
       if (jid && jobIds.has(jid)) {
         if (!invByJob[jid]) invByJob[jid] = []
         invByJob[jid].push(inv)
