@@ -8,25 +8,29 @@ const supabase = createClient(
 export async function writeSyncLog({
   location_id,
   entity_id,
+  entity_type = 'client',
+  direction = 'inbound',
   zoho_record_id,
   jobber_record_id,
   status,
   message,
 }: {
-  location_id: string
-  entity_id: string
-  zoho_record_id?: string
+  location_id:      string
+  entity_id:        string
+  entity_type?:     'client' | 'request' | 'quote' | 'job' | 'invoice' | 'payment' | 'note' | 'location'
+  direction?:       'inbound' | 'outbound'
+  zoho_record_id?:  string
   jobber_record_id?: string
-  status: 'success' | 'error'
-  message: string
+  status:           'success' | 'error'
+  message:          string
 }) {
   try {
     await supabase.from('sync_log').insert({
       location_id,
-      direction: 'inbound',
-      entity_type: 'client',
+      direction,
+      entity_type,
       entity_id,
-      zoho_record_id: zoho_record_id || null,
+      zoho_record_id:  zoho_record_id  || null,
       jobber_record_id: jobber_record_id || null,
       status,
       message,
