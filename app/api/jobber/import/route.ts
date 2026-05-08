@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getZohoLocation } from '@/lib/zoho'
 import { jobberQuery, getValidJobberToken } from '@/lib/jobber'
 import { writeSyncLog } from '@/lib/sync-log'
+import { supabaseService } from '@/lib/supabase-service'
 
+// ── Zoho token helper (unchanged) ────────────────────────────
 async function getZohoAccessToken(): Promise<string> {
   const res = await fetch(
     `https://accounts.zoho.com/oauth/v2/token?grant_type=refresh_token&client_id=${process.env.ZOHO_CLIENT_ID}&client_secret=${process.env.ZOHO_CLIENT_SECRET}&refresh_token=${process.env.ZOHO_REFRESH_TOKEN}`,
@@ -108,6 +110,17 @@ const CLIENTS_QUERY = `
         emails { address primary }
         phones { number primary }
         createdAt
+        jobs {
+          nodes {
+            id
+            title
+            jobStatus
+            startAt
+            completedAt
+            total { amount }
+            assignedTo { id name { full } }
+          }
+        }
       }
       pageInfo { hasNextPage endCursor }
     }
@@ -159,6 +172,103 @@ function formatDate(isoString: string | null): string | null {
   return isoString.split('T')[0]
 }
 
+// ── NEW: Supabase dual-write helpers ─────────────────────────
+
+async function upsertLeadToSupabase(client: any, location_id: string, zohoIds?: {
+  deal_id?: string | null
+  contact_id?: string | null
+  req_id?: string | null
+}) {
+  try {
+    const email = client.emails?.find((e: any) => e.primary)?.address ?? client.emails?.[0]?.address ?? null
+    const phone = client.phones?.find((p: any) => p.primary)?.number ?? client.phones?.[0]?.number ?? null
+
+    const payload = {
+      location_id,
+      jobber_client_id: client.id,
+      name: `${client.firstName || ''} ${client.lastName || ''}`.trim() || client.companyName || 'Unknown',
+      first_name: client.firstName || null,
+      last_name: client.lastName || null,
+      company: client.companyName || null,
+      email,
+      phone,
+      zoho_deal_id: zohoIds?.deal_id || null,
+      zoho_contact_id: zohoIds?.contact_id || null,
+      jobber_synced_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+
+    const { data: existing } = await supabaseService
+      .from('leads')
+      .select('id')
+      .eq('jobber_client_id', client.id)
+      .eq('location_id', location_id)
+      .maybeSingle()
+
+    if (existing) {
+      await supabaseService.from('leads').update(payload).eq('id', existing.id)
+      return existing.id
+    }
+
+    const { data: created, error } = await supabaseService
+      .from('leads')
+      .insert({ ...payload, created_at: client.createdAt || new Date().toISOString() })
+      .select('id')
+      .single()
+
+    if (error) throw new Error(error.message)
+    return created.id
+  } catch (err: any) {
+    console.error('[supabase] upsertLead failed:', err.message)
+    return null
+  }
+}
+
+async function upsertJobsToSupabase(client: any, leadId: string, location_id: string) {
+  if (!client.jobs?.nodes?.length) return
+
+  const STATUS: Record<string, string> = {
+    ACTIVE: 'In Progress', COMPLETED: 'Completed',
+    REQUIRES_INVOICING: 'Needs Invoice', LATE: 'Late',
+    TODAY: 'Today', UPCOMING: 'Upcoming', ARCHIVED: 'Archived',
+  }
+
+  for (const job of client.jobs.nodes) {
+    try {
+      const payload = {
+        lead_id: leadId,
+        location_id,
+        jobber_job_id: job.id,
+        title: job.title || 'Untitled Job',
+        status: STATUS[job.jobStatus?.toUpperCase()] ?? job.jobStatus ?? 'Unknown',
+        scheduled_date: job.startAt ? new Date(job.startAt).toISOString().split('T')[0] : null,
+        completed_date: job.completedAt ? new Date(job.completedAt).toISOString().split('T')[0] : null,
+        amount: job.total?.amount ? parseFloat(job.total.amount) : null,
+        assigned_team: job.assignedTo ? [job.assignedTo.name.full] : [],
+        jobber_synced_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+
+      const { data: existing } = await supabaseService
+        .from('jobs')
+        .select('id')
+        .eq('jobber_job_id', job.id)
+        .maybeSingle()
+
+      if (existing) {
+        await supabaseService.from('jobs').update(payload).eq('id', existing.id)
+      } else {
+        await supabaseService.from('jobs')
+          .insert({ ...payload, created_at: job.createdAt || new Date().toISOString() })
+      }
+    } catch (err: any) {
+      console.error('[supabase] upsertJob failed:', job.id, err.message)
+    }
+  }
+}
+
+// ── Zoho create (unchanged logic, + Supabase dual-write) ──────
+
 async function createZohoRequest(client: any, request: any, location: any, zohoToken: string) {
   const ZOHO_API_BASE = process.env.ZOHO_API_BASE!
   const email = client.emails?.find((e: any) => e.primary)?.address || client.emails?.[0]?.address || ''
@@ -195,7 +305,13 @@ async function createZohoRequest(client: any, request: any, location: any, zohoT
   const reqId = createResult.data?.[0]?.details?.id
 
   if (!reqId) return { success: false, action: 'failed', error: 'Failed to create request', details: createResult }
-  if (!stage || !hasContact) return { success: true, action: 'created_stagnant', reqId, reason: !hasContact ? 'no contact info' : 'no activity' }
+
+  if (!stage || !hasContact) {
+    // Stagnant — still write lead to Supabase
+    const leadId = await upsertLeadToSupabase(client, location.Location_ID, { req_id: reqId })
+    if (leadId) await upsertJobsToSupabase(client, leadId, location.Location_ID)
+    return { success: true, action: 'created_stagnant', reqId, reason: !hasContact ? 'no contact info' : 'no activity' }
+  }
 
   const dealData: any = {
     Deal_Name: `${client.firstName} ${client.lastName || ''}`.trim(),
@@ -236,8 +352,18 @@ async function createZohoRequest(client: any, request: any, location: any, zohoT
   if (reqId) await zohoFetch(`${ZOHO_API_BASE}/Requests`, zohoToken, { method: 'PUT', body: JSON.stringify({ data: [{ id: reqId, Converted: true, Request_Status: 'Converted', Account: accountId, Contact: contactId, Opportunity: dealId, Job_Slug: dealId, Account_Slug: accountId, Contact_Slug: contactId }] }) })
   if (dealId && stage) await zohoFetch(`${ZOHO_API_BASE}/Deals`, zohoToken, { method: 'PUT', body: JSON.stringify({ data: [{ id: dealId, Stage: stage }] }) })
 
+  // ── Dual-write to Supabase ───────────────────────────────────
+  const leadId = await upsertLeadToSupabase(client, location.Location_ID, {
+    deal_id: dealId,
+    contact_id: contactId,
+    req_id: reqId,
+  })
+  if (leadId) await upsertJobsToSupabase(client, leadId, location.Location_ID)
+
   return { success: true, action: 'created', reqId, dealId, stage, accountId, contactId }
 }
+
+// ── POST handler (unchanged) ──────────────────────────────────
 
 export async function POST(request: NextRequest) {
   try {
@@ -286,7 +412,6 @@ export async function POST(request: NextRequest) {
         'Final Processing': 0, 'Job in Progress': 0, 'Quote': 0,
         'Assessment Scheduled': 0, 'Stagnant': 0, 'No contact info': 0,
       }
-
       for (const item of workItems) {
         const { stage } = determineStageAndDate(item.request)
         const hasContact = hasContactInfo(item.client)
@@ -294,7 +419,6 @@ export async function POST(request: NextRequest) {
         else if (!stage) stageCounts['Stagnant']++
         else stageCounts[stage] = (stageCounts[stage] || 0) + 1
       }
-
       return NextResponse.json({
         dry_run: true,
         location: location.Name,
@@ -319,7 +443,6 @@ export async function POST(request: NextRequest) {
       return !existingIds.has(item.request.id)
     })
 
-    // Dev mode: take 10 newest per stage
     if (dev_mode) {
       const stageGroups: Record<string, Array<{ client: any; request: any; date: string }>> = {}
       for (const item of remaining) {
@@ -328,7 +451,6 @@ export async function POST(request: NextRequest) {
         if (!stageGroups[key]) stageGroups[key] = []
         stageGroups[key].push({ ...item, date: date || item.client.createdAt })
       }
-      // Sort each group by date desc, take 10
       const devItems: Array<{ client: any; request: any }> = []
       for (const group of Object.values(stageGroups)) {
         group.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
