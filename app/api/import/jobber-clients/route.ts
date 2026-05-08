@@ -34,11 +34,17 @@ const REQUESTS_QUERY = `
         jobberWebUri
         client { id }
         assessment { startAt }
-        quotes(first: 1) {
+        quotes(first: 5) {
           nodes {
             id
             createdAt
-            amounts { total }
+            jobberWebUri
+            amounts { 
+              subtotal
+              taxAmount
+              discountAmount
+              total 
+            }
           }
         }
         jobs(first: 1) {
@@ -128,6 +134,8 @@ export async function POST(req: NextRequest) {
       requests_updated:     0,
       assessments_created:  0,
       assessments_updated:  0,
+      quotes_created:       0,
+      quotes_updated:       0,
       errors:               [] as string[],
     }
 
@@ -144,6 +152,12 @@ export async function POST(req: NextRequest) {
           if (request.assessment?.startAt) {
             const aResult = await upsertAssessment(request, result.id, leadId, location_id)
             aResult.created ? stats.assessments_created++ : stats.assessments_updated++
+          }
+
+          // Quotes (all of them)
+          for (const quote of (request.quotes?.nodes || [])) {
+            const qResult = await upsertQuote(quote, result.id, leadId, location_id)
+            qResult.created ? stats.quotes_created++ : stats.quotes_updated++
           }
         }
       } catch (err: any) {
@@ -258,5 +272,36 @@ async function upsertAssessment(request: any, service_request_id: string, lead_i
     .insert({ ...payload, created_at: assessment.startAt || new Date().toISOString() })
     .select('id').single()
   if (error) throw new Error(`Assessment: ${error.message}`)
+  return { id: data.id, created: true }
+}
+
+async function upsertQuote(quote: any, service_request_id: string, lead_id: string, location_id: string) {
+  const payload = {
+    service_request_id,
+    lead_id,
+    location_id,
+    jobber_quote_id:  quote.id,
+    quote_url:        quote.jobberWebUri || null,
+    status:           'sent',
+    subtotal:         quote.amounts?.subtotal      ? parseFloat(quote.amounts.subtotal)      : null,
+    tax_amount:       quote.amounts?.taxAmount     ? parseFloat(quote.amounts.taxAmount)     : null,
+    discount_amount:  quote.amounts?.discountAmount ? parseFloat(quote.amounts.discountAmount) : null,
+    total:            quote.amounts?.total         ? parseFloat(quote.amounts.total)         : null,
+    sent_at:          quote.createdAt || null,
+    jobber_synced_at: new Date().toISOString(),
+    updated_at:       new Date().toISOString(),
+  }
+
+  const { data: existing } = await supabaseService.from('quotes').select('id')
+    .eq('jobber_quote_id', quote.id).maybeSingle()
+
+  if (existing) {
+    await supabaseService.from('quotes').update(payload).eq('id', existing.id)
+    return { id: existing.id, created: false }
+  }
+  const { data, error } = await supabaseService.from('quotes')
+    .insert({ ...payload, created_at: quote.createdAt || new Date().toISOString() })
+    .select('id').single()
+  if (error) throw new Error(`Quote: ${error.message}`)
   return { id: data.id, created: true }
 }
