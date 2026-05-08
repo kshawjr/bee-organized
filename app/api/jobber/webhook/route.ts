@@ -247,24 +247,34 @@ async function handleClient(itemId: string, location: any, token: string) {
 
 async function handleRequest(itemId: string, location: any, token: string) {
   const res = await jobberQuery(token, REQUEST_QUERY, { id: itemId })
-  console.log('[webhook] Request query result:', JSON.stringify(res).slice(0, 300))
   const request = res.data?.request
   if (!request) {
     console.warn('[webhook] No request data returned for id:', itemId)
     return
   }
 
-  // Find the parent lead
-  const { data: lead } = await supabaseService.from('leads').select('id')
+  // Find or create the parent lead
+  let leadId: string
+  const { data: existingLead } = await supabaseService.from('leads').select('id')
     .eq('jobber_client_id', request.client?.id).eq('location_id', location.location_id).maybeSingle()
 
-  if (!lead) {
-    console.warn(`[webhook] No lead found for request ${itemId}`)
-    return
+  if (existingLead) {
+    leadId = existingLead.id
+  } else {
+    // Client not imported yet — create lead automatically
+    console.log('[webhook] Lead not found — creating from client:', request.client?.id)
+    await handleClient(request.client.id, location, token)
+    const { data: newLead } = await supabaseService.from('leads').select('id')
+      .eq('jobber_client_id', request.client.id).eq('location_id', location.location_id).maybeSingle()
+    if (!newLead) {
+      console.warn('[webhook] Could not create lead for request', itemId)
+      return
+    }
+    leadId = newLead.id
   }
 
   const payload = {
-    lead_id:           lead.id,
+    lead_id:           leadId,
     location_id:       location.location_id,
     jobber_request_id: request.id,
     request_url:       request.jobberWebUri || null,
@@ -285,7 +295,7 @@ async function handleRequest(itemId: string, location: any, token: string) {
       .insert({ ...payload, created_at: request.createdAt || new Date().toISOString() })
   }
 
-  console.log(`[webhook] Request upserted: ${request.id}`)
+  console.log('[webhook] Request upserted:', request.id)
 }
 
 async function handleQuote(itemId: string, location: any, token: string) {
