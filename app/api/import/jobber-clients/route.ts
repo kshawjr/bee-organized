@@ -122,11 +122,13 @@ export async function POST(req: NextRequest) {
     }
 
     const stats = {
-      leads_created:    0,
-      leads_updated:    0,
-      requests_created: 0,
-      requests_updated: 0,
-      errors:           [] as string[],
+      leads_created:        0,
+      leads_updated:        0,
+      requests_created:     0,
+      requests_updated:     0,
+      assessments_created:  0,
+      assessments_updated:  0,
+      errors:               [] as string[],
     }
 
     for (const client of clients) {
@@ -137,6 +139,12 @@ export async function POST(req: NextRequest) {
         for (const request of (requestsByClient[client.id] || [])) {
           const result = await upsertServiceRequest(request, leadId, location_id)
           result.created ? stats.requests_created++ : stats.requests_updated++
+
+          // Assessment
+          if (request.assessment?.startAt) {
+            const aResult = await upsertAssessment(request, result.id, leadId, location_id)
+            aResult.created ? stats.assessments_created++ : stats.assessments_updated++
+          }
         }
       } catch (err: any) {
         stats.errors.push(`${client.firstName} ${client.lastName}: ${err.message}`)
@@ -220,5 +228,35 @@ async function upsertServiceRequest(request: any, lead_id: string, location_id: 
     .insert({ ...payload, created_at: request.createdAt || new Date().toISOString() })
     .select('id').single()
   if (error) throw new Error(error.message)
+  return { id: data.id, created: true }
+}
+
+async function upsertAssessment(request: any, service_request_id: string, lead_id: string, location_id: string) {
+  const assessment = request.assessment
+
+  const payload = {
+    service_request_id,
+    lead_id,
+    location_id,
+    jobber_request_id: request.id,
+    scheduled_at:      assessment.startAt || null,
+    status:            'scheduled',
+    source:            'jobber',
+    jobber_synced_at:  new Date().toISOString(),
+    updated_at:        new Date().toISOString(),
+  }
+
+  // Dedup by service_request_id — one assessment per request
+  const { data: existing } = await supabaseService.from('assessments').select('id')
+    .eq('service_request_id', service_request_id).maybeSingle()
+
+  if (existing) {
+    await supabaseService.from('assessments').update(payload).eq('id', existing.id)
+    return { id: existing.id, created: false }
+  }
+  const { data, error } = await supabaseService.from('assessments')
+    .insert({ ...payload, created_at: assessment.startAt || new Date().toISOString() })
+    .select('id').single()
+  if (error) throw new Error(`Assessment: ${error.message}`)
   return { id: data.id, created: true }
 }
