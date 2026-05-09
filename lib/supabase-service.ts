@@ -1,3 +1,7 @@
+// lib/supabase-service.ts
+// Service role client for server-side writes (API routes only)
+// Never use this on the client side — it bypasses RLS
+
 import { createClient } from '@supabase/supabase-js'
 
 export const supabaseService = createClient(
