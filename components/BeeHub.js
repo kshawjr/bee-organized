@@ -1,8 +1,8 @@
 'use client'
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-const React = { useState, useEffect, useRef, useMemo, useCallback, createElement: require('react').createElement, Fragment: require('react').Fragment }
 
-import { useState, useEffect, useRef } from "react";
+var React=require('react');
+var useState=React.useState,useEffect=React.useEffect,useRef=React.useRef,useMemo=React.useMemo,useCallback=React.useCallback,createContext=React.createContext,useContext=React.useContext;
+
 const STAGES = [{
   key: 'New',
   label: 'New',
