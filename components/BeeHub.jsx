@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react"
 
 // ═══════════════════════════════════════════════════════
-//  BEE HUB — Combined App Preview
+//  BEE HUB - Combined App Preview
 //  Dashboard + The Hive in one navigable experience
 // ═══════════════════════════════════════════════════════
 
@@ -75,18 +75,18 @@ const PEOPLE = [
     tags:['hot'], isJunk:false,
     buzzNotes:[
       { id:'bn1', text:'Prefers morning appointments', ts:'May 1', user:'System' },
-      { id:'bn2', text:'Has 2 golden retrievers — heads up for home visits', ts:'May 1', user:'You' },
+      { id:'bn2', text:'Has 2 golden retrievers - heads up for home visits', ts:'May 1', user:'You' },
     ],
     jobNotes:[], jobs:[], invoices:[], finalProcessed:false,
     outreachTimeline:[
-      { id:'o0', type:'system', method:'system', label:'Jobber search ran on intake — no existing client', ts:'May 1, 8:42am', status:'done' },
+      { id:'o0', type:'system', method:'system', label:'Jobber search ran on intake - no existing client', ts:'May 1, 8:42am', status:'done' },
       { id:'o1', type:'drip',   method:'email',  label:'Welcome Email sent', ts:'May 1, 9:00am', status:'sent' },
       { id:'o2', type:'drip',   method:'email',  label:'How We Help',        ts:'May 3',         status:'scheduled' },
     ],
     activity:[{ type:'system', text:'Client created from website form', ts:'May 1, 8:42am' }],
   },
 
-  // ── Linda Hall — two active jobs (demonstrates multi-job client) ──
+  // ── Linda Hall - two active jobs (demonstrates multi-job client) ──
   {
     id:'linda1', assignedTo:'u1', locationId:'loc_kc', name:'Linda Hall', phone:'(303) 555-0740', email:'lindahall@gmail.com',
     stage:'Request', source:'Referral', project:'Master Closet', created:'Apr 28', referredBy:'p1',
@@ -94,11 +94,11 @@ const PEOPLE = [
     reachOutMethod:'call', jobberSearchStatus:'not_found', jobberClient:null,
     path:'email-nurture', assessment:'May 12 at 2:00 PM', assessmentType:'in-person', jobberRef:'REQ-1087',
     tags:['returning'], isJunk:false,
-    buzzNotes:[{ id:'bn1', text:'Returning client — previously used another organizer', ts:'Apr 28', user:'You' }],
+    buzzNotes:[{ id:'bn1', text:'Returning client - previously used another organizer', ts:'Apr 28', user:'You' }],
     jobNotes:[], jobs:[], invoices:[], finalProcessed:false, jobContacts:[],
     outreachTimeline:[
       { id:'o1', type:'drip', method:'email', label:'Welcome Email sent', ts:'Apr 28', status:'sent' },
-      { id:'o2', type:'manual', method:'call', label:'Called — scheduled assessment May 12', ts:'May 1', status:'done', user:'You' },
+      { id:'o2', type:'manual', method:'call', label:'Called - scheduled assessment May 12', ts:'May 1', status:'done', user:'You' },
     ],
     activity:[],
   },
@@ -109,7 +109,7 @@ const PEOPLE = [
     reachOutMethod:null, jobberSearchStatus:'not_found', jobberClient:null,
     path:'email-nurture', assessment:null, assessmentType:null, jobberRef:null,
     tags:[], isJunk:false,
-    buzzNotes:[{ id:'bn1', text:'Called in separately asking about kitchen — linked to same address', ts:'May 3', user:'You' }],
+    buzzNotes:[{ id:'bn1', text:'Called in separately asking about kitchen - linked to same address', ts:'May 3', user:'You' }],
     jobNotes:[], jobs:[], invoices:[], finalProcessed:false, jobContacts:[],
     outreachTimeline:[
       { id:'o1', type:'drip', method:'email', label:'Welcome Email sent', ts:'May 3', status:'sent' },
@@ -129,16 +129,16 @@ const PEOPLE = [
     path:'quick-connect', assessment:null, assessmentType:null, jobberRef:null,
     tags:['returning','referral'], isJunk:false,
     buzzNotes:[
-      { id:'bn1', text:'Returning client — very happy with past work', ts:'May 2', user:'System' },
+      { id:'bn1', text:'Returning client - very happy with past work', ts:'May 2', user:'System' },
       { id:'bn2', text:'Prefers text over phone calls', ts:'May 2', user:'You' },
     ],
     jobNotes:[{ id:'jn1', text:'Interested in kitchen + pantry combo', ts:'May 2', user:'You', synced:false }],
     jobs:[], invoices:[], finalProcessed:false,
     outreachTimeline:[
       { id:'o1', type:'drip',   method:'sms',  label:'Welcome Text sent', ts:'May 2, 9:00am', status:'sent' },
-      { id:'o2', type:'manual', method:'call', label:'Called — no answer, voicemail left', ts:'May 2, 2:00pm', status:'done', user:'You' },
+      { id:'o2', type:'manual', method:'call', label:'Called - no answer, voicemail left', ts:'May 2, 2:00pm', status:'done', user:'You' },
     ],
-    activity:[{ type:'system', text:'Client created — referred by Karen', ts:'May 2' }],
+    activity:[{ type:'system', text:'Client created - referred by Karen', ts:'May 2' }],
   },
   {
     id:'3', assignedTo:'u1', locationId:'loc_kc', name:'Lisa Patel', phone:'(303) 555-0512', email:'lpatel@gmail.com',
@@ -151,29 +151,29 @@ const PEOPLE = [
     path:'email-nurture', assessment:'May 6 at 10:00 AM', assessmentType:'in-person', jobberRef:'REQ-1042', estimateSent:'Apr 29, 2026', estimateApproved:null,
     tags:['vip','hot'], isJunk:false,
     buzzNotes:[
-      { id:'bn1', text:'Very detail-oriented — high expectations', ts:'Apr 20', user:'You' },
-      { id:'bn2', text:'Gate code: 4521 — side entrance', ts:'Apr 29', user:'You' },
+      { id:'bn1', text:'Very detail-oriented - high expectations', ts:'Apr 20', user:'You' },
+      { id:'bn2', text:'Gate code: 4521 - side entrance', ts:'Apr 29', user:'You' },
     ],
     jobNotes:[{ id:'jn1', text:'Bring extra drawer dividers', ts:'Apr 29', user:'You', synced:true }],
     jobs:[], invoices:[], finalProcessed:false,
     outreachTimeline:[
       { id:'o1', type:'drip',   method:'email',  label:'Welcome Email sent', ts:'Apr 20', status:'sent' },
-      { id:'o2', type:'manual', method:'call',   label:'Called — connected, scheduling assessment', ts:'Apr 28', status:'done', user:'You' },
-      { id:'o3', type:'system', method:'system', label:'Request created in Jobber — REQ-1042', ts:'Apr 29', status:'done' },
+      { id:'o2', type:'manual', method:'call',   label:'Called - connected, scheduling assessment', ts:'Apr 28', status:'done', user:'You' },
+      { id:'o3', type:'system', method:'system', label:'Request created in Jobber - REQ-1042', ts:'Apr 29', status:'done' },
     ],
     activity:[],
   },
   {
     id:'4', assignedTo:'u1', locationId:'loc_kc', name:'Patricia Nguyen', phone:'(720) 555-0855', email:'pnguyen@me.com',
     stage:'Job in Progress', source:'Referral', project:'Whole Home', created:'Apr 10',
-    jobDetail:"We have a large home that's gotten out of control over the past few years. The biggest pain points are the master closet — it's a walk-in but we can barely walk in anymore — and the kitchen pantry which is completely disorganized. The garage is also a disaster zone. We have two kids and a dog, so durable, easy-to-maintain systems are key. We don't need fancy, just functional!",
+    jobDetail:"We have a large home that's gotten out of control over the past few years. The biggest pain points are the master closet - it's a walk-in but we can barely walk in anymore - and the kitchen pantry which is completely disorganized. The garage is also a disaster zone. We have two kids and a dog, so durable, easy-to-maintain systems are key. We don't need fancy, just functional!",
     address:'445 Birch Lane, Denver CO 80205',
     addresses:[{ type:'Service', value:'445 Birch Lane, Denver CO 80205' }, { type:'Moving From', value:'112 Oak St, Boulder CO 80301' }],
     reachOutMethod:'sms', jobberSearchStatus:'not_found', jobberClient:null,
     path:'personal-touch', assessment:null, assessmentType:null, jobberRef:'JOB-2847',
     tags:[], isJunk:false,
-    buzzNotes:[{ id:'bn1', text:'Client travels frequently — confirm access 24hr before', ts:'Apr 11', user:'You' }],
-    jobNotes:[{ id:'jn1', text:'4 bed, 3 bath — start closets then kitchen', ts:'Apr 11', user:'You', synced:true }],
+    buzzNotes:[{ id:'bn1', text:'Client travels frequently - confirm access 24hr before', ts:'Apr 11', user:'You' }],
+    jobNotes:[{ id:'jn1', text:'4 bed, 3 bath - start closets then kitchen', ts:'Apr 11', user:'You', synced:true }],
     jobs:[{ id:'job1', jobberRef:'JOB-2847', title:'Whole Home Organization', status:'In Progress', scheduledDate:'May 5, 2026', team:['Jessica R.','Maria L.'] }],
     invoices:[
       { id:'inv1', number:'INV-1041', amount:850, status:'Paid',             date:'Apr 28' },
@@ -183,7 +183,7 @@ const PEOPLE = [
     finalProcessed:false,
     outreachTimeline:[
       { id:'o1', type:'manual', method:'sms',    label:'Sent intro text', ts:'Apr 10', status:'done', user:'You' },
-      { id:'o2', type:'system', method:'system', label:'Job created — JOB-2847', ts:'Apr 11', status:'done' },
+      { id:'o2', type:'system', method:'system', label:'Job created - JOB-2847', ts:'Apr 11', status:'done' },
     ],
     activity:[],
   },
@@ -201,8 +201,8 @@ const PEOPLE = [
     finalProcessed:false,
     outreachTimeline:[
       { id:'o1', type:'drip',   method:'email',  label:'Welcome Email sent', ts:'Apr 5', status:'sent' },
-      { id:'o2', type:'manual', method:'call',   label:'Called — booked job directly', ts:'Apr 10', status:'done', user:'You' },
-      { id:'o3', type:'system', method:'system', label:'Job created — JOB-2831', ts:'Apr 10', status:'done' },
+      { id:'o2', type:'manual', method:'call',   label:'Called - booked job directly', ts:'Apr 10', status:'done', user:'You' },
+      { id:'o3', type:'system', method:'system', label:'Job created - JOB-2831', ts:'Apr 10', status:'done' },
     ],
     activity:[],
   },
@@ -214,7 +214,7 @@ const PEOPLE = [
     reachOutMethod:'email', jobberSearchStatus:'not_found', jobberClient:null,
     path:'email-nurture', assessment:null, assessmentType:null, jobberRef:null,
     tags:['warm'], isJunk:false,
-    buzzNotes:[{ id:'bn1', text:'Found us on Instagram — loves our aesthetic', ts:'Apr 28', user:'System' }],
+    buzzNotes:[{ id:'bn1', text:'Found us on Instagram - loves our aesthetic', ts:'Apr 28', user:'System' }],
     jobNotes:[], jobs:[], invoices:[], finalProcessed:false,
     outreachTimeline:[
       { id:'o1', type:'drip',   method:'email',  label:'Welcome Email sent', ts:'Apr 28', status:'sent' },
@@ -230,13 +230,13 @@ const PEOPLE = [
     jobberClient:{ clientId:'JC-5102', jobs:[{ id:'JOB-1180', title:'Pantry', date:'Jan 2025', status:'Completed', amount:320 }] },
     path:'personal-touch', assessment:'Apr 22 at 2:00 PM', assessmentType:'in-person', jobberRef:'REQ-1055', estimateSent:'Apr 23, 2026', estimateApproved:'Apr 24, 2026',
     tags:['returning'], isJunk:false,
-    buzzNotes:[{ id:'bn1', text:'Returning client — garage project after pantry last year', ts:'Apr 15', user:'You' }],
+    buzzNotes:[{ id:'bn1', text:'Returning client - garage project after pantry last year', ts:'Apr 15', user:'You' }],
     jobNotes:[{ id:'jn1', text:'Wants wall storage + overhead shelving', ts:'Apr 22', user:'You', synced:true }],
     jobs:[], invoices:[], finalProcessed:false,
     outreachTimeline:[
-      { id:'o1', type:'manual', method:'call',   label:'Called — connected, scheduled assessment', ts:'Apr 16', status:'done', user:'You' },
+      { id:'o1', type:'manual', method:'call',   label:'Called - connected, scheduled assessment', ts:'Apr 16', status:'done', user:'You' },
       { id:'o2', type:'system', method:'system', label:'Assessment completed Apr 22', ts:'Apr 22', status:'done' },
-      { id:'o3', type:'manual', method:'email',  label:'Sent estimate — $1,200', ts:'Apr 24', status:'done', user:'You' },
+      { id:'o3', type:'manual', method:'email',  label:'Sent estimate - $1,200', ts:'Apr 24', status:'done', user:'You' },
     ],
     activity:[],
   },
@@ -247,13 +247,13 @@ const PEOPLE = [
     reachOutMethod:'call', jobberSearchStatus:'not_found', jobberClient:null,
     path:'general-a', assessment:null, assessmentType:null, jobberRef:'JOB-2801',
     tags:[], isJunk:false, buzzNotes:[],
-    jobNotes:[{ id:'jn1', text:'New build — just moved in, boxes everywhere', ts:'Apr 2', user:'You', synced:true }],
+    jobNotes:[{ id:'jn1', text:'New build - just moved in, boxes everywhere', ts:'Apr 2', user:'You', synced:true }],
     jobs:[{ id:'job3', jobberRef:'JOB-2801', title:'Move-In Organization', status:'In Progress', scheduledDate:'May 3, 2026', team:['Maria L.'] }],
     invoices:[{ id:'inv4', number:'INV-1015', amount:920, status:'Paid', date:'Apr 30' }],
     finalProcessed:false,
     outreachTimeline:[
-      { id:'o1', type:'manual', method:'call',   label:'Called — connected, booked', ts:'Apr 2', status:'done', user:'You' },
-      { id:'o2', type:'system', method:'system', label:'Job created — JOB-2801', ts:'Apr 2', status:'done' },
+      { id:'o1', type:'manual', method:'call',   label:'Called - connected, booked', ts:'Apr 2', status:'done', user:'You' },
+      { id:'o2', type:'system', method:'system', label:'Job created - JOB-2801', ts:'Apr 2', status:'done' },
     ],
     activity:[],
   },
@@ -277,12 +277,12 @@ const PEOPLE = [
     reachOutMethod:'call', jobberSearchStatus:'not_found', jobberClient:null,
     path:'email-nurture', assessment:'May 8 at 11:00 AM', assessmentType:'virtual', jobberRef:'REQ-1062',
     tags:['hot'], isJunk:false,
-    buzzNotes:[{ id:'bn1', text:'Whole home — 4 kids, very motivated to get organized', ts:'Apr 19', user:'You' }],
+    buzzNotes:[{ id:'bn1', text:'Whole home - 4 kids, very motivated to get organized', ts:'Apr 19', user:'You' }],
     jobNotes:[], jobs:[], invoices:[], finalProcessed:false,
     outreachTimeline:[
       { id:'o1', type:'drip',   method:'email',  label:'Welcome Email sent', ts:'Apr 18', status:'sent' },
-      { id:'o2', type:'manual', method:'call',   label:'Called — connected, scheduled virtual assessment', ts:'Apr 22', status:'done', user:'You' },
-      { id:'o3', type:'system', method:'system', label:'Request created — REQ-1062', ts:'Apr 22', status:'done' },
+      { id:'o2', type:'manual', method:'call',   label:'Called - connected, scheduled virtual assessment', ts:'Apr 22', status:'done', user:'You' },
+      { id:'o3', type:'system', method:'system', label:'Request created - REQ-1062', ts:'Apr 22', status:'done' },
     ],
     activity:[],
   },
@@ -297,7 +297,7 @@ const PEOPLE = [
     invoices:[{ id:'inv5', number:'INV-0981', amount:680, status:'Paid', date:'Apr 1' }],
     finalProcessed:true,
     outreachTimeline:[
-      { id:'o1', type:'system', method:'system', label:'Closed Won — synced to Zoho', ts:'Apr 1', status:'done' },
+      { id:'o1', type:'system', method:'system', label:'Closed Won - synced to Zoho', ts:'Apr 1', status:'done' },
     ],
     activity:[],
   },
@@ -321,18 +321,18 @@ const PEOPLE = [
     address:'440 Pike View Dr, Colorado Springs CO 80916', addresses:[{ type:'Service', value:'440 Pike View Dr, Colorado Springs CO 80916' }],
     reachOutMethod:'call', jobberSearchStatus:'not_found', jobberClient:null,
     path:'email-nurture', assessment:null, assessmentType:null, jobberRef:null,
-    tags:[], isJunk:true, junkReason:'Out of Budget', junkNote:'Too expensive — went with a different service',
-    buzzNotes:[{ id:'bn1', text:'Close note: Too expensive — went with a different service', ts:'Apr 10', user:'You' }],
+    tags:[], isJunk:true, junkReason:'Out of Budget', junkNote:'Too expensive - went with a different service',
+    buzzNotes:[{ id:'bn1', text:'Close note: Too expensive - went with a different service', ts:'Apr 10', user:'You' }],
     jobNotes:[], jobs:[], invoices:[], finalProcessed:false,
     outreachTimeline:[
       { id:'o1', type:'drip',   method:'email',  label:'Welcome Email sent', ts:'Mar 20', status:'sent' },
-      { id:'o2', type:'manual', method:'call',   label:'Called — not a fit, price concern', ts:'Mar 25', status:'done', user:'You' },
-      { id:'o3', type:'system', method:'system', label:'Record closed — Out of Budget', ts:'Apr 10', status:'done' },
+      { id:'o2', type:'manual', method:'call',   label:'Called - not a fit, price concern', ts:'Mar 25', status:'done', user:'You' },
+      { id:'o3', type:'system', method:'system', label:'Record closed - Out of Budget', ts:'Apr 10', status:'done' },
     ],
-    activity:[{ type:'stage', text:'Record closed — Out of Budget · Too expensive — went with a different service', ts:'Apr 10', user:'You' }],
+    activity:[{ type:'stage', text:'Record closed - Out of Budget · Too expensive - went with a different service', ts:'Apr 10', user:'You' }],
   },
 
-  // ── SHOWCASE LEAD — has a little bit of everything ──────────────────────────
+  // ── SHOWCASE LEAD - has a little bit of everything ──────────────────────────
   {
     id:'showcase1', assignedTo:'u1', locationId:'loc_kc', name:'Amanda Rivera', phone:'(303) 555-0741', email:'amanda@riverhome.com',
     stage:'Nurturing', source:'Word of Mouth', project:'Full Home', created:'Mar 1',
@@ -342,25 +342,25 @@ const PEOPLE = [
     path:'general-b', assessment:null, assessmentType:null, jobberRef:null,
     tags:['vip','warm'],
     marketingOptOut:false,
-    snoozeUntil:'2026-05-07', snoozeNote:'Finishing home renovation in May — call back after the 7th',
+    snoozeUntil:'2026-05-07', snoozeNote:'Finishing home renovation in May - call back after the 7th',
     quickCapture:false,
     daysInStage:42,
     isJunk:false,
     buzzNotes:[
-      { id:'bn1', text:'Met her at a Denver Chamber networking event — very interested', ts:'Mar 1', user:'You' },
-      { id:'bn2', text:'Has 4-bedroom home, recently renovated kitchen — wants full-home pass', ts:'Mar 3', user:'You' },
-      { id:'bn3', text:'💤 Snoozed: Finishing home renovation in May — call back after the 7th', ts:'Apr 15', user:'You' },
+      { id:'bn1', text:'Met her at a Denver Chamber networking event - very interested', ts:'Mar 1', user:'You' },
+      { id:'bn2', text:'Has 4-bedroom home, recently renovated kitchen - wants full-home pass', ts:'Mar 3', user:'You' },
+      { id:'bn3', text:'💤 Snoozed: Finishing home renovation in May - call back after the 7th', ts:'Apr 15', user:'You' },
     ],
     jobNotes:[
-      { id:'jn1', text:'Will need minimum 2 organizers on site — large master closet and basement', ts:'Mar 5', user:'You', synced:false },
+      { id:'jn1', text:'Will need minimum 2 organizers on site - large master closet and basement', ts:'Mar 5', user:'You', synced:false },
     ],
     jobs:[], invoices:[], finalProcessed:false,
     outreachTimeline:[
       { id:'o1', type:'drip',   method:'email',  label:'Welcome Email sent',               ts:'Mar 1, 9:00am',  status:'sent' },
       { id:'o2', type:'drip',   method:'email',  label:'How We Help email',                ts:'Mar 4',          status:'sent' },
-      { id:'o3', type:'manual', method:'call',   label:'Called — connected, great chat',   ts:'Mar 6, 11:00am', status:'done', user:'You' },
+      { id:'o3', type:'manual', method:'call',   label:'Called - connected, great chat',   ts:'Mar 6, 11:00am', status:'done', user:'You' },
       { id:'o4', type:'drip',   method:'email',  label:'Before & After Photos',            ts:'Mar 10',         status:'sent' },
-      { id:'o5', type:'system', method:'system', label:'Moved to Nurturing — renovation in progress', ts:'Apr 15', status:'done' },
+      { id:'o5', type:'system', method:'system', label:'Moved to Nurturing - renovation in progress', ts:'Apr 15', status:'done' },
       { id:'o6', type:'system', method:'system', label:'Snoozed until May 7',              ts:'Apr 15',         status:'done' },
     ],
     activity:[
@@ -370,7 +370,7 @@ const PEOPLE = [
     referredBy:null,
   },
 
-  // ── TWO JOHNSONS — to demo multiple search results ──────────────────────────
+  // ── TWO JOHNSONS - to demo multiple search results ──────────────────────────
   {
     id:'johnson1', assignedTo:'u1', locationId:'loc_kc', name:'Mark Johnson', phone:'(303) 555-0192', email:'mark.j@gmail.com',
     stage:'New', source:'Word of Mouth', project:'Garage', created:'May 5',
@@ -408,13 +408,13 @@ const PEOPLE = [
     address:null, addresses:[], reachOutMethod:null, jobberSearchStatus:'pending', jobberClient:null,
     path:null, assessment:null, assessmentType:null, jobberRef:null,
     tags:[], isJunk:false, marketingOptOut:false,
-    quickCapture:true, quickNote:'Met at open house on Larimer St — interested in move-in organization, just bought a place',
+    quickCapture:true, quickNote:'Met at open house on Larimer St - interested in move-in organization, just bought a place',
     buzzNotes:[
-      { id:'bn1', text:'Met at open house on Larimer St — interested in move-in organization, just bought a place', ts:'May 6', user:'You' },
+      { id:'bn1', text:'Met at open house on Larimer St - interested in move-in organization, just bought a place', ts:'May 6', user:'You' },
     ],
     jobNotes:[], jobs:[], invoices:[], finalProcessed:false,
     outreachTimeline:[
-      { id:'o1', type:'system', method:'system', label:'Quick capture — needs follow-up', ts:'May 6', status:'done' },
+      { id:'o1', type:'system', method:'system', label:'Quick capture - needs follow-up', ts:'May 6', status:'done' },
     ],
     activity:[],
   },
@@ -422,7 +422,7 @@ const PEOPLE = [
   {
     id:'est1', assignedTo:'u1', locationId:'loc_kc', name:'Nicole Hartman', phone:'(303) 555-0291', email:'nhartman@gmail.com',
     stage:'Estimate Sent', source:'Referral', project:'Full Home', created:'Apr 10',
-    jobDetail:"Full home — 4 bed, 3 bath. We just had twins and the house is completely out of control. Every single room needs work. I would love to start with the nursery and the master bedroom since those are the most chaotic right now. After that, kitchen and pantry. We have a LOT of stuff and will need help making decisions about what to keep. I'm very motivated and will be home all day. My husband works from home on Tuesdays so please avoid that day if possible.",
+    jobDetail:"Full home - 4 bed, 3 bath. We just had twins and the house is completely out of control. Every single room needs work. I would love to start with the nursery and the master bedroom since those are the most chaotic right now. After that, kitchen and pantry. We have a LOT of stuff and will need help making decisions about what to keep. I'm very motivated and will be home all day. My husband works from home on Tuesdays so please avoid that day if possible.",
     address:'2847 Oak Ridge Dr, Denver CO 80206', addresses:[{ type:'Service', value:'2847 Oak Ridge Dr, Denver CO 80206' }],
     reachOutMethod:'call', jobberSearchStatus:'found',
     jobberClient:{ clientId:'JC-7821', jobs:[] },
@@ -430,18 +430,18 @@ const PEOPLE = [
     jobberRef:'REQ-1089',
     estimateSent:'Apr 16, 2026', estimateApproved:null,
     tags:['warm'], isJunk:false, marketingOptOut:false,
-    buzzNotes:[{ id:'bn1', text:'Full home — 4 bed, 3 bath. Very motivated, just had twins.', ts:'Apr 10', user:'You' }],
+    buzzNotes:[{ id:'bn1', text:'Full home - 4 bed, 3 bath. Very motivated, just had twins.', ts:'Apr 10', user:'You' }],
     jobNotes:[], jobs:[], invoices:[], finalProcessed:false,
     outreachTimeline:[
-      { id:'o1', type:'system', method:'system', label:'Lead created — referred by Karen M.', ts:'Apr 10', status:'done' },
-      { id:'o2', type:'manual', method:'call',   label:'Called — scheduled assessment Apr 14', ts:'Apr 11', status:'done', user:'You' },
+      { id:'o1', type:'system', method:'system', label:'Lead created - referred by Karen M.', ts:'Apr 10', status:'done' },
+      { id:'o2', type:'manual', method:'call',   label:'Called - scheduled assessment Apr 14', ts:'Apr 11', status:'done', user:'You' },
       { id:'o3', type:'system', method:'system', label:'Assessment completed', ts:'Apr 14', status:'done' },
-      { id:'o4', type:'manual', method:'email',  label:'Estimate sent — $2,400', ts:'Apr 16', status:'done', user:'You' },
+      { id:'o4', type:'manual', method:'email',  label:'Estimate sent - $2,400', ts:'Apr 16', status:'done', user:'You' },
     ],
     activity:[
       { type:'stage', text:'Lead created via referral', ts:'Apr 10', user:'System' },
-      { type:'call',  text:'Spoke with Nicole — scheduling assessment for Apr 14', ts:'Apr 11', user:'You' },
-      { type:'stage', text:'Assessment completed — sent estimate $2,400', ts:'Apr 16', user:'You' },
+      { type:'call',  text:'Spoke with Nicole - scheduling assessment for Apr 14', ts:'Apr 11', user:'You' },
+      { type:'stage', text:'Assessment completed - sent estimate $2,400', ts:'Apr 16', user:'You' },
     ],
   },
   {
@@ -454,19 +454,19 @@ const PEOPLE = [
     jobberRef:'REQ-1094',
     estimateSent:'Apr 28, 2026', estimateApproved:'Apr 29, 2026',
     tags:['hot'], isJunk:false, marketingOptOut:false,
-    buzzNotes:[{ id:'bn1', text:'Approved same day — ready to book ASAP', ts:'Apr 29', user:'You' }],
+    buzzNotes:[{ id:'bn1', text:'Approved same day - ready to book ASAP', ts:'Apr 29', user:'You' }],
     jobNotes:[], jobs:[], invoices:[], finalProcessed:false,
     outreachTimeline:[
       { id:'o1', type:'system', method:'system', label:'Lead created from Google', ts:'Apr 22', status:'done' },
       { id:'o2', type:'manual', method:'email',  label:'Follow-up email sent', ts:'Apr 23', status:'done', user:'You' },
       { id:'o3', type:'system', method:'system', label:'Assessment completed', ts:'Apr 26', status:'done' },
-      { id:'o4', type:'manual', method:'email',  label:'Estimate sent — $875', ts:'Apr 28', status:'done', user:'You' },
+      { id:'o4', type:'manual', method:'email',  label:'Estimate sent - $875', ts:'Apr 28', status:'done', user:'You' },
       { id:'o5', type:'system', method:'system', label:'Estimate approved ✅', ts:'Apr 29', status:'done' },
     ],
     activity:[
       { type:'stage', text:'Lead created from Google search', ts:'Apr 22', user:'System' },
       { type:'email', text:'Follow-up email sent', ts:'Apr 23', user:'You' },
-      { type:'stage', text:'Estimate sent $875 — approved next day', ts:'Apr 29', user:'You' },
+      { type:'stage', text:'Estimate sent $875 - approved next day', ts:'Apr 29', user:'You' },
     ],
   },
   {
@@ -478,18 +478,18 @@ const PEOPLE = [
     jobberRef:'REQ-1101',
     estimateSent:'May 5, 2026', estimateApproved:null,
     tags:[], isJunk:false, marketingOptOut:false,
-    buzzNotes:[{ id:'bn1', text:'Has large closet + 2-car garage. Estimate sent 3 days ago — following up.', ts:'May 5', user:'You' }],
+    buzzNotes:[{ id:'bn1', text:'Has large closet + 2-car garage. Estimate sent 3 days ago - following up.', ts:'May 5', user:'You' }],
     jobNotes:[], jobs:[], invoices:[], finalProcessed:false,
     outreachTimeline:[
       { id:'o1', type:'system', method:'system', label:'Lead created from Instagram DM', ts:'Apr 30', status:'done' },
-      { id:'o2', type:'manual', method:'sms',    label:'Text sent — assessment confirmed', ts:'May 1', status:'done', user:'You' },
+      { id:'o2', type:'manual', method:'sms',    label:'Text sent - assessment confirmed', ts:'May 1', status:'done', user:'You' },
       { id:'o3', type:'system', method:'system', label:'Assessment completed May 3', ts:'May 3', status:'done' },
-      { id:'o4', type:'manual', method:'email',  label:'Estimate sent — $1,150', ts:'May 5', status:'done', user:'You' },
+      { id:'o4', type:'manual', method:'email',  label:'Estimate sent - $1,150', ts:'May 5', status:'done', user:'You' },
     ],
     activity:[
       { type:'stage', text:'Lead created via Instagram DM', ts:'Apr 30', user:'System' },
-      { type:'sms',   text:'Texted — assessment scheduled for May 3', ts:'May 1', user:'You' },
-      { type:'stage', text:'Estimate sent $1,150 — awaiting approval', ts:'May 5', user:'You' },
+      { type:'sms',   text:'Texted - assessment scheduled for May 3', ts:'May 1', user:'You' },
+      { type:'stage', text:'Estimate sent $1,150 - awaiting approval', ts:'May 5', user:'You' },
     ],
   },
   // ── Lead referred by Mark Johnson ───────────────────────────────────────────
@@ -500,10 +500,10 @@ const PEOPLE = [
     reachOutMethod:null, jobberSearchStatus:'not_found', jobberClient:null,
     path:'general-a', assessment:null, assessmentType:null, jobberRef:null,
     tags:[], isJunk:false, marketingOptOut:false,
-    buzzNotes:[{ id:'bn1', text:'Referred by Mark Johnson — neighbor', ts:'May 7', user:'System' }],
+    buzzNotes:[{ id:'bn1', text:'Referred by Mark Johnson - neighbor', ts:'May 7', user:'System' }],
     jobNotes:[], jobs:[], invoices:[], finalProcessed:false,
     outreachTimeline:[
-      { id:'o1', type:'system', method:'system', label:'Lead created — referred by Mark Johnson', ts:'May 7', status:'done' },
+      { id:'o1', type:'system', method:'system', label:'Lead created - referred by Mark Johnson', ts:'May 7', status:'done' },
     ],
     activity:[{ type:'system', text:'Referred by Mark Johnson', ts:'May 7' }],
   },
@@ -589,7 +589,7 @@ const EXTRA_PEOPLE = (() => {
         tags: pick(tags),
         isJunk: stage==='Closed Lost'&&Math.random()>0.3,
         junkReason: stage==='Closed Lost'?pick(['Out of Budget','Not Responsive','Went with Competitor','Wrong Fit',null]):null,
-        buzzNotes: Math.random()>0.6?[{id:`bn${id}`,text:pick(['Prefers morning appointments','Has a dog — heads up','Gate code: 1234','Very detail-oriented','Referred by a friend','Returns calls quickly','Prefers text','Large project — needs team']),ts:`${month} ${day}`,user:'You'}]:[],
+        buzzNotes: Math.random()>0.6?[{id:`bn${id}`,text:pick(['Prefers morning appointments','Has a dog - heads up','Gate code: 1234','Very detail-oriented','Referred by a friend','Returns calls quickly','Prefers text','Large project - needs team']),ts:`${month} ${day}`,user:'You'}]:[],
         jobNotes: [],
         jobs: hasJobber&&stage!=='Request'?[{id:`job${id}`,jobberRef:`JOB-${rnd(1000,9999)}`,title:pick(projects)+' Organization',status:stage==='Closed Won'?'Completed':'In Progress',scheduledDate:`Apr ${rnd(1,30)}, 2026`,team:[pick(['Jessica R.','Maria L.','Ana G.','Tom C.'])]}]:[],
         invoices: hasInvoice?[{id:`inv${id}`,number:`INV-${rnd(1000,9999)}`,amount:rnd(350,2200),status:isPaid?'Paid':'Awaiting Payment',date:`Apr ${rnd(1,30)}`}]:[],
@@ -644,11 +644,11 @@ const handle = <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,
 const SAD_FACES = ['😢','😔','💔','😞','🥺','😿']
 
 const MOTIVATIONAL = [
-  "Not every lead is the right fit — the right ones are coming 🐝",
+  "Not every lead is the right fit - the right ones are coming 🐝",
   "Every no gets you closer to the next yes ✨",
-  "Keep going — your next great client is out there 💪",
+  "Keep going - your next great client is out there 💪",
   "Shake it off. The hive keeps buzzing 🍯",
-  "Quality over quantity — always 🌟",
+  "Quality over quantity - always 🌟",
   "On to the next one. You've got this 🚀",
   "Every closed door opens a better window 🪟",
   "The best organizers know when to let go 🧹",
@@ -798,7 +798,7 @@ function ReachOutPopup({ person, onDone, onClose }) {
   function confirm() {
     if (!method) return
     const labels = {call:'Phone Call',sms:'Text',email:'Email'}
-    const newEntry = { id:`o${Date.now()}`, type:'manual', method, label:`Reached out via ${labels[method]}${note?' — '+note:''}`, ts:'Just now', status:'done', user:'You' }
+    const newEntry = { id:`o${Date.now()}`, type:'manual', method, label:`Reached out via ${labels[method]}${note?' - '+note:''}`, ts:'Just now', status:'done', user:'You' }
     const isFirst = !person.reachOutMethod
     onDone({
       reachOutMethod: person.reachOutMethod||method,
@@ -818,7 +818,7 @@ function ReachOutPopup({ person, onDone, onClose }) {
           </button>
         ))}
       </div>
-      <input style={{...inp, marginBottom:'1.25rem'}} placeholder="Notes — left voicemail, no answer, etc." value={note} onChange={e=>setNote(e.target.value)} />
+      <input style={{...inp, marginBottom:'1.25rem'}} placeholder="Notes - left voicemail, no answer, etc." value={note} onChange={e=>setNote(e.target.value)} />
       <div style={{ display:'flex', gap:'10px' }}>
         <button onClick={onClose} style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
         <button onClick={confirm} disabled={!method} style={{ flex:2, padding:'12px', background:method?'#f97316':'#e5e7eb', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:method?'white':'#9ca3af', cursor:method?'pointer':'not-allowed' }}>Log Reach Out</button>
@@ -860,13 +860,13 @@ function TagPopup({ person, onSave, onClose }) {
 }
 
 // ─── Close Popup ──────────────────────────────────────────────────────────────
-// Default closed lost reasons — editable in Admin → Configure
+// Default closed lost reasons - editable in Admin → Configure
 const DEFAULT_CLOSE_REASONS = [
   'Price too high',
   'Hired competitor',
   'No longer moving',
   'Went with friend/family',
-  'Unresponsive — timed out',
+  'Unresponsive - timed out',
   'Budget on hold',
   'Already organized',
   'Changed mind',
@@ -875,7 +875,7 @@ const DEFAULT_CLOSE_REASONS = [
   'Spam / Bot',
   'Other',
 ]
-// Shared mutable list — ConfigureTab writes here, ClosePopup reads here
+// Shared mutable list - ConfigureTab writes here, ClosePopup reads here
 let _closeLostReasons = DEFAULT_CLOSE_REASONS.slice()
 function getCloseLostReasons() { return Array.isArray(_closeLostReasons) ? _closeLostReasons : DEFAULT_CLOSE_REASONS }
 function setCloseLostReasons(list) { if(Array.isArray(list)) _closeLostReasons = list }
@@ -890,7 +890,7 @@ let _partnerTiers = null
 function getPartnerTiers() { return _partnerTiers || PARTNER_TIERS }
 function setAdminPartnerTiers(list) { _partnerTiers = list }
 
-// Location default drip path — set by Settings Paths tab
+// Location default drip path - set by Settings Paths tab
 let _defaultPathId = 'general-a'
 let _defaultMovePathId = 'move-a'
 function getDefaultPathId() { return _defaultPathId }
@@ -898,7 +898,7 @@ function getDefaultMovePathId() { return _defaultMovePathId }
 function setDefaultPathId(id) { if(id) _defaultPathId = id }
 function setDefaultMovePathId(id) { if(id) _defaultMovePathId = id }
 
-// Project type → drip category map — admin-editable via Configure tab
+// Project type → drip category map - admin-editable via Configure tab
 let _projectTypeCategories = null // lazily initialized on first access
 function getProjectTypeCategories() {
   if (!_projectTypeCategories) {
@@ -982,7 +982,7 @@ function ProcessLeadSheet({ person, onSave, onClose }) {
           ))}
         </div>
 
-        {/* CONTEXT step — wake-up only */}
+        {/* CONTEXT step - wake-up only */}
         {cur?.key==='context'&&(
           <div style={{ display:'grid', gap:'12px' }}>
             <div>
@@ -1213,7 +1213,7 @@ function ClosePopup({ person, onConfirm, onClose }) {
   const canConfirm = reason && (!needsNote || note.trim().length > 0)
 
   return (
-    <Popup title={step==='reason'?`Close — ${person.name}`:'Schedule Follow-Up'} onClose={onClose}>
+    <Popup title={step==='reason'?`Close - ${person.name}`:'Schedule Follow-Up'} onClose={onClose}>
       {step==='reason'&&(
         <>
           <p style={{ fontSize:'13px', color:'#8a9e9a', marginBottom:'1rem' }}>
@@ -1231,7 +1231,7 @@ function ClosePopup({ person, onConfirm, onClose }) {
           {reason&&(
             <div style={{ marginBottom:'1.25rem' }}>
               <textarea value={note} onChange={e=>setNote(e.target.value)}
-                placeholder={reason==='Other'?'Please describe the reason for closing...':'Optional — any notes?'}
+                placeholder={reason==='Other'?'Please describe the reason for closing...':'Optional - any notes?'}
                 autoFocus={reason==='Other'}
                 style={{...inp, height:'80px', resize:'none', borderColor: needsNote && !note.trim() ? 'rgba(212,160,70,0.5)' : 'rgba(0,0,0,0.1)'}} />
               {needsNote && !note.trim() && <p style={{ fontSize:'11px', color:'#d4a046', marginTop:'4px' }}>A note is required for this reason.</p>}
@@ -1249,7 +1249,7 @@ function ClosePopup({ person, onConfirm, onClose }) {
 
       {step==='followup'&&(
         <>
-          <p style={{ fontSize:'13px', color:'#8a9e9a', marginBottom:'1rem' }}>Not the right time — want to set a reminder to follow up later?</p>
+          <p style={{ fontSize:'13px', color:'#8a9e9a', marginBottom:'1rem' }}>Not the right time - want to set a reminder to follow up later?</p>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'1rem' }}>
             <button onClick={()=>setScheduleFollowUp(true)} style={{ padding:'14px 12px', background:scheduleFollowUp?'rgba(168,201,196,0.12)':'#f7f5f0', border:`2px solid ${scheduleFollowUp?'#a8c9c4':'rgba(0,0,0,0.08)'}`, borderRadius:'12px', cursor:'pointer', fontFamily:'inherit', textAlign:'center' }}>
               <p style={{ fontSize:'18px', marginBottom:'3px' }}>📅</p>
@@ -1353,10 +1353,10 @@ function CloseOutFlow({ person, onComplete, onClose, onAddFollowUp }) {
       outreachTimeline:[
         ...person.outreachTimeline,
         ...(completionNote?[{id:`o${Date.now()-2}`,type:'note',method:'note',label:`Completion note: ${completionNote}`,ts:'Just now',status:'done'}]:[]),
-        ...(satisfaction==='unhappy'?[{id:`o${Date.now()-1}`,type:'system',method:'system',label:'⚠️ Client flagged — satisfaction follow-up needed',ts:'Just now',status:'pending'}]:[]),
+        ...(satisfaction==='unhappy'?[{id:`o${Date.now()-1}`,type:'system',method:'system',label:'⚠️ Client flagged - satisfaction follow-up needed',ts:'Just now',status:'pending'}]:[]),
         ...(reviewSent?[{id:`o${Date.now()-1}`,type:'system',method:'system',label:'Google review request sent',ts:'Just now',status:'done'}]:[]),
         ...(scheduleFollowUp&&followUpDate?[{id:`o${Date.now()}`,type:'system',method:'system',label:`Follow-up reminder set for ${followUpDate}${followUpNote?' · '+followUpNote:''}`,ts:'Just now',status:'scheduled'}]:[]),
-        {id:`o${Date.now()}`,type:'system',method:'system',label:'Closed Won — synced to Zoho · Re-engage set for '+reEngageDate,ts:'Just now',status:'done'},
+        {id:`o${Date.now()}`,type:'system',method:'system',label:'Closed Won - synced to Zoho · Re-engage set for '+reEngageDate,ts:'Just now',status:'done'},
       ]
     })
   }
@@ -1433,7 +1433,7 @@ function CloseOutFlow({ person, onComplete, onClose, onAddFollowUp }) {
               {/* Optional completion note */}
               <div>
                 <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Completion Note (optional)</p>
-                <textarea value={completionNote} onChange={e=>setCompletionNote(e.target.value)} placeholder="e.g. Client was thrilled — garage came out great. Suggested pantry next visit." rows={2}
+                <textarea value={completionNote} onChange={e=>setCompletionNote(e.target.value)} placeholder="e.g. Client was thrilled - garage came out great. Suggested pantry next visit." rows={2}
                   style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', resize:'none', boxSizing:'border-box' }} />
               </div>
             </div>
@@ -1579,17 +1579,17 @@ function CloseOutFlow({ person, onComplete, onClose, onAddFollowUp }) {
           )}
           {step===1&&(
             <button onClick={()=>allPaid&&setStep(2)} disabled={!allPaid} style={{ flex:1, padding:'13px', background:allPaid?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:700, color:allPaid?'white':'#9ca3af', cursor:allPaid?'pointer':'not-allowed' }}>
-              {allPaid?'Next — Rate the Job →':'Mark invoice as paid to continue'}
+              {allPaid?'Next - Rate the Job →':'Mark invoice as paid to continue'}
             </button>
           )}
           {step===2&&(
             <button onClick={()=>satisfaction&&setStep(3)} disabled={!satisfaction} style={{ flex:1, padding:'13px', background:satisfaction?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:700, color:satisfaction?'white':'#9ca3af', cursor:satisfaction?'pointer':'not-allowed' }}>
-              {satisfaction?'Next — Review Summary →':'Select one to continue'}
+              {satisfaction?'Next - Review Summary →':'Select one to continue'}
             </button>
           )}
           {step===3&&(
             <button onClick={()=>setStep(4)} style={{ flex:1, padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:'pointer' }}>
-              Next — Follow-Up →
+              Next - Follow-Up →
             </button>
           )}
           {step===4&&(
@@ -1743,7 +1743,7 @@ function InvoicePopup({ person, onFinalProcess, onClose, onUpdate }) {
             <div style={{ width:'20px', height:'20px', borderRadius:'6px', border:`2px solid ${confirmed?'#22c55e':'rgba(0,0,0,0.2)'}`, background:confirmed?'#22c55e':'white', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
               {confirmed&&<span style={{ fontSize:'11px', color:'white' }}>✓</span>}
             </div>
-            <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.4 }}>Invoice amounts confirmed — ready to close out.</p>
+            <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.4 }}>Invoice amounts confirmed - ready to close out.</p>
           </div>
           <button onClick={()=>confirmed&&onFinalProcess()} disabled={!confirmed} style={{ width:'100%', padding:'12px', background:confirmed?'#22c55e':'#e5e7eb', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:confirmed?'white':'#9ca3af', cursor:confirmed?'pointer':'not-allowed' }}>
             ✅ Complete & Sync to Zoho
@@ -1795,13 +1795,13 @@ function SendToJobberPopup({ person, onDone, onClose }) {
       : `JOB-${Math.floor(Math.random()*9000+1000)}`
 
     const newEntries = [
-      { id:`o${Date.now()}`,   type:'system', method:'system', label:person.jobberClient?`Matched existing client — ${person.jobberClient.clientId}`:'New client created in Jobber', ts:'Just now', status:'done' },
-      { id:`o${Date.now()+1}`, type:'system', method:'system', label:`${isReq?'Request':'Job'} created in Jobber — ${ref}`, ts:'Just now', status:'done' },
+      { id:`o${Date.now()}`,   type:'system', method:'system', label:person.jobberClient?`Matched existing client - ${person.jobberClient.clientId}`:'New client created in Jobber', ts:'Just now', status:'done' },
+      { id:`o${Date.now()+1}`, type:'system', method:'system', label:`${isReq?'Request':'Job'} created in Jobber - ${ref}`, ts:'Just now', status:'done' },
     ]
 
     const hasAssessment = isReq && includeAssessment && date
     if (hasAssessment) {
-      newEntries.push({ id:`o${Date.now()+2}`, type:'system', method:'system', label:`${assessmentType==='virtual'?'Virtual':'In-person'} assessment — ${date} at ${time}`, ts:'Just now', status:'done' })
+      newEntries.push({ id:`o${Date.now()+2}`, type:'system', method:'system', label:`${assessmentType==='virtual'?'Virtual':'In-person'} assessment - ${date} at ${time}`, ts:'Just now', status:'done' })
     }
 
     onDone({
@@ -1843,7 +1843,7 @@ function SendToJobberPopup({ person, onDone, onClose }) {
         <>
           <p style={{ fontSize:'13px', color:'#8a9e9a', marginBottom:'1rem' }}>{person.jobberClient?`For ${person.jobberClient.clientId}`:'New client will be created.'}</p>
           <AC aKey="request" icon="📋" title="Create a Request" color="#0ea5e9" desc="Add a request in Jobber. Optionally attach an assessment." />
-          <AC aKey="job"     icon="🔨" title="Create a Job Directly" color="#10b981" desc="Skip request — create a job directly when client is ready." />
+          <AC aKey="job"     icon="🔨" title="Create a Job Directly" color="#10b981" desc="Skip request - create a job directly when client is ready." />
           <button onClick={()=>action&&setStep(action==='request'?'request-details':'confirm')} disabled={!action} style={{ width:'100%', padding:'12px', background:action?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:action?'white':'#9ca3af', cursor:action?'pointer':'not-allowed', marginTop:'4px' }}>Continue →</button>
         </>
       )}
@@ -1876,7 +1876,7 @@ function SendToJobberPopup({ person, onDone, onClose }) {
                 <input type="date" value={date} onChange={e=>setDate(e.target.value)} min={new Date().toISOString().split('T')[0]} style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
               </div>
 
-              {/* Time — scroll picker 15 min increments */}
+              {/* Time - scroll picker 15 min increments */}
               <div>
                 <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Time</p>
                 <div style={{ height:'180px', overflowY:'scroll', border:'1.5px solid rgba(0,0,0,0.08)', borderRadius:'10px', background:'white', WebkitOverflowScrolling:'touch' }}>
@@ -2155,7 +2155,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
         const nameMatch  = !q.includes('@') && qDigits.length < 7 && q.length >= 2 && p.name.toLowerCase().includes(q)
         return phoneMatch || emailMatch || nameMatch
       })
-      // Deduplicate — one row per unique client (by phone or email)
+      // Deduplicate - one row per unique client (by phone or email)
       const seen = new Set()
       const deduped = found.filter(p => {
         const key = p.phone.replace(/\D/g,'') || p.email.toLowerCase()
@@ -2205,7 +2205,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
       jobberRef:null, reachOutMethod:null, jobberSearchStatus:'pending', jobberClient:null,
       desc:form.desc, address:null, addresses:[], referredBy:null,
       tags:[], isJunk:false, jobNotes:[], jobs:[], invoices:[], finalProcessed:false, jobContacts:[],
-      outreachTimeline:[{ id:`o${Date.now()}`, type:'system', method:'system', label:'Quick capture — needs follow-up', ts:'Just now', status:'done' }],
+      outreachTimeline:[{ id:`o${Date.now()}`, type:'system', method:'system', label:'Quick capture - needs follow-up', ts:'Just now', status:'done' }],
       activity:[],
     })
     onClose()
@@ -2219,14 +2219,14 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
       invoices:[], jobs:[], finalProcessed:false, isJunk:false, created:'Just now',
       project:form.project||match.project||'',
       path: chosenPath?.id==='none' ? null : chosenPath?.id,
-      outreachTimeline:[{ id:`o${Date.now()}`, type:'system', method:'system', label:'Returning client — new request started', ts:'Just now', status:'done' }],
+      outreachTimeline:[{ id:`o${Date.now()}`, type:'system', method:'system', label:'Returning client - new request started', ts:'Just now', status:'done' }],
       activity:[],
     })
     onClose()
   }
 
   const titles = { lookup:'New Client', found:'Client Found', 'new-job':'New Job', notfound:'New Client', 'new-details':'Contact Details', quick:'Quick Capture', multiple:'Multiple Matches' }
-  const subs   = { lookup:'Check if they already exist', found:'Select a job or add new', 'new-job':match?.name||'', notfound:'No match — create new record', 'new-details':'Fill in their details', quick:'Name + phone, done', multiple:'Select the right person' }
+  const subs   = { lookup:'Check if they already exist', found:'Select a job or add new', 'new-job':match?.name||'', notfound:'No match - create new record', 'new-details':'Fill in their details', quick:'Name + phone, done', multiple:'Select the right person' }
 
   return (
     <Popup title={titles[phase]} onClose={onClose}>
@@ -2246,7 +2246,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
             <span style={{ fontSize:'18px' }}>⚡</span>
             <div>
               <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Quick capture</p>
-              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Just grab name + phone — process later</p>
+              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Just grab name + phone - process later</p>
             </div>
           </button>
         </div>
@@ -2256,7 +2256,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
       {phase==='quick'&&(
         <div style={{ display:'grid', gap:'10px' }}>
           <div style={{ padding:'9px 12px', background:'rgba(212,160,70,0.06)', borderRadius:'9px', border:'1px solid rgba(212,160,70,0.15)' }}>
-            <p style={{ fontSize:'12px', color:'#b07a20' }}>⚡ Just the basics — fill in the rest later.</p>
+            <p style={{ fontSize:'12px', color:'#b07a20' }}>⚡ Just the basics - fill in the rest later.</p>
           </div>
           <div style={{ display:'grid', gap:'8px' }}>
             <div><label style={lbl}>First Name</label><input autoFocus style={inp} placeholder='Sarah' value={form.firstName} onChange={e=>set('firstName',e.target.value)} /></div>
@@ -2286,7 +2286,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
         <div style={{ display:'grid', gap:'10px' }}>
           <div style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 12px', background:'rgba(99,102,241,0.06)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'10px' }}>
             <span style={{ fontSize:'16px' }}>🔍</span>
-            <p style={{ fontSize:'12px', color:'#4a5e5a' }}><strong>{matches.length} matches</strong> found — select the right one</p>
+            <p style={{ fontSize:'12px', color:'#4a5e5a' }}><strong>{matches.length} matches</strong> found - select the right one</p>
           </div>
           <div style={{ display:'grid', gap:'6px', maxHeight:'260px', overflowY:'auto', overflowX:'hidden' }}>
             {matches.map(p=>{
@@ -2323,7 +2323,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
       {phase==='found'&&match&&(
         <div style={{ display:'grid', gap:'0' }}>
 
-          {/* Client row — tap to select */}
+          {/* Client row - tap to select */}
           <button onClick={()=>setClientSelected(true)}
             style={{ display:'flex', alignItems:'center', gap:'10px', padding:'13px 14px', background:clientSelected?'rgba(16,185,129,0.04)':'white', border:`1.5px solid ${clientSelected?'rgba(16,185,129,0.3)':'rgba(0,0,0,0.09)'}`, borderRadius:clientSelected?'12px 12px 0 0':'12px', borderBottom:clientSelected?'none':'1.5px solid rgba(0,0,0,0.09)', cursor:clientSelected?'default':'pointer', fontFamily:'inherit', textAlign:'left', width:'100%', transition:'all 0.15s' }}>
             <div style={{ width:'38px', height:'38px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#1a2e2b)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px', fontWeight:700, color:'white', flexShrink:0 }}>
@@ -2344,7 +2344,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
             }
           </button>
 
-          {/* Jobs — unified list, indented under client */}
+          {/* Jobs - unified list, indented under client */}
           {(()=>{
             // Build full job list: active pipeline records + Jobber history
             const activeRecs = existingPeople.filter(p =>
@@ -2446,7 +2446,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
             <span style={{ fontSize:'20px' }}>👤</span>
             <div>
               <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>No existing client found</p>
-              <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{query?`"${query}" — `:''}Creating a new record.</p>
+              <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{query?`"${query}" - `:''}Creating a new record.</p>
             </div>
           </div>
           <div style={{ display:'flex', gap:'8px' }}>
@@ -2500,7 +2500,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
               )}
             </div>
           )}
-          {/* Address toggle — matches partner/contact/company */}
+          {/* Address toggle - matches partner/contact/company */}
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 12px', background:'rgba(0,0,0,0.02)', borderRadius:'9px', border:'1px solid rgba(0,0,0,0.07)' }}>
             <span style={{ fontSize:'13px', color:'#4a5e5a', display:'flex', alignItems:'center', gap:'6px' }}>📍 <span>Add address</span></span>
             <button onClick={()=>setShowAddrEntry(v=>!v)} style={{ position:'relative', width:'40px', height:'22px', borderRadius:'11px', border:'none', cursor:'pointer', background:showAddrEntry?'#1a2e2b':'rgba(0,0,0,0.15)', transition:'background 0.2s', flexShrink:0, padding:0 }}>
@@ -2692,7 +2692,7 @@ function SourceInlineField({ person, onUpdate }) {
         <button onClick={()=>setShowSourcePicker(true)} style={{ fontSize:'11px', color:'#a8c9c4', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>Edit</button>
       </div>
 
-      {/* Referred by — only when Referral */}
+      {/* Referred by - only when Referral */}
       {person.source==='Referral' && (
         <div style={{ padding:'8px 14px 10px', borderTop:'1px solid rgba(0,0,0,0.04)', background:'rgba(168,201,196,0.03)' }}>
           <p style={{ fontSize:'10px', color:'#8a9e9a', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px', marginLeft:'30px' }}>Referred By</p>
@@ -2913,7 +2913,7 @@ function HeaderChips({ person, update }) {
   const SOURCES = ['Website','Referral','Word of Mouth','Instagram','Facebook','Google','Yelp','NextDoor','Other']
   const PROJECTS = ['Home Organization','Full Home','Kitchen + Pantry','Closet','Garage','Office','Move-In','Move-Out','Other']
 
-  // Resolve referral — could be a partner or a customer
+  // Resolve referral - could be a partner or a customer
   const referredPartner = PARTNERS_DATA.find(p=>p.id===person.referredBy)
   const referredCustomer = !referredPartner && person.referredBy
     ? ALL_PEOPLE.find(p=>p.id===person.referredBy)
@@ -3122,7 +3122,7 @@ function EditableDelay({ step, pathId, setPathSteps }) {
 // ─── Date Formatter ──────────────────────────────────────────────────────────
 function fmtDate(d) {
   if (!d) return ''
-  // Already formatted like "May 6" or "May 6 at 10:00 AM" — leave alone
+  // Already formatted like "May 6" or "May 6 at 10:00 AM" - leave alone
   if (typeof d === 'string' && !/^\d{4}-\d{2}-\d{2}/.test(d)) return d
   try {
     const dt = new Date(d)
@@ -3376,7 +3376,7 @@ function ContactsTab({ person, onUpdate }) {
       )}
 
       {contacts.length === 0 && !addingNew && (
-        <p style={{ fontSize:'12px', color:'#b0c0bc', fontStyle:'italic', textAlign:'center', padding:'8px 0' }}>No job contacts yet — search to link an existing partner or add new.</p>
+        <p style={{ fontSize:'12px', color:'#b0c0bc', fontStyle:'italic', textAlign:'center', padding:'8px 0' }}>No job contacts yet - search to link an existing partner or add new.</p>
       )}
 
       {/* Search / lookup */}
@@ -3516,7 +3516,7 @@ function PersonPanel({ person, onClose, onUpdate, onMarkJunk, onResurrect, onAdd
   function handleTags(tags) { update({ tags }); setPopup(null) }
   function handleSendToJobber(patch) { update(patch); setPopup(null) }
   function handleFinalProcess() {
-    update({ finalProcessed:true, stage:'Closed Won', outreachTimeline:[...person.outreachTimeline,{id:`o${Date.now()}`,type:'system',method:'system',label:'Closed Won — synced to Zoho',ts:'Just now',status:'done'}] })
+    update({ finalProcessed:true, stage:'Closed Won', outreachTimeline:[...person.outreachTimeline,{id:`o${Date.now()}`,type:'system',method:'system',label:'Closed Won - synced to Zoho',ts:'Just now',status:'done'}] })
     setPopup(null)
     setShowWonAnimation(true)
     setTimeout(()=>{ setShowWonAnimation(false); onClose() }, 4500)
@@ -3525,7 +3525,7 @@ function PersonPanel({ person, onClose, onUpdate, onMarkJunk, onResurrect, onAdd
     const now = 'Just now'
     const activityEntry = {
       type:'stage',
-      text:`Record closed — ${reason}${note?' · '+note:''}`,
+      text:`Record closed - ${reason}${note?' · '+note:''}`,
       ts:now,
       user:'You'
     }
@@ -3577,7 +3577,7 @@ function PersonPanel({ person, onClose, onUpdate, onMarkJunk, onResurrect, onAdd
                     </button>
                     <button onClick={()=>setPopup('account')} style={{ fontSize:'10px', color:'#a8c9c4', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', padding:0, fontWeight:500, marginLeft:'2px' }}>account profile →</button>
                   </div>
-                  {/* Status row — stage pill + job number for Job in Progress */}
+                  {/* Status row - stage pill + job number for Job in Progress */}
                   <div style={{ display:'flex', gap:'4px', flexWrap:'wrap', alignItems:'center', marginBottom:'4px' }}>
                     <span style={{ fontSize:'11px', padding:'2px 8px', borderRadius:'20px', background:s.bg, color:s.color, fontWeight:600 }}>{s.icon} {s.label}</span>
                     {person.stage==='Job in Progress'&&person.jobs?.[0]&&(
@@ -3677,7 +3677,7 @@ function PersonPanel({ person, onClose, onUpdate, onMarkJunk, onResurrect, onAdd
                     <span style={{ fontSize:'20px' }}>{person.snoozeUntil?'⏰':'⚡'}</span>
                     <div style={{ flex:1 }}>
                       <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', marginBottom:'2px' }}>
-                        {person.snoozeUntil?'This lead woke up — ready to re-engage?':'Quick capture — needs to be processed'}
+                        {person.snoozeUntil?'This lead woke up - ready to re-engage?':'Quick capture - needs to be processed'}
                       </p>
                       <p style={{ fontSize:'11px', color:'#8a9e9a' }}>
                         {person.snoozeUntil
@@ -3690,7 +3690,7 @@ function PersonPanel({ person, onClose, onUpdate, onMarkJunk, onResurrect, onAdd
                 )}
 
 
-                {/* Addresses — card style matching notes */}
+                {/* Addresses - card style matching notes */}
                 <div style={{ background:'#f8faf8', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'10px', padding:'10px 12px' }}>
                   <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'6px' }}>
                     <div style={{ display:'flex', alignItems:'center', gap:'5px' }}>
@@ -3718,7 +3718,7 @@ function PersonPanel({ person, onClose, onUpdate, onMarkJunk, onResurrect, onAdd
                   ))}
                 </div>
 
-                {/* What They're Looking For — client-submitted job detail */}
+                {/* What They're Looking For - client-submitted job detail */}
                 <div style={{ background:'#f8faf8', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'10px', padding:'10px 12px' }}>
                   <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'6px' }}>
                     <div style={{ display:'flex', alignItems:'center', gap:'5px' }}>
@@ -3732,7 +3732,7 @@ function PersonPanel({ person, onClose, onUpdate, onMarkJunk, onResurrect, onAdd
                   </div>
                   {person.jobDetail
                     ? <p style={{ fontSize:'12px', color:'#2a3e3b', lineHeight:1.6 }}>{person.jobDetail.length>160 ? person.jobDetail.slice(0,160)+'...' : person.jobDetail}</p>
-                    : <p style={{ fontSize:'11px', color:'#b0c0bc', fontStyle:'italic', lineHeight:1.5 }}>No details yet — can be captured on intake form or added from a phone call.</p>
+                    : <p style={{ fontSize:'11px', color:'#b0c0bc', fontStyle:'italic', lineHeight:1.5 }}>No details yet - can be captured on intake form or added from a phone call.</p>
                   }
                 </div>
                 {/* Notes */}
@@ -3869,13 +3869,13 @@ function PersonPanel({ person, onClose, onUpdate, onMarkJunk, onResurrect, onAdd
                       )}
                     </div>
                   )}
-                  {/* Send to Jobber — unlock message inside button */}
+                  {/* Send to Jobber - unlock message inside button */}
                   {isEarlyStage&&!person.jobberRef&&(
                     <button onClick={()=>canSendToJobber&&setPopup('send-jobber')} style={{ width:'100%', padding:'11px', background:canSendToJobber?'#1a2e2b':'rgba(0,0,0,0.04)', border:`1.5px solid ${canSendToJobber?'transparent':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:canSendToJobber?'white':'#b0c0bc', cursor:canSendToJobber?'pointer':'not-allowed' }}>
-                      {canSendToJobber ? <><JobberIcon size={18} style={{marginRight:'6px'}} />Send to Jobber</> : <><JobberIcon size={18} style={{marginRight:'6px'}} />Send to Jobber — log a reach-out first</>}
+                      {canSendToJobber ? <><JobberIcon size={18} style={{marginRight:'6px'}} />Send to Jobber</> : <><JobberIcon size={18} style={{marginRight:'6px'}} />Send to Jobber - log a reach-out first</>}
                     </button>
                   )}
-                  {/* Close-Out trigger — Job in Progress with invoices */}
+                  {/* Close-Out trigger - Job in Progress with invoices */}
                   {person.stage==='Job in Progress'&&hasInvoices&&!person.finalProcessed&&(
                     <button onClick={()=>setShowCloseOut(true)} style={{ width:'100%', padding:'12px 14px', background:'rgba(34,197,94,0.06)', border:'1.5px solid rgba(34,197,94,0.25)', borderRadius:'12px', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
                       <span style={{ fontSize:'20px' }}>✅</span>
@@ -3886,7 +3886,7 @@ function PersonPanel({ person, onClose, onUpdate, onMarkJunk, onResurrect, onAdd
                       <span style={{ fontSize:'12px', color:'#22c55e' }}>→</span>
                     </button>
                   )}
-                  {/* Final Processing — already in that stage */}
+                  {/* Final Processing - already in that stage */}
                   {person.stage==='Final Processing'&&!person.finalProcessed&&(
                     <button onClick={()=>setShowCloseOut(true)} style={{ width:'100%', padding:'11px', background:'#22c55e', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>✅ Complete Close-Out</button>
                   )}
@@ -3919,7 +3919,7 @@ function PersonPanel({ person, onClose, onUpdate, onMarkJunk, onResurrect, onAdd
                   )
                 })()}
 
-                {/* Admin Section — compact */}
+                {/* Admin Section - compact */}
                 <div style={{ display:'grid', gap:'6px' }}>
                   <p style={{ fontSize:'10px', fontWeight:700, color:'#b0c0bc', textTransform:'uppercase', letterSpacing:'0.6px', paddingLeft:'2px' }}>Admin</p>
                 <div style={{ background:'white', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'12px', overflow:'hidden' }}>
@@ -3954,7 +3954,7 @@ function PersonPanel({ person, onClose, onUpdate, onMarkJunk, onResurrect, onAdd
                         </div>
                       </div>
                     ))}
-                    {/* New Lead Drip — combined path + pause */}
+                    {/* New Lead Drip - combined path + pause */}
                     <div style={{ padding:'10px 12px', display:'flex', alignItems:'center', gap:'10px', borderTop:'1px solid rgba(0,0,0,0.05)' }}>
                       <span style={{ fontSize:'14px', width:'20px', textAlign:'center', flexShrink:0 }}>🔁</span>
                       <div style={{ flex:1 }}>
@@ -3979,7 +3979,7 @@ function PersonPanel({ person, onClose, onUpdate, onMarkJunk, onResurrect, onAdd
                       </button>
                     </div>
 
-                    {/* Marketing emails — bottom, out of the way */}
+                    {/* Marketing emails - bottom, out of the way */}
                     <div style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 14px', borderTop:'1px solid rgba(0,0,0,0.05)' }}>
                       <span style={{ fontSize:'14px', width:'20px', textAlign:'center', flexShrink:0 }}>{person.marketingOptOut?'🚫':'📧'}</span>
                       <div style={{ flex:1 }}>
@@ -4044,7 +4044,7 @@ function PersonPanel({ person, onClose, onUpdate, onMarkJunk, onResurrect, onAdd
           person={person}
           onSave={(date, time, type)=>{
             onUpdate({...person, assessment:`${date} at ${time}`, assessmentType:type,
-              outreachTimeline:[...person.outreachTimeline, { id:`o${Date.now()}`, type:'system', method:'system', label:`${type==='virtual'?'Virtual':'In-person'} assessment scheduled — ${date} at ${time}`, ts:'Just now', status:'done' }]
+              outreachTimeline:[...person.outreachTimeline, { id:`o${Date.now()}`, type:'system', method:'system', label:`${type==='virtual'?'Virtual':'In-person'} assessment scheduled - ${date} at ${time}`, ts:'Just now', status:'done' }]
             })
             setShowAssessmentScheduler(false)
           }}
@@ -4298,7 +4298,7 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson }) {
         <button onClick={()=>setShowSourcePicker(true)} style={{ fontSize:'11px', color:'#a8c9c4', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit' }}>Edit</button>
       </div>
 
-      {/* Referred by — only when source is Referral */}
+      {/* Referred by - only when source is Referral */}
       {person.source === 'Referral' && (
         <div style={{ marginTop:'8px', marginLeft:'30px' }}>
           <p style={{ fontSize:'10px', color:'#8a9e9a', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Referred by</p>
@@ -4455,12 +4455,11 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson }) {
           {/* Scrollable content */}
           <div style={{ flex:1, overflowY:'auto', padding:'1.25rem', display:'grid', gap:'1.25rem' }}>
 
-            {/* Buzz Notes — always top */}
-            {/* Buzz Notes — always top */}
+            {/* Buzz Notes - always top */}
+            {/* Buzz Notes - always top */}
             <BuzzNotesSection person={person} onUpdatePerson={onUpdatePerson} />
-}
 
-            {/* Client Details — editable */}
+            {/* Client Details - editable */}
             <Section title="Client Details">
               <div style={{ background:'white', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'12px', padding:'0 14px' }}>
                 <EditableField icon="📞" label="Phone"   fieldKey="phone"   val={person.phone} />
@@ -4640,7 +4639,7 @@ function StageGroup({ stage, stageConf: s, records, selectedIds, setSelectedIds,
 
   return (
     <div style={{ marginBottom:'8px' }}>
-      {/* Stage label — clickable to collapse */}
+      {/* Stage label - clickable to collapse */}
       <div onClick={toggleCollapse} style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom: collapsed?0:'8px', padding:'7px 10px', borderRadius:'8px', cursor:'pointer', userSelect:'none', background: collapsed?'rgba(0,0,0,0.03)':'transparent', transition:'background 0.15s' }}>
         <span style={{ fontSize:'13px', color:'#8a9e9a', transition:'transform 0.2s', display:'inline-block', transform: collapsed?'rotate(-90deg)':'rotate(0deg)', lineHeight:1 }}>▾</span>
         <span style={{ fontSize:'14px' }}>{s.icon}</span>
@@ -4764,7 +4763,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
     setPeople(p=>p.map(x=>x.id===id?{
       ...x, isJunk:false, finalProcessed:false,
       stage:'New', junkReason:undefined, junkNote:undefined,
-      activity:[...x.activity, { type:'stage', text:'Record resurrected — returned to pipeline', ts:'Just now', user:'You' }]
+      activity:[...x.activity, { type:'stage', text:'Record resurrected - returned to pipeline', ts:'Just now', user:'You' }]
     }:x))
     setViewMode('open')
   }
@@ -4840,7 +4839,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
           </button>
         </div>
       </div>
-      {/* Header row 2: Open / Captured / Closed — full width only */}
+      {/* Header row 2: Open / Captured / Closed - full width only */}
       <div style={{ display:'flex', background:'rgba(0,0,0,0.05)', borderRadius:'8px', padding:'3px', marginBottom:'1rem' }}>
         {[['open','Open'],['captures','⚡'],['closed','Closed']].map(([v,label])=>(
           <button key={v} onClick={()=>{ setViewMode(v); setStageFilter('') }}
@@ -4848,7 +4847,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
             {label}{v==='closed'&&closed.length>0?` (${closed.length})`:v==='captures'&&captures.length>0?` (${captures.length})`:''}          </button>
         ))}
       </div>
-      {/* FAB — New Client */}
+      {/* FAB - New Client */}
       <button onClick={()=>setShowNewLead(true)}
         style={{ position:'fixed', bottom:'80px', right:'16px', zIndex:500, width:'52px', height:'52px', borderRadius:'50%', background:'#1a2e2b', color:'white', border:'none', fontSize:'28px', lineHeight:1, cursor:'pointer', boxShadow:'0 4px 20px rgba(26,46,43,0.4)', display:'flex', alignItems:'center', justifyContent:'center' }}>
         +
@@ -4915,7 +4914,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
             <div key={p.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 0', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
               <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
                 <Avatar name={p.name} size={28} muted />
-                <div><p style={{ fontSize:'13px', color:'#8a9e9a' }}>{p.name}</p><p style={{ fontSize:'11px', color:'#b0c0bc' }}>{p.junkReason}{p.junkNote?` — ${p.junkNote.slice(0,40)}${p.junkNote.length>40?'...':''}`:''}</p></div>
+                <div><p style={{ fontSize:'13px', color:'#8a9e9a' }}>{p.name}</p><p style={{ fontSize:'11px', color:'#b0c0bc' }}>{p.junkReason}{p.junkNote?` - ${p.junkNote.slice(0,40)}${p.junkNote.length>40?'...':''}`:''}</p></div>
               </div>
               <button onClick={()=>resurrectPerson(p.id)} style={{ fontSize:'11px', color:'#10b981', background:'none', border:'1px solid rgba(16,185,129,0.2)', borderRadius:'6px', padding:'3px 8px', cursor:'pointer', fontFamily:'inherit' }}>🌱 Resurrect</button>
             </div>
@@ -4934,7 +4933,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
           onDelete={id=>{ setSavedViews(p=>p.filter(v=>v.id!==id)); if(activeViewId===id) setActiveViewId(null) }}
           onSave={name=>{ const id=`v${Date.now()}`; setSavedViews(p=>[...p,{ id, name, filters:{ stageFilters, sourceFilters, assigneeFilters, tagFilters, timeFilter, returningOnly } }]); setActiveViewId(id) }}
         />
-        {/* Search row — hidden in captures mode */}
+        {/* Search row - hidden in captures mode */}
         {viewMode!=='captures'&&<div style={{ display:'flex', gap:'8px', marginBottom:'8px' }}>
           <input type="text" placeholder="Search name, email, phone..." value={search} onChange={e=>setSearch(e.target.value)}
             style={{ flex:1, padding:'8px 12px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none' }} />
@@ -4949,11 +4948,11 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
           </button>
         </div>}
 
-        {/* Filter panel — hidden in captures mode */}
+        {/* Filter panel - hidden in captures mode */}
         {viewMode!=='captures'&&showFilters&&(
           <div style={{ background:'white', border:'1.5px solid rgba(0,0,0,0.08)', borderRadius:'12px', padding:'12px 14px', display:'grid', gap:'10px' }}>
 
-            {/* Stages — compact pills */}
+            {/* Stages - compact pills */}
             {viewMode==='open'&&(
               <div>
                 <p style={{ fontSize:'10px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'5px' }}>Stage</p>
@@ -4969,7 +4968,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
               </div>
             )}
 
-            {/* Source — compact pills */}
+            {/* Source - compact pills */}
             {(()=>{
               const sources = [...new Set(currentPool.map(p=>p.source).filter(Boolean))]
               return sources.length>0?(
@@ -5219,7 +5218,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
                 { icon:'⚡', label:'Synced to Jobber', desc:'This client has a matching record in Jobber' },
                 { icon:'🐝', label:'Buzz Notes', desc:'Internal notes from your team about this client' },
                 { icon:'⚠️', label:'Unpaid Invoice', desc:'One or more invoices are awaiting payment' },
-                { icon:'💬', label:'Description', desc:'Client left a description — tap to read it' },
+                { icon:'💬', label:'Description', desc:'Client left a description - tap to read it' },
                 { icon:'📅', label:'Assessment Scheduled', desc:'An assessment is booked for this client' },
                 { icon:'⏸', label:'Drip Paused', desc:'New Lead Drip emails are paused for this client' },
                 { icon:'▶', label:'Drip Active', desc:'New Lead Drip emails are running normally' },
@@ -5317,12 +5316,12 @@ const D_UPCOMING = [
 ]
 
 const D_RECENT_ACTIVITY = [
-  { icon:'✨', text:'New lead — Megan Torres · Aurora',          location:'Aurora',           ts:'1h ago',    color:'#6366f1' },
+  { icon:'✨', text:'New lead - Megan Torres · Aurora',          location:'Aurora',           ts:'1h ago',    color:'#6366f1' },
   { icon:'📲', text:'Reached out to Jennifer Torres · Denver',   location:'Denver',           ts:'2h ago',    color:'#f97316' },
   { icon:'⚡', text:'Claire Davidson sent to Jobber · Aurora',   location:'Aurora',           ts:'Yesterday', color:'#10b981' },
-  { icon:'📅', text:'Assessment scheduled — Rachel Kim · Boulder', location:'Boulder',        ts:'Yesterday', color:'#0ea5e9' },
-  { icon:'💰', text:'Invoice paid — Diana Walsh · Boulder',       location:'Boulder',          ts:'2 days ago',color:'#22c55e' },
-  { icon:'🏆', text:'Closed Won — Maria Gonzalez · Aurora',      location:'Aurora',           ts:'3 days ago',color:'#d4a046' },
+  { icon:'📅', text:'Assessment scheduled - Rachel Kim · Boulder', location:'Boulder',        ts:'Yesterday', color:'#0ea5e9' },
+  { icon:'💰', text:'Invoice paid - Diana Walsh · Boulder',       location:'Boulder',          ts:'2 days ago',color:'#22c55e' },
+  { icon:'🏆', text:'Closed Won - Maria Gonzalez · Aurora',      location:'Aurora',           ts:'3 days ago',color:'#d4a046' },
 ]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -5370,7 +5369,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   const proration = calcProration(ROLE_PRICING.owner)
   const ccAmount  = withCC(proration.prorated)
 
-  // ── ALL hooks at top — no conditional returns before these ──────────────────
+  // ── ALL hooks at top - no conditional returns before these ──────────────────
   const [completedSteps, setCompletedSteps]   = useState({})
   const [activeStepOpen, setActiveStepOpen]   = useState(null)
   const [showInviteFlow, setShowInviteFlow]   = useState(false)
@@ -5386,7 +5385,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   const [cvv, setCvv]           = useState('')
   const [cardName, setCardName] = useState('')
 
-  // Per-step forms — prefilled from invite data
+  // Per-step forms - prefilled from invite data
   const [profileForm, setProfileForm] = useState({
     firstName: nameParts[0]||'',
     lastName:  nameParts.slice(1).join(' ')||'',
@@ -5574,7 +5573,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                   ))}
                 </div>
               </div>
-              {/* SMS & Voice add-on — coming soon */}
+              {/* SMS & Voice add-on - coming soon */}
               {payStep==='pricing'&&(
                 <div style={{ background:'white', borderRadius:'12px', border:'1px solid rgba(0,0,0,0.08)', padding:'14px 16px', marginBottom:'12px', display:'flex', alignItems:'center', gap:'12px' }}>
                   <span style={{ fontSize:'22px', flexShrink:0 }}>📱</span>
@@ -5597,7 +5596,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                 <>
                   <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'10px' }}>Choose payment method</p>
                   <div style={{ display:'grid', gap:'10px', marginBottom:'10px' }}>
-                    {[{key:'ach',icon:'🏦',label:'ACH / Bank Transfer',sub:'Free — no processing fee'},{key:'cc',icon:'💳',label:'Credit Card',sub:`+3% fee — pay $${ccAmount}`}].map(m=>(
+                    {[{key:'ach',icon:'🏦',label:'ACH / Bank Transfer',sub:'Free - no processing fee'},{key:'cc',icon:'💳',label:'Credit Card',sub:`+3% fee - pay $${ccAmount}`}].map(m=>(
                       <button key={m.key} onClick={()=>{ setMethod(m.key); setPayStep(m.key) }} style={{ width:'100%', padding:'16px', background:'white', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'12px', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'14px', textAlign:'left' }}>
                         <span style={{ fontSize:'24px' }}>{m.icon}</span>
                         <div style={{ flex:1 }}><p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>{m.label}</p><p style={{ fontSize:'12px', color:m.key==='ach'?'#22c55e':'#f59e0b' }}>{m.sub}</p></div>
@@ -5721,7 +5720,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                   <p style={{ fontSize:'13px', fontWeight:600, color:done?'#22c55e':locked?'#b0c0bc':'#1a2e2b', marginBottom:'2px' }}>{step.label}</p>
                   <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{step.desc}</p>
                 </div>
-                {/* Skip button for invite step — in the header row */}
+                {/* Skip button for invite step - in the header row */}
                 {step.id==='invite'&&!done&&!locked&&(
                   <button onClick={e=>{ e.stopPropagation(); setShowSkipModal(true) }}
                     style={{ padding:'4px 10px', background:'transparent', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'20px', fontSize:'11px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer', flexShrink:0 }}>
@@ -5755,7 +5754,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
         <div style={{ position:'fixed', inset:0, zIndex:10020, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px', background:'rgba(26,46,43,0.6)' }}>
           <div style={{ background:'white', borderRadius:'20px', padding:'28px 24px', maxWidth:'360px', width:'100%', boxShadow:'0 20px 60px rgba(26,46,43,0.3)', textAlign:'center' }}>
             <p style={{ fontSize:'36px', marginBottom:'12px' }}>🐝</p>
-            <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'8px' }}>No worries — invite them later!</h2>
+            <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'8px' }}>No worries - invite them later!</h2>
             <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'20px' }}>
               You can invite your team anytime from <strong>Settings → Team</strong>. They'll get an email with setup instructions.
             </p>
@@ -5975,13 +5974,13 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
           </div>
         </div>
 
-        {/* Location phone — prefilled from profile */}
+        {/* Location phone - prefilled from profile */}
         <div>
           <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:'4px' }}>
             <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>📞 Location Phone</p>
             {!locationForm.phone && profileForm.phone && <span style={{ fontSize:'10px', color:'#a8c9c4', fontStyle:'italic' }}>Prefilled from your profile</span>}
           </div>
-          <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'6px' }}>This is the business number shown in your emails. Prefilled from your profile — change it if you have a dedicated business line.</p>
+          <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'6px' }}>This is the business number shown in your emails. Prefilled from your profile - change it if you have a dedicated business line.</p>
           <input type="tel"
             value={locationForm.phone || profileForm.phone}
             onChange={e=>setLocationForm(f=>({...f,phone:e.target.value}))}
@@ -6010,12 +6009,12 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
             <div style={{ marginTop:'8px', display:'grid', gap:'8px', padding:'12px', background:'rgba(99,102,241,0.04)', borderRadius:'9px', border:'1px solid rgba(99,102,241,0.12)' }}>
               <div>
                 <p style={{ fontSize:'10px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Sender Name</p>
-                <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'5px' }}>How your name appears in the inbox — e.g. "Jane · Bee Organized KC"</p>
+                <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'5px' }}>How your name appears in the inbox - e.g. "Jane · Bee Organized KC"</p>
                 <input value={locationForm.senderName} onChange={e=>setLocationForm(f=>({...f,senderName:e.target.value}))} placeholder="Jane · Bee Organized Kansas City" style={inp} />
               </div>
               <div>
                 <p style={{ fontSize:'10px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Reply-To Email</p>
-                <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'5px' }}>Where replies land — can be a shared inbox or different address</p>
+                <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'5px' }}>Where replies land - can be a shared inbox or different address</p>
                 <input type="email" value={locationForm.replyToEmail} onChange={e=>setLocationForm(f=>({...f,replyToEmail:e.target.value}))} placeholder="replies@yourbusiness.com" style={inp} />
               </div>
             </div>
@@ -6029,10 +6028,10 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
           <select value={locationForm.timezone} onChange={e=>setLocationForm(f=>({...f,timezone:e.target.value}))}
             style={{ ...inp, background:'white', cursor:'pointer', color:locationForm.timezone?'#1a2e2b':'#8a9e9a' }}>
             <option value="">Select your timezone…</option>
-            <option value="Eastern Time (ET)">Eastern Time (ET) — New York, Miami</option>
-            <option value="Central Time (CT)">Central Time (CT) — Chicago, Dallas, Kansas City</option>
-            <option value="Mountain Time (MT)">Mountain Time (MT) — Denver, Phoenix</option>
-            <option value="Pacific Time (PT)">Pacific Time (PT) — Los Angeles, Seattle</option>
+            <option value="Eastern Time (ET)">Eastern Time (ET) - New York, Miami</option>
+            <option value="Central Time (CT)">Central Time (CT) - Chicago, Dallas, Kansas City</option>
+            <option value="Mountain Time (MT)">Mountain Time (MT) - Denver, Phoenix</option>
+            <option value="Pacific Time (PT)">Pacific Time (PT) - Los Angeles, Seattle</option>
             <option value="Alaska Time (AKT)">Alaska Time (AKT)</option>
             <option value="Hawaii Time (HT)">Hawaii Time (HT)</option>
           </select>
@@ -6058,7 +6057,7 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
   if (step.id==='import') {
     return (
       <div style={{ paddingTop:'12px', display:'grid', gap:'10px' }}>
-        <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>Import all your existing clients from Jobber into Bee Hub. This is a one-time step — future syncs happen automatically.</p>
+        <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>Import all your existing clients from Jobber into Bee Hub. This is a one-time step - future syncs happen automatically.</p>
         <ImportStepContent markDone={markDone} setActiveStepOpen={setActiveStepOpen} />
       </div>
     )
@@ -6080,7 +6079,7 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
         </button>
         <button onClick={()=>{ markDone('invite'); setActiveStepOpen(null) }}
           style={{ width:'100%', padding:'9px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>
-          Skip — invite later
+          Skip - invite later
         </button>
       </div>
     )
@@ -6111,19 +6110,19 @@ function PathChooser({ title, emoji, current, onSelect, previewPath, setPreviewP
           <div key={style.id} style={{ background:'white', borderRadius:'12px', border:`2px solid ${isSelected?'#1a2e2b':isCustom?'rgba(168,201,196,0.35)':'rgba(0,0,0,0.08)'}`, overflow:'hidden' }}>
             {/* Selection row */}
             <div style={{ padding:'12px 14px', display:'flex', alignItems:'center', gap:'10px' }}>
-              {/* Radio — tap to SELECT */}
+              {/* Radio - tap to SELECT */}
               <div onClick={()=>onSelect(style.id)}
                 style={{ width:'34px', height:'34px', borderRadius:'50%', border:`2px solid ${isSelected?'#1a2e2b':'rgba(0,0,0,0.15)'}`, background:isSelected?'#1a2e2b':'white', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, cursor:'pointer' }}>
                 {isSelected
                   ? <div style={{ width:'11px', height:'11px', borderRadius:'50%', background:'white' }} />
                   : <span style={{ fontSize:'13px' }}>{pd.emoji||style.icon}</span>}
               </div>
-              {/* Label — tap to SELECT */}
+              {/* Label - tap to SELECT */}
               <div style={{ flex:1, cursor:'pointer' }} onClick={()=>onSelect(style.id)}>
                 <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{style.label}</p>
                 <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>{pd.tagline||style.cta}</p>
               </div>
-              {/* Preview toggle — SEPARATE from selection */}
+              {/* Preview toggle - SEPARATE from selection */}
               {!isCustom&&(
                 <button onClick={()=>setPreviewPath(isPreview?null:style.id)}
                   style={{ padding:'4px 10px', background:'rgba(0,0,0,0.04)', border:'1px solid rgba(0,0,0,0.08)', borderRadius:'20px', fontSize:'11px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer', flexShrink:0, whiteSpace:'nowrap' }}>
@@ -6206,8 +6205,8 @@ function OnboardingPathsEditor({ onComplete }) {
   const PLAIN = {
     'path-a': { emoji:'📅', tagline:"Ask if they're free this week + share your rates", explain:"You'll send a welcome email, then ask \"Do you have availability this week?\" and show your hourly rates. Simple and direct." },
     'path-b': { emoji:'🔗', tagline:'Send a calendar link + share your rates', explain:"You'll send a welcome email, then share a booking link so they can pick a time themselves, plus your rates. Great if you prefer self-scheduling." },
-    'path-c': { emoji:'📲', tagline:"Just ask if they're free — keep it casual", explain:"You'll send a welcome email, then a casual \"hey, are you free this week?\" No rates, no links. Friendly and low pressure." },
-    'path-d': { emoji:'🤝', tagline:'Ask + calendar link + phone number', explain:"You'll send a welcome email, then give them three ways to connect — reply, book online, or call. Best for people who like options." },
+    'path-c': { emoji:'📲', tagline:"Just ask if they're free - keep it casual", explain:"You'll send a welcome email, then a casual \"hey, are you free this week?\" No rates, no links. Friendly and low pressure." },
+    'path-d': { emoji:'🤝', tagline:'Ask + calendar link + phone number', explain:"You'll send a welcome email, then give them three ways to connect - reply, book online, or call. Best for people who like options." },
     'path-e': { emoji:'💛', tagline:'Availability check + warm referral follow-up', explain:"Similar to Path A but with a warmer, referral-focused tone. Great for word-of-mouth leads who already trust you." },
   }
 
@@ -6218,17 +6217,17 @@ function OnboardingPathsEditor({ onComplete }) {
       <div style={{ background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'12px', padding:'16px' }}>
         <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'8px' }}>📬 What is a New Lead Drip?</p>
         <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'10px' }}>
-          When someone fills out your form, Bee Hub automatically sends them emails to follow up. A <strong>New Lead Drip</strong> is just the plan — which emails go out, and when.
+          When someone fills out your form, Bee Hub automatically sends them emails to follow up. A <strong>New Lead Drip</strong> is just the plan - which emails go out, and when.
         </p>
         <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'10px' }}>
           Think of it like a friendly robot that follows up for you while you're busy with a job. 🐝
         </p>
         <div style={{ background:'white', borderRadius:'9px', padding:'10px 12px', border:'1px solid rgba(0,0,0,0.07)', marginBottom:'10px' }}>
           <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', marginBottom:'6px' }}>Every path starts with the same 2 things:</p>
-          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.8 }}>1️⃣ A welcome email — goes out right when they sign up</p>
-          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.8 }}>2️⃣ A follow-up email 1–2 days later — <strong>this is what changes between paths</strong></p>
+          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.8 }}>1️⃣ A welcome email - goes out right when they sign up</p>
+          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.8 }}>2️⃣ A follow-up email 1–2 days later - <strong>this is what changes between paths</strong></p>
         </div>
-        <p style={{ fontSize:'12px', color:'#8a9e9a', fontStyle:'italic' }}>💡 Don't stress — you can change the emails and timing anytime in Settings. This just gets you started.</p>
+        <p style={{ fontSize:'12px', color:'#8a9e9a', fontStyle:'italic' }}>💡 Don't stress - you can change the emails and timing anytime in Settings. This just gets you started.</p>
       </div>
       <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.5 }}>You'll pick one path for <strong>move jobs</strong> and one for <strong>everything else</strong> (kitchens, closets, full homes, etc.).</p>
       <button onClick={()=>setWizardStep('move')}
@@ -6397,7 +6396,7 @@ function OnboardingInviteSheet({ onClose, onDone }) {
           <div style={{ padding:'1.25rem' }}>
             <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'16px' }}>
               <button onClick={()=>setStep('method')} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>←</button>
-              <div><p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>ACH Bank Transfer</p><p style={{ fontSize:'12px', color:'#22c55e' }}>Free — no processing fee</p></div>
+              <div><p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>ACH Bank Transfer</p><p style={{ fontSize:'12px', color:'#22c55e' }}>Free - no processing fee</p></div>
             </div>
             <div style={{ background:'rgba(168,201,196,0.08)', border:'1px solid rgba(168,201,196,0.2)', borderRadius:'10px', padding:'12px 14px', marginBottom:'20px', display:'flex', justifyContent:'space-between' }}>
               <span style={{ fontSize:'13px', color:'#4a5e5a' }}>Total due today</span>
@@ -6455,7 +6454,7 @@ function OnboardingInviteSheet({ onClose, onDone }) {
               <span style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>${totalCost}</span>
             </div>
             <div style={{ display:'grid', gap:'10px', marginBottom:'16px' }}>
-              {[{key:'ach',icon:'🏦',label:'ACH / Bank Transfer',sub:'Free — no processing fee'},{key:'cc',icon:'💳',label:'Credit Card',sub:`+3% fee · total $${ccTotal}`}].map(m=>(
+              {[{key:'ach',icon:'🏦',label:'ACH / Bank Transfer',sub:'Free - no processing fee'},{key:'cc',icon:'💳',label:'Credit Card',sub:`+3% fee · total $${ccTotal}`}].map(m=>(
                 <button key={m.key} onClick={()=>{ setMethod(m.key); setStep(m.key) }} style={{ width:'100%', padding:'16px', background:'white', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'12px', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'14px', textAlign:'left' }}>
                   <span style={{ fontSize:'24px' }}>{m.icon}</span>
                   <div style={{ flex:1 }}><p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>{m.label}</p><p style={{ fontSize:'12px', color:m.key==='ach'?'#22c55e':'#f59e0b' }}>{m.sub}</p></div>
@@ -6581,7 +6580,7 @@ function PastDueBanner({ isOwner=false, graceDaysLeft=14, onPayNow }) {
       <span style={{ fontSize:'18px', flexShrink:0 }}>{expired ? '🔒' : '⚠️'}</span>
       <div style={{ flex:1 }}>
         <p style={{ fontSize:'13px', fontWeight:700, color:'white', marginBottom:'2px' }}>
-          {expired ? 'Account locked — payment required' : `Payment failed · ${graceDaysLeft} day${graceDaysLeft!==1?'s':''} left`}
+          {expired ? 'Account locked - payment required' : `Payment failed · ${graceDaysLeft} day${graceDaysLeft!==1?'s':''} left`}
         </p>
         <p style={{ fontSize:'11px', color:'rgba(255,200,200,0.8)' }}>
           {expired ? 'Your account has been locked. Update your payment method to restore access.' : 'Your March 1 renewal payment failed. Update your payment method before your access expires.'}
@@ -6735,7 +6734,7 @@ function ReadOnlyBanner() {
   return (
     <div style={{ background:'rgba(138,158,154,0.12)', borderBottom:'1px solid rgba(138,158,154,0.2)', padding:'8px 16px', display:'flex', alignItems:'center', gap:'8px' }}>
       <span style={{ fontSize:'14px' }}>⏸</span>
-      <p style={{ fontSize:'12px', color:'#4a5e5a', fontWeight:500 }}>This location is <strong>inactive</strong> — view only. Contact your franchisor to reactivate.</p>
+      <p style={{ fontSize:'12px', color:'#4a5e5a', fontWeight:500 }}>This location is <strong>inactive</strong> - view only. Contact your franchisor to reactivate.</p>
     </div>
   )
 }
@@ -6820,12 +6819,12 @@ const SPECIALTIES = [
   { id:'networking',        label:'🤝 Networking Group',    color:'#c084fc', bg:'rgba(192,132,252,0.1)' },
 ]
 
-// Partner relationship tiers — used to classify the type of partnership
+// Partner relationship tiers - used to classify the type of partnership
 const PARTNER_TIERS = [
-  { id:'networking-contact', label:'Networking Contact', color:'#A8C9C4', bg:'rgba(168,201,196,0.15)', desc:'Early-stage connection — building relationship' },
+  { id:'networking-contact', label:'Networking Contact', color:'#A8C9C4', bg:'rgba(168,201,196,0.15)', desc:'Early-stage connection - building relationship' },
   { id:'service-provider',   label:'Service Provider',   color:'#31797D', bg:'rgba(49,121,125,0.12)',  desc:'Provides a service relevant to our clients' },
-  { id:'referral-partner',   label:'Referral Partner',   color:'#839F6B', bg:'rgba(131,159,107,0.12)', desc:'Actively sends referrals — mutual relationship' },
-  { id:'power-partner',      label:'Power Partner',      color:'#C99B50', bg:'rgba(201,155,80,0.12)',  desc:'Top-tier — consistent referrals and deep trust' },
+  { id:'referral-partner',   label:'Referral Partner',   color:'#839F6B', bg:'rgba(131,159,107,0.12)', desc:'Actively sends referrals - mutual relationship' },
+  { id:'power-partner',      label:'Power Partner',      color:'#C99B50', bg:'rgba(201,155,80,0.12)',  desc:'Top-tier - consistent referrals and deep trust' },
 ]
 
 const TOUCHPOINT_TYPES = [
@@ -6838,26 +6837,26 @@ const TOUCHPOINT_TYPES = [
   { key:'thankyou',icon:'🙏', label:'Thank You Sent'   },
 ]
 
-// ─── Companies — each scoped to one location ─────────────────────────────────
+// ─── Companies - each scoped to one location ─────────────────────────────────
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 // All entities share: id, locationId, name, phone, email, website, notes
 // Partners & Contacts also have: type, title, company, companyId, etc.
 
 const COMPANIES_DATA = [
   // Kansas City
-  { id:'co1', locationId:'loc_kc', name:'Meridian Realty',       industry:'Real Estate',      phone:'(816) 555-0900', email:'info@meridianrealty.com',   website:'meridianrealty.com',  notes:[{ id:'n1', text:'Largest referral source — 3 active agents referring clients', ts:'Jan 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'Nov 2024' }] },
-  { id:'co2', locationId:'loc_kc', name:'ABC Moving & Storage',   industry:'Moving Services',  phone:'(816) 555-0441', email:'partners@abcmoving.com',      website:'abcmoving.com',       notes:[{ id:'n1', text:'Refer us to every move-in — great pipeline for organization jobs', ts:'Mar 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'Mar 2025' }] },
-  { id:'co3', locationId:'loc_kc', name:'Walsh Construction',     industry:'General Contractor',phone:'(816) 555-0830', email:'info@walshconstruction.com',  website:'walshconstruction.com',notes:[{ id:'n1', text:'High-end remodels — clients always need post-reno organizing', ts:'Apr 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'Apr 2025' }] },
+  { id:'co1', locationId:'loc_kc', name:'Meridian Realty',       industry:'Real Estate',      phone:'(816) 555-0900', email:'info@meridianrealty.com',   website:'meridianrealty.com',  notes:[{ id:'n1', text:'Largest referral source - 3 active agents referring clients', ts:'Jan 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'Nov 2024' }] },
+  { id:'co2', locationId:'loc_kc', name:'ABC Moving & Storage',   industry:'Moving Services',  phone:'(816) 555-0441', email:'partners@abcmoving.com',      website:'abcmoving.com',       notes:[{ id:'n1', text:'Refer us to every move-in - great pipeline for organization jobs', ts:'Mar 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'Mar 2025' }] },
+  { id:'co3', locationId:'loc_kc', name:'Walsh Construction',     industry:'General Contractor',phone:'(816) 555-0830', email:'info@walshconstruction.com',  website:'walshconstruction.com',notes:[{ id:'n1', text:'High-end remodels - clients always need post-reno organizing', ts:'Apr 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'Apr 2025' }] },
   // Scottsdale
-  { id:'co4', locationId:'loc_scottsdale', name:'Reyes Interior Design',  industry:'Interior Design',     phone:'(480) 555-0578', email:'sofia@reyesdesign.com',     website:'reyesdesign.com',     notes:[{ id:'n1', text:'Co-market opportunity — her clients love organized spaces', ts:'Mar 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'Mar 2025' }] },
-  { id:'co5', locationId:'loc_scottsdale', name:'Boulder Property Group', industry:'Property Management', phone:'(480) 555-0192', email:'info@boulderpg.com',          website:'boulderpg.com',       notes:[{ id:'n1', text:'Manages 40+ properties — huge opportunity', ts:'May 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'May 2025' }] },
+  { id:'co4', locationId:'loc_scottsdale', name:'Reyes Interior Design',  industry:'Interior Design',     phone:'(480) 555-0578', email:'sofia@reyesdesign.com',     website:'reyesdesign.com',     notes:[{ id:'n1', text:'Co-market opportunity - her clients love organized spaces', ts:'Mar 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'Mar 2025' }] },
+  { id:'co5', locationId:'loc_scottsdale', name:'Boulder Property Group', industry:'Property Management', phone:'(480) 555-0192', email:'info@boulderpg.com',          website:'boulderpg.com',       notes:[{ id:'n1', text:'Manages 40+ properties - huge opportunity', ts:'May 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'May 2025' }] },
   // Omaha
-  { id:'co6', locationId:'loc_omaha',     name:'Heartland Staging Co.',   industry:'Home Staging',        phone:'(402) 555-0310', email:'hello@heartlandstaging.com', website:'heartlandstaging.com', notes:[{ id:'n1', text:'Stager + organizer combo — lots of shared clients', ts:'Apr 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'Apr 2025' }] },
+  { id:'co6', locationId:'loc_omaha',     name:'Heartland Staging Co.',   industry:'Home Staging',        phone:'(402) 555-0310', email:'hello@heartlandstaging.com', website:'heartlandstaging.com', notes:[{ id:'n1', text:'Stager + organizer combo - lots of shared clients', ts:'Apr 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'Apr 2025' }] },
 ]
 
 const PARTNERS_DATA = [
 
-  // ── Kansas City — Partners ──────────────────────────────────────────────────
+  // ── Kansas City - Partners ──────────────────────────────────────────────────
   {
     id:'p1', locationId:'loc_kc', type:'partner',
     cardImage:'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iMzQwIiB2aWV3Qm94PSIwIDAgNjAwIDM0MCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImJnIiB4MT0iMCUiIHkxPSIwJSIgeDI9IjEwMCUiIHkyPSIxMDAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3R5bGU9InN0b3AtY29sb3I6IzFhM2EzNTtzdG9wLW9wYWNpdHk6MSIgLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxMDAlIiBzdHlsZT0ic3RvcC1jb2xvcjojMGYyNDIwO3N0b3Atb3BhY2l0eToxIiAvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iZ29sZCIgeDE9IjAlIiB5MT0iMCUiIHgyPSIxMDAlIiB5Mj0iMCUiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdHlsZT0ic3RvcC1jb2xvcjojZDRhMDQ2O3N0b3Atb3BhY2l0eToxIiAvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0eWxlPSJzdG9wLWNvbG9yOiNiMDdhMjA7c3RvcC1vcGFjaXR5OjEiIC8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogIDwvZGVmcz4KICAKICA8IS0tIENhcmQgYmFja2dyb3VuZCAtLT4KICA8cmVjdCB3aWR0aD0iNjAwIiBoZWlnaHQ9IjM0MCIgcng9IjE2IiBmaWxsPSJ1cmwoI2JnKSIgLz4KICAKICA8IS0tIEdvbGQgYWNjZW50IGJhciBsZWZ0IC0tPgogIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSI2IiBoZWlnaHQ9IjM0MCIgcng9IjMiIGZpbGw9InVybCgjZ29sZCkiIC8+CiAgCiAgPCEtLSBHb2xkIGFjY2VudCBsaW5lIHRvcCByaWdodCAtLT4KICA8cmVjdCB4PSI0NDAiIHk9IjAiIHdpZHRoPSIxNjAiIGhlaWdodD0iNCIgcng9IjAiIGZpbGw9InVybCgjZ29sZCkiIG9wYWNpdHk9IjAuNiIgLz4KICAKICA8IS0tIENvbXBhbnkgbmFtZSAtLT4KICA8dGV4dCB4PSI0MiIgeT0iNzIiIGZvbnQtZmFtaWx5PSJHZW9yZ2lhLCBzZXJpZiIgZm9udC1zaXplPSIyOCIgZm9udC13ZWlnaHQ9ImJvbGQiIGZpbGw9IiNmZmZmZmYiIGxldHRlci1zcGFjaW5nPSIxIj5NZXJpZGlhbiBSZWFsdHk8L3RleHQ+CiAgCiAgPCEtLSBUYWdsaW5lIC0tPgogIDx0ZXh0IHg9IjQ0IiB5PSI5OCIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYThjOWM0IiBsZXR0ZXItc3BhY2luZz0iMiI+S0FOU0FTIENJVFkgTUVUUk8gwrcgUkVTSURFTlRJQUwgJmFtcDsgQ09NTUVSQ0lBTDwvdGV4dD4KICAKICA8IS0tIERpdmlkZXIgLS0+CiAgPGxpbmUgeDE9IjQyIiB5MT0iMTE2IiB4Mj0iMzIwIiB5Mj0iMTE2IiBzdHJva2U9IiNkNGEwNDYiIHN0cm9rZS13aWR0aD0iMSIgb3BhY2l0eT0iMC40IiAvPgogIAogIDwhLS0gTmFtZSAtLT4KICA8dGV4dCB4PSI0MiIgeT0iMTU4IiBmb250LWZhbWlseT0iR2VvcmdpYSwgc2VyaWYiIGZvbnQtc2l6ZT0iMjYiIGZpbGw9IiNmZmZmZmYiIGZvbnQtd2VpZ2h0PSJib2xkIj5LYXJlbiBNYXJ0aW5lejwvdGV4dD4KICAKICA8IS0tIFRpdGxlIC0tPgogIDx0ZXh0IHg9IjQ0IiB5PSIxODIiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZmlsbD0iI2E4YzljNCIgbGV0dGVyLXNwYWNpbmc9IjEiPlJFQUxUT1LCriDCtyBMSVNUSU5HIFNQRUNJQUxJU1Q8L3RleHQ+CiAgCiAgPCEtLSBDb250YWN0IGluZm8gLS0+CiAgPHRleHQgeD0iNDQiIHk9IjIyNCIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIiBmaWxsPSIjZDRkNGQ0Ij7wn5OeICAoODE2KSA1NTUtMDkxNjwvdGV4dD4KICA8dGV4dCB4PSI0NCIgeT0iMjQ4IiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNkNGQ0ZDQiPuKcie+4jyAga21hcnRpbmV6QG1lcmlkaWFucmVhbHR5LmNvbTwvdGV4dD4KICA8dGV4dCB4PSI0NCIgeT0iMjcyIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNkNGQ0ZDQiPvCfjJAgIG1lcmlkaWFucmVhbHR5LmNvbTwvdGV4dD4KICAKICA8IS0tIEJvdHRvbSB0YWdsaW5lIC0tPgogIDx0ZXh0IHg9IjQ0IiB5PSIzMTQiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2E4YzljNCIgb3BhY2l0eT0iMC43IiBmb250LXN0eWxlPSJpdGFsaWMiPiJZb3VyIEhvbWUuIFlvdXIgU3RvcnkuIE91ciBDb21taXRtZW50LiI8L3RleHQ+CiAgCiAgPCEtLSBEZWNvcmF0aXZlIGhleGFnb24gdG9wIHJpZ2h0IChCZWUgT3JnYW5pemVkIG1vdGlmKSAtLT4KICA8cG9seWdvbiBwb2ludHM9IjU0MCwzMCA1NjUsNDQgNTY1LDcyIDU0MCw4NiA1MTUsNzIgNTE1LDQ0IiBmaWxsPSJub25lIiBzdHJva2U9IiNkNGEwNDYiIHN0cm9rZS13aWR0aD0iMS41IiBvcGFjaXR5PSIwLjMiIC8+CiAgPHBvbHlnb24gcG9pbnRzPSI1NDAsNDIgNTU2LDUxIDU1Niw2OSA1NDAsNzggNTI0LDY5IDUyNCw1MSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZDRhMDQ2IiBzdHJva2Utd2lkdGg9IjEiIG9wYWNpdHk9IjAuMiIgLz4KICAKICA8IS0tIE1MUyAvIExpY2Vuc2UgYmFkZ2UgLS0+CiAgPHJlY3QgeD0iNDkwIiB5PSIyODAiIHdpZHRoPSI5MiIgaGVpZ2h0PSIyOCIgcng9IjYiIGZpbGw9InJnYmEoMjEyLDE2MCw3MCwwLjE1KSIgLz4KICA8dGV4dCB4PSI1MzYiIHk9IjI5OSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjZDRhMDQ2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBsZXR0ZXItc3BhY2luZz0iMC41Ij5NTFPCriBDRVJUSUZJRUQ8L3RleHQ+Cjwvc3ZnPg==',
@@ -6872,8 +6871,8 @@ const PARTNERS_DATA = [
       { id:'ns4', text:'Sent holiday gift basket', date:null, done:true, doneAt:'Dec 2024', createdAt:'Nov 2024' },
     ],
     notes:[
-      { id:'n1', text:'Met at her open house — very enthusiastic about home organization for listings', ts:'Nov 2024', user:'You' },
-      { id:'n2', text:'Prefers text over calls. Send holiday gift every year — loves Teak & Twine.', ts:'Jan 2025', user:'You' },
+      { id:'n1', text:'Met at her open house - very enthusiastic about home organization for listings', ts:'Nov 2024', user:'You' },
+      { id:'n2', text:'Prefers text over calls. Send holiday gift every year - loves Teak & Twine.', ts:'Jan 2025', user:'You' },
     ],
     referrals:[
       { leadId:'3',  name:'Lisa Patel',      date:'Apr 20', converted:true,  revenue:0 },
@@ -6881,10 +6880,10 @@ const PARTNERS_DATA = [
     ],
     activity:[
       { type:'event',    label:'Met at Denver Business Expo',              ts:'Nov 2024' },
-      { type:'coffee',   label:'Coffee at Snooze — discussed partnership', ts:'Dec 2024' },
+      { type:'coffee',   label:'Coffee at Snooze - discussed partnership', ts:'Dec 2024' },
       { type:'referral', label:'Sent Lisa Patel our way',                  ts:'Apr 20', user:'Karen' },
       { type:'thankyou', label:'Thank-you card + gift sent',               ts:'Apr 22', user:'You' },
-      { type:'call',     label:'Quarterly check-in call — great energy',   ts:'Apr 28', user:'You' },
+      { type:'call',     label:'Quarterly check-in call - great energy',   ts:'Apr 28', user:'You' },
     ],
   },
   {
@@ -6897,15 +6896,15 @@ const PARTNERS_DATA = [
     nextSteps:[
       { id:'ns1', text:'Send referral thank-you cards for April leads', date:'2026-05-15', done:false, createdAt:'May 7' },
     ],
-    notes:[{ id:'n1', text:'Primary contact at ABC — handles all partner referrals personally', ts:'Mar 2025', user:'You' }],
+    notes:[{ id:'n1', text:'Primary contact at ABC - handles all partner referrals personally', ts:'Mar 2025', user:'You' }],
     referrals:[
       { leadId:'johnson1', name:'Mark Johnson', date:'Apr 5',  converted:false, revenue:0 },
       { leadId:'qc1',      name:'David Park',   date:'Apr 18', converted:false, revenue:0 },
     ],
     activity:[
       { type:'event',    label:'Met at Chamber of Commerce mixer', ts:'Mar 2025' },
-      { type:'referral', label:'Sent Mark Johnson — move-in job',  ts:'Apr 5',  user:'Tony' },
-      { type:'referral', label:'Sent David Park — new homeowner',  ts:'Apr 18', user:'Tony' },
+      { type:'referral', label:'Sent Mark Johnson - move-in job',  ts:'Apr 5',  user:'Tony' },
+      { type:'referral', label:'Sent David Park - new homeowner',  ts:'Apr 18', user:'Tony' },
     ],
   },
   {
@@ -6919,16 +6918,16 @@ const PARTNERS_DATA = [
       { id:'ns1', text:'Follow up on Diana Walsh project outcome', date:'2026-05-20', done:false, createdAt:'May 1' },
     ],
     notes:[
-      { id:'n1', text:'Manages high-end remodels — clients always need organizing after. Great fit.', ts:'Feb 2025', user:'You' },
-      { id:'n2', text:'Big golfer — good convo starter', ts:'Mar 2025', user:'You' },
+      { id:'n1', text:'Manages high-end remodels - clients always need organizing after. Great fit.', ts:'Feb 2025', user:'You' },
+      { id:'n2', text:'Big golfer - good convo starter', ts:'Mar 2025', user:'You' },
     ],
     referrals:[
       { leadId:'r4', name:'Diana Walsh', date:'Apr 15', converted:true, revenue:0 },
     ],
     activity:[
-      { type:'call',     label:'Intro call — Karen connected us',          ts:'Feb 2025' },
+      { type:'call',     label:'Intro call - Karen connected us',          ts:'Feb 2025' },
       { type:'coffee',   label:'Met for coffee, discussed cross-referral', ts:'Mar 2025', user:'You' },
-      { type:'referral', label:'Sent Diana Walsh — garage after remodel',  ts:'Apr 15', user:'James' },
+      { type:'referral', label:'Sent Diana Walsh - garage after remodel',  ts:'Apr 15', user:'James' },
     ],
   },
   {
@@ -6939,22 +6938,22 @@ const PARTNERS_DATA = [
     howWeMet:'Intro from Tony Reyes', metDate:'Apr 20', lastContact:'Apr 20',
     isCustomer:false, customerLeadId:null, tags:[],
     nextSteps:[],
-    notes:[{ id:'n1', text:'Handles residential moves — Tony connected us. Following up.', ts:'Apr 20', user:'You' }],
+    notes:[{ id:'n1', text:'Handles residential moves - Tony connected us. Following up.', ts:'Apr 20', user:'You' }],
     referrals:[],
     activity:[{ type:'event', label:'Intro from Tony Reyes', ts:'Apr 20' }],
   },
 
-  // ── Kansas City — Contacts ──────────────────────────────────────────────────
+  // ── Kansas City - Contacts ──────────────────────────────────────────────────
   {
     id:'c1', locationId:'loc_kc', type:'contact',
     name:'Derek Walsh', title:'Site Manager', company:'Walsh Construction', companyId:'co3',
     phone:'(816) 555-0823', email:'derek@walshconstruction.com', website:'walshconstruction.com',
     relationship:'Vendor',
-    howWeMet:'Home show — chatted at the tradeshow booth', metDate:'Apr 10', lastContact:'Apr 10',
+    howWeMet:'Home show - chatted at the tradeshow booth', metDate:'Apr 10', lastContact:'Apr 10',
     stage:'Contact', specialties:[], tier:null, isCustomer:false, customerLeadId:null, tags:[],
-    notes:[{ id:'n1', text:'Works the job sites — good ground-level relationship to maintain', ts:'Apr 10', user:'You' }],
+    notes:[{ id:'n1', text:'Works the job sites - good ground-level relationship to maintain', ts:'Apr 10', user:'You' }],
     referrals:[], nextSteps:[],
-    activity:[{ type:'event', label:'Added as Contact — Home show', ts:'Apr 10' }],
+    activity:[{ type:'event', label:'Added as Contact - Home show', ts:'Apr 10' }],
   },
   {
     id:'c2', locationId:'loc_kc', type:'contact',
@@ -6963,12 +6962,12 @@ const PARTNERS_DATA = [
     relationship:'Vendor',
     howWeMet:'Met on a move-in job at Birchwood Dr', metDate:'Apr 25', lastContact:'Apr 25',
     stage:'Contact', specialties:[], tier:null, isCustomer:false, customerLeadId:null, tags:[],
-    notes:[{ id:'n1', text:'On the ground crew — friendly, talks to new homeowners. Good word of mouth.', ts:'Apr 25', user:'You' }],
+    notes:[{ id:'n1', text:'On the ground crew - friendly, talks to new homeowners. Good word of mouth.', ts:'Apr 25', user:'You' }],
     referrals:[], nextSteps:[],
-    activity:[{ type:'event', label:'Added as Contact — met on job site', ts:'Apr 25' }],
+    activity:[{ type:'event', label:'Added as Contact - met on job site', ts:'Apr 25' }],
   },
 
-  // ── Scottsdale — Partners ───────────────────────────────────────────────────
+  // ── Scottsdale - Partners ───────────────────────────────────────────────────
   {
     id:'p3', locationId:'loc_scottsdale', type:'partner',
     name:'Sofia Reyes', title:'Principal Designer', company:'Reyes Interior Design', companyId:'co4',
@@ -6979,7 +6978,7 @@ const PARTNERS_DATA = [
     nextSteps:[
       { id:'ns1', text:'Send co-marketing proposal', date:'2026-05-20', done:false, createdAt:'May 1' },
     ],
-    notes:[{ id:'n1', text:'Loves our concept — working on a formal referral agreement', ts:'Mar 2025', user:'You' }],
+    notes:[{ id:'n1', text:'Loves our concept - working on a formal referral agreement', ts:'Mar 2025', user:'You' }],
     referrals:[],
     activity:[
       { type:'event', label:'Met at Cherry Creek Art Festival',         ts:'Mar 2025' },
@@ -6996,12 +6995,12 @@ const PARTNERS_DATA = [
     nextSteps:[
       { id:'ns1', text:'Send info packet + pricing for multi-unit clients', date:'2026-05-12', done:false, createdAt:'May 1' },
     ],
-    notes:[{ id:'n1', text:'Manages 40+ properties — massive opportunity if he refers even 10%', ts:'May 2025', user:'You' }],
+    notes:[{ id:'n1', text:'Manages 40+ properties - massive opportunity if he refers even 10%', ts:'May 2025', user:'You' }],
     referrals:[],
     activity:[{ type:'event', label:'Met at Chamber of Commerce mixer', ts:'May 2025' }],
   },
 
-  // ── Omaha — Partners ────────────────────────────────────────────────────────
+  // ── Omaha - Partners ────────────────────────────────────────────────────────
   {
     id:'p8', locationId:'loc_kc', type:'partner',
     name:'Maria Cruz', title:'Property Manager', company:'Denver Realty Group', companyId:null,
@@ -7010,11 +7009,11 @@ const PARTNERS_DATA = [
     howWeMet:'Lisa Patel referral', metDate:'Feb 2025', lastContact:'Apr 20',
     isCustomer:false, customerLeadId:null, tags:[],
     nextSteps:[],
-    notes:[{ id:'n1', text:'Manages several properties in the Cherry Creek area — good source of move-in referrals', ts:'Feb 2025', user:'You' }],
+    notes:[{ id:'n1', text:'Manages several properties in the Cherry Creek area - good source of move-in referrals', ts:'Feb 2025', user:'You' }],
     referrals:[],
     activity:[
       { type:'intro', label:'Introduction via Lisa Patel', ts:'Feb 2025' },
-      { type:'meeting', label:'Coffee meeting — discussed referral arrangement', ts:'Mar 2025', user:'You' },
+      { type:'meeting', label:'Coffee meeting - discussed referral arrangement', ts:'Mar 2025', user:'You' },
     ],
   },
   {
@@ -7025,14 +7024,14 @@ const PARTNERS_DATA = [
     howWeMet:'Omaha REALTOR Expo', metDate:'Apr 2025', lastContact:'Apr 28',
     isCustomer:true, customerLeadId:'4', tags:['top-referrer'],
     nextSteps:[],
-    notes:[{ id:'n1', text:'Was also a client — loved the closet work. Now refers every staging client.', ts:'Apr 28', user:'You' }],
+    notes:[{ id:'n1', text:'Was also a client - loved the closet work. Now refers every staging client.', ts:'Apr 28', user:'You' }],
     referrals:[
       { leadId:'r5', name:'Amanda Chen', date:'Apr 28', converted:false, revenue:0 },
     ],
     activity:[
       { type:'event',    label:'Met at Omaha REALTOR Expo',                ts:'Apr 2025' },
-      { type:'referral', label:'Became a client — Closet + Pantry project', ts:'Apr 25' },
-      { type:'referral', label:'Referred Amanda Chen — new listing',        ts:'Apr 28', user:'Rachel' },
+      { type:'referral', label:'Became a client - Closet + Pantry project', ts:'Apr 25' },
+      { type:'referral', label:'Referred Amanda Chen - new listing',        ts:'Apr 28', user:'Rachel' },
     ],
   },
 ]
@@ -7063,7 +7062,7 @@ function CardViewerModal({ cardImage=null, onClose }) {
   )
 }
 
-// ─── Scan Business Card — Coming Soon ────────────────────────────────────────
+// ─── Scan Business Card - Coming Soon ────────────────────────────────────────
 function ScanCardButton() {
   const [showToast, setShowToast] = useState(false)
   function tap() { setShowToast(true); setTimeout(()=>setShowToast(false), 3000) }
@@ -7138,7 +7137,7 @@ function AddCompanyModal({ onAdd, onClose, partners=[], onUpdatePartner=()=>{} }
           {/* Link existing people */}
           {partners.filter(p=>!p.isDeleted).length>0&&(
             <div>
-              <label style={lbl}>Link People <span style={{ fontSize:'10px', color:'#8a9e9a', textTransform:'none', letterSpacing:0, fontWeight:400 }}>optional — attach existing partners or contacts</span></label>
+              <label style={lbl}>Link People <span style={{ fontSize:'10px', color:'#8a9e9a', textTransform:'none', letterSpacing:0, fontWeight:400 }}>optional - attach existing partners or contacts</span></label>
               <input style={{...inp, marginBottom:'8px'}} placeholder='Search partners and contacts…' value={peopleSearch} onChange={e=>setPeopleSearch(e.target.value)} />
               <div style={{ maxHeight:'160px', overflowY:'auto', display:'grid', gap:'4px' }}>
                 {filteredPeople.slice(0,20).map(p=>{
@@ -7209,7 +7208,7 @@ function AddPartnerModal({ onAdd, onClose, defaultType='partner', companies=[], 
         howWeMet:form.howWeMet, metDate:'Just now', lastContact:'Just now',
         isCustomer:false, customerLeadId:null,
         tags:[], referrals:[], notes:[],
-        activity:[{ type:'event', label:`Added as ${type==='contact'?'Contact':'Partner'}${form.howWeMet?' — '+form.howWeMet:''}`, ts:'Just now' }],
+        activity:[{ type:'event', label:`Added as ${type==='contact'?'Contact':'Partner'}${form.howWeMet?' - '+form.howWeMet:''}`, ts:'Just now' }],
       })
     }
     onClose()
@@ -7234,7 +7233,7 @@ function AddPartnerModal({ onAdd, onClose, defaultType='partner', companies=[], 
             </button>
           ))}
         </div>
-        {type==='contact'&&<p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'14px', marginTop:'-8px' }}>Someone in your network — no referral expected.</p>}
+        {type==='contact'&&<p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'14px', marginTop:'-8px' }}>Someone in your network - no referral expected.</p>}
         {type==='company'&&<p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'14px', marginTop:'-8px' }}>An organization you can link partners and contacts to.</p>}
 
         <div style={{ display:'grid', gap:'12px' }}>
@@ -7393,7 +7392,7 @@ function TouchpointPopup({ partner, onAdd, onClose }) {
   function save() {
     if (!type) return
     const t = TOUCHPOINT_TYPES.find(x=>x.key===type)
-    onAdd({ type, label:`${t.label}${note?' — '+note:''}`, ts:'Just now', user:'You' })
+    onAdd({ type, label:`${t.label}${note?' - '+note:''}`, ts:'Just now', user:'You' })
     onClose()
   }
 
@@ -7413,7 +7412,7 @@ function TouchpointPopup({ partner, onAdd, onClose }) {
             </button>
           ))}
         </div>
-        <input style={{...inp, marginBottom:'1rem'}} placeholder='Notes — what was discussed?' value={note} onChange={e=>setNote(e.target.value)} />
+        <input style={{...inp, marginBottom:'1rem'}} placeholder='Notes - what was discussed?' value={note} onChange={e=>setNote(e.target.value)} />
         <div style={{ display:'flex', gap:'10px' }}>
           <button onClick={onClose} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
           <button onClick={save} disabled={!type} style={{ flex:2, padding:'11px', background:type?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:type?'white':'#9ca3af', cursor:type?'pointer':'not-allowed' }}>Save</button>
@@ -7501,7 +7500,7 @@ function AddPartnerNotePopup({ onAdd, onClose }) {
           <h3 style={{ fontSize:'16px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>🐝 Add Note</h3>
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
         </div>
-        <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'1rem' }}>Stays with this partner — personality, preferences, reminders</p>
+        <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'1rem' }}>Stays with this partner - personality, preferences, reminders</p>
         <textarea autoFocus value={text} onChange={e=>setText(e.target.value)} placeholder='e.g. Prefers morning calls, loves golf, send holiday gifts...' style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none', boxSizing:'border-box', height:'100px', resize:'none', marginBottom:'1.25rem' }} />
         <div style={{ display:'flex', gap:'10px' }}>
           <button onClick={onClose} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
@@ -7782,7 +7781,7 @@ function PartnerNextSteps({ partner, onUpdate }) {
 
       {pending.length===0&&!showAdd&&(
         <div style={{ padding:'14px 14px' }}>
-          <p style={{ fontSize:'12px', color:'#b0c0bc', fontStyle:'italic' }}>No next steps — tap + Add to plan your next move</p>
+          <p style={{ fontSize:'12px', color:'#b0c0bc', fontStyle:'italic' }}>No next steps - tap + Add to plan your next move</p>
         </div>
       )}
       {pending.map((step,i)=>{
@@ -7876,7 +7875,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
         <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, height:'88vh', display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.15)' }}>
           <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'12px auto 0' }} />
 
-          {/* Header — clean: identity + tier + stage only */}
+          {/* Header - clean: identity + tier + stage only */}
           <div style={{ padding:'0.75rem 1.25rem 0.75rem', borderBottom:'1px solid rgba(0,0,0,0.06)', flexShrink:0 }}>
             <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:'12px' }}>
               <div style={{ display:'flex', alignItems:'center', gap:'12px', flex:1, minWidth:0 }}>
@@ -7898,7 +7897,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
                     </button>
                     <button onClick={()=>setPopup('editName')} style={{ background:'none', border:'none', cursor:'pointer', fontSize:'10px', color:'#c8d8d4', padding:0, fontFamily:'inherit' }}>✏️</button>
                   </div>
-                  {/* Stage + Tier — partners only; contacts get a Convert button */}
+                  {/* Stage + Tier - partners only; contacts get a Convert button */}
                   <div style={{ display:'flex', gap:'6px', alignItems:'center', flexWrap:'wrap' }}>
                     {partner.type==='contact' ? (
                       <>
@@ -7966,7 +7965,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
                   ))}
                 </div>
                 
-                {/* Related Records — Job Contact On */}
+                {/* Related Records - Job Contact On */}
                 {(()=>{
                   const jobContactOn = people.filter(p=>
                     p.jobContacts?.some(c=>c.sourceId===partner.id)
@@ -8029,7 +8028,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
                 </div>
                 <PartnerNextSteps partner={partner} onUpdate={function(patch){ update(patch) }} />
 
-                {/* Related Records — Job Contact On */}
+                {/* Related Records - Job Contact On */}
                 {(()=>{
                   const jobContactOn = people.filter(p=>
                     p.jobContacts?.some(c=>c.sourceId===partner.id)
@@ -8098,7 +8097,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
                 </div>
               )) : (
                 <div onClick={()=>setPopup('note')} style={{ padding:'12px', textAlign:'center', background:'rgba(212,160,70,0.04)', border:'1px dashed rgba(212,160,70,0.2)', borderRadius:'9px', cursor:'pointer' }}>
-                  <p style={{ fontSize:'12px', color:'#c8a050' }}>No notes yet — tap to add</p>
+                  <p style={{ fontSize:'12px', color:'#c8a050' }}>No notes yet - tap to add</p>
                 </div>
               )}
             </div>
@@ -8106,7 +8105,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
             </div>
             )}
             {pTab==='referrals'&&<>
-            {/* Referrals — linked Client records */}
+            {/* Referrals - linked Client records */}
             {(()=>{
               const linkedClient = people.filter(p=>p.referredBy===partner.id)
               const hasOldReferrals = (partner.referrals||[]).length > 0
@@ -8146,7 +8145,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
               )
             })()}
 
-              {/* Job Contact On — records where this partner appears as a job contact */}
+              {/* Job Contact On - records where this partner appears as a job contact */}
               {(()=>{
                 const jobContactOn = people.filter(p=>
                   p.jobContacts?.some(c=>c.sourceId===partner.id)
@@ -8215,7 +8214,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
                     update({
                       isCustomer:true,
                       stage:'Client',
-                      activity:[...partner.activity,{ type:'stage', label:'Added as client — Hive record created', ts:now, user:'You' }]
+                      activity:[...partner.activity,{ type:'stage', label:'Added as client - Hive record created', ts:now, user:'You' }]
                     })
                     onAddToHive&&onAddToHive(partner)
                   }} style={{ flex:1, padding:'10px', background:'transparent', border:'1.5px solid rgba(212,160,70,0.4)', borderRadius:'10px', fontSize:'12px', fontFamily:'inherit', color:'#d4a046', cursor:'pointer' }}>
@@ -8272,7 +8271,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
         </div>
       )}
       {popup==='editName'&&(()=>{
-      {/* Universal info edit modal — same for partners and contacts */}
+      {/* Universal info edit modal - same for partners and contacts */}
 
       {showCompanyModal&&(
         <div style={{ position:'fixed', inset:0, zIndex:10020, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px', background:'rgba(26,46,43,0.45)' }}>
@@ -8475,7 +8474,7 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
             ))}
           </div>
 
-          {/* Stats — partners only */}
+          {/* Stats - partners only */}
           {partnerTab==='partners'&&<div style={{ display:'flex', gap:'8px', marginTop:'1rem' }}>
             {[
               { label:'Referrals',     value:totalReferrals },
@@ -8501,7 +8500,7 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
             onDelete={id=>{ setSavedViews(p=>p.filter(v=>v.id!==id)); if(activeViewId===id) setActiveViewId(null) }}
             onSave={name=>{ const id=`v${Date.now()}`; setSavedViews(p=>[...p,{ id, name, filters:{ stageFilter, tierFilter, specFilter, tagFilter } }]); setActiveViewId(id) }}
           />
-          {/* Search + Filters — hidden in companies tab */}
+          {/* Search + Filters - hidden in companies tab */}
           {partnerTab!=='companies'&&<div style={{ display:'flex', gap:'8px' }}>
             <input type="text"
               placeholder={partnerTab==='contacts'?'Search contacts by name, company…':'Search partners by name, company…'}
@@ -8514,11 +8513,11 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
             </button>}
           </div>}
 
-          {/* Filter panel — partners only */}
+          {/* Filter panel - partners only */}
           {showFilters&&partnerTab==='partners'&&(
             <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', padding:'16px', display:'grid', gap:'16px' }}>
 
-              {/* Stage — partners only */}
+              {/* Stage - partners only */}
               {partnerTab==='partners'&&<div>
                 <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>Stage</p>
                 <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
@@ -8713,7 +8712,7 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
                   {search ? `No matching ${partnerTab}` : `No ${partnerTab} yet`}
                 </p>
                 <p style={{ fontSize:'13px', color:'#8a9e9a' }}>
-                  {search ? `No results for "${search}"` : partnerTab==='contacts'?'Add contacts from your network — neighbors, realtors, past clients':'Add your first partner to start tracking referrals'}
+                  {search ? `No results for "${search}"` : partnerTab==='contacts'?'Add contacts from your network - neighbors, realtors, past clients':'Add your first partner to start tracking referrals'}
                 </p>
               </div>
             )}
@@ -8723,10 +8722,10 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
 
       {selected&&<PartnerPanel partner={selected} people={people} companies={allCompanies} onCreateCompany={co=>setCompanies(prev=>[...prev,co])} onClose={()=>setSelected(null)} onUpdate={updatePartner} onDelete={(id)=>{ setPartners(prev=>prev.map(p=>p.id===id?{...p,isDeleted:true,deletedAt:new Date().toISOString()}:p)); setSelected(null) }} onAddToHive={(p,mode)=>{ onAddToHive&&onAddToHive(p,mode); if(mode==='view'||!mode) setSelected(null) }} onOpenCompanyModal={(p)=>{ setCompanyModalPartner(p); setCompanyModalQ(p.company||'') }} onOpenInfoEdit={(p)=>setEditingPartnerInfo(p)} onViewCard={(p)=>setViewingCard(p)} />}
 
-      {viewingCard&&<CardViewerModal cardImage={viewingCard.cardImage||null} onClose={()=>setViewingCard(null)} />}}}
+      {viewingCard&&<CardViewerModal cardImage={viewingCard.cardImage||null} onClose={()=>setViewingCard(null)} />}
 
-      {/* Company modal rendered at screen level — outside PartnerPanel to avoid z-index/touch issues */}
-      {/* Partner/Contact info edit modal — at screen level to avoid iOS z-index issues */}
+      {/* Company modal rendered at screen level - outside PartnerPanel to avoid z-index/touch issues */}
+      {/* Partner/Contact info edit modal - at screen level to avoid iOS z-index issues */}
       {editingPartnerInfo&&(
         <EntityInfoEditModal
           fields={{
@@ -8821,8 +8820,8 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
             <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'16px' }}>Each lives in its own database and can be linked together.</p>
             <div style={{ display:'grid', gap:'8px' }}>
               {[
-                { type:'partner', icon:'🤝', label:'Partner', desc:'Actively refers business — realtor, stager, mover' },
-                { type:'contact', icon:'👤', label:'Contact', desc:'Someone in your network — neighbor, past client, vendor' },
+                { type:'partner', icon:'🤝', label:'Partner', desc:'Actively refers business - realtor, stager, mover' },
+                { type:'contact', icon:'👤', label:'Contact', desc:'Someone in your network - neighbor, past client, vendor' },
                 { type:'company', icon:'🏢', label:'Company', desc:'Group partners and contacts under one organization' },
               ].map(opt=>(
                 <button key={opt.type} onClick={()=>setAddType(opt.type)}
@@ -8865,12 +8864,12 @@ const TEMPLATE_VARIABLES = [
 const DEFAULT_TEMPLATES = [
   {
     id:'t1', name:'Welcome Email', type:'email', tag:'welcome',
-    subject:'Welcome, {{first_name}} — let\'s get organized 🐝',
+    subject:'Welcome, {{first_name}} - let\'s get organized 🐝',
     body:`Hi {{first_name}},
 
 Thanks so much for reaching out! I'm {{organizer_name}} with Bee Organized {{location_name}} and I'm thrilled you connected with us.
 
-We specialize in creating calm, functional spaces that actually work for your life — from kitchens and closets to whole-home transformations.
+We specialize in creating calm, functional spaces that actually work for your life - from kitchens and closets to whole-home transformations.
 
 I'd love to learn more about what you're working on. Would you be open to a quick call this week?
 
@@ -8893,7 +8892,7 @@ Here's what a typical session includes:
 • Strategic placement so things are easy to find and put back
 • A customized system built around your lifestyle
 
-Most clients tell us they feel a weight lifted the moment we finish — not just from the clutter, but from the mental load of knowing where everything is.
+Most clients tell us they feel a weight lifted the moment we finish - not just from the clutter, but from the mental load of knowing where everything is.
 
 Ready to get started? Book a free assessment here:
 {{booking_link}}
@@ -8909,9 +8908,9 @@ Bee Organized {{location_name}}`,
 
 I thought you might enjoy hearing from some of our recent clients:
 
-"I can actually find things now. It sounds simple but it's changed my mornings completely." — Sarah M.
+"I can actually find things now. It sounds simple but it's changed my mornings completely." - Sarah M.
 
-"They transformed our pantry in one afternoon. Worth every penny." — Jennifer T.
+"They transformed our pantry in one afternoon. Worth every penny." - Jennifer T.
 
 We serve {{service_area}} and would love to do the same for you.
 
@@ -8926,13 +8925,13 @@ Bee Organized {{location_name}}`,
     subject:'Still thinking about it? Let\'s chat.',
     body:`Hi {{first_name}},
 
-I know life gets busy — no pressure at all.
+I know life gets busy - no pressure at all.
 
 If you're still thinking about getting organized, I'd love to answer any questions you have. Sometimes it helps to just talk through the space before committing.
 
 You can book a free 20-minute call here: {{booking_link}}
 
-Or just reply to this email — I'm happy to chat.
+Or just reply to this email - I'm happy to chat.
 
 {{organizer_name}}
 Bee Organized {{location_name}}
@@ -8954,7 +8953,7 @@ Bee Organized {{location_name}}
   {
     id:'t7', name:'Booking Link Text', type:'sms', tag:'cta',
     subject:'',
-    body:`Hi {{first_name}}! Ready when you are 🐝 Book your free assessment here: {{booking_link}} — takes 2 min!`,
+    body:`Hi {{first_name}}! Ready when you are 🐝 Book your free assessment here: {{booking_link}} - takes 2 min!`,
     usedIn:['direct-book:step1'],
   },
   {
@@ -8962,11 +8961,11 @@ Bee Organized {{location_name}}
     subject:'',
     body:`Hi, may I speak with {{first_name}}?
 
-[If available]: Hi {{first_name}}, this is {{organizer_name}} calling from Bee Organized {{location_name}}. You recently reached out about getting organized — I just wanted to introduce myself and see if you had any questions!
+[If available]: Hi {{first_name}}, this is {{organizer_name}} calling from Bee Organized {{location_name}}. You recently reached out about getting organized - I just wanted to introduce myself and see if you had any questions!
 
 [Goal]: Schedule an in-person or virtual assessment.
 
-[If voicemail]: Hi {{first_name}}, this is {{organizer_name}} from Bee Organized {{location_name}}. I'm just following up on your inquiry — would love to chat! Give me a call back at {{phone}} or book a time at {{booking_link}}. Talk soon!`,
+[If voicemail]: Hi {{first_name}}, this is {{organizer_name}} from Bee Organized {{location_name}}. I'm just following up on your inquiry - would love to chat! Give me a call back at {{phone}} or book a time at {{booking_link}}. Talk soon!`,
     usedIn:['quick-connect:step2','personal-touch:step1'],
   },
   {
@@ -8978,7 +8977,7 @@ I wanted to send a personal note rather than just another automated email.
 
 I genuinely believe we could create something special in your space. Every home is different and I love working through the puzzle of what system will work best for you.
 
-If you're ready to take the next step — even just to look around — I'd love to come by for a free assessment.
+If you're ready to take the next step - even just to look around - I'd love to come by for a free assessment.
 
 {{booking_link}}
 
@@ -8989,12 +8988,12 @@ Bee Organized {{location_name}}
 {{phone}}`,
     usedIn:['personal-touch:step2'],
   },
-  // Path A — Availability + Rates (Move)
+  // Path A - Availability + Rates (Move)
   { id:'ta1', name:'Move · Avail + Rates', type:'email', tag:'cta',
     subject:'{{first_name}}, do you have availability this week?',
     body:`Hi {{first_name}},
 
-Moving is a lot — we want to make it as smooth as possible.
+Moving is a lot - we want to make it as smooth as possible.
 
 Do you have any availability this week for us to come by and get your space organized? Even a few hours can make a huge difference on move day.
 
@@ -9007,14 +9006,14 @@ Bee Organized {{location_name}}
 {{phone}}`,
     usedIn:['move-a:step2'],
   },
-  // Path A — Availability + Rates (General)
+  // Path A - Availability + Rates (General)
   { id:'ta2', name:'General · Avail + Rates', type:'email', tag:'cta',
     subject:'{{first_name}}, do you have availability this week?',
     body:`Hi {{first_name}},
 
 Do you have any availability this week to get started?
 
-We work in 3-hour minimum sessions at $X/hr for a two-organizer team. Most clients see significant progress in a single session — and many spaces are fully transformed in one day.
+We work in 3-hour minimum sessions at $X/hr for a two-organizer team. Most clients see significant progress in a single session - and many spaces are fully transformed in one day.
 
 What does your schedule look like?
 
@@ -9023,9 +9022,9 @@ Bee Organized {{location_name}}
 {{phone}}`,
     usedIn:['general-a:step3'],
   },
-  // Path B — Calendar + Rates (Move)
+  // Path B - Calendar + Rates (Move)
   { id:'tb1', name:'Move · Calendar + Rates', type:'email', tag:'cta',
-    subject:'Book a quick call — let\u2019s plan your move, {{first_name}}',
+    subject:'Book a quick call - let\u2019s plan your move, {{first_name}}',
     body:`Hi {{first_name}},
 
 Moving is hectic and we want to make sure we set you up for success.
@@ -9041,14 +9040,14 @@ We'd love to help make this move your smoothest one yet.
 Bee Organized {{location_name}}`,
     usedIn:['move-b:step2'],
   },
-  // Path B — Calendar + Rates (General)
+  // Path B - Calendar + Rates (General)
   { id:'tb2', name:'General · Calendar + Rates', type:'email', tag:'cta',
     subject:'Book a free discovery call, {{first_name}}',
     body:`Hi {{first_name}},
 
 I'd love to learn more about your space before we dive in.
 
-Book a free 15-minute discovery call here — no commitment, just a conversation:
+Book a free 15-minute discovery call here - no commitment, just a conversation:
 {{booking_link}}
 
 For reference, our rates are $X/hr for a two-organizer team (3-hr minimum).
@@ -9059,12 +9058,12 @@ Looking forward to connecting!
 Bee Organized {{location_name}}`,
     usedIn:['general-b:step3'],
   },
-  // Path C — Availability only (Move)
+  // Path C - Availability only (Move)
   { id:'tc1', name:'Move · Availability Only', type:'email', tag:'cta',
-    subject:'{{first_name}} — do you have time this week?',
+    subject:'{{first_name}} - do you have time this week?',
     body:`Hi {{first_name}},
 
-With your move coming up, I just wanted to check — do you have any availability this week?
+With your move coming up, I just wanted to check - do you have any availability this week?
 
 Even a few hours of organization before or after the move can make the whole experience so much less overwhelming.
 
@@ -9074,12 +9073,12 @@ What's your schedule looking like?
 Bee Organized {{location_name}}`,
     usedIn:['move-c:step2'],
   },
-  // Path C — Availability only (General)
+  // Path C - Availability only (General)
   { id:'tc2', name:'General · Availability Only', type:'email', tag:'cta',
     subject:'{{first_name}}, do you have time this week?',
     body:`Hi {{first_name}},
 
-Just wanted to check in — do you have any availability this week to get started on your space?
+Just wanted to check in - do you have any availability this week to get started on your space?
 
 Reply here and we'll find a time that works for you.
 
@@ -9087,12 +9086,12 @@ Reply here and we'll find a time that works for you.
 Bee Organized {{location_name}}`,
     usedIn:['general-c:step3'],
   },
-  // Path D — Availability + Calendar + Phone (Move)
+  // Path D - Availability + Calendar + Phone (Move)
   { id:'td1', name:'Move · Avail + Calendar + Phone', type:'email', tag:'cta',
-    subject:'{{first_name}} — a few ways to connect',
+    subject:'{{first_name}} - a few ways to connect',
     body:`Hi {{first_name}},
 
-Moving week is almost here — let's make sure your space is ready.
+Moving week is almost here - let's make sure your space is ready.
 
 A few ways to connect with us:
 
@@ -9102,15 +9101,15 @@ A few ways to connect with us:
 
 📞 Prefer to just call? Reach us at {{phone}}
 
-Whatever works best for you — we're here!
+Whatever works best for you - we're here!
 
 {{organizer_name}}
 Bee Organized {{location_name}}`,
     usedIn:['move-d:step2'],
   },
-  // Path D — Availability + Calendar + Phone (General)
+  // Path D - Availability + Calendar + Phone (General)
   { id:'td2', name:'General · Avail + Calendar + Phone', type:'email', tag:'cta',
-    subject:'{{first_name}} — let’s find a time',
+    subject:'{{first_name}} - let’s find a time',
     body:`Hi {{first_name}},
 
 A few easy ways to connect and get your project started:
@@ -9567,7 +9566,7 @@ function StepTemplatePicker({ step, templates, onSelect, onClose, smsEnabled=tru
   )
 }
 
-// Pricing — managed by super admin (defaults; overridden by APP_PRICING state in App)
+// Pricing - managed by super admin (defaults; overridden by APP_PRICING state in App)
 const DEFAULT_ROLE_PRICING = {
   owner:    550,
   manager:  425,
@@ -9663,7 +9662,7 @@ const DEFAULT_SETTINGS = {
   },
 }
 
-// Path CTA styles — apply to either Move or General leads
+// Path CTA styles - apply to either Move or General leads
 const PATH_STYLES = [
   {
     id:'path-a', label:'Path A', icon:'📅',
@@ -9680,7 +9679,7 @@ const PATH_STYLES = [
   {
     id:'path-c', label:'Path C', icon:'📲',
     cta:'Availability check only',
-    desc:'Simply asks "do you have availability this week?" — no rates or links',
+    desc:'Simply asks "do you have availability this week?" - no rates or links',
     tags:['availability'],
   },
   {
@@ -9698,14 +9697,14 @@ const PATH_STYLES = [
 ]
 
 const DRIP_PATHS_CONFIG = [
-  { id:'move-a',    name:'Move · New Lead Path A',    icon:'📦', projectType:'move',    styleId:'path-a', desc:'Move clients — availability check + rates' },
-  { id:'move-b',    name:'Move · New Lead Path B',    icon:'📦', projectType:'move',    styleId:'path-b', desc:'Move clients — calendar link + rates' },
-  { id:'move-c',    name:'Move · Path C',    icon:'📦', projectType:'move',    styleId:'path-c', desc:'Move clients — availability check only' },
-  { id:'move-d',    name:'Move · Path D',    icon:'📦', projectType:'move',    styleId:'path-d', desc:'Move clients — availability + calendar + phone' },
-  { id:'general-a', name:'General · New Lead Path A', icon:'🏠', projectType:'general', styleId:'path-a', desc:'All other projects — availability check + rates' },
-  { id:'general-b', name:'General · New Lead Path B', icon:'🏠', projectType:'general', styleId:'path-b', desc:'All other projects — calendar link + rates' },
-  { id:'general-c', name:'General · New Lead Path C', icon:'🏠', projectType:'general', styleId:'path-c', desc:'All other projects — availability check only' },
-  { id:'general-d', name:'General · New Lead Path D', icon:'🏠', projectType:'general', styleId:'path-d', desc:'All other projects — availability + calendar + phone' },
+  { id:'move-a',    name:'Move · New Lead Path A',    icon:'📦', projectType:'move',    styleId:'path-a', desc:'Move clients - availability check + rates' },
+  { id:'move-b',    name:'Move · New Lead Path B',    icon:'📦', projectType:'move',    styleId:'path-b', desc:'Move clients - calendar link + rates' },
+  { id:'move-c',    name:'Move · Path C',    icon:'📦', projectType:'move',    styleId:'path-c', desc:'Move clients - availability check only' },
+  { id:'move-d',    name:'Move · Path D',    icon:'📦', projectType:'move',    styleId:'path-d', desc:'Move clients - availability + calendar + phone' },
+  { id:'general-a', name:'General · New Lead Path A', icon:'🏠', projectType:'general', styleId:'path-a', desc:'All other projects - availability check + rates' },
+  { id:'general-b', name:'General · New Lead Path B', icon:'🏠', projectType:'general', styleId:'path-b', desc:'All other projects - calendar link + rates' },
+  { id:'general-c', name:'General · New Lead Path C', icon:'🏠', projectType:'general', styleId:'path-c', desc:'All other projects - availability check only' },
+  { id:'general-d', name:'General · New Lead Path D', icon:'🏠', projectType:'general', styleId:'path-d', desc:'All other projects - availability + calendar + phone' },
   { id:'custom',    name:'Custom',           icon:'✏️', projectType:'any',     styleId:'custom', desc:'Build your own sequence' },
 ]
 
@@ -9827,7 +9826,7 @@ function JobberConnectionCard({ settings, updateLocation }) {
       </div>
       {status==='disconnected'&&(
         <div style={{ padding:'8px 14px 10px', borderTop:'1px solid rgba(0,0,0,0.05)', background:'rgba(239,68,68,0.03)' }}>
-          <p style={{ fontSize:'11px', color:'#ef4444' }}>Connection lost — reconnect to resume syncing leads, jobs, and invoices.</p>
+          <p style={{ fontSize:'11px', color:'#ef4444' }}>Connection lost - reconnect to resume syncing leads, jobs, and invoices.</p>
         </div>
       )}
     </div>
@@ -9852,7 +9851,7 @@ function ClientImportCard({ isJobberConnected, locationId }) {
         <span style={{ fontSize:'16px' }}>📋</span>
         <div>
           <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Client Import</p>
-          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Skipped — tap to import when ready</p>
+          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Skipped - tap to import when ready</p>
         </div>
       </div>
       <button onClick={()=>setSkipped(false)}
@@ -10094,13 +10093,13 @@ function SmsAddonCard({ settings, updateLocation }) {
   )
 }
 
-// ─── Subscription Card (Profile — simple recap) ───────────────────────────────
+// ─── Subscription Card (Profile - simple recap) ───────────────────────────────
 // ─── Billing History Sheet ────────────────────────────────────────────────────
 const BILLING_HISTORY = [
-  { id:'inv001', date:'Mar 1, 2026',  desc:'Annual Renewal — Owner + 2 seats + SMS', amount:1075, method:'ACH ····7823', status:'paid' },
+  { id:'inv001', date:'Mar 1, 2026',  desc:'Annual Renewal - Owner + 2 seats + SMS', amount:1075, method:'ACH ····7823', status:'paid' },
   { id:'inv002', date:'Jan 12, 2026', desc:'SMS Messaging Add-on (prorated)',         amount:18,   method:'ACH ····7823', status:'paid' },
-  { id:'inv003', date:'Oct 15, 2025', desc:'Activation — Owner seat (prorated)',      amount:314,  method:'ACH ····7823', status:'paid' },
-  { id:'inv004', date:'Oct 15, 2025', desc:'Manager seat — Jessica Rivera (prorated)',amount:243,  method:'ACH ····7823', status:'paid' },
+  { id:'inv003', date:'Oct 15, 2025', desc:'Activation - Owner seat (prorated)',      amount:314,  method:'ACH ····7823', status:'paid' },
+  { id:'inv004', date:'Oct 15, 2025', desc:'Manager seat - Jessica Rivera (prorated)',amount:243,  method:'ACH ····7823', status:'paid' },
 ]
 
 function BillingHistorySheet({ onClose }) {
@@ -10566,13 +10565,13 @@ function SmsVoiceInfoModal({ onClose }) {
     {
       icon:'💬', name:'SMS Basic', pop:false,
       tag:'Automated outbound texting',
-      desc:'Send pre-written text sequences automatically when a lead hits a new stage. Set it once — Bee Hub handles the follow-up so nothing slips through the cracks.',
+      desc:'Send pre-written text sequences automatically when a lead hits a new stage. Set it once - Bee Hub handles the follow-up so nothing slips through the cracks.',
       features:['Stage-triggered SMS drips','Pre-written message templates','Opt-out handled automatically','Works alongside your email drip paths'],
     },
     {
       icon:'↔️', name:'SMS Pro', pop:true,
       tag:'Two-way conversations',
-      desc:'When a client texts back, Bee Hub routes the reply into their record. A suggested response is drafted automatically based on the conversation — you review and send in one tap.',
+      desc:'When a client texts back, Bee Hub routes the reply into their record. A suggested response is drafted automatically based on the conversation - you review and send in one tap.',
       features:['Inbound replies routed to client record','AI-drafted reply suggestions','Reply from inside Bee Hub','Full conversation history on client card'],
     },
     {
@@ -10584,7 +10583,7 @@ function SmsVoiceInfoModal({ onClose }) {
     {
       icon:'📆', name:'Autonomous Scheduling', pop:false, preview:true,
       tag:'Assessments booked without lifting a finger',
-      desc:'When a client texts saying they\'re ready to meet, Bee Hub detects the intent, checks the ZB\'s location calendar for real availability, texts back options on their behalf, and schedules the confirmed assessment directly into Jobber — without the ZB lifting a finger.',
+      desc:'When a client texts saying they\'re ready to meet, Bee Hub detects the intent, checks the ZB\'s location calendar for real availability, texts back options on their behalf, and schedules the confirmed assessment directly into Jobber - without the ZB lifting a finger.',
       features:['Detects booking intent from client replies','Reads ZB location calendar for live availability','Texts 2–3 time options to the client','Schedules confirmed assessment into Jobber','Sends confirmation text to the client automatically'],
     },
   ]
@@ -10593,7 +10592,7 @@ function SmsVoiceInfoModal({ onClose }) {
     {
       icon:'📲', name:'Voice Basic', pop:false,
       tag:'Click-to-call & smart routing',
-      desc:'Call any client directly from their record with one tap. Inbound calls from leads route straight to your cell. If you miss one, they automatically get a text — so no lead goes cold.',
+      desc:'Call any client directly from their record with one tap. Inbound calls from leads route straight to your cell. If you miss one, they automatically get a text - so no lead goes cold.',
       features:['Click-to-call from client card','Inbound call routing to your cell','Missed call auto-text','Local presence dialing'],
     },
     {
@@ -10605,7 +10604,7 @@ function SmsVoiceInfoModal({ onClose }) {
     {
       icon:'🧠', name:'Voice AI', pop:false,
       tag:'Your calls, summarized instantly',
-      desc:'After every call, Bee Hub reads the transcript and writes a one-line summary, suggests your next action, and flags anything urgent — so you always know exactly where things stand.',
+      desc:'After every call, Bee Hub reads the transcript and writes a one-line summary, suggests your next action, and flags anything urgent - so you always know exactly where things stand.',
       features:['One-line call summary generated automatically','Suggested next action after every call','Urgent flag for high-priority follow-ups','Summary pushed to client timeline'],
     },
   ]
@@ -10652,7 +10651,7 @@ function SmsVoiceInfoModal({ onClose }) {
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'8px' }}>
             <div>
               <p style={{ fontSize:'18px', fontWeight:700, color:'white', fontFamily:'Georgia,serif', marginBottom:'4px' }}>📱 SMS & Voice</p>
-              <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.8)', lineHeight:'1.5' }}>Reach clients faster, follow up automatically, and never miss a call — all inside Bee Hub.</p>
+              <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.8)', lineHeight:'1.5' }}>Reach clients faster, follow up automatically, and never miss a call - all inside Bee Hub.</p>
             </div>
             <button onClick={onClose} style={{ background:'rgba(255,255,255,0.1)', border:'none', borderRadius:'8px', width:'30px', height:'30px', color:'rgba(168,201,196,0.8)', fontSize:'18px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, marginLeft:'12px' }}>×</button>
           </div>
@@ -10679,7 +10678,7 @@ function SmsVoiceInfoModal({ onClose }) {
           {/* CTA */}
           <div style={{ padding:'14px', background:'rgba(168,201,196,0.07)', border:'1px solid rgba(168,201,196,0.2)', borderRadius:'12px', textAlign:'center', marginTop:'4px' }}>
             <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'4px' }}>Want early access?</p>
-            <p style={{ fontSize:'11px', color:'#8a9e9a', marginBottom:'10px', lineHeight:'1.5' }}>Let your support team know — you'll be first in line when SMS & Voice launches.</p>
+            <p style={{ fontSize:'11px', color:'#8a9e9a', marginBottom:'10px', lineHeight:'1.5' }}>Let your support team know - you'll be first in line when SMS & Voice launches.</p>
             {notified ? (
               <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:'8px', padding:'9px 22px', background:'rgba(34,197,94,0.08)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:'9px' }}>
                 <span style={{ fontSize:'14px' }}>✅</span>
@@ -10819,7 +10818,7 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
           {pastDueCount>0&&(
             <div style={{ margin:'0 12px 12px', padding:'8px 12px', background:'rgba(239,68,68,0.15)', border:'1px solid rgba(239,68,68,0.3)', borderRadius:'8px', display:'flex', alignItems:'center', gap:'6px' }}>
               <span>⚠️</span>
-              <p style={{ fontSize:'12px', color:'#fca5a5', fontWeight:500 }}>{pastDueCount} seat{pastDueCount>1?'s':''} past due — tap member to resolve</p>
+              <p style={{ fontSize:'12px', color:'#fca5a5', fontWeight:500 }}>{pastDueCount} seat{pastDueCount>1?'s':''} past due - tap member to resolve</p>
             </div>
           )}
         </div>
@@ -10864,7 +10863,7 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
         })}
       </div>
 
-      {/* Seat pricing reference — wraps on mobile */}
+      {/* Seat pricing reference - wraps on mobile */}
       <div style={{ margin:'12px 12px 16px' }}>
         <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Seat Pricing</p>
         <div style={{ display:'flex', gap:'5px', flexWrap:'wrap' }}>
@@ -11334,7 +11333,7 @@ function TemplatePreviewModal({ template, settings, onClose }) {
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
         </div>
 
-        {/* View mode toggle — email only */}
+        {/* View mode toggle - email only */}
         {!isSMS && !isCall && (
           <div style={{ padding:'8px 16px', borderBottom:'1px solid rgba(0,0,0,0.05)', display:'flex', gap:'6px', flexShrink:0 }}>
             {['desktop','mobile','text'].map(m=>(
@@ -11528,10 +11527,10 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
       const newT = { ...data, id:`t${Date.now()}`, tag:'custom', usedIn:[] }
       setTemplates(prev=>[...prev, newT])
     } else if (isSuperAdmin) {
-      // Super admin editing master — updates master for all
+      // Super admin editing master - updates master for all
       setTemplates(prev=>prev.map(t=>t.id===editingTemplate.master.id?{...t,...data}:t))
     } else {
-      // Franchise editing — saves as location copy, master untouched
+      // Franchise editing - saves as location copy, master untouched
       const masterId = editingTemplate.master.id
       setLocationOverrides(prev=>({ ...prev, [masterId]:{ ...data, masterTemplateId:masterId, savedAt:new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'}) } }))
     }
@@ -11568,7 +11567,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
           </button>
         )}
         <h1 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'white', marginBottom:'1rem' }}>Settings ⚙️</h1>
-        {/* Section tabs — short labels fit portrait mobile without overflow */}
+        {/* Section tabs - short labels fit portrait mobile without overflow */}
         <div style={{ position:'relative', width:'100%', overflowX:'hidden' }}>
           <div style={{ display:'flex', gap:'2px', width:'100%' }}>
             {sections.map(sec=>{
@@ -11613,7 +11612,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                 { label:'Change Password',  icon:'🔑', color:'#1a2e2b' },
                 { label:'Sign Out',         icon:'🚪', color:'#ef4444' },
               ].map(item=>(
-                <button key={item.label} onClick={()=>alert(`${item.label} — coming soon`)} style={{ width:'100%', padding:'14px 16px', background:'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
+                <button key={item.label} onClick={()=>alert(`${item.label} - coming soon`)} style={{ width:'100%', padding:'14px 16px', background:'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
                   <span style={{ fontSize:'18px' }}>{item.icon}</span>
                   <span style={{ fontSize:'14px', fontWeight:500, color:item.color }}>{item.label}</span>
                   <span style={{ marginLeft:'auto', color:'#c8d8d4' }}>›</span>
@@ -11666,7 +11665,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
               <SettingsEditRow label="Google Reviews"   value={settings.location.reviewsLink}  onSave={v=>updateLocation('reviewsLink',v)}  hint="Sent to completed clients" />
             </div>
 
-            <SectionHeader title="Assessment Default" desc="Used when scheduling — can be overridden per lead" />
+            <SectionHeader title="Assessment Default" desc="Used when scheduling - can be overridden per lead" />
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
               <div style={{ padding:'12px 16px', background:'white' }}>
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
@@ -11778,7 +11777,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                                 })}
                               </div>
                             ) : (
-                              <p style={{ fontSize:'12px', color:'#b0c0bc', textAlign:'center', padding:'8px' }}>No steps yet — add one below</p>
+                              <p style={{ fontSize:'12px', color:'#b0c0bc', textAlign:'center', padding:'8px' }}>No steps yet - add one below</p>
                             )}
 
                             {/* Add Step inline */}
@@ -11847,7 +11846,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                 )}
               </div>
 
-              {/* Legend — franchise only */}
+              {/* Legend - franchise only */}
               {!isSuperAdmin&&(
                 <div style={{ display:'flex', gap:'10px', marginBottom:'14px', flexWrap:'wrap' }}>
                   <div style={{ display:'flex', alignItems:'center', gap:'5px' }}><span style={{ width:'8px', height:'8px', borderRadius:'50%', background:'#8a9e9a', display:'inline-block' }} /><span style={{ fontSize:'11px', color:'#8a9e9a' }}>Using master</span></div>
@@ -11891,7 +11890,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                                 <button onClick={()=>setEditingTemplate({ master, tpl })} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Edit</button>
                               </div>
                             </div>
-                            {/* Reset to master row — only if customized */}
+                            {/* Reset to master row - only if customized */}
                             {isCustomized&&(
                               <div style={{ borderTop:'1px solid rgba(0,0,0,0.04)', padding:'8px 14px 8px 62px', display:'flex', alignItems:'center', gap:'8px' }}>
                                 <span style={{ fontSize:'11px', color:'#c8d8d4' }}>↩ Reverts to master if reset</span>
@@ -11915,7 +11914,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
 
         {activeSection==='automation'&&(
           <div style={{ padding:'0 12px 24px' }}>
-            <SectionHeader title="How Automation Works" desc="What Bee Hub does automatically — and when you need to step in" />
+            <SectionHeader title="How Automation Works" desc="What Bee Hub does automatically - and when you need to step in" />
 
             {/* Phase groups */}
             {[
@@ -11933,7 +11932,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                 color:'#f97316',
                 bg:'rgba(249,115,22,0.06)',
                 steps:[
-                  { icon:'🌿', label:'Move to Nurturing manually', detail:'When a lead says "not yet" — move them here. Light-touch emails every 3–4 weeks keep you top of mind.' },
+                  { icon:'🌿', label:'Move to Nurturing manually', detail:'When a lead says "not yet" - move them here. Light-touch emails every 3–4 weeks keep you top of mind.' },
                   { icon:'⏳', label:'85 days → warning in Needs Attention', detail:'You\'ll see a red card on your home screen. Decide: re-engage or let it close.' },
                   { icon:'❌', label:'90 days → auto-closes as Lost', detail:'System sends a final "closing your file" email first. Many leads re-engage at this point.' },
                 ]
@@ -11962,7 +11961,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             ))}
 
             <div style={{ background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'12px', padding:'14px', marginTop:'8px' }}>
-              <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>📖 Full instruction guide coming soon. You only need to act when something appears in <strong>Needs Attention</strong> on your home screen — everything else runs on its own.</p>
+              <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>📖 Full instruction guide coming soon. You only need to act when something appears in <strong>Needs Attention</strong> on your home screen - everything else runs on its own.</p>
             </div>
           </div>
         )}
@@ -11972,12 +11971,12 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
 
         {activeSection==='notifs'&&(
           <>
-            {/* SMS alerts — coming soon notice */}
+            {/* SMS alerts - coming soon notice */}
             <div style={{ margin:'12px 12px 0', padding:'12px 14px', background:'rgba(212,160,70,0.06)', border:'1px solid rgba(212,160,70,0.2)', borderRadius:'10px', display:'flex', alignItems:'center', gap:'10px' }}>
               <span style={{ fontSize:'20px' }}>💬</span>
               <div style={{ flex:1 }}>
                 <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>SMS Alerts</p>
-                <p style={{ fontSize:'12px', color:'#8a9e9a' }}>SMS & Voice is coming soon — see My Location for details.</p>
+                <p style={{ fontSize:'12px', color:'#8a9e9a' }}>SMS & Voice is coming soon - see My Location for details.</p>
               </div>
               <span style={{ fontSize:'10px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.1)', border:'1px solid rgba(212,160,70,0.2)', padding:'2px 9px', borderRadius:'20px', flexShrink:0 }}>Coming Soon</span>
             </div>
@@ -12318,9 +12317,9 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       stage:'New', source:'Partner', project:'', created:'Just now',
       path:'general-a', paused:false, assessment:null, assessmentType:null,
       jobberRef:null, reachOutMethod:null, jobberSearchStatus:'pending', jobberClient:null,
-      desc:`Partner converted to client — ${partner.company||partner.title||''}`,
+      desc:`Partner converted to client - ${partner.company||partner.title||''}`,
       address:null, addresses:[], tags:['returning'], isJunk:false,
-      buzzNotes:[{ id:`bn${Date.now()}`, text:`Was a partner — ${partner.title||''}${partner.company?' at '+partner.company:''}`, ts:'Just now', user:'System' }],
+      buzzNotes:[{ id:`bn${Date.now()}`, text:`Was a partner - ${partner.title||''}${partner.company?' at '+partner.company:''}`, ts:'Just now', user:'System' }],
       jobNotes:[], jobs:[], invoices:[], finalProcessed:false,
       outreachTimeline:[{ id:`o${Date.now()}`, type:'system', method:'system', label:'Partner converted to client', ts:'Just now', status:'done' }],
       activity:[],
@@ -12329,7 +12328,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     return newPerson
   }
 
-  // Effective location ID — uses selectedLoc when super admin has a location selected but locFilter is still 'all'
+  // Effective location ID - uses selectedLoc when super admin has a location selected but locFilter is still 'all'
   const effectiveLocId = locFilter!=='all' ? locFilter : selectedLoc?.id || null
 
   // Filter leads by location
@@ -12348,7 +12347,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   const inProgress      = visibleLeads.filter(l=>l.stage==='Job in Progress')
   const assessmentsToday= visibleUpcoming.filter(u=>u.date==='Today')
 
-  // Recent activity — use people state, show for any specific location view
+  // Recent activity - use people state, show for any specific location view
   const recentActivityItems = (() => {
     if (!effectiveLocId) return []
     const locPeople = people.filter(p=>p.locationId===effectiveLocId)
@@ -12365,12 +12364,12 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     }
     locPeople.slice(0,10).forEach(p=>{
       const s = stageMap[p.stage]
-      if (s) events.push({ icon:s.icon, text:`${p.stage} — ${p.name}`, ts:p.activity?.[0]?.ts||p.created||'Recently', color:s.color })
+      if (s) events.push({ icon:s.icon, text:`${p.stage} - ${p.name}`, ts:p.activity?.[0]?.ts||p.created||'Recently', color:s.color })
     })
     return events.slice(0,5)
   })()
 
-  // Pipeline stage counts — real people data
+  // Pipeline stage counts - real people data
   const visiblePeople = locFilter==='all' ? people : people.filter(p=>p.locationId===locFilter)
   const activePeople  = visiblePeople.filter(p=>!p.isJunk&&p.stage!=='Closed Won'&&p.stage!=='Closed Lost')
   const unpaidInvoices  = activePeople.flatMap(p=>p.invoices||[]).filter(i=>i.status==='Awaiting Payment')
@@ -12407,7 +12406,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   )
 
   const BottomNav = () => null
-  // Onboarding screen — allow settings for setup steps, block everything else
+  // Onboarding screen - allow settings for setup steps, block everything else
   if (isOnboarding && activeNav !== 'home' && activeNav !== 'settings') { nav('home') }
 
   if (isOnboarding && activeNav === 'settings') return (
@@ -12426,7 +12425,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     <OnboardingScreen ownerName={ownerName} ownerEmail={ownerEmail} franchiseRole={franchiseRole} topOffset={topOffset} onOpenSettings={(section)=>{ nav('settings'); setOnboardingSection(section) }} onComplete={onCompleteOnboarding} />
   )
 
-  // Past due — owner can go to settings, everyone else sees lockout after grace expires
+  // Past due - owner can go to settings, everyone else sees lockout after grace expires
   if (isPastDue && graceExpired && franchiseRole !== 'owner') return (
     <LockoutScreen isOwner={false} />
   )
@@ -12535,7 +12534,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
             <p style={{ fontSize:'12px', color:BRAND.teal, fontWeight:600, marginBottom:'4px' }}>📅 Today's Schedule</p>
             {assessmentsToday.map(a=>(
               <div key={a.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <p style={{ fontSize:'13px', color:'white' }}>{a.client} — {a.type}</p>
+                <p style={{ fontSize:'13px', color:'white' }}>{a.client} - {a.type}</p>
                 <span style={{ fontSize:'12px', color:BRAND.teal }}>{a.time}</span>
               </div>
             ))}
@@ -12553,7 +12552,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
 
       <div style={{ padding:'1.25rem', display:'grid', gap:'1.25rem' }}>
 
-        {/* Needs Attention — merged with follow-up reminders */}
+        {/* Needs Attention - merged with follow-up reminders */}
         {(()=>{
           const locFollowUps = effectiveLocId ? followUps.filter(f=>!f.locationId||f.locationId===effectiveLocId) : followUps
           const hasItems = noReachOut.length>0||stuckLeads.length>0||unpaidInvoices.length>0||locFollowUps.length>0||nearExpiryNurture.length>0||snoozedToday.length>0
@@ -12584,12 +12583,12 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
               {!hasItems&&!showAddFollowUp&&(
                 <div style={{ padding:'14px', background:'rgba(34,197,94,0.05)', border:'1px solid rgba(34,197,94,0.15)', borderRadius:'12px', display:'flex', alignItems:'center', gap:'10px' }}>
                   <span style={{ fontSize:'18px' }}>🎉</span>
-                  <p style={{ fontSize:'13px', color:'#4a5e5a' }}>All clear — nothing needs attention right now.</p>
+                  <p style={{ fontSize:'13px', color:'#4a5e5a' }}>All clear - nothing needs attention right now.</p>
                 </div>
               )}
 
               <div style={{ display:'grid', gap:'6px' }}>
-                {nearExpiryNurture.length>0&&<ExpandableAttentionCard icon="⏳" urgency="high" title={`${nearExpiryNurture.length} nurture lead${nearExpiryNurture.length>1?'s':''} near auto-close — review now`} records={nearExpiryNurture} onOpenRecord={onOpenRecord} nav={nav} />}
+                {nearExpiryNurture.length>0&&<ExpandableAttentionCard icon="⏳" urgency="high" title={`${nearExpiryNurture.length} nurture lead${nearExpiryNurture.length>1?'s':''} near auto-close - review now`} records={nearExpiryNurture} onOpenRecord={onOpenRecord} nav={nav} />}
                 {snoozedToday.length>0&&<ExpandableAttentionCard icon="⏰" urgency="high" title={`${snoozedToday.length} snoozed lead${snoozedToday.length>1?'s':''} waking up today`} records={snoozedToday} onOpenRecord={onOpenRecord} nav={nav} />}
                 {noReachOut.length>0&&<ExpandableAttentionCard icon="📲" urgency="high" title={`${noReachOut.length} new client${noReachOut.length>1?'s':''} with no reach-out`} records={noReachOut} onOpenRecord={onOpenRecord} nav={nav} />}
                 {stuckLeads.length>0&&<ExpandableAttentionCard icon="⏸" urgency="medium" title={`${stuckLeads.length} client stuck 7+ days`} records={stuckLeads} onOpenRecord={onOpenRecord} nav={nav} />}
@@ -12740,7 +12739,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         </div>
         )}
 
-        {/* Pipeline — modern funnel bars */}
+        {/* Pipeline - modern funnel bars */}
         <div style={{ background:'white', borderRadius:'14px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.06)' }}>
           <div style={{ padding:'14px 16px 12px', display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
             <div>
@@ -12774,7 +12773,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         </div>
 
 
-        {/* Upcoming assessments — always shown for location views */}
+        {/* Upcoming assessments - always shown for location views */}
         {visibleUpcoming.length>0 ? (
           <div>
             <p style={{ fontSize:'11px', fontWeight:700, color:BRAND.muted, textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>Upcoming Assessments</p>
@@ -12801,7 +12800,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
           </div>
         )}
 
-        {/* Recent activity — always shown */}
+        {/* Recent activity - always shown */}
         <div>
           <p style={{ fontSize:'11px', fontWeight:700, color:BRAND.muted, textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>Recent Activity</p>
             {recentActivityItems.length>0 ? (
@@ -12843,7 +12842,7 @@ const FRANCHISE_ROLES = [
   { key:'owner',    label:'Owner',          icon:'👑', color:'#d4a046', bg:'rgba(212,160,70,0.1)',  desc:'Full access including revenue & settings'  },
   { key:'manager',  label:'Manager',        icon:'⚡', color:'#6366f1', bg:'rgba(99,102,241,0.1)',  desc:'Full access except revenue'                },
   { key:'light',    label:'Light User',     icon:'👤', color:'#10b981', bg:'rgba(16,185,129,0.1)',  desc:'Can edit records, no settings or revenue'  },
-  { key:'readonly', label:'Read Only User', icon:'👁',  color:'#8a9e9a', bg:'rgba(138,158,154,0.1)', desc:'View only — no creating or editing'         },
+  { key:'readonly', label:'Read Only User', icon:'👁',  color:'#8a9e9a', bg:'rgba(138,158,154,0.1)', desc:'View only - no creating or editing'         },
 ]
 
 const USERS_DATA = [
@@ -13648,7 +13647,7 @@ const CRM_STATUS_CONF = {
 function fmtMoney(n) { return '$'+n.toLocaleString() }
 
 // ═══════════════════════════════════════════════════════
-//  ADMIN MODULE — Corporate + Super Admin
+//  ADMIN MODULE - Corporate + Super Admin
 // ═══════════════════════════════════════════════════════
 
 function LocationCard({ loc, role, onSelect, onStatusChange, onViewLocation, onDrilldown }) {
@@ -13942,7 +13941,7 @@ function InviteModal({ locations, preselectedLocId, onInvite, onClose }) {
               <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
             </div>
 
-            {/* Name fields — stacked for mobile */}
+            {/* Name fields - stacked for mobile */}
             <div style={{ display:'grid', gap:'10px', marginBottom:'14px' }}>
               <div>
                 <p style={{ fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>First Name <span style={{ color:'#ef4444' }}>*</span></p>
@@ -13985,17 +13984,17 @@ function InviteModal({ locations, preselectedLocId, onInvite, onClose }) {
               </div>
             </div>
 
-            {/* Location — only for franchise */}
+            {/* Location - only for franchise */}
             {!isCorporate && (
               <div style={{ marginBottom:'14px' }}>
                 <p style={{ fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Location</p>
                 <select value={locId} onChange={e=>setLocId(e.target.value)} style={{ width:'100%', padding:'12px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', background:'white', boxSizing:'border-box' }}>
-                  {locations.filter(l=>l.crmStatus==='active'||l.crmStatus==='onboarding').map(l=><option key={l.id} value={l.id}>{l.name}, {l.state}{l.owner?' — '+l.owner:''} {l.crmStatus==='onboarding'?'🐣':''}</option>)}
+                  {locations.filter(l=>l.crmStatus==='active'||l.crmStatus==='onboarding').map(l=><option key={l.id} value={l.id}>{l.name}, {l.state}{l.owner?' - '+l.owner:''} {l.crmStatus==='onboarding'?'🐣':''}</option>)}
                 </select>
               </div>
             )}
 
-            {/* Role — only for franchise */}
+            {/* Role - only for franchise */}
             {!isCorporate && (
               <div style={{ marginBottom:'20px' }}>
                 <p style={{ fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Role</p>
@@ -14016,7 +14015,7 @@ function InviteModal({ locations, preselectedLocId, onInvite, onClose }) {
 
             {isCorporate && (
               <div style={{ marginBottom:'20px', padding:'14px', background:'rgba(99,102,241,0.06)', border:'1px solid rgba(99,102,241,0.15)', borderRadius:'10px' }}>
-                <p style={{ fontSize:'13px', color:'#6366f1', fontWeight:500, lineHeight:1.5 }}>Corporate users can see all locations, the royalty dashboard, and location performance — but cannot edit location settings or records.</p>
+                <p style={{ fontSize:'13px', color:'#6366f1', fontWeight:500, lineHeight:1.5 }}>Corporate users can see all locations, the royalty dashboard, and location performance - but cannot edit location settings or records.</p>
               </div>
             )}
 
@@ -14350,7 +14349,7 @@ function ProjectTypeEditModal({ items, onClose, onSave }) {
         <div style={{ padding:'18px 20px 14px', borderBottom:'1px solid rgba(0,0,0,0.07)', display:'flex', alignItems:'flex-start', justifyContent:'space-between', flexShrink:0 }}>
           <div>
             <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'2px' }}>Project Types</p>
-            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Set each type as Move or General — determines the New Lead Drip used</p>
+            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Set each type as Move or General - determines the New Lead Drip used</p>
           </div>
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
         </div>
@@ -14446,7 +14445,7 @@ function ListEditModal({ list, onClose }) {
 
         {/* List */}
         <div style={{ flex:1, overflowY:'auto', padding:'12px 20px' }}>
-          {list.items.length===0&&<p style={{ fontSize:'13px', color:'#b0c0bc', fontStyle:'italic', padding:'8px 0' }}>No items yet — add one below.</p>}
+          {list.items.length===0&&<p style={{ fontSize:'13px', color:'#b0c0bc', fontStyle:'italic', padding:'8px 0' }}>No items yet - add one below.</p>}
           {list.items.map((item,i)=>(
             <div key={i} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'6px 0', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
               {editIdx===i ? (
@@ -14588,7 +14587,7 @@ function ConfigureTab() {
     { key:'tags',     label:'Lead Tags',            desc:"Used to label and filter leads in Clients", count:tags.length,        items:tags,        setItems:setTags,           placeholder:'Add a tag…' },
   ]
   const partnerLists = [
-    { key:'specialties', label:'Partner Specialties', desc:"What partners do — shown in the Partners module", count:specialties.length, items:specialties, setItems:setSpecialties, placeholder:'Add a specialty…' },
+    { key:'specialties', label:'Partner Specialties', desc:"What partners do - shown in the Partners module", count:specialties.length, items:specialties, setItems:setSpecialties, placeholder:'Add a specialty…' },
   ]
 
   function Section({ title, children }) {
@@ -14627,7 +14626,7 @@ function ConfigureTab() {
         <button onClick={()=>setOpen('projects')} style={{ width:'100%', padding:'13px 16px', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left' }}>
           <div style={{ flex:1, minWidth:0 }}>
             <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Project Types</p>
-            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Each tagged Move or General — determines New Lead Drip used</p>
+            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Each tagged Move or General - determines New Lead Drip used</p>
           </div>
           <div style={{ display:'flex', alignItems:'center', gap:'8px', flexShrink:0 }}>
             <span style={{ fontSize:'12px', color:'#a8c9c4', fontWeight:600, background:'rgba(168,201,196,0.1)', padding:'2px 8px', borderRadius:'10px' }}>{projects.length}</span>
@@ -14871,7 +14870,7 @@ function PricingManagementTab() {
       {/* Save banner */}
       <div style={{ position:'sticky', bottom:'5rem', left:0, right:0 }}>
         <button onClick={saveAll} style={{ width:'100%', padding:'13px', background:saved?'#22c55e':'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', transition:'background 0.3s', boxShadow:'0 4px 16px rgba(26,46,43,0.2)' }}>
-          {saved ? '✅ Saved — pricing updated' : 'Save Pricing Changes'}
+          {saved ? '✅ Saved - pricing updated' : 'Save Pricing Changes'}
         </button>
       </div>
     </div>
@@ -15307,7 +15306,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
             ))}
           </div>
 
-          {/* Location list — compact */}
+          {/* Location list - compact */}
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'2px' }}>
             <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{filtered.length} location{filtered.length!==1?'s':''}</p>
           </div>
@@ -15364,7 +15363,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
 }
 
 // ═══════════════════════════════════════════════════════
-//  REPORTS — Greyed out placeholder
+//  REPORTS - Greyed out placeholder
 // ═══════════════════════════════════════════════════════
 
 // ─── Sync Log Data ────────────────────────────────────────────────────────────
@@ -15378,8 +15377,8 @@ const SYNC_LOG_DATA = (() => {
   const statuses = ['success','success','success','success','warning','error']
   const messages = {
     success: [
-      'Jobber sync completed — 3 clients updated',
-      'Jobber sync completed — no changes',
+      'Jobber sync completed - 3 clients updated',
+      'Jobber sync completed - no changes',
       'Token refreshed successfully',
       'Webhook received: new_job',
       'Webhook received: quote_approved',
@@ -15388,16 +15387,16 @@ const SYNC_LOG_DATA = (() => {
       'Client profile updated via webhook',
     ],
     warning: [
-      'Jobber sync partial — 1 client skipped (missing email)',
-      'Token expiry within 24 hours — refresh recommended',
+      'Jobber sync partial - 1 client skipped (missing email)',
+      'Token expiry within 24 hours - refresh recommended',
       'Webhook payload missing field: phone',
-      'Rate limit approaching — 80% of quota used',
+      'Rate limit approaching - 80% of quota used',
     ],
     error: [
-      'Jobber sync failed — authentication error',
-      'Webhook delivery failed — timeout after 30s',
-      'Token refresh failed — invalid client credentials',
-      'Jobber API returned 500 — retrying in 5 min',
+      'Jobber sync failed - authentication error',
+      'Webhook delivery failed - timeout after 30s',
+      'Token refresh failed - invalid client credentials',
+      'Jobber API returned 500 - retrying in 5 min',
     ],
   }
 
@@ -15450,7 +15449,7 @@ const REPORT_PROJECT_DIST = [24,20,16,14,10,9,7]
 
 function seedRevByLoc(locId, months=8) {
   const base = REPORT_REVENUE_BY_MONTH[locId]
-  if (!base) return new Array(months).fill(0)  // new/unknown location — no fake data
+  if (!base) return new Array(months).fill(0)  // new/unknown location - no fake data
   return base.slice(-months)
 }
 function totalRevByLoc(locId) { return seedRevByLoc(locId).reduce((s,v)=>s+v,0) }
@@ -16008,7 +16007,7 @@ function SyncLogContent() {
 
 
 // ═══════════════════════════════════════════════════════
-//  ROOT APP — Role-aware shell
+//  ROOT APP - Role-aware shell
 // ═══════════════════════════════════════════════════════
 
 export default function App() {
@@ -16025,13 +16024,13 @@ export default function App() {
   const [globalSelectedPartner, setGlobalSelectedPartner] = useState(null)
   const [people, setPeople]                 = useState(ALL_PEOPLE)
   const [followUps, setFollowUps]           = useState([
-    { id:'fu1', personId:'3',  personName:'Lisa Patel',      note:'Assessment follow-up — did she book?',       date:'2026-05-07', locationId:'loc_kc', createdAt:'May 5' },
-    { id:'fu2', personId:'2',  personName:'Jennifer Torres', note:'Re-engage — went quiet after first call',     date:'2026-05-09', locationId:'loc_kc', createdAt:'May 4' },
-    { id:'fu3', personId:'4',  personName:'Patricia Nguyen', note:'Invoice #2 unpaid — gentle nudge',            date:'2026-05-11', locationId:'loc_kc', createdAt:'May 3' },
+    { id:'fu1', personId:'3',  personName:'Lisa Patel',      note:'Assessment follow-up - did she book?',       date:'2026-05-07', locationId:'loc_kc', createdAt:'May 5' },
+    { id:'fu2', personId:'2',  personName:'Jennifer Torres', note:'Re-engage - went quiet after first call',     date:'2026-05-09', locationId:'loc_kc', createdAt:'May 4' },
+    { id:'fu3', personId:'4',  personName:'Patricia Nguyen', note:'Invoice #2 unpaid - gentle nudge',            date:'2026-05-11', locationId:'loc_kc', createdAt:'May 3' },
     { id:'fu4', personId:'5',  personName:'Karen Wallace',   note:'Final walkthrough check-in',                  date:'2026-05-22', locationId:'loc_kc', createdAt:'May 2' },
-    { id:'fu5', personId:null, personName:'Amy Brooks',      note:'Referral from Patricia — reach out',          date:'2026-05-28', locationId:'loc_kc', createdAt:'May 1' },
-    { id:'fu6', personId:null, personName:'Diana Walsh',     note:'Seasonal refresh — summer closet cleanout',  date:'2026-06-10', locationId:'loc_kc', createdAt:'Apr 30' },
-    { id:'fu7', personId:null, personName:'Rachel Hall',     note:'Pantry project — revisit after school year',  date:'2026-06-18', locationId:'loc_kc', createdAt:'Apr 28' },
+    { id:'fu5', personId:null, personName:'Amy Brooks',      note:'Referral from Patricia - reach out',          date:'2026-05-28', locationId:'loc_kc', createdAt:'May 1' },
+    { id:'fu6', personId:null, personName:'Diana Walsh',     note:'Seasonal refresh - summer closet cleanout',  date:'2026-06-10', locationId:'loc_kc', createdAt:'Apr 30' },
+    { id:'fu7', personId:null, personName:'Rachel Hall',     note:'Pantry project - revisit after school year',  date:'2026-06-18', locationId:'loc_kc', createdAt:'Apr 28' },
   ])
   const [partners, setPartners]             = useState(PARTNERS_DATA)
   const [companies, setCompanies]           = useState(COMPANIES_DATA)
@@ -16080,7 +16079,7 @@ export default function App() {
   const DemoBar = () => (
     <div style={{ position:'fixed', top:0, left:0, right:0, background:'#0a0a0a', borderBottom:'1px solid rgba(255,255,255,0.08)', zIndex:10001, display:'flex', flexDirection:'column' }}>
       <div style={{ height:'32px', display:'flex', alignItems:'center', padding:'0 10px', gap:'6px' }}>
-        {/* Me — Kevin Shaw super admin */}
+        {/* Me - Kevin Shaw super admin */}
         <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
           <div style={{ width:'20px', height:'20px', borderRadius:'50%', background:'linear-gradient(135deg,#d4a046,#b07a20)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'9px', fontWeight:700, color:'white' }}>KS</div>
           <span style={{ fontSize:'10px', fontWeight:600, color:'white' }}>Kevin Shaw</span>
@@ -16355,7 +16354,7 @@ export default function App() {
       <LocBanner />
       <LocPickerDropdown />
 
-      {/* Sidebar nav — desktop only */}
+      {/* Sidebar nav - desktop only */}
       <div className="bee-sidebar" style={{ display:'none', position:'fixed', top:0, left:0, bottom:0, width:'220px', background:'#1a2e2b', flexDirection:'column', zIndex:99, borderRight:'1px solid rgba(168,201,196,0.1)', overflowY:'auto' }}>
         {/* Spacer to push below demo bar + loc banner */}
         <div style={{ height:`${TOTAL_TOP}px`, flexShrink:0 }} />
@@ -16411,7 +16410,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* Main content — offset by sidebar on desktop */}
+      {/* Main content - offset by sidebar on desktop */}
       <div className="bee-main" style={{ marginLeft:0 }}>
         {screen()}
       </div>
