@@ -64,6 +64,8 @@ export default async function HomePage() {
   const initialLocFilter = isElevated ? 'all' : hubUser.location_id || 'all'
 
   const supabase = await createServerSupabaseClient()
+
+  // Fetch guide slides
   const { data: slidesData } = await supabase
     .from('guide_slides')
     .select('*')
@@ -88,12 +90,37 @@ export default async function HomePage() {
     }
   })
 
+  // Fetch the user's location subscription (so onboarding shows the right variant).
+  // Super_admins and corporate users aren't tied to one location → stays null for them.
+  let currentSubscription: any = null
+  if (hubUser.location_id) {
+    const { data: locRow } = await supabase
+      .from('locations')
+      .select(
+        'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes'
+      )
+      .eq('id', hubUser.location_id)
+      .single()
+
+    if (locRow) {
+      currentSubscription = {
+        subscription_status: locRow.subscription_status || 'deferred',
+        subscription_plan: locRow.subscription_plan || null,
+        payment_source: locRow.payment_source || 'none',
+        paid_through_date: locRow.paid_through_date || null,
+        deferred_until: locRow.deferred_until || null,
+        billing_notes: locRow.billing_notes || null,
+      }
+    }
+  }
+
   return (
     <BeeHub
       initialRole={role}
       initialFranchiseRole={franchiseRole}
       initialLocFilter={initialLocFilter}
       initialGuideSlides={initialGuideSlides}
+      currentSubscription={currentSubscription}
       currentUser={{
         id: hubUser.id,
         email: hubUser.email,
