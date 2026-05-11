@@ -5,14 +5,18 @@ export type HubRole = 'super_admin' | 'admin' | 'owner' | 'lite_user'
 
 export async function requireAuth() {
   const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) redirect('/auth/login')
   return user
 }
 
 export async function getHubUser() {
   const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
   if (!user) return null
   const { data: hubUser } = await supabase
     .from('hub_users')
@@ -24,7 +28,7 @@ export async function getHubUser() {
 
 export async function requireHubUser() {
   const hubUser = await getHubUser()
-  if (!hubUser) redirect('/login')
+  if (!hubUser) redirect('/auth/login')
   return hubUser
 }
 
