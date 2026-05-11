@@ -15,15 +15,26 @@ export async function GET() {
   }
 
   // Map DB rows → shape BeeHub expects
-  const slides = (data || []).map((row) => ({
-    icon: row.icon,
-    chapter: row.chapter,
-    color: row.color,
-    title: row.title,
-    body: row.body || '',
-    bullets: row.bullets || [],
-    screenshot: row.screenshot_url || null,
-  }))
+  const slides = (data || []).map((row) => {
+    // Prefer screenshots[] array; fallback to legacy single screenshot_url
+    let screenshots: string[] = []
+    if (Array.isArray(row.screenshots) && row.screenshots.length > 0) {
+      screenshots = row.screenshots
+    } else if (row.screenshot_url) {
+      screenshots = [row.screenshot_url]
+    }
+
+    return {
+      icon: row.icon,
+      chapter: row.chapter,
+      color: row.color,
+      title: row.title,
+      body: row.body || '',
+      bullets: row.bullets || [],
+      screenshot: screenshots[0] || null, // legacy field, points to first screenshot
+      screenshots, // new field
+    }
+  })
 
   return NextResponse.json({ slides })
 }
@@ -32,7 +43,6 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const supabase = await createServerSupabaseClient()
 
-  // Auth gate
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -40,7 +50,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
-  // Role gate (RLS also enforces, but explicit check gives a cleaner error)
   const { data: hubUser } = await supabase
     .from('hub_users')
     .select('role')
@@ -58,13 +67,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'invalid payload — slides must be an array' }, { status: 400 })
   }
 
-  // Replace all slides: delete then insert. (Supabase REST doesn't expose
-  // transactions; brief inconsistency window is acceptable for an admin
-  // editor used by one user at a time.)
+  // Replace all slides: delete then insert.
   const { error: delErr } = await supabase
     .from('guide_slides')
     .delete()
-    .neq('id', '00000000-0000-0000-0000-000000000000') // delete-all idiom
+    .neq('id', '00000000-0000-0000-0000-000000000000')
 
   if (delErr) {
     console.error('[guide_slides DELETE]', delErr)
@@ -72,17 +79,28 @@ export async function POST(request: NextRequest) {
   }
 
   if (slides.length > 0) {
-    const rows = slides.map((s: any, i: number) => ({
-      slot: i,
-      icon: s.icon || null,
-      chapter: s.chapter || null,
-      color: s.color || '#1a2e2b',
-      title: s.title || '',
-      body: s.body || null,
-      bullets: Array.isArray(s.bullets) ? s.bullets : [],
-      screenshot_url: s.screenshot || null,
-      updated_by: user.id,
-    }))
+    const rows = slides.map((s: any, i: number) => {
+      // Accept either screenshots[] (preferred) or single screenshot (legacy)
+      let screenshots: string[] = []
+      if (Array.isArray(s.screenshots)) {
+        screenshots = s.screenshots
+      } else if (s.screenshot) {
+        screenshots = [s.screenshot]
+      }
+
+      return {
+        slot: i,
+        icon: s.icon || null,
+        chapter: s.chapter || null,
+        color: s.color || '#1a2e2b',
+        title: s.title || '',
+        body: s.body || null,
+        bullets: Array.isArray(s.bullets) ? s.bullets : [],
+        screenshot_url: screenshots[0] || null, // keep legacy column populated
+        screenshots, // new column
+        updated_by: user.id,
+      }
+    })
 
     const { error: insErr } = await supabase.from('guide_slides').insert(rows)
     if (insErr) {
