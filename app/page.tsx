@@ -1,4 +1,5 @@
 import { requireAuth, getHubUser } from '@/lib/auth'
+import { createServerSupabaseClient } from '@/lib/supabase-server'
 import BeeHub from '@/components/BeeHub'
 
 // Map hub_users.role → BeeHub's internal role string
@@ -23,13 +24,13 @@ function mapRole(dbRole: string | null | undefined): {
 }
 
 export default async function HomePage() {
-  // Ensure user is authenticated — redirects to login if not
+  // Ensure user is authenticated — redirects to /auth/login if not
   const authUser = await requireAuth()
 
   // Look up their hub_users row
   const hubUser = await getHubUser()
 
-  // Authenticated but no hub_users profile → show informative page (no redirect loop)
+  // Authenticated but no hub_users profile → informative page (no redirect loop)
   if (!hubUser) {
     return (
       <div
@@ -71,11 +72,30 @@ export default async function HomePage() {
   const isElevated = role === 'super_admin' || role === 'corporate'
   const initialLocFilter = isElevated ? 'all' : hubUser.location_id || 'all'
 
+  // Server-fetch guide slides so first paint already has them.
+  // Empty array means BeeHub falls back to GUIDE_SLIDES defaults bundled in.
+  const supabase = await createServerSupabaseClient()
+  const { data: slidesData } = await supabase
+    .from('guide_slides')
+    .select('*')
+    .order('slot', { ascending: true })
+
+  const initialGuideSlides = (slidesData || []).map((row: any) => ({
+    icon: row.icon,
+    chapter: row.chapter,
+    color: row.color,
+    title: row.title,
+    body: row.body || '',
+    bullets: row.bullets || [],
+    screenshot: row.screenshot_url || null,
+  }))
+
   return (
     <BeeHub
       initialRole={role}
       initialFranchiseRole={franchiseRole}
       initialLocFilter={initialLocFilter}
+      initialGuideSlides={initialGuideSlides}
       currentUser={{
         id: hubUser.id,
         email: hubUser.email,
