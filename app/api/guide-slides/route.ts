@@ -14,9 +14,7 @@ export async function GET() {
     return NextResponse.json({ slides: [], error: error.message }, { status: 500 })
   }
 
-  // Map DB rows → shape BeeHub expects
   const slides = (data || []).map((row) => {
-    // Prefer screenshots[] array; fallback to legacy single screenshot_url
     let screenshots: string[] = []
     if (Array.isArray(row.screenshots) && row.screenshots.length > 0) {
       screenshots = row.screenshots
@@ -31,15 +29,15 @@ export async function GET() {
       title: row.title,
       body: row.body || '',
       bullets: row.bullets || [],
-      screenshot: screenshots[0] || null, // legacy field, points to first screenshot
-      screenshots, // new field
+      screenshot: screenshots[0] || null,
+      screenshots,
     }
   })
 
   return NextResponse.json({ slides })
 }
 
-// POST — replace all slides. Super_admin only.
+// POST — replace all slides. Super_admin or admin only.
 export async function POST(request: NextRequest) {
   const supabase = await createServerSupabaseClient()
 
@@ -56,8 +54,13 @@ export async function POST(request: NextRequest) {
     .eq('id', user.id)
     .single()
 
-  if (!hubUser || hubUser.role !== 'super_admin') {
-    return NextResponse.json({ error: 'forbidden — super_admin only' }, { status: 403 })
+  // Allow both super_admin AND admin to edit the guide
+  const allowedRoles = ['super_admin', 'admin']
+  if (!hubUser || !allowedRoles.includes(hubUser.role)) {
+    return NextResponse.json(
+      { error: 'forbidden — super_admin or admin only' },
+      { status: 403 }
+    )
   }
 
   const body = await request.json().catch(() => ({}))
@@ -67,7 +70,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'invalid payload — slides must be an array' }, { status: 400 })
   }
 
-  // Replace all slides: delete then insert.
   const { error: delErr } = await supabase
     .from('guide_slides')
     .delete()
@@ -80,7 +82,6 @@ export async function POST(request: NextRequest) {
 
   if (slides.length > 0) {
     const rows = slides.map((s: any, i: number) => {
-      // Accept either screenshots[] (preferred) or single screenshot (legacy)
       let screenshots: string[] = []
       if (Array.isArray(s.screenshots)) {
         screenshots = s.screenshots
@@ -96,8 +97,8 @@ export async function POST(request: NextRequest) {
         title: s.title || '',
         body: s.body || null,
         bullets: Array.isArray(s.bullets) ? s.bullets : [],
-        screenshot_url: screenshots[0] || null, // keep legacy column populated
-        screenshots, // new column
+        screenshot_url: screenshots[0] || null,
+        screenshots,
         updated_by: user.id,
       }
     })
