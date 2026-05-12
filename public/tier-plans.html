@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bee Hub — User Tiers & Access</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --green: #1a2e2b;
+    --green-deep: #0f1f1c;
+    --teal: #a8c9c4;
+    --teal-soft: #d3e4e0;
+    --gold: #d4a046;
+    --gold-bright: #e8b85a;
+    --bg: #fdfbf6;
+    --paper: #ffffff;
+    --ink: #1a2e2b;
+    --ink-soft: #4a5e5a;
+    --ink-faint: #8a9e9a;
+    --line: rgba(26,46,43,0.10);
+    --line-strong: rgba(26,46,43,0.20);
+    --red: #c14545;
+    --yellow: #b88820;
+  }
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.5;
+    padding: 32px 24px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet {
+    max-width: 1080px;
+    margin: 0 auto;
+    background: var(--paper);
+    box-shadow: 0 1px 3px rgba(26,46,43,0.04), 0 12px 40px rgba(26,46,43,0.08);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+  .hex-watermark {
+    position: absolute;
+    top: -40px;
+    right: -40px;
+    width: 280px;
+    height: 280px;
+    opacity: 0.04;
+    pointer-events: none;
+  }
+  /* ───── Header ───── */
+  header {
+    background: var(--green);
+    color: white;
+    padding: 36px 48px 32px;
+    position: relative;
+    overflow: hidden;
+  }
+  header::before {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--gold) 0%, var(--gold-bright) 30%, var(--teal) 70%, var(--teal-soft) 100%);
+  }
+  .logo-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  .bee {
+    font-size: 28px;
+    filter: drop-shadow(0 2px 8px rgba(212,160,70,0.4));
+  }
+  .logo-text {
+    font-family: 'Playfair Display', serif;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+  .logo-sub {
+    font-size: 11px;
+    color: var(--teal);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-left: 6px;
+    border-left: 1px solid rgba(168,201,196,0.3);
+    padding-left: 14px;
+  }
+  h1 {
+    font-family: 'Playfair Display', serif;
+    font-size: 38px;
+    font-weight: 700;
+    line-height: 1.1;
+    margin-bottom: 8px;
+    letter-spacing: -0.5px;
+  }
+  h1 em {
+    color: var(--gold-bright);
+    font-style: italic;
+    font-weight: 700;
+  }
+  .subhead {
+    font-size: 14px;
+    color: var(--teal);
+    line-height: 1.6;
+    max-width: 620px;
+  }
+  /* ───── Tier Cards ───── */
+  .tiers {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .tier {
+    padding: 28px 24px 24px;
+    border-right: 1px solid var(--line);
+    position: relative;
+    background: var(--paper);
+    transition: background 0.15s ease;
+    display: flex;
+    flex-direction: column;
+  }
+  .tier:last-child { border-right: none; }
+  .tier.owner { background: linear-gradient(180deg, rgba(212,160,70,0.06) 0%, transparent 100%); }
+  .tier.viewer { background: linear-gradient(180deg, rgba(168,201,196,0.10) 0%, transparent 100%); }
+  .tier-accent {
+    width: 28px;
+    height: 4px;
+    border-radius: 2px;
+    margin-bottom: 12px;
+  }
+  .tier.owner    .tier-accent { background: var(--gold); }
+  .tier.manager  .tier-accent { background: var(--green); }
+  .tier.organizer .tier-accent { background: var(--teal); }
+  .tier.viewer   .tier-accent { background: var(--ink-faint); }
+  .tier-label {
+    font-size: 10px;
+    color: var(--ink-faint);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .tier-name {
+    font-family: 'Playfair Display', serif;
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--green);
+    margin-bottom: 4px;
+    letter-spacing: -0.3px;
+  }
+  .tier-tag {
+    font-size: 12px;
+    color: var(--ink-soft);
+    margin-bottom: 14px;
+    font-style: italic;
+    line-height: 1.4;
+    min-height: 34px;
+  }
+  .price-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-bottom: 4px;
+    margin-top: auto;
+  }
+  .price {
+    font-family: 'Playfair Display', serif;
+    font-size: 30px;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: -0.5px;
+  }
+  .price.free { color: var(--ink-faint); }
+  .price-unit {
+    font-size: 11px;
+    color: var(--ink-faint);
+    font-weight: 500;
+  }
+  .price-monthly {
+    font-size: 11px;
+    color: var(--ink-faint);
+    margin-top: 2px;
+  }
+  .price-detail {
+    font-size: 10px;
+    color: var(--ink-faint);
+    margin-top: 6px;
+    line-height: 1.5;
+    font-style: italic;
+  }
+  /* ───── Co-Owner callout (subtle one-liner) ───── */
+  .co-owner {
+    padding: 12px 48px;
+    background: rgba(212,160,70,0.05);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    position: relative;
+  }
+  .co-owner::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--gold);
+  }
+  .co-owner-body {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  .co-owner-label {
+    font-size: 10px;
+    color: var(--gold);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .co-owner-text {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    line-height: 1.5;
+  }
+  .co-owner-text strong {
+    color: var(--green);
+    font-weight: 700;
+  }
+  /* Login security notice — teal accent variant of co-owner */
+  .login-notice {
+    background: rgba(168,201,196,0.10);
+    border-top: none;
+  }
+  .login-notice::before {
+    background: var(--teal);
+  }
+  .login-notice .co-owner-label {
+    color: #4d7a72;
+  }
+  /* ───── Roadmap strip ───── */
+  .roadmap {
+    padding: 24px 48px 28px;
+    background: var(--green);
+    color: white;
+    position: relative;
+  }
+  .roadmap-header {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+  .roadmap-label {
+    font-size: 10px;
+    color: var(--gold);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  .roadmap-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 18px;
+    font-weight: 700;
+    color: white;
+  }
+  .roadmap-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+  .roadmap-item {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(168,201,196,0.15);
+    border-radius: 6px;
+    padding: 12px 14px;
+    transition: background 0.15s ease;
+  }
+  .roadmap-item-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .roadmap-icon {
+    font-size: 14px;
+    line-height: 1;
+  }
+  .roadmap-name {
+    font-family: 'Playfair Display', serif;
+    font-size: 14px;
+    font-weight: 700;
+    color: white;
+    letter-spacing: 0.2px;
+  }
+  .roadmap-desc {
+    font-size: 11px;
+    color: var(--teal);
+    line-height: 1.5;
+  }
+  /* ───── Matrix ───── */
+  .matrix-section {
+    padding: 32px 48px 24px;
+  }
+  .section-label {
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 700;
+    margin-bottom: 14px;
+  }
+  .section-heading {
+    font-family: 'Playfair Display', serif;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--green);
+    margin-top: 22px;
+    margin-bottom: 8px;
+    padding: 8px 12px;
+    background: rgba(26,46,43,0.04);
+    border-left: 3px solid var(--gold);
+    border-radius: 2px;
+  }
+  .section-heading:first-of-type { margin-top: 0; }
+  table.matrix {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    table-layout: fixed;
+  }
+  table.matrix .col-cap { width: 48%; }
+  table.matrix .col-tier { width: 13%; }
+  table.matrix thead th {
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 700;
+    padding: 10px 8px;
+    text-align: center;
+    background: rgba(26,46,43,0.03);
+    border-bottom: 2px solid var(--line-strong);
+  }
+  table.matrix thead th.cap-col {
+    text-align: left;
+    padding-left: 14px;
+  }
+  table.matrix thead th.tier-h.owner { background: rgba(212,160,70,0.10); color: var(--gold); }
+  table.matrix thead th.tier-h.manager { background: rgba(26,46,43,0.06); color: var(--green); }
+  table.matrix thead th.tier-h.organizer { background: rgba(168,201,196,0.18); color: #5a7a76; }
+  table.matrix thead th.tier-h.viewer { background: rgba(168,201,196,0.08); color: var(--ink-soft); }
+  table.matrix tbody td {
+    padding: 8px 8px;
+    text-align: center;
+    border-bottom: 1px solid var(--line);
+    font-size: 14px;
+    vertical-align: middle;
+  }
+  table.matrix tbody td.cap {
+    text-align: left;
+    padding-left: 14px;
+    font-size: 12px;
+    color: var(--ink);
+    font-weight: 500;
+  }
+  table.matrix tbody td.cap .cap-sub {
+    display: block;
+    font-size: 10.5px;
+    color: var(--ink-faint);
+    font-weight: 400;
+    margin-top: 1px;
+  }
+  table.matrix tbody tr:hover:not(.section-row) { background: rgba(26,46,43,0.02); }
+
+  /* Section-divider rows inside the same table — colspan=5 */
+  table.matrix .section-row td {
+    font-family: 'Playfair Display', serif;
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--green);
+    padding: 12px 14px;
+    background: rgba(26,46,43,0.045);
+    border-left: 3px solid var(--gold);
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    letter-spacing: 0.2px;
+  }
+  table.matrix .section-row:first-child td { border-top: none; }
+  .yes { color: #2d8659; font-weight: 700; font-size: 17px; line-height: 1; }
+  .no  { color: var(--red); font-weight: 700; font-size: 15px; line-height: 1; opacity: 0.55; }
+  .partial {
+    display: inline-block;
+    background: rgba(184,136,32,0.12);
+    color: var(--yellow);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    padding: 3px 6px;
+    border-radius: 10px;
+    text-transform: uppercase;
+  }
+  /* ───── Footer ───── */
+  .footer {
+    background: linear-gradient(180deg, var(--bg) 0%, #f5f1e8 100%);
+    padding: 32px 48px;
+    border-top: 1px solid var(--line);
+  }
+  .footer.slim {
+    padding: 20px 48px;
+  }
+  .footer.slim .meta {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+  .scenarios {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-top: 14px;
+  }
+  .scenario {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 16px;
+    position: relative;
+  }
+  .scenario::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--teal);
+    border-radius: 8px 0 0 8px;
+  }
+  .scenario.featured::before { background: var(--gold); }
+  .scenario-label {
+    font-size: 10px;
+    color: var(--ink-faint);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .scenario-name {
+    font-family: 'Playfair Display', serif;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--green);
+    margin-bottom: 6px;
+  }
+  .scenario-comp {
+    font-size: 11px;
+    color: var(--ink-soft);
+    line-height: 1.6;
+    margin-bottom: 8px;
+  }
+  .scenario-total {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+  }
+  .scenario-price {
+    font-family: 'Playfair Display', serif;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--green);
+  }
+  .scenario-mo {
+    font-size: 10px;
+    color: var(--ink-faint);
+  }
+  .meta {
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+    color: var(--ink-faint);
+    letter-spacing: 0.5px;
+  }
+  .meta-tag {
+    background: var(--green);
+    color: var(--teal);
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  /* ═════════ MOBILE RESPONSIVE ═════════ */
+  @media (max-width: 768px) {
+    body { padding: 12px 8px; }
+    .sheet { border-radius: 6px; }
+    .hex-watermark { width: 180px; height: 180px; top: -30px; right: -30px; }
+
+    /* Header */
+    header { padding: 24px 20px 22px; }
+    .logo-row { gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+    .logo-text { font-size: 18px; }
+    .logo-sub { font-size: 9px; letter-spacing: 1.5px; padding-left: 10px; }
+    h1 { font-size: 26px; margin-bottom: 6px; }
+    .subhead { font-size: 12.5px; line-height: 1.55; }
+
+    /* Tier cards — stack vertically */
+    .tiers { grid-template-columns: 1fr; }
+    .tier {
+      border-right: none;
+      border-bottom: 1px solid var(--line);
+      padding: 20px 20px 18px;
+    }
+    .tier:last-child { border-bottom: none; }
+    .tier-name { font-size: 22px; margin-bottom: 6px; }
+    .tier-tag { font-size: 11.5px; margin-bottom: 10px; min-height: 48px; }
+    .price { font-size: 26px; }
+    .price-monthly { font-size: 10.5px; }
+    .price-detail { font-size: 10px; margin-top: 4px; }
+
+    /* Co-owner & login callouts */
+    .co-owner { padding: 11px 18px; }
+    .co-owner-body {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 3px;
+    }
+    .co-owner-label {
+      font-size: 9px;
+      letter-spacing: 1.3px;
+    }
+    .co-owner-text { font-size: 12px; line-height: 1.5; }
+
+    /* Matrix section */
+    .matrix-section { padding: 22px 12px 18px; }
+    .section-label { font-size: 10px; letter-spacing: 1.5px; margin-bottom: 10px; }
+
+    /* Tables — compact for mobile */
+    table.matrix thead th {
+      font-size: 8.5px;
+      padding: 8px 3px;
+      letter-spacing: 0.3px;
+      line-height: 1.2;
+    }
+    table.matrix thead th.cap-col {
+      padding-left: 10px;
+      font-size: 8.5px;
+    }
+    table.matrix tbody td {
+      padding: 7px 3px;
+      font-size: 13px;
+    }
+    table.matrix tbody td.cap {
+      font-size: 11px;
+      padding-left: 10px;
+      padding-right: 4px;
+    }
+    table.matrix tbody td.cap .cap-sub {
+      font-size: 9.5px;
+      line-height: 1.3;
+      margin-top: 1px;
+    }
+    table.matrix .section-row td {
+      font-size: 12px;
+      padding: 9px 10px;
+    }
+    .yes { font-size: 14px; }
+    .no { font-size: 13px; }
+    .partial {
+      font-size: 7.5px;
+      letter-spacing: 0.4px;
+      padding: 2px 4px;
+    }
+
+    /* Roadmap */
+    .roadmap { padding: 22px 20px 24px; }
+    .roadmap-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      margin-bottom: 14px;
+    }
+    .roadmap-label { font-size: 9px; letter-spacing: 1.5px; }
+    .roadmap-title { font-size: 15px; }
+    .roadmap-grid { grid-template-columns: 1fr; gap: 10px; }
+    .roadmap-item { padding: 11px 13px; }
+    .roadmap-name { font-size: 13px; }
+    .roadmap-desc { font-size: 10.5px; }
+
+    /* Footer */
+    .footer.slim { padding: 14px 20px; }
+    .meta {
+      flex-direction: column;
+      gap: 8px;
+      align-items: flex-start;
+      font-size: 9.5px;
+      text-align: left;
+    }
+    .meta-tag { font-size: 8px; }
+  }
+
+  @media (max-width: 420px) {
+    h1 { font-size: 22px; }
+    .tier-name { font-size: 20px; }
+    .price { font-size: 24px; }
+    /* Tighter table for narrow phones */
+    table.matrix thead th { font-size: 8px; padding: 7px 2px; }
+    table.matrix .col-cap { width: 44%; }
+    table.matrix .col-tier { width: 14%; }
+    table.matrix tbody td.cap { font-size: 10.5px; }
+    table.matrix tbody td.cap .cap-sub { font-size: 9px; }
+  }
+  /* ═════════ END MOBILE ═════════ */
+
+  /* Print friendliness */
+  @media print {
+    body { background: white; padding: 0; }
+    .sheet { box-shadow: none; max-width: 100%; }
+    @page { margin: 0.4in; size: letter; }
+  }
+</style>
+</head>
+<body>
+
+<div class="sheet">
+
+  <!-- Hexagon SVG watermark -->
+  <svg class="hex-watermark" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <polygon points="50,5 90,27 90,73 50,95 10,73 10,27" fill="none" stroke="#1a2e2b" stroke-width="0.8"/>
+    <polygon points="50,20 75,35 75,65 50,80 25,65 25,35" fill="none" stroke="#1a2e2b" stroke-width="0.5"/>
+  </svg>
+
+  <!-- ───── HEADER ───── -->
+  <header>
+    <div class="logo-row">
+      <span class="bee">🐝</span>
+      <span class="logo-text">Bee Hub</span>
+      <span class="logo-sub">Bee Organized · Franchise Platform</span>
+    </div>
+    <h1>User Tiers <em>&</em> Access</h1>
+    <p class="subhead">Four access levels. Per-seat annual subscription. Each franchise location buys the levels it needs — Level 1 has full control, Level 4 is read-only. Map your real-world job titles to the level that matches their access needs.</p>
+  </header>
+
+  <!-- ───── TIER CARDS ───── -->
+  <div class="tiers">
+
+    <div class="tier owner">
+      <div class="tier-accent"></div>
+      <div class="tier-label">Level 1 · Full Access</div>
+      <div class="tier-name">Queen Bee</div>
+      <div class="tier-tag">Good for: Franchise owners</div>
+      <div class="price-row">
+        <span class="price">$550</span>
+        <span class="price-unit">/ year</span>
+      </div>
+      <div class="price-monthly">$45.83/mo equivalent</div>
+      <div class="price-detail">One per location. Required seat.</div>
+    </div>
+
+    <div class="tier manager">
+      <div class="tier-accent"></div>
+      <div class="tier-label">Level 2 · Operational</div>
+      <div class="tier-name">Hive Keeper</div>
+      <div class="tier-tag">Good for: General managers, operations leads</div>
+      <div class="price-row">
+        <span class="price">$400</span>
+        <span class="price-unit">/ year</span>
+      </div>
+      <div class="price-monthly">$33.33/mo equivalent</div>
+      <div class="price-detail">≈ 75% of Queen Bee. No billing or Jobber control.</div>
+    </div>
+
+    <div class="tier organizer">
+      <div class="tier-accent"></div>
+      <div class="tier-label">Level 3 · Front Office</div>
+      <div class="tier-name">Worker Bee</div>
+      <div class="tier-tag">Good for: Coordinators, schedulers, customer service</div>
+      <div class="price-row">
+        <span class="price">$200</span>
+        <span class="price-unit">/ year</span>
+      </div>
+      <div class="price-monthly">$16.67/mo equivalent</div>
+      <div class="price-detail">≈ 40% of Queen Bee. No financial visibility.</div>
+    </div>
+
+    <div class="tier viewer">
+      <div class="tier-accent"></div>
+      <div class="tier-label">Level 4 · Read-Only</div>
+      <div class="tier-name">Honey Watcher</div>
+      <div class="tier-tag">Good for: Accountants, advisors, silent partners</div>
+      <div class="price-row">
+        <span class="price">$50</span>
+        <span class="price-unit">/ year</span>
+      </div>
+      <div class="price-monthly">$4.17/mo equivalent</div>
+      <div class="price-detail">Read-only access. Add as many as you need.</div>
+    </div>
+
+  </div>
+
+  <!-- ───── CO-OWNER CALLOUT ───── -->
+  <div class="co-owner">
+    <div class="co-owner-body">
+      <span class="co-owner-label">Multiple owners</span>
+      <span class="co-owner-text">Locations with co-owners can add a second Queen Bee seat at <strong>$400/yr</strong> — both seats get full access. Total for two co-owners: <strong>$950/yr</strong>.</span>
+    </div>
+  </div>
+
+  <!-- ───── LOGIN SECURITY NOTICE ───── -->
+  <div class="co-owner login-notice">
+    <div class="co-owner-body">
+      <span class="co-owner-label">Account security</span>
+      <span class="co-owner-text">All logins require a verified <strong>Bee Organized email address</strong>. Seats are individual — credentials cannot be shared between users.</span>
+    </div>
+  </div>
+  <div class="matrix-section">
+    <div class="section-label">Access Matrix</div>
+
+    <table class="matrix">
+      <colgroup>
+        <col class="col-cap">
+        <col class="col-tier">
+        <col class="col-tier">
+        <col class="col-tier">
+        <col class="col-tier">
+      </colgroup>
+      <thead>
+        <tr>
+          <th class="cap-col">Capability</th>
+          <th class="tier-h owner">Queen Bee</th>
+          <th class="tier-h manager">Hive Keeper</th>
+          <th class="tier-h organizer">Worker Bee</th>
+          <th class="tier-h viewer">Honey Watcher</th>
+        </tr>
+      </thead>
+      <tbody>
+
+        <tr class="section-row"><td colspan="5">⚙ Account & Billing</td></tr>
+        <tr><td class="cap">Manage subscription & billing<span class="cap-sub">Upgrade/downgrade, payment methods, invoices</span></td>
+          <td><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+        <tr><td class="cap">View billing & invoices<span class="cap-sub">See current plan and past charges</span></td>
+          <td><span class="yes">✓</span></td><td><span class="partial">View only</span></td><td><span class="no">✗</span></td><td><span class="partial">View only</span></td></tr>
+        <tr><td class="cap">Connect / disconnect Jobber<span class="cap-sub">OAuth connection to franchise's Jobber account</span></td>
+          <td><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+        <tr><td class="cap">Edit location settings<span class="cap-sub">Business hours, service area, add-ons, branding</span></td>
+          <td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+
+        <tr class="section-row"><td colspan="5">👥 Team Management</td></tr>
+        <tr><td class="cap">Invite / remove Hive Keepers<span class="cap-sub">Add or revoke operational seats</span></td>
+          <td><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+        <tr><td class="cap">Invite / remove Worker Bees & Honey Watchers<span class="cap-sub">Add or revoke lower-access seats</span></td>
+          <td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+        <tr><td class="cap">Assign clients to team members<span class="cap-sub">Set who owns each client</span></td>
+          <td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+
+        <tr class="section-row"><td colspan="5">🐝 Clients & Pipeline</td></tr>
+        <tr><td class="cap">View all clients in the location<span class="cap-sub">Full Hive access — needed for phone & email intake</span></td>
+          <td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+        <tr><td class="cap">Edit client records<span class="cap-sub">Update contact info, stage, tags, notes</span></td>
+          <td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="no">✗</span></td></tr>
+        <tr><td class="cap">Add new leads / clients<span class="cap-sub">Capture incoming phone calls and web inquiries</span></td>
+          <td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="no">✗</span></td></tr>
+        <tr><td class="cap">Schedule assessments & follow-ups<span class="cap-sub">Set appointment times, follow-up reminders</span></td>
+          <td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="no">✗</span></td></tr>
+        <tr><td class="cap">Log Buzz Notes & Job Notes<span class="cap-sub">Private team notes + Jobber-synced notes</span></td>
+          <td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="no">✗</span></td></tr>
+        <tr><td class="cap">Complete jobs & mark stages done<span class="cap-sub">Field-completion work (typically done in Jobber)</span></td>
+          <td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+
+        <tr class="section-row"><td colspan="5">🤝 Contacts & Partners</td></tr>
+        <tr><td class="cap">View partners, contacts, companies<span class="cap-sub">Reference referral network during intake calls</span></td>
+          <td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+        <tr><td class="cap">Add or edit partners & contacts<span class="cap-sub">Build the relationship database</span></td>
+          <td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+
+        <tr class="section-row"><td colspan="5">📧 Drip Campaigns & Templates</td></tr>
+        <tr><td class="cap">Edit drip paths & email templates<span class="cap-sub">Automated outreach configuration (strategic)</span></td>
+          <td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+        <tr><td class="cap">Pause / resume drips for a client<span class="cap-sub">Common request when handling customer calls</span></td>
+          <td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="no">✗</span></td></tr>
+
+        <tr class="section-row"><td colspan="5">📊 Reports & Financials</td></tr>
+        <tr><td class="cap">View revenue, royalty, pipeline reports<span class="cap-sub">Financial dashboards and trend data</span></td>
+          <td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
+        <tr><td class="cap">Export reports & client data<span class="cap-sub">CSV downloads for accounting / analysis</span></td>
+          <td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
+
+      </tbody>
+    </table>
+
+  </div>
+
+  <!-- ───── FOOTER : Slim meta line ───── -->
+  <div class="footer slim">
+    <div class="meta">
+      <div>Per-seat annual subscription · Billed at the location level · No setup fees · Mix & match levels to fit your team</div>
+      <div class="meta-tag">Bee Hub v1 · Confidential</div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
