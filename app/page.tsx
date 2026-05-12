@@ -20,6 +20,17 @@ function mapRole(dbRole: string | null | undefined): {
   }
 }
 
+function fmtJoined(iso: string | null | undefined): string {
+  if (!iso) return ''
+  try {
+    const d = new Date(iso)
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    return `${months[d.getMonth()]} ${d.getFullYear()}`
+  } catch {
+    return ''
+  }
+}
+
 export default async function HomePage() {
   const authUser = await requireAuth()
   const hubUser = await getHubUser()
@@ -65,7 +76,7 @@ export default async function HomePage() {
 
   const supabase = await createServerSupabaseClient()
 
-  // Fetch guide slides
+  // ─── Guide slides ───
   const { data: slidesData } = await supabase
     .from('guide_slides')
     .select('*')
@@ -90,8 +101,7 @@ export default async function HomePage() {
     }
   })
 
-  // Fetch the user's location subscription (so onboarding shows the right variant).
-  // Super_admins and corporate users aren't tied to one location → stays null for them.
+  // ─── User's own location subscription (for onboarding variant) ───
   let currentSubscription: any = null
   if (hubUser.location_id) {
     const { data: locRow } = await supabase
@@ -114,12 +124,84 @@ export default async function HomePage() {
     }
   }
 
+  // ─── All locations for admin views (elevated users only) ───
+  let initialLocations: any[] | null = null
+  if (isElevated) {
+    const { data: locs } = await supabase
+      .from('locations')
+      .select(
+        'id, name, state, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, created_at'
+      )
+      .order('name', { ascending: true })
+
+    // Fetch owners — hub_users with role='owner' linked by location_id
+    const { data: owners } = await supabase
+      .from('hub_users')
+      .select('id, full_name, email, location_id, role')
+      .in('role', ['owner', 'admin'])
+
+    const ownersByLoc: Record<string, { name: string; userCount: number }> = {}
+    const userCountByLoc: Record<string, number> = {}
+    ;(owners || []).forEach((u: any) => {
+      if (!u.location_id) return
+      userCountByLoc[u.location_id] = (userCountByLoc[u.location_id] || 0) + 1
+      if (u.role === 'owner' && !ownersByLoc[u.location_id]) {
+        ownersByLoc[u.location_id] = {
+          name: u.full_name || u.email,
+          userCount: 0,
+        }
+      }
+    })
+
+    initialLocations = (locs || []).map((row: any) => {
+      const lifecycle = row.lifecycle_status || 'onboarding'
+      const subStatus = row.subscription_status || 'deferred'
+      // Derive single crmStatus the existing UI expects.
+      // Past Due takes precedence so the badge surfaces billing problems.
+      const crmStatus =
+        subStatus === 'past_due'
+          ? 'pastdue'
+          : lifecycle === 'paused'
+            ? 'inactive'
+            : lifecycle
+
+      return {
+        id: row.id,
+        name: row.name,
+        state: row.state || '',
+        owner: ownersByLoc[row.id]?.name || null,
+        crmStatus,
+        lifecycle_status: lifecycle,
+        subscription_status: subStatus,
+        subscription_plan: row.subscription_plan || null,
+        payment_source: row.payment_source || 'none',
+        paid_through_date: row.paid_through_date || null,
+        billing_notes: row.billing_notes || null,
+        phone: '',
+        website: '',
+        reviewsLink: '',
+        bookingLink: '',
+        email: '',
+        timezone: '',
+        path: '',
+        jobberConnected: !!row.jobber_account_id,
+        jobberAccountId: row.jobber_account_id || null,
+        leads: 0,
+        revenue: 0,
+        collected: 0,
+        userCount: userCountByLoc[row.id] || 0,
+        joinedDate: fmtJoined(row.created_at),
+      }
+    })
+  }
+
   return (
     <BeeHub
       initialRole={role}
       initialFranchiseRole={franchiseRole}
       initialLocFilter={initialLocFilter}
       initialGuideSlides={initialGuideSlides}
+      initialLocations={initialLocations}
       currentSubscription={currentSubscription}
       currentUser={{
         id: hubUser.id,
