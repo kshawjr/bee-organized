@@ -16126,13 +16126,21 @@ function SyncLogContent() {
 //  ROOT APP - Role-aware shell
 // ═══════════════════════════════════════════════════════
 
-export default function App({ currentUser } = {}) {
-  const [role, setRole]                     = useState('super_admin')
-  const [franchiseRole, setFranchiseRole]   = useState('owner') // owner|manager|light|readonly
+export default function App({
+  currentUser,
+  initialRole,
+  initialFranchiseRole,
+  initialLocFilter,
+  initialGuideSlides,        // accepted; not yet consumed — GUIDE_SLIDES const still drives the guide
+  initialLocations,          // accepted; not yet consumed — ALL_LOCATIONS mock still drives the picker
+  currentSubscription,
+} = {}) {
+  const [role, setRole]                     = useState(initialRole ?? 'super_admin')
+  const [franchiseRole, setFranchiseRole]   = useState(initialFranchiseRole ?? 'owner') // owner|manager|light|readonly
   const [activeNav, setActiveNav]           = useState('home')
   const [viewAsTarget, setViewAsTarget]     = useState(null)
   const [viewAsUser, setViewAsUser]         = useState(null) // full user object when viewing as specific user
-  const [locFilter, setLocFilter]           = useState('all')
+  const [locFilter, setLocFilter]           = useState(initialLocFilter ?? 'all')
   const [showLocPicker, setShowLocPicker]   = useState(false)
   const [showRolePicker, setShowRolePicker] = useState(false)
   const [showGlobalSearch, setShowGlobalSearch] = useState(false)
@@ -16164,9 +16172,20 @@ export default function App({ currentUser } = {}) {
     ? ALL_LOCATIONS.find(l=>l.id===viewAsUser.locationId)
     : selectedLoc
 
-  const effectiveCrmStatus = franchiseLoc
-    ? (locStatuses[franchiseLoc.id] || franchiseLoc.crmStatus)
-    : 'active'
+  // Real franchise user: derive crmStatus from currentSubscription.
+  // super_admin / corporate sign in with currentSubscription=null and fall
+  // through to the existing mock/view-as path.
+  const effectiveCrmStatus = (() => {
+    if (!isElevated && currentSubscription) {
+      const s = currentSubscription.subscription_status
+      if (s === 'deferred') return 'onboarding'
+      if (s === 'past_due') return 'pastdue'
+      if (s === 'inactive') return 'inactive'
+      return 'active'
+    }
+    if (franchiseLoc) return locStatuses[franchiseLoc.id] || franchiseLoc.crmStatus
+    return 'active'
+  })()
 
   function nav(key) { setActiveNav(key); window.scrollTo(0,0) }
   function addPersonFromPartner(p) {
@@ -16186,13 +16205,18 @@ export default function App({ currentUser } = {}) {
     ...(isElevated ? [{ key:'admin', icon:'🏢', label:role==='super_admin'?'Admin':'Corp' }] : []),
   ]
 
-  // Heights
-  const DEMO_BAR_H  = 32
+  // Heights — demo bar only renders for super_admin (see DemoBar gate below),
+  // so its height must zero out for other roles or content gets a phantom gap.
+  const DEMO_BAR_H  = role === 'super_admin' ? 32 : 0
   const LOC_BAR_H   = isElevated ? 36 : 0
   const TOTAL_TOP   = DEMO_BAR_H + LOC_BAR_H
 
   // ── Demo role switcher bar (top) ───────────────────────────────────────────
-  const DemoBar = () => (
+  // Only renders for super_admin — real franchise owners and corporate users
+  // should never see "Kevin Shaw / View as" controls.
+  const DemoBar = () => {
+    if (role !== 'super_admin') return null
+    return (
     <div style={{ position:'fixed', top:0, left:0, right:0, background:'#0a0a0a', borderBottom:'1px solid rgba(255,255,255,0.08)', zIndex:10001, display:'flex', flexDirection:'column' }}>
       <div style={{ height:'32px', display:'flex', alignItems:'center', padding:'0 10px', gap:'6px' }}>
         {/* Me - Kevin Shaw super admin */}
@@ -16221,7 +16245,8 @@ export default function App({ currentUser } = {}) {
 
       </div>
     </div>
-  )
+    )
+  }
   // ── Location banner ────────────────────────────────────────────────────────
   const LocBanner = () => {
     if (!isElevated) return null
@@ -16397,8 +16422,8 @@ export default function App({ currentUser } = {}) {
           selectedLoc={selectedLoc}
           isElevated={isElevated}
           crmStatus={effectiveCrmStatus}
-          ownerName={viewAsUser?.name || selectedLoc?.owner || 'Kevin Shaw'}
-          ownerEmail={viewAsUser?.email || ''}
+          ownerName={viewAsUser?.name || selectedLoc?.owner || currentUser?.name || 'Kevin Shaw'}
+          ownerEmail={viewAsUser?.email || currentUser?.email || ''}
           topOffset={TOTAL_TOP}
           partners={partners}
           setPartners={setPartners}
