@@ -5510,6 +5510,22 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     return () => clearTimeout(t)
   }, [toast])
 
+  // Render diagnostic — placed AFTER all hook declarations but BEFORE any
+  // early returns (payStep flow at ~5631, launching at ~5742, etc.) so it
+  // fires on every render regardless of which return path is taken.
+  console.log('[OnboardingScreen render]', {
+    activeStepOpen,
+    completedSteps,
+    hasToast: !!toast,
+  })
+
+  // Mount/unmount tracker — confirms whether the component instance survives
+  // across renders or is being destroyed and recreated.
+  useEffect(() => {
+    console.log('[OnboardingScreen MOUNTED]')
+    return () => console.log('[OnboardingScreen UNMOUNTED]')
+  }, [])
+
   const finalAmt = method==='cc' ? ccAmount : proration.prorated
 
   function markDone(id)  { setCompletedSteps(prev=>({...prev,[id]:true})) }
@@ -5778,11 +5794,6 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
 
 
 
-  console.log('[OnboardingScreen render]', {
-    completedSteps,
-    activeStepOpen,
-    hasToast: !!toast,
-  })
   return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'7rem', paddingTop:`${topOffset}px` }}>
       <div style={{ background:BRAND.dark, padding:'1rem 1.25rem 1.25rem' }}>
