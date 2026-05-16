@@ -5436,6 +5436,11 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   const [toast, setToast] = useState(null)
 
   useEffect(() => {
+    console.log('[OAuth handler] fired', {
+      search: typeof window !== 'undefined' ? window.location.search : 'ssr',
+      completedSteps,
+      activeStepOpen,
+    })
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
     const result = params.get('jobber')
@@ -5445,6 +5450,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
       setCompletedSteps(prev => ({ ...prev, jobber: true }))
       setActiveStepOpen('import')
       setToast({ kind: 'success', msg: 'Jobber connected ✓' })
+      console.log('[OAuth handler] queued state updates: jobber=done, activeStepOpen=import, toast=success')
     } else if (result === 'error') {
       const reason = params.get('reason') || 'unknown'
       setActiveStepOpen('jobber')
@@ -5727,6 +5733,11 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
 
 
 
+  console.log('[OnboardingScreen render]', {
+    completedSteps,
+    activeStepOpen,
+    hasToast: !!toast,
+  })
   return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'7rem', paddingTop:`${topOffset}px` }}>
       <div style={{ background:BRAND.dark, padding:'1rem 1.25rem 1.25rem' }}>
