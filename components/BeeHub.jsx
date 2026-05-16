@@ -5370,7 +5370,7 @@ function AttentionCard({ icon, title, desc, urgency='medium', action, onAction }
 
 // ─── Placeholder Screen ───────────────────────────────────────────────────────
 // ─── Onboarding Screen ────────────────────────────────────────────────────────
-function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='owner', topOffset=0, onOpenSettings, onComplete=()=>{} }) {
+function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='owner', topOffset=0, onOpenSettings, onComplete=()=>{}, onSkipOnboarding=()=>{} }) {
   const isOwner   = franchiseRole === 'owner'
   const nameParts = (ownerName||'').split(' ')
   const proration = calcProration(ROLE_PRICING.owner)
@@ -5427,6 +5427,37 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
       setLocationForm(f=>({...f, sendFromEmail:String(profileForm.email||''), senderName:(profileForm.firstName+' '+profileForm.lastName).trim()||'', replyToEmail:String(profileForm.email||'') }))
     }
   }, [profileForm.email])
+
+  // ── OAuth return handler ───────────────────────────────────────────────────
+  // Lifted from JobberConnectStep because the Connect step doesn't mount after
+  // the Jobber redirect (fresh page load → activeStepOpen is null → only the
+  // step list is rendered). Handler must live on the screen that's always
+  // mounted while onboarding is active.
+  const [toast, setToast] = useState(null)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const result = params.get('jobber')
+    if (!result) return
+
+    if (result === 'connected') {
+      setCompletedSteps(prev => ({ ...prev, jobber: true }))
+      setActiveStepOpen('import')
+      setToast({ kind: 'success', msg: 'Jobber connected ✓' })
+    } else if (result === 'error') {
+      const reason = params.get('reason') || 'unknown'
+      setActiveStepOpen('jobber')
+      setToast({ kind: 'error', msg: `Couldn't connect Jobber: ${reason}` })
+    }
+    window.history.replaceState({}, '', window.location.pathname)
+  }, [])
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 3000)
+    return () => clearTimeout(t)
+  }, [toast])
 
   const finalAmt = method==='cc' ? ccAmount : proration.prorated
 
@@ -5738,7 +5769,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                 {!locked&&!done&&step.id==='invite'&&<span style={{ fontSize:'14px', color:'#c8d8d4', transform:isOpen?'rotate(90deg)':'none', display:'inline-block', transition:'transform 0.15s', marginLeft:'4px' }}>›</span>}
               </div>
               {done&&<div style={{ margin:'0 14px 14px', padding:'9px 14px', background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:'9px', display:'flex', alignItems:'center', gap:'8px' }}><span>✅</span><span style={{ fontSize:'12px', fontWeight:600, color:'#22c55e' }}>Completed</span></div>}
-              {isOpen&&<div style={{ padding:'0 14px 14px' }}><StepContent step={step} profileForm={profileForm} setProfileForm={setProfileForm} locationForm={locationForm} setLocationForm={setLocationForm} jobberKey={jobberKey} setJobberKey={setJobberKey} showAdvancedSender={showAdvancedSender} setShowAdvancedSender={setShowAdvancedSender} markDone={markDone} setActiveStepOpen={setActiveStepOpen} setShowInviteFlow={setShowInviteFlow} onOpenSettings={onOpenSettings} setSavedPaths={setSavedPaths} /></div>}
+              {isOpen&&<div style={{ padding:'0 14px 14px' }}><StepContent step={step} profileForm={profileForm} setProfileForm={setProfileForm} locationForm={locationForm} setLocationForm={setLocationForm} jobberKey={jobberKey} setJobberKey={setJobberKey} showAdvancedSender={showAdvancedSender} setShowAdvancedSender={setShowAdvancedSender} markDone={markDone} setActiveStepOpen={setActiveStepOpen} setShowInviteFlow={setShowInviteFlow} onOpenSettings={onOpenSettings} setSavedPaths={setSavedPaths} onSkipOnboarding={onSkipOnboarding} /></div>}
             </div>
           )
         })}
@@ -5754,6 +5785,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
           </div>
         )}
       </div>
+      {toast && <InlineToast {...toast} />}
       {showInviteFlow&&<OnboardingInviteSheet onClose={()=>setShowInviteFlow(false)} onDone={()=>{ markDone('invite'); setShowInviteFlow(false) }} />}
 
       {/* Skip invite modal */}
@@ -5873,7 +5905,7 @@ function JobberConnectStep({ markDone, setActiveStepOpen }) {
   )
 }
 
-function ImportStepContent({ markDone, setActiveStepOpen }) {
+function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding }) {
   const currentUser = useContext(CurrentUserContext)
   const locationId  = currentUser?.locationId || null
 
@@ -5947,9 +5979,13 @@ function ImportStepContent({ markDone, setActiveStepOpen }) {
           </p>
         )}
       </div>
-      <button onClick={()=>{ markDone('import'); setActiveStepOpen(null) }}
+      <button onClick={()=>{
+          markDone('import')
+          if (onSkipOnboarding) onSkipOnboarding()
+          else setActiveStepOpen(null)
+        }}
         style={{ width:'100%', padding:'11px', background:'#22c55e', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
-        ✓ Complete Step
+        {onSkipOnboarding ? 'Continue to Hub →' : '✓ Complete Step'}
       </button>
     </div>
   )
@@ -6021,7 +6057,7 @@ function ImportStepContent({ markDone, setActiveStepOpen }) {
   )
 }
 
-function StepContent({ step, profileForm, setProfileForm, locationForm, setLocationForm, jobberKey, setJobberKey, showAdvancedSender, setShowAdvancedSender, markDone, setActiveStepOpen, setShowInviteFlow, onOpenSettings, setSavedPaths=()=>{} }) {
+function StepContent({ step, profileForm, setProfileForm, locationForm, setLocationForm, jobberKey, setJobberKey, showAdvancedSender, setShowAdvancedSender, markDone, setActiveStepOpen, setShowInviteFlow, onOpenSettings, setSavedPaths=()=>{}, onSkipOnboarding }) {
 const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }
   if (step.id==='profile') {
     const phoneDigits = profileForm.phone.replace(/\D/g,'')
@@ -6174,7 +6210,7 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
     return (
       <div style={{ paddingTop:'12px', display:'grid', gap:'10px' }}>
         <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>Import all your existing clients from Jobber into Bee Hub. This is a one-time step - future syncs happen automatically.</p>
-        <ImportStepContent markDone={markDone} setActiveStepOpen={setActiveStepOpen} />
+        <ImportStepContent markDone={markDone} setActiveStepOpen={setActiveStepOpen} onSkipOnboarding={onSkipOnboarding} />
       </div>
     )
   }
@@ -12412,6 +12448,11 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
   const [showNewLead, setShowNewLead] = useState(false)
   const [onboardingSection, setOnboardingSection] = useState(null)
+  // Client-side override to dismiss onboarding after a milestone (e.g. import
+  // succeeds). The real source of truth is locations.subscription_status; this
+  // state lets the user exit without a DB write. Resets on page reload —
+  // follow-up commit should flip subscription_status on the server.
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false)
   const isReadOnly   = crmStatus === 'inactive'
   const isLiteUser   = franchiseRole === 'light' || franchiseRole === 'readonly'
   const canSeeFinancials = !isLiteUser
@@ -12537,8 +12578,8 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     </div>
   )
 
-  if (isOnboarding) return (
-    <OnboardingScreen ownerName={ownerName} ownerEmail={ownerEmail} franchiseRole={franchiseRole} topOffset={topOffset} onOpenSettings={(section)=>{ nav('settings'); setOnboardingSection(section) }} onComplete={onCompleteOnboarding} />
+  if (isOnboarding && !onboardingDismissed) return (
+    <OnboardingScreen ownerName={ownerName} ownerEmail={ownerEmail} franchiseRole={franchiseRole} topOffset={topOffset} onOpenSettings={(section)=>{ nav('settings'); setOnboardingSection(section) }} onComplete={onCompleteOnboarding} onSkipOnboarding={()=>{ setOnboardingDismissed(true); nav('hive') }} />
   )
 
   // Past due - owner can go to settings, everyone else sees lockout after grace expires
