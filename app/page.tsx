@@ -1,5 +1,6 @@
 import { requireAuth, getHubUser } from '@/lib/auth'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { supabaseService } from '@/lib/supabase-service'
 import BeeHub from '@/components/BeeHub'
 
 function mapRole(dbRole: string | null | undefined): {
@@ -74,6 +75,7 @@ export default async function HomePage() {
   const isElevated = role === 'super_admin' || role === 'corporate'
   const initialLocFilter = isElevated ? 'all' : hubUser.location_id || 'all'
 
+  // Cookie-bound client — used for user-scoped reads (their own location, guide slides)
   const supabase = await createServerSupabaseClient()
 
   // ─── Guide slides ───
@@ -104,13 +106,15 @@ export default async function HomePage() {
   // ─── User's own location subscription (for onboarding variant) ───
   let currentSubscription: any = null
   if (hubUser.location_id) {
-    const { data: locRow } = await supabase
+    const { data: locRow, error: subErr } = await supabase
       .from('locations')
       .select(
         'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes'
       )
       .eq('id', hubUser.location_id)
       .single()
+
+    if (subErr) console.error('[page.tsx] currentSubscription error:', subErr.message)
 
     if (locRow) {
       currentSubscription = {
@@ -125,20 +129,30 @@ export default async function HomePage() {
   }
 
   // ─── All locations for admin views (elevated users only) ───
+  // Use service-role client to bypass RLS — avoids the SSR cookie-refresh
+  // silent-fail pattern that returns empty arrays on stale sessions.
+  // Auth has already been verified via requireAuth + getHubUser + isElevated.
   let initialLocations: any[] | null = null
   if (isElevated) {
-    const { data: locs } = await supabase
+    const { data: locs, error: locsErr } = await supabaseService
       .from('locations')
       .select(
         'id, name, state, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, created_at'
       )
       .order('name', { ascending: true })
 
-    // Fetch owners — hub_users with role='owner' linked by location_id
-    const { data: owners } = await supabase
+    if (locsErr) {
+      console.error('[page.tsx] locations fetch error:', locsErr.message)
+    } else {
+      console.log(`[page.tsx] Fetched ${locs?.length ?? 0} locations for ${hubUser.email}`)
+    }
+
+    const { data: owners, error: ownersErr } = await supabaseService
       .from('hub_users')
       .select('id, full_name, email, location_id, role')
       .in('role', ['owner', 'admin'])
+
+    if (ownersErr) console.error('[page.tsx] owners fetch error:', ownersErr.message)
 
     const ownersByLoc: Record<string, { name: string; userCount: number }> = {}
     const userCountByLoc: Record<string, number> = {}
@@ -156,8 +170,6 @@ export default async function HomePage() {
     initialLocations = (locs || []).map((row: any) => {
       const lifecycle = row.lifecycle_status || 'onboarding'
       const subStatus = row.subscription_status || 'deferred'
-      // Derive single crmStatus the existing UI expects.
-      // Past Due takes precedence so the badge surfaces billing problems.
       const crmStatus =
         subStatus === 'past_due'
           ? 'pastdue'
