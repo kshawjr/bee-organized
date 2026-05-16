@@ -1,11 +1,18 @@
 'use client'
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, createContext, useContext } from "react"
 
 // ═══════════════════════════════════════════════════════
 //  BEE HUB - Combined App Preview
 //  Dashboard + The Hive in one navigable experience
 // ═══════════════════════════════════════════════════════
+
+// Auth context — populated by App({ currentUser }) prop from page.tsx via
+// BeeHubApp. Components deep in the tree (e.g. JobberConnectStep,
+// ImportStepContent) read locationId from here instead of being prop-drilled
+// through DashboardScreen → OnboardingScreen → StepContent.
+// Value shape: { id, email, name, role, locationId } or null.
+const CurrentUserContext = createContext(null)
 
 const STAGES = [
   { key:'New',             label:'New',             color:'#6366f1', bg:'rgba(99,102,241,0.08)',  dot:'#6366f1', icon:'✨' },
@@ -5782,17 +5789,59 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
 }
 
 
+// Minimal inline toast — top-right, 3s auto-dismiss. Avoids pulling in a
+// toast library for two call sites.
+function InlineToast({ kind, msg }) {
+  const bg = kind === 'error' ? 'rgba(239,68,68,0.95)' : 'rgba(34,197,94,0.95)'
+  return (
+    <div style={{ position:'fixed', top:'16px', right:'16px', zIndex:10200, background:bg, color:'white', padding:'10px 14px', borderRadius:'10px', fontSize:'13px', fontWeight:600, fontFamily:'inherit', boxShadow:'0 8px 24px rgba(0,0,0,0.2)', maxWidth:'320px' }}>
+      {msg}
+    </div>
+  )
+}
+
 function JobberConnectStep({ markDone, setActiveStepOpen }) {
-  const [state, setState] = useState('idle') // idle | connecting | connected
+  const currentUser = useContext(CurrentUserContext)
+  const locationId  = currentUser?.locationId || null
+
+  // Treat 'connected' as a UI-only confirmation flag — markDone is the
+  // source of truth for whether the step is complete in the onboarding flow.
+  const [connected, setConnected] = useState(false)
+  const [toast, setToast]         = useState(null)
+
+  // OAuth return handler — fires once on mount.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const result = params.get('jobber')
+    if (!result) return
+
+    if (result === 'connected') {
+      setConnected(true)
+      markDone('jobber')
+      setToast({ kind:'success', msg:'Jobber connected ✓' })
+    } else if (result === 'error') {
+      const reason = params.get('reason') || 'unknown'
+      setToast({ kind:'error', msg:`Couldn't connect Jobber: ${reason}` })
+    }
+    window.history.replaceState({}, '', window.location.pathname)
+  }, [])
+
+  // Auto-dismiss toast after 3s.
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 3000)
+    return () => clearTimeout(t)
+  }, [toast])
 
   function handleConnect() {
-    setState('connecting')
-    // Simulate OAuth popup flow
-    setTimeout(() => setState('connected'), 2800)
+    if (!locationId) return
+    window.location.href = '/api/jobber/connect?location_id=' + encodeURIComponent(locationId)
   }
 
-  if (state === 'connected') return (
+  if (connected) return (
     <div style={{ paddingTop:'12px', display:'grid', gap:'10px' }}>
+      {toast && <InlineToast {...toast} />}
       <div style={{ padding:'14px', background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:'10px', textAlign:'center' }}>
         <p style={{ fontSize:'22px', marginBottom:'4px' }}>⚡</p>
         <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>Jobber connected!</p>
@@ -5805,74 +5854,98 @@ function JobberConnectStep({ markDone, setActiveStepOpen }) {
     </div>
   )
 
-  if (state === 'connecting') return (
-    <div style={{ paddingTop:'12px', display:'grid', gap:'10px' }}>
-      {/* Simulated popup overlay */}
-      <div style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.5)', zIndex:10100, display:'flex', alignItems:'center', justifyContent:'center' }}>
-        <div style={{ background:'white', borderRadius:'20px', width:'340px', padding:'28px 24px', textAlign:'center', boxShadow:'0 20px 60px rgba(26,46,43,0.3)' }}>
-          <div style={{ width:'52px', height:'52px', borderRadius:'12px', background:'rgba(255,107,53,0.1)', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 12px' }}>
-            <span style={{ fontSize:'24px' }}>⚡</span>
-          </div>
-          <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'6px' }}>Connecting to Jobber</p>
-          <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'20px', lineHeight:1.5 }}>Complete the authorization in the Jobber window. This window will close automatically when done.</p>
-          <div style={{ display:'flex', gap:'6px', justifyContent:'center', marginBottom:'16px' }}>
-            {[0,1,2].map(i=>(
-              <div key={i} style={{ width:'8px', height:'8px', borderRadius:'50%', background:'#a8c9c4', animation:`pulse ${0.6 + i * 0.2}s ease-in-out infinite alternate` }} />
-            ))}
-          </div>
-          <style>{`@keyframes pulse { from { opacity:0.3; transform:scale(0.8) } to { opacity:1; transform:scale(1.1) } }`}</style>
-          <button onClick={()=>setState('idle')}
-            style={{ fontSize:'11px', color:'#8a9e9a', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit' }}>
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-
   return (
     <div style={{ paddingTop:'12px', display:'grid', gap:'10px' }}>
+      {toast && <InlineToast {...toast} />}
       <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>
         Connect your Jobber account to sync clients, jobs, and invoices automatically. You'll be redirected to Jobber to authorize access.
       </p>
-      <button onClick={handleConnect}
-        style={{ width:'100%', padding:'11px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
+      <button onClick={handleConnect} disabled={!locationId}
+        style={{ width:'100%', padding:'11px', background: locationId ? '#1a2e2b' : '#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color: locationId ? 'white' : '#9ca3af', cursor: locationId ? 'pointer' : 'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
         <span>⚡</span> Connect Jobber
       </button>
+      {!locationId && (
+        <p style={{ fontSize:'11px', color:'#ef4444', textAlign:'center' }}>
+          No location assigned to your account. Contact your admin.
+        </p>
+      )}
     </div>
   )
 }
 
 function ImportStepContent({ markDone, setActiveStepOpen }) {
-  const [state, setState]   = useState('idle')
-  const [progress, setProgress] = useState(0)
-  const [count, setCount]   = useState(0)
+  const currentUser = useContext(CurrentUserContext)
+  const locationId  = currentUser?.locationId || null
 
-  function startImport() {
-    setState('running')
-    setProgress(0)
-    const total = Math.floor(Math.random() * 80) + 40
-    let cur = 0
-    const iv = setInterval(() => {
-      cur += Math.floor(Math.random() * 8) + 2
-      if (cur >= total) {
-        cur = total
-        clearInterval(iv)
-        setProgress(100)
-        setCount(total)
-        setTimeout(() => setState('done'), 800)
+  const [jobId,   setJobId]   = useState(null)
+  const [status,  setStatus]  = useState(null)   // polled import_jobs row
+  const [summary, setSummary] = useState(null)   // initial POST response
+  const [error,   setError]   = useState(null)   // network or HTTP error
+
+  const isTerminal = status?.status === 'completed' || status?.status === 'failed'
+  const isRunning  = jobId && !isTerminal && !error
+  const isDone     = status?.status === 'completed'
+  const isFailed   = status?.status === 'failed' || (!!error && !isRunning)
+
+  // Polling loop — fires once per jobId; chains setTimeout instead of
+  // setInterval so a slow status fetch doesn't pile up overlapping requests.
+  useEffect(() => {
+    if (!jobId) return
+    let stopped  = false
+    let timer
+
+    const tick = async () => {
+      try {
+        const r = await fetch('/api/import/status/' + jobId)
+        const d = await r.json()
+        if (stopped) return
+        if (!r.ok) { setError(d.error || 'status_fetch_failed'); return }
+        setStatus(d)
+        if (d.status === 'completed' || d.status === 'failed') return
+        timer = setTimeout(tick, 2000)
+      } catch {
+        if (!stopped) timer = setTimeout(tick, 2000)
       }
-      setProgress(Math.round((cur / total) * 100))
-      setCount(cur)
-    }, 180)
+    }
+
+    timer = setTimeout(tick, 0)
+    return () => { stopped = true; clearTimeout(timer) }
+  }, [jobId])
+
+  async function startImport() {
+    if (!locationId || isRunning) return
+    setError(null); setStatus(null); setSummary(null)
+    try {
+      const r = await fetch(
+        '/api/import/jobber-clients?location_id=' + encodeURIComponent(locationId),
+        { method:'POST' },
+      )
+      const d = await r.json()
+      if (!r.ok || !d.success) { setError(d.error || 'import_failed'); return }
+      setSummary(d)
+      setJobId(d.job_id)
+    } catch (e) {
+      setError(String(e?.message || e))
+    }
   }
 
-  if (state === 'done') return (
+  function tryAgain() {
+    setJobId(null); setStatus(null); setSummary(null); setError(null)
+  }
+
+  // ─── done ──
+  if (isDone) return (
     <div style={{ display:'grid', gap:'10px' }}>
       <div style={{ padding:'14px', background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:'10px', textAlign:'center' }}>
         <p style={{ fontSize:'22px', marginBottom:'4px' }}>✅</p>
-        <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>{count} clients imported</p>
-        <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Future syncs happen automatically</p>
+        <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>
+          {summary?.total_clients ?? status?.processed_records ?? 0} clients imported
+        </p>
+        {summary && (
+          <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5 }}>
+            Leads {summary.leads_created}+{summary.leads_updated} · Requests {summary.requests_created}+{summary.requests_updated} · Jobs {summary.jobs_created}+{summary.jobs_updated} · Invoices {summary.invoices_created}+{summary.invoices_updated}
+          </p>
+        )}
       </div>
       <button onClick={()=>{ markDone('import'); setActiveStepOpen(null) }}
         style={{ width:'100%', padding:'11px', background:'#22c55e', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
@@ -5881,26 +5954,69 @@ function ImportStepContent({ markDone, setActiveStepOpen }) {
     </div>
   )
 
-  if (state === 'running') return (
-    <div style={{ display:'grid', gap:'8px' }}>
-      <p style={{ fontSize:'12px', color:'#4a5e5a' }}>Importing… {count} clients so far</p>
-      <div style={{ height:'8px', background:'rgba(168,201,196,0.2)', borderRadius:'4px', overflow:'hidden' }}>
-        <div style={{ height:'100%', width:`${progress}%`, background:'linear-gradient(90deg,#1a2e2b,#a8c9c4)', borderRadius:'4px', transition:'width 0.2s ease' }} />
+  // ─── failed ──
+  if (isFailed) return (
+    <div style={{ display:'grid', gap:'10px' }}>
+      <div style={{ padding:'14px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'10px', textAlign:'center' }}>
+        <p style={{ fontSize:'22px', marginBottom:'4px' }}>❌</p>
+        <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'4px' }}>Import failed</p>
+        <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, wordBreak:'break-word' }}>
+          {status?.error_message || error || 'Unknown error'}
+        </p>
       </div>
-      <p style={{ fontSize:'10px', color:'#8a9e9a', textAlign:'right' }}>{progress}%</p>
+      <button onClick={tryAgain}
+        style={{ width:'100%', padding:'11px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+        Try Again
+      </button>
     </div>
   )
 
+  // ─── running ──
+  if (isRunning) {
+    const hasTotal = (status?.total_records || 0) > 0
+    const pct = hasTotal
+      ? Math.min(100, Math.round(((status.processed_records || 0) / status.total_records) * 100))
+      : 0
+    const phaseLabel = status?.phase || 'starting'
+    return (
+      <div style={{ display:'grid', gap:'8px' }}>
+        <p style={{ fontSize:'12px', color:'#4a5e5a' }}>
+          {phaseLabel} — {status?.processed_records || 0}
+          {hasTotal ? ` of ${status.total_records}` : ''}
+        </p>
+        {hasTotal ? (
+          <div style={{ height:'8px', background:'rgba(168,201,196,0.2)', borderRadius:'4px', overflow:'hidden' }}>
+            <div style={{ height:'100%', width:`${pct}%`, background:'linear-gradient(90deg,#1a2e2b,#a8c9c4)', borderRadius:'4px', transition:'width 0.3s ease' }} />
+          </div>
+        ) : (
+          <div style={{ height:'8px', background:'rgba(168,201,196,0.2)', borderRadius:'4px', overflow:'hidden', position:'relative' }}>
+            <div style={{ position:'absolute', top:0, bottom:0, width:'30%', background:'linear-gradient(90deg,transparent,#a8c9c4,transparent)', borderRadius:'4px', animation:'beeImportIndeterminate 1.4s ease-in-out infinite' }} />
+            <style>{`@keyframes beeImportIndeterminate { 0%{left:-30%} 100%{left:100%} }`}</style>
+          </div>
+        )}
+        {hasTotal && (
+          <p style={{ fontSize:'10px', color:'#8a9e9a', textAlign:'right' }}>{pct}%</p>
+        )}
+      </div>
+    )
+  }
+
+  // ─── idle ──
   return (
     <div style={{ display:'grid', gap:'8px' }}>
-      <button onClick={startImport}
-        style={{ width:'100%', padding:'11px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+      <button onClick={startImport} disabled={!locationId || isRunning}
+        style={{ width:'100%', padding:'11px', background: locationId ? '#1a2e2b' : '#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color: locationId ? 'white' : '#9ca3af', cursor: locationId ? 'pointer' : 'not-allowed' }}>
         Start Import
       </button>
       <button onClick={()=>{ setActiveStepOpen(null) }}
         style={{ width:'100%', padding:'9px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>
         Skip for now
       </button>
+      {!locationId && (
+        <p style={{ fontSize:'11px', color:'#ef4444', textAlign:'center' }}>
+          No location assigned to your account. Contact your admin.
+        </p>
+      )}
     </div>
   )
 }
@@ -16010,7 +16126,7 @@ function SyncLogContent() {
 //  ROOT APP - Role-aware shell
 // ═══════════════════════════════════════════════════════
 
-export default function App() {
+export default function App({ currentUser } = {}) {
   const [role, setRole]                     = useState('super_admin')
   const [franchiseRole, setFranchiseRole]   = useState('owner') // owner|manager|light|readonly
   const [activeNav, setActiveNav]           = useState('home')
@@ -16349,6 +16465,7 @@ export default function App() {
   }, [])
 
   return (
+    <CurrentUserContext.Provider value={currentUser || null}>
     <div>
       <DemoBar />
       <LocBanner />
@@ -16442,5 +16559,6 @@ export default function App() {
         />
       )}
     </div>
+    </CurrentUserContext.Provider>
   )
 }

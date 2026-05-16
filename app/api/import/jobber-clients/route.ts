@@ -202,6 +202,13 @@ export async function POST(req: NextRequest) {
   if (!location) {
     return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
   }
+
+  // Owner can only import their own location. super_admin can import any.
+  // hub_users.location_id stores the UUID, matching locations.id.
+  if (hubUser.role === 'owner' && hubUser.location_id !== location.id) {
+    return NextResponse.json({ error: 'forbidden_location' }, { status: 403 })
+  }
+
   if (!location.jobber_access_token) {
     return NextResponse.json(
       { error: 'location_not_connected_to_jobber' },

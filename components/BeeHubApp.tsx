@@ -2,8 +2,22 @@
 import dynamic from 'next/dynamic'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const App = dynamic(() => import('./BeeHub.js'), { ssr: false }) as any
+const App = dynamic(() => import('./BeeHub.jsx'), { ssr: false }) as any
 
-export default function BeeHubApp({ initialRoute }: { initialRoute?: string }) {
-  return <App initialRoute={initialRoute} />
+type CurrentUser = {
+  id: string
+  email: string
+  name: string
+  role: string
+  locationId?: string | null
+}
+
+export default function BeeHubApp({
+  initialRoute,
+  currentUser,
+}: {
+  initialRoute?: string
+  currentUser?: CurrentUser
+}) {
+  return <App initialRoute={initialRoute} currentUser={currentUser} />
 }

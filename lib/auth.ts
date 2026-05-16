@@ -55,6 +55,8 @@ export function canAccessLocation(hubUser: any, locationId: string) {
 }
 
 // Check if user can run imports
+// Owner-of-location enforcement (must own the location being imported into)
+// happens in the import route — this check just gates the role itself.
 export function canRunImport(role: string) {
-  return role === 'super_admin'
+  return role === 'super_admin' || role === 'owner'
 }
