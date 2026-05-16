@@ -16539,17 +16539,36 @@ export default function App({
           </button>
         </div>
         {/* User info at bottom */}
-        <div style={{ padding:'14px 16px', borderTop:'1px solid rgba(168,201,196,0.08)' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-            <div style={{ width:'32px', height:'32px', borderRadius:'50%', background:'linear-gradient(135deg,#d4a046,#b07a20)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'11px', fontWeight:700, color:'white', flexShrink:0 }}>
-              {viewAsUser ? viewAsUser.initials : 'KS'}
+        {(() => {
+          const sidebarName = viewAsUser?.name || currentUser?.name || 'Kevin Shaw'
+          const sidebarInitials = viewAsUser?.initials || (sidebarName ? getInitials(sidebarName) : 'KS')
+          const sidebarRoleLabel = viewAsUser
+            ? (FRANCHISE_ROLES.find(r => r.key === viewAsUser.role)?.label || 'Corporate')
+            : role === 'super_admin' ? 'Super Admin'
+            : role === 'corporate'   ? 'Corporate'
+            : role === 'franchise' && franchiseRole === 'owner'  ? 'Queen Bee'
+            : role === 'franchise' && franchiseRole === 'viewer' ? 'Honey Watcher'
+            : ''
+          return (
+            <div style={{ padding:'14px 16px', borderTop:'1px solid rgba(168,201,196,0.08)' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+                <div style={{ width:'32px', height:'32px', borderRadius:'50%', background:'linear-gradient(135deg,#d4a046,#b07a20)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'11px', fontWeight:700, color:'white', flexShrink:0 }}>
+                  {sidebarInitials}
+                </div>
+                <div style={{ minWidth:0, flex:1 }}>
+                  <p style={{ fontSize:'12px', fontWeight:600, color:'white', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sidebarName}</p>
+                  {sidebarRoleLabel && (
+                    <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.5)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sidebarRoleLabel}</p>
+                  )}
+                </div>
+              </div>
+              <a href="/api/auth/signout"
+                style={{ display:'block', marginTop:'10px', padding:'7px 10px', background:'rgba(168,201,196,0.08)', border:'1px solid rgba(168,201,196,0.15)', borderRadius:'8px', textAlign:'center', fontSize:'11px', fontWeight:600, color:'rgba(168,201,196,0.85)', textDecoration:'none', fontFamily:'inherit' }}>
+                Sign Out
+              </a>
             </div>
-            <div style={{ minWidth:0 }}>
-              <p style={{ fontSize:'12px', fontWeight:600, color:'white', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{viewAsUser?.name||'Kevin Shaw'}</p>
-              <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.5)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{viewAsUser ? FRANCHISE_ROLES.find(r=>r.key===viewAsUser.role)?.label||'Corporate' : 'Super Admin'}</p>
-            </div>
-          </div>
-        </div>
+          )
+        })()}
       </div>
 
       {/* Main content - offset by sidebar on desktop */}
