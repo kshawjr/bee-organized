@@ -12619,10 +12619,29 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   )
 
   const BottomNav = () => null
-  // Onboarding screen - allow settings for setup steps, block everything else
-  if (isOnboarding && activeNav !== 'home' && activeNav !== 'settings') { nav('home') }
 
-  if (isOnboarding && activeNav === 'settings') return (
+  // Onboarding screen - allow settings for setup steps, block everything else.
+  // Wrapped in useEffect to avoid setState-during-render — the previous inline
+  // form called nav() during render, triggering a re-render cycle that briefly
+  // unmounted OnboardingScreen and discarded its URL-handler state updates.
+  useEffect(() => {
+    if (isOnboarding && activeNav !== 'home' && activeNav !== 'settings') {
+      nav('home')
+    }
+  }, [isOnboarding, activeNav])
+
+  console.log('[DashboardScreen render]', {
+    effectiveCrmStatus: crmStatus,
+    activeNav,
+    onboardingDismissed,
+    isOnboarding,
+  })
+
+  // Logs the chosen return branch on the way out so we can see render→return
+  // mapping in devtools. Cleanup commit will remove all of these together.
+  const logReturn = (label, jsx) => { console.log('[DashboardScreen returning]', label); return jsx }
+
+  if (isOnboarding && activeNav === 'settings') return logReturn('SettingsScreen (onboarding)', (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
       <SettingsScreen
         onStatusChange={s=>setCrmStatus(s)}
@@ -12632,26 +12651,26 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         onboardingData={onboardingData}
       />
     </div>
-  )
+  ))
 
-  if (isOnboarding && !onboardingDismissed) return (
+  if (isOnboarding && !onboardingDismissed) return logReturn('OnboardingScreen', (
     <OnboardingScreen ownerName={ownerName} ownerEmail={ownerEmail} franchiseRole={franchiseRole} topOffset={topOffset} onOpenSettings={(section)=>{ nav('settings'); setOnboardingSection(section) }} onComplete={onCompleteOnboarding} onSkipOnboarding={()=>{ setOnboardingDismissed(true); nav('hive') }} />
-  )
+  ))
 
   // Past due - owner can go to settings, everyone else sees lockout after grace expires
-  if (isPastDue && graceExpired && franchiseRole !== 'owner') return (
+  if (isPastDue && graceExpired && franchiseRole !== 'owner') return logReturn('LockoutScreen (non-owner)', (
     <LockoutScreen isOwner={false} />
-  )
-  if (isPastDue && graceExpired && franchiseRole === 'owner' && activeNav !== 'settings') return (
+  ))
+  if (isPastDue && graceExpired && franchiseRole === 'owner' && activeNav !== 'settings') return logReturn('LockoutScreen (owner)', (
     <LockoutScreen isOwner={true} onGoToSettings={()=>nav('settings')} />
-  )
+  ))
   if (isPastDue && activeNav !== 'settings' && activeNav !== 'home' && !graceExpired) {
     // allow browsing but read-only during grace
   }
 
-  if (activeNav==='hive') return <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} /></>
+  if (activeNav==='hive') return logReturn('HiveScreen', <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} /></>)
 
-  if (activeNav==='schedule') return (
+  if (activeNav==='schedule') return logReturn('ScheduleScreen', (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'5rem' }}>
       <div style={{ padding:'1.5rem 1.25rem 1rem', background:BRAND.dark }}>
         <h1 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'white' }}>Schedule 📅</h1>
@@ -12673,9 +12692,9 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       </div>
       <BottomNav />
     </div>
-  )
+  ))
 
-  if (activeNav==='partners') return (
+  if (activeNav==='partners') return logReturn('PartnersScreen', (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
       {isReadOnly&&<ReadOnlyBanner />}
       <PartnersScreen
@@ -12697,9 +12716,9 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       />
       <BottomNav />
     </div>
-  )
+  ))
 
-  if (activeNav==='settings') return (
+  if (activeNav==='settings') return logReturn('SettingsScreen', (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
       <PastDueBar />
       <SettingsScreen
@@ -12713,9 +12732,9 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       />
       <BottomNav />
     </div>
-  )
+  ))
 
-  return (
+  return logReturn('HomeDashboard', (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'5rem' }}>
       <PastDueBar />
 
@@ -13042,7 +13061,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       />}
       <BottomNav />
     </div>
-  )
+  ))
 }
 
 // ─── Root App ─────────────────────────────────────────
