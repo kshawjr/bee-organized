@@ -5447,16 +5447,61 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     if (!result) return
 
     if (result === 'connected') {
+      // Persist intent to survive a potential unmount-before-render cycle.
+      // The hydrate effect below consumes this on the next fresh mount.
+      sessionStorage.setItem('bee.oauth.return', JSON.stringify({
+        kind: 'jobber-connected',
+        at: Date.now(),
+      }))
       setCompletedSteps(prev => ({ ...prev, jobber: true }))
       setActiveStepOpen('import')
       setToast({ kind: 'success', msg: 'Jobber connected ✓' })
       console.log('[OAuth handler] queued state updates: jobber=done, activeStepOpen=import, toast=success')
     } else if (result === 'error') {
       const reason = params.get('reason') || 'unknown'
+      sessionStorage.setItem('bee.oauth.return', JSON.stringify({
+        kind: 'jobber-error',
+        reason,
+        at: Date.now(),
+      }))
       setActiveStepOpen('jobber')
       setToast({ kind: 'error', msg: `Couldn't connect Jobber: ${reason}` })
     }
     window.history.replaceState({}, '', window.location.pathname)
+  }, [])
+
+  // Hydrate OAuth intent from sessionStorage on every fresh mount.
+  // Confirmed root cause: OnboardingScreen unmounts after the URL handler's
+  // setters queue but before React renders the new state. We don't need to
+  // know WHY the unmount happens — this catches the intent on remount.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const raw = sessionStorage.getItem('bee.oauth.return')
+    if (!raw) return
+
+    let payload
+    try { payload = JSON.parse(raw) } catch {
+      sessionStorage.removeItem('bee.oauth.return')
+      return
+    }
+
+    // Stale guard — ignore intents older than 60s.
+    if (Date.now() - (payload.at || 0) > 60000) {
+      sessionStorage.removeItem('bee.oauth.return')
+      return
+    }
+
+    sessionStorage.removeItem('bee.oauth.return')
+    console.log('[OAuth hydrate from storage]', payload)
+
+    if (payload.kind === 'jobber-connected') {
+      setCompletedSteps(prev => ({ ...prev, jobber: true }))
+      setActiveStepOpen('import')
+      setToast({ kind: 'success', msg: 'Jobber connected ✓' })
+    } else if (payload.kind === 'jobber-error') {
+      setActiveStepOpen('jobber')
+      setToast({ kind: 'error', msg: `Couldn't connect Jobber: ${payload.reason || 'unknown'}` })
+    }
   }, [])
 
   useEffect(() => {
