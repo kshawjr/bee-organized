@@ -10,6 +10,14 @@
 // All child writes use the slug for consistency with hub_users.location_id
 // and the rest of the codebase.
 //
+// Stage classification (see determineStage):
+//   Final Processing → Job in Progress → Estimate Sent → Assessment Scheduled
+//   → Nurturing (no downstream activity AND createdAt > 30 days ago)
+//   → New Request (default)
+// The Nurturing bucket exists because the franchise historically used Jobber
+// as a parking lot for stale leads — old untouched requests should not show
+// up as "fresh and actionable" New Request rows.
+//
 // KNOWN: leads/assessments/payments/notes lack UNIQUE on jobber_*_id.
 // Re-running this import concurrently could create dup rows in those tables.
 // Hardening pass: add UNIQUE constraints + switch to ON CONFLICT upserts.
@@ -92,6 +100,8 @@ const JOB_STATUS: Record<string, string> = {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+const NURTURING_AGE_MS = 30 * 24 * 60 * 60 * 1000  // 30 days
+
 // ── helpers ───────────────────────────────────────────────────
 
 async function lookupLocation(input: string) {
@@ -144,7 +154,13 @@ function determineStage(request: any): string {
   if (request._hasInvoice)    return 'Final Processing'
   if (request._hasJob)        return 'Job in Progress'
   if (request._hasQuote)      return 'Estimate Sent'
-  if (request.assessment)     return 'Assessment Scheduled'
+  if (request._hasAssessment) return 'Assessment Scheduled'
+  // No downstream activity. If the request was created > 30 days ago it's
+  // a stale parked lead, not a fresh actionable request.
+  if (request.createdAt) {
+    const ageMs = Date.now() - new Date(request.createdAt).getTime()
+    if (ageMs > NURTURING_AGE_MS) return 'Nurturing'
+  }
   return 'New Request'
 }
 
@@ -262,9 +278,10 @@ export async function POST(req: NextRequest) {
     // ─── set _has* flags so determineStage works on flat queries ──
     for (const r of requests) {
       const reqJobs = jobsByReq[r.id] || []
-      r._hasQuote   = (quotesByReq[r.id] || []).length > 0
-      r._hasJob     = reqJobs.length > 0
-      r._hasInvoice = reqJobs.some((j: any) => (j.invoices?.nodes || []).length > 0)
+      r._hasQuote      = (quotesByReq[r.id] || []).length > 0
+      r._hasJob        = reqJobs.length > 0
+      r._hasInvoice    = reqJobs.some((j: any) => (j.invoices?.nodes || []).length > 0)
+      r._hasAssessment = !!r.assessment
     }
 
     // ─── upsert phase ──
