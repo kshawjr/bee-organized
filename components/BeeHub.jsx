@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useRef, createContext, useContext } from "react"
+import { useRouter } from "next/navigation"
 
 // ═══════════════════════════════════════════════════════
 //  BEE HUB - Combined App Preview
@@ -16315,6 +16316,7 @@ export default function App({
   initialLocations,          // accepted; not yet consumed — ALL_LOCATIONS mock still drives the picker
   currentSubscription,
 } = {}) {
+  const router = useRouter()
   const [role, setRole]                     = useState(initialRole ?? 'super_admin')
   const [franchiseRole, setFranchiseRole]   = useState(initialFranchiseRole ?? 'owner') // owner|manager|light|readonly
   const [activeNav, setActiveNav]           = useState('home')
@@ -16633,6 +16635,7 @@ export default function App({
             // dismisses client-side, so a failed write only impacts next session.
             if (locId) {
               fetch('/api/locations/' + locId + '/complete-onboarding', { method: 'POST' })
+                .then(() => router.refresh())
                 .catch(e => console.error('[onboarding complete] server write failed:', e))
             }
           }}
