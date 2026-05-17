@@ -5462,11 +5462,6 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   }, [])
 
   useEffect(() => {
-    console.log('[OAuth handler] fired', {
-      search: typeof window !== 'undefined' ? window.location.search : 'ssr',
-      completedSteps,
-      activeStepOpen,
-    })
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
     const result = params.get('jobber')
@@ -5482,7 +5477,6 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
       setCompletedSteps(prev => ({ ...prev, jobber: true }))
       setActiveStepOpen('import')
       setToast({ kind: 'success', msg: 'Jobber connected ✓' })
-      console.log('[OAuth handler] queued state updates: jobber=done, activeStepOpen=import, toast=success')
     } else if (result === 'error') {
       const reason = params.get('reason') || 'unknown'
       sessionStorage.setItem('bee.oauth.return', JSON.stringify({
@@ -5518,7 +5512,6 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     }
 
     sessionStorage.removeItem('bee.oauth.return')
-    console.log('[OAuth hydrate from storage]', payload)
 
     if (payload.kind === 'jobber-connected') {
       setCompletedSteps(prev => ({ ...prev, jobber: true }))
@@ -5548,22 +5541,6 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
       }))
     } catch {}
   }, [completedSteps, activeStepOpen])
-
-  // Render diagnostic — placed AFTER all hook declarations but BEFORE any
-  // early returns (payStep flow at ~5631, launching at ~5742, etc.) so it
-  // fires on every render regardless of which return path is taken.
-  console.log('[OnboardingScreen render]', {
-    activeStepOpen,
-    completedSteps,
-    hasToast: !!toast,
-  })
-
-  // Mount/unmount tracker — confirms whether the component instance survives
-  // across renders or is being destroyed and recreated.
-  useEffect(() => {
-    console.log('[OnboardingScreen MOUNTED]')
-    return () => console.log('[OnboardingScreen UNMOUNTED]')
-  }, [])
 
   const finalAmt = method==='cc' ? ccAmount : proration.prorated
 
@@ -12702,18 +12679,8 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     }
   }, [isOnboarding, activeNav])
 
-  console.log('[DashboardScreen render]', {
-    effectiveCrmStatus: crmStatus,
-    activeNav,
-    onboardingDismissed,
-    isOnboarding,
-  })
 
-  // Logs the chosen return branch on the way out so we can see render→return
-  // mapping in devtools. Cleanup commit will remove all of these together.
-  const logReturn = (label, jsx) => { console.log('[DashboardScreen returning]', label); return jsx }
-
-  if (isOnboarding && activeNav === 'settings') return logReturn('SettingsScreen (onboarding)', (
+  if (isOnboarding && activeNav === 'settings') return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
       <SettingsScreen
         onStatusChange={s=>setCrmStatus(s)}
@@ -12723,9 +12690,9 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         onboardingData={onboardingData}
       />
     </div>
-  ))
+  )
 
-  if (isOnboarding && !onboardingDismissed) return logReturn('OnboardingScreen', (
+  if (isOnboarding && !onboardingDismissed) return (
     <OnboardingScreen ownerName={ownerName} ownerEmail={ownerEmail} franchiseRole={franchiseRole} topOffset={topOffset} onOpenSettings={(section)=>{ nav('settings'); setOnboardingSection(section) }} onComplete={onCompleteOnboarding} onSkipOnboarding={()=>{
       if (typeof window !== 'undefined') {
         sessionStorage.removeItem('bee.onboarding.state')
@@ -12734,22 +12701,22 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       setOnboardingDismissed(true)
       nav('hive')
     }} />
-  ))
+  )
 
   // Past due - owner can go to settings, everyone else sees lockout after grace expires
-  if (isPastDue && graceExpired && franchiseRole !== 'owner') return logReturn('LockoutScreen (non-owner)', (
+  if (isPastDue && graceExpired && franchiseRole !== 'owner') return (
     <LockoutScreen isOwner={false} />
-  ))
-  if (isPastDue && graceExpired && franchiseRole === 'owner' && activeNav !== 'settings') return logReturn('LockoutScreen (owner)', (
+  )
+  if (isPastDue && graceExpired && franchiseRole === 'owner' && activeNav !== 'settings') return (
     <LockoutScreen isOwner={true} onGoToSettings={()=>nav('settings')} />
-  ))
+  )
   if (isPastDue && activeNav !== 'settings' && activeNav !== 'home' && !graceExpired) {
     // allow browsing but read-only during grace
   }
 
-  if (activeNav==='hive') return logReturn('HiveScreen', <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} /></>)
+  if (activeNav==='hive') return <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} /></>
 
-  if (activeNav==='schedule') return logReturn('ScheduleScreen', (
+  if (activeNav==='schedule') return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'5rem' }}>
       <div style={{ padding:'1.5rem 1.25rem 1rem', background:BRAND.dark }}>
         <h1 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'white' }}>Schedule 📅</h1>
@@ -12771,9 +12738,9 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       </div>
       <BottomNav />
     </div>
-  ))
+  )
 
-  if (activeNav==='partners') return logReturn('PartnersScreen', (
+  if (activeNav==='partners') return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
       {isReadOnly&&<ReadOnlyBanner />}
       <PartnersScreen
@@ -12795,9 +12762,9 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       />
       <BottomNav />
     </div>
-  ))
+  )
 
-  if (activeNav==='settings') return logReturn('SettingsScreen', (
+  if (activeNav==='settings') return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
       <PastDueBar />
       <SettingsScreen
@@ -12811,9 +12778,9 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       />
       <BottomNav />
     </div>
-  ))
+  )
 
-  return logReturn('HomeDashboard', (
+  return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'5rem' }}>
       <PastDueBar />
 
@@ -13140,7 +13107,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       />}
       <BottomNav />
     </div>
-  ))
+  )
 }
 
 // ─── Root App ─────────────────────────────────────────
