@@ -5435,6 +5435,24 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   // mounted while onboarding is active.
   const [toast, setToast] = useState(null)
 
+  // ── General state hydrate ──────────────────────────────────────────────────
+  // Restore completedSteps + activeStepOpen from sessionStorage on every fresh
+  // mount. The Jobber OAuth redirect causes a hard page navigation that wipes
+  // all React state — without this, the user returns from Jobber to find every
+  // step they completed BEFORE clicking Connect Jobber is reset to incomplete.
+  // Must run BEFORE the OAuth handler below so prior state is restored first,
+  // then the jobber=done + activeStepOpen='import' overlay applies cleanly.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const saved = sessionStorage.getItem('bee.onboarding.state')
+      if (!saved) return
+      const parsed = JSON.parse(saved)
+      if (parsed.completedSteps) setCompletedSteps(parsed.completedSteps)
+      if (parsed.activeStepOpen) setActiveStepOpen(parsed.activeStepOpen)
+    } catch {}
+  }, [])
+
   useEffect(() => {
     console.log('[OAuth handler] fired', {
       search: typeof window !== 'undefined' ? window.location.search : 'ssr',
@@ -5509,6 +5527,19 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     const t = setTimeout(() => setToast(null), 3000)
     return () => clearTimeout(t)
   }, [toast])
+
+  // Persist onboarding state on every change so the OAuth round-trip's hard
+  // page navigation doesn't wipe completedSteps + activeStepOpen. Cleared by
+  // DashboardScreen.onSkipOnboarding when the user finishes onboarding.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      sessionStorage.setItem('bee.onboarding.state', JSON.stringify({
+        completedSteps,
+        activeStepOpen,
+      }))
+    } catch {}
+  }, [completedSteps, activeStepOpen])
 
   // Render diagnostic — placed AFTER all hook declarations but BEFORE any
   // early returns (payStep flow at ~5631, launching at ~5742, etc.) so it
@@ -12665,7 +12696,14 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   ))
 
   if (isOnboarding && !onboardingDismissed) return logReturn('OnboardingScreen', (
-    <OnboardingScreen ownerName={ownerName} ownerEmail={ownerEmail} franchiseRole={franchiseRole} topOffset={topOffset} onOpenSettings={(section)=>{ nav('settings'); setOnboardingSection(section) }} onComplete={onCompleteOnboarding} onSkipOnboarding={()=>{ setOnboardingDismissed(true); nav('hive') }} />
+    <OnboardingScreen ownerName={ownerName} ownerEmail={ownerEmail} franchiseRole={franchiseRole} topOffset={topOffset} onOpenSettings={(section)=>{ nav('settings'); setOnboardingSection(section) }} onComplete={onCompleteOnboarding} onSkipOnboarding={()=>{
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('bee.onboarding.state')
+        sessionStorage.removeItem('bee.oauth.return')
+      }
+      setOnboardingDismissed(true)
+      nav('hive')
+    }} />
   ))
 
   // Past due - owner can go to settings, everyone else sees lockout after grace expires
