@@ -5414,7 +5414,15 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     setLaunching(true)
     setLaunchStep(0)
     const tick = (i) => {
-      if (i >= LAUNCH_STEPS.length) { onComplete(data); return }
+      if (i >= LAUNCH_STEPS.length) {
+        onComplete(data)
+        // For real franchise owner sign-ins, onComplete's updateLocStatus is
+        // a no-op (franchiseLoc is null). Without this fallback the launch
+        // animation reaches step 4 and the user is silently stuck on the
+        // onboarding screen with nowhere to go.
+        if (onSkipOnboarding) onSkipOnboarding()
+        return
+      }
       setLaunchStep(i)
       setTimeout(()=>tick(i+1), 750)
     }
@@ -16622,7 +16630,22 @@ export default function App({
           nav={nav}
           onOpenRecord={(person)=>{ setGlobalSelectedPerson(person); nav('hive') }}
           followUps={followUps}
-          onCompleteOnboarding={(data)=>{ if(franchiseLoc) updateLocStatus(franchiseLoc.id,'active'); if(data) setOnboardingData({...data, location:{...data.location, locId:franchiseLoc?.id||'', locationName:franchiseLoc?.name||''}}); setActiveNav('home') }}
+          onCompleteOnboarding={(data)=>{
+            // Real franchise owners have franchiseLoc=null (no selectedLoc,
+            // no viewAsUser) — fall back to their currentUser.locationId so
+            // the dismissal works in both view-as and real-sign-in cases.
+            const locId = franchiseLoc?.id || currentUser?.locationId || null
+            if (locId) updateLocStatus(locId, 'active')
+            if (data) setOnboardingData({...data, location:{...data.location, locId: locId || '', locationName: franchiseLoc?.name || ''}})
+            setActiveNav('home')
+            // Persist to DB so refreshing doesn't resurface onboarding.
+            // Fire and forget — the launch animation's onSkipOnboarding already
+            // dismisses client-side, so a failed write only impacts next session.
+            if (locId) {
+              fetch('/api/locations/' + locId + '/complete-onboarding', { method: 'POST' })
+                .catch(e => console.error('[onboarding complete] server write failed:', e))
+            }
+          }}
           onboardingData={onboardingData}
           setFollowUps={setFollowUps}
         />
