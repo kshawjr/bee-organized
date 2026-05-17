@@ -852,7 +852,7 @@ function TagPopup({ person, onSave, onClose }) {
 
   return (
     <Popup title="Tags" onClose={onClose}>
-      <p style={{ fontSize:'13px', color:'#8a9e9a', marginBottom:'1rem' }}>Tag this lead to help with filtering and follow-up.</p>
+      <p style={{ fontSize:'13px', color:'#8a9e9a', marginBottom:'1rem' }}>Tag this client to help with filtering and follow-up.</p>
       <div style={{ display:'grid', gap:'8px', marginBottom:'1.25rem' }}>
         {ALL_TAGS.map(tag=>{
           const active = selected.includes(tag.id)
@@ -971,7 +971,7 @@ function ProcessLeadSheet({ person, onSave, onClose }) {
       reachOutMethod: null,
       activity: [...(person.activity||[]), {
         type:'process', label: isWakeUp
-          ? `Lead re-activated${note?' · '+note:''}`
+          ? `Client re-activated${note?' · '+note:''}`
           : `Quick capture processed → drip assigned`,
         ts:'Just now', user:'You'
       }]
@@ -1081,7 +1081,7 @@ function ProcessLeadSheet({ person, onSave, onClose }) {
         {/* CONFIRM step */}
         {cur?.key==='confirm'&&(
           <div style={{ display:'grid', gap:'12px' }}>
-            <h3 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>{isWakeUp?'Ready to re-engage?':'Process this lead?'}</h3>
+            <h3 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>{isWakeUp?'Ready to re-engage?':'Process this client?'}</h3>
             <div style={{ background:'rgba(168,201,196,0.06)', border:'1px solid rgba(168,201,196,0.2)', borderRadius:'10px', padding:'12px 14px', display:'grid', gap:'8px' }}>
               {[
                 { label:'Lead', val:person.name },
@@ -1099,8 +1099,8 @@ function ProcessLeadSheet({ person, onSave, onClose }) {
               <button onClick={back} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>← Back</button>
               <button onClick={finish} style={{ flex:2, padding:'11px', background:'#22c55e', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
                 {(pathId==='none')
-                  ? (isWakeUp?'✅ Re-activate (no drip)':'✅ Process lead (no drip)')
-                  : (isWakeUp?'✅ Re-activate & start drip':'✅ Process lead & start drip')
+                  ? (isWakeUp?'✅ Re-activate (no drip)':'✅ Process client (no drip)')
+                  : (isWakeUp?'✅ Re-activate & start drip':'✅ Process client & start drip')
                 }
               </button>
             </div>
@@ -3692,7 +3692,7 @@ function PersonPanel({ person, onClose, onUpdate, onMarkJunk, onResurrect, onAdd
                     <span style={{ fontSize:'20px' }}>{person.snoozeUntil?'⏰':'⚡'}</span>
                     <div style={{ flex:1 }}>
                       <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', marginBottom:'2px' }}>
-                        {person.snoozeUntil?'This lead woke up - ready to re-engage?':'Quick capture - needs to be processed'}
+                        {person.snoozeUntil?'This client woke up - ready to re-engage?':'Quick capture - needs to be processed'}
                       </p>
                       <p style={{ fontSize:'11px', color:'#8a9e9a' }}>
                         {person.snoozeUntil
@@ -3828,7 +3828,7 @@ function PersonPanel({ person, onClose, onUpdate, onMarkJunk, onResurrect, onAdd
                   <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'8px' }}>Journey</p>
                   <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
                     {[
-                      { label:'Lead Created',         done:true,                               icon:'✨', date:person.created },
+                      { label:'Client Created',       done:true,                               icon:'✨', date:person.created },
                       { label:'First Reach-Out',      done:!!person.reachOutMethod,            icon:'📲', date:person.outreachTimeline?.find(o=>o.type==='manual')?.ts },
                       { label:'Assessment Scheduled', done:!!person.assessment,                icon:'📅', date:person.assessment },
                       { label:'Assessment Completed', done:!!person.assessmentCompleted,        icon:'✅', date:person.assessmentCompleted },
@@ -4883,7 +4883,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
             <div style={{ padding:'40px 20px', textAlign:'center', background:'white', borderRadius:'12px', border:'1px solid rgba(0,0,0,0.07)' }}>
               <p style={{ fontSize:'24px', marginBottom:'8px' }}>⚡</p>
               <p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b', marginBottom:'4px' }}>No quick captures</p>
-              <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Use Quick capture in New Client to collect leads on the go</p>
+              <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Use Quick capture in New Client to collect clients on the go</p>
             </div>
           ) : captures.map(p=>(
             <button key={p.id} onClick={()=>setSelected(p)}
@@ -4906,7 +4906,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
           ))}
           {captures.length>0&&(
             <p style={{ fontSize:'11px', color:'#8a9e9a', textAlign:'center', padding:'8px' }}>
-              Tap any lead to open and fill in project, path, then activate
+              Tap any client to open and fill in project, path, then activate
             </p>
           )}
         </div>
@@ -5139,7 +5139,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
             if (filtered.length === 0 && !stageFilter) return (
               <div style={{ padding:'3rem', textAlign:'center', color:'#b0c0bc', fontSize:'13px' }}>
                 {search ? 'No matching clients' : 'No clients yet'}
-                <p style={{ fontSize:'11px', marginTop:'4px' }}>{search ? `No results for "${search}"` : 'Add your first lead to get started'}</p>
+                <p style={{ fontSize:'11px', marginTop:'4px' }}>{search ? `No results for "${search}"` : 'Add your first client to get started'}</p>
               </div>
             )
 
@@ -5339,7 +5339,7 @@ const D_UPCOMING = [
 ]
 
 const D_RECENT_ACTIVITY = [
-  { icon:'✨', text:'New lead - Megan Torres · Aurora',          location:'Aurora',           ts:'1h ago',    color:'#6366f1' },
+  { icon:'✨', text:'New client - Megan Torres · Aurora',          location:'Aurora',           ts:'1h ago',    color:'#6366f1' },
   { icon:'📲', text:'Reached out to Jennifer Torres · Denver',   location:'Denver',           ts:'2h ago',    color:'#f97316' },
   { icon:'⚡', text:'Claire Davidson sent to Jobber · Aurora',   location:'Aurora',           ts:'Yesterday', color:'#10b981' },
   { icon:'📅', text:'Assessment scheduled - Rachel Kim · Boulder', location:'Boulder',        ts:'Yesterday', color:'#0ea5e9' },
@@ -5909,7 +5909,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
               <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>
                 ✅ Your subscription is active<br/>
                 ✅ Your New Lead Drip is set<br/>
-                ✅ Leads can start coming in<br/>
+                ✅ Clients can start coming in<br/>
                 👥 Team invites whenever you're ready
               </p>
             </div>
@@ -6074,7 +6074,21 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
   }
 
   // ─── done ──
-  if (isDone) return (
+  if (isDone) {
+    const IMPORT_STAGE_ORDER = ['New Request','Assessment Scheduled','Estimate Sent','Job in Progress','Final Processing','Nurturing']
+    const IMPORT_STAGE_ABBR  = {
+      'New Request':'New', 'Assessment Scheduled':'Assessment', 'Estimate Sent':'Estimate',
+      'Job in Progress':'Job', 'Final Processing':'Final', 'Nurturing':'Nurturing',
+    }
+    const fmtCount = (label, c, u) => u ? `${label}: ${c} new, ${u} updated` : `${label}: ${c}`
+    const fmtStages = (byStage) => {
+      if (!byStage) return ''
+      const parts = IMPORT_STAGE_ORDER
+        .map(s => byStage[s] ? `${byStage[s]} ${IMPORT_STAGE_ABBR[s]}` : null)
+        .filter(Boolean)
+      return parts.length ? ` (${parts.join(', ')})` : ''
+    }
+    return (
     <div style={{ display:'grid', gap:'10px' }}>
       <div style={{ padding:'14px', background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:'10px', textAlign:'center' }}>
         <p style={{ fontSize:'22px', marginBottom:'4px' }}>✅</p>
@@ -6083,7 +6097,7 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
         </p>
         {summary && (
           <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5 }}>
-            Leads: {summary.leads_created} created, {summary.leads_updated} updated · Requests: {summary.requests_created} created, {summary.requests_updated} updated · Jobs: {summary.jobs_created} created, {summary.jobs_updated} updated · Invoices: {summary.invoices_created} created, {summary.invoices_updated} updated
+            {fmtCount('Clients', summary.leads_created, summary.leads_updated)} · {fmtCount('Requests', summary.requests_created, summary.requests_updated)}{fmtStages(summary.requests_by_stage)} · {fmtCount('Jobs', summary.jobs_created, summary.jobs_updated)} · {fmtCount('Invoices', summary.invoices_created, summary.invoices_updated)}
           </p>
         )}
       </div>
@@ -6109,7 +6123,8 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
         )
       })()}
     </div>
-  )
+    )
+  }
 
   // ─── failed ──
   if (isFailed) return (
@@ -6562,7 +6577,7 @@ function OnboardingPathsEditor({ onComplete }) {
             <span style={{ fontSize:'18px' }}>📅</span>
             <div>
               <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Calendar link required</p>
-              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Your selected path sends a booking link to leads.</p>
+              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Your selected path sends a booking link to clients.</p>
             </div>
           </div>
           <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5, marginBottom:'10px' }}>Add your Calendly, Acuity, or other booking page URL. Leads will use this to schedule directly from your follow-up email.</p>
@@ -8271,9 +8286,9 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
               <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'8px' }}>
                   {[
-                    { label:'Referrals', value:totalReferrals, color:'#1a2e2b', sub:'leads sent' },
+                    { label:'Referrals', value:totalReferrals, color:'#1a2e2b', sub:'clients sent' },
                     { label:'Converted', value:converted,      color:'#22c55e', sub:'became clients' },
-                    { label:'Revenue',   value:revenue>0?('$'+revenue.toLocaleString()):'—', color:'#d4a046', sub:'from leads' },
+                    { label:'Revenue',   value:revenue>0?('$'+revenue.toLocaleString()):'—', color:'#d4a046', sub:'from clients' },
                   ].map(st=>(
                     <div key={st.label} style={{ background:'#f7f5f0', borderRadius:'10px', padding:'10px 12px', textAlign:'center' }}>
                       <p style={{ fontSize:'18px', fontWeight:700, color:st.color, fontFamily:'Georgia,serif', marginBottom:'1px' }}>{st.value}</p>
@@ -9529,7 +9544,7 @@ function CustomPathBuilder({ templates, onSave, onClose, smsEnabled=true }) {
           <div>
             <label style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.5px', display:'block', marginBottom:'6px' }}>Applies To</label>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'7px' }}>
-              {[['any','🌐','All Leads'],['move','📦','Move Only'],['general','🏠','General Only']].map(([v,icon,label])=>(
+              {[['any','🌐','All Clients'],['move','📦','Move Only'],['general','🏠','General Only']].map(([v,icon,label])=>(
                 <button key={v} onClick={()=>setProjectType(v)} style={{ padding:'9px', borderRadius:'9px', cursor:'pointer', border:'2px solid', borderColor:projectType===v?'#a8c9c4':'rgba(0,0,0,0.08)', background:projectType===v?'rgba(168,201,196,0.12)':'white', fontFamily:'inherit', display:'flex', flexDirection:'column', alignItems:'center', gap:'4px' }}>
                   <span style={{ fontSize:'18px' }}>{icon}</span>
                   <span style={{ fontSize:'11px', fontWeight:projectType===v?600:400, color:'#1a2e2b' }}>{label}</span>
@@ -9851,7 +9866,7 @@ const DEFAULT_ROLE_PRICING = {
 let ROLE_PRICING = { ...DEFAULT_ROLE_PRICING }
 
 const DEFAULT_ADDONS = [
-  { id:'sms',   name:'SMS Messaging',     icon:'💬', price:100, desc:'Automated text messages to leads',    active:true,  canDelete:false },
+  { id:'sms',   name:'SMS Messaging',     icon:'💬', price:100, desc:'Automated text messages to clients',  active:true,  canDelete:false },
 ]
 
 let APP_ADDONS = [...DEFAULT_ADDONS]
@@ -10099,7 +10114,7 @@ function JobberConnectionCard({ settings, updateLocation }) {
       </div>
       {status==='disconnected'&&(
         <div style={{ padding:'8px 14px 10px', borderTop:'1px solid rgba(0,0,0,0.05)', background:'rgba(239,68,68,0.03)' }}>
-          <p style={{ fontSize:'11px', color:'#ef4444' }}>Connection lost - reconnect to resume syncing leads, jobs, and invoices.</p>
+          <p style={{ fontSize:'11px', color:'#ef4444' }}>Connection lost - reconnect to resume syncing clients, jobs, and invoices.</p>
         </div>
       )}
     </div>
@@ -10322,7 +10337,7 @@ function SmsAddonCard({ settings, updateLocation }) {
               <span style={{ fontSize:'10px', color:'#d4a046', background:'rgba(212,160,70,0.1)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>Add-on</span>
               {enabled&&<span style={{ fontSize:'10px', color:'#22c55e', background:'rgba(34,197,94,0.1)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>✅ Active</span>}
             </div>
-            <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{`Send automated texts to leads · $${getSMSPrice()}/yr`}</p>
+            <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{`Send automated texts to clients · $${getSMSPrice()}/yr`}</p>
           </div>
         </div>
 
@@ -10841,7 +10856,7 @@ function SmsVoiceInfoModal({ onClose }) {
     {
       icon:'💬', name:'SMS Basic', pop:false,
       tag:'Automated outbound texting',
-      desc:'Send pre-written text sequences automatically when a lead hits a new stage. Set it once - Bee Hub handles the follow-up so nothing slips through the cracks.',
+      desc:'Send pre-written text sequences automatically when a client hits a new stage. Set it once - Bee Hub handles the follow-up so nothing slips through the cracks.',
       features:['Stage-triggered SMS drips','Pre-written message templates','Opt-out handled automatically','Works alongside your email drip paths'],
     },
     {
@@ -10868,7 +10883,7 @@ function SmsVoiceInfoModal({ onClose }) {
     {
       icon:'📲', name:'Voice Basic', pop:false,
       tag:'Click-to-call & smart routing',
-      desc:'Call any client directly from their record with one tap. Inbound calls from leads route straight to your cell. If you miss one, they automatically get a text - so no lead goes cold.',
+      desc:'Call any client directly from their record with one tap. Inbound calls from clients route straight to your cell. If you miss one, they automatically get a text - so no client goes cold.',
       features:['Click-to-call from client card','Inbound call routing to your cell','Missed call auto-text','Local presence dialing'],
     },
     {
@@ -11516,7 +11531,7 @@ function SavedViews({ views, onApply, onDelete, onSave, hasActiveFilters, active
         <div style={{ display:'flex', gap:'6px', marginBottom:'8px' }}>
           <input autoFocus value={name} onChange={e=>setName(e.target.value)}
             onKeyDown={e=>{ if(e.key==='Enter') save(); if(e.key==='Escape') { setNaming(false); setName('') } }}
-            placeholder="View name (e.g. Hot leads this week)"
+            placeholder="View name (e.g. Hot clients this week)"
             style={{ flex:1, padding:'7px 11px', border:'1.5px solid #a8c9c4', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
           <button onClick={save} disabled={!name.trim()} style={{ padding:'7px 14px', background:name.trim()?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:name.trim()?'white':'#9ca3af', cursor:name.trim()?'pointer':'not-allowed' }}>Save</button>
           <button onClick={()=>{ setNaming(false); setName('') }} style={{ padding:'7px 10px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', color:'#8a9e9a', cursor:'pointer' }}>✕</button>
@@ -11657,7 +11672,7 @@ function TemplatePreviewModal({ template, settings, onClose }) {
           <div style={{ padding:'10px 16px', borderTop:'1px solid rgba(0,0,0,0.06)', background:'#f7f5f0', flexShrink:0 }}>
             <div style={{ display:'flex', gap:'16px', fontSize:'11px', color:'#8a9e9a' }}>
               <span>From: <strong style={{ color:'#1a2e2b' }}>{fromName}</strong></span>
-              <span>To: <strong style={{ color:'#1a2e2b' }}>{recipientName} (lead)</strong></span>
+              <span>To: <strong style={{ color:'#1a2e2b' }}>{recipientName} (client)</strong></span>
             </div>
           </div>
         )}
@@ -11941,7 +11956,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
               <SettingsEditRow label="Google Reviews"   value={settings.location.reviewsLink}  onSave={v=>updateLocation('reviewsLink',v)}  hint="Sent to completed clients" />
             </div>
 
-            <SectionHeader title="Assessment Default" desc="Used when scheduling - can be overridden per lead" />
+            <SectionHeader title="Assessment Default" desc="Used when scheduling - can be overridden per client" />
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
               <div style={{ padding:'12px 16px', background:'white' }}>
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
@@ -11982,7 +11997,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
           <>
             <div style={{ padding:'12px 12px 0' }}>
               <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
-                Project type auto-selects the path category. Set the default CTA style for each. Overridable per lead.
+                Project type auto-selects the path category. Set the default CTA style for each. Overridable per client.
               </p>
             </div>
 
@@ -12195,22 +12210,22 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             {/* Phase groups */}
             {[
               {
-                phase:'🌱 Getting leads in',
+                phase:'🌱 Getting clients in',
                 color:'#6366f1',
                 bg:'rgba(99,102,241,0.06)',
                 steps:[
-                  { icon:'✨', label:'New lead arrives', detail:'Drip path starts within 24 hours automatically. No action needed.' },
-                  { icon:'📲', label:'No reply? Follow-ups continue', detail:'System keeps sending on your path schedule. Lead moves to Attempting to Contact.' },
+                  { icon:'✨', label:'New client arrives', detail:'Drip path starts within 24 hours automatically. No action needed.' },
+                  { icon:'📲', label:'No reply? Follow-ups continue', detail:'System keeps sending on your path schedule. Client moves to Attempting to Contact.' },
                 ]
               },
               {
-                phase:'⏸ Leads who need more time',
+                phase:'⏸ Clients who need more time',
                 color:'#f97316',
                 bg:'rgba(249,115,22,0.06)',
                 steps:[
-                  { icon:'🌿', label:'Move to Nurturing manually', detail:'When a lead says "not yet" - move them here. Light-touch emails every 3–4 weeks keep you top of mind.' },
+                  { icon:'🌿', label:'Move to Nurturing manually', detail:'When a client says "not yet" - move them here. Light-touch emails every 3–4 weeks keep you top of mind.' },
                   { icon:'⏳', label:'85 days → warning in Needs Attention', detail:'You\'ll see a red card on your home screen. Decide: re-engage or let it close.' },
-                  { icon:'❌', label:'90 days → auto-closes as Lost', detail:'System sends a final "closing your file" email first. Many leads re-engage at this point.' },
+                  { icon:'❌', label:'90 days → auto-closes as Lost', detail:'System sends a final "closing your file" email first. Many clients re-engage at this point.' },
                 ]
               },
               {
@@ -12218,9 +12233,9 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                 color:'#10b981',
                 bg:'rgba(16,185,129,0.06)',
                 steps:[
-                  { icon:'📅', label:'Assessment booked in Jobber', detail:'Lead auto-moves to Request. Confirmation email sends. Shows on your home dashboard.' },
-                  { icon:'🔨', label:'Job goes active in Jobber', detail:'Lead moves to Job in Progress. Invoice tracking begins.' },
-                  { icon:'🏆', label:'Invoice paid → Closed Won', detail:'Lead marked Won. Review request email sends automatically.' },
+                  { icon:'📅', label:'Assessment booked in Jobber', detail:'Client auto-moves to Request. Confirmation email sends. Shows on your home dashboard.' },
+                  { icon:'🔨', label:'Job goes active in Jobber', detail:'Client moves to Job in Progress. Invoice tracking begins.' },
+                  { icon:'🏆', label:'Invoice paid → Closed Won', detail:'Client marked Won. Review request email sends automatically.' },
                 ]
               },
             ].map((group,gi)=>(
@@ -12258,7 +12273,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             </div>
 
             {/* Alert types */}
-            <SectionHeader title="Lead Alerts" desc="Notify me when..." />
+            <SectionHeader title="Client Alerts" desc="Notify me when..." />
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
               <AlertRow
                 icon="✨" label="New Client" desc="A new client enters the pipeline"
@@ -12303,7 +12318,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                 smsEnabled={settings.location.smsEnabled}
               />
               <AlertRow
-                icon="⏸" label="Stuck Lead" desc="A lead hasn't moved in several days"
+                icon="⏸" label="Stuck Client" desc="A client hasn't moved in several days"
                 value={settings.notifications.stuckLead}
                 onChange={v=>updateNotif('stuckLead',v)}
                 channels={settings.notifications.stuckLeadChannels||['email']}
@@ -12861,7 +12876,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
                 </p>
                 <button onClick={()=>setShowAddFollowUp(s=>!s)} style={{ fontSize:'11px', color:'#a8c9c4', background:'none', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'6px', padding:'2px 8px', cursor:'pointer', fontFamily:'inherit', fontWeight:600 }}>+ Reminder</button>
               </div>
-              <p style={{ fontSize:'11px', color:BRAND.muted, marginBottom:'10px' }}>Stuck leads, unpaid invoices, and your scheduled follow-ups</p>
+              <p style={{ fontSize:'11px', color:BRAND.muted, marginBottom:'10px' }}>Stuck clients, unpaid invoices, and your scheduled follow-ups</p>
 
               {showAddFollowUp&&(
                 <div style={{ background:'white', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'12px', padding:'12px 14px', marginBottom:'8px', display:'grid', gap:'8px' }}>
@@ -12885,8 +12900,8 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
               )}
 
               <div style={{ display:'grid', gap:'6px' }}>
-                {nearExpiryNurture.length>0&&<ExpandableAttentionCard icon="⏳" urgency="high" title={`${nearExpiryNurture.length} nurture lead${nearExpiryNurture.length>1?'s':''} near auto-close - review now`} records={nearExpiryNurture} onOpenRecord={onOpenRecord} nav={nav} />}
-                {snoozedToday.length>0&&<ExpandableAttentionCard icon="⏰" urgency="high" title={`${snoozedToday.length} snoozed lead${snoozedToday.length>1?'s':''} waking up today`} records={snoozedToday} onOpenRecord={onOpenRecord} nav={nav} />}
+                {nearExpiryNurture.length>0&&<ExpandableAttentionCard icon="⏳" urgency="high" title={`${nearExpiryNurture.length} nurture client${nearExpiryNurture.length>1?'s':''} near auto-close - review now`} records={nearExpiryNurture} onOpenRecord={onOpenRecord} nav={nav} />}
+                {snoozedToday.length>0&&<ExpandableAttentionCard icon="⏰" urgency="high" title={`${snoozedToday.length} snoozed client${snoozedToday.length>1?'s':''} waking up today`} records={snoozedToday} onOpenRecord={onOpenRecord} nav={nav} />}
                 {noReachOut.length>0&&<ExpandableAttentionCard icon="📲" urgency="high" title={`${noReachOut.length} new client${noReachOut.length>1?'s':''} with no reach-out`} records={noReachOut} onOpenRecord={onOpenRecord} nav={nav} />}
                 {stuckLeads.length>0&&<ExpandableAttentionCard icon="⏸" urgency="medium" title={`${stuckLeads.length} client stuck 7+ days`} records={stuckLeads} onOpenRecord={onOpenRecord} nav={nav} />}
                 {unpaidInvoices.length>0&&(()=>{ const ip=activePeople.filter(p=>p.invoices?.some(i=>i.status==='Awaiting Payment')); return ip.length?<ExpandableAttentionCard icon="💳" urgency="medium" title={`${ip.length} unpaid invoice${ip.length>1?'s':''} · ${fmt(unpaidInvoices.reduce((s,i)=>s+i.amount,0))}`} records={ip} onOpenRecord={onOpenRecord} nav={nav} />:null })()}
@@ -12976,7 +12991,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         {/* Stats row */}
         <div style={{ display:'flex', gap:'8px' }}>
           <StatCard icon="✨"
-            label={isElevated&&locFilter==='all'?'Active Leads':'New leads'}
+            label={isElevated&&locFilter==='all'?'Active Clients':'New clients'}
             value={isElevated&&locFilter==='all'?activeLeads.length:newThisWeek.length}
             sub={isElevated&&locFilter==='all'?'Across all locations':'Added this week'}
             bg="white" />
@@ -13040,12 +13055,12 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         <div style={{ background:'white', borderRadius:'14px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.06)' }}>
           <div style={{ padding:'14px 16px 12px', display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
             <div>
-              <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', marginBottom:'2px' }}>Lead Pipeline</p>
-              <p style={{ fontSize:'11px', color:BRAND.muted }}>Client = your leads in the CRM</p>
+              <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', marginBottom:'2px' }}>Client Pipeline</p>
+              <p style={{ fontSize:'11px', color:BRAND.muted }}>Client = your records in the CRM</p>
             </div>
             <div style={{ textAlign:'right' }}>
               <p style={{ fontSize:'22px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', lineHeight:1 }}>{activePeople.length}</p>
-              <p style={{ fontSize:'10px', color:BRAND.muted, marginTop:'2px' }}>Active leads</p>
+              <p style={{ fontSize:'10px', color:BRAND.muted, marginTop:'2px' }}>Active clients</p>
             </div>
           </div>
           <div style={{ borderTop:'1px solid rgba(0,0,0,0.04)' }}>
@@ -13111,7 +13126,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
                 ))}
               </div>
             ) : (
-              <p style={{ fontSize:'13px', color:BRAND.muted, fontStyle:'italic', padding:'12px 0' }}>No recent activity yet. Add leads in Clients to get started.</p>
+              <p style={{ fontSize:'13px', color:BRAND.muted, fontStyle:'italic', padding:'12px 0' }}>No recent activity yet. Add clients to get started.</p>
             )}
           </div>
 
@@ -14881,7 +14896,7 @@ function ConfigureTab() {
 
   const leadLists = [
     { key:'lost',     label:'Closed Lost Reasons', desc:"Shown when closing a lead as lost",         count:lostReasons.length, items:lostReasons, setItems:updateLostReasons, placeholder:'Add a reason…' },
-    { key:'tags',     label:'Lead Tags',            desc:"Used to label and filter leads in Clients", count:tags.length,        items:tags,        setItems:setTags,           placeholder:'Add a tag…' },
+    { key:'tags',     label:'Client Tags',          desc:"Used to label and filter clients",          count:tags.length,        items:tags,        setItems:setTags,           placeholder:'Add a tag…' },
   ]
   const partnerLists = [
     { key:'specialties', label:'Partner Specialties', desc:"What partners do - shown in the Partners module", count:specialties.length, items:specialties, setItems:setSpecialties, placeholder:'Add a specialty…' },
@@ -14918,7 +14933,7 @@ function ConfigureTab() {
   return (
     <div style={{ padding:'1rem 1.25rem' }}>
 
-      <Section title="Leads">
+      <Section title="Clients">
         {leadLists.map((list,i)=><ListRow key={list.key} list={list} i={i} total={leadLists.length+1} onTap={()=>setOpen(list.key)} />)}
         <button onClick={()=>setOpen('projects')} style={{ width:'100%', padding:'13px 16px', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left' }}>
           <div style={{ flex:1, minWidth:0 }}>
@@ -15679,7 +15694,7 @@ const SYNC_LOG_DATA = (() => {
       'Token refreshed successfully',
       'Webhook received: new_job',
       'Webhook received: quote_approved',
-      'Lead imported from web form',
+      'Client imported from web form',
       '5 assessments synced from Jobber',
       'Client profile updated via webhook',
     ],

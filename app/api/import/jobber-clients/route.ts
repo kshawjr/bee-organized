@@ -300,6 +300,7 @@ export async function POST(req: NextRequest) {
     const stats = {
       leads_created: 0, leads_updated: 0,
       requests_created: 0, requests_updated: 0,
+      requests_by_stage: {} as Record<string, number>,
       assessments_created: 0, assessments_updated: 0,
       quotes_created: 0, quotes_updated: 0,
       jobs_created: 0, jobs_updated: 0,
@@ -316,6 +317,7 @@ export async function POST(req: NextRequest) {
         for (const request of (reqByClient[client.id] || [])) {
           const reqResult = await upsertServiceRequest(request, leadId, locSlug)
           reqResult.created ? stats.requests_created++ : stats.requests_updated++
+          stats.requests_by_stage[reqResult.stage] = (stats.requests_by_stage[reqResult.stage] || 0) + 1
           const reqDbId = reqResult.id
 
           if (request.assessment?.startAt) {
@@ -445,11 +447,12 @@ async function upsertLead(client: any, location_id: string) {
 }
 
 async function upsertServiceRequest(request: any, lead_id: string, location_id: string) {
+  const stage = determineStage(request)
   const payload = {
     lead_id, location_id,
     jobber_request_id: request.id,
     request_url: request.jobberWebUri || null,
-    stage: determineStage(request),
+    stage,
     status: 'active',
     source: 'jobber',
     requested_at: request.createdAt || null,
@@ -463,7 +466,7 @@ async function upsertServiceRequest(request: any, lead_id: string, location_id: 
     .maybeSingle()
   if (existing) {
     await supabaseService.from('service_requests').update(payload).eq('id', existing.id)
-    return { id: existing.id, created: false }
+    return { id: existing.id, created: false, stage }
   }
   const { data, error } = await supabaseService
     .from('service_requests')
@@ -471,7 +474,7 @@ async function upsertServiceRequest(request: any, lead_id: string, location_id: 
     .select('id')
     .single()
   if (error) throw new Error(error.message)
-  return { id: data.id, created: true }
+  return { id: data.id, created: true, stage }
 }
 
 async function upsertAssessment(
