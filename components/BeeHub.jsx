@@ -14182,7 +14182,7 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onViewLocation, onD
               ['📞', currentLoc.phone||'—'],
               ['📍', currentLoc.address||'—'],
               ['⚡', currentLoc.jobberConnected ? `Jobber connected · ${currentLoc.jobberAccountId||''}` : 'Jobber not connected'],
-              ['👥', `${currentLoc.leads||0} leads · ${locUsers.length} user${locUsers.length!==1?'s':''}`],
+              ['👥', `${currentLoc.leads||0} clients · ${locUsers.length} user${locUsers.length!==1?'s':''}`],
             ].map(([icon, val])=>(
               <div key={icon} style={{ display:'flex', gap:'8px', alignItems:'center' }}>
                 <span style={{ fontSize:'13px', flexShrink:0 }}>{icon}</span>

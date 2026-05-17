@@ -149,7 +149,7 @@ export default async function HomePage() {
     const { data: locs, error: locsErr } = await supabaseService
       .from('locations')
       .select(
-        'id, name, state, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, created_at'
+        'id, name, state, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, last_sync_status, created_at'
       )
       .order('name', { ascending: true })
 
@@ -182,12 +182,17 @@ export default async function HomePage() {
     initialLocations = (locs || []).map((row: any) => {
       const lifecycle = row.lifecycle_status || 'onboarding'
       const subStatus = row.subscription_status || 'deferred'
+      // Prefer subscription_status as the source of truth. lifecycle_status
+      // is a secondary lever ('paused' overrides to inactive); a null/missing
+      // lifecycle_status should NOT drag an active subscription back to
+      // 'onboarding' (prior bug — Test Location showed onboarding badge
+      // despite subscription_status='active').
       const crmStatus =
-        subStatus === 'past_due'
-          ? 'pastdue'
-          : lifecycle === 'paused'
-            ? 'inactive'
-            : lifecycle
+        subStatus === 'past_due'              ? 'pastdue'
+        : lifecycle === 'paused'              ? 'inactive'
+        : subStatus === 'inactive'            ? 'inactive'
+        : subStatus === 'active'              ? 'active'
+        :                                       'onboarding'
 
       return {
         id: row.id,
@@ -210,6 +215,7 @@ export default async function HomePage() {
         path: '',
         jobberConnected: !!row.jobber_account_id,
         jobberAccountId: row.jobber_account_id || null,
+        last_sync_status: row.last_sync_status || null,
         leads: 0,
         revenue: 0,
         collected: 0,
