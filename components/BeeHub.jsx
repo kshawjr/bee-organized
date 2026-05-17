@@ -6083,7 +6083,7 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
         </p>
         {summary && (
           <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5 }}>
-            Leads {summary.leads_created}+{summary.leads_updated} · Requests {summary.requests_created}+{summary.requests_updated} · Jobs {summary.jobs_created}+{summary.jobs_updated} · Invoices {summary.invoices_created}+{summary.invoices_updated}
+            Leads: {summary.leads_created} created, {summary.leads_updated} updated · Requests: {summary.requests_created} created, {summary.requests_updated} updated · Jobs: {summary.jobs_created} created, {summary.jobs_updated} updated · Invoices: {summary.invoices_created} created, {summary.invoices_updated} updated
           </p>
         )}
       </div>

@@ -352,11 +352,11 @@ export async function POST(req: NextRequest) {
       entity_id: locSlug,
       status: stats.errors.length > 0 ? 'error' : 'success',
       message:
-        `Leads:${stats.leads_created}+${stats.leads_updated} ` +
-        `Requests:${stats.requests_created}+${stats.requests_updated} ` +
-        `Jobs:${stats.jobs_created}+${stats.jobs_updated} ` +
-        `Invoices:${stats.invoices_created}+${stats.invoices_updated} ` +
-        `Errors:${stats.errors.length}`,
+        `Leads: ${stats.leads_created} created, ${stats.leads_updated} updated; ` +
+        `Requests: ${stats.requests_created} created, ${stats.requests_updated} updated; ` +
+        `Jobs: ${stats.jobs_created} created, ${stats.jobs_updated} updated; ` +
+        `Invoices: ${stats.invoices_created} created, ${stats.invoices_updated} updated; ` +
+        `Errors: ${stats.errors.length}`,
     })
 
     await updateProgress(importJob.id, {
@@ -452,6 +452,7 @@ async function upsertServiceRequest(request: any, lead_id: string, location_id: 
     stage: determineStage(request),
     status: 'active',
     source: 'jobber',
+    requested_at: request.createdAt || null,
     jobber_synced_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   }
