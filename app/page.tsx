@@ -103,13 +103,17 @@ export default async function HomePage() {
     }
   })
 
-  // ─── User's own location subscription (for onboarding variant) ───
+  // ─── User's own location: subscription + Jobber connection state ───
+  // Single query, two derived prop shapes (subscription/billing vs.
+  // connection-status). Real franchise owners get both; super_admin /
+  // corporate get null (they don't have a location-scoped UI).
   let currentSubscription: any = null
+  let currentLocation: any = null
   if (hubUser.location_id) {
     const { data: locRow, error: subErr } = await supabase
       .from('locations')
       .select(
-        'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes'
+        'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes, jobber_account_id, last_sync_status, token_expiry'
       )
       .eq('id', hubUser.location_id)
       .single()
@@ -124,6 +128,14 @@ export default async function HomePage() {
         paid_through_date: locRow.paid_through_date || null,
         deferred_until: locRow.deferred_until || null,
         billing_notes: locRow.billing_notes || null,
+      }
+      currentLocation = {
+        id: locRow.id,
+        name: locRow.name,
+        jobber_connected: !!locRow.jobber_account_id,
+        jobber_account_id: locRow.jobber_account_id || null,
+        last_sync_status: locRow.last_sync_status || null,
+        token_expiry: locRow.token_expiry || null,
       }
     }
   }
@@ -215,6 +227,7 @@ export default async function HomePage() {
       initialGuideSlides={initialGuideSlides}
       initialLocations={initialLocations}
       currentSubscription={currentSubscription}
+      currentLocation={currentLocation}
       currentUser={{
         id: hubUser.id,
         email: hubUser.email,

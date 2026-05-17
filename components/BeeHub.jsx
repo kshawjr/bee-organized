@@ -15,6 +15,14 @@ import { useRouter } from "next/navigation"
 // Value shape: { id, email, name, role, locationId } or null.
 const CurrentUserContext = createContext(null)
 
+// Real franchise location data from Supabase, populated for franchise owner
+// sign-ins (currentLocation prop). Null for super_admin / corporate (they
+// have no location-scoped UI). Consumed by SettingsScreen and any other
+// screen that needs the live jobber_connected / jobber_account_id state
+// instead of falling back to the ALL_LOCATIONS mock.
+// Value shape: { id, name, jobber_connected, jobber_account_id, last_sync_status, token_expiry } or null.
+const CurrentLocationContext = createContext(null)
+
 const STAGES = [
   { key:'New',             label:'New',             color:'#6366f1', bg:'rgba(99,102,241,0.08)',  dot:'#6366f1', icon:'✨' },
   { key:'Attempting',      label:'Attempting to Contact', color:'#f97316', bg:'rgba(249,115,22,0.08)',  dot:'#f97316', icon:'📲' },
@@ -11682,6 +11690,10 @@ function TemplatePreviewModal({ template, settings, onClose }) {
 }
 
 function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null, onboardingBack=null, isPastDue=false, graceDaysLeft=14, locationId='loc1', onPaymentResolved, people=[], franchiseRole='owner', isSuperAdmin=false, onboardingData=null }) {
+  // Real franchise owner sign-ins get currentLocation from context (populated
+  // by App from page.tsx's Supabase fetch). Used as a higher-priority source
+  // than the ALL_LOCATIONS mock for the location settings panel.
+  const currentLocationCtx = useContext(CurrentLocationContext)
   // Build settings from selected location if provided, with onboarding data taking priority
   const od = onboardingData  // shorthand
   const locProfile = od?.profile ? {
@@ -11749,6 +11761,15 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     sendFromEmail:  selectedLoc.email || '',
     replyToEmail:   selectedLoc.email || '',
     notifEmails:    selectedLoc.email ? [selectedLoc.email] : [],
+  } : currentLocationCtx ? {
+    // Real franchise owner sign-in: hydrate from Supabase via context.
+    // Only jobberStatus + jobberAccountId are wired so far; other fields
+    // fall back to defaults until page.tsx fetches them.
+    ...DEFAULT_SETTINGS.location,
+    locId:           currentLocationCtx.id,
+    name:            currentLocationCtx.name,
+    jobberStatus:    currentLocationCtx.jobber_connected ? 'connected' : 'disconnected',
+    jobberAccountId: currentLocationCtx.jobber_account_id || '',
   } : (()=>{
     // Look up from ALL_LOCATIONS by locationId
     const loc = ALL_LOCATIONS.find(l=>l.id===locationId)
@@ -16330,6 +16351,7 @@ export default function App({
   initialGuideSlides,        // accepted; not yet consumed — GUIDE_SLIDES const still drives the guide
   initialLocations,          // accepted; not yet consumed — ALL_LOCATIONS mock still drives the picker
   currentSubscription,
+  currentLocation,           // real Supabase row for franchise owners; null for elevated users
 } = {}) {
   const router = useRouter()
   const [role, setRole]                     = useState(initialRole ?? 'super_admin')
@@ -16709,6 +16731,7 @@ export default function App({
 
   return (
     <CurrentUserContext.Provider value={currentUser || null}>
+    <CurrentLocationContext.Provider value={currentLocation || null}>
     <div>
       <DemoBar />
       <LocBanner />
@@ -16821,6 +16844,7 @@ export default function App({
         />
       )}
     </div>
+    </CurrentLocationContext.Provider>
     </CurrentUserContext.Provider>
   )
 }

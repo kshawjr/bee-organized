@@ -12,12 +12,23 @@ type CurrentUser = {
   locationId?: string | null
 }
 
+type CurrentLocation = {
+  id: string
+  name: string
+  jobber_connected: boolean
+  jobber_account_id: string | null
+  last_sync_status: string | null
+  token_expiry: string | null
+}
+
 export default function BeeHubApp({
   initialRoute,
   currentUser,
+  currentLocation,
 }: {
   initialRoute?: string
   currentUser?: CurrentUser
+  currentLocation?: CurrentLocation | null
 }) {
-  return <App initialRoute={initialRoute} currentUser={currentUser} />
+  return <App initialRoute={initialRoute} currentUser={currentUser} currentLocation={currentLocation} />
 }

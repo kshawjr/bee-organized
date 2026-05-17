@@ -43,6 +43,14 @@ interface BeeHubProps {
     deferred_until?: string | null
     billing_notes?: string | null
   } | null
+  currentLocation?: {
+    id: string
+    name: string
+    jobber_connected: boolean
+    jobber_account_id: string | null
+    last_sync_status: string | null
+    token_expiry: string | null
+  } | null
   currentUser?: {
     id: string
     email: string
