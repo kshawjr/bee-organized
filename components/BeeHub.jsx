@@ -5567,6 +5567,15 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     if (idx===0) return false
     return !isDone(order[idx-1].id)
   }
+  // Returns the next step id in the onboarding order, or null if `currentStepId`
+  // is the last step. Used by ImportStepContent's success button to advance
+  // rather than dismiss when there are remaining steps (paths, invite, etc.).
+  function advanceFromStep(currentStepId) {
+    const order = isOwner ? OWNER_STEPS : NON_OWNER_STEPS
+    const idx   = order.findIndex(s => s.id === currentStepId)
+    if (idx < 0 || idx === order.length - 1) return null
+    return order[idx + 1].id
+  }
 
   const OWNER_STEPS = [
     { id:'pay',       icon:'💳', label:'Activate subscription',   desc:`$${proration.prorated} today · renews ${proration.renewDate}` },
@@ -5867,7 +5876,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                 {!locked&&!done&&step.id==='invite'&&<span style={{ fontSize:'14px', color:'#c8d8d4', transform:isOpen?'rotate(90deg)':'none', display:'inline-block', transition:'transform 0.15s', marginLeft:'4px' }}>›</span>}
               </div>
               {done&&<div style={{ margin:'0 14px 14px', padding:'9px 14px', background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:'9px', display:'flex', alignItems:'center', gap:'8px' }}><span>✅</span><span style={{ fontSize:'12px', fontWeight:600, color:'#22c55e' }}>Completed</span></div>}
-              {isOpen&&<div style={{ padding:'0 14px 14px' }}><StepContent step={step} profileForm={profileForm} setProfileForm={setProfileForm} locationForm={locationForm} setLocationForm={setLocationForm} jobberKey={jobberKey} setJobberKey={setJobberKey} showAdvancedSender={showAdvancedSender} setShowAdvancedSender={setShowAdvancedSender} markDone={markDone} setActiveStepOpen={setActiveStepOpen} setShowInviteFlow={setShowInviteFlow} onOpenSettings={onOpenSettings} setSavedPaths={setSavedPaths} onSkipOnboarding={onSkipOnboarding} /></div>}
+              {isOpen&&<div style={{ padding:'0 14px 14px' }}><StepContent step={step} profileForm={profileForm} setProfileForm={setProfileForm} locationForm={locationForm} setLocationForm={setLocationForm} jobberKey={jobberKey} setJobberKey={setJobberKey} showAdvancedSender={showAdvancedSender} setShowAdvancedSender={setShowAdvancedSender} markDone={markDone} setActiveStepOpen={setActiveStepOpen} setShowInviteFlow={setShowInviteFlow} onOpenSettings={onOpenSettings} setSavedPaths={setSavedPaths} onSkipOnboarding={onSkipOnboarding} onAdvanceFromStep={advanceFromStep} /></div>}
             </div>
           )
         })}
@@ -6003,7 +6012,7 @@ function JobberConnectStep({ markDone, setActiveStepOpen }) {
   )
 }
 
-function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding }) {
+function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAdvanceFromStep }) {
   const currentUser = useContext(CurrentUserContext)
   const locationId  = currentUser?.locationId || null
 
@@ -6077,14 +6086,27 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding }) {
           </p>
         )}
       </div>
-      <button onClick={()=>{
-          markDone('import')
-          if (onSkipOnboarding) onSkipOnboarding()
-          else setActiveStepOpen(null)
-        }}
-        style={{ width:'100%', padding:'11px', background:'#22c55e', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
-        {onSkipOnboarding ? 'Continue to Hub →' : '✓ Complete Step'}
-      </button>
+      {(() => {
+        const nextStepId = onAdvanceFromStep ? onAdvanceFromStep('import') : null
+        const buttonLabel = nextStepId        ? 'Continue →'
+                          : onSkipOnboarding  ? 'Continue to Hub →'
+                          :                     '✓ Complete Step'
+        return (
+          <button onClick={()=>{
+              markDone('import')
+              if (nextStepId) {
+                setActiveStepOpen(nextStepId)
+              } else if (onSkipOnboarding) {
+                onSkipOnboarding()
+              } else {
+                setActiveStepOpen(null)
+              }
+            }}
+            style={{ width:'100%', padding:'11px', background:'#22c55e', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+            {buttonLabel}
+          </button>
+        )
+      })()}
     </div>
   )
 
@@ -6155,7 +6177,7 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding }) {
   )
 }
 
-function StepContent({ step, profileForm, setProfileForm, locationForm, setLocationForm, jobberKey, setJobberKey, showAdvancedSender, setShowAdvancedSender, markDone, setActiveStepOpen, setShowInviteFlow, onOpenSettings, setSavedPaths=()=>{}, onSkipOnboarding }) {
+function StepContent({ step, profileForm, setProfileForm, locationForm, setLocationForm, jobberKey, setJobberKey, showAdvancedSender, setShowAdvancedSender, markDone, setActiveStepOpen, setShowInviteFlow, onOpenSettings, setSavedPaths=()=>{}, onSkipOnboarding, onAdvanceFromStep }) {
 const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }
   if (step.id==='profile') {
     const phoneDigits = profileForm.phone.replace(/\D/g,'')
@@ -6308,7 +6330,7 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
     return (
       <div style={{ paddingTop:'12px', display:'grid', gap:'10px' }}>
         <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>Import all your existing clients from Jobber into Bee Hub. This is a one-time step - future syncs happen automatically.</p>
-        <ImportStepContent markDone={markDone} setActiveStepOpen={setActiveStepOpen} onSkipOnboarding={onSkipOnboarding} />
+        <ImportStepContent markDone={markDone} setActiveStepOpen={setActiveStepOpen} onSkipOnboarding={onSkipOnboarding} onAdvanceFromStep={onAdvanceFromStep} />
       </div>
     )
   }
