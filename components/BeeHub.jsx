@@ -15620,9 +15620,12 @@ function LocationDrilldown({ loc, people, users, partners, onClose }) {
   )
 }
 
-function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, onStatusChange, users=USERS_DATA, setUsers=()=>{}, people=[], setPeople=()=>{}, partners=[], setPartners=()=>{} }) {
+function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, onStatusChange, users=USERS_DATA, setUsers=()=>{}, people=[], setPeople=()=>{}, partners=[], setPartners=()=>{}, initialLocations=null }) {
   const [adminTab, setAdminTab]   = useState('locations')
-  const [locations, setLocations] = useState(ALL_LOCATIONS)
+  // Real Supabase locations when provided by App (super_admin/corporate
+  // sign-ins via page.tsx fetch); falls back to mock for view-as flows
+  // and demo paths where initialLocations is null.
+  const [locations, setLocations] = useState(initialLocations || ALL_LOCATIONS)
   const [selectedLoc, setSelectedLoc] = useState(null)
   const [drillLoc, setDrillLoc]   = useState(null)
   const [search, setSearch]       = useState('')
@@ -16721,6 +16724,7 @@ export default function App({
           setPeople={setPeople}
           partners={partners}
           setPartners={setPartners}
+          initialLocations={initialLocations}
         />
       </div>
     )
