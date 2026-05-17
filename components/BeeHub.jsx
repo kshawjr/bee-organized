@@ -517,7 +517,11 @@ const PEOPLE = [
 ]
 
 // ─── Extended seed data ───────────────────────────────────────────────────────
-const EXTRA_PEOPLE = (() => {
+// Math.random() inside means this would produce different arrays on server vs
+// client if evaluated at module load → React hydration mismatch on any rendered
+// stat or list. Wrapped as a function and called from a useEffect in App so
+// the seed only generates client-side after mount.
+const generateExtraPeople = () => {
   const stages = ['New','Attempting','Nurturing','Request','Job in Progress','Final Processing','Closed Won','Closed Lost']
   const sources = ['Website','Referral','Google','Instagram','Facebook','Word of Mouth','Yelp','NextDoor']
   const projects = ['Home Organization','Kitchen + Pantry','Closet + Office','Garage','Full Home','Move-In Organization','Bedroom + Closet','Basement','Attic','Master Closet','Pantry','Mudroom + Entry']
@@ -607,10 +611,13 @@ const EXTRA_PEOPLE = (() => {
     }
   })
   return results
-})()
+}
 
 
-const ALL_PEOPLE = [...PEOPLE, ...EXTRA_PEOPLE]
+// Deterministic at module load — only the 21 hand-authored PEOPLE. The
+// EXTRA_PEOPLE generator is invoked from a useEffect in App() post-mount
+// so SSR and client hydration see the same data.
+const ALL_PEOPLE = PEOPLE
 
 function getInitials(n) { return n.split(' ').map(w=>w[0]).join('').slice(0,2) }
 function stageConf(key) { return STAGES.find(s=>s.key===key)||STAGES[0] }
@@ -4714,7 +4721,12 @@ function QuickNoteInput({ onAdd }) {
 function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='all', isElevated=false, initialSelected=null, onInitialSelectedConsumed=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11' }) {
   if (!people) return null
   const allPeople = locFilter==='all' ? people : people.filter(p=>p.locationId===locFilter)
-  const [view, setView] = useState(()=>{ try { return localStorage.getItem('bee_hive_view')||'list' } catch(e){ return 'list' } })
+  // Default 'list' on both SSR and client. Hydrate from localStorage after
+  // mount to avoid React hydration mismatch on the initial render.
+  const [view, setView] = useState('list')
+  useEffect(() => {
+    try { const v = localStorage.getItem('bee_hive_view'); if (v) setView(v) } catch {}
+  }, [])
   const [selected, setSelected] = useState(initialSelected)
   const [viewingCard, setViewingCard] = useState(null)
 
@@ -4751,9 +4763,12 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
   const [expandedStages, setExpandedStages] = useState({})
   const [descPopup, setDescPopup] = useState(null) // {id, name, text, x, y}
   const [showKanbanLegend, setShowKanbanLegend] = useState(false)
-  const [kanbanCollapsed, setKanbanCollapsed] = useState(()=>{
-    try { return JSON.parse(localStorage.getItem('bee_kanban_collapsed')||'{}') } catch(e){ return {} }
-  })
+  // Default {} on SSR + initial client render; hydrate from localStorage
+  // post-mount so the rendered HTML matches between server and client.
+  const [kanbanCollapsed, setKanbanCollapsed] = useState({})
+  useEffect(() => {
+    try { setKanbanCollapsed(JSON.parse(localStorage.getItem('bee_kanban_collapsed')||'{}')) } catch {}
+  }, [])
   const [sortAlpha, setSortAlpha] = useState(false)
   function toggleKanbanCol(key) {
     setKanbanCollapsed(prev=>{
@@ -10093,9 +10108,12 @@ function JobberConnectionCard({ settings, updateLocation }) {
 // ─── Client Import Card ────────────────────────────────────────────────────────
 function ClientImportCard({ isJobberConnected, locationId }) {
   const STORAGE_KEY = `import_complete_${locationId}`
-  const [importState, setImportState] = useState(() => {
-    try { return localStorage.getItem(STORAGE_KEY) || 'idle' } catch { return 'idle' }
-  })
+  // Default 'idle' on SSR + initial client render; hydrate from localStorage
+  // post-mount so the rendered HTML matches between server and client.
+  const [importState, setImportState] = useState('idle')
+  useEffect(() => {
+    try { const v = localStorage.getItem(STORAGE_KEY); if (v) setImportState(v) } catch {}
+  }, [STORAGE_KEY])
   const [progress, setProgress]     = useState(0)
   const [clientCount, setClientCount] = useState(0)
   const [skipped, setSkipped]       = useState(false)
@@ -16309,6 +16327,11 @@ export default function App({
   const [globalSelectedPerson, setGlobalSelectedPerson]   = useState(null)
   const [globalSelectedPartner, setGlobalSelectedPartner] = useState(null)
   const [people, setPeople]                 = useState(ALL_PEOPLE)
+  // Extend with randomized mock data post-mount. Module-level Math.random
+  // would diverge between SSR and client → hydration mismatch.
+  useEffect(() => {
+    setPeople(prev => [...prev, ...generateExtraPeople()])
+  }, [])
   const [followUps, setFollowUps]           = useState([
     { id:'fu1', personId:'3',  personName:'Lisa Patel',      note:'Assessment follow-up - did she book?',       date:'2026-05-07', locationId:'loc_kc', createdAt:'May 5' },
     { id:'fu2', personId:'2',  personName:'Jennifer Torres', note:'Re-engage - went quiet after first call',     date:'2026-05-09', locationId:'loc_kc', createdAt:'May 4' },
