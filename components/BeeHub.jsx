@@ -6188,7 +6188,7 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
         style={{ width:'100%', padding:'11px', background: locationId ? '#1a2e2b' : '#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color: locationId ? 'white' : '#9ca3af', cursor: locationId ? 'pointer' : 'not-allowed' }}>
         Start Import
       </button>
-      <button onClick={()=>{ setActiveStepOpen(null) }}
+      <button onClick={()=>{ markDone('import'); setActiveStepOpen(null) }}
         style={{ width:'100%', padding:'9px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>
         Skip for now
       </button>
@@ -6802,21 +6802,8 @@ function OnboardingInviteSheet({ onClose, onDone }) {
               <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
             </div>
 
-            {/* Compact pricing row */}
-            <div style={{ display:'flex', gap:'6px', marginBottom:'16px', overflowX:'auto', paddingBottom:'2px' }}>
-              {FRANCHISE_ROLES.filter(r=>r.key!=='owner').map(r=>{
-                const p=calcProration(ROLE_PRICING[r.key]||0)
-                return (
-                  <div key={r.key} style={{ flexShrink:0, padding:'7px 10px', background:'#f7f5f0', borderRadius:'9px', display:'flex', alignItems:'center', gap:'5px' }}>
-                    <span style={{ fontSize:'14px' }}>{r.icon}</span>
-                    <div>
-                      <p style={{ fontSize:'11px', fontWeight:600, color:'#1a2e2b', whiteSpace:'nowrap' }}>{r.label}</p>
-                      <p style={{ fontSize:'10px', color:'#8a9e9a', whiteSpace:'nowrap' }}>${p.prorated} today</p>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+            {/* Pricing matrix — replaces compact row with full TierPlansInline (a3eb93c "users on top, tier pills + matrix below" pattern) */}
+            <TierPlansInline />
 
             <div style={{ display:'grid', gap:'8px', marginBottom:'12px' }}>
               {invites.map((inv)=>{
@@ -11162,17 +11149,8 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
         })}
       </div>
 
-      {/* Seat pricing reference - wraps on mobile */}
-      <div style={{ margin:'12px 12px 16px' }}>
-        <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Seat Pricing</p>
-        <div style={{ display:'flex', gap:'5px', flexWrap:'wrap' }}>
-          {FRANCHISE_ROLES.map(r=>(
-            <span key={r.key} style={{ display:'inline-flex', alignItems:'center', gap:'4px', padding:'4px 10px', background:'white', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'20px', fontSize:'11px', color:'#4a5e5a', whiteSpace:'nowrap' }}>
-              {r.icon} <strong style={{ color:'#1a2e2b' }}>{r.label}</strong> · ${ROLE_PRICING[r.key]?.toLocaleString()}/yr
-            </span>
-          ))}
-        </div>
-      </div>
+      {/* Pricing matrix — TierPlansInline restored from lost BeeHub.js work (a3eb93c) */}
+      <TierPlansInline />
 
       {showInvite&&<OnboardingInviteSheet onClose={()=>setShowInvite(false)} onDone={invited=>{ if(invited) invited.forEach(u=>addUser(u)); setShowInvite(false) }} />}
       {showUpdatePayment&&<UpdatePaymentModal current={payMethod} onSave={m=>{ setPayMethod(m); setShowUpdatePayment(false) }} onClose={()=>setShowUpdatePayment(false)} />}
@@ -13172,11 +13150,145 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
 // ═══════════════════════════════════════════════════════
 
 const FRANCHISE_ROLES = [
-  { key:'owner',    label:'Owner',          icon:'👑', color:'#d4a046', bg:'rgba(212,160,70,0.1)',  desc:'Full access including revenue & settings'  },
-  { key:'manager',  label:'Manager',        icon:'⚡', color:'#6366f1', bg:'rgba(99,102,241,0.1)',  desc:'Full access except revenue'                },
-  { key:'light',    label:'Light User',     icon:'👤', color:'#10b981', bg:'rgba(16,185,129,0.1)',  desc:'Can edit records, no settings or revenue'  },
-  { key:'readonly', label:'Read Only User', icon:'👁',  color:'#8a9e9a', bg:'rgba(138,158,154,0.1)', desc:'View only - no creating or editing'         },
+  { key:'owner',    label:'Queen Bee',     icon:'👑', color:'#d4a046', bg:'rgba(212,160,70,0.1)',  desc:'Full access — billing, settings, Jobber'  },
+  { key:'manager',  label:'Hive Keeper',   icon:'🍯', color:'#6366f1', bg:'rgba(99,102,241,0.1)',  desc:'Operational lead — no billing or Jobber'  },
+  { key:'light',    label:'Worker Bee',    icon:'🐝', color:'#10b981', bg:'rgba(16,185,129,0.1)',  desc:'Front office — intake, scheduling, customer service'  },
+  { key:'readonly', label:'Honey Watcher', icon:'👁',  color:'#8a9e9a', bg:'rgba(138,158,154,0.1)', desc:'Read-only — accountants, advisors'  },
 ]
+
+// Restored from compiled BeeHub.js (commits a8690d2/5cf57aa/a3eb93c).
+// Phase 0 cleanup deleted the .js artifact; those commits had only modified
+// it, never BeeHub.jsx, so their work was lost. Translated from
+// React.createElement back to JSX.
+function TierPlansInline() {
+  const [showMatrix, setShowMatrix] = useState(false)
+  const tiers = [
+    { key:'owner',    name:'Queen Bee',     icon:'👑', color:'#d4a046', level:'L1', goodFor:'Franchise owners',                       price:550, detail:'Required · One per location' },
+    { key:'manager',  name:'Hive Keeper',   icon:'🍯', color:'#6366f1', level:'L2', goodFor:'Managers, operations leads',             price:400, detail:'No billing or Jobber control' },
+    { key:'light',    name:'Worker Bee',    icon:'🐝', color:'#10b981', level:'L3', goodFor:'Schedulers, customer service',           price:200, detail:'No financial visibility' },
+    { key:'readonly', name:'Honey Watcher', icon:'👁',  color:'#8a9e9a', level:'L4', goodFor:'Accountants, advisors, silent partners', price:50,  detail:'Read-only · Add as many as needed' },
+  ]
+  const sections = [
+    { title:'⚙ Account & Billing', rows:[
+      ['Manage subscription & billing','Upgrade, payment methods, invoices',['y','n','n','n']],
+      ['View billing & invoices','See current plan and past charges',['y','v','n','v']],
+      ['Connect / disconnect Jobber',"OAuth to franchise's Jobber account",['y','n','n','n']],
+      ['Edit location settings','Business hours, service area, branding',['y','y','n','n']],
+    ]},
+    { title:'👥 Team Management', rows:[
+      ['Invite / remove Hive Keepers','Add or revoke operational seats',['y','n','n','n']],
+      ['Invite / remove Worker Bees & Honey Watchers','Add or revoke lower-access seats',['y','y','n','n']],
+      ['Assign clients to team members','Set who owns each client',['y','y','n','n']],
+    ]},
+    { title:'🐝 Clients & Pipeline', rows:[
+      ['View all clients in the location','Full Hive access',['y','y','y','y']],
+      ['Edit client records','Update contact info, stage, tags',['y','y','y','n']],
+      ['Add new leads / clients','Capture incoming calls and inquiries',['y','y','y','n']],
+      ['Schedule assessments & follow-ups','Set appointment times',['y','y','y','n']],
+      ['Log Buzz Notes & Job Notes','Private + Jobber-synced notes',['y','y','y','n']],
+      ['Complete jobs & mark stages done','Field-completion work',['y','y','n','n']],
+    ]},
+    { title:'🤝 Contacts & Partners', rows:[
+      ['View partners, contacts, companies','Reference referral network',['y','y','y','y']],
+      ['Add or edit partners & contacts','Build the relationship database',['y','y','n','n']],
+    ]},
+    { title:'📧 Drip Campaigns', rows:[
+      ['Edit drip paths & email templates','Strategic outreach configuration',['y','y','n','n']],
+      ['Pause / resume drips for a client','Per-client drip control',['y','y','y','n']],
+    ]},
+    { title:'📊 Reports & Financials', rows:[
+      ['View revenue, royalty, pipeline reports','Financial dashboards',['y','y','n','y']],
+      ['Export reports & client data','CSV downloads',['y','y','n','y']],
+    ]},
+  ]
+  const renderAccess = (v) =>
+    v === 'y' ? <span style={{ color:'#2d8659', fontWeight:700, fontSize:'15px', lineHeight:1 }}>✓</span>
+  : v === 'n' ? <span style={{ color:'#c14545', fontWeight:700, fontSize:'13px', opacity:0.5, lineHeight:1 }}>✗</span>
+  : v === 'v' ? <span style={{ display:'inline-block', background:'rgba(184,136,32,0.15)', color:'#b88820', fontSize:'8px', fontWeight:700, letterSpacing:'0.3px', padding:'2px 4px', borderRadius:'6px', textTransform:'uppercase' }}>View</span>
+  : null
+
+  return (
+    <div style={{ margin:'24px 12px 16px' }}>
+      <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'10px' }}>Seat Pricing & Access</p>
+
+      {/* Tier pills */}
+      <div style={{ display:'grid', gap:'8px', marginBottom:'14px' }}>
+        {tiers.map(t => (
+          <div key={t.key} style={{ padding:'11px 13px', background:'white', border:'1px solid rgba(0,0,0,0.06)', borderLeft:`4px solid ${t.color}`, borderRadius:'10px', display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap' }}>
+            <div style={{ display:'flex', alignItems:'baseline', gap:'7px', flex:'0 0 auto' }}>
+              <span style={{ fontSize:'17px', lineHeight:1 }}>{t.icon}</span>
+              <p style={{ fontSize:'13.5px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{t.name}</p>
+              <span style={{ fontSize:'9px', color:'#8a9e9a', letterSpacing:'0.5px', textTransform:'uppercase', fontWeight:700, padding:'1px 5px', background:'rgba(26,46,43,0.05)', borderRadius:'4px' }}>{t.level}</span>
+            </div>
+            <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', flex:1, minWidth:0, lineHeight:1.4 }}>
+              {t.goodFor}
+              <span style={{ display:'block', fontSize:'10px', color:'#b0c0bc', marginTop:'1px', fontStyle:'normal' }}>{t.detail}</span>
+            </p>
+            <div style={{ flex:'0 0 auto', textAlign:'right' }}>
+              <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', lineHeight:1 }}>
+                ${t.price.toLocaleString()}
+                <span style={{ fontSize:'10px', color:'#8a9e9a', fontWeight:500, marginLeft:'2px' }}>/yr</span>
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Multiple Owners note */}
+      <div style={{ padding:'10px 13px', background:'rgba(212,160,70,0.07)', borderLeft:'3px solid #d4a046', borderRadius:'6px', marginBottom:'8px' }}>
+        <p style={{ fontSize:'9.5px', color:'#d4a046', letterSpacing:'1px', textTransform:'uppercase', fontWeight:700, marginBottom:'3px' }}>Multiple Owners</p>
+        <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.5 }}>
+          Co-owners can add a second Queen Bee seat at <strong style={{ color:'#1a2e2b' }}>$400/yr</strong> — both get full access. Total: <strong style={{ color:'#1a2e2b' }}>$950/yr</strong>.
+        </p>
+      </div>
+
+      {/* Account Security note */}
+      <div style={{ padding:'10px 13px', background:'rgba(168,201,196,0.12)', borderLeft:'3px solid #a8c9c4', borderRadius:'6px', marginBottom:'16px' }}>
+        <p style={{ fontSize:'9.5px', color:'#4d7a72', letterSpacing:'1px', textTransform:'uppercase', fontWeight:700, marginBottom:'3px' }}>Account Security</p>
+        <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.5 }}>
+          All logins require a verified <strong style={{ color:'#1a2e2b' }}>Bee Organized email</strong>. Seats are individual — credentials cannot be shared.
+        </p>
+      </div>
+
+      {/* Toggle */}
+      <button onClick={() => setShowMatrix(!showMatrix)}
+        style={{ width:'100%', padding:'10px 12px', background:showMatrix?'transparent':'#1a2e2b', border:showMatrix?'1px solid rgba(0,0,0,0.12)':'none', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:showMatrix?'#1a2e2b':'white', cursor:'pointer', marginBottom:showMatrix?'12px':0, letterSpacing:'0.3px' }}>
+        {(showMatrix ? '▲ Hide ' : '▼ Show ') + 'full access matrix'}
+      </button>
+
+      {/* Access matrix */}
+      {showMatrix && (
+        <div style={{ border:'1px solid rgba(0,0,0,0.08)', borderRadius:'10px', overflow:'hidden', background:'white' }}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 34px 34px 34px 34px', gap:'4px', padding:'10px 12px', background:'rgba(26,46,43,0.04)', borderBottom:'2px solid rgba(0,0,0,0.08)', alignItems:'center' }}>
+            <p style={{ fontSize:'9px', letterSpacing:'1px', textTransform:'uppercase', color:'#8a9e9a', fontWeight:700 }}>Capability</p>
+            <p style={{ fontSize:'15px', textAlign:'center', lineHeight:1 }}>👑</p>
+            <p style={{ fontSize:'15px', textAlign:'center', lineHeight:1 }}>🍯</p>
+            <p style={{ fontSize:'15px', textAlign:'center', lineHeight:1 }}>🐝</p>
+            <p style={{ fontSize:'15px', textAlign:'center', lineHeight:1 }}>👁</p>
+          </div>
+          {sections.map(s => (
+            <React.Fragment key={s.title}>
+              <div style={{ padding:'8px 12px', background:'rgba(212,160,70,0.05)', borderLeft:'3px solid #d4a046', fontFamily:'Georgia,serif', fontSize:'11.5px', fontWeight:700, color:'#1a2e2b', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
+                {s.title}
+              </div>
+              {s.rows.map((r, i) => (
+                <div key={`${s.title}-${i}`} style={{ display:'grid', gridTemplateColumns:'1fr 34px 34px 34px 34px', gap:'4px', padding:'9px 12px', borderBottom:'1px solid rgba(0,0,0,0.04)', alignItems:'center' }}>
+                  <div>
+                    <p style={{ fontSize:'10.5px', fontWeight:500, color:'#1a2e2b', lineHeight:1.3 }}>{r[0]}</p>
+                    <p style={{ fontSize:'9.5px', color:'#8a9e9a', marginTop:'2px', lineHeight:1.3 }}>{r[1]}</p>
+                  </div>
+                  {r[2].map((v, ci) => (
+                    <div key={ci} style={{ textAlign:'center' }}>{renderAccess(v)}</div>
+                  ))}
+                </div>
+              ))}
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 const USERS_DATA = [
   { id:'u1',  locationId:'loc_kc',         name:'Lynette Ewy',      email:'lewy@beeorganized.com',           role:'owner',     status:'active', initials:'LE', joined:'Oct 2025' },
