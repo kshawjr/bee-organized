@@ -14344,9 +14344,12 @@ function UsersTab({ users, setUsers, locations, locFilter, onInvite }) {
   const [locF, setLocF] = useState(locFilter)
 
   const q = search.toLowerCase()
-  const corpUsers = users.filter(u => u.role==='corporate' && (!search || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)))
-  const filtered  = users.filter(u => u.role!=='corporate' && u.locationId && (!search || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)) && (locF==='all' || u.locationId===locF))
-  const byLoc     = locations.map(loc=>({ loc, members: filtered.filter(u=>u.locationId===loc.id) })).filter(g=>g.members.length>0)
+  const catOf    = u => u.displayCategory || (u.role==='corporate' ? 'corporate' : (u.locationId ? 'franchise' : 'corporate'))
+  const matchQ   = u => !search || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
+  const devUsers = users.filter(u => catOf(u)==='development' && matchQ(u))
+  const corpUsers= users.filter(u => catOf(u)==='corporate'   && matchQ(u))
+  const filtered = users.filter(u => catOf(u)==='franchise'   && u.locationId && matchQ(u) && (locF==='all' || u.locationId===locF))
+  const byLoc    = locations.map(loc=>({ loc, members: filtered.filter(u=>u.locationId===loc.id) })).filter(g=>g.members.length>0)
 
   function updateRole(uid, role) { setUsers(prev=>prev.map(u=>u.id===uid?{...u,role}:u)) }
   function removeUser(uid)       { setUsers(prev=>prev.filter(u=>u.id!==uid)) }
@@ -14377,6 +14380,16 @@ function UsersTab({ users, setUsers, locations, locFilter, onInvite }) {
   return (
     <div style={{ padding:'0 1.25rem 1rem', display:'grid', gap:'10px' }}>
       <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search users..." style={{ width:'100%', padding:'10px 14px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none', boxSizing:'border-box' }} />
+
+      {/* Development */}
+      {locF==='all'&&devUsers.length>0&&(
+        <div>
+          <p style={{ fontSize:'11px', fontWeight:700, color:'#475569', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px', padding:'0 2px' }}>🛠 Development</p>
+          <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
+            {devUsers.map(u=><UserRow key={u.id} u={u} showRolePicker={false} />)}
+          </div>
+        </div>
+      )}
 
       {/* Corporate */}
       {locF==='all'&&(
@@ -14762,6 +14775,9 @@ function ViewAsUserSheet({ users=USERS_DATA, onConfirm, onClose }) {
     return ()=>{ document.body.style.overflow = prev }
   }, [])
 
+  // TODO(post-demo): split corporateUsers into devUsers + corpUsers
+  // here too, mirroring UsersTab. Same data shape now has
+  // u.displayCategory available.
   const corporateUsers = users.filter(u => u.role === 'corporate')
   const franchiseUsers = users.filter(u => u.role !== 'corporate' && u.locationId)
 

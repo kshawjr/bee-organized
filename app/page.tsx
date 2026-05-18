@@ -74,6 +74,10 @@ function buildLocationUser(row: any) {
     // matches the USERS_DATA mock convention and keeps location-less
     // admins from falling through both filters in UsersTab.
     role: row.location_id ? mapTier(row.role) : 'corporate',
+    displayCategory:
+      row.location_id ? 'franchise' :
+      row.role === 'super_admin' ? 'development' :
+      'corporate',
     status: 'active',
     joined: fmtJoined(row.created_at),
   }
