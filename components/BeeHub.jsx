@@ -14072,6 +14072,7 @@ function LocationCard({ loc, role, onSelect, onStatusChange, onViewLocation, onD
 
 
 function LocationDetailSheet({ loc, onClose, onStatusChange, onViewLocation, onDrilldown, role }) {
+  const router = useRouter()
   React.useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -14080,7 +14081,72 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onViewLocation, onD
   const [currentLoc, setCurrentLoc] = useState(loc)
   const sc = CRM_STATUS_CONF[currentLoc.crmStatus]
   const showRevenue = role==='corporate' || role==='super_admin'
+  const canEditSubscription = role==='super_admin' || role==='corporate'
   const locUsers = USERS_DATA.filter(u=>u.locationId===currentLoc.id)
+
+  // Subscription editor state
+  const initialPaymentSource = currentLoc.payment_source || 'none'
+  const initialPaidThrough   = currentLoc.paid_through_date || ''
+  const initialBillingNotes  = currentLoc.billing_notes || ''
+  const [paymentSource, setPaymentSource] = useState(initialPaymentSource)
+  const [paidThrough, setPaidThrough]     = useState(initialPaidThrough)
+  const [billingNotes, setBillingNotes]   = useState(initialBillingNotes)
+  const [subSaving, setSubSaving]         = useState(false)
+  const [subError, setSubError]           = useState('')
+  const [subSuccess, setSubSuccess]       = useState(false)
+
+  const subDirty =
+    paymentSource !== initialPaymentSource ||
+    paidThrough   !== initialPaidThrough ||
+    billingNotes  !== initialBillingNotes
+
+  function selectPaymentSource(next) {
+    setPaymentSource(next)
+    if (next === 'prepaid_corporate' && !paidThrough) {
+      setPaidThrough('2027-03-01')
+    }
+    setSubSuccess(false)
+    setSubError('')
+  }
+
+  function resetSubscription() {
+    setPaymentSource(initialPaymentSource)
+    setPaidThrough(initialPaidThrough)
+    setBillingNotes(initialBillingNotes)
+    setSubError('')
+    setSubSuccess(false)
+  }
+
+  async function saveSubscription() {
+    setSubSaving(true)
+    setSubError('')
+    setSubSuccess(false)
+    try {
+      const res = await fetch('/api/locations/' + currentLoc.id + '/subscription', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          payment_source: paymentSource,
+          paid_through_date: paymentSource === 'prepaid_corporate' ? (paidThrough || null) : null,
+          billing_notes: billingNotes.trim() || null,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || 'Save failed')
+      setCurrentLoc(prev => ({
+        ...prev,
+        payment_source:    json.location?.payment_source    ?? paymentSource,
+        paid_through_date: json.location?.paid_through_date ?? null,
+        billing_notes:     json.location?.billing_notes     ?? null,
+      }))
+      setSubSuccess(true)
+      router.refresh()
+    } catch (err) {
+      setSubError(err.message || 'Save failed')
+    } finally {
+      setSubSaving(false)
+    }
+  }
 
   function changeStatus(key) {
     setCurrentLoc(prev=>({...prev, crmStatus:key}))
@@ -14152,6 +14218,79 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onViewLocation, onD
                     </div>
                   )
                 })}
+              </div>
+            </div>
+          )}
+
+          {/* Subscription editor (super_admin / corporate only) */}
+          {canEditSubscription && (
+            <div>
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Subscription</p>
+              <div style={{ background:'#f7f5f0', borderRadius:'10px', padding:'12px', display:'grid', gap:'10px' }}>
+
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:'11px', color:'#8a9e9a' }}>Status</span>
+                  <span style={{ fontSize:'11px', padding:'2px 8px', borderRadius:'10px', background:'rgba(26,46,43,0.06)', color:'#1a2e2b', fontWeight:600 }}>
+                    {currentLoc.subscription_status || 'deferred'}
+                  </span>
+                </div>
+
+                <div>
+                  <label style={{ display:'block', fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Payment source</label>
+                  <select
+                    value={paymentSource}
+                    onChange={e=>selectPaymentSource(e.target.value)}
+                    style={{ width:'100%', padding:'9px 11px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none', boxSizing:'border-box' }}
+                  >
+                    <option value="none">None (default)</option>
+                    <option value="direct">Direct (franchisee pays)</option>
+                    <option value="prepaid_corporate">Prepaid corporate</option>
+                    <option value="corporate_sponsored">Corporate sponsored</option>
+                  </select>
+                </div>
+
+                {paymentSource === 'prepaid_corporate' && (
+                  <div>
+                    <label style={{ display:'block', fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Paid through</label>
+                    <input
+                      type="date"
+                      value={paidThrough}
+                      onChange={e=>{ setPaidThrough(e.target.value); setSubSuccess(false); setSubError('') }}
+                      style={{ width:'100%', padding:'9px 11px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none', boxSizing:'border-box' }}
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label style={{ display:'block', fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Billing notes</label>
+                  <textarea
+                    rows={3}
+                    value={billingNotes}
+                    onChange={e=>{ setBillingNotes(e.target.value); setSubSuccess(false); setSubError('') }}
+                    placeholder="Internal notes (visible to super_admins only)"
+                    style={{ width:'100%', padding:'9px 11px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none', boxSizing:'border-box', resize:'vertical' }}
+                  />
+                </div>
+
+                {subError && (
+                  <p style={{ fontSize:'11px', color:'#ef4444', margin:0 }}>{subError}</p>
+                )}
+                {subSuccess && !subDirty && (
+                  <p style={{ fontSize:'11px', color:'#22c55e', margin:0 }}>Saved.</p>
+                )}
+
+                <div style={{ display:'flex', gap:'8px' }}>
+                  <button
+                    onClick={resetSubscription}
+                    disabled={!subDirty || subSaving}
+                    style={{ flex:1, padding:'9px', background:'white', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:(!subDirty||subSaving)?'not-allowed':'pointer', opacity:(!subDirty||subSaving)?0.5:1 }}
+                  >Cancel</button>
+                  <button
+                    onClick={saveSubscription}
+                    disabled={!subDirty || subSaving}
+                    style={{ flex:1, padding:'9px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:(!subDirty||subSaving)?'not-allowed':'pointer', opacity:(!subDirty||subSaving)?0.5:1 }}
+                  >{subSaving ? 'Saving…' : 'Save changes'}</button>
+                </div>
               </div>
             </div>
           )}

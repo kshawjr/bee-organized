@@ -61,7 +61,14 @@ export async function PATCH(
   const body = await request.json().catch(() => ({}))
 
   const allowedStatuses = ['deferred', 'trial', 'active', 'past_due', 'canceled']
-  const allowedSources = ['none', 'corporate', 'stripe']
+  const allowedSources = [
+    'none',
+    'direct',
+    'prepaid_corporate',
+    'corporate_sponsored',
+    'corporate',
+    'stripe',
+  ]
 
   const update: Record<string, any> = {}
 
