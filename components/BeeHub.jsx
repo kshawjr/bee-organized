@@ -11604,6 +11604,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   // than the ALL_LOCATIONS mock for the location settings panel.
   const currentLocationCtx = useContext(CurrentLocationContext)
   const tierPricesCtx = useContext(TierPricesContext)
+  const seatsCtx = useContext(SeatsContext)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
   const livePrices = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
   // Build settings from selected location if provided, with onboarding data taking priority
@@ -11938,8 +11939,14 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
            what they have, what renews when, and how to add more. */}
         {activeSection==='billing'&&(()=>{
           const billingPaymentSource = currentLocationCtx?.payment_source || 'direct'
-          const billingSeats = [{ tier:'owner', count:1 }]
-          const billingAnnual = billingSeats.reduce((sum, s) => sum + getTierPrice(s.tier) * s.count, 0)
+          // Per-tier counts derived from real subscription_seats via SeatsContext
+          // (Dispatch 1). Falls back to a single owner seat if context isn't
+          // mounted — keeps SettingsScreen renderable in isolation (storybook,
+          // legacy mock harnesses) where SeatsContext.Provider isn't wrapped.
+          const seatCountsByTier = seatsCtx?.seatCountsByTier?.() ?? { owner:{ total:1, assigned:1, available:0 } }
+          const tierKeysWithSeats = SUBSCRIPTION_TIER_META.map(m=>m.key).filter(k => (seatCountsByTier[k]?.total||0) > 0)
+          const hasAnySeats = tierKeysWithSeats.length > 0
+          const billingAnnual = Object.entries(seatCountsByTier).reduce((sum, [tier, c]) => sum + getTierPrice(tier) * (c?.total||0), 0)
           const billingRenewalDate = nextRenewalDate()
           const billingRenewalLabel = formatRenewalDate(billingRenewalDate)
           const billingRenewalYear = billingRenewalDate.getUTCFullYear()
@@ -11977,43 +11984,53 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                   )}
                 </div>
 
-                {/* Seat breakdown — "+ Add seat" lives as an inline list-bottom
-                   affordance rather than a standalone CTA so the action reads
-                   as a natural extension of the seat list. */}
+                {/* Seat breakdown — one row per tier with at least 1 seat,
+                   ordered by SUBSCRIPTION_TIER_META (owner→manager→light→
+                   readonly). Each row shows total / assigned / available so
+                   owners can see at a glance who's seated vs. what's still
+                   open for invite. "+ Add seats" remains an inline list-bottom
+                   affordance (Stripe wiring is Dispatch 3). */}
                 <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', overflow:'hidden', marginBottom:'18px' }}>
                   <div style={{ padding:'10px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)', background:'rgba(26,46,43,0.03)' }}>
                     <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px' }}>
-                      Current Seats
+                      Your seats this year
                     </p>
                   </div>
                   <div>
-                    {billingSeats.filter(s=>s.count>0).map(s=>{
-                      const meta = SUBSCRIPTION_TIER_META.find(m=>m.key===s.tier)
-                      if (!meta) return null
+                    {hasAnySeats ? tierKeysWithSeats.map(key => {
+                      const meta = SUBSCRIPTION_TIER_META.find(m=>m.key===key)
+                      const c = seatCountsByTier[key]
+                      if (!meta || !c) return null
                       return (
-                        <div key={s.tier} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 14px', borderBottom:'1px solid rgba(0,0,0,0.04)', borderLeft:`4px solid ${meta.color}` }}>
+                        <div key={key} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 14px', borderBottom:'1px solid rgba(0,0,0,0.04)', borderLeft:`4px solid ${meta.color}` }}>
                           <span style={{ fontSize:'18px' }}>{meta.icon}</span>
                           <div style={{ flex:1, minWidth:0 }}>
                             <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>
-                              {s.count} {meta.name}{s.count !== 1 ? 's' : ''}
+                              {c.total} {meta.name}{c.total !== 1 ? 's' : ''}
                             </p>
-                            <p style={{ fontSize:'10.5px', color:'#8a9e9a' }}>{meta.detail}</p>
+                            <p style={{ fontSize:'10.5px', color:'#8a9e9a' }}>
+                              {c.assigned} assigned · {c.available} available
+                            </p>
                           </div>
                         </div>
                       )
-                    })}
+                    }) : (
+                      <div style={{ padding:'18px 14px', textAlign:'center' }}>
+                        <p style={{ fontSize:'13px', color:'#4a5e5a', marginBottom:'4px', fontWeight:500 }}>No seats yet</p>
+                        <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5 }}>
+                          Finish onboarding to activate your subscription and seat your team.
+                        </p>
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={()=>alert('Stripe integration coming soon — contact corporate to add seats for now.')}
                       style={{ display:'block', width:'100%', padding:'10px 14px', background:'transparent', border:'none', borderTop:'1px dashed rgba(0,0,0,0.08)', fontSize:'12px', fontFamily:'inherit', fontWeight:500, color:'#8a9e9a', cursor:'pointer', textAlign:'left' }}
                       onMouseEnter={e=>{ e.currentTarget.style.background='rgba(26,46,43,0.03)'; e.currentTarget.style.color='#4a5e5a' }}
                       onMouseLeave={e=>{ e.currentTarget.style.background='transparent'; e.currentTarget.style.color='#8a9e9a' }}>
-                      + Add seat
+                      + Add seats
                     </button>
                   </div>
-                  <p style={{ fontSize:'10.5px', color:'#b0c0bc', fontStyle:'italic', padding:'8px 14px', margin:0, borderTop:'1px solid rgba(0,0,0,0.04)' }}>
-                    Seat detail tracking coming soon — currently shows the required Zee Bee.
-                  </p>
                 </div>
               </div>
 
