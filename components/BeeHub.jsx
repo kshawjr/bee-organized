@@ -14372,7 +14372,6 @@ function UsersTab({ users, setUsers, locations, locFilter, onInvite }) {
             </select>
           : <span style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:'rgba(99,102,241,0.1)', color:'#6366f1', fontWeight:600, flexShrink:0 }}>🏢 Corporate</span>
         }
-        <button onClick={()=>removeUser(u.id)} style={{ background:'none', border:'none', color:'#e5a0a0', cursor:'pointer', fontSize:'16px', padding:'2px', flexShrink:0 }}>×</button>
       </div>
     )
   }
@@ -14766,7 +14765,7 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
   )
 }
 
-function ViewAsUserSheet({ users=USERS_DATA, onConfirm, onClose }) {
+function ViewAsUserSheet({ users=USERS_DATA, locations=ALL_LOCATIONS, onConfirm, onClose }) {
   const [search, setSearch] = useState('')
 
   React.useEffect(()=>{
@@ -14781,8 +14780,10 @@ function ViewAsUserSheet({ users=USERS_DATA, onConfirm, onClose }) {
   const corporateUsers = users.filter(u => u.role === 'corporate')
   const franchiseUsers = users.filter(u => u.role !== 'corporate' && u.locationId)
 
-  // Group franchise users by location
-  const byLoc = ALL_LOCATIONS
+  // Group franchise users by real (Supabase) locations passed in via prop.
+  // Iterating ALL_LOCATIONS instead would hide users at locations whose UUID
+  // isn't in the mock — e.g. Test Location → admin@beeorganized.com.
+  const byLoc = locations
     .map(loc => ({ loc, users: franchiseUsers.filter(u=>u.locationId===loc.id && (!search || u.name.toLowerCase().includes(search.toLowerCase()) || loc.name.toLowerCase().includes(search.toLowerCase()))) }))
     .filter(g => g.users.length > 0)
 
@@ -17535,6 +17536,7 @@ export default function App({
       {viewAsTarget&&(
         <ViewAsUserSheet
           users={users}
+          locations={initialLocations || ALL_LOCATIONS}
           onConfirm={(user)=>{
             const isCorp = user.role === 'corporate'
             setLocFilter(isCorp ? 'all' : user.locationId)
