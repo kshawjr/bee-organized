@@ -9,6 +9,7 @@ import {
   formatRenewalDate,
   nextRenewalDate,
   daysUntilNextRenewal,
+  prorateToNextRenewal,
 } from "@/lib/subscription-math"
 
 // ═══════════════════════════════════════════════════════
@@ -13171,12 +13172,28 @@ function SubscriptionCalculator({
 
   const display = getSubscriptionDisplay(normalizedSource, seats, new Date(), livePrices)
 
+  // Co-owner rule: the 2nd Zee Bee seat bills at the Hive Manager rate, not
+  // the full owner rate. Owner seats are capped at 2 — a location has at most
+  // one primary owner + one co-owner. Math lib stays naive (count × price);
+  // we apply the discount here so the Breakdown / Annual / Prorated all
+  // reflect the same effective total.
+  const SEAT_MAX = (tier) => tier === 'owner' ? 2 : 99
+  const ownerCount = (seats.find(s => s.tier === 'owner')?.count) || 0
+  const ownerPrice = getTierPrice('owner')
+  const managerPrice = getTierPrice('manager')
+  const coOwnerDiscount = ownerCount >= 2 ? (ownerCount - 1) * (ownerPrice - managerPrice) : 0
+  const effectiveAnnual = display.annual - coOwnerDiscount
+  const effectiveProrated = display.mode === 'direct'
+    ? prorateToNextRenewal(effectiveAnnual)
+    : 0
+
   function adjustSeat(tier, delta) {
     setSeats(prev => {
       const idx = prev.findIndex(s => s.tier === tier)
       const current = idx >= 0 ? prev[idx].count : 0
       const min = tier === 'owner' ? 1 : 0
-      const next = Math.max(min, Math.min(99, current + delta))
+      const max = SEAT_MAX(tier)
+      const next = Math.max(min, Math.min(max, current + delta))
       if (next === current) return prev
       let nextSeats
       if (idx >= 0) {
@@ -13203,7 +13220,7 @@ function SubscriptionCalculator({
   // - sponsored: $0 today, no math shown
   const heroNumber =
     display.mode === 'direct'
-      ? formatCurrency(display.prorated)
+      ? formatCurrency(effectiveProrated)
       : formatCurrency(0)
 
   const heroSub =
@@ -13237,6 +13254,34 @@ function SubscriptionCalculator({
             const count = getCount(t.key)
             if (count <= 0) return null
             const price = getTierPrice(t.key)
+            // Co-owner rule: render the Zee Bee row as two lines when count≥2 —
+            // primary at owner rate + extras at Hive Manager rate.
+            if (t.key === 'owner' && count >= 2) {
+              const primarySub = price
+              const extraCount = count - 1
+              const extraSub = extraCount * managerPrice
+              return (
+                <React.Fragment key={t.key}>
+                  <div style={{ display:'flex', alignItems:'baseline', gap:'6px', fontSize:'12.5px', color:'#4a5e5a' }}>
+                    <span style={{ fontSize:'13px', lineHeight:1 }}>{t.icon}</span>
+                    <span style={{ flex:1 }}>
+                      1 {t.name} × {formatCurrency(price, { showCents:'never' })}/yr
+                    </span>
+                    <span style={{ fontWeight:600, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
+                      {formatCurrency(primarySub, { showCents:'never' })}
+                    </span>
+                  </div>
+                  <div style={{ display:'flex', alignItems:'baseline', gap:'6px', fontSize:'12px', color:'#8a9e9a', paddingLeft:'19px' }}>
+                    <span style={{ flex:1 }}>
+                      + {extraCount} co-owner {t.name}{extraCount !== 1 ? 's' : ''} × {formatCurrency(managerPrice, { showCents:'never' })}/yr
+                    </span>
+                    <span style={{ fontWeight:600, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
+                      {formatCurrency(extraSub, { showCents:'never' })}
+                    </span>
+                  </div>
+                </React.Fragment>
+              )
+            }
             const subtotal = price * count
             return (
               <div key={t.key} style={{ display:'flex', alignItems:'baseline', gap:'6px', fontSize:'12.5px', color:'#4a5e5a' }}>
@@ -13254,7 +13299,7 @@ function SubscriptionCalculator({
         <div style={{ borderTop:'1px solid rgba(0,0,0,0.08)', paddingTop:'8px', display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'6px' }}>
           <span style={{ fontSize:'12px', color:'#4a5e5a', fontWeight:600 }}>Annual total</span>
           <span style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
-            {formatCurrency(display.annual, { showCents:'never' })}
+            {formatCurrency(effectiveAnnual, { showCents:'never' })}
           </span>
         </div>
         {display.mode === 'direct' && (
@@ -13264,11 +13309,11 @@ function SubscriptionCalculator({
                 Prorated ({daysLeft} days)
               </span>
               <span style={{ fontSize:'13.5px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
-                {formatCurrency(display.prorated)}
+                {formatCurrency(effectiveProrated)}
               </span>
             </div>
             <p style={{ fontSize:'11px', color:'#8a9e9a', textAlign:'center' }}>
-              Renews {renewalLabel} at {formatCurrency(display.annual, { showCents:'never' })}/year
+              Renews {renewalLabel} at {formatCurrency(effectiveAnnual, { showCents:'never' })}/year
             </p>
           </>
         )}
@@ -13302,16 +13347,22 @@ function SubscriptionCalculator({
         {SUBSCRIPTION_TIER_META.map(t => {
           const count = getCount(t.key)
           const price = getTierPrice(t.key)
-          const subtotal = price * count
+          // Co-owner rule reflected in row subtotal: 1st at owner rate, 2nd at manager rate.
+          const subtotal = (t.key === 'owner' && count >= 2)
+            ? price + (count - 1) * managerPrice
+            : price * count
           const minusDisabled = t.key === 'owner' ? count <= 1 : count <= 0
-          const plusDisabled = count >= 99
+          const plusDisabled = count >= SEAT_MAX(t.key)
+          const detailText = t.key === 'owner'
+            ? `${formatCurrency(price, { showCents:'never' })}/yr · 2nd seat ${formatCurrency(managerPrice, { showCents:'never' })}/yr · Max 2`
+            : `${formatCurrency(price, { showCents:'never' })}/yr · ${t.detail}`
           return (
             <div key={t.key} style={{ padding:'12px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)', borderLeft:`4px solid ${t.color}`, display:'flex', alignItems:'center', gap:'10px' }}>
               <span style={{ fontSize:'20px', lineHeight:1, flexShrink:0 }}>{t.icon}</span>
               <div style={{ flex:1, minWidth:0 }}>
                 <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{t.name}</p>
                 <p style={{ fontSize:'10.5px', color:'#8a9e9a', marginTop:'1px' }}>
-                  {formatCurrency(price, { showCents:'never' })}/yr · {t.detail}
+                  {detailText}
                 </p>
               </div>
               <div style={{ display:'flex', alignItems:'center', gap:'6px', flexShrink:0 }}>
