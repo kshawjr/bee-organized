@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from "react"
 import { useRouter } from "next/navigation"
 import {
-  TIER_PRICES,
+  DEFAULT_TIER_PRICES,
   getSubscriptionDisplay,
   formatCurrency,
   formatRenewalDate,
@@ -38,6 +38,19 @@ const CurrentLocationContext = createContext(null)
 // keep working.
 // Value shape: Array<{ id, name, initials, email, locationId, role, status, joined }> or null.
 const LocationUsersContext = createContext(null)
+
+// Single source of truth for subscription seat pricing. Populated by App
+// from initialTierPrices (server-fetched from Supabase tier_prices table)
+// and mutated when PricingManagementTab successfully PUTs to
+// /api/admin/tier-prices. Replaces the two parallel hardcoded tables that
+// preceded the tier_prices migration and disagreed by $25 on manager/light.
+// Value shape: {
+//   tierPrices: Array<{ id, display_name, price_annual, description, sort_order, updated_at }>,
+//   setTierPrices: (next) => void,
+//   getTierPrice: (id) => number,
+//   livePrices: { owner, manager, light, readonly }   // record form for math helpers
+// } or null.
+const TierPricesContext = createContext(null)
 
 const STAGES = [
   { key:'New',             label:'New',             color:'#6366f1', bg:'rgba(99,102,241,0.08)',  dot:'#6366f1', icon:'✨' },
@@ -6763,6 +6776,8 @@ function OnboardingPathsEditor({ onComplete }) {
 
 
 function OnboardingInviteSheet({ onClose, onDone }) {
+  const tierPricesCtx = useContext(TierPricesContext)
+  const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
   const [invites, setInvites] = useState([{ id:1, firstName:'', lastName:'', email:'', role:'manager' }])
   const [step, setStep]       = useState('form') // form|review|processing|done
 
@@ -6778,8 +6793,8 @@ function OnboardingInviteSheet({ onClose, onDone }) {
 
   function isValidEmail(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim()) }
   const validInvites = invites.filter(i=>i.firstName.trim()&&i.email.trim()&&isValidEmail(i.email))
-  const annualAdd  = validInvites.reduce((s,i)=>s+(ROLE_PRICING[i.role]||0), 0)
-  const proratedAdd = validInvites.reduce((s,i)=>s+calcProration(ROLE_PRICING[i.role]||0).prorated, 0)
+  const annualAdd  = validInvites.reduce((s,i)=>s+getTierPrice(i.role), 0)
+  const proratedAdd = validInvites.reduce((s,i)=>s+calcProration(getTierPrice(i.role)).prorated, 0)
 
   // Local-only stub: there's no real backend seat-add yet (post-demo work
   // with subscription_seats). For now, "Send Invite" just transitions to
@@ -6929,13 +6944,16 @@ function OnboardingInviteSheet({ onClose, onDone }) {
   )
 }
 // ─── Renewal total calculator ─────────────────────────────────────────────────
-function calcRenewalTotal(locationId, smsEnabled=false) {
+// `prices` is an optional record { owner, manager, light, readonly } supplied
+// from TierPricesContext at the call site. Falls back to DEFAULT_TIER_PRICES
+// so module-level / pre-context callers continue to work.
+function calcRenewalTotal(locationId, smsEnabled=false, prices=DEFAULT_TIER_PRICES) {
   const locUsers = USERS_DATA.filter(u => u.locationId === locationId)
   const smsPrice = APP_ADDONS.find(a=>a.id==='sms')?.price || 0
   // If no users found (e.g. owner not in USERS_DATA), default to owner plan pricing
   const seats    = locUsers.length > 0
-    ? locUsers.reduce((s, u) => s + (ROLE_PRICING[u.role] || 0), 0)
-    : ROLE_PRICING.owner
+    ? locUsers.reduce((s, u) => s + (prices[u.role] || 0), 0)
+    : (prices.owner || 0)
   const sms      = smsEnabled ? smsPrice : 0
   return { seats, sms, total: seats + sms, users: locUsers, smsPrice }
 }
@@ -6995,8 +7013,11 @@ function LockoutScreen({ isOwner=false, onGoToSettings }) {
 
 // ─── Past Due Settings Card ───────────────────────────────────────────────────
 function PastDuePaymentCard({ locationId, graceDaysLeft=14, onResolved }) {
+  const tierPricesCtx = useContext(TierPricesContext)
+  const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
+  const livePrices = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
   const [showModal, setShowModal] = useState(false)
-  const renewal = calcRenewalTotal(locationId)
+  const renewal = calcRenewalTotal(locationId, false, livePrices)
   const expired = graceDaysLeft <= 0
 
   const REMINDERS = [
@@ -7041,7 +7062,7 @@ function PastDuePaymentCard({ locationId, graceDaysLeft=14, onResolved }) {
               return (
                 <div key={u.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                   <span style={{ fontSize:'12px', color:'#4a5e5a' }}>{rc?.icon} {u.name} · {rc?.label}</span>
-                  <span style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b' }}>${ROLE_PRICING[u.role]?.toLocaleString()}</span>
+                  <span style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b' }}>${getTierPrice(u.role).toLocaleString()}</span>
                 </div>
               )
             })}
@@ -9934,17 +9955,9 @@ function StepTemplatePicker({ step, templates, onSelect, onClose, smsEnabled=tru
   )
 }
 
-// Pricing - managed by super admin (defaults; overridden by APP_PRICING state in App)
-const DEFAULT_ROLE_PRICING = {
-  owner:    550,
-  manager:  425,
-  light:    225,
-  readonly:  50,
-}
-
-// Mutable reference updated from App pricing state
-let ROLE_PRICING = { ...DEFAULT_ROLE_PRICING }
-
+// Add-ons - managed by super admin (in-memory only for now; persistence
+// is a follow-up to the tier_prices rollout).
+// TODO: migrate APP_ADDONS to Supabase + Context like tier_prices.
 const DEFAULT_ADDONS = [
   { id:'sms',   name:'SMS Messaging',     icon:'💬', price:100, desc:'Automated text messages to clients',  active:true,  canDelete:false },
 ]
@@ -9990,7 +10003,7 @@ const DEFAULT_SETTINGS = {
     plan:      'owner',
     subStatus: 'active',
     renewDate: 'March 1, 2027',
-    nextAmount: calcProration(ROLE_PRICING.owner).prorated,
+    nextAmount: calcProration(DEFAULT_TIER_PRICES.owner).prorated,
   },
   location: {
     locId:          '',
@@ -10523,13 +10536,16 @@ function BillingHistorySheet({ onClose }) {
 }
 
 function SubscriptionCard({ profile, settings, locationId='loc1' }) {
+  const tierPricesCtx = useContext(TierPricesContext)
+  const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
+  const livePrices = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
   const [showUpdateModal, setShowUpdateModal] = useState(false)
   const [showHistory, setShowHistory]         = useState(false)
   const [payMethod, setPayMethod] = useState(null)
   const rc    = FRANCHISE_ROLES.find(r=>r.key===profile.plan)||FRANCHISE_ROLES[0]
-  const price = ROLE_PRICING[profile.plan]||550
+  const price = getTierPrice(profile.plan) || getTierPrice('owner')
   const smsEnabled = settings?.location?.smsEnabled || false
-  const renewal = calcRenewalTotal(locationId, smsEnabled)
+  const renewal = calcRenewalTotal(locationId, smsEnabled, livePrices)
   // Always include the owner seat if no users found (owner may not be in USERS_DATA)
   const smsPrice = APP_ADDONS.find(a=>a.id==='sms')?.price || 0
   const renewalTotal = renewal.total > 0 ? renewal.total : price + (smsEnabled ? smsPrice : 0)
@@ -10561,7 +10577,7 @@ function SubscriptionCard({ profile, settings, locationId='loc1' }) {
               <p style={{ fontSize:'11px', color:'#8a9e9a', marginBottom:'2px' }}>Auto-charge on March 1</p>
               <p style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>${renewalTotal.toLocaleString()}</p>
               <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>
-                {renewalSeats} seat{renewalSeats!==1?'s':''} · ${(ROLE_PRICING[profile.plan]||ROLE_PRICING.owner).toLocaleString()}/yr
+                {renewalSeats} seat{renewalSeats!==1?'s':''} · ${(getTierPrice(profile.plan) || getTierPrice('owner')).toLocaleString()}/yr
                 {smsEnabled?` + SMS $${smsPrice}/yr`:''}
               </p>
             </div>
@@ -11509,6 +11525,9 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   // by App from page.tsx's Supabase fetch). Used as a higher-priority source
   // than the ALL_LOCATIONS mock for the location settings panel.
   const currentLocationCtx = useContext(CurrentLocationContext)
+  const tierPricesCtx = useContext(TierPricesContext)
+  const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
+  const livePrices = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
   // Build settings from selected location if provided, with onboarding data taking priority
   const od = onboardingData  // shorthand
   const locProfile = od?.profile ? {
@@ -11520,7 +11539,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     plan:      'owner',
     subStatus: 'active',
     renewDate: 'March 1, 2027',
-    nextAmount: calcProration(ROLE_PRICING.owner).prorated,
+    nextAmount: calcProration(getTierPrice('owner')).prorated,
   } : selectedLoc ? {
     firstName: (selectedLoc.owner||'').split(' ')[0],
     lastName:  (selectedLoc.owner||'').split(' ').slice(1).join(' '),
@@ -11530,7 +11549,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     plan:      'owner',
     subStatus: 'active',
     renewDate: 'March 1, 2027',
-    nextAmount: calcProration(ROLE_PRICING.owner).prorated,
+    nextAmount: calcProration(getTierPrice('owner')).prorated,
   } : (()=>{
     // Look up owner from USERS_DATA for this location
     const owner = USERS_DATA.find(u=>u.locationId===locationId&&u.role==='owner')
@@ -11842,7 +11861,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
         {activeSection==='billing'&&(()=>{
           const billingPaymentSource = currentLocationCtx?.payment_source || 'direct'
           const billingSeats = [{ tier:'owner', count:1 }]
-          const billingAnnual = billingSeats.reduce((sum, s) => sum + (TIER_PRICES[s.tier] || 0) * s.count, 0)
+          const billingAnnual = billingSeats.reduce((sum, s) => sum + getTierPrice(s.tier) * s.count, 0)
           const billingRenewalDate = nextRenewalDate()
           const billingRenewalLabel = formatRenewalDate(billingRenewalDate)
           const billingRenewalYear = billingRenewalDate.getUTCFullYear()
@@ -13114,8 +13133,9 @@ const FRANCHISE_ROLES = [
 // Phase 0 cleanup deleted the .js artifact; those commits had only modified
 // it, never BeeHub.jsx, so their work was lost. Translated from
 // React.createElement back to JSX.
-// Tier display metadata — keys mirror TIER_PRICES keys in lib/subscription-math.
-// Kept colocated with TierPlansInline so seat icons/colors stay consistent.
+// Tier display metadata — keys mirror tier ids in the Supabase tier_prices table
+// (and DEFAULT_TIER_PRICES in lib/subscription-math.ts). Kept colocated with
+// TierPlansInline so seat icons/colors stay consistent.
 const SUBSCRIPTION_TIER_META = [
   { key:'owner',    name:'Zee Bee',       icon:'👑', color:'#d4a046', detail:'Required · One per location' },
   { key:'manager',  name:'Hive Manager',  icon:'🍯', color:'#6366f1', detail:'Operations & team leads' },
@@ -13129,6 +13149,9 @@ function SubscriptionCalculator({
   showSeatControls = true,
   onSeatsChange = null,
 }) {
+  const tierPricesCtx = useContext(TierPricesContext)
+  const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
+  const livePrices = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
   // 'none' is the DB default for locations corporate hasn't classified yet.
   // Treat as 'direct' (self-pay) for display purposes.
   const normalizedSource =
@@ -13146,7 +13169,7 @@ function SubscriptionCalculator({
     if (!showSeatControls) setSeats(initialSeats)
   }, [seatsKey, showSeatControls])
 
-  const display = getSubscriptionDisplay(normalizedSource, seats)
+  const display = getSubscriptionDisplay(normalizedSource, seats, new Date(), livePrices)
 
   function adjustSeat(tier, delta) {
     setSeats(prev => {
@@ -13213,7 +13236,7 @@ function SubscriptionCalculator({
           {SUBSCRIPTION_TIER_META.map(t => {
             const count = getCount(t.key)
             if (count <= 0) return null
-            const price = TIER_PRICES[t.key]
+            const price = getTierPrice(t.key)
             const subtotal = price * count
             return (
               <div key={t.key} style={{ display:'flex', alignItems:'baseline', gap:'6px', fontSize:'12.5px', color:'#4a5e5a' }}>
@@ -13278,7 +13301,7 @@ function SubscriptionCalculator({
       <div style={{ display:'grid' }}>
         {SUBSCRIPTION_TIER_META.map(t => {
           const count = getCount(t.key)
-          const price = TIER_PRICES[t.key]
+          const price = getTierPrice(t.key)
           const subtotal = price * count
           const minusDisabled = t.key === 'owner' ? count <= 1 : count <= 0
           const plusDisabled = count >= 99
@@ -13346,11 +13369,13 @@ function SubscriptionCalculator({
 }
 
 function TierPlansInline() {
+  const tierPricesCtx = useContext(TierPricesContext)
+  const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
   const tiers = [
-    { key:'owner',    name:'Zee Bee',       icon:'👑', color:'#d4a046', level:'L1', price:550 },
-    { key:'manager',  name:'Hive Manager',  icon:'🍯', color:'#6366f1', level:'L2', price:400 },
-    { key:'light',    name:'Worker Bee',    icon:'🐝', color:'#10b981', level:'L3', price:200 },
-    { key:'readonly', name:'Honey Watcher', icon:'👁',  color:'#8a9e9a', level:'L4', price:50  },
+    { key:'owner',    name:'Zee Bee',       icon:'👑', color:'#d4a046', level:'L1', price:getTierPrice('owner') },
+    { key:'manager',  name:'Hive Manager',  icon:'🍯', color:'#6366f1', level:'L2', price:getTierPrice('manager') },
+    { key:'light',    name:'Worker Bee',    icon:'🐝', color:'#10b981', level:'L3', price:getTierPrice('light') },
+    { key:'readonly', name:'Honey Watcher', icon:'👁',  color:'#8a9e9a', level:'L4', price:getTierPrice('readonly') },
   ]
   const sections = [
     { title:'⚙ Account & Billing', rows:[
@@ -14424,7 +14449,7 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onViewLocation, onD
           {/* Team */}
           {locUsers.length>0&&(
             <div>
-              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Team · ${calcRenewalTotal(currentLoc.id).total.toLocaleString()}/yr</p>
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Team · ${calcRenewalTotal(currentLoc.id, false, livePrices).total.toLocaleString()}/yr</p>
               <div style={{ background:'#f7f5f0', borderRadius:'10px', overflow:'hidden' }}>
                 {locUsers.map((u,i,arr)=>{
                   const rc = FRANCHISE_ROLES.find(r=>r.key===u.role)
@@ -14433,7 +14458,7 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onViewLocation, onD
                       <div style={{ width:'28px', height:'28px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'10px', fontWeight:700, color:'white', flexShrink:0 }}>{u.initials}</div>
                       <p style={{ flex:1, fontSize:'12px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.name}</p>
                       <span style={{ fontSize:'10px', color:rc?.color, background:rc?.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:600, flexShrink:0 }}>{rc?.label}</span>
-                      <span style={{ fontSize:'10px', color:'#8a9e9a', flexShrink:0 }}>${ROLE_PRICING[u.role]?.toLocaleString()}/yr</span>
+                      <span style={{ fontSize:'10px', color:'#8a9e9a', flexShrink:0 }}>${getTierPrice(u.role).toLocaleString()}/yr</span>
                     </div>
                   )
                 })}
@@ -15422,21 +15447,72 @@ function ConfigureTab() {
   )
 }
 function PricingManagementTab() {
-  const [rolePrices, setRolePrices]   = useState({ ...DEFAULT_ROLE_PRICING })
+  const tierPricesCtx = useContext(TierPricesContext)
+  const tierPrices = tierPricesCtx?.tierPrices ?? []
+  const setTierPrices = tierPricesCtx?.setTierPrices ?? (() => {})
+  // Local edit buffer — keyed by tier id (matches FRANCHISE_ROLES.key).
+  // Re-syncs from context whenever the canonical prices change (e.g. another
+  // tab saves) so we don't show stale values.
+  const initialRolePrices = () => {
+    const out = {}
+    for (const r of FRANCHISE_ROLES) {
+      const row = tierPrices.find(t => t.id === r.key)
+      out[r.key] = row?.price_annual ?? DEFAULT_TIER_PRICES[r.key] ?? 0
+    }
+    return out
+  }
+  const [rolePrices, setRolePrices]   = useState(initialRolePrices)
+  // Reset local buffer when context price set changes identity (e.g. another
+  // session save, initial hydration). Cheap shallow-compare via JSON key.
+  const tierPricesKey = tierPrices.map(t => `${t.id}:${t.price_annual}`).join('|')
+  useEffect(() => {
+    setRolePrices(initialRolePrices())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tierPricesKey])
   const [addons, setAddons]           = useState([...DEFAULT_ADDONS])
   const [editingRole, setEditingRole] = useState(null)
   const [editingAddon, setEditingAddon] = useState(null)
   const [showNewAddon, setShowNewAddon] = useState(false)
   const [newAddon, setNewAddon]       = useState({ name:'', icon:'⭐', price:'', desc:'' })
   const [saved, setSaved]             = useState(false)
+  const [saving, setSaving]           = useState(false)
+  const [saveError, setSaveError]     = useState('')
 
-  function saveAll() {
-    // Push changes to mutable globals
-    Object.assign(ROLE_PRICING, rolePrices)
-    APP_ADDONS.length = 0
-    addons.forEach(a => APP_ADDONS.push(a))
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+  // PUT tier prices to /api/admin/tier-prices. Addons remain in-memory only
+  // for now — Supabase addon_prices table is a follow-up.
+  async function saveAll() {
+    setSaving(true)
+    setSaveError('')
+    try {
+      const payload = {
+        prices: Object.entries(rolePrices).map(([id, price_annual]) => ({
+          id,
+          price_annual: parseInt(price_annual, 10) || 0,
+        })),
+      }
+      const res = await fetch('/api/admin/tier-prices', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || `Save failed (${res.status})`)
+      }
+      const updated = await res.json()
+      if (Array.isArray(updated) && updated.length > 0) {
+        setTierPrices(updated)
+      }
+      // Addons (in-memory; persistence deferred — see APP_ADDONS comment).
+      APP_ADDONS.length = 0
+      addons.forEach(a => APP_ADDONS.push(a))
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (e) {
+      setSaveError(e.message || 'Save failed')
+    } finally {
+      setSaving(false)
+    }
   }
 
   function updateRolePrice(key, val) {
@@ -15634,8 +15710,13 @@ function PricingManagementTab() {
 
       {/* Save banner */}
       <div style={{ position:'sticky', bottom:'5rem', left:0, right:0 }}>
-        <button onClick={saveAll} style={{ width:'100%', padding:'13px', background:saved?'#22c55e':'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', transition:'background 0.3s', boxShadow:'0 4px 16px rgba(26,46,43,0.2)' }}>
-          {saved ? '✅ Saved - pricing updated' : 'Save Pricing Changes'}
+        {saveError && (
+          <div style={{ marginBottom:'8px', padding:'10px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'10px', fontSize:'12px', color:'#991b1b' }}>
+            {saveError}
+          </div>
+        )}
+        <button onClick={saveAll} disabled={saving} style={{ width:'100%', padding:'13px', background:saved?'#22c55e':saving?'#4a5e5a':'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:saving?'wait':'pointer', transition:'background 0.3s', boxShadow:'0 4px 16px rgba(26,46,43,0.2)' }}>
+          {saving ? 'Saving…' : saved ? '✅ Saved - pricing updated' : 'Save Pricing Changes'}
         </button>
       </div>
     </div>
@@ -17791,6 +17872,7 @@ export default function App({
   initialLocFilter,
   initialGuideSlides,        // server-rendered slides from page.tsx (Supabase guide_slides table)
   initialManualSlides,       // server-rendered manual slides from page.tsx (Supabase manual_slides table)
+  initialTierPrices,         // server-rendered seat pricing from page.tsx (Supabase tier_prices table)
   initialLocations,          // accepted; not yet consumed — ALL_LOCATIONS mock still drives the picker
   initialUsers,              // real hub_users roster from Supabase; null → fall back to USERS_DATA mock
   currentSubscription,
@@ -17811,6 +17893,37 @@ export default function App({
   // Hive Hub Manual: reference-only, never auto-opens, no dismiss flag.
   const [manualSlides, setManualSlides]     = useState(Array.isArray(initialManualSlides) ? initialManualSlides : [])
   const [showManual, setShowManual]         = useState(false)
+  // Seat pricing: single source of truth from Supabase tier_prices. Falls back
+  // to DEFAULT_TIER_PRICES synthetic rows if the table is empty / unmigrated,
+  // so renders never crash on a fresh environment.
+  const [tierPrices, setTierPricesState]    = useState(
+    Array.isArray(initialTierPrices) && initialTierPrices.length > 0
+      ? initialTierPrices
+      : Object.entries(DEFAULT_TIER_PRICES).map(([id, price_annual], i) => ({
+          id,
+          display_name: id,
+          price_annual,
+          description: null,
+          sort_order: i + 1,
+          updated_at: null,
+        }))
+  )
+  const getTierPrice = (tierId) => {
+    const row = tierPrices.find(t => t.id === tierId)
+    return row?.price_annual ?? DEFAULT_TIER_PRICES[tierId] ?? 0
+  }
+  const livePrices = {
+    owner:    getTierPrice('owner'),
+    manager:  getTierPrice('manager'),
+    light:    getTierPrice('light'),
+    readonly: getTierPrice('readonly'),
+  }
+  const tierPricesValue = {
+    tierPrices,
+    setTierPrices: setTierPricesState,
+    getTierPrice,
+    livePrices,
+  }
   const [franchiseRole, setFranchiseRole]   = useState(initialFranchiseRole ?? 'owner') // owner|manager|light|readonly
   const [activeNav, setActiveNav]           = useState('home')
   const [viewAsTarget, setViewAsTarget]     = useState(null)
@@ -18197,6 +18310,7 @@ export default function App({
     <CurrentUserContext.Provider value={currentUser || null}>
     <CurrentLocationContext.Provider value={currentLocation || null}>
     <LocationUsersContext.Provider value={users}>
+    <TierPricesContext.Provider value={tierPricesValue}>
     <div>
       <DemoBar />
       <LocBanner />
@@ -18325,6 +18439,7 @@ export default function App({
         />
       )}
     </div>
+    </TierPricesContext.Provider>
     </LocationUsersContext.Provider>
     </CurrentLocationContext.Provider>
     </CurrentUserContext.Provider>

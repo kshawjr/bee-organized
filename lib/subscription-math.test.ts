@@ -1,7 +1,7 @@
 // @ts-nocheck — describe/it/expect are provided by Jest or Vitest once a test
 // runner is wired in. Remove this directive after the runner is configured.
 import {
-  TIER_PRICES,
+  DEFAULT_TIER_PRICES,
   type SeatLine,
   nextRenewalDate,
   daysUntilNextRenewal,
@@ -198,11 +198,11 @@ describe('formatRenewalDate', () => {
   })
 })
 
-describe('TIER_PRICES', () => {
-  it('exposes expected constants', () => {
-    expect(TIER_PRICES.owner).toBe(550)
-    expect(TIER_PRICES.manager).toBe(400)
-    expect(TIER_PRICES.light).toBe(200)
-    expect(TIER_PRICES.readonly).toBe(50)
+describe('DEFAULT_TIER_PRICES', () => {
+  it('exposes expected fallback constants (override at runtime via tier_prices table)', () => {
+    expect(DEFAULT_TIER_PRICES.owner).toBe(550)
+    expect(DEFAULT_TIER_PRICES.manager).toBe(400)
+    expect(DEFAULT_TIER_PRICES.light).toBe(200)
+    expect(DEFAULT_TIER_PRICES.readonly).toBe(50)
   })
 })

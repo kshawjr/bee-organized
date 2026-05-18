@@ -1,11 +1,16 @@
-export const TIER_PRICES = {
+// Fallback defaults — used when no live prices are passed from Supabase.
+// Real source of truth is the `tier_prices` table (see migrations/tier_prices.sql),
+// fetched by app/page.tsx and threaded through TierPricesContext in BeeHub.jsx.
+// Keep these in sync with the seed values in the migration as a safety net.
+export const DEFAULT_TIER_PRICES = {
   owner: 550,
   manager: 400,
   light: 200,
   readonly: 50,
 } as const
 
-export type TierKey = keyof typeof TIER_PRICES
+export type TierKey = keyof typeof DEFAULT_TIER_PRICES
+export type TierPrices = Record<string, number>
 
 export const RENEWAL_MONTH = 3
 export const RENEWAL_DAY = 1
@@ -34,12 +39,19 @@ export function prorateToNextRenewal(annualPrice: number, from: Date = new Date(
   return Math.round(annualPrice * (days / DAYS_PER_YEAR) * 100) / 100
 }
 
-export function calculateSeatTotal(seats: SeatLine[]): number {
-  return seats.reduce((sum, line) => sum + TIER_PRICES[line.tier] * line.count, 0)
+export function calculateSeatTotal(
+  seats: SeatLine[],
+  prices: TierPrices = DEFAULT_TIER_PRICES,
+): number {
+  return seats.reduce((sum, line) => sum + (prices[line.tier] ?? 0) * line.count, 0)
 }
 
-export function calculateProratedSeatTotal(seats: SeatLine[], from: Date = new Date()): number {
-  return prorateToNextRenewal(calculateSeatTotal(seats), from)
+export function calculateProratedSeatTotal(
+  seats: SeatLine[],
+  from: Date = new Date(),
+  prices: TierPrices = DEFAULT_TIER_PRICES,
+): number {
+  return prorateToNextRenewal(calculateSeatTotal(seats, prices), from)
 }
 
 export function formatCurrency(
@@ -85,6 +97,7 @@ export function getSubscriptionDisplay(
   paymentSource: PaymentSource,
   seats: SeatLine[],
   from: Date = new Date(),
+  prices: TierPrices = DEFAULT_TIER_PRICES,
 ): SubscriptionDisplay {
   const mode: SubscriptionDisplay['mode'] =
     paymentSource === 'prepaid_corporate'
@@ -93,7 +106,7 @@ export function getSubscriptionDisplay(
         ? 'sponsored'
         : 'direct'
 
-  const annual = calculateSeatTotal(seats)
+  const annual = calculateSeatTotal(seats, prices)
   const renewalDate = nextRenewalDate(from)
   const daysUntilRenewal = daysUntilNextRenewal(from)
   const prorated = mode === 'direct' ? prorateToNextRenewal(annual, from) : 0

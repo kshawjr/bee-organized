@@ -155,6 +155,16 @@ export default async function HomePage() {
     }
   })
 
+  // ─── Tier prices (single source of truth for seat pricing) ───
+  // Service-role read so an unmigrated table never breaks rendering for
+  // franchise users. Write path (/api/admin/tier-prices PUT) re-checks role.
+  const { data: tierPricesRaw } = await supabaseService
+    .from('tier_prices')
+    .select('id, display_name, price_annual, description, sort_order, updated_at')
+    .order('sort_order', { ascending: true })
+
+  const initialTierPrices = tierPricesRaw || []
+
   // ─── Manual slides (Hive Hub Manual — second guide system) ───
   // Service-role read so an unmigrated table never breaks rendering for
   // franchise users. Write path (/api/manual-slides POST) re-checks role.
@@ -341,6 +351,7 @@ export default async function HomePage() {
       initialLocFilter={initialLocFilter}
       initialGuideSlides={initialGuideSlides}
       initialManualSlides={initialManualSlides}
+      initialTierPrices={initialTierPrices}
       initialLocations={initialLocations}
       initialUsers={initialUsers}
       currentSubscription={currentSubscription}

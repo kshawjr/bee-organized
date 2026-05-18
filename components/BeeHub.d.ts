@@ -25,6 +25,14 @@ interface BeeHubProps {
     screenshots?: string[]
     video_url?: string | null
   }>
+  initialTierPrices?: Array<{
+    id: string
+    display_name: string
+    price_annual: number
+    description?: string | null
+    sort_order: number
+    updated_at?: string | null
+  }>
   initialLocations?: Array<{
     id: string
     name: string
