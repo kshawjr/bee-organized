@@ -13460,13 +13460,21 @@ function TierPlansInline() {
         ))}
       </div>
 
-      {/* Multiple Owners note */}
-      <div style={{ padding:'10px 13px', background:'rgba(212,160,70,0.07)', borderLeft:'3px solid #d4a046', borderRadius:'6px', marginTop:'14px', marginBottom:'8px' }}>
-        <p style={{ fontSize:'9.5px', color:'#d4a046', letterSpacing:'1px', textTransform:'uppercase', fontWeight:700, marginBottom:'3px' }}>Multiple Owners</p>
-        <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.5 }}>
-          Co-owners can add a second Zee Bee seat at <strong style={{ color:'#1a2e2b' }}>$400/year</strong> — both get full access. Total: <strong style={{ color:'#1a2e2b' }}>$950/year</strong>.
-        </p>
-      </div>
+      {/* Multiple Owners note — second Zee Bee bills at the Hive Manager rate;
+         total = first owner + manager (live from tier_prices). */}
+      {(() => {
+        const ownerPrice = getTierPrice('owner')
+        const managerPrice = getTierPrice('manager')
+        const coOwnedTotal = ownerPrice + managerPrice
+        return (
+          <div style={{ padding:'10px 13px', background:'rgba(212,160,70,0.07)', borderLeft:'3px solid #d4a046', borderRadius:'6px', marginTop:'14px', marginBottom:'8px' }}>
+            <p style={{ fontSize:'9.5px', color:'#d4a046', letterSpacing:'1px', textTransform:'uppercase', fontWeight:700, marginBottom:'3px' }}>Multiple Owners</p>
+            <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.5 }}>
+              Co-owners can add a second Zee Bee seat at <strong style={{ color:'#1a2e2b' }}>${managerPrice.toLocaleString()}/year</strong> — both get full access. Total: <strong style={{ color:'#1a2e2b' }}>${coOwnedTotal.toLocaleString()}/year</strong>.
+            </p>
+          </div>
+        )
+      })()}
 
       {/* Account Security note */}
       <div style={{ padding:'10px 13px', background:'rgba(168,201,196,0.12)', borderLeft:'3px solid #a8c9c4', borderRadius:'6px' }}>
