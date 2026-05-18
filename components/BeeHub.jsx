@@ -11724,16 +11724,19 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
           const billingPaymentSource = currentLocationCtx?.payment_source || 'direct'
           const billingSeats = [{ tier:'owner', count:1 }]
           const billingAnnual = billingSeats.reduce((sum, s) => sum + (TIER_PRICES[s.tier] || 0) * s.count, 0)
-          const billingRenewalLabel = formatRenewalDate(nextRenewalDate())
-          let summaryTitle, summaryBody, summaryAccent
+          const billingRenewalDate = nextRenewalDate()
+          const billingRenewalLabel = formatRenewalDate(billingRenewalDate)
+          const billingRenewalYear = billingRenewalDate.getUTCFullYear()
+          let summaryTitle, summaryBody, summaryAccent, summaryIsSponsored = false
           if (billingPaymentSource === 'prepaid_corporate') {
             summaryTitle = 'Prepaid by Bee Organized'
             summaryBody  = `Paid through ${billingRenewalLabel}. (Funded by Bee Organized)`
             summaryAccent = '#6366f1'
           } else if (billingPaymentSource === 'corporate_sponsored') {
-            summaryTitle = 'Sponsored by Bee Organized'
-            summaryBody  = 'Sponsored by Bee Organized during the testing period.'
+            summaryTitle = 'Sponsored by Bee Organized — Testing Period'
+            summaryBody  = 'Your subscription is currently sponsored during the platform testing phase.'
             summaryAccent = '#10b981'
+            summaryIsSponsored = true
           } else {
             summaryTitle = 'Subscription active'
             summaryBody  = `Next renewal: ${billingRenewalLabel}. ${formatCurrency(billingAnnual, { showCents:'never' })}/year.`
@@ -11751,10 +11754,17 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                   <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.5 }}>
                     {summaryBody}
                   </p>
+                  {summaryIsSponsored && (
+                    <div style={{ background:'#fef3c7', border:'1px solid #f59e0b', borderRadius:'8px', padding:'12px 14px', marginTop:'12px', fontSize:'13px', color:'#78350f', lineHeight:1.5 }}>
+                      <strong>⚠️ Important:</strong> When testing concludes, you'll be responsible for a prorated subscription fee from that date through March 1, {billingRenewalYear}. Your normal annual renewal continues March 1 thereafter.
+                    </div>
+                  )}
                 </div>
 
-                {/* Seat breakdown */}
-                <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', overflow:'hidden', marginBottom:'12px' }}>
+                {/* Seat breakdown — "+ Add seat" lives as an inline list-bottom
+                   affordance rather than a standalone CTA so the action reads
+                   as a natural extension of the seat list. */}
+                <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', overflow:'hidden', marginBottom:'18px' }}>
                   <div style={{ padding:'10px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)', background:'rgba(26,46,43,0.03)' }}>
                     <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px' }}>
                       Current Seats
@@ -11776,19 +11786,19 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                         </div>
                       )
                     })}
+                    <button
+                      type="button"
+                      onClick={()=>alert('Stripe integration coming soon — contact corporate to add seats for now.')}
+                      style={{ display:'block', width:'100%', padding:'10px 14px', background:'transparent', border:'none', borderTop:'1px dashed rgba(0,0,0,0.08)', fontSize:'12px', fontFamily:'inherit', fontWeight:500, color:'#8a9e9a', cursor:'pointer', textAlign:'left' }}
+                      onMouseEnter={e=>{ e.currentTarget.style.background='rgba(26,46,43,0.03)'; e.currentTarget.style.color='#4a5e5a' }}
+                      onMouseLeave={e=>{ e.currentTarget.style.background='transparent'; e.currentTarget.style.color='#8a9e9a' }}>
+                      + Add seat
+                    </button>
                   </div>
-                  <p style={{ fontSize:'10.5px', color:'#b0c0bc', fontStyle:'italic', padding:'8px 14px', margin:0 }}>
+                  <p style={{ fontSize:'10.5px', color:'#b0c0bc', fontStyle:'italic', padding:'8px 14px', margin:0, borderTop:'1px solid rgba(0,0,0,0.04)' }}>
                     Seat detail tracking coming soon — currently shows the required Zee Bee.
                   </p>
                 </div>
-
-                {/* Add seat CTA (stub — Stripe wiring lands with the seat-mgmt task) */}
-                <button
-                  type="button"
-                  onClick={()=>alert('Stripe integration coming soon — contact corporate to add seats for now.')}
-                  style={{ width:'100%', padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', marginBottom:'18px' }}>
-                  + Add seat
-                </button>
               </div>
 
               <TierPlansInline />
@@ -13128,9 +13138,14 @@ function SubscriptionCalculator({
             </p>
           )}
           {display.mode === 'sponsored' && (
-            <p style={{ fontSize:'11px', color:'#4a5e5a', padding:'8px 10px', background:'rgba(16,185,129,0.06)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:'8px' }}>
-              Corporate-sponsored during testing period. No charge today.
-            </p>
+            <>
+              <p style={{ fontSize:'11px', color:'#4a5e5a', padding:'8px 10px', background:'rgba(16,185,129,0.06)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:'8px' }}>
+                Corporate-sponsored during testing period. No charge today.
+              </p>
+              <div style={{ background:'#fef3c7', border:'1px solid #f59e0b', borderRadius:'8px', padding:'12px 14px', marginTop:'12px', fontSize:'13px', color:'#78350f', lineHeight:1.5 }}>
+                <strong>⚠️ Important:</strong> When testing concludes, you'll be responsible for a prorated subscription fee from that date through March 1, {nextRenewalDate().getUTCFullYear()}. Your normal annual renewal continues March 1 thereafter.
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -13245,9 +13260,11 @@ function TierPlansInline() {
 
   return (
     <div style={{ margin:'24px 12px 16px' }}>
-      <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'10px' }}>Seat Pricing & Access</p>
+      <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'10px' }}>Tiers · Pricing · Access</p>
 
-      {/* Tier pills */}
+      {/* Tier pills — name + price share the headline row so pricing is
+         visually balanced with the tier name (the "where each tier sits" and
+         "what it costs" facts read together, not in separate sections). */}
       <div style={{ display:'grid', gap:'8px', marginBottom:'14px' }}>
         {tiers.map(t => (
           <div key={t.key} style={{ padding:'11px 13px', background:'white', border:'1px solid rgba(0,0,0,0.06)', borderLeft:`4px solid ${t.color}`, borderRadius:'10px', display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap' }}>
@@ -13255,17 +13272,14 @@ function TierPlansInline() {
               <span style={{ fontSize:'17px', lineHeight:1 }}>{t.icon}</span>
               <p style={{ fontSize:'13.5px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{t.name}</p>
               <span style={{ fontSize:'9px', color:'#8a9e9a', letterSpacing:'0.5px', textTransform:'uppercase', fontWeight:700, padding:'1px 5px', background:'rgba(26,46,43,0.05)', borderRadius:'4px' }}>{t.level}</span>
+              <span style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginLeft:'4px' }}>
+                · ${t.price.toLocaleString()}<span style={{ fontSize:'10px', color:'#8a9e9a', fontWeight:500 }}>/year</span>
+              </span>
             </div>
             <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', flex:1, minWidth:0, lineHeight:1.4 }}>
               {t.goodFor}
               <span style={{ display:'block', fontSize:'10px', color:'#b0c0bc', marginTop:'1px', fontStyle:'normal' }}>{t.detail}</span>
             </p>
-            <div style={{ flex:'0 0 auto', textAlign:'right' }}>
-              <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', lineHeight:1 }}>
-                ${t.price.toLocaleString()}
-                <span style={{ fontSize:'10px', color:'#8a9e9a', fontWeight:500, marginLeft:'2px' }}>/yr</span>
-              </p>
-            </div>
           </div>
         ))}
       </div>
@@ -13274,7 +13288,7 @@ function TierPlansInline() {
       <div style={{ padding:'10px 13px', background:'rgba(212,160,70,0.07)', borderLeft:'3px solid #d4a046', borderRadius:'6px', marginBottom:'8px' }}>
         <p style={{ fontSize:'9.5px', color:'#d4a046', letterSpacing:'1px', textTransform:'uppercase', fontWeight:700, marginBottom:'3px' }}>Multiple Owners</p>
         <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.5 }}>
-          Co-owners can add a second Zee Bee seat at <strong style={{ color:'#1a2e2b' }}>$400/yr</strong> — both get full access. Total: <strong style={{ color:'#1a2e2b' }}>$950/yr</strong>.
+          Co-owners can add a second Zee Bee seat at <strong style={{ color:'#1a2e2b' }}>$400/year</strong> — both get full access. Total: <strong style={{ color:'#1a2e2b' }}>$950/year</strong>.
         </p>
       </div>
 
