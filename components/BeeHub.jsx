@@ -11714,32 +11714,87 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
         )}
 
         {/* ── Billing ── */}
-        {/* Order: tier reference (general) → this location's seats (specific) →
-           seat-management CTA. TierPlansInline was previously rendered in the
-           Team tab; moved here so all subscription/pricing surfaces live in
-           one place and Team stays focused on people management. */}
-        {activeSection==='billing'&&(
-          <>
-            <TierPlansInline />
-            <SectionHeader title="Subscription" desc="Current seat configuration and renewal" />
-            <div style={{ padding:'0 12px' }}>
-              <SubscriptionCalculator
-                initialSeats={[{ tier:'owner', count:1 }]}
-                paymentSource={currentLocationCtx?.payment_source || 'direct'}
-                showSeatControls={false}
-              />
-              <p style={{ fontSize:'10.5px', color:'#b0c0bc', fontStyle:'italic', margin:'10px 4px 0' }}>
-                Seat detail tracking coming soon — currently shows the required Zee Bee.
-              </p>
-              <button
-                type="button"
-                onClick={()=>alert('Add/remove seats — coming soon. Contact corporate to adjust seats for now.')}
-                style={{ width:'100%', marginTop:'14px', padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
-                Add / remove seats →
-              </button>
-            </div>
-          </>
-        )}
+        {/* Post-onboarding billing view: payment-source-specific status card,
+           current seat breakdown, "+ Add seat" CTA (stub), and the general
+           tier reference (TierPlansInline) at the bottom. The prorated
+           "Due today" number is intentionally absent — that's an onboarding
+           concept; once a location is active the user only needs to know
+           what they have, what renews when, and how to add more. */}
+        {activeSection==='billing'&&(()=>{
+          const billingPaymentSource = currentLocationCtx?.payment_source || 'direct'
+          const billingSeats = [{ tier:'owner', count:1 }]
+          const billingAnnual = billingSeats.reduce((sum, s) => sum + (TIER_PRICES[s.tier] || 0) * s.count, 0)
+          const billingRenewalLabel = formatRenewalDate(nextRenewalDate())
+          let summaryTitle, summaryBody, summaryAccent
+          if (billingPaymentSource === 'prepaid_corporate') {
+            summaryTitle = 'Prepaid by Bee Organized'
+            summaryBody  = `Paid through ${billingRenewalLabel}. (Funded by Bee Organized)`
+            summaryAccent = '#6366f1'
+          } else if (billingPaymentSource === 'corporate_sponsored') {
+            summaryTitle = 'Sponsored by Bee Organized'
+            summaryBody  = 'Sponsored by Bee Organized during the testing period.'
+            summaryAccent = '#10b981'
+          } else {
+            summaryTitle = 'Subscription active'
+            summaryBody  = `Next renewal: ${billingRenewalLabel}. ${formatCurrency(billingAnnual, { showCents:'never' })}/year.`
+            summaryAccent = '#22c55e'
+          }
+          return (
+            <>
+              <SectionHeader title="Subscription" desc="Your plan and seats" />
+              <div style={{ padding:'0 12px' }}>
+                {/* Payment status summary */}
+                <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', borderLeft:`4px solid ${summaryAccent}`, padding:'14px 16px', marginBottom:'12px' }}>
+                  <p style={{ fontSize:'10px', fontWeight:700, color:summaryAccent, textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'6px' }}>
+                    {summaryTitle}
+                  </p>
+                  <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.5 }}>
+                    {summaryBody}
+                  </p>
+                </div>
+
+                {/* Seat breakdown */}
+                <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', overflow:'hidden', marginBottom:'12px' }}>
+                  <div style={{ padding:'10px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)', background:'rgba(26,46,43,0.03)' }}>
+                    <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px' }}>
+                      Current Seats
+                    </p>
+                  </div>
+                  <div>
+                    {billingSeats.filter(s=>s.count>0).map(s=>{
+                      const meta = SUBSCRIPTION_TIER_META.find(m=>m.key===s.tier)
+                      if (!meta) return null
+                      return (
+                        <div key={s.tier} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 14px', borderBottom:'1px solid rgba(0,0,0,0.04)', borderLeft:`4px solid ${meta.color}` }}>
+                          <span style={{ fontSize:'18px' }}>{meta.icon}</span>
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>
+                              {s.count} {meta.name}{s.count !== 1 ? 's' : ''}
+                            </p>
+                            <p style={{ fontSize:'10.5px', color:'#8a9e9a' }}>{meta.detail}</p>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <p style={{ fontSize:'10.5px', color:'#b0c0bc', fontStyle:'italic', padding:'8px 14px', margin:0 }}>
+                    Seat detail tracking coming soon — currently shows the required Zee Bee.
+                  </p>
+                </div>
+
+                {/* Add seat CTA (stub — Stripe wiring lands with the seat-mgmt task) */}
+                <button
+                  type="button"
+                  onClick={()=>alert('Stripe integration coming soon — contact corporate to add seats for now.')}
+                  style={{ width:'100%', padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', marginBottom:'18px' }}>
+                  + Add seat
+                </button>
+              </div>
+
+              <TierPlansInline />
+            </>
+          )
+        })()}
 
         {/* ── New Lead Drip ── */}
         {activeSection==='paths'&&(
@@ -13001,14 +13056,86 @@ function SubscriptionCalculator({
 
   const heroSub =
     display.mode === 'direct'
-      ? `Renews ${renewalLabel} at ${formatCurrency(display.annual)}/yr`
+      ? `Prorated to next ${renewalLabel}`
       : display.mode === 'prepaid'
         ? `Prepaid through ${renewalLabel}`
         : 'Sponsored by corporate during testing'
 
   return (
     <div style={{ display:'grid', gap:'12px' }}>
-      {/* Seat configuration block */}
+      {/* Cost summary card — moved above seat config so Due Today is prominent at top of onboarding pay step */}
+      <div style={{ borderRadius:'14px', overflow:'hidden', boxShadow:'0 2px 16px rgba(26,46,43,0.08)', border:'1px solid rgba(168,201,196,0.2)' }}>
+        <div style={{ background:'linear-gradient(135deg,#1a2e2b,#2a4a40)', padding:'16px 18px', color:'white' }}>
+          <p style={{ fontSize:'10.5px', color:'rgba(168,201,196,0.65)', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'6px', fontWeight:600 }}>
+            {display.mode === 'direct' ? 'Due Today' : display.mode === 'prepaid' ? 'Due Today (Prepaid)' : 'Due Today (Sponsored)'}
+          </p>
+          <p style={{ fontSize:'34px', fontWeight:700, fontFamily:'Georgia,serif', lineHeight:1, marginBottom:'6px' }}>
+            {heroNumber}
+          </p>
+          <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.85)' }}>
+            {heroSub}
+          </p>
+        </div>
+
+        {/* Detail breakdown */}
+        <div style={{ background:'white', padding:'14px 16px' }}>
+          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>
+            Breakdown
+          </p>
+          <div style={{ display:'grid', gap:'6px', marginBottom:'10px' }}>
+            {SUBSCRIPTION_TIER_META.map(t => {
+              const count = getCount(t.key)
+              if (count <= 0) return null
+              const price = TIER_PRICES[t.key]
+              const subtotal = price * count
+              return (
+                <div key={t.key} style={{ display:'flex', alignItems:'baseline', gap:'6px', fontSize:'12.5px', color:'#4a5e5a' }}>
+                  <span style={{ fontSize:'13px', lineHeight:1 }}>{t.icon}</span>
+                  <span style={{ flex:1 }}>
+                    {count} {t.name}{count !== 1 ? 's' : ''} × {formatCurrency(price, { showCents:'never' })}/yr
+                  </span>
+                  <span style={{ fontWeight:600, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
+                    {formatCurrency(subtotal, { showCents:'never' })}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          <div style={{ borderTop:'1px solid rgba(0,0,0,0.08)', paddingTop:'8px', display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'6px' }}>
+            <span style={{ fontSize:'12px', color:'#4a5e5a', fontWeight:600 }}>Annual total</span>
+            <span style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
+              {formatCurrency(display.annual, { showCents:'never' })}
+            </span>
+          </div>
+          {display.mode === 'direct' && (
+            <>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', padding:'6px 8px', background:'rgba(212,160,70,0.08)', border:'1px solid rgba(212,160,70,0.2)', borderRadius:'8px', marginBottom:'8px' }}>
+                <span style={{ fontSize:'11px', color:'#b88820', fontWeight:600 }}>
+                  Prorated ({daysLeft} days)
+                </span>
+                <span style={{ fontSize:'13.5px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
+                  {formatCurrency(display.prorated)}
+                </span>
+              </div>
+              <p style={{ fontSize:'11px', color:'#8a9e9a', textAlign:'center' }}>
+                Renews {renewalLabel} at {formatCurrency(display.annual, { showCents:'never' })}/year
+              </p>
+            </>
+          )}
+          {display.mode === 'prepaid' && (
+            <p style={{ fontSize:'11px', color:'#4a5e5a', padding:'8px 10px', background:'rgba(99,102,241,0.06)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'8px' }}>
+              Prepaid by corporate through {renewalLabel}. No charge today.
+            </p>
+          )}
+          {display.mode === 'sponsored' && (
+            <p style={{ fontSize:'11px', color:'#4a5e5a', padding:'8px 10px', background:'rgba(16,185,129,0.06)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:'8px' }}>
+              Corporate-sponsored during testing period. No charge today.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Seat configuration block — moved below summary so Due Today reads first */}
       {showSeatControls && (
         <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', overflow:'hidden' }}>
           <div style={{ padding:'12px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)', background:'rgba(26,46,43,0.03)' }}>
@@ -13065,73 +13192,6 @@ function SubscriptionCalculator({
           </div>
         </div>
       )}
-
-      {/* Cost summary card */}
-      <div style={{ borderRadius:'14px', overflow:'hidden', boxShadow:'0 2px 16px rgba(26,46,43,0.08)', border:'1px solid rgba(168,201,196,0.2)' }}>
-        <div style={{ background:'linear-gradient(135deg,#1a2e2b,#2a4a40)', padding:'16px 18px', color:'white' }}>
-          <p style={{ fontSize:'10.5px', color:'rgba(168,201,196,0.65)', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'6px', fontWeight:600 }}>
-            {display.mode === 'direct' ? 'Due Today' : display.mode === 'prepaid' ? 'Due Today (Prepaid)' : 'Due Today (Sponsored)'}
-          </p>
-          <p style={{ fontSize:'34px', fontWeight:700, fontFamily:'Georgia,serif', lineHeight:1, marginBottom:'6px' }}>
-            {heroNumber}
-          </p>
-          <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.85)' }}>
-            {heroSub}
-          </p>
-        </div>
-
-        {/* Detail breakdown — default open per spec */}
-        <div style={{ background:'white', padding:'14px 16px' }}>
-          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>
-            Breakdown
-          </p>
-          <div style={{ display:'grid', gap:'6px', marginBottom:'10px' }}>
-            {SUBSCRIPTION_TIER_META.map(t => {
-              const count = getCount(t.key)
-              if (count <= 0) return null
-              const price = TIER_PRICES[t.key]
-              const subtotal = price * count
-              return (
-                <div key={t.key} style={{ display:'flex', alignItems:'baseline', gap:'6px', fontSize:'12.5px', color:'#4a5e5a' }}>
-                  <span style={{ fontSize:'13px', lineHeight:1 }}>{t.icon}</span>
-                  <span style={{ flex:1 }}>
-                    {count} {t.name}{count !== 1 ? 's' : ''} × {formatCurrency(price, { showCents:'never' })}
-                  </span>
-                  <span style={{ fontWeight:600, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
-                    {formatCurrency(subtotal, { showCents:'never' })}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-          <div style={{ borderTop:'1px solid rgba(0,0,0,0.08)', paddingTop:'8px', display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'6px' }}>
-            <span style={{ fontSize:'12px', color:'#4a5e5a', fontWeight:600 }}>Annual total</span>
-            <span style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
-              {formatCurrency(display.annual, { showCents:'never' })}
-            </span>
-          </div>
-          {display.mode === 'direct' && (
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', padding:'6px 8px', background:'rgba(212,160,70,0.08)', border:'1px solid rgba(212,160,70,0.2)', borderRadius:'8px' }}>
-              <span style={{ fontSize:'11px', color:'#b88820', fontWeight:600 }}>
-                Prorated to {renewalLabel} ({daysLeft} days)
-              </span>
-              <span style={{ fontSize:'13.5px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
-                {formatCurrency(display.prorated)}
-              </span>
-            </div>
-          )}
-          {display.mode === 'prepaid' && (
-            <p style={{ fontSize:'11px', color:'#4a5e5a', padding:'8px 10px', background:'rgba(99,102,241,0.06)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'8px' }}>
-              Prepaid by corporate through {renewalLabel}. No charge today.
-            </p>
-          )}
-          {display.mode === 'sponsored' && (
-            <p style={{ fontSize:'11px', color:'#4a5e5a', padding:'8px 10px', background:'rgba(16,185,129,0.06)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:'8px' }}>
-              Corporate-sponsored during testing period. No charge today.
-            </p>
-          )}
-        </div>
-      </div>
     </div>
   )
 }
