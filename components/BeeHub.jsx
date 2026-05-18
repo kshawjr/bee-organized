@@ -11177,9 +11177,6 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
         })}
       </div>
 
-      {/* Pricing matrix — TierPlansInline restored from lost BeeHub.js work (a3eb93c) */}
-      <TierPlansInline />
-
       {showInvite&&<OnboardingInviteSheet onClose={()=>setShowInvite(false)} onDone={invited=>{ if(invited) invited.forEach(u=>addUser(u)); setShowInvite(false) }} />}
       {showUpdatePayment&&<UpdatePaymentModal current={payMethod} onSave={m=>{ setPayMethod(m); setShowUpdatePayment(false) }} onClose={()=>setShowUpdatePayment(false)} />}
       {showHistory&&<BillingHistorySheet onClose={()=>setShowHistory(false)} />}
@@ -12023,8 +12020,13 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
         )}
 
         {/* ── Billing ── */}
+        {/* Order: tier reference (general) → this location's seats (specific) →
+           seat-management CTA. TierPlansInline was previously rendered in the
+           Team tab; moved here so all subscription/pricing surfaces live in
+           one place and Team stays focused on people management. */}
         {activeSection==='billing'&&(
           <>
+            <TierPlansInline />
             <SectionHeader title="Subscription" desc="Current seat configuration and renewal" />
             <div style={{ padding:'0 12px' }}>
               <SubscriptionCalculator
