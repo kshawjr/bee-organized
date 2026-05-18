@@ -5440,14 +5440,23 @@ function WelcomeStep({ ownerName, ownerEmail, topOffset, onContinue }) {
   const firstName = getFirstName(ownerName, ownerEmail)
   const greeting  = firstName ? `Welcome aboard, ${firstName}! 🐝` : `Welcome aboard! 🐝`
   const overview = [
-    { icon:'💳', label:'Confirm your subscription' },
-    { icon:'👤', label:'Set up your profile' },
-    { icon:'📍', label:'Add your franchise location' },
-    { icon:'🔗', label:'Connect to Jobber' },
-    { icon:'📥', label:'Import your clients' },
-    { icon:'📬', label:'Set up drip paths' },
-    { icon:'👥', label:'Invite your team' },
+    { label:'Subscription' },
+    { label:'Profile' },
+    { label:'Location' },
+    { label:'Jobber' },
+    { label:'Import' },
+    { label:'Drip Paths' },
+    { label:'Team' },
   ]
+  const [isDesktop, setIsDesktop] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const mq = window.matchMedia('(min-width: 768px)')
+    const update = () => setIsDesktop(mq.matches)
+    update()
+    mq.addEventListener('change', update)
+    return () => mq.removeEventListener('change', update)
+  }, [])
   return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'7rem', paddingTop:`${topOffset}px` }}>
       <div style={{ background:BRAND.dark, padding:'2rem 1.5rem 2.25rem', position:'relative', overflow:'hidden' }}>
@@ -5469,15 +5478,32 @@ function WelcomeStep({ ownerName, ownerEmail, topOffset, onContinue }) {
         <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'12px' }}>
           Here's what we'll do together
         </p>
-        <div style={{ display:'grid', gap:'8px', marginBottom:'18px' }}>
-          {overview.map((s,i)=>(
-            <div key={s.label} style={{ display:'flex', alignItems:'center', gap:'12px', background:'white', borderRadius:'12px', border:'1px solid rgba(0,0,0,0.06)', padding:'12px 14px', boxShadow:'0 1px 3px rgba(26,46,43,0.04)' }}>
-              <div style={{ width:'34px', height:'34px', borderRadius:'10px', background:'rgba(26,46,43,0.06)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px', flexShrink:0 }}>{s.icon}</div>
-              <span style={{ fontSize:'14px', color:'#1a2e2b', fontWeight:500 }}>{s.label}</span>
-              <span style={{ marginLeft:'auto', fontSize:'11px', fontWeight:600, color:'#b0c0bc' }}>{String(i+1).padStart(2,'0')}</span>
+        {isDesktop ? (
+          <div style={{ marginTop:'32px', marginBottom:'24px', padding:'0 4px' }}>
+            <div style={{ position:'relative', display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+              <div style={{ position:'absolute', top:'15px', left:'5%', right:'5%', height:'1.5px', background:'#a8c9c4', zIndex:0 }} />
+              {overview.map((s,i)=>(
+                <div key={s.label} style={{ position:'relative', zIndex:1, flex:'1 1 0', display:'flex', flexDirection:'column', alignItems:'center' }}>
+                  <div style={{ width:'30px', height:'30px', borderRadius:'50%', background:'#1a2e2b', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'12px', fontWeight:600, color:'white', lineHeight:1 }}>
+                    {i+1}
+                  </div>
+                  <div style={{ marginTop:'10px', fontSize:'11px', color:'#6b7280', fontWeight:500, textAlign:'center', whiteSpace:'nowrap' }}>
+                    {s.label}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
+        ) : (
+          <div style={{ maxWidth:'280px', margin:'24px auto' }}>
+            {overview.map((s,i)=>(
+              <div key={s.label} style={{ display:'flex', alignItems:'center', gap:'12px', padding:'11px 4px', borderBottom: i < overview.length-1 ? '1px solid #e5e7eb' : 'none' }}>
+                <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:'22px', height:'22px', borderRadius:'50%', background:'#1a2e2b', color:'white', fontSize:'11px', fontWeight:600, flexShrink:0 }}>{i+1}</span>
+                <span style={{ fontSize:'14px', color:'#1a2e2b', fontWeight:500 }}>{s.label}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <p style={{ fontSize:'12px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center', marginBottom:'16px' }}>
           Takes about 10–15 minutes — you can pause and resume anytime
         </p>
