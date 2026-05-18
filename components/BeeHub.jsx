@@ -5773,9 +5773,13 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     { id:'paths',     icon:'📧', label:'Review drip paths',       desc:'Choose your default follow-up sequences' },
     { id:'invite',    icon:'👥', label:'Invite your team',        desc:'Add managers and users to your location' },
   ]
+  // Lightweight onboarding for invited team members (lite_user role). Two
+  // steps: a personalized welcome + minimal profile. Employees don't see
+  // pay / location / Jobber / import / paths / invite — their owner has
+  // already handled those at the location level.
   const NON_OWNER_STEPS = [
-    { id:'profile',   icon:'👤', label:'Complete your profile',   desc:'Your name, email and phone number' },
-    { id:'alerts',    icon:'🔔', label:'Set up notifications',    desc:'Choose how you want to be alerted' },
+    { id:'welcome_employee', icon:'👋', label:'Welcome aboard',         desc:'You’ve joined the team — quick intro' },
+    { id:'profile',          icon:'👤', label:'Complete your profile',  desc:'Your name, phone (optional), and photo' },
   ]
   const STEPS     = isOwner ? OWNER_STEPS : NON_OWNER_STEPS
   const doneCount = STEPS.filter(s=>isDone(s.id)).length
@@ -11166,7 +11170,16 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
   // Initializer reads context once (snapshot at mount) — subsequent invites
   // mutate local state via addUser/removeUser, which is the existing pattern.
   const locationUsersCtx = useContext(LocationUsersContext)
+  const currentUserCtx   = useContext(CurrentUserContext)
+  const currentLocationCtx = useContext(CurrentLocationContext)
+  const seatsCtx         = useContext(SeatsContext)
   const usersSource      = locationUsersCtx || USERS_DATA
+  // Real DB-backed locationId — TeamSection's prop is the legacy mock id;
+  // when a franchise owner is signed in we want the actual uuid for invites
+  // and seat freeing.
+  const dbLocationId     = currentLocationCtx?.id || null
+  const [showAddSeats, setShowAddSeats] = useState(false)
+  const [removing, setRemoving]         = useState(null)
   const [users, setUsers] = useState(()=>{
     const fromData = usersSource.filter(u=>u.locationId===locationId)
     if (fromData.length > 0) return fromData
@@ -11204,6 +11217,42 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
   function removeUser(uid)      { setUsers(prev=>prev.filter(u=>u.id!==uid)) }
   function updateRole(uid,role) { setUsers(prev=>prev.map(u=>u.id===uid?{...u,role}:u)) }
   function updateSub(uid,patch) { setSubData(prev=>({...prev,[uid]:{...prev[uid],...patch}})) }
+
+  // Remove a team member: free their seat (PATCH user_id=null), delete
+  // their hub_users row, drop them from local state. Owners can remove
+  // anyone except themselves; super_admin/admin always allowed.
+  async function removeMember(member) {
+    if (!member?.id) return
+    setRemoving(member.id)
+    try {
+      // Find the seat assigned to this user (if any) and free it. We don't
+      // require a seat to exist — seats may have been removed manually.
+      const assignedSeat = (seatsCtx?.seats || []).find(s => s.user_id === member.id && s.status === 'active')
+      if (assignedSeat) {
+        const r = await fetch('/api/seats', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: assignedSeat.id, user_id: null }),
+        })
+        if (!r.ok) {
+          const j = await r.json().catch(()=>({}))
+          throw new Error(j.error || 'Could not free seat')
+        }
+        // Mirror in context so the billing card refreshes immediately.
+        seatsCtx?.setSeats?.(prev => prev.map(s => s.id === assignedSeat.id ? { ...s, user_id: null } : s))
+      }
+      const r2 = await fetch(`/api/hub_users/${encodeURIComponent(member.id)}`, { method: 'DELETE' })
+      if (!r2.ok) {
+        const j = await r2.json().catch(()=>({}))
+        throw new Error(j.error || 'Could not remove member')
+      }
+      removeUser(member.id)
+    } catch (err) {
+      alert(err?.message || 'Could not remove member')
+    } finally {
+      setRemoving(null)
+    }
+  }
 
   const subConf = {
     active:   { color:'#22c55e', bg:'rgba(34,197,94,0.08)',  label:'Active',   icon:'\u2705' },
@@ -11249,17 +11298,45 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
         })}
       </div>
 
-      {showInvite&&<OnboardingInviteSheet onClose={()=>setShowInvite(false)} onDone={invited=>{ if(invited) invited.forEach(u=>addUser(u)); setShowInvite(false) }} />}
+      {showInvite && dbLocationId && (
+        <InviteTeamMemberModal
+          locationId={dbLocationId}
+          onClose={()=>setShowInvite(false)}
+          onInviteCreated={()=>{ /* no-op: invite is pending until accept, so don't add to users list yet */ }}
+          onOpenAddSeats={()=>setShowAddSeats(true)}
+        />
+      )}
+      {showInvite && !dbLocationId && (
+        // Demo / view-as path — falls back to the existing local-state sheet
+        // since there's no real DB location to invite into.
+        <OnboardingInviteSheet onClose={()=>setShowInvite(false)} onDone={invited=>{ if(invited) invited.forEach(u=>addUser(u)); setShowInvite(false) }} />
+      )}
+      {showAddSeats && dbLocationId && (
+        <AddSeatsModal
+          locationId={dbLocationId}
+          onClose={()=>setShowAddSeats(false)}
+          onSeatsAdded={(rows)=>{ seatsCtx?.setSeats?.(prev=>[...prev, ...rows]) }}
+        />
+      )}
 
       {selectedMember&&(
         <MemberDetailPopup
           user={selectedMember}
           sub={subData[selectedMember.id]||{ status:'active', method:'ach', last4:'????', note:'' }}
           subConf={subConf}
+          canRemove={!!dbLocationId && currentUserCtx?.id !== selectedMember.id}
+          removing={removing === selectedMember.id}
           onClose={()=>setSelectedMember(null)}
           onUpdateRole={role=>{ updateRole(selectedMember.id,role); setSelectedMember(prev=>({...prev,role})) }}
           onUpdateSub={patch=>updateSub(selectedMember.id,patch)}
-          onRemove={()=>{ removeUser(selectedMember.id); setSelectedMember(null) }}
+          onRemove={async ()=>{
+            if (dbLocationId) {
+              await removeMember(selectedMember)
+              setSelectedMember(null)
+            } else {
+              removeUser(selectedMember.id); setSelectedMember(null)
+            }
+          }}
         />
       )}
     </>
@@ -11267,7 +11344,7 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
 }
 
 
-function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdateSub, onRemove }) {
+function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdateSub, onRemove, canRemove=true, removing=false }) {
   const [note, setNote]       = useState(sub.note||'')
   const [editingNote, setEditingNote] = useState(false)
   const rc = FRANCHISE_ROLES.find(r=>r.key===user.role)||FRANCHISE_ROLES[0]
@@ -11343,11 +11420,12 @@ function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdate
           </div>
 
           {/* Danger zone */}
-          {user.role!=='owner'&&(
+          {user.role!=='owner' && canRemove && (
             <div style={{ padding:'14px 20px' }}>
-              <button onClick={()=>{ if(window.confirm(`Remove ${user.name} from this location?`)) onRemove() }}
-                style={{ width:'100%', padding:'10px', background:'rgba(239,68,68,0.04)', border:'1.5px solid rgba(239,68,68,0.15)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#ef4444', cursor:'pointer', fontWeight:500 }}>
-                Remove from Location
+              <button onClick={()=>{ if(removing) return; if(window.confirm(`Remove ${user.name} from this location? Their seat will return to the pool.`)) onRemove() }}
+                disabled={removing}
+                style={{ width:'100%', padding:'10px', background:'rgba(239,68,68,0.04)', border:'1.5px solid rgba(239,68,68,0.15)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#ef4444', cursor:removing?'wait':'pointer', fontWeight:500, opacity:removing?0.6:1 }}>
+                {removing ? 'Removing…' : 'Remove from Location'}
               </button>
             </div>
           )}
@@ -11605,6 +11683,9 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   const currentLocationCtx = useContext(CurrentLocationContext)
   const tierPricesCtx = useContext(TierPricesContext)
   const seatsCtx = useContext(SeatsContext)
+  // Lifted modal state for Settings > Billing (the billing branch renders via
+  // an IIFE so it can't hold its own hooks).
+  const [showAddSeatsModal, setShowAddSeatsModal] = useState(false)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
   const livePrices = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
   // Build settings from selected location if provided, with onboarding data taking priority
@@ -12024,10 +12105,11 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                     )}
                     <button
                       type="button"
-                      onClick={()=>alert('Stripe integration coming soon — contact corporate to add seats for now.')}
-                      style={{ display:'block', width:'100%', padding:'10px 14px', background:'transparent', border:'none', borderTop:'1px dashed rgba(0,0,0,0.08)', fontSize:'12px', fontFamily:'inherit', fontWeight:500, color:'#8a9e9a', cursor:'pointer', textAlign:'left' }}
-                      onMouseEnter={e=>{ e.currentTarget.style.background='rgba(26,46,43,0.03)'; e.currentTarget.style.color='#4a5e5a' }}
-                      onMouseLeave={e=>{ e.currentTarget.style.background='transparent'; e.currentTarget.style.color='#8a9e9a' }}>
+                      onClick={()=>setShowAddSeatsModal(true)}
+                      disabled={!currentLocationCtx?.id}
+                      style={{ display:'block', width:'100%', padding:'10px 14px', background:'transparent', border:'none', borderTop:'1px dashed rgba(0,0,0,0.08)', fontSize:'12px', fontFamily:'inherit', fontWeight:500, color:currentLocationCtx?.id?'#8a9e9a':'#c8d8d4', cursor:currentLocationCtx?.id?'pointer':'not-allowed', textAlign:'left' }}
+                      onMouseEnter={e=>{ if(currentLocationCtx?.id){ e.currentTarget.style.background='rgba(26,46,43,0.03)'; e.currentTarget.style.color='#4a5e5a' } }}
+                      onMouseLeave={e=>{ if(currentLocationCtx?.id){ e.currentTarget.style.background='transparent'; e.currentTarget.style.color='#8a9e9a' } }}>
                       + Add seats
                     </button>
                   </div>
@@ -12519,6 +12601,14 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
           onClose={()=>setEditingStep(null)}
         />
       )}
+
+      {showAddSeatsModal && currentLocationCtx?.id && (
+        <AddSeatsModal
+          locationId={currentLocationCtx.id}
+          onClose={()=>setShowAddSeatsModal(false)}
+          onSeatsAdded={(rows)=>{ seatsCtx?.setSeats?.(prev=>[...prev, ...rows]) }}
+        />
+      )}
     </div>
   )
 }
@@ -12662,7 +12752,20 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   const isReadOnly   = crmStatus === 'inactive'
   const isLiteUser   = franchiseRole === 'light' || franchiseRole === 'readonly'
   const canSeeFinancials = !isLiteUser
-  const isOnboarding = crmStatus === 'onboarding'
+  // Fresh invite-accept flag (sessionStorage). Set by AcceptInviteClient
+  // post-accept; consumed once on the first home render so the invited
+  // employee sees the lightweight EMPLOYEE_STEPS flow even though their
+  // location's subscription_status is already 'active'.
+  const [employeeOnboarding, setEmployeeOnboarding] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      if (sessionStorage.getItem('bee.employeeOnboarding') === '1') {
+        setEmployeeOnboarding(true)
+      }
+    } catch {}
+  }, [])
+  const isOnboarding = crmStatus === 'onboarding' || (employeeOnboarding && franchiseRole !== 'owner')
   const isPastDue    = crmStatus === 'pastdue'
   const graceDaysLeft = 14
   const graceExpired  = graceDaysLeft <= 0
@@ -12798,7 +12901,9 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       if (typeof window !== 'undefined') {
         sessionStorage.removeItem('bee.onboarding.state')
         sessionStorage.removeItem('bee.oauth.return')
+        sessionStorage.removeItem('bee.employeeOnboarding')
       }
+      setEmployeeOnboarding(false)
       setOnboardingDismissed(true)
       nav('hive')
     }} />
@@ -18025,6 +18130,349 @@ function SyncLogContent() {
 // ═══════════════════════════════════════════════════════
 //  ROOT APP - Role-aware shell
 // ═══════════════════════════════════════════════════════
+
+// ─── AddSeatsModal ─────────────────────────────────────────────────────────
+// Real "+ Add seats" flow (Dispatch 3). Replaces the stub alert. Owner
+// picks a tier + quantity, sees live prorated cost, POSTs a bulk insert
+// to /api/seats. On success, pushes the new seats into SeatsContext so
+// the billing card refreshes without a reload. No real Stripe yet —
+// "Pay" just records the prorated_cost on each seat row.
+function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
+  const tierPricesCtx = useContext(TierPricesContext)
+  const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
+
+  const [tier, setTier]         = useState('manager')
+  const [quantity, setQuantity] = useState(1)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError]       = useState('')
+
+  React.useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+
+  // Only Manager / Worker / Watcher — owner seats are seeded during
+  // onboarding's co-owner flow and capped at 2; post-onboarding add-seat
+  // doesn't touch them.
+  const TIER_OPTIONS = SUBSCRIPTION_TIER_META.filter(t => t.key !== 'owner')
+
+  const annualEach   = getTierPrice(tier)
+  const proratedEach = prorateToNextRenewal(annualEach)
+  const totalProrated = proratedEach * quantity
+  const totalAnnual   = annualEach * quantity
+
+  async function handlePay() {
+    if (submitting) return
+    setSubmitting(true)
+    setError('')
+    try {
+      const res = await fetch('/api/seats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location_id: locationId,
+          tier,
+          quantity,
+          prorated_cost: Math.round(proratedEach * 100),
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || 'Failed to add seats')
+      const inserted = Array.isArray(json) ? json : [json]
+      onSeatsAdded(inserted)
+      onClose()
+    } catch (err) {
+      setError(err?.message || 'Could not add seats')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:10020, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'relative', background:'white', borderRadius:'14px', width:'100%', maxWidth:'440px', maxHeight:'90vh', display:'flex', flexDirection:'column', boxShadow:'0 16px 48px rgba(26,46,43,0.25)', overflow:'hidden', zIndex:1 }}>
+        <div style={{ padding:'18px 22px 4px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+            <div>
+              <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>Add seats to your plan</h2>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>Pay annually, prorated to next March 1. Once paid, you can invite team members anytime.</p>
+            </div>
+            <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', lineHeight:1, padding:'0 0 0 8px' }}>×</button>
+          </div>
+        </div>
+
+        <div style={{ padding:'14px 22px', overflowY:'auto', flex:1 }}>
+          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'8px' }}>Seat tier</p>
+          <div style={{ display:'grid', gap:'8px', marginBottom:'18px' }}>
+            {TIER_OPTIONS.map(t => {
+              const isSelected = tier === t.key
+              const price = getTierPrice(t.key)
+              return (
+                <button key={t.key} onClick={()=>setTier(t.key)}
+                  style={{ padding:'12px 14px', background:isSelected?'rgba(26,46,43,0.04)':'white', border:`2px solid ${isSelected?'#1a2e2b':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left', display:'flex', alignItems:'center', gap:'12px' }}>
+                  <span style={{ fontSize:'22px' }}>{t.icon}</span>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{t.name}</p>
+                    <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{t.detail}</p>
+                  </div>
+                  <div style={{ textAlign:'right' }}>
+                    <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>${price.toLocaleString()}</p>
+                    <p style={{ fontSize:'10px', color:'#8a9e9a' }}>/yr each</p>
+                  </div>
+                  {isSelected && <span style={{ color:'#1a2e2b', fontSize:'15px' }}>✓</span>}
+                </button>
+              )
+            })}
+          </div>
+
+          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'8px' }}>Quantity</p>
+          <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'18px' }}>
+            <button onClick={()=>setQuantity(q=>Math.max(1, q-1))} disabled={quantity<=1}
+              style={{ width:'36px', height:'36px', borderRadius:'9px', background:'white', border:'1.5px solid rgba(0,0,0,0.1)', fontSize:'18px', color:quantity<=1?'#c8d8d4':'#1a2e2b', cursor:quantity<=1?'not-allowed':'pointer', fontFamily:'inherit' }}>−</button>
+            <span style={{ fontSize:'20px', fontWeight:700, color:'#1a2e2b', minWidth:'30px', textAlign:'center' }}>{quantity}</span>
+            <button onClick={()=>setQuantity(q=>Math.min(10, q+1))} disabled={quantity>=10}
+              style={{ width:'36px', height:'36px', borderRadius:'9px', background:'white', border:'1.5px solid rgba(0,0,0,0.1)', fontSize:'18px', color:quantity>=10?'#c8d8d4':'#1a2e2b', cursor:quantity>=10?'not-allowed':'pointer', fontFamily:'inherit' }}>+</button>
+            <span style={{ fontSize:'11px', color:'#b0c0bc', marginLeft:'6px' }}>Cap 10 per request</span>
+          </div>
+
+          <div style={{ background:'rgba(26,46,43,0.03)', border:'1px solid rgba(0,0,0,0.06)', borderRadius:'10px', padding:'12px 14px' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'6px' }}>
+              <span style={{ fontSize:'12px', color:'#4a5e5a' }}>Annual cost</span>
+              <span style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{formatCurrency(totalAnnual, { showCents:'never' })}</span>
+            </div>
+            <div style={{ display:'flex', justifyContent:'space-between' }}>
+              <span style={{ fontSize:'12px', color:'#4a5e5a' }}>Prorated to Mar 1</span>
+              <span style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b' }}>{formatCurrency(totalProrated, { showCents:'auto' })}</span>
+            </div>
+          </div>
+
+          {error && (
+            <p style={{ marginTop:'12px', padding:'8px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.15)', borderRadius:'8px', color:'#ef4444', fontSize:'12px' }}>{error}</p>
+          )}
+        </div>
+
+        <div style={{ padding:'12px 22px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px' }}>
+          <button onClick={onClose} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
+          <button onClick={handlePay} disabled={submitting}
+            style={{ flex:2, padding:'11px', background:submitting?'#8a9e9a':'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:submitting?'wait':'pointer' }}>
+            {submitting ? 'Adding…' : `Pay ${formatCurrency(totalProrated, { showCents:'auto' })} →`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── InviteTeamMemberModal ─────────────────────────────────────────────────
+// Real Team-tab Invite flow. Replaces OnboardingInviteSheet's stub Send-
+// Invite branch for the post-onboarding Settings → Team path. Owner picks
+// an email + tier (only tiers with at least one available seat are
+// selectable), POSTs to /api/hub_users/invite which creates a
+// pending_invites row and returns a shareable URL. The seat itself isn't
+// claimed until the invitee accepts.
+function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, onOpenAddSeats }) {
+  const seatsCtx = useContext(SeatsContext)
+
+  const [step, setStep] = useState('form') // form | success
+  const [email, setEmail] = useState('')
+  const [fullName, setFullName] = useState('')
+  const [tier, setTier] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [createdInvite, setCreatedInvite] = useState(null)
+  const [copied, setCopied] = useState(false)
+
+  React.useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+
+  const counts = seatsCtx?.seatCountsByTier?.() || {}
+  const availableTiers = SUBSCRIPTION_TIER_META
+    .filter(t => t.key !== 'owner' && (counts[t.key]?.available || 0) > 0)
+  const hasAvailable = availableTiers.length > 0
+
+  // Default to the first available tier when modal opens.
+  React.useEffect(() => {
+    if (!tier && availableTiers.length > 0) setTier(availableTiers[0].key)
+  }, [availableTiers, tier])
+
+  function isValidEmail(s) {
+    return typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim())
+  }
+
+  async function handleSendInvite() {
+    if (submitting) return
+    if (!isValidEmail(email)) {
+      setError('Enter a valid email address')
+      return
+    }
+    if (!tier) {
+      setError('Pick a tier')
+      return
+    }
+    setSubmitting(true)
+    setError('')
+    try {
+      const res = await fetch('/api/hub_users/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          full_name: fullName.trim() || null,
+          location_id: locationId,
+          tier,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || 'Failed to create invite')
+      setCreatedInvite(json)
+      setStep('success')
+      if (onInviteCreated) onInviteCreated(json)
+    } catch (err) {
+      setError(err?.message || 'Could not create invite')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function copyLink() {
+    if (!createdInvite?.invite_url) return
+    try {
+      await navigator.clipboard.writeText(createdInvite.invite_url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {}
+  }
+
+  const mailto = createdInvite
+    ? `mailto:${encodeURIComponent(createdInvite.invite?.email || '')}?subject=${encodeURIComponent('You’re invited to Bee Hub')}&body=${encodeURIComponent(`Join our team on Bee Hub: ${createdInvite.invite_url}`)}`
+    : ''
+
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:10020, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'relative', background:'white', borderRadius:'14px', width:'100%', maxWidth:'420px', maxHeight:'90vh', display:'flex', flexDirection:'column', boxShadow:'0 16px 48px rgba(26,46,43,0.25)', overflow:'hidden', zIndex:1 }}>
+        <div style={{ padding:'18px 22px 4px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+            <div>
+              <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>
+                {step === 'success' ? 'Invitation created' : 'Invite a team member'}
+              </h2>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
+                {step === 'success'
+                  ? 'Share this link with the invitee. It expires in 7 days.'
+                  : 'They’ll sign in with Google to claim their seat.'}
+              </p>
+            </div>
+            <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', lineHeight:1, padding:'0 0 0 8px' }}>×</button>
+          </div>
+        </div>
+
+        <div style={{ padding:'16px 22px', overflowY:'auto', flex:1 }}>
+          {step === 'form' && !hasAvailable && (
+            <div style={{ padding:'16px', background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.2)', borderRadius:'10px' }}>
+              <p style={{ fontSize:'13px', fontWeight:600, color:'#78350f', marginBottom:'6px' }}>No available seats</p>
+              <p style={{ fontSize:'12px', color:'#78350f', lineHeight:1.5, marginBottom:'12px' }}>
+                Add seats to your plan before inviting team members.
+              </p>
+              <button onClick={()=>{ onClose(); if (onOpenAddSeats) onOpenAddSeats() }}
+                style={{ padding:'9px 16px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+                + Add Seats
+              </button>
+            </div>
+          )}
+
+          {step === 'form' && hasAvailable && (
+            <>
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Email *</p>
+              <input
+                type="email" value={email} onChange={e=>setEmail(e.target.value)}
+                placeholder="teammate@example.com"
+                style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', marginBottom:'14px' }}
+              />
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Full name (optional)</p>
+              <input
+                type="text" value={fullName} onChange={e=>setFullName(e.target.value)}
+                placeholder="Jane Doe"
+                style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', marginBottom:'14px' }}
+              />
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Tier *</p>
+              <div style={{ display:'grid', gap:'8px', marginBottom:'6px' }}>
+                {availableTiers.map(t => {
+                  const isSelected = tier === t.key
+                  const c = counts[t.key]
+                  return (
+                    <button key={t.key} onClick={()=>setTier(t.key)}
+                      style={{ padding:'11px 12px', background:isSelected?'rgba(26,46,43,0.04)':'white', border:`2px solid ${isSelected?'#1a2e2b':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left', display:'flex', alignItems:'center', gap:'10px' }}>
+                      <span style={{ fontSize:'18px' }}>{t.icon}</span>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{t.name}</p>
+                        <p style={{ fontSize:'10.5px', color:'#8a9e9a' }}>{c?.available || 0} available</p>
+                      </div>
+                      {isSelected && <span style={{ color:'#1a2e2b', fontSize:'15px' }}>✓</span>}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {error && (
+                <p style={{ marginTop:'12px', padding:'8px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.15)', borderRadius:'8px', color:'#ef4444', fontSize:'12px' }}>{error}</p>
+              )}
+            </>
+          )}
+
+          {step === 'success' && createdInvite && (
+            <>
+              <div style={{ marginBottom:'14px' }}>
+                <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'4px' }}>Share with</p>
+                <p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b', wordBreak:'break-all' }}>{createdInvite.invite?.email}</p>
+              </div>
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Invite link</p>
+              <div style={{ display:'flex', gap:'6px', alignItems:'stretch', marginBottom:'12px' }}>
+                <input readOnly value={createdInvite.invite_url}
+                  style={{ flex:1, padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.08)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', background:'rgba(26,46,43,0.02)', boxSizing:'border-box' }}
+                  onClick={e=>e.currentTarget.select()}
+                />
+                <button onClick={copyLink}
+                  style={{ padding:'10px 14px', background:copied?'#22c55e':'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', flexShrink:0 }}>
+                  {copied ? 'Copied ✓' : 'Copy'}
+                </button>
+              </div>
+              <a href={mailto}
+                style={{ display:'block', textAlign:'center', padding:'10px', background:'rgba(26,46,43,0.04)', border:'1px solid rgba(26,46,43,0.08)', borderRadius:'9px', fontSize:'12px', color:'#1a2e2b', textDecoration:'none', fontWeight:500 }}>
+                Open in mail client →
+              </a>
+            </>
+          )}
+        </div>
+
+        <div style={{ padding:'12px 22px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px' }}>
+          {step === 'form' && hasAvailable && (
+            <>
+              <button onClick={onClose} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
+              <button onClick={handleSendInvite} disabled={submitting}
+                style={{ flex:2, padding:'11px', background:submitting?'#8a9e9a':'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:submitting?'wait':'pointer' }}>
+                {submitting ? 'Sending…' : 'Send Invite →'}
+              </button>
+            </>
+          )}
+          {step === 'form' && !hasAvailable && (
+            <button onClick={onClose} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Close</button>
+          )}
+          {step === 'success' && (
+            <button onClick={onClose} style={{ flex:1, padding:'11px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+              Done
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function App({
   currentUser,

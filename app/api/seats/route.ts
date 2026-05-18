@@ -101,8 +101,12 @@ export async function GET(request: NextRequest) {
   return NextResponse.json(data || [])
 }
 
-// POST /api/seats — create a seat (owner's first seat at activation OR add-seat flow).
-// Body: { location_id, tier, user_id?, prorated_cost?, notes? }
+// POST /api/seats — create one or more seats (owner activation OR add-seat flow).
+// Body: { location_id, tier, user_id?, prorated_cost?, notes?, quantity? }
+//   quantity defaults to 1 (caps at 50 — bulk creates from "+ Add seats" cap
+//   their UI picker at 10, the 50 ceiling is just a server-side sanity guard).
+//   When quantity > 1, returns an array of inserted seats; quantity = 1 keeps
+//   the legacy single-object shape so the onboarding Activate path doesn't break.
 export async function POST(request: NextRequest) {
   const supabase = await createServerSupabaseClient()
   const caller = await loadCaller(supabase)
@@ -111,7 +115,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => ({}))
-  const { location_id, tier, user_id, prorated_cost, notes } = body || {}
+  const { location_id, tier, user_id, prorated_cost, notes, quantity } = body || {}
 
   if (typeof location_id !== 'string' || !location_id) {
     return NextResponse.json({ error: 'location_id required' }, { status: 400 })
@@ -136,6 +140,14 @@ export async function POST(request: NextRequest) {
     )
   }
 
+  const qty = quantity === undefined || quantity === null ? 1 : quantity
+  if (!Number.isInteger(qty) || qty < 1 || qty > 50) {
+    return NextResponse.json(
+      { error: 'quantity must be an integer between 1 and 50' },
+      { status: 400 }
+    )
+  }
+
   if (!canWriteLocation(caller.role, caller.locationId, location_id)) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
@@ -144,31 +156,35 @@ export async function POST(request: NextRequest) {
   // works fine but whose policy depends on a hub_users row that may have
   // been created via service-role) write atomically. App-layer check above
   // is the real gate; service role bypasses RLS only after we've authorized.
-  const insertRow: Record<string, any> = {
+  const baseRow: Record<string, any> = {
     location_id,
     tier,
     user_id: user_id ?? null,
     added_by: caller.userId,
   }
   if (prorated_cost !== undefined && prorated_cost !== null) {
-    insertRow.prorated_cost = prorated_cost
+    baseRow.prorated_cost = prorated_cost
   }
   if (typeof notes === 'string' && notes.trim()) {
-    insertRow.notes = notes.trim()
+    baseRow.notes = notes.trim()
   }
+
+  const rowsToInsert = Array.from({ length: qty }, () => ({ ...baseRow }))
 
   const { data, error } = await supabaseService
     .from('subscription_seats')
-    .insert(insertRow)
+    .insert(rowsToInsert)
     .select(SEAT_COLS)
-    .single()
 
   if (error) {
     console.error('[seats POST]', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json(data, { status: 201 })
+  if (qty === 1) {
+    return NextResponse.json((data && data[0]) || null, { status: 201 })
+  }
+  return NextResponse.json(data || [], { status: 201 })
 }
 
 // PATCH /api/seats — assign or unassign a user to a seat.
