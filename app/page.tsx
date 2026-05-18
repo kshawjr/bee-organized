@@ -133,6 +133,7 @@ export default async function HomePage() {
   const { data: slidesData } = await supabase
     .from('guide_slides')
     .select('*')
+    .order('chapter', { ascending: true })
     .order('slot', { ascending: true })
 
   const initialGuideSlides = (slidesData || []).map((row: any) => {
@@ -160,6 +161,7 @@ export default async function HomePage() {
   const { data: manualSlidesRaw } = await supabaseService
     .from('manual_slides')
     .select('*')
+    .order('chapter', { ascending: true })
     .order('slot', { ascending: true })
 
   const initialManualSlides = (manualSlidesRaw || []).map((row: any) => {
