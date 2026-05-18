@@ -16092,13 +16092,13 @@ function SlideEditForm({ slide, isNew, onSave, onCancel, allChapters = [] }) {
 
   return (
     <div onClick={onCancel} style={{ position:'fixed', inset:0, zIndex:10110, display:'flex', alignItems:'flex-end', justifyContent:'center', padding:0, background:'rgba(26,46,43,0.45)' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background:'white', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:'520px', maxHeight:'90vh', display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(0,0,0,0.2)' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background:'white', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:'520px', maxHeight:'90vh', boxShadow:'0 -8px 40px rgba(0,0,0,0.2)' }}>
         <div style={{ padding:'16px 18px 12px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <h2 style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{isNew ? 'Add Slide' : 'Edit Slide'}</h2>
           <button onClick={onCancel} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', padding:0, lineHeight:1, fontFamily:'inherit' }}>×</button>
         </div>
 
-        <div style={{ padding:'14px 18px', overflowY:'auto', overscrollBehavior:'contain', flex:1, display:'grid', gap:'12px' }}>
+        <div style={{ padding:'14px 18px', maxHeight:'calc(70vh - 80px)', overflowY:'auto', overscrollBehavior:'contain', paddingRight:'12px', display:'grid', gap:'12px' }}>
           <div>
             <label style={lbl}>Chapter</label>
             <div style={{ display:'flex', gap:'6px', marginBottom:'6px' }}>
@@ -16180,11 +16180,11 @@ function SlideEditForm({ slide, isNew, onSave, onCancel, allChapters = [] }) {
               </div>
             ))}
           </div>
-        </div>
 
-        <div style={{ padding:'12px 18px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px', justifyContent:'flex-end' }}>
-          <button onClick={onCancel} style={{ padding:'7px 14px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer', fontWeight:600 }}>Cancel</button>
-          <button onClick={save} disabled={!canSave} style={{ padding:'7px 16px', background: !canSave ? '#a8c9c4' : '#1a2e2b', color:'white', border:'none', borderRadius:'8px', fontSize:'12px', fontWeight:600, fontFamily:'inherit', cursor: !canSave ? 'not-allowed' : 'pointer' }}>{isNew ? 'Add slide' : 'Save'}</button>
+          <div style={{ position:'sticky', bottom:0, background:'white', borderTop:'1px solid #e5e7eb', padding:'12px 0', marginTop:'12px', display:'flex', gap:'8px', justifyContent:'flex-end' }}>
+            <button onClick={onCancel} style={{ padding:'7px 14px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer', fontWeight:600 }}>Cancel</button>
+            <button onClick={save} disabled={!canSave} style={{ padding:'7px 16px', background: !canSave ? '#a8c9c4' : '#1a2e2b', color:'white', border:'none', borderRadius:'8px', fontSize:'12px', fontWeight:600, fontFamily:'inherit', cursor: !canSave ? 'not-allowed' : 'pointer' }}>{isNew ? 'Add slide' : 'Save'}</button>
+          </div>
         </div>
       </div>
     </div>
@@ -16569,13 +16569,13 @@ function SlideEditFormManual({ slide, isNew, onSave, onCancel, allChapters = [] 
 
   return (
     <div onClick={onCancel} style={{ position:'fixed', inset:0, zIndex:10110, display:'flex', alignItems:'flex-end', justifyContent:'center', padding:0, background:'rgba(26,46,43,0.45)' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background:'white', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:'520px', maxHeight:'90vh', display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(0,0,0,0.2)' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background:'white', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:'520px', maxHeight:'90vh', boxShadow:'0 -8px 40px rgba(0,0,0,0.2)' }}>
         <div style={{ padding:'16px 18px 12px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <h2 style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{isNew ? 'Add Manual Slide' : 'Edit Manual Slide'}</h2>
           <button onClick={onCancel} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', padding:0, lineHeight:1, fontFamily:'inherit' }}>×</button>
         </div>
 
-        <div style={{ padding:'14px 18px', overflowY:'auto', overscrollBehavior:'contain', flex:1, display:'grid', gap:'12px' }}>
+        <div style={{ padding:'14px 18px', maxHeight:'calc(70vh - 80px)', overflowY:'auto', overscrollBehavior:'contain', paddingRight:'12px', display:'grid', gap:'12px' }}>
           <div>
             <label style={lbl}>Chapter</label>
             <div style={{ display:'flex', gap:'6px', marginBottom:'6px' }}>
@@ -16672,11 +16672,11 @@ function SlideEditFormManual({ slide, isNew, onSave, onCancel, allChapters = [] 
               </div>
             ))}
           </div>
-        </div>
 
-        <div style={{ padding:'12px 18px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px', justifyContent:'flex-end' }}>
-          <button onClick={onCancel} style={{ padding:'7px 14px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer', fontWeight:600 }}>Cancel</button>
-          <button onClick={save} disabled={!canSave} style={{ padding:'7px 16px', background: !canSave ? '#a8c9c4' : '#1a2e2b', color:'white', border:'none', borderRadius:'8px', fontSize:'12px', fontWeight:600, fontFamily:'inherit', cursor: !canSave ? 'not-allowed' : 'pointer' }}>{isNew ? 'Add slide' : 'Save'}</button>
+          <div style={{ position:'sticky', bottom:0, background:'white', borderTop:'1px solid #e5e7eb', padding:'12px 0', marginTop:'12px', display:'flex', gap:'8px', justifyContent:'flex-end' }}>
+            <button onClick={onCancel} style={{ padding:'7px 14px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer', fontWeight:600 }}>Cancel</button>
+            <button onClick={save} disabled={!canSave} style={{ padding:'7px 16px', background: !canSave ? '#a8c9c4' : '#1a2e2b', color:'white', border:'none', borderRadius:'8px', fontSize:'12px', fontWeight:600, fontFamily:'inherit', cursor: !canSave ? 'not-allowed' : 'pointer' }}>{isNew ? 'Add slide' : 'Save'}</button>
+          </div>
         </div>
       </div>
     </div>
