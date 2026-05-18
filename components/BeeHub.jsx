@@ -2,6 +2,14 @@
 
 import React, { useState, useEffect, useRef, createContext, useContext } from "react"
 import { useRouter } from "next/navigation"
+import {
+  TIER_PRICES,
+  getSubscriptionDisplay,
+  formatCurrency,
+  formatRenewalDate,
+  nextRenewalDate,
+  daysUntilNextRenewal,
+} from "@/lib/subscription-math"
 
 // ═══════════════════════════════════════════════════════
 //  BEE HUB - Combined App Preview
@@ -5397,13 +5405,33 @@ function AttentionCard({ icon, title, desc, urgency='medium', action, onAction }
 function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='owner', topOffset=0, onOpenSettings, onComplete=()=>{}, onSkipOnboarding=()=>{} }) {
   const isOwner   = franchiseRole === 'owner'
   const nameParts = (ownerName||'').split(' ')
-  const proration = calcProration(ROLE_PRICING.owner)
-  const ccAmount  = withCC(proration.prorated)
+  const currentLocationCtx = useContext(CurrentLocationContext)
 
   // ── ALL hooks at top - no conditional returns before these ──────────────────
   const [completedSteps, setCompletedSteps]   = useState({})
   const [activeStepOpen, setActiveStepOpen]   = useState(null)
   const [showInviteFlow, setShowInviteFlow]   = useState(false)
+
+  // Live seat configuration on the pay step. Lives in React state only —
+  // persistence to subscription_seats is Task 4 (post-demo). Resets on
+  // unmount, which is acceptable: once 'pay' is marked done the user
+  // doesn't return to this step.
+  const [selectedSeats, setSelectedSeats] = useState([{ tier:'owner', count:1 }])
+  const paymentSourceForPay =
+    currentLocationCtx?.payment_source === 'prepaid_corporate' || currentLocationCtx?.payment_source === 'corporate_sponsored'
+      ? currentLocationCtx.payment_source
+      : 'direct'
+  const paySubDisplay = getSubscriptionDisplay(paymentSourceForPay, selectedSeats)
+  const ccAmount = Math.round(paySubDisplay.prorated * 1.03 * 100) / 100
+  // Back-compat shim — the legacy payment screens (method picker, ACH form,
+  // CC form, post-pay confirm) read `proration.*`. Map to the new display
+  // so we don't have to touch every downstream string.
+  const proration = {
+    prorated: paySubDisplay.prorated,
+    annual:   paySubDisplay.annual,
+    days:     paySubDisplay.daysUntilRenewal,
+    renewDate: formatRenewalDate(paySubDisplay.renewalDate),
+  }
 
   // Payment
   const [payStep, setPayStep]   = useState('pricing')
@@ -5706,26 +5734,13 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
         <div style={{ background:BRAND.cream, borderRadius:'20px 20px 0 0', padding:'1.25rem 1.25rem 6rem', minHeight:'calc(100vh - 80px)' }}>
           {(payStep==='pricing'||payStep==='method')&&(
             <>
-              <div style={{ background:'white', borderRadius:'16px', overflow:'hidden', boxShadow:'0 2px 16px rgba(26,46,43,0.08)', marginBottom:'16px', border:'1px solid rgba(168,201,196,0.2)' }}>
-                <div style={{ background:'linear-gradient(135deg,#1a2e2b,#2a4a40)', padding:'12px' }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'16px' }}>
-                    <div><p style={{ fontSize:'11px', color:'rgba(168,201,196,0.6)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'4px' }}>Your Plan</p><div style={{ display:'flex', alignItems:'center', gap:'8px' }}><span style={{ fontSize:'20px' }}>👑</span><p style={{ fontSize:'22px', fontWeight:700, color:'white', fontFamily:'Georgia,serif' }}>Owner</p></div></div>
-                    <div style={{ textAlign:'right' }}><p style={{ fontSize:'28px', fontWeight:700, color:'white', fontFamily:'Georgia,serif', lineHeight:1 }}>${proration.prorated}</p><p style={{ fontSize:'12px', color:'rgba(168,201,196,0.7)' }}>due today</p></div>
-                  </div>
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'8px' }}>
-                    {[['Full price',`$${proration.annual}/yr`],['Days left',`${proration.days} days`],['Renews','Mar 1, 2027']].map(([l,v])=>(
-                      <div key={l} style={{ background:'rgba(255,255,255,0.07)', borderRadius:'9px', padding:'9px 10px', textAlign:'center' }}>
-                        <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.55)', marginBottom:'2px' }}>{l}</p>
-                        <p style={{ fontSize:'12px', fontWeight:600, color:'white' }}>{v}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div style={{ padding:'14px 16px' }}>
-                  {['Full Hive CRM pipeline','Drip paths & email templates','Partner management','Jobber integration','Team member seats (billed separately)'].map(f=>(
-                    <div key={f} style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}><span style={{ color:'#22c55e' }}>✓</span><span style={{ fontSize:'13px', color:'#4a5e5a' }}>{f}</span></div>
-                  ))}
-                </div>
+              <div style={{ marginBottom:'16px' }}>
+                <SubscriptionCalculator
+                  initialSeats={selectedSeats}
+                  paymentSource={paymentSourceForPay}
+                  showSeatControls={payStep==='pricing'}
+                  onSeatsChange={setSelectedSeats}
+                />
               </div>
               {/* SMS & Voice add-on - coming soon */}
               {payStep==='pricing'&&(
@@ -11836,10 +11851,13 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   }
 
   const canManageTeam = ['owner','manager'].includes(franchiseRole)
+  // TODO: Hive Manager view-only access — see tier matrix 'View billing & invoices'
+  const canViewBilling = franchiseRole === 'owner'
   const sections = [
     { key:'profile',   label:'Profile',    icon:'👤' },
     { key:'location',  label:'My Location',icon:'📍' },
     ...(canManageTeam ? [{ key:'team', label:'Team', icon:'👥' }] : []),
+    ...(canViewBilling ? [{ key:'billing', label:'Billing', icon:'💳' }] : []),
     { key:'paths',     label:'Paths',      icon:'📧' },
     { key:'templates', label:'Templates',  icon:'📝' },
     { key:'automation',label:'Automation', icon:'⚡' },
@@ -11861,7 +11879,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
         <div style={{ position:'relative', width:'100%', overflowX:'hidden' }}>
           <div style={{ display:'flex', gap:'2px', width:'100%' }}>
             {sections.map(sec=>{
-              const SHORT = { profile:'Profile', location:'Location', team:'Team', paths:'Paths', templates:'Templates', notifs:'Alerts' }
+              const SHORT = { profile:'Profile', location:'Location', team:'Team', billing:'Billing', paths:'Paths', templates:'Templates', notifs:'Alerts' }
               const isActive = activeSection===sec.key
               return (
                 <button key={sec.key}
@@ -11988,6 +12006,29 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
               locationId={settings.location.locId||'loc1'}
             />
 
+          </>
+        )}
+
+        {/* ── Billing ── */}
+        {activeSection==='billing'&&(
+          <>
+            <SectionHeader title="Subscription" desc="Current seat configuration and renewal" />
+            <div style={{ padding:'0 12px' }}>
+              <SubscriptionCalculator
+                initialSeats={[{ tier:'owner', count:1 }]}
+                paymentSource={currentLocationCtx?.payment_source || 'direct'}
+                showSeatControls={false}
+              />
+              <p style={{ fontSize:'10.5px', color:'#b0c0bc', fontStyle:'italic', margin:'10px 4px 0' }}>
+                Seat detail tracking coming soon — currently shows the required Zee Bee.
+              </p>
+              <button
+                type="button"
+                onClick={()=>alert('Add/remove seats — coming soon. Contact corporate to adjust seats for now.')}
+                style={{ width:'100%', marginTop:'14px', padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+                Add / remove seats →
+              </button>
+            </div>
           </>
         )}
 
@@ -13160,6 +13201,212 @@ const FRANCHISE_ROLES = [
 // Phase 0 cleanup deleted the .js artifact; those commits had only modified
 // it, never BeeHub.jsx, so their work was lost. Translated from
 // React.createElement back to JSX.
+// Tier display metadata — keys mirror TIER_PRICES keys in lib/subscription-math.
+// Kept colocated with TierPlansInline so seat icons/colors stay consistent.
+const SUBSCRIPTION_TIER_META = [
+  { key:'owner',    name:'Zee Bee',       icon:'👑', color:'#d4a046', detail:'Required · One per location' },
+  { key:'manager',  name:'Hive Manager',  icon:'🍯', color:'#6366f1', detail:'Operations & team leads' },
+  { key:'light',    name:'Worker Bee',    icon:'🐝', color:'#10b981', detail:'Schedulers, customer service' },
+  { key:'readonly', name:'Honey Watcher', icon:'👁',  color:'#8a9e9a', detail:'Read-only · Add as many as needed' },
+]
+
+function SubscriptionCalculator({
+  initialSeats = [{ tier:'owner', count:1 }],
+  paymentSource = 'direct',
+  showSeatControls = true,
+  onSeatsChange = null,
+}) {
+  // 'none' is the DB default for locations corporate hasn't classified yet.
+  // Treat as 'direct' (self-pay) for display purposes.
+  const normalizedSource =
+    paymentSource === 'prepaid_corporate' || paymentSource === 'corporate_sponsored'
+      ? paymentSource
+      : 'direct'
+
+  const [seats, setSeats] = useState(initialSeats)
+
+  // When parent's initialSeats changes (e.g. location switch in display-only
+  // mode), sync local state. Skip for interactive mode — user edits are
+  // authoritative there.
+  const seatsKey = JSON.stringify(initialSeats)
+  useEffect(() => {
+    if (!showSeatControls) setSeats(initialSeats)
+  }, [seatsKey, showSeatControls])
+
+  const display = getSubscriptionDisplay(normalizedSource, seats)
+
+  function adjustSeat(tier, delta) {
+    setSeats(prev => {
+      const idx = prev.findIndex(s => s.tier === tier)
+      const current = idx >= 0 ? prev[idx].count : 0
+      const min = tier === 'owner' ? 1 : 0
+      const next = Math.max(min, Math.min(99, current + delta))
+      if (next === current) return prev
+      let nextSeats
+      if (idx >= 0) {
+        nextSeats = prev.map((s, i) => i === idx ? { ...s, count: next } : s)
+      } else {
+        nextSeats = [...prev, { tier, count: next }]
+      }
+      if (onSeatsChange) onSeatsChange(nextSeats)
+      return nextSeats
+    })
+  }
+
+  function getCount(tier) {
+    const found = seats.find(s => s.tier === tier)
+    return found?.count || 0
+  }
+
+  const renewalLabel = formatRenewalDate(nextRenewalDate())
+  const daysLeft = daysUntilNextRenewal()
+
+  // Header headline number depends on mode:
+  // - direct: prorated $ they pay today
+  // - prepaid: $0 today, annual is informational
+  // - sponsored: $0 today, no math shown
+  const heroNumber =
+    display.mode === 'direct'
+      ? formatCurrency(display.prorated)
+      : formatCurrency(0)
+
+  const heroSub =
+    display.mode === 'direct'
+      ? `Renews ${renewalLabel} at ${formatCurrency(display.annual)}/yr`
+      : display.mode === 'prepaid'
+        ? `Prepaid through ${renewalLabel}`
+        : 'Sponsored by corporate during testing'
+
+  return (
+    <div style={{ display:'grid', gap:'12px' }}>
+      {/* Seat configuration block */}
+      {showSeatControls && (
+        <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', overflow:'hidden' }}>
+          <div style={{ padding:'12px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)', background:'rgba(26,46,43,0.03)' }}>
+            <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px' }}>
+              Configure Seats
+            </p>
+          </div>
+          <div style={{ display:'grid' }}>
+            {SUBSCRIPTION_TIER_META.map(t => {
+              const count = getCount(t.key)
+              const price = TIER_PRICES[t.key]
+              const subtotal = price * count
+              const minusDisabled = t.key === 'owner' ? count <= 1 : count <= 0
+              const plusDisabled = count >= 99
+              return (
+                <div key={t.key} style={{ padding:'12px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)', borderLeft:`4px solid ${t.color}`, display:'flex', alignItems:'center', gap:'10px' }}>
+                  <span style={{ fontSize:'20px', lineHeight:1, flexShrink:0 }}>{t.icon}</span>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{t.name}</p>
+                    <p style={{ fontSize:'10.5px', color:'#8a9e9a', marginTop:'1px' }}>
+                      {formatCurrency(price, { showCents:'never' })}/yr · {t.detail}
+                    </p>
+                  </div>
+                  <div style={{ display:'flex', alignItems:'center', gap:'6px', flexShrink:0 }}>
+                    <button
+                      type="button"
+                      onClick={() => adjustSeat(t.key, -1)}
+                      disabled={minusDisabled}
+                      aria-label={`Decrease ${t.name}`}
+                      style={{ width:'28px', height:'28px', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.12)', background:minusDisabled?'#f3f4f6':'white', color:minusDisabled?'#c8d8d4':'#1a2e2b', fontSize:'15px', fontWeight:700, cursor:minusDisabled?'not-allowed':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', padding:0 }}>
+                      −
+                    </button>
+                    <span style={{ minWidth:'24px', textAlign:'center', fontSize:'14px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
+                      {count}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => adjustSeat(t.key, 1)}
+                      disabled={plusDisabled}
+                      aria-label={`Increase ${t.name}`}
+                      style={{ width:'28px', height:'28px', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.12)', background:plusDisabled?'#f3f4f6':'white', color:plusDisabled?'#c8d8d4':'#1a2e2b', fontSize:'15px', fontWeight:700, cursor:plusDisabled?'not-allowed':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', padding:0 }}>
+                      +
+                    </button>
+                  </div>
+                  <div style={{ minWidth:'62px', textAlign:'right', flexShrink:0 }}>
+                    <p style={{ fontSize:'12.5px', fontWeight:700, color:count>0?'#1a2e2b':'#c8d8d4', fontFamily:'Georgia,serif' }}>
+                      {formatCurrency(subtotal, { showCents:'never' })}
+                    </p>
+                    <p style={{ fontSize:'9.5px', color:'#b0c0bc' }}>subtotal</p>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Cost summary card */}
+      <div style={{ borderRadius:'14px', overflow:'hidden', boxShadow:'0 2px 16px rgba(26,46,43,0.08)', border:'1px solid rgba(168,201,196,0.2)' }}>
+        <div style={{ background:'linear-gradient(135deg,#1a2e2b,#2a4a40)', padding:'16px 18px', color:'white' }}>
+          <p style={{ fontSize:'10.5px', color:'rgba(168,201,196,0.65)', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'6px', fontWeight:600 }}>
+            {display.mode === 'direct' ? 'Due Today' : display.mode === 'prepaid' ? 'Due Today (Prepaid)' : 'Due Today (Sponsored)'}
+          </p>
+          <p style={{ fontSize:'34px', fontWeight:700, fontFamily:'Georgia,serif', lineHeight:1, marginBottom:'6px' }}>
+            {heroNumber}
+          </p>
+          <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.85)' }}>
+            {heroSub}
+          </p>
+        </div>
+
+        {/* Detail breakdown — default open per spec */}
+        <div style={{ background:'white', padding:'14px 16px' }}>
+          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>
+            Breakdown
+          </p>
+          <div style={{ display:'grid', gap:'6px', marginBottom:'10px' }}>
+            {SUBSCRIPTION_TIER_META.map(t => {
+              const count = getCount(t.key)
+              if (count <= 0) return null
+              const price = TIER_PRICES[t.key]
+              const subtotal = price * count
+              return (
+                <div key={t.key} style={{ display:'flex', alignItems:'baseline', gap:'6px', fontSize:'12.5px', color:'#4a5e5a' }}>
+                  <span style={{ fontSize:'13px', lineHeight:1 }}>{t.icon}</span>
+                  <span style={{ flex:1 }}>
+                    {count} {t.name}{count !== 1 ? 's' : ''} × {formatCurrency(price, { showCents:'never' })}
+                  </span>
+                  <span style={{ fontWeight:600, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
+                    {formatCurrency(subtotal, { showCents:'never' })}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          <div style={{ borderTop:'1px solid rgba(0,0,0,0.08)', paddingTop:'8px', display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'6px' }}>
+            <span style={{ fontSize:'12px', color:'#4a5e5a', fontWeight:600 }}>Annual total</span>
+            <span style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
+              {formatCurrency(display.annual, { showCents:'never' })}
+            </span>
+          </div>
+          {display.mode === 'direct' && (
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', padding:'6px 8px', background:'rgba(212,160,70,0.08)', border:'1px solid rgba(212,160,70,0.2)', borderRadius:'8px' }}>
+              <span style={{ fontSize:'11px', color:'#b88820', fontWeight:600 }}>
+                Prorated to {renewalLabel} ({daysLeft} days)
+              </span>
+              <span style={{ fontSize:'13.5px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
+                {formatCurrency(display.prorated)}
+              </span>
+            </div>
+          )}
+          {display.mode === 'prepaid' && (
+            <p style={{ fontSize:'11px', color:'#4a5e5a', padding:'8px 10px', background:'rgba(99,102,241,0.06)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'8px' }}>
+              Prepaid by corporate through {renewalLabel}. No charge today.
+            </p>
+          )}
+          {display.mode === 'sponsored' && (
+            <p style={{ fontSize:'11px', color:'#4a5e5a', padding:'8px 10px', background:'rgba(16,185,129,0.06)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:'8px' }}>
+              Corporate-sponsored during testing period. No charge today.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function TierPlansInline() {
   const [showMatrix, setShowMatrix] = useState(false)
   const tiers = [

@@ -136,6 +136,10 @@ export default async function HomePage() {
         jobber_account_id: locRow.jobber_account_id || null,
         last_sync_status: locRow.last_sync_status || null,
         token_expiry: locRow.token_expiry || null,
+        payment_source: locRow.payment_source || 'none',
+        subscription_status: locRow.subscription_status || 'deferred',
+        subscription_plan: locRow.subscription_plan || null,
+        paid_through_date: locRow.paid_through_date || null,
       }
     }
   }
