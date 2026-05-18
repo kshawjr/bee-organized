@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 
-// GET — fetch all slides, ordered by slot
+// GET — fetch all slides, ordered by chapter then slot
 export async function GET() {
   const supabase = await createServerSupabaseClient()
   const { data, error } = await supabase
     .from('manual_slides')
     .select('*')
+    .order('chapter', { ascending: true })
     .order('slot', { ascending: true })
 
   if (error) {
