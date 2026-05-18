@@ -11385,7 +11385,7 @@ function TemplatePreviewModal({ template, settings, onClose }) {
   )
 }
 
-function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null, onboardingBack=null, isPastDue=false, graceDaysLeft=14, locationId='loc1', onPaymentResolved, people=[], franchiseRole='owner', isSuperAdmin=false, onboardingData=null }) {
+function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null, onboardingBack=null, isPastDue=false, graceDaysLeft=14, locationId='loc1', onPaymentResolved, people=[], franchiseRole='owner', isSuperAdmin=false, onboardingData=null, onOpenManual=null }) {
   // Real franchise owner sign-ins get currentLocation from context (populated
   // by App from page.tsx's Supabase fetch). Used as a higher-priority source
   // than the ALL_LOCATIONS mock for the location settings panel.
@@ -11565,6 +11565,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     { key:'templates', label:'Templates',  icon:'📝' },
     { key:'automation',label:'Automation', icon:'⚡' },
     { key:'notifs',    label:'Alerts',     icon:'🔔' },
+    { key:'manual',    label:'Manual',     icon:'📚' },
   ]
 
   return (
@@ -11582,7 +11583,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
         <div style={{ position:'relative', width:'100%', overflowX:'hidden' }}>
           <div style={{ display:'flex', gap:'2px', width:'100%' }}>
             {sections.map(sec=>{
-              const SHORT = { profile:'Profile', location:'Location', team:'Team', billing:'Billing', paths:'Paths', templates:'Templates', notifs:'Alerts' }
+              const SHORT = { profile:'Profile', location:'Location', team:'Team', billing:'Billing', paths:'Paths', templates:'Templates', notifs:'Alerts', manual:'Manual' }
               const isActive = activeSection===sec.key
               return (
                 <button key={sec.key}
@@ -12167,6 +12168,26 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
 
             <div style={{ height:'1rem' }} />
           </>
+        )}
+
+        {activeSection==='manual'&&(
+          <div style={{ padding:'0 12px 24px' }}>
+            <SectionHeader title="Manual" desc="Open the Hive Hub Manual — your full reference, with videos, screenshots, and walkthroughs" />
+            <div style={{ background:'white', borderRadius:'12px', padding:'20px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', display:'flex', flexDirection:'column', alignItems:'flex-start', gap:'12px' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+                <div style={{ width:'40px', height:'40px', borderRadius:'10px', background:'rgba(26,46,43,0.08)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'22px' }}>📚</div>
+                <div>
+                  <p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Hive Hub Manual</p>
+                  <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'2px' }}>Reference articles you can flip through anytime</p>
+                </div>
+              </div>
+              <button
+                onClick={()=>onOpenManual&&onOpenManual()}
+                disabled={!onOpenManual}
+                style={{ padding:'10px 18px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontWeight:600, color:'white', cursor:onOpenManual?'pointer':'not-allowed', opacity:onOpenManual?1:0.5, fontFamily:'inherit' }}
+              >Open Manual</button>
+            </div>
+          </div>
         )}
 
       </div>
@@ -16170,7 +16191,499 @@ function SlideEditForm({ slide, isNew, onSave, onCancel, allChapters = [] }) {
   )
 }
 
-function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, onStatusChange, users=USERS_DATA, setUsers=()=>{}, people=[], setPeople=()=>{}, partners=[], setPartners=()=>{}, guideSlides=[], setGuideSlides=()=>{}, initialLocations=null }) {
+// ═══════════════════════════════════════════════════════
+//  Hive Hub MANUAL — second guide system (expanded reference)
+//  - Wider modal (max 1200px) + taller content (70vh) for video iframes
+//  - Reference-only: no auto-open, no localStorage dismiss flag
+//  - Opens only via explicit setShowManual(true) calls
+// ═══════════════════════════════════════════════════════
+
+// Returns a player-embed URL for YouTube/Vimeo/Loom, or null if the URL
+// isn't a recognized host. Used by ManualModal (iframe src) and by
+// SlideEditFormManual (blur-time validation).
+function toEmbedUrl(url) {
+  if (!url || typeof url !== 'string') return null
+  const u = url.trim()
+  const yt1 = u.match(/^https?:\/\/youtu\.be\/([A-Za-z0-9_-]{6,})/i)
+  if (yt1) return `https://www.youtube.com/embed/${yt1[1]}`
+  const yt2 = u.match(/^https?:\/\/(?:www\.)?youtube\.com\/watch\?[^#]*\bv=([A-Za-z0-9_-]{6,})/i)
+  if (yt2) return `https://www.youtube.com/embed/${yt2[1]}`
+  if (/^https?:\/\/(?:www\.)?youtube\.com\/embed\/[A-Za-z0-9_-]{6,}/i.test(u)) return u
+  const vim = u.match(/^https?:\/\/(?:www\.)?vimeo\.com\/(\d+)/i)
+  if (vim) return `https://player.vimeo.com/video/${vim[1]}`
+  if (/^https?:\/\/player\.vimeo\.com\/video\/\d+/i.test(u)) return u
+  const loom = u.match(/^https?:\/\/(?:www\.)?loom\.com\/share\/([A-Za-z0-9-]+)/i)
+  if (loom) return `https://www.loom.com/embed/${loom[1]}`
+  if (/^https?:\/\/(?:www\.)?loom\.com\/embed\/[A-Za-z0-9-]+/i.test(u)) return u
+  return null
+}
+
+function ManualModal({ slides, open, onClose }) {
+  const activeSlides = Array.isArray(slides) ? slides : []
+  const [idx, setIdx] = useState(0)
+  if (!open) return null
+  if (activeSlides.length === 0) return null
+  const slide = activeSlides[Math.min(idx, activeSlides.length - 1)]
+  if (!slide) return null
+  const chapterIdxMap = {}
+  activeSlides.forEach((s, i) => {
+    if (chapterIdxMap[s.chapter] === undefined) chapterIdxMap[s.chapter] = i
+  })
+  const chapters = [...new Set(activeSlides.map(s => s.chapter))]
+  function next() {
+    if (idx < activeSlides.length - 1) setIdx(idx + 1)
+    else onClose()
+  }
+  function prev() { if (idx > 0) setIdx(idx - 1) }
+  const embed = toEmbedUrl(slide.video_url)
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:10100, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px', background:'rgba(26,46,43,0.55)' }}>
+      <div style={{ background:'white', borderRadius:'18px', width:'80vw', maxWidth:'1200px', maxHeight:'90vh', display:'flex', flexDirection:'column', boxShadow:'0 24px 80px rgba(0,0,0,0.25)', overflow:'hidden', fontFamily:'"DM Sans",system-ui,sans-serif' }}>
+        <div style={{ background:slide.color, padding:'18px 20px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px' }}>
+          <select value={slide.chapter} onChange={e => setIdx(chapterIdxMap[e.target.value])} style={{ fontSize:'11px', color:'white', background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:'6px', padding:'4px 8px', fontFamily:'inherit', fontWeight:600, cursor:'pointer', outline:'none' }}>
+            {chapters.map((c, i) => (
+              <option key={c} value={c} style={{ background:'white', color:'#1a2e2b' }}>{`${i+1} of ${chapters.length} — ${c}`}</option>
+            ))}
+          </select>
+          <button onClick={onClose} style={{ background:'none', border:'none', color:'rgba(255,255,255,0.85)', cursor:'pointer', fontSize:'22px', padding:0, lineHeight:1, fontFamily:'inherit' }}>×</button>
+        </div>
+        <div style={{ padding:'24px 28px 16px', height:'70vh', overflowY:'auto', display:'flex', flexDirection:'column', alignItems:'center', textAlign:'center' }}>
+          <div style={{ fontSize:'48px', marginBottom:'10px' }}>{slide.icon}</div>
+          <h2 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'12px' }}>{slide.title}</h2>
+          {embed && (
+            <div style={{ position:'relative', width:'100%', maxWidth:'900px', paddingBottom:'56.25%', height:0, marginBottom:'18px', borderRadius:'10px', overflow:'hidden', background:'#000' }}>
+              <iframe
+                src={embed}
+                style={{ position:'absolute', top:0, left:0, width:'100%', height:'100%', border:0 }}
+                allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
+                allowFullScreen
+                title={slide.title || 'Video'}
+              />
+            </div>
+          )}
+          {slide.body && (
+            <p style={{ fontSize:'14px', color:'#4a5e5a', lineHeight:1.65, marginBottom:'16px', maxWidth:'780px' }}>{slide.body}</p>
+          )}
+          {((slide.screenshots && slide.screenshots.length > 0) ? slide.screenshots : (slide.screenshot ? [slide.screenshot] : [])).map((src, si) => (
+            <img key={si} src={src} alt="" style={{ maxWidth:'100%', borderRadius:'10px', marginBottom:'10px', border:'1px solid rgba(0,0,0,0.06)', display:'block' }} />
+          ))}
+          {slide.bullets && slide.bullets.length > 0 && (
+            <ul style={{ listStyle:'none', padding:0, margin:0, textAlign:'left', display:'flex', flexDirection:'column', gap:'8px', width:'100%', maxWidth:'780px' }}>
+              {slide.bullets.map((b, i) => (
+                <li key={i} style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.55, paddingLeft:'18px', position:'relative' }}>
+                  <span style={{ position:'absolute', left:0, color:slide.color, fontWeight:700 }}>·</span>
+                  {b}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div style={{ padding:'10px 20px', display:'flex', justifyContent:'center', gap:'5px', flexWrap:'wrap' }}>
+          {activeSlides.map((_, i) => (
+            <button key={i} onClick={() => setIdx(i)} style={{ width:i===idx?'18px':'6px', height:'6px', borderRadius:'3px', background:i===idx?slide.color:'rgba(0,0,0,0.12)', cursor:'pointer', border:'none', padding:0, transition:'all 0.2s' }} />
+          ))}
+        </div>
+        <div style={{ padding:'14px 20px 18px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', alignItems:'center', justifyContent:'flex-end', gap:'10px' }}>
+          <div style={{ display:'flex', gap:'8px' }}>
+            {idx > 0 && (
+              <button onClick={prev} style={{ padding:'8px 14px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:'pointer' }}>← Back</button>
+            )}
+            <button onClick={next} style={{ padding:'8px 16px', background:slide.color, border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>{idx === activeSlides.length - 1 ? 'Done' : 'Next →'}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ManualEditor({ slides: propSlides, onPersist }) {
+  const [slides, setSlides] = useState(() => Array.isArray(propSlides) ? propSlides : [])
+  const [editing, setEditing] = useState(null)
+  const [justSaved, setJustSaved] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState(null)
+
+  async function persist(newSlides) {
+    setSlides(newSlides)
+    setSaveError(null)
+    if (!onPersist) {
+      setJustSaved(true); setTimeout(() => setJustSaved(false), 1800)
+      return
+    }
+    setSaving(true)
+    try {
+      await onPersist(newSlides)
+      setJustSaved(true); setTimeout(() => setJustSaved(false), 1800)
+    } catch (e) {
+      console.error('[ManualEditor] save failed:', e)
+      setSaveError(e?.message || 'Save failed — check console')
+    } finally {
+      setSaving(false)
+    }
+  }
+  function moveSlide(i, dir) {
+    const j = i + dir
+    if (j < 0 || j >= slides.length) return
+    const s = [...slides]
+    ;[s[i], s[j]] = [s[j], s[i]]
+    persist(s)
+  }
+  function deleteSlide(i) {
+    if (!confirm('Delete this slide?')) return
+    persist(slides.filter((_, idx) => idx !== i))
+    if (editing === i) setEditing(null)
+  }
+  function saveEdit(slide) {
+    if (editing === 'new') {
+      persist([...slides, slide])
+    } else if (editing && typeof editing === 'object' && editing.mode === 'newInChapter') {
+      const s = [...slides]
+      s.splice(editing.insertAfter + 1, 0, slide)
+      persist(s)
+    } else if (editing && typeof editing === 'object' && editing.mode === 'newChapter') {
+      persist([...slides, slide])
+    } else {
+      const s = [...slides]
+      s[editing] = slide
+      persist(s)
+    }
+    setEditing(null)
+  }
+  function retrySave() { persist(slides) }
+
+  const editingSlide =
+    editing === 'new'
+      ? { chapter:'', icon:'📚', title:'', color:'#1a2e2b', body:'', bullets:[''], screenshots:[], video_url:'' }
+      : (editing && typeof editing === 'object' && editing.mode === 'newInChapter')
+        ? { chapter:editing.chapter||'', icon:'📚', title:'', color: slides.find(s => s.chapter === editing.chapter)?.color || '#1a2e2b', body:'', bullets:[''], screenshots:[], video_url:'' }
+        : (editing && typeof editing === 'object' && editing.mode === 'newChapter')
+          ? { chapter:'', icon:'📚', title:'', color:'#d4a046', body:'', bullets:[''], screenshots:[], video_url:'' }
+          : (editing !== null && typeof editing === 'number')
+            ? slides[editing]
+            : null
+
+  const isEmpty = slides.length === 0
+
+  return (
+    <div style={{ padding:'1.25rem', display:'grid', gap:'12px' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'8px' }}>
+        <div>
+          <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>📚 Manual Editor</h2>
+          <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>{`${slides.length} slide${slides.length===1?'':'s'}`}</p>
+        </div>
+        <div style={{ display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap' }}>
+          {saving && <span style={{ fontSize:'11px', color:'#6366f1', fontWeight:600 }}>Saving…</span>}
+          {!saving && justSaved && <span style={{ fontSize:'11px', color:'#10b981', fontWeight:600 }}>✓ Saved · just now</span>}
+          {!isEmpty && (
+            <button onClick={() => setPreviewOpen(true)} style={{ padding:'6px 10px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>👁 Preview</button>
+          )}
+          <button onClick={() => setEditing('new')} style={{ padding:'6px 12px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>+ Add slide</button>
+        </div>
+      </div>
+
+      {saveError && (
+        <div style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'10px', padding:'10px 12px', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px' }}>
+          <p style={{ fontSize:'12px', color:'#b91c1c', flex:1, margin:0 }}>
+            <strong>Save failed:</strong> {saveError}
+            <br />
+            <span style={{ fontSize:'11px', opacity:0.85 }}>Your edits are preserved locally. Retry or reload to discard.</span>
+          </p>
+          <button onClick={retrySave} disabled={saving} style={{ padding:'6px 12px', background:'#b91c1c', border:'none', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:saving?'not-allowed':'pointer', opacity:saving?0.5:1 }}>Retry</button>
+        </div>
+      )}
+
+      {isEmpty ? (
+        <div style={{ background:'white', border:'1px dashed rgba(0,0,0,0.15)', borderRadius:'12px', padding:'32px 16px', textAlign:'center' }}>
+          <div style={{ fontSize:'36px', marginBottom:'8px' }}>📚</div>
+          <p style={{ fontSize:'13px', color:'#4a5e5a', marginBottom:'14px' }}>Build your manual &mdash; slides appear here as you add them</p>
+          <button onClick={() => setEditing('new')} style={{ padding:'8px 16px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>+ Add slide</button>
+        </div>
+      ) : (
+        <div style={{ background:'white', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'12px', overflow:'hidden' }}>
+          {(() => {
+            const groups = []
+            let cur = null
+            slides.forEach((s, idx) => {
+              if (s.chapter !== cur) { groups.push({ chapter: s.chapter, items: [] }); cur = s.chapter }
+              groups[groups.length - 1].items.push({ slide: s, idx })
+            })
+            const elements = groups.map((g, gi) => (
+              <div key={'g'+gi} style={{ borderTop: gi > 0 ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
+                <div style={{ padding:'8px 12px', background:'rgba(168,201,196,0.10)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:'10px', fontWeight:700, color:'#1a2e2b', textTransform:'uppercase', letterSpacing:'0.6px' }}>{g.chapter || '(no chapter)'}</span>
+                  <button
+                    onClick={() => {
+                      const lastIdx = g.items[g.items.length - 1].idx
+                      setEditing({ mode:'newInChapter', chapter:g.chapter, insertAfter:lastIdx })
+                    }}
+                    style={{ background:'none', border:'none', fontSize:'10px', color:'#1a2e2b', fontWeight:600, cursor:'pointer', fontFamily:'inherit', padding:0 }}
+                  >+ Add slide</button>
+                </div>
+                {g.items.map(({ slide: s, idx: i }) => (
+                  <div key={i} style={{ padding:'10px 12px', display:'flex', alignItems:'center', gap:'10px', borderTop:'1px solid rgba(0,0,0,0.04)' }}>
+                    <span style={{ fontSize:'10px', color:'#b0c0bc', fontWeight:700, width:'18px', textAlign:'center', flexShrink:0 }}>{i + 1}</span>
+                    <div style={{ width:'4px', height:'28px', background:s.color, borderRadius:'2px', flexShrink:0 }} />
+                    <span style={{ fontSize:'18px', flexShrink:0 }}>{s.icon}</span>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.title}</p>
+                      <p style={{ fontSize:'9px', color:'#a8c9c4', marginTop:'1px' }}>
+                        {s.video_url ? '🎬 video · ' : ''}
+                        {((s.screenshots && s.screenshots.length > 0) || s.screenshot)
+                          ? `🖼 ${(s.screenshots && s.screenshots.length) || 1} image${(((s.screenshots && s.screenshots.length) || 1) > 1 ? 's' : '')}`
+                          : ''}
+                      </p>
+                    </div>
+                    <div style={{ display:'flex', gap:'2px', flexShrink:0 }}>
+                      <button onClick={() => moveSlide(i, -1)} disabled={i === 0} style={{ background:'none', border:'none', padding:'4px 6px', cursor:i===0?'not-allowed':'pointer', opacity:i===0?0.25:0.65, fontSize:'13px', fontFamily:'inherit' }}>↑</button>
+                      <button onClick={() => moveSlide(i, 1)} disabled={i === slides.length - 1} style={{ background:'none', border:'none', padding:'4px 6px', cursor:i===slides.length-1?'not-allowed':'pointer', opacity:i===slides.length-1?0.25:0.65, fontSize:'13px', fontFamily:'inherit' }}>↓</button>
+                      <button onClick={() => setEditing(i)} style={{ background:'none', border:'none', padding:'4px 6px', cursor:'pointer', opacity:0.65, fontSize:'12px', fontFamily:'inherit' }}>✏️</button>
+                      <button onClick={() => deleteSlide(i)} style={{ background:'none', border:'none', padding:'4px 6px', cursor:'pointer', opacity:0.65, fontSize:'13px', fontFamily:'inherit', color:'#ef4444' }}>×</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))
+            elements.push(
+              <div key="addCh" style={{ padding:'10px 12px', borderTop:'1px dashed rgba(0,0,0,0.10)', textAlign:'center' }}>
+                <button onClick={() => setEditing({ mode:'newChapter' })} style={{ background:'none', border:'none', fontSize:'11px', color:'#1a2e2b', fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>+ New chapter</button>
+              </div>
+            )
+            return elements
+          })()}
+        </div>
+      )}
+
+      {editingSlide && (
+        <SlideEditFormManual
+          slide={editingSlide}
+          isNew={editing === 'new' || (editing && typeof editing === 'object')}
+          onSave={saveEdit}
+          onCancel={() => setEditing(null)}
+          allChapters={[...new Set(slides.map(s => s.chapter).filter(Boolean))]}
+        />
+      )}
+
+      {previewOpen && (
+        <ManualModal
+          open={true}
+          onClose={() => setPreviewOpen(false)}
+          slides={slides}
+        />
+      )}
+    </div>
+  )
+}
+
+function SlideEditFormManual({ slide, isNew, onSave, onCancel, allChapters = [] }) {
+  const [chapter, setChapter] = useState(slide.chapter || '')
+  const hasExisting = allChapters.length > 0
+  const initialMode =
+    slide.chapter && allChapters.includes(slide.chapter)
+      ? 'existing'
+      : (hasExisting && !slide.chapter)
+        ? 'existing'
+        : 'new'
+  const [chapterMode, setChapterMode] = useState(initialMode)
+  const [icon, setIcon] = useState(slide.icon || '📚')
+  const [title, setTitle] = useState(slide.title || '')
+  const [color, setColor] = useState(slide.color || '#1a2e2b')
+  const [body, setBody] = useState(slide.body || '')
+  const [bullets, setBullets] = useState(slide.bullets && slide.bullets.length ? slide.bullets : [''])
+  const [screenshots, setScreenshots] = useState(() => {
+    if (slide.screenshots && slide.screenshots.length) return slide.screenshots
+    if (slide.screenshot) return [slide.screenshot]
+    return []
+  })
+  const [videoUrl, setVideoUrl] = useState(slide.video_url || '')
+  const [videoError, setVideoError] = useState(null)
+
+  useEffect(() => {
+    const scrollY = window.scrollY
+    const b = document.body
+    const h = document.documentElement
+    const prev = { pos:b.style.position, top:b.style.top, width:b.style.width, bo:b.style.overflow, ho:h.style.overflow }
+    b.style.position = 'fixed'
+    b.style.top = `-${scrollY}px`
+    b.style.width = '100%'
+    b.style.overflow = 'hidden'
+    h.style.overflow = 'hidden'
+    return () => {
+      b.style.position = prev.pos
+      b.style.top = prev.top
+      b.style.width = prev.width
+      b.style.overflow = prev.bo
+      h.style.overflow = prev.ho
+      window.scrollTo(0, scrollY)
+    }
+  }, [])
+
+  function validateVideoOnBlur() {
+    const v = (videoUrl || '').trim()
+    if (!v) { setVideoError(null); return }
+    setVideoError(toEmbedUrl(v) ? null : 'Not a recognized YouTube, Vimeo, or Loom URL')
+  }
+
+  function save() {
+    const finalChapter = (chapter || '').trim() || 'Untitled'
+    const v = (videoUrl || '').trim()
+    if (v && !toEmbedUrl(v)) {
+      setVideoError('Not a recognized YouTube, Vimeo, or Loom URL')
+      return
+    }
+    onSave({
+      chapter: finalChapter,
+      icon, title, color, body,
+      bullets: bullets.filter(b => b.trim()),
+      screenshots,
+      screenshot: screenshots[0] || null,
+      video_url: v || null,
+    })
+  }
+  function updateBullet(i, v) { const next = [...bullets]; next[i] = v; setBullets(next) }
+  function addBullet() { setBullets([...bullets, '']) }
+  function removeBullet(i) { setBullets(bullets.filter((_, idx) => idx !== i)) }
+  function onScreenshotsChange(e) {
+    const files = Array.from(e.target.files || [])
+    if (!files.length) return
+    Promise.all(files.map(f => new Promise(res => {
+      const r = new FileReader()
+      r.onload = ev => res(ev.target.result)
+      r.readAsDataURL(f)
+    }))).then(urls => { setScreenshots(prev => [...prev, ...urls]) })
+    e.target.value = ''
+  }
+  function removeScreenshot(i) { setScreenshots(screenshots.filter((_, idx) => idx !== i)) }
+  function moveScreenshot(i, dir) {
+    const j = i + dir
+    if (j < 0 || j >= screenshots.length) return
+    const s = [...screenshots]
+    ;[s[i], s[j]] = [s[j], s[i]]
+    setScreenshots(s)
+  }
+
+  const inp = { width:'100%', padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', background:'white' }
+  const lbl = { fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px', display:'block' }
+  const isCustomColor = !CHAPTER_COLORS.find(cc => cc.value === color)
+  const canSave = !!title.trim() && !!(chapter || '').trim() && !videoError
+
+  return (
+    <div onClick={onCancel} style={{ position:'fixed', inset:0, zIndex:10110, display:'flex', alignItems:'flex-end', justifyContent:'center', padding:0, background:'rgba(26,46,43,0.45)' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background:'white', borderRadius:'20px 20px 0 0', width:'100%', maxWidth:'520px', maxHeight:'90vh', display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(0,0,0,0.2)' }}>
+        <div style={{ padding:'16px 18px 12px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <h2 style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{isNew ? 'Add Manual Slide' : 'Edit Manual Slide'}</h2>
+          <button onClick={onCancel} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', padding:0, lineHeight:1, fontFamily:'inherit' }}>×</button>
+        </div>
+
+        <div style={{ padding:'14px 18px', overflowY:'auto', overscrollBehavior:'contain', flex:1, display:'grid', gap:'12px' }}>
+          <div>
+            <label style={lbl}>Chapter</label>
+            <div style={{ display:'flex', gap:'6px', marginBottom:'6px' }}>
+              <button type="button" disabled={!hasExisting} onClick={() => { setChapterMode('existing'); if (allChapters.length && !allChapters.includes(chapter)) setChapter(allChapters[0]) }} style={{ flex:1, padding:'6px 8px', fontSize:'11px', fontWeight:600, fontFamily:'inherit', border:'1.5px solid ' + (chapterMode === 'existing' ? '#1a2e2b' : 'rgba(0,0,0,0.1)'), background:chapterMode === 'existing' ? '#1a2e2b' : 'white', color:chapterMode === 'existing' ? 'white' : (hasExisting ? '#4a5e5a' : '#b0c0bc'), borderRadius:'8px', cursor:hasExisting ? 'pointer' : 'not-allowed' }}>Existing chapter</button>
+              <button type="button" onClick={() => { setChapterMode('new'); setChapter('') }} style={{ flex:1, padding:'6px 8px', fontSize:'11px', fontWeight:600, fontFamily:'inherit', border:'1.5px solid ' + (chapterMode === 'new' ? '#1a2e2b' : 'rgba(0,0,0,0.1)'), background:chapterMode === 'new' ? '#1a2e2b' : 'white', color:chapterMode === 'new' ? 'white' : '#4a5e5a', borderRadius:'8px', cursor:'pointer' }}>+ New chapter</button>
+            </div>
+            {chapterMode === 'existing' && hasExisting ? (
+              <select value={allChapters.includes(chapter) ? chapter : allChapters[0]} onChange={e => setChapter(e.target.value)} style={inp}>
+                {allChapters.map(ch => <option key={ch} value={ch}>{ch}</option>)}
+              </select>
+            ) : (
+              <input type="text" value={chapter} onChange={e => setChapter(e.target.value)} placeholder="New chapter name" autoFocus style={inp} />
+            )}
+          </div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'80px 1fr', gap:'10px' }}>
+            <div>
+              <label style={lbl}>Icon</label>
+              <input type="text" value={icon} onChange={e => setIcon(e.target.value)} maxLength={4} style={{ ...inp, textAlign:'center', fontSize:'20px', padding:'4px' }} />
+            </div>
+            <div>
+              <label style={lbl}>Title</label>
+              <input type="text" value={title} onChange={e => setTitle(e.target.value)} style={inp} />
+            </div>
+          </div>
+
+          <div>
+            <label style={lbl}>Accent color</label>
+            <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+              {CHAPTER_COLORS.map(col => (
+                <button key={col.value} type="button" onClick={() => setColor(col.value)} title={col.label} style={{ width:'30px', height:'30px', borderRadius:'8px', background:col.value, border: color === col.value ? '3px solid #d4a046' : '1.5px solid rgba(0,0,0,0.1)', cursor:'pointer', padding:0, boxShadow: color === col.value ? '0 0 0 2px white inset' : 'none' }} />
+              ))}
+              <label title="Custom color" style={{ width:'30px', height:'30px', borderRadius:'8px', border: isCustomColor ? '3px solid #d4a046' : '1.5px dashed rgba(0,0,0,0.3)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', position:'relative', overflow:'hidden', background: isCustomColor ? color : 'conic-gradient(from 0deg,#ef4444,#f59e0b,#eab308,#22c55e,#06b6d4,#3b82f6,#a855f7,#ec4899,#ef4444)' }}>
+                <input type="color" value={color} onChange={e => setColor(e.target.value)} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer', border:'none' }} />
+                {isCustomColor ? null : <span style={{ fontSize:'10px', fontWeight:700, color:'white', mixBlendMode:'difference' }}>+</span>}
+              </label>
+              <input type="text" value={color} maxLength={7} onChange={e => {
+                let v = e.target.value.trim()
+                if (v && !v.startsWith('#')) v = '#' + v
+                if (/^#[0-9a-fA-F]{0,6}$/.test(v)) setColor(v)
+              }} placeholder="#hex" style={{ width:'90px', padding:'7px 8px', fontSize:'12px', fontFamily:'JetBrains Mono,Menlo,monospace', color:'#1a2e2b', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', outline:'none', background:'white', textTransform:'uppercase', letterSpacing:'0.05em' }} />
+            </div>
+          </div>
+
+          <div>
+            <label style={lbl}>Video URL (optional)</label>
+            <input
+              type="text"
+              value={videoUrl}
+              onChange={e => { setVideoUrl(e.target.value); if (videoError) setVideoError(null) }}
+              onBlur={validateVideoOnBlur}
+              placeholder="https://youtube.com/watch?v=... or Loom/Vimeo URL"
+              style={{ ...inp, borderColor: videoError ? '#ef4444' : 'rgba(0,0,0,0.1)' }}
+            />
+            {videoError && (
+              <p style={{ fontSize:'11px', color:'#b91c1c', marginTop:'4px' }}>{videoError}</p>
+            )}
+          </div>
+
+          <div>
+            <label style={lbl}>Body</label>
+            <textarea value={body} onChange={e => setBody(e.target.value)} rows={3} style={{ ...inp, resize:'vertical', fontFamily:'inherit', lineHeight:1.5 }} />
+          </div>
+
+          <div>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'5px' }}>
+              <label style={lbl}>Bullets</label>
+              <button type="button" onClick={addBullet} style={{ background:'none', border:'none', fontSize:'11px', color:'#1a2e2b', fontWeight:600, cursor:'pointer', padding:0, fontFamily:'inherit' }}>+ Add</button>
+            </div>
+            {bullets.map((b, i) => (
+              <div key={i} style={{ display:'flex', gap:'6px', marginBottom:'4px' }}>
+                <input type="text" value={b} onChange={e => updateBullet(i, e.target.value)} placeholder="Bullet point" style={inp} />
+                <button type="button" onClick={() => removeBullet(i)} disabled={bullets.length === 1} style={{ background:'none', border:'none', color:'#8a9e9a', fontSize:'14px', cursor:bullets.length===1?'not-allowed':'pointer', padding:'4px 6px', opacity:bullets.length===1?0.3:1, fontFamily:'inherit' }}>×</button>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'5px' }}>
+              <label style={lbl}>{`Screenshots (${screenshots.length})`}</label>
+              <label htmlFor="manual-screens" style={{ background:'none', border:'none', fontSize:'11px', color:'#1a2e2b', fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>+ Add image(s)</label>
+              <input id="manual-screens" type="file" accept="image/*" multiple onChange={onScreenshotsChange} style={{ display:'none' }} />
+            </div>
+            {screenshots.length === 0 && (
+              <p style={{ fontSize:'11px', color:'#b0c0bc', textAlign:'center', padding:'12px', border:'1.5px dashed rgba(0,0,0,0.08)', borderRadius:'8px' }}>No screenshots yet</p>
+            )}
+            {screenshots.map((url, i) => (
+              <div key={i} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'6px', background:'rgba(168,201,196,0.08)', borderRadius:'8px', marginBottom:'4px' }}>
+                <img src={url} alt="" style={{ width:'48px', height:'36px', objectFit:'cover', borderRadius:'4px', flexShrink:0 }} />
+                <span style={{ flex:1, fontSize:'11px', color:'#4a5e5a' }}>{`Image ${i+1}`}</span>
+                <button type="button" onClick={() => moveScreenshot(i, -1)} disabled={i === 0} style={{ background:'none', border:'none', padding:'2px 6px', cursor:i===0?'not-allowed':'pointer', opacity:i===0?0.25:0.65, fontSize:'12px', fontFamily:'inherit' }}>↑</button>
+                <button type="button" onClick={() => moveScreenshot(i, 1)} disabled={i === screenshots.length - 1} style={{ background:'none', border:'none', padding:'2px 6px', cursor:i===screenshots.length-1?'not-allowed':'pointer', opacity:i===screenshots.length-1?0.25:0.65, fontSize:'12px', fontFamily:'inherit' }}>↓</button>
+                <button type="button" onClick={() => removeScreenshot(i)} style={{ background:'none', border:'none', color:'#ef4444', fontSize:'14px', cursor:'pointer', padding:'2px 6px', fontFamily:'inherit' }}>×</button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ padding:'12px 18px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px', justifyContent:'flex-end' }}>
+          <button onClick={onCancel} style={{ padding:'7px 14px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer', fontWeight:600 }}>Cancel</button>
+          <button onClick={save} disabled={!canSave} style={{ padding:'7px 16px', background: !canSave ? '#a8c9c4' : '#1a2e2b', color:'white', border:'none', borderRadius:'8px', fontSize:'12px', fontWeight:600, fontFamily:'inherit', cursor: !canSave ? 'not-allowed' : 'pointer' }}>{isNew ? 'Add slide' : 'Save'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, onStatusChange, users=USERS_DATA, setUsers=()=>{}, people=[], setPeople=()=>{}, partners=[], setPartners=()=>{}, guideSlides=[], setGuideSlides=()=>{}, manualSlides=[], setManualSlides=()=>{}, initialLocations=null }) {
   const [adminTab, setAdminTab]   = useState('locations')
   // Real Supabase locations when provided by App (super_admin/corporate
   // sign-ins via page.tsx fetch); falls back to mock for view-as flows
@@ -16227,7 +16740,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
 
           {/* Sub-tabs */}
           <div style={{ display:'flex', gap:'4px', background:'rgba(0,0,0,0.15)', borderRadius:'10px', padding:'3px', marginTop:'4px' }}>
-            {[{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'guide',label:'📖 Guide'}]:[]),...(role==='super_admin'?[{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])].map(t=>(
+            {[{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'guide',label:'📖 Guide'},{key:'manual',label:'📚 Manual'}]:[]),...(role==='super_admin'?[{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])].map(t=>(
               <button key={t.key} onClick={()=>{ setAdminTab(t.key); setSearch('') }} style={{ flex:1, padding:'7px', borderRadius:'8px', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', fontWeight:adminTab===t.key?600:400, background:adminTab===t.key?'white':'transparent', color:adminTab===t.key?'#1a2e2b':'rgba(168,201,196,0.7)' }}>
                 {t.label}
               </button>
@@ -16296,6 +16809,22 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
                 throw new Error(err.error || `HTTP ${res.status}`)
               }
               setGuideSlides(newSlides)
+            }}
+          />
+        ) : adminTab==='manual' ? (
+          <ManualEditor
+            slides={manualSlides}
+            onPersist={async newSlides => {
+              const res = await fetch('/api/manual-slides', {
+                method:'POST',
+                headers:{ 'Content-Type':'application/json' },
+                body: JSON.stringify({ slides: newSlides }),
+              })
+              if (!res.ok) {
+                const err = await res.json().catch(() => ({}))
+                throw new Error(err.error || `HTTP ${res.status}`)
+              }
+              setManualSlides(newSlides)
             }}
           />
         ) : adminTab==='pricing' ? (
@@ -17030,6 +17559,7 @@ export default function App({
   initialFranchiseRole,
   initialLocFilter,
   initialGuideSlides,        // server-rendered slides from page.tsx (Supabase guide_slides table)
+  initialManualSlides,       // server-rendered manual slides from page.tsx (Supabase manual_slides table)
   initialLocations,          // accepted; not yet consumed — ALL_LOCATIONS mock still drives the picker
   initialUsers,              // real hub_users roster from Supabase; null → fall back to USERS_DATA mock
   currentSubscription,
@@ -17047,6 +17577,9 @@ export default function App({
     } catch (e) { /* private mode / disabled storage */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  // Hive Hub Manual: reference-only, never auto-opens, no dismiss flag.
+  const [manualSlides, setManualSlides]     = useState(Array.isArray(initialManualSlides) ? initialManualSlides : [])
+  const [showManual, setShowManual]         = useState(false)
   const [franchiseRole, setFranchiseRole]   = useState(initialFranchiseRole ?? 'owner') // owner|manager|light|readonly
   const [activeNav, setActiveNav]           = useState('home')
   const [viewAsTarget, setViewAsTarget]     = useState(null)
@@ -17112,12 +17645,15 @@ export default function App({
   }
 
   // ── Nav ────────────────────────────────────────────────────────────────────
+  // `action:'openManual'` is a soft route — sidebar/bottom-nav buttons call
+  // setShowManual(true) instead of nav(key). No activeNav highlight either.
   const navItems = [
     { key:'home',     icon:'🏠', label:'Home'    },
     { key:'hive',     icon:'🐝', label:'Clients'    },
     { key:'partners', icon:'👥', label:'Contacts'},
     { key:'reports',  icon:'📊', label:'Reports' },
     { key:'settings', icon:'⚙️', label:'Settings'},
+    { key:'manual',   icon:'📚', label:'Manual',  action:'openManual' },
     ...(isElevated ? [{ key:'admin', icon:'🏢', label:role==='super_admin'?'Admin':'Corp' }] : []),
   ]
 
@@ -17265,7 +17801,7 @@ export default function App({
           {navItems.map(item=>{
             const isLocked = (isOnboardingState && item.key!=='home' && item.key!=='settings') || (item.key==='reports' && !['super_admin','corporate','franchise'].includes(role))
             return (
-              <button key={item.key} onClick={()=>!isLocked&&nav(item.key)} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'3px', padding:'4px 8px', background:'none', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', opacity:isLocked?0.25:1 }}>
+              <button key={item.key} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'3px', padding:'4px 8px', background:'none', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', opacity:isLocked?0.25:1 }}>
                 <span style={{ fontSize:'20px', lineHeight:1 }}>{item.icon}</span>
                 <span style={{ fontSize:'9px', color:activeNav===item.key?'#a8c9c4':'rgba(168,201,196,0.45)', fontWeight:activeNav===item.key?600:400 }}>{item.label}</span>
               </button>
@@ -17303,6 +17839,8 @@ export default function App({
           setPartners={setPartners}
           guideSlides={guideSlides}
           setGuideSlides={setGuideSlides}
+          manualSlides={manualSlides}
+          setManualSlides={setManualSlides}
           initialLocations={initialLocations}
         />
       </div>
@@ -17318,7 +17856,7 @@ export default function App({
             </p>
           </div>
         )}
-        {(!isElevated||locFilter!=='all')&&<SettingsScreen onStatusChange={()=>{}} selectedLoc={selectedLoc} locationId={viewAsUser?.locationId || (locFilter==='all'?'loc_kc':locFilter)} franchiseRole={franchiseRole} isSuperAdmin={role==='super_admin'&&!viewAsUser} onboardingData={onboardingData} />}
+        {(!isElevated||locFilter!=='all')&&<SettingsScreen onStatusChange={()=>{}} selectedLoc={selectedLoc} locationId={viewAsUser?.locationId || (locFilter==='all'?'loc_kc':locFilter)} franchiseRole={franchiseRole} isSuperAdmin={role==='super_admin'&&!viewAsUser} onboardingData={onboardingData} onOpenManual={()=>setShowManual(true)} />}
       </div>
     )
     if (activeNav==='hive') return (
@@ -17441,6 +17979,11 @@ export default function App({
           slides={guideSlides}
         />
       )}
+      <ManualModal
+        slides={manualSlides}
+        open={showManual}
+        onClose={() => setShowManual(false)}
+      />
       <LocPickerDropdown />
 
       {/* Sidebar nav - desktop only */}
@@ -17469,7 +18012,7 @@ export default function App({
             const isLocked = (isOnboardingState && item.key!=='home' && item.key!=='settings') || isReports || isSettings || isPartners
             const isActive = activeNav===item.key
             return (
-              <button key={item.key} onClick={()=>!isLocked&&nav(item.key)} style={{ width:'100%', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left', background:isActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>
+              <button key={item.key} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ width:'100%', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left', background:isActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>
                 <span style={{ fontSize:'18px', lineHeight:1, flexShrink:0 }}>{item.icon}</span>
                 <span style={{ fontSize:'13px', fontWeight:isActive?600:400, color:isActive?'#a8c9c4':'rgba(168,201,196,0.6)' }}>{item.label}</span>
                 {isActive&&<div style={{ marginLeft:'auto', width:'4px', height:'4px', borderRadius:'50%', background:'#a8c9c4' }} />}
