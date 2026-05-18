@@ -5752,6 +5752,14 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
         <div style={{ background:BRAND.cream, borderRadius:'20px 20px 0 0', padding:'1.25rem 1.25rem 6rem', minHeight:'calc(100vh - 80px)' }}>
           {(payStep==='pricing'||payStep==='method')&&(
             <>
+              {/* Tier reference — rendered at the top of the pay step for both
+                 pricing and method sub-steps across all three payment_source
+                 variants (direct / prepaid / sponsored, which all render through
+                 SubscriptionCalculator below). */}
+              <div style={{ borderBottom:'1px solid #e5e7eb', marginBottom:'24px', paddingBottom:'24px' }}>
+                <h2 style={{ fontSize:'16px', fontWeight:600, color:'#1a2e2b', marginBottom:'12px' }}>What's included at each tier</h2>
+                <TierPlansInline />
+              </div>
               <div style={{ marginBottom:'16px' }}>
                 <SubscriptionCalculator
                   initialSeats={selectedSeats}
@@ -5779,13 +5787,6 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
               )}
               {payStep==='pricing'&&<button onClick={()=>setPayStep('method')} style={{ width:'100%', padding:'15px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', marginBottom:'10px' }}>Activate for ${proration.prorated} →</button>}
               {showSmsModal&&<SmsVoiceInfoModal onClose={()=>setShowSmsModal(false)} />}
-              {/* Tier reference — rendered for both pricing and method sub-steps
-                 across all three payment_source variants (direct / prepaid / sponsored,
-                 which all render through SubscriptionCalculator above). */}
-              <div style={{ borderTop:'1px solid #e5e7eb', marginTop:'32px', paddingTop:'24px' }}>
-                <h2 style={{ fontSize:'16px', fontWeight:600, color:'#1a2e2b', marginBottom:'12px' }}>What's included at each tier</h2>
-                <TierPlansInline />
-              </div>
               {payStep==='method'&&(
                 <>
                   <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'10px' }}>Choose payment method</p>
@@ -13078,141 +13079,156 @@ function SubscriptionCalculator({
         ? `Prepaid through ${renewalLabel}`
         : 'Sponsored by corporate during testing'
 
-  return (
-    <div style={{ display:'grid', gap:'12px' }}>
-      {/* Cost summary card — moved above seat config so Due Today is prominent at top of onboarding pay step */}
-      <div style={{ borderRadius:'14px', overflow:'hidden', boxShadow:'0 2px 16px rgba(26,46,43,0.08)', border:'1px solid rgba(168,201,196,0.2)' }}>
-        <div style={{ background:'linear-gradient(135deg,#1a2e2b,#2a4a40)', padding:'16px 18px', color:'white' }}>
-          <p style={{ fontSize:'10.5px', color:'rgba(168,201,196,0.65)', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'6px', fontWeight:600 }}>
-            {display.mode === 'direct' ? 'Due Today' : display.mode === 'prepaid' ? 'Due Today (Prepaid)' : 'Due Today (Sponsored)'}
-          </p>
-          <p style={{ fontSize:'34px', fontWeight:700, fontFamily:'Georgia,serif', lineHeight:1, marginBottom:'6px' }}>
-            {heroNumber}
-          </p>
-          <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.85)' }}>
-            {heroSub}
-          </p>
-        </div>
-
-        {/* Detail breakdown */}
-        <div style={{ background:'white', padding:'14px 16px' }}>
-          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>
-            Breakdown
-          </p>
-          <div style={{ display:'grid', gap:'6px', marginBottom:'10px' }}>
-            {SUBSCRIPTION_TIER_META.map(t => {
-              const count = getCount(t.key)
-              if (count <= 0) return null
-              const price = TIER_PRICES[t.key]
-              const subtotal = price * count
-              return (
-                <div key={t.key} style={{ display:'flex', alignItems:'baseline', gap:'6px', fontSize:'12.5px', color:'#4a5e5a' }}>
-                  <span style={{ fontSize:'13px', lineHeight:1 }}>{t.icon}</span>
-                  <span style={{ flex:1 }}>
-                    {count} {t.name}{count !== 1 ? 's' : ''} × {formatCurrency(price, { showCents:'never' })}/yr
-                  </span>
-                  <span style={{ fontWeight:600, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
-                    {formatCurrency(subtotal, { showCents:'never' })}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-          <div style={{ borderTop:'1px solid rgba(0,0,0,0.08)', paddingTop:'8px', display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'6px' }}>
-            <span style={{ fontSize:'12px', color:'#4a5e5a', fontWeight:600 }}>Annual total</span>
-            <span style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
-              {formatCurrency(display.annual, { showCents:'never' })}
-            </span>
-          </div>
-          {display.mode === 'direct' && (
-            <>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', padding:'6px 8px', background:'rgba(212,160,70,0.08)', border:'1px solid rgba(212,160,70,0.2)', borderRadius:'8px', marginBottom:'8px' }}>
-                <span style={{ fontSize:'11px', color:'#b88820', fontWeight:600 }}>
-                  Prorated ({daysLeft} days)
-                </span>
-                <span style={{ fontSize:'13.5px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
-                  {formatCurrency(display.prorated)}
-                </span>
-              </div>
-              <p style={{ fontSize:'11px', color:'#8a9e9a', textAlign:'center' }}>
-                Renews {renewalLabel} at {formatCurrency(display.annual, { showCents:'never' })}/year
-              </p>
-            </>
-          )}
-          {display.mode === 'prepaid' && (
-            <p style={{ fontSize:'11px', color:'#4a5e5a', padding:'8px 10px', background:'rgba(99,102,241,0.06)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'8px' }}>
-              Prepaid by corporate through {renewalLabel}. No charge today.
-            </p>
-          )}
-          {display.mode === 'sponsored' && (
-            <>
-              <p style={{ fontSize:'11px', color:'#4a5e5a', padding:'8px 10px', background:'rgba(16,185,129,0.06)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:'8px' }}>
-                Corporate-sponsored during testing period. No charge today.
-              </p>
-              <div style={{ background:'#fef3c7', border:'1px solid #f59e0b', borderRadius:'8px', padding:'12px 14px', marginTop:'12px', fontSize:'13px', color:'#78350f', lineHeight:1.5 }}>
-                <strong>⚠️ Important:</strong> When testing concludes, you'll be responsible for a prorated subscription fee from that date through March 1, {nextRenewalDate().getUTCFullYear()}. Your normal annual renewal continues March 1 thereafter.
-              </div>
-            </>
-          )}
-        </div>
+  const costSummaryCard = (
+    <div style={{ borderRadius:'14px', overflow:'hidden', boxShadow:'0 2px 16px rgba(26,46,43,0.08)', border:'1px solid rgba(168,201,196,0.2)' }}>
+      <div style={{ background:'linear-gradient(135deg,#1a2e2b,#2a4a40)', padding:'16px 18px', color:'white' }}>
+        <p style={{ fontSize:'10.5px', color:'rgba(168,201,196,0.65)', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'6px', fontWeight:600 }}>
+          {display.mode === 'direct' ? 'Due Today' : display.mode === 'prepaid' ? 'Due Today (Prepaid)' : 'Due Today (Sponsored)'}
+        </p>
+        <p style={{ fontSize:'34px', fontWeight:700, fontFamily:'Georgia,serif', lineHeight:1, marginBottom:'6px' }}>
+          {heroNumber}
+        </p>
+        <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.85)' }}>
+          {heroSub}
+        </p>
       </div>
 
-      {/* Seat configuration block — moved below summary so Due Today reads first */}
-      {showSeatControls && (
-        <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', overflow:'hidden' }}>
-          <div style={{ padding:'12px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)', background:'rgba(26,46,43,0.03)' }}>
-            <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px' }}>
-              Configure Seats
-            </p>
-          </div>
-          <div style={{ display:'grid' }}>
-            {SUBSCRIPTION_TIER_META.map(t => {
-              const count = getCount(t.key)
-              const price = TIER_PRICES[t.key]
-              const subtotal = price * count
-              const minusDisabled = t.key === 'owner' ? count <= 1 : count <= 0
-              const plusDisabled = count >= 99
-              return (
-                <div key={t.key} style={{ padding:'12px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)', borderLeft:`4px solid ${t.color}`, display:'flex', alignItems:'center', gap:'10px' }}>
-                  <span style={{ fontSize:'20px', lineHeight:1, flexShrink:0 }}>{t.icon}</span>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{t.name}</p>
-                    <p style={{ fontSize:'10.5px', color:'#8a9e9a', marginTop:'1px' }}>
-                      {formatCurrency(price, { showCents:'never' })}/yr · {t.detail}
-                    </p>
-                  </div>
-                  <div style={{ display:'flex', alignItems:'center', gap:'6px', flexShrink:0 }}>
-                    <button
-                      type="button"
-                      onClick={() => adjustSeat(t.key, -1)}
-                      disabled={minusDisabled}
-                      aria-label={`Decrease ${t.name}`}
-                      style={{ width:'28px', height:'28px', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.12)', background:minusDisabled?'#f3f4f6':'white', color:minusDisabled?'#c8d8d4':'#1a2e2b', fontSize:'15px', fontWeight:700, cursor:minusDisabled?'not-allowed':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', padding:0 }}>
-                      −
-                    </button>
-                    <span style={{ minWidth:'24px', textAlign:'center', fontSize:'14px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
-                      {count}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => adjustSeat(t.key, 1)}
-                      disabled={plusDisabled}
-                      aria-label={`Increase ${t.name}`}
-                      style={{ width:'28px', height:'28px', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.12)', background:plusDisabled?'#f3f4f6':'white', color:plusDisabled?'#c8d8d4':'#1a2e2b', fontSize:'15px', fontWeight:700, cursor:plusDisabled?'not-allowed':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', padding:0 }}>
-                      +
-                    </button>
-                  </div>
-                  <div style={{ minWidth:'62px', textAlign:'right', flexShrink:0 }}>
-                    <p style={{ fontSize:'12.5px', fontWeight:700, color:count>0?'#1a2e2b':'#c8d8d4', fontFamily:'Georgia,serif' }}>
-                      {formatCurrency(subtotal, { showCents:'never' })}
-                    </p>
-                    <p style={{ fontSize:'9.5px', color:'#b0c0bc' }}>subtotal</p>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+      {/* Detail breakdown */}
+      <div style={{ background:'white', padding:'14px 16px' }}>
+        <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>
+          Breakdown
+        </p>
+        <div style={{ display:'grid', gap:'6px', marginBottom:'10px' }}>
+          {SUBSCRIPTION_TIER_META.map(t => {
+            const count = getCount(t.key)
+            if (count <= 0) return null
+            const price = TIER_PRICES[t.key]
+            const subtotal = price * count
+            return (
+              <div key={t.key} style={{ display:'flex', alignItems:'baseline', gap:'6px', fontSize:'12.5px', color:'#4a5e5a' }}>
+                <span style={{ fontSize:'13px', lineHeight:1 }}>{t.icon}</span>
+                <span style={{ flex:1 }}>
+                  {count} {t.name}{count !== 1 ? 's' : ''} × {formatCurrency(price, { showCents:'never' })}/yr
+                </span>
+                <span style={{ fontWeight:600, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
+                  {formatCurrency(subtotal, { showCents:'never' })}
+                </span>
+              </div>
+            )
+          })}
         </div>
+        <div style={{ borderTop:'1px solid rgba(0,0,0,0.08)', paddingTop:'8px', display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'6px' }}>
+          <span style={{ fontSize:'12px', color:'#4a5e5a', fontWeight:600 }}>Annual total</span>
+          <span style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
+            {formatCurrency(display.annual, { showCents:'never' })}
+          </span>
+        </div>
+        {display.mode === 'direct' && (
+          <>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', padding:'6px 8px', background:'rgba(212,160,70,0.08)', border:'1px solid rgba(212,160,70,0.2)', borderRadius:'8px', marginBottom:'8px' }}>
+              <span style={{ fontSize:'11px', color:'#b88820', fontWeight:600 }}>
+                Prorated ({daysLeft} days)
+              </span>
+              <span style={{ fontSize:'13.5px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
+                {formatCurrency(display.prorated)}
+              </span>
+            </div>
+            <p style={{ fontSize:'11px', color:'#8a9e9a', textAlign:'center' }}>
+              Renews {renewalLabel} at {formatCurrency(display.annual, { showCents:'never' })}/year
+            </p>
+          </>
+        )}
+        {display.mode === 'prepaid' && (
+          <p style={{ fontSize:'11px', color:'#4a5e5a', padding:'8px 10px', background:'rgba(99,102,241,0.06)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'8px' }}>
+            Prepaid by corporate through {renewalLabel}. No charge today.
+          </p>
+        )}
+        {display.mode === 'sponsored' && (
+          <>
+            <p style={{ fontSize:'11px', color:'#4a5e5a', padding:'8px 10px', background:'rgba(16,185,129,0.06)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:'8px' }}>
+              Corporate-sponsored during testing period. No charge today.
+            </p>
+            <div style={{ background:'#fef3c7', border:'1px solid #f59e0b', borderRadius:'8px', padding:'12px 14px', marginTop:'12px', fontSize:'13px', color:'#78350f', lineHeight:1.5 }}>
+              <strong>⚠️ Important:</strong> When testing concludes, you'll be responsible for a prorated subscription fee from that date through March 1, {nextRenewalDate().getUTCFullYear()}. Your normal annual renewal continues March 1 thereafter.
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+
+  const seatConfigBlock = showSeatControls && (
+    <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', overflow:'hidden' }}>
+      <div style={{ padding:'12px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)', background:'rgba(26,46,43,0.03)' }}>
+        <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px' }}>
+          Configure Seats
+        </p>
+      </div>
+      <div style={{ display:'grid' }}>
+        {SUBSCRIPTION_TIER_META.map(t => {
+          const count = getCount(t.key)
+          const price = TIER_PRICES[t.key]
+          const subtotal = price * count
+          const minusDisabled = t.key === 'owner' ? count <= 1 : count <= 0
+          const plusDisabled = count >= 99
+          return (
+            <div key={t.key} style={{ padding:'12px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)', borderLeft:`4px solid ${t.color}`, display:'flex', alignItems:'center', gap:'10px' }}>
+              <span style={{ fontSize:'20px', lineHeight:1, flexShrink:0 }}>{t.icon}</span>
+              <div style={{ flex:1, minWidth:0 }}>
+                <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{t.name}</p>
+                <p style={{ fontSize:'10.5px', color:'#8a9e9a', marginTop:'1px' }}>
+                  {formatCurrency(price, { showCents:'never' })}/yr · {t.detail}
+                </p>
+              </div>
+              <div style={{ display:'flex', alignItems:'center', gap:'6px', flexShrink:0 }}>
+                <button
+                  type="button"
+                  onClick={() => adjustSeat(t.key, -1)}
+                  disabled={minusDisabled}
+                  aria-label={`Decrease ${t.name}`}
+                  style={{ width:'28px', height:'28px', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.12)', background:minusDisabled?'#f3f4f6':'white', color:minusDisabled?'#c8d8d4':'#1a2e2b', fontSize:'15px', fontWeight:700, cursor:minusDisabled?'not-allowed':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', padding:0 }}>
+                  −
+                </button>
+                <span style={{ minWidth:'24px', textAlign:'center', fontSize:'14px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
+                  {count}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => adjustSeat(t.key, 1)}
+                  disabled={plusDisabled}
+                  aria-label={`Increase ${t.name}`}
+                  style={{ width:'28px', height:'28px', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.12)', background:plusDisabled?'#f3f4f6':'white', color:plusDisabled?'#c8d8d4':'#1a2e2b', fontSize:'15px', fontWeight:700, cursor:plusDisabled?'not-allowed':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', padding:0 }}>
+                  +
+                </button>
+              </div>
+              <div style={{ minWidth:'62px', textAlign:'right', flexShrink:0 }}>
+                <p style={{ fontSize:'12.5px', fontWeight:700, color:count>0?'#1a2e2b':'#c8d8d4', fontFamily:'Georgia,serif' }}>
+                  {formatCurrency(subtotal, { showCents:'never' })}
+                </p>
+                <p style={{ fontSize:'9.5px', color:'#b0c0bc' }}>subtotal</p>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+
+  // Direct mode: Configure Seats reads first (decision input), then the Cost
+  // Summary card reflects that decision underneath. Prepaid + sponsored modes
+  // keep the summary/acknowledgment up top since there's no decision to make.
+  return (
+    <div style={{ display:'grid', gap:'12px' }}>
+      {display.mode === 'direct' ? (
+        <>
+          {seatConfigBlock}
+          {costSummaryCard}
+        </>
+      ) : (
+        <>
+          {costSummaryCard}
+          {seatConfigBlock}
+        </>
       )}
     </div>
   )
