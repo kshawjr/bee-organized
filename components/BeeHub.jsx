@@ -5779,16 +5779,13 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
               )}
               {payStep==='pricing'&&<button onClick={()=>setPayStep('method')} style={{ width:'100%', padding:'15px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', marginBottom:'10px' }}>Activate for ${proration.prorated} →</button>}
               {showSmsModal&&<SmsVoiceInfoModal onClose={()=>setShowSmsModal(false)} />}
-              {/* Tier reference — shown during seat-selection (pricing) sub-step
-                 for all three payment_source variants (direct / prepaid / sponsored,
-                 which all render through SubscriptionCalculator above). Hidden during
-                 method selection so it doesn't compete with the ACH/CC choice. */}
-              {payStep==='pricing'&&(
-                <div style={{ borderTop:'1px solid #e5e7eb', marginTop:'32px', paddingTop:'24px' }}>
-                  <h2 style={{ fontSize:'16px', fontWeight:600, color:'#1a2e2b', marginBottom:'12px' }}>What's included at each tier</h2>
-                  <TierPlansInline />
-                </div>
-              )}
+              {/* Tier reference — rendered for both pricing and method sub-steps
+                 across all three payment_source variants (direct / prepaid / sponsored,
+                 which all render through SubscriptionCalculator above). */}
+              <div style={{ borderTop:'1px solid #e5e7eb', marginTop:'32px', paddingTop:'24px' }}>
+                <h2 style={{ fontSize:'16px', fontWeight:600, color:'#1a2e2b', marginBottom:'12px' }}>What's included at each tier</h2>
+                <TierPlansInline />
+              </div>
               {payStep==='method'&&(
                 <>
                   <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'10px' }}>Choose payment method</p>
