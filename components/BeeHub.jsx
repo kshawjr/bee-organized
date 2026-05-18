@@ -5656,6 +5656,17 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   // then the jobber=done + activeStepOpen='import' overlay applies cleanly.
   useEffect(() => {
     if (typeof window === 'undefined') return
+    // Task 4 Pass 1 — DB cache wins over sessionStorage on initial mount.
+    // currentLocationCtx.onboarding_state comes from app/page.tsx and gives
+    // us cross-device / cross-browser continuity. sessionStorage stays as
+    // the same-tab safety net for an unmount-mid-write race (and for
+    // view-as / demo paths where currentLocationCtx is null).
+    const dbState = currentLocationCtx?.onboarding_state
+    if (dbState && (dbState.completedSteps || dbState.activeStepOpen)) {
+      if (dbState.completedSteps) setCompletedSteps(dbState.completedSteps)
+      if (dbState.activeStepOpen) setActiveStepOpen(dbState.activeStepOpen)
+      return
+    }
     try {
       const saved = sessionStorage.getItem('bee.onboarding.state')
       if (!saved) return
@@ -5748,7 +5759,30 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
 
   const finalAmt = method==='cc' ? ccAmount : proration.prorated
 
-  function markDone(id)  { setCompletedSteps(prev=>({...prev,[id]:true})) }
+  // Task 4 Pass 1 — persistStep is the DB write half of markDone. Fire-and-
+  // forget: a network failure doesn't roll back the optimistic local update,
+  // and the sessionStorage effect above keeps a same-tab safety net. The
+  // /api/onboarding/progress route dual-writes onboarding_progress (audit)
+  // and locations.onboarding_state (cached snapshot read on next page load).
+  // view-as / demo paths (no real currentUser) skip the network.
+  function persistStep(stepId, metadata) {
+    if (typeof window === 'undefined') return
+    if (!currentUserCtx?.id) return
+    fetch('/api/onboarding/progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        step: stepId,
+        metadata: metadata || {},
+        activeStepOpen,
+      }),
+    }).catch(err => console.error('[persistStep]', stepId, err?.message || err))
+  }
+
+  function markDone(id, metadata)  {
+    setCompletedSteps(prev=>({...prev,[id]:true}))
+    persistStep(id, metadata)
+  }
   function isDone(id)    { return !!completedSteps[id] }
   function isLocked(id)  {
     const order = isOwner ? OWNER_STEPS : NON_OWNER_STEPS

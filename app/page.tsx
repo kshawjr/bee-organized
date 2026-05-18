@@ -204,7 +204,7 @@ export default async function HomePage() {
     const { data: locRow, error: subErr } = await supabase
       .from('locations')
       .select(
-        'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes, jobber_account_id, last_sync_status, token_expiry'
+        'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes, jobber_account_id, last_sync_status, token_expiry, onboarding_state, default_drip_path, default_move_drip_path'
       )
       .eq('id', hubUser.location_id)
       .single()
@@ -231,6 +231,13 @@ export default async function HomePage() {
         subscription_status: locRow.subscription_status || 'deferred',
         subscription_plan: locRow.subscription_plan || null,
         paid_through_date: locRow.paid_through_date || null,
+        // Onboarding persistence — read on every page load for cross-device
+        // continuity. OnboardingChecklist seeds React state from this and
+        // falls back to sessionStorage if absent. Writes go through
+        // /api/onboarding/progress.
+        onboarding_state: locRow.onboarding_state || {},
+        default_drip_path: locRow.default_drip_path || 'general-a',
+        default_move_drip_path: locRow.default_move_drip_path || 'move-a',
       }
     }
   }
@@ -282,7 +289,7 @@ export default async function HomePage() {
     const { data: locs, error: locsErr } = await supabaseService
       .from('locations')
       .select(
-        'id, name, state, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, last_sync_status, created_at'
+        'id, name, state, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, last_sync_status, created_at, onboarding_state, default_drip_path, default_move_drip_path'
       )
       .order('name', { ascending: true })
 
@@ -362,6 +369,11 @@ export default async function HomePage() {
         collected: 0,
         userCount: userCountByLoc[row.id] || 0,
         joinedDate: fmtJoined(row.created_at),
+        // Onboarding persistence (admin views — read-only here; surfaced
+        // for future super_admin dashboards showing per-location progress)
+        onboarding_state: row.onboarding_state || {},
+        default_drip_path: row.default_drip_path || 'general-a',
+        default_move_drip_path: row.default_move_drip_path || 'move-a',
       }
     })
   } else if (hubUser.location_id) {

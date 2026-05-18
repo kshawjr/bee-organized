@@ -52,6 +52,13 @@ interface BeeHubProps {
     collected?: number
     userCount?: number
     joinedDate?: string
+    onboarding_state?: {
+      completedSteps?: Record<string, boolean>
+      activeStepOpen?: string | null
+      lastUpdated?: string
+    }
+    default_drip_path?: string
+    default_move_drip_path?: string
     [key: string]: any
   }> | null
   initialUsers?: Array<{
@@ -102,6 +109,13 @@ interface BeeHubProps {
     jobber_account_id: string | null
     last_sync_status: string | null
     token_expiry: string | null
+    onboarding_state?: {
+      completedSteps?: Record<string, boolean>
+      activeStepOpen?: string | null
+      lastUpdated?: string
+    }
+    default_drip_path?: string
+    default_move_drip_path?: string
   } | null
   currentUser?: {
     id: string
