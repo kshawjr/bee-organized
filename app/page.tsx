@@ -154,6 +154,34 @@ export default async function HomePage() {
     }
   })
 
+  // ─── Manual slides (Hive Hub Manual — second guide system) ───
+  // Service-role read so an unmigrated table never breaks rendering for
+  // franchise users. Write path (/api/manual-slides POST) re-checks role.
+  const { data: manualSlidesRaw } = await supabaseService
+    .from('manual_slides')
+    .select('*')
+    .order('slot', { ascending: true })
+
+  const initialManualSlides = (manualSlidesRaw || []).map((row: any) => {
+    let screenshots: string[] = []
+    if (Array.isArray(row.screenshots) && row.screenshots.length > 0) {
+      screenshots = row.screenshots
+    } else if (row.screenshot_url) {
+      screenshots = [row.screenshot_url]
+    }
+    return {
+      icon: row.icon,
+      chapter: row.chapter,
+      color: row.color,
+      title: row.title,
+      body: row.body || '',
+      bullets: row.bullets || [],
+      screenshot: screenshots[0] || null,
+      screenshots,
+      video_url: row.video_url || null,
+    }
+  })
+
   // ─── User's own location: subscription + Jobber connection state ───
   // Single query, two derived prop shapes (subscription/billing vs.
   // connection-status). Real franchise owners get both; super_admin /
@@ -310,6 +338,7 @@ export default async function HomePage() {
       initialFranchiseRole={franchiseRole}
       initialLocFilter={initialLocFilter}
       initialGuideSlides={initialGuideSlides}
+      initialManualSlides={initialManualSlides}
       initialLocations={initialLocations}
       initialUsers={initialUsers}
       currentSubscription={currentSubscription}

@@ -14,6 +14,17 @@ interface BeeHubProps {
     screenshot?: string | null
     screenshots?: string[]
   }>
+  initialManualSlides?: Array<{
+    icon?: string | null
+    chapter?: string | null
+    color?: string
+    title: string
+    body?: string
+    bullets?: string[]
+    screenshot?: string | null
+    screenshots?: string[]
+    video_url?: string | null
+  }>
   initialLocations?: Array<{
     id: string
     name: string
