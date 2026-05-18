@@ -70,7 +70,10 @@ function buildLocationUser(row: any) {
     initials: initialsFrom(name),
     email: row.email,
     locationId: row.location_id,
-    role: mapTier(row.role),
+    // Users with no location_id are corporate-tier (org-level seats);
+    // matches the USERS_DATA mock convention and keeps location-less
+    // admins from falling through both filters in UsersTab.
+    role: row.location_id ? mapTier(row.role) : 'corporate',
     status: 'active',
     joined: fmtJoined(row.created_at),
   }

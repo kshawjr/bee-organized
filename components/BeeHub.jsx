@@ -14346,7 +14346,7 @@ function UsersTab({ users, setUsers, locations, locFilter, onInvite }) {
   const q = search.toLowerCase()
   const corpUsers = users.filter(u => u.role==='corporate' && (!search || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)))
   const filtered  = users.filter(u => u.role!=='corporate' && u.locationId && (!search || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)) && (locF==='all' || u.locationId===locF))
-  const byLoc     = locations.filter(l=>l.crmStatus==='active').map(loc=>({ loc, members: filtered.filter(u=>u.locationId===loc.id) })).filter(g=>g.members.length>0)
+  const byLoc     = locations.map(loc=>({ loc, members: filtered.filter(u=>u.locationId===loc.id) })).filter(g=>g.members.length>0)
 
   function updateRole(uid, role) { setUsers(prev=>prev.map(u=>u.id===uid?{...u,role}:u)) }
   function removeUser(uid)       { setUsers(prev=>prev.filter(u=>u.id!==uid)) }
