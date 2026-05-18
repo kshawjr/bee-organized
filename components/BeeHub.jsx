@@ -6768,7 +6768,7 @@ function OnboardingInviteSheet({ onClose, onDone }) {
               <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
             </div>
 
-            {/* Pricing matrix — replaces compact row with full TierPlansInline (a3eb93c "users on top, tier pills + matrix below" pattern) */}
+            {/* Pricing comparison matrix */}
             <TierPlansInline />
 
             <div style={{ display:'grid', gap:'8px', marginBottom:'12px' }}>
@@ -13212,12 +13212,11 @@ function SubscriptionCalculator({
 }
 
 function TierPlansInline() {
-  const [showMatrix, setShowMatrix] = useState(false)
   const tiers = [
-    { key:'owner',    name:'Zee Bee',       icon:'👑', color:'#d4a046', level:'L1', goodFor:'Franchise owners',                       price:550, detail:'Required · One per location' },
-    { key:'manager',  name:'Hive Manager',  icon:'🍯', color:'#6366f1', level:'L2', goodFor:'Managers, operations leads',             price:400, detail:'No billing or Jobber control' },
-    { key:'light',    name:'Worker Bee',    icon:'🐝', color:'#10b981', level:'L3', goodFor:'Schedulers, customer service',           price:200, detail:'No financial visibility' },
-    { key:'readonly', name:'Honey Watcher', icon:'👁',  color:'#8a9e9a', level:'L4', goodFor:'Accountants, advisors, silent partners', price:50,  detail:'Read-only · Add as many as needed' },
+    { key:'owner',    name:'Zee Bee',       icon:'👑', color:'#d4a046', level:'L1', price:550 },
+    { key:'manager',  name:'Hive Manager',  icon:'🍯', color:'#6366f1', level:'L2', price:400 },
+    { key:'light',    name:'Worker Bee',    icon:'🐝', color:'#10b981', level:'L3', price:200 },
+    { key:'readonly', name:'Honey Watcher', icon:'👁',  color:'#8a9e9a', level:'L4', price:50  },
   ]
   const sections = [
     { title:'⚙ Account & Billing', rows:[
@@ -13254,38 +13253,56 @@ function TierPlansInline() {
   ]
   const renderAccess = (v) =>
     v === 'y' ? <span style={{ color:'#2d8659', fontWeight:700, fontSize:'15px', lineHeight:1 }}>✓</span>
-  : v === 'n' ? <span style={{ color:'#c14545', fontWeight:700, fontSize:'13px', opacity:0.5, lineHeight:1 }}>✗</span>
+  : v === 'n' ? <span style={{ color:'#b0c0bc', fontWeight:500, fontSize:'14px', lineHeight:1 }}>—</span>
   : v === 'v' ? <span style={{ display:'inline-block', background:'rgba(184,136,32,0.15)', color:'#b88820', fontSize:'8px', fontWeight:700, letterSpacing:'0.3px', padding:'2px 4px', borderRadius:'6px', textTransform:'uppercase' }}>View</span>
   : null
 
+  const gridCols = 'minmax(120px, 1.35fr) repeat(4, minmax(54px, 1fr))'
+
   return (
     <div style={{ margin:'24px 12px 16px' }}>
-      <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'10px' }}>Tiers · Pricing · Access</p>
+      <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'10px' }}>Compare Plans</p>
 
-      {/* Tier pills — name + price share the headline row so pricing is
-         visually balanced with the tier name (the "where each tier sits" and
-         "what it costs" facts read together, not in separate sections). */}
-      <div style={{ display:'grid', gap:'8px', marginBottom:'14px' }}>
-        {tiers.map(t => (
-          <div key={t.key} style={{ padding:'11px 13px', background:'white', border:'1px solid rgba(0,0,0,0.06)', borderLeft:`4px solid ${t.color}`, borderRadius:'10px', display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap' }}>
-            <div style={{ display:'flex', alignItems:'baseline', gap:'7px', flex:'0 0 auto' }}>
-              <span style={{ fontSize:'17px', lineHeight:1 }}>{t.icon}</span>
-              <p style={{ fontSize:'13.5px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{t.name}</p>
-              <span style={{ fontSize:'9px', color:'#8a9e9a', letterSpacing:'0.5px', textTransform:'uppercase', fontWeight:700, padding:'1px 5px', background:'rgba(26,46,43,0.05)', borderRadius:'4px' }}>{t.level}</span>
-              <span style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginLeft:'4px' }}>
-                · ${t.price.toLocaleString()}<span style={{ fontSize:'10px', color:'#8a9e9a', fontWeight:500 }}>/year</span>
-              </span>
+      {/* Comparison matrix — tiers as columns, features as rows.
+         Header row is sticky within the nearest scroll context so the tier
+         labels stay visible while scanning through long feature sections. */}
+      <div style={{ border:'1px solid rgba(0,0,0,0.08)', borderRadius:'10px', overflow:'hidden', background:'white' }}>
+        {/* Sticky header — tier name + level + price stacked vertically */}
+        <div style={{ display:'grid', gridTemplateColumns:gridCols, gap:'4px', background:'rgba(26,46,43,0.04)', borderBottom:'2px solid rgba(0,0,0,0.12)', position:'sticky', top:0, zIndex:5, paddingLeft:'12px', paddingRight:'10px' }}>
+          <div style={{ display:'flex', alignItems:'flex-end', padding:'10px 0', fontSize:'9px', letterSpacing:'1px', textTransform:'uppercase', color:'#8a9e9a', fontWeight:700 }}>Capability</div>
+          {tiers.map(t => (
+            <div key={t.key} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'3px', textAlign:'center', borderTop:`3px solid ${t.color}`, padding:'8px 2px 10px' }}>
+              <span style={{ fontSize:'15px', lineHeight:1 }}>{t.icon}</span>
+              <p style={{ fontSize:'9.5px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', lineHeight:1.15 }}>{t.name}</p>
+              <span style={{ fontSize:'7.5px', color:'#8a9e9a', letterSpacing:'0.5px', textTransform:'uppercase', fontWeight:700, padding:'1px 4px', background:'rgba(26,46,43,0.06)', borderRadius:'3px', lineHeight:1.2 }}>{t.level}</span>
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginTop:'1px' }}>${t.price}<span style={{ fontSize:'8px', color:'#8a9e9a', fontWeight:500 }}>/yr</span></p>
             </div>
-            <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', flex:1, minWidth:0, lineHeight:1.4 }}>
-              {t.goodFor}
-              <span style={{ display:'block', fontSize:'10px', color:'#b0c0bc', marginTop:'1px', fontStyle:'normal' }}>{t.detail}</span>
-            </p>
-          </div>
+          ))}
+        </div>
+
+        {/* Feature rows, grouped by section */}
+        {sections.map(s => (
+          <React.Fragment key={s.title}>
+            <div style={{ padding:'8px 12px', background:'rgba(212,160,70,0.05)', borderLeft:'3px solid #d4a046', fontFamily:'Georgia,serif', fontSize:'11.5px', fontWeight:700, color:'#1a2e2b', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
+              {s.title}
+            </div>
+            {s.rows.map((r, i) => (
+              <div key={`${s.title}-${i}`} style={{ display:'grid', gridTemplateColumns:gridCols, gap:'4px', padding:'9px 10px 9px 12px', borderBottom:'1px solid rgba(0,0,0,0.04)', alignItems:'center' }}>
+                <div>
+                  <p style={{ fontSize:'10.5px', fontWeight:500, color:'#1a2e2b', lineHeight:1.3 }}>{r[0]}</p>
+                  <p style={{ fontSize:'9.5px', color:'#8a9e9a', marginTop:'2px', lineHeight:1.3 }}>{r[1]}</p>
+                </div>
+                {r[2].map((v, ci) => (
+                  <div key={ci} style={{ textAlign:'center' }}>{renderAccess(v)}</div>
+                ))}
+              </div>
+            ))}
+          </React.Fragment>
         ))}
       </div>
 
       {/* Multiple Owners note */}
-      <div style={{ padding:'10px 13px', background:'rgba(212,160,70,0.07)', borderLeft:'3px solid #d4a046', borderRadius:'6px', marginBottom:'8px' }}>
+      <div style={{ padding:'10px 13px', background:'rgba(212,160,70,0.07)', borderLeft:'3px solid #d4a046', borderRadius:'6px', marginTop:'14px', marginBottom:'8px' }}>
         <p style={{ fontSize:'9.5px', color:'#d4a046', letterSpacing:'1px', textTransform:'uppercase', fontWeight:700, marginBottom:'3px' }}>Multiple Owners</p>
         <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.5 }}>
           Co-owners can add a second Zee Bee seat at <strong style={{ color:'#1a2e2b' }}>$400/year</strong> — both get full access. Total: <strong style={{ color:'#1a2e2b' }}>$950/year</strong>.
@@ -13293,49 +13310,12 @@ function TierPlansInline() {
       </div>
 
       {/* Account Security note */}
-      <div style={{ padding:'10px 13px', background:'rgba(168,201,196,0.12)', borderLeft:'3px solid #a8c9c4', borderRadius:'6px', marginBottom:'16px' }}>
+      <div style={{ padding:'10px 13px', background:'rgba(168,201,196,0.12)', borderLeft:'3px solid #a8c9c4', borderRadius:'6px' }}>
         <p style={{ fontSize:'9.5px', color:'#4d7a72', letterSpacing:'1px', textTransform:'uppercase', fontWeight:700, marginBottom:'3px' }}>Account Security</p>
         <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.5 }}>
           All logins require a verified <strong style={{ color:'#1a2e2b' }}>Bee Organized email</strong>. Seats are individual — credentials cannot be shared.
         </p>
       </div>
-
-      {/* Toggle */}
-      <button onClick={() => setShowMatrix(!showMatrix)}
-        style={{ width:'100%', padding:'10px 12px', background:showMatrix?'transparent':'#1a2e2b', border:showMatrix?'1px solid rgba(0,0,0,0.12)':'none', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:showMatrix?'#1a2e2b':'white', cursor:'pointer', marginBottom:showMatrix?'12px':0, letterSpacing:'0.3px' }}>
-        {(showMatrix ? '▲ Hide ' : '▼ Show ') + 'full access matrix'}
-      </button>
-
-      {/* Access matrix */}
-      {showMatrix && (
-        <div style={{ border:'1px solid rgba(0,0,0,0.08)', borderRadius:'10px', overflow:'hidden', background:'white' }}>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 34px 34px 34px 34px', gap:'4px', padding:'10px 12px', background:'rgba(26,46,43,0.04)', borderBottom:'2px solid rgba(0,0,0,0.08)', alignItems:'center' }}>
-            <p style={{ fontSize:'9px', letterSpacing:'1px', textTransform:'uppercase', color:'#8a9e9a', fontWeight:700 }}>Capability</p>
-            <p style={{ fontSize:'15px', textAlign:'center', lineHeight:1 }}>👑</p>
-            <p style={{ fontSize:'15px', textAlign:'center', lineHeight:1 }}>🍯</p>
-            <p style={{ fontSize:'15px', textAlign:'center', lineHeight:1 }}>🐝</p>
-            <p style={{ fontSize:'15px', textAlign:'center', lineHeight:1 }}>👁</p>
-          </div>
-          {sections.map(s => (
-            <React.Fragment key={s.title}>
-              <div style={{ padding:'8px 12px', background:'rgba(212,160,70,0.05)', borderLeft:'3px solid #d4a046', fontFamily:'Georgia,serif', fontSize:'11.5px', fontWeight:700, color:'#1a2e2b', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
-                {s.title}
-              </div>
-              {s.rows.map((r, i) => (
-                <div key={`${s.title}-${i}`} style={{ display:'grid', gridTemplateColumns:'1fr 34px 34px 34px 34px', gap:'4px', padding:'9px 12px', borderBottom:'1px solid rgba(0,0,0,0.04)', alignItems:'center' }}>
-                  <div>
-                    <p style={{ fontSize:'10.5px', fontWeight:500, color:'#1a2e2b', lineHeight:1.3 }}>{r[0]}</p>
-                    <p style={{ fontSize:'9.5px', color:'#8a9e9a', marginTop:'2px', lineHeight:1.3 }}>{r[1]}</p>
-                  </div>
-                  {r[2].map((v, ci) => (
-                    <div key={ci} style={{ textAlign:'center' }}>{renderAccess(v)}</div>
-                  ))}
-                </div>
-              ))}
-            </React.Fragment>
-          ))}
-        </div>
-      )}
     </div>
   )
 }
