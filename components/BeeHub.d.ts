@@ -64,6 +64,18 @@ interface BeeHubProps {
     status: string
     joined: string
   }> | null
+  initialSeats?: Array<{
+    id: string
+    location_id: string
+    tier: 'owner' | 'manager' | 'light' | 'readonly'
+    user_id: string | null
+    status: 'active' | 'inactive'
+    added_at: string
+    removed_at?: string | null
+    prorated_cost?: number | null
+    added_by?: string | null
+    notes?: string | null
+  }>
   currentSubscription?: {
     subscription_status?: string
     subscription_plan?: string | null

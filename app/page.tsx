@@ -235,6 +235,27 @@ export default async function HomePage() {
     }
   }
 
+  // ─── Subscription seats for the current user's location ───
+  // Service-role read so an unmigrated table never breaks rendering for
+  // franchise users pre-migration. Returns active seats only — Dispatch 2
+  // surfaces inactive history through Admin > Billing if needed.
+  // Super_admin / corporate (no location_id) get an empty array — they dig
+  // into specific locations via the Admin tab.
+  let initialSeats: any[] = []
+  if (currentLocation?.id) {
+    const { data: seatsRaw, error: seatsErr } = await supabaseService
+      .from('subscription_seats')
+      .select(
+        'id, location_id, tier, user_id, status, added_at, removed_at, prorated_cost, added_by, notes'
+      )
+      .eq('location_id', currentLocation.id)
+      .eq('status', 'active')
+      .order('added_at', { ascending: true })
+
+    if (seatsErr) console.error('[page.tsx] seats fetch error:', seatsErr.message)
+    initialSeats = seatsRaw || []
+  }
+
   // ─── All locations for admin views (elevated users only) ───
   // Use service-role client to bypass RLS — avoids the SSR cookie-refresh
   // silent-fail pattern that returns empty arrays on stale sessions.
@@ -354,6 +375,7 @@ export default async function HomePage() {
       initialTierPrices={initialTierPrices}
       initialLocations={initialLocations}
       initialUsers={initialUsers}
+      initialSeats={initialSeats}
       currentSubscription={currentSubscription}
       currentLocation={currentLocation}
       currentUser={{

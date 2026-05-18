@@ -53,6 +53,19 @@ const LocationUsersContext = createContext(null)
 // } or null.
 const TierPricesContext = createContext(null)
 
+// Pool-model seat inventory for the current location, populated by App from
+// initialSeats (server-fetched from Supabase subscription_seats via page.tsx).
+// Each seat is a discrete row — assigned to a user or held unassigned.
+// Mutated by onboarding Activate, add-seat flows, and team invite assignment
+// so the UI stays in sync without a page reload.
+// Value shape: {
+//   seats: Array<{ id, location_id, tier, user_id, status, added_at, prorated_cost, ... }>,
+//   setSeats: (next) => void,
+//   seatCountsByTier: () => Record<tier, { total, assigned, available }>,
+//   availableSeatsByTier: () => Array<seat>   // unassigned + active
+// } or null.
+const SeatsContext = createContext(null)
+
 const STAGES = [
   { key:'New',             label:'New',             color:'#6366f1', bg:'rgba(99,102,241,0.08)',  dot:'#6366f1', icon:'✨' },
   { key:'Attempting',      label:'Attempting to Contact', color:'#f97316', bg:'rgba(249,115,22,0.08)',  dot:'#f97316', icon:'📲' },
@@ -5535,6 +5548,8 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   const isOwner   = franchiseRole === 'owner'
   const nameParts = (ownerName||'').split(' ')
   const currentLocationCtx = useContext(CurrentLocationContext)
+  const currentUserCtx     = useContext(CurrentUserContext)
+  const seatsCtx           = useContext(SeatsContext)
 
   // ── ALL hooks at top - no conditional returns before these ──────────────────
   const [completedSteps, setCompletedSteps]   = useState({})
@@ -5566,6 +5581,11 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   const [payStep, setPayStep]   = useState('pricing')
   const [showSmsModal, setShowSmsModal] = useState(false)
   const [method, setMethod]     = useState(null)
+  // Activation state: in-flight flag + last error message. Used by completePay
+  // to gate the "Continue Setup →" button and surface a retry-able error if
+  // the seat insert or subscription_status flip fails.
+  const [activating, setActivating]         = useState(false)
+  const [activateError, setActivateError]   = useState('')
   const [routing, setRouting]   = useState('')
   const [bankAcct, setBankAcct] = useState('')
   const [cardNum, setCardNum]   = useState('')
@@ -5766,10 +5786,62 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     setPayStep('processing')
     setTimeout(()=>setPayStep('done'), 2200)
   }
-  function completePay() {
-    markDone('pay')
-    setPayStep('pricing')
-    setMethod(null)
+  // completePay is the persistence boundary for onboarding Activate. Prior to
+  // Dispatch 1, this just advanced the step locally. Now:
+  //   1. POST /api/seats to record the owner's first seat row.
+  //      - direct mode: include prorated_cost in cents
+  //      - prepaid_corporate / corporate_sponsored: omit prorated_cost
+  //   2. POST /api/locations/[id]/complete-onboarding to flip
+  //      subscription_status='deferred' → 'active' on the locations row.
+  //   3. Push the new seat into SeatsContext so Settings > Billing and the
+  //      team UI reflect it without a reload.
+  // On failure we surface the error inline and stay on the 'done' modal so
+  // the user can retry. If we're rendered in a view-as / demo path with no
+  // real location or user, we skip the DB writes and advance locally — the
+  // mock flows shouldn't hit the network.
+  async function completePay() {
+    if (activating) return
+    const locId  = currentLocationCtx?.id
+    const userId = currentUserCtx?.id
+    if (!locId || !userId) {
+      markDone('pay')
+      setPayStep('pricing')
+      setMethod(null)
+      return
+    }
+    setActivating(true)
+    setActivateError('')
+    try {
+      const isDirect = paymentSourceForPay === 'direct'
+      const seatBody = { location_id: locId, tier: 'owner', user_id: userId }
+      if (isDirect) {
+        seatBody.prorated_cost = Math.round(proration.prorated * 100)
+      }
+      const seatRes = await fetch('/api/seats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(seatBody),
+      })
+      const seatJson = await seatRes.json().catch(() => ({}))
+      if (!seatRes.ok) throw new Error(seatJson.error || 'Failed to record seat')
+
+      const subRes = await fetch(`/api/locations/${locId}/complete-onboarding`, {
+        method: 'POST',
+      })
+      const subJson = await subRes.json().catch(() => ({}))
+      if (!subRes.ok) throw new Error(subJson.error || 'Failed to activate subscription')
+
+      if (seatsCtx?.setSeats) {
+        seatsCtx.setSeats(prev => [...prev, seatJson])
+      }
+      markDone('pay')
+      setPayStep('pricing')
+      setMethod(null)
+    } catch (err) {
+      setActivateError(err?.message || 'Activation failed — please try again')
+    } finally {
+      setActivating(false)
+    }
   }
 
   // ── Non-owner: simple checklist ─────────────────────────────────────────────
@@ -5858,7 +5930,12 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                 </div>
               ))}
             </div>
-            <button onClick={completePay} style={{ width:'100%', padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Continue Setup →</button>
+            {activateError && (
+              <div style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.3)', borderRadius:'10px', padding:'9px 12px', marginBottom:'12px', fontSize:'12px', color:'#b91c1c' }}>
+                {activateError}
+              </div>
+            )}
+            <button onClick={completePay} disabled={activating} style={{ width:'100%', padding:'13px', background:activating?'#4a5e5a':'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:activating?'wait':'pointer', opacity:activating?0.85:1 }}>{activating ? 'Activating…' : 'Continue Setup →'}</button>
           </div>
         </div>
       </div>
@@ -17942,6 +18019,7 @@ export default function App({
   initialTierPrices,         // server-rendered seat pricing from page.tsx (Supabase tier_prices table)
   initialLocations,          // accepted; not yet consumed — ALL_LOCATIONS mock still drives the picker
   initialUsers,              // real hub_users roster from Supabase; null → fall back to USERS_DATA mock
+  initialSeats,              // server-rendered subscription_seats for the current location (empty array for elevated users)
   currentSubscription,
   currentLocation,           // real Supabase row for franchise owners; null for elevated users
 } = {}) {
@@ -17990,6 +18068,29 @@ export default function App({
     setTierPrices: setTierPricesState,
     getTierPrice,
     livePrices,
+  }
+  // Subscription seats — pool model. Onboarding Activate seeds the first
+  // owner seat; "+ Add seats" (Dispatch 3) and team invite assignment mutate
+  // this state. Defaults to [] so renders never crash on a pre-migration env.
+  const [seats, setSeats] = useState(Array.isArray(initialSeats) ? initialSeats : [])
+  function seatCountsByTier() {
+    return seats.reduce((acc, s) => {
+      if (s.status && s.status !== 'active') return acc
+      acc[s.tier] = acc[s.tier] || { total: 0, assigned: 0, available: 0 }
+      acc[s.tier].total++
+      if (s.user_id) acc[s.tier].assigned++
+      else acc[s.tier].available++
+      return acc
+    }, {})
+  }
+  function availableSeatsByTier() {
+    return seats.filter(s => !s.user_id && (s.status === 'active' || !s.status))
+  }
+  const seatsValue = {
+    seats,
+    setSeats,
+    seatCountsByTier,
+    availableSeatsByTier,
   }
   const [franchiseRole, setFranchiseRole]   = useState(initialFranchiseRole ?? 'owner') // owner|manager|light|readonly
   const [activeNav, setActiveNav]           = useState('home')
@@ -18378,6 +18479,7 @@ export default function App({
     <CurrentLocationContext.Provider value={currentLocation || null}>
     <LocationUsersContext.Provider value={users}>
     <TierPricesContext.Provider value={tierPricesValue}>
+    <SeatsContext.Provider value={seatsValue}>
     <div>
       <DemoBar />
       <LocBanner />
@@ -18506,6 +18608,7 @@ export default function App({
         />
       )}
     </div>
+    </SeatsContext.Provider>
     </TierPricesContext.Provider>
     </LocationUsersContext.Provider>
     </CurrentLocationContext.Provider>
