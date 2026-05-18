@@ -1058,7 +1058,7 @@ function ProcessLeadSheet({ person, onSave, onClose }) {
           <div style={{ display:'grid', gap:'10px' }}>
             <div>
               <h3 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'2px' }}>Which New Lead Drip?</h3>
-              <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{project?`${project} → ${defCat==='move'?'Move':'General'} paths`:'General paths'}</p>
+              <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{project?`${project} → ${defCat==='move'?'Move':'Organizing'} paths`:'Organizing paths'}</p>
             </div>
             {/* No drip option */}
             <div onClick={()=>setPathId('none')} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'11px 12px', background:pathId==='none'?'rgba(239,68,68,0.05)':'white', border:`1.5px solid ${pathId==='none'?'rgba(239,68,68,0.3)':'rgba(0,0,0,0.08)'}`, borderRadius:'9px', cursor:'pointer' }}>
@@ -4002,7 +4002,7 @@ function PersonPanel({ person, onClose, onUpdate, onMarkJunk, onResurrect, onAdd
                           <span style={{ fontSize:'12px', color:'#1a2e2b' }}>{(()=>{
                             const p = DRIP_PATHS_CONFIG.find(d=>d.id===person.path)
                             if (p) return p.name
-                            const m={'email-nurture':'General · New Lead Path A','quick-connect':'General · New Lead Path C','personal-touch':'General · New Lead Path D','general-a':'General · New Lead Path A','general-b':'General · New Lead Path B','move-a':'Move · New Lead Path A','move-b':'Move · New Lead Path B'}
+                            const m={'email-nurture':'Organizing · New Lead Path A','quick-connect':'Organizing · New Lead Path C','personal-touch':'Organizing · New Lead Path D','general-a':'Organizing · New Lead Path A','general-b':'Organizing · New Lead Path B','move-a':'Move · New Lead Path A','move-b':'Move · New Lead Path B'}
                             return m[person.path]||person.path||'No path assigned'
                           })()}</span>
                           <span style={{ fontSize:'10px', padding:'1px 7px', borderRadius:'20px', fontWeight:600, background:person.paused?'rgba(245,158,11,0.1)':'rgba(16,185,129,0.08)', color:person.paused?'#f59e0b':'#10b981' }}>{person.paused?'⏸ Paused':'▶ Active'}</span>
@@ -6563,7 +6563,7 @@ function OnboardingPathsEditor({ onComplete }) {
         <button onClick={()=>setWizardStep('intro')} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>← Back</button>
         <button onClick={()=>{ if(selectedMove){ setPreviewPath(null); setWizardStep('general') } }} disabled={!selectedMove}
           style={{ flex:1, padding:'11px', background:selectedMove?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:selectedMove?'white':'#9ca3af', cursor:selectedMove?'pointer':'not-allowed' }}>
-          {selectedMove?'Next: General Projects →':'Select a path first'}
+          {selectedMove?'Next: Organizing Projects →':'Select a path first'}
         </button>
       </div>
     </div>
@@ -6571,7 +6571,7 @@ function OnboardingPathsEditor({ onComplete }) {
 
   if (wizardStep==='general') return (
     <div style={{ paddingTop:'12px', display:'grid', gap:'12px' }}>
-      <PathChooser title="General Projects (Kitchens, Closets, etc.)" emoji="🏠" current={selectedGeneral} onSelect={setSelectedGeneral} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={pathOptions} getSteps={getSteps} getTemplate={getTemplate} />
+      <PathChooser title="Organizing Projects (Kitchens, Closets, etc.)" emoji="🏠" current={selectedGeneral} onSelect={setSelectedGeneral} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={pathOptions} getSteps={getSteps} getTemplate={getTemplate} />
       <div style={{ display:'flex', gap:'8px' }}>
         <button onClick={()=>{ setPreviewPath(null); setWizardStep('move') }} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>← Back</button>
         <button onClick={()=>selectedGeneral&&setWizardStep('confirm')} disabled={!selectedGeneral}
@@ -6589,7 +6589,7 @@ function OnboardingPathsEditor({ onComplete }) {
         <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'12px' }}>🎉 Here\'s what you picked:</p>
         {[
           { label:'📦 Move Jobs',    val:selectedMove==='custom'?'Custom Path':selectedMove    ? PATH_STYLES.find(p=>p.id===selectedMove)?.label    : '—', explain: selectedMove==='custom'?'Build this in Settings → Paths after setup':selectedMove    ? PLAIN[selectedMove]?.tagline    : '' },
-          { label:'🏠 General Jobs', val:selectedGeneral==='custom'?'Custom Path':selectedGeneral ? PATH_STYLES.find(p=>p.id===selectedGeneral)?.label : '—', explain: selectedGeneral==='custom'?'Build this in Settings → Paths after setup':selectedGeneral ? PLAIN[selectedGeneral]?.tagline : '' },
+          { label:'🏠 Organizing Jobs', val:selectedGeneral==='custom'?'Custom Path':selectedGeneral ? PATH_STYLES.find(p=>p.id===selectedGeneral)?.label : '—', explain: selectedGeneral==='custom'?'Build this in Settings → Paths after setup':selectedGeneral ? PLAIN[selectedGeneral]?.tagline : '' },
         ].map(r=>(
           <div key={r.label} style={{ padding:'8px 0', borderBottom:'1px solid rgba(34,197,94,0.1)' }}>
             <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'2px' }}>
@@ -9246,7 +9246,7 @@ Bee Organized {{location_name}}
     usedIn:['move-a:step2'],
   },
   // Path A - Availability + Rates (General)
-  { id:'ta2', name:'General · Avail + Rates', type:'email', tag:'cta',
+  { id:'ta2', name:'Organizing · Avail + Rates', type:'email', tag:'cta',
     subject:'{{first_name}}, do you have availability this week?',
     body:`Hi {{first_name}},
 
@@ -9280,7 +9280,7 @@ Bee Organized {{location_name}}`,
     usedIn:['move-b:step2'],
   },
   // Path B - Calendar + Rates (General)
-  { id:'tb2', name:'General · Calendar + Rates', type:'email', tag:'cta',
+  { id:'tb2', name:'Organizing · Calendar + Rates', type:'email', tag:'cta',
     subject:'Book a free discovery call, {{first_name}}',
     body:`Hi {{first_name}},
 
@@ -9313,7 +9313,7 @@ Bee Organized {{location_name}}`,
     usedIn:['move-c:step2'],
   },
   // Path C - Availability only (General)
-  { id:'tc2', name:'General · Availability Only', type:'email', tag:'cta',
+  { id:'tc2', name:'Organizing · Availability Only', type:'email', tag:'cta',
     subject:'{{first_name}}, do you have time this week?',
     body:`Hi {{first_name}},
 
@@ -9347,7 +9347,7 @@ Bee Organized {{location_name}}`,
     usedIn:['move-d:step2'],
   },
   // Path D - Availability + Calendar + Phone (General)
-  { id:'td2', name:'General · Avail + Calendar + Phone', type:'email', tag:'cta',
+  { id:'td2', name:'Organizing · Avail + Calendar + Phone', type:'email', tag:'cta',
     subject:'{{first_name}} - let’s find a time',
     body:`Hi {{first_name}},
 
@@ -9495,7 +9495,7 @@ function CustomPathBuilder({ templates, onSave, onClose, smsEnabled=true }) {
           <div>
             <label style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.5px', display:'block', marginBottom:'6px' }}>Applies To</label>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'7px' }}>
-              {[['any','🌐','All Clients'],['move','📦','Move Only'],['general','🏠','General Only']].map(([v,icon,label])=>(
+              {[['any','🌐','All Clients'],['move','📦','Move Only'],['general','🏠','Organizing Only']].map(([v,icon,label])=>(
                 <button key={v} onClick={()=>setProjectType(v)} style={{ padding:'9px', borderRadius:'9px', cursor:'pointer', border:'2px solid', borderColor:projectType===v?'#a8c9c4':'rgba(0,0,0,0.08)', background:projectType===v?'rgba(168,201,196,0.12)':'white', fontFamily:'inherit', display:'flex', flexDirection:'column', alignItems:'center', gap:'4px' }}>
                   <span style={{ fontSize:'18px' }}>{icon}</span>
                   <span style={{ fontSize:'11px', fontWeight:projectType===v?600:400, color:'#1a2e2b' }}>{label}</span>
@@ -9940,10 +9940,10 @@ const DRIP_PATHS_CONFIG = [
   { id:'move-b',    name:'Move · New Lead Path B',    icon:'📦', projectType:'move',    styleId:'path-b', desc:'Move clients - calendar link + rates' },
   { id:'move-c',    name:'Move · Path C',    icon:'📦', projectType:'move',    styleId:'path-c', desc:'Move clients - availability check only' },
   { id:'move-d',    name:'Move · Path D',    icon:'📦', projectType:'move',    styleId:'path-d', desc:'Move clients - availability + calendar + phone' },
-  { id:'general-a', name:'General · New Lead Path A', icon:'🏠', projectType:'general', styleId:'path-a', desc:'All other projects - availability check + rates' },
-  { id:'general-b', name:'General · New Lead Path B', icon:'🏠', projectType:'general', styleId:'path-b', desc:'All other projects - calendar link + rates' },
-  { id:'general-c', name:'General · New Lead Path C', icon:'🏠', projectType:'general', styleId:'path-c', desc:'All other projects - availability check only' },
-  { id:'general-d', name:'General · New Lead Path D', icon:'🏠', projectType:'general', styleId:'path-d', desc:'All other projects - availability + calendar + phone' },
+  { id:'general-a', name:'Organizing · New Lead Path A', icon:'🏠', projectType:'general', styleId:'path-a', desc:'All other projects - availability check + rates' },
+  { id:'general-b', name:'Organizing · New Lead Path B', icon:'🏠', projectType:'general', styleId:'path-b', desc:'All other projects - calendar link + rates' },
+  { id:'general-c', name:'Organizing · New Lead Path C', icon:'🏠', projectType:'general', styleId:'path-c', desc:'All other projects - availability check only' },
+  { id:'general-d', name:'Organizing · New Lead Path D', icon:'🏠', projectType:'general', styleId:'path-d', desc:'All other projects - availability + calendar + phone' },
   { id:'custom',    name:'Custom',           icon:'✏️', projectType:'any',     styleId:'custom', desc:'Build your own sequence' },
 ]
 
@@ -11741,7 +11741,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
 
             {[
               { key:'moveDefault',    label:'📦 Move Projects',   desc:'Move-In and Move-Out',    filter:'move'    },
-              { key:'generalDefault', label:'🏠 General Projects', desc:'Closet, Kitchen, Full Home, etc.', filter:'general' },
+              { key:'generalDefault', label:'🏠 Organizing Projects', desc:'Closet, Kitchen, Full Home, etc.', filter:'general' },
             ].map(section=>(
               <div key={section.key}>
                 <SectionHeader title={section.label} desc={section.desc} />
@@ -14878,7 +14878,7 @@ function ProjectTypeEditModal({ items, onClose, onSave }) {
         <div style={{ padding:'18px 20px 14px', borderBottom:'1px solid rgba(0,0,0,0.07)', display:'flex', alignItems:'flex-start', justifyContent:'space-between', flexShrink:0 }}>
           <div>
             <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'2px' }}>Project Types</p>
-            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Set each type as Move or General - determines the New Lead Drip used</p>
+            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Set each type as Move or Organizing - determines the New Lead Drip used</p>
           </div>
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
         </div>
@@ -14905,7 +14905,7 @@ function ProjectTypeEditModal({ items, onClose, onSave }) {
                 {['general','move'].map(cat=>(
                   <button key={cat} onClick={()=>updateCat(i,cat)}
                     style={{ flex:1, padding:'5px 0', background:t.category===cat?(cat==='move'?'#0ea5e9':'#10b981'):'transparent', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'11px', fontWeight:t.category===cat?700:400, color:t.category===cat?'white':'#8a9e9a', transition:'all 0.15s' }}>
-                    {cat==='general'?'General':'Move'}
+                    {cat==='general'?'Organizing':'Move'}
                   </button>
                 ))}
               </div>
@@ -15155,7 +15155,7 @@ function ConfigureTab() {
         <button onClick={()=>setOpen('projects')} style={{ width:'100%', padding:'13px 16px', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left' }}>
           <div style={{ flex:1, minWidth:0 }}>
             <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Project Types</p>
-            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Each tagged Move or General - determines New Lead Drip used</p>
+            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Each tagged Move or Organizing - determines New Lead Drip used</p>
           </div>
           <div style={{ display:'flex', alignItems:'center', gap:'8px', flexShrink:0 }}>
             <span style={{ fontSize:'12px', color:'#a8c9c4', fontWeight:600, background:'rgba(168,201,196,0.1)', padding:'2px 8px', borderRadius:'10px' }}>{projects.length}</span>
