@@ -11031,11 +11031,11 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
   })
   const [showInvite, setShowInvite]         = useState(false)
   const [selectedMember, setSelectedMember] = useState(null)
-  const [showUpdatePayment, setShowUpdatePayment] = useState(false)
-  const [showHistory, setShowHistory]       = useState(false)
-  const [payMethod, setPayMethod]           = useState(null)
 
-  // Generate subData dynamically from actual users
+  // subData remains \u2014 MemberDetailPopup still consumes it (per-user
+  // subscription detail in the row-tap sheet). The composite billing
+  // card at the top of TeamSection was deleted, but the row-detail
+  // surface is flagged for separate scope, not removed here.
   const [subData, setSubData] = useState(()=>{
     const data = {}
     const base = usersSource.filter(u=>u.locationId===locationId)
@@ -11043,9 +11043,6 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
     list.forEach(u=>{ data[u.id] = { status:'active', method:'ach', last4:'', note:'' } })
     return data
   })
-
-  const [showSmsPayment, setShowSmsPayment] = useState(false)
-  const [showSmsInfo, setShowSmsInfo] = useState(false)
 
   function addUser(u)           { setUsers(prev=>[...prev,u]) }
   function removeUser(uid)      { setUsers(prev=>prev.filter(u=>u.id!==uid)) }
@@ -11058,91 +11055,13 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
     inactive: { color:'#8a9e9a', bg:'rgba(138,158,154,0.08)',label:'Inactive', icon:'\u23f8' },
   }
 
-  const smsEnabled   = settings?.location?.smsEnabled||false
-  const smsPrice     = APP_ADDONS.find(a=>a.id==='sms')?.price||0
-  const rc           = FRANCHISE_ROLES.find(r=>r.key===profile?.plan)||FRANCHISE_ROLES[0]
-  const seatTotal    = users.reduce((s,u)=>s+(ROLE_PRICING[u.role]||ROLE_PRICING.owner||0),0)
-  const addonTotal   = smsEnabled ? smsPrice : 0
-  const grandTotal   = seatTotal + addonTotal
-  const pastDueCount = users.filter(u=>(subData[u.id]?.status||'active')==='pastdue').length
-
   return (
     <>
-      {/* Single unified billing card */}
-      <div style={{ margin:'12px 12px 0' }}>
-        <div style={{ background:'linear-gradient(135deg,#1a2e2b,#253d36)', borderRadius:'14px', overflow:'hidden' }}>
-          <div style={{ padding:'14px 16px 12px', borderBottom:'1px solid rgba(168,201,196,0.1)' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'8px' }}>
-              <span style={{ fontSize:'16px', flexShrink:0 }}>📍</span>
-              <p style={{ fontSize:'14px', fontWeight:700, color:'white', fontFamily:'Georgia,serif', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1, minWidth:0 }}>Bee Organized {settings?.location?.name||'Location'}</p>
-            </div>
-            <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between' }}>
-              <p style={{ fontSize:'11px', color:'rgba(168,201,196,0.6)' }}>{rc?.icon} {rc?.label} · Renews Mar 1, 2027</p>
-              <p style={{ fontSize:'22px', fontWeight:700, color:'white', fontFamily:'Georgia,serif', flexShrink:0, marginLeft:'12px' }}>${grandTotal.toLocaleString()}<span style={{ fontSize:'11px', fontWeight:400, color:'rgba(168,201,196,0.5)' }}>/yr</span></p>
-            </div>
-          </div>
-          {/* Breakdown */}
-          <div style={{ padding:'10px 16px', borderBottom:'1px solid rgba(168,201,196,0.08)', display:'flex', gap:'16px', flexWrap:'wrap', alignItems:'center' }}>
-            <div>
-              <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.5)', marginBottom:'1px' }}>{users.length} seat{users.length!==1?'s':''}</p>
-              <p style={{ fontSize:'12px', fontWeight:600, color:'rgba(168,201,196,0.85)' }}>${seatTotal.toLocaleString()}/yr</p>
-            </div>
-            {smsEnabled&&(
-              <div>
-                <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.5)', marginBottom:'1px' }}>SMS add-on</p>
-                <p style={{ fontSize:'12px', fontWeight:600, color:'rgba(168,201,196,0.85)' }}>${smsPrice.toLocaleString()}/yr</p>
-              </div>
-            )}
-            <div style={{ marginLeft:'auto', textAlign:'right' }}>
-              <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.5)', marginBottom:'1px' }}>Payment on file</p>
-              <p style={{ fontSize:'12px', fontWeight:600, color:'rgba(168,201,196,0.85)' }}>{payMethod ? `${payMethod.type==='ach'?'🏦':'💳'} ${payMethod.label} ····${payMethod.last4}` : '⚠️ No payment on file'}</p>
-            </div>
-          </div>
-          {/* SMS Add-on */}
-          <div style={{ padding:'10px 16px', borderBottom:'1px solid rgba(168,201,196,0.08)' }}>
-            <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.4)', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'8px' }}>Add-ons</p>
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-                <span style={{ fontSize:'16px' }}>💬</span>
-                <div>
-                  <p style={{ fontSize:'12px', fontWeight:600, color:'rgba(168,201,196,0.9)', marginBottom:'1px' }}>SMS & Voice</p>
-                  <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.5)' }}>Automated texts, call routing, AI summaries</p>
-                </div>
-              </div>
-                <button onClick={()=>setShowSmsInfo(true)}
-                style={{ fontSize:'10px', fontWeight:600, color:'rgba(168,201,196,0.85)', background:'rgba(255,255,255,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'20px', padding:'4px 12px', cursor:'pointer', fontFamily:'inherit', flexShrink:0, whiteSpace:'nowrap' }}>
-                Learn More →
-              </button>
-            </div>
-          </div>
-          {showSmsInfo&&(
-            <SmsVoiceInfoModal onClose={()=>setShowSmsInfo(false)} />
-          )}
-          {/* Actions */}
-          <div style={{ padding:'12px 16px 14px', display:'flex', gap:'8px' }}>
-            <button onClick={()=>setShowUpdatePayment(true)}
-              style={{ flex:1, padding:'9px 12px', background:'rgba(255,255,255,0.08)', border:'1px solid rgba(168,201,196,0.15)', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:500, color:'rgba(168,201,196,0.8)', cursor:'pointer' }}>
-              Update Payment
-            </button>
-            <button onClick={()=>setShowHistory(true)}
-              style={{ padding:'9px 16px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(168,201,196,0.12)', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', color:'rgba(168,201,196,0.6)', cursor:'pointer' }}>
-              History
-            </button>
-          </div>
-          {pastDueCount>0&&(
-            <div style={{ margin:'0 12px 12px', padding:'8px 12px', background:'rgba(239,68,68,0.15)', border:'1px solid rgba(239,68,68,0.3)', borderRadius:'8px', display:'flex', alignItems:'center', gap:'6px' }}>
-              <span>⚠️</span>
-              <p style={{ fontSize:'12px', color:'#fca5a5', fontWeight:500 }}>{pastDueCount} seat{pastDueCount>1?'s':''} past due - tap member to resolve</p>
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* Team members header */}
       <div style={{ margin:'16px 12px 8px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
         <div>
           <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>Team Members</p>
-          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Tap to manage subscription & role</p>
+          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Tap to manage role</p>
         </div>
         <button onClick={()=>setShowInvite(true)}
           style={{ padding:'6px 12px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
@@ -11154,21 +11073,18 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
       <div style={{ margin:'0 12px' }}>
         {users.length===0&&<p style={{ fontSize:'13px', color:'#b0c0bc', fontStyle:'italic', padding:'8px 0' }}>No team members yet.</p>}
         {users.map(u=>{
-          const rc2   = FRANCHISE_ROLES.find(r=>r.key===u.role)||{ icon:'👑', label:'Owner', bg:'rgba(212,160,70,0.1)', color:'#d4a046' }
-          const sub   = subData[u.id]||{ status:'active', method:'ach', last4:'????', note:'' }
-          const sc    = subConf[sub.status]||subConf.active
-          const price = ROLE_PRICING[u.role]||ROLE_PRICING.owner||550
+          const rc2 = FRANCHISE_ROLES.find(r=>r.key===u.role)||{ icon:'👑', label:'Owner', bg:'rgba(212,160,70,0.1)', color:'#d4a046' }
+          const sub = subData[u.id]||{ status:'active', method:'ach', last4:'????', note:'' }
+          const sc  = subConf[sub.status]||subConf.active
           return (
             <div key={u.id} onClick={()=>setSelectedMember(u)}
-              style={{ background:'white', borderRadius:'10px', marginBottom:'6px', border:'1px solid '+(sub.status==='pastdue'?'rgba(239,68,68,0.2)':'rgba(0,0,0,0.07)'), cursor:'pointer', display:'flex', alignItems:'center', gap:'12px', padding:'11px 14px' }}>
+              style={{ background:'white', borderRadius:'10px', marginBottom:'6px', border:'1px solid rgba(0,0,0,0.07)', cursor:'pointer', display:'flex', alignItems:'center', gap:'12px', padding:'11px 14px' }}>
               <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px', fontWeight:700, color:'white', flexShrink:0 }}>{u.initials}</div>
               <div style={{ flex:1, minWidth:0 }}>
                 <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'3px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.name}</p>
                 <div style={{ display:'flex', alignItems:'center', gap:'4px', flexWrap:'wrap' }}>
                   <span style={{ fontSize:'10px', color:rc2.color, background:rc2.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>{rc2.icon} {rc2.label}</span>
                   <span style={{ fontSize:'10px', color:sc.color, background:sc.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>{sc.icon} {sc.label}</span>
-                  <span style={{ fontSize:'10px', color:'#8a9e9a' }}>${price.toLocaleString()}/yr</span>
-
                 </div>
               </div>
               <span style={{ fontSize:'16px', color:'#c8d8d4' }}>›</span>
@@ -11178,19 +11094,6 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
       </div>
 
       {showInvite&&<OnboardingInviteSheet onClose={()=>setShowInvite(false)} onDone={invited=>{ if(invited) invited.forEach(u=>addUser(u)); setShowInvite(false) }} />}
-      {showUpdatePayment&&<UpdatePaymentModal current={payMethod} onSave={m=>{ setPayMethod(m); setShowUpdatePayment(false) }} onClose={()=>setShowUpdatePayment(false)} />}
-      {showHistory&&<BillingHistorySheet onClose={()=>setShowHistory(false)} />}
-      {showSmsPayment&&(
-        <SubscriptionPaymentModal
-          plan="SMS Messaging"
-          amount={calcProration(smsPrice).prorated}
-          annual={smsPrice}
-          renewDate={calcProration(smsPrice).renewDate}
-          isProrated={true}
-          onClose={()=>setShowSmsPayment(false)}
-          onPaid={()=>{ updateLocation('smsEnabled',true); setShowSmsPayment(false) }}
-        />
-      )}
 
       {selectedMember&&(
         <MemberDetailPopup
