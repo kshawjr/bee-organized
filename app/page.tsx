@@ -242,6 +242,7 @@ export default async function HomePage() {
   // Super_admin / corporate (no location_id) get an empty array — they dig
   // into specific locations via the Admin tab.
   let initialSeats: any[] = []
+  let initialPendingInvites: any[] = []
   if (currentLocation?.id) {
     const { data: seatsRaw, error: seatsErr } = await supabaseService
       .from('subscription_seats')
@@ -254,6 +255,19 @@ export default async function HomePage() {
 
     if (seatsErr) console.error('[page.tsx] seats fetch error:', seatsErr.message)
     initialSeats = seatsRaw || []
+
+    // Pending invites count against the per-tier seat pool. InviteTeamMember
+    // subtracts these from available seats so the UI matches what the API
+    // gates on — without this, owner sees "1 available" but POST returns 409.
+    const { data: pendingRaw, error: pendingErr } = await supabaseService
+      .from('pending_invites')
+      .select('id, location_id, email, full_name, role, tier, invite_expires_at, accepted_at, created_at')
+      .eq('location_id', currentLocation.id)
+      .is('accepted_at', null)
+      .order('created_at', { ascending: true })
+
+    if (pendingErr) console.error('[page.tsx] pending_invites fetch error:', pendingErr.message)
+    initialPendingInvites = pendingRaw || []
   }
 
   // ─── All locations for admin views (elevated users only) ───
@@ -376,6 +390,7 @@ export default async function HomePage() {
       initialLocations={initialLocations}
       initialUsers={initialUsers}
       initialSeats={initialSeats}
+      initialPendingInvites={initialPendingInvites}
       currentSubscription={currentSubscription}
       currentLocation={currentLocation}
       currentUser={{

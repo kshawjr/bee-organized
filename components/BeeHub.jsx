@@ -61,8 +61,10 @@ const TierPricesContext = createContext(null)
 // Value shape: {
 //   seats: Array<{ id, location_id, tier, user_id, status, added_at, prorated_cost, ... }>,
 //   setSeats: (next) => void,
+//   pendingInvites: Array<{ id, tier, accepted_at, ... }>,
+//   setPendingInvites: (next) => void,
 //   seatCountsByTier: () => Record<tier, { total, assigned, available }>,
-//   availableSeatsByTier: () => Array<seat>   // unassigned + active
+//   availableSeatsByTierWithPending: (tier) => number  // unassigned active - pending at tier
 // } or null.
 const SeatsContext = createContext(null)
 
@@ -11178,7 +11180,6 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
   // when a franchise owner is signed in we want the actual uuid for invites
   // and seat freeing.
   const dbLocationId     = currentLocationCtx?.id || null
-  const [showAddSeats, setShowAddSeats] = useState(false)
   const [removing, setRemoving]         = useState(null)
   const [users, setUsers] = useState(()=>{
     const fromData = usersSource.filter(u=>u.locationId===locationId)
@@ -11303,20 +11304,12 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
           locationId={dbLocationId}
           onClose={()=>setShowInvite(false)}
           onInviteCreated={()=>{ /* no-op: invite is pending until accept, so don't add to users list yet */ }}
-          onOpenAddSeats={()=>setShowAddSeats(true)}
         />
       )}
       {showInvite && !dbLocationId && (
         // Demo / view-as path — falls back to the existing local-state sheet
         // since there's no real DB location to invite into.
         <OnboardingInviteSheet onClose={()=>setShowInvite(false)} onDone={invited=>{ if(invited) invited.forEach(u=>addUser(u)); setShowInvite(false) }} />
-      )}
-      {showAddSeats && dbLocationId && (
-        <AddSeatsModal
-          locationId={dbLocationId}
-          onClose={()=>setShowAddSeats(false)}
-          onSeatsAdded={(rows)=>{ seatsCtx?.setSeats?.(prev=>[...prev, ...rows]) }}
-        />
       )}
 
       {selectedMember&&(
@@ -12107,10 +12100,15 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                       type="button"
                       onClick={()=>setShowAddSeatsModal(true)}
                       disabled={!currentLocationCtx?.id}
-                      style={{ display:'block', width:'100%', padding:'10px 14px', background:'transparent', border:'none', borderTop:'1px dashed rgba(0,0,0,0.08)', fontSize:'12px', fontFamily:'inherit', fontWeight:500, color:currentLocationCtx?.id?'#8a9e9a':'#c8d8d4', cursor:currentLocationCtx?.id?'pointer':'not-allowed', textAlign:'left' }}
-                      onMouseEnter={e=>{ if(currentLocationCtx?.id){ e.currentTarget.style.background='rgba(26,46,43,0.03)'; e.currentTarget.style.color='#4a5e5a' } }}
-                      onMouseLeave={e=>{ if(currentLocationCtx?.id){ e.currentTarget.style.background='transparent'; e.currentTarget.style.color='#8a9e9a' } }}>
-                      + Add seats
+                      style={{ display:'block', width:'100%', padding:'12px 14px', background:'transparent', border:'none', borderTop:'1px dashed rgba(0,0,0,0.08)', fontFamily:'inherit', textAlign:'left', cursor:currentLocationCtx?.id?'pointer':'not-allowed', opacity:currentLocationCtx?.id?1:0.5 }}
+                      onMouseEnter={e=>{ if(currentLocationCtx?.id){ e.currentTarget.style.background='rgba(26,46,43,0.03)' } }}
+                      onMouseLeave={e=>{ if(currentLocationCtx?.id){ e.currentTarget.style.background='transparent' } }}>
+                      <p style={{ fontSize:'12.5px', fontWeight:600, color:'#4a5e5a', marginBottom:'2px' }}>
+                        + Pre-buy seats
+                      </p>
+                      <p style={{ fontSize:'10.5px', color:'#8a9e9a', lineHeight:1.45 }}>
+                        Already know how many seats you need? Buy them now and invite people anytime. Or use Team → Invite to buy + invite in one step.
+                      </p>
                     </button>
                   </div>
                 </div>
@@ -18266,19 +18264,28 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
 }
 
 // ─── InviteTeamMemberModal ─────────────────────────────────────────────────
-// Real Team-tab Invite flow. Replaces OnboardingInviteSheet's stub Send-
-// Invite branch for the post-onboarding Settings → Team path. Owner picks
-// an email + tier (only tiers with at least one available seat are
-// selectable), POSTs to /api/hub_users/invite which creates a
-// pending_invites row and returns a shareable URL. The seat itself isn't
-// claimed until the invitee accepts.
-function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, onOpenAddSeats }) {
+// Unified "+ Invite Team Member" entry point. Owner picks an email +
+// tier; modal detects whether a seat at that tier is already available
+// (factoring in pending invites — the API gates on the same math). If a
+// seat exists, POST /api/hub_users/invite. If not, POST
+// /api/seats/buy-and-invite, which creates the seat and the invite
+// server-side in one step with rollback on partial failure.
+//
+// AddSeatsModal still exists for pre-buying ahead of inviting — see
+// Settings > Billing.
+function InviteTeamMemberModal({ locationId, onClose, onInviteCreated }) {
   const seatsCtx = useContext(SeatsContext)
+  const tierPricesCtx = useContext(TierPricesContext)
+  const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
 
   const [step, setStep] = useState('form') // form | success
   const [email, setEmail] = useState('')
   const [fullName, setFullName] = useState('')
-  const [tier, setTier] = useState('')
+  // All 3 employee tiers always selectable — owner tier is special-cased
+  // (created during onboarding co-owner flow, capped at 2) and intentionally
+  // not invitable from here.
+  const TIER_OPTIONS = SUBSCRIPTION_TIER_META.filter(t => t.key !== 'owner')
+  const [tier, setTier] = useState(TIER_OPTIONS[0]?.key || 'manager')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [createdInvite, setCreatedInvite] = useState(null)
@@ -18290,21 +18297,26 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, onOpenAdd
     return () => { document.body.style.overflow = prev }
   }, [])
 
+  // Live availability for the currently-picked tier. Uses the same math
+  // the server-side invite check uses (unassigned active seats minus
+  // pending invites) so the UI never claims a seat is free when the API
+  // would 409.
   const counts = seatsCtx?.seatCountsByTier?.() || {}
-  const availableTiers = SUBSCRIPTION_TIER_META
-    .filter(t => t.key !== 'owner' && (counts[t.key]?.available || 0) > 0)
-  const hasAvailable = availableTiers.length > 0
+  const availableForTier = seatsCtx?.availableSeatsByTierWithPending?.(tier) ?? 0
+  const isAvailable = availableForTier >= 1
 
-  // Default to the first available tier when modal opens.
-  React.useEffect(() => {
-    if (!tier && availableTiers.length > 0) setTier(availableTiers[0].key)
-  }, [availableTiers, tier])
+  const tierMeta = SUBSCRIPTION_TIER_META.find(t => t.key === tier)
+  const annualPrice = getTierPrice(tier)
+  const proratedDollars = prorateToNextRenewal(annualPrice)
+  const proratedCents = Math.round(proratedDollars * 100)
+  const renewalLabel = formatRenewalDate(nextRenewalDate())
+  const renewalYear = nextRenewalDate().getUTCFullYear()
 
   function isValidEmail(s) {
     return typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim())
   }
 
-  async function handleSendInvite() {
+  async function handleSubmit() {
     if (submitting) return
     if (!isValidEmail(email)) {
       setError('Enter a valid email address')
@@ -18317,23 +18329,50 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, onOpenAdd
     setSubmitting(true)
     setError('')
     try {
-      const res = await fetch('/api/hub_users/invite', {
+      const useBuyAndInvite = !isAvailable
+      const endpoint = useBuyAndInvite
+        ? '/api/seats/buy-and-invite'
+        : '/api/hub_users/invite'
+      const payload = useBuyAndInvite
+        ? {
+            location_id: locationId,
+            tier,
+            email: email.trim().toLowerCase(),
+            full_name: fullName.trim() || null,
+            prorated_cost: proratedCents,
+          }
+        : {
+            email: email.trim().toLowerCase(),
+            full_name: fullName.trim() || null,
+            location_id: locationId,
+            tier,
+          }
+
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: email.trim().toLowerCase(),
-          full_name: fullName.trim() || null,
-          location_id: locationId,
-          tier,
-        }),
+        body: JSON.stringify(payload),
       })
       const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(json.error || 'Failed to create invite')
+      if (!res.ok) {
+        throw new Error(
+          json.error ||
+            (useBuyAndInvite ? 'Failed to buy seat and invite' : 'Failed to create invite')
+        )
+      }
+      // Sync local context so any open Settings > Billing / Team views
+      // refresh without a page reload.
+      if (useBuyAndInvite && json.seat) {
+        seatsCtx?.setSeats?.(prev => [...prev, json.seat])
+      }
+      if (json.invite) {
+        seatsCtx?.setPendingInvites?.(prev => [...prev, json.invite])
+      }
       setCreatedInvite(json)
       setStep('success')
       if (onInviteCreated) onInviteCreated(json)
     } catch (err) {
-      setError(err?.message || 'Could not create invite')
+      setError(err?.message || 'Could not complete invite')
     } finally {
       setSubmitting(false)
     }
@@ -18352,10 +18391,16 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, onOpenAdd
     ? `mailto:${encodeURIComponent(createdInvite.invite?.email || '')}?subject=${encodeURIComponent('You’re invited to Bee Hub')}&body=${encodeURIComponent(`Join our team on Bee Hub: ${createdInvite.invite_url}`)}`
     : ''
 
+  const submitLabel = submitting
+    ? (isAvailable ? 'Sending…' : 'Buying…')
+    : isAvailable
+      ? 'Send Invite →'
+      : `Buy & Send Invite — ${formatCurrency(proratedDollars, { showCents:'auto' })} →`
+
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10020, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
       <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
-      <div style={{ position:'relative', background:'white', borderRadius:'14px', width:'100%', maxWidth:'420px', maxHeight:'90vh', display:'flex', flexDirection:'column', boxShadow:'0 16px 48px rgba(26,46,43,0.25)', overflow:'hidden', zIndex:1 }}>
+      <div style={{ position:'relative', background:'white', borderRadius:'14px', width:'100%', maxWidth:'440px', maxHeight:'90vh', display:'flex', flexDirection:'column', boxShadow:'0 16px 48px rgba(26,46,43,0.25)', overflow:'hidden', zIndex:1 }}>
         <div style={{ padding:'18px 22px 4px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
             <div>
@@ -18373,20 +18418,7 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, onOpenAdd
         </div>
 
         <div style={{ padding:'16px 22px', overflowY:'auto', flex:1 }}>
-          {step === 'form' && !hasAvailable && (
-            <div style={{ padding:'16px', background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.2)', borderRadius:'10px' }}>
-              <p style={{ fontSize:'13px', fontWeight:600, color:'#78350f', marginBottom:'6px' }}>No available seats</p>
-              <p style={{ fontSize:'12px', color:'#78350f', lineHeight:1.5, marginBottom:'12px' }}>
-                Add seats to your plan before inviting team members.
-              </p>
-              <button onClick={()=>{ onClose(); if (onOpenAddSeats) onOpenAddSeats() }}
-                style={{ padding:'9px 16px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
-                + Add Seats
-              </button>
-            </div>
-          )}
-
-          {step === 'form' && hasAvailable && (
+          {step === 'form' && (
             <>
               <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Email *</p>
               <input
@@ -18401,23 +18433,61 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, onOpenAdd
                 style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', marginBottom:'14px' }}
               />
               <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Tier *</p>
-              <div style={{ display:'grid', gap:'8px', marginBottom:'6px' }}>
-                {availableTiers.map(t => {
+              <div style={{ display:'grid', gap:'8px', marginBottom:'10px' }}>
+                {TIER_OPTIONS.map(t => {
                   const isSelected = tier === t.key
-                  const c = counts[t.key]
+                  const availAtT = seatsCtx?.availableSeatsByTierWithPending?.(t.key) ?? 0
                   return (
                     <button key={t.key} onClick={()=>setTier(t.key)}
                       style={{ padding:'11px 12px', background:isSelected?'rgba(26,46,43,0.04)':'white', border:`2px solid ${isSelected?'#1a2e2b':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left', display:'flex', alignItems:'center', gap:'10px' }}>
                       <span style={{ fontSize:'18px' }}>{t.icon}</span>
                       <div style={{ flex:1, minWidth:0 }}>
                         <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{t.name}</p>
-                        <p style={{ fontSize:'10.5px', color:'#8a9e9a' }}>{c?.available || 0} available</p>
+                        <p style={{ fontSize:'10.5px', color:'#8a9e9a' }}>
+                          {availAtT > 0
+                            ? `${availAtT} available`
+                            : `none available — +${formatCurrency(prorateToNextRenewal(getTierPrice(t.key)), { showCents:'auto' })} prorated`}
+                        </p>
                       </div>
                       {isSelected && <span style={{ color:'#1a2e2b', fontSize:'15px' }}>✓</span>}
                     </button>
                   )
                 })}
               </div>
+
+              {/* Live status line — recalculates as the tier changes. Green
+                  when a seat is already pooled, amber when a purchase is
+                  required to send this invite. */}
+              {isAvailable ? (
+                <div style={{ marginBottom:'10px', padding:'9px 12px', background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.18)', borderRadius:'9px' }}>
+                  <p style={{ fontSize:'12px', color:'#15803d', fontWeight:500 }}>
+                    ✓ {availableForTier} {tierMeta?.name || tier} seat{availableForTier === 1 ? '' : 's'} available at this location
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div style={{ marginBottom:'10px', padding:'9px 12px', background:'rgba(245,158,11,0.07)', border:'1px solid rgba(245,158,11,0.22)', borderRadius:'9px' }}>
+                    <p style={{ fontSize:'12px', color:'#92400e', fontWeight:500 }}>
+                      No {tierMeta?.name || tier} seats available — purchase 1 to invite
+                    </p>
+                  </div>
+
+                  <div style={{ background:'rgba(26,46,43,0.03)', border:'1px solid rgba(0,0,0,0.06)', borderRadius:'10px', padding:'10px 12px', marginBottom:'10px' }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'4px' }}>
+                      <span style={{ fontSize:'12px', color:'#4a5e5a' }}>1 {tierMeta?.name || tier} seat</span>
+                      <span style={{ fontSize:'12.5px', fontWeight:600, color:'#1a2e2b' }}>{formatCurrency(annualPrice, { showCents:'never' })}/yr</span>
+                    </div>
+                    <div style={{ display:'flex', justifyContent:'space-between' }}>
+                      <span style={{ fontSize:'12px', color:'#4a5e5a' }}>Prorated to {renewalLabel}</span>
+                      <span style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{formatCurrency(proratedDollars, { showCents:'auto' })}</span>
+                    </div>
+                  </div>
+
+                  <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, marginBottom:'8px' }}>
+                    Pays for 1 seat and sends the invitation in one step. Seat returns to your pool if the invitation expires or is removed.
+                  </p>
+                </>
+              )}
 
               {error && (
                 <p style={{ marginTop:'12px', padding:'8px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.15)', borderRadius:'8px', color:'#ef4444', fontSize:'12px' }}>{error}</p>
@@ -18451,17 +18521,14 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, onOpenAdd
         </div>
 
         <div style={{ padding:'12px 22px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px' }}>
-          {step === 'form' && hasAvailable && (
+          {step === 'form' && (
             <>
               <button onClick={onClose} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
-              <button onClick={handleSendInvite} disabled={submitting}
+              <button onClick={handleSubmit} disabled={submitting}
                 style={{ flex:2, padding:'11px', background:submitting?'#8a9e9a':'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:submitting?'wait':'pointer' }}>
-                {submitting ? 'Sending…' : 'Send Invite →'}
+                {submitLabel}
               </button>
             </>
-          )}
-          {step === 'form' && !hasAvailable && (
-            <button onClick={onClose} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Close</button>
           )}
           {step === 'success' && (
             <button onClick={onClose} style={{ flex:1, padding:'11px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
@@ -18485,6 +18552,7 @@ export default function App({
   initialLocations,          // accepted; not yet consumed — ALL_LOCATIONS mock still drives the picker
   initialUsers,              // real hub_users roster from Supabase; null → fall back to USERS_DATA mock
   initialSeats,              // server-rendered subscription_seats for the current location (empty array for elevated users)
+  initialPendingInvites,     // server-rendered pending_invites for the current location (empty array for elevated users)
   currentSubscription,
   currentLocation,           // real Supabase row for franchise owners; null for elevated users
 } = {}) {
@@ -18538,6 +18606,13 @@ export default function App({
   // owner seat; "+ Add seats" (Dispatch 3) and team invite assignment mutate
   // this state. Defaults to [] so renders never crash on a pre-migration env.
   const [seats, setSeats] = useState(Array.isArray(initialSeats) ? initialSeats : [])
+  // Pending (unaccepted) invites — kept in context so InviteTeamMemberModal
+  // can subtract them from raw seat counts to match the server-side check
+  // in /api/hub_users/invite (which would otherwise return 409 after the
+  // UI claimed a seat was free).
+  const [pendingInvites, setPendingInvites] = useState(
+    Array.isArray(initialPendingInvites) ? initialPendingInvites : []
+  )
   function seatCountsByTier() {
     return seats.reduce((acc, s) => {
       if (s.status && s.status !== 'active') return acc
@@ -18551,11 +18626,21 @@ export default function App({
   function availableSeatsByTier() {
     return seats.filter(s => !s.user_id && (s.status === 'active' || !s.status))
   }
+  function availableSeatsByTierWithPending(tier) {
+    const total = seats.filter(
+      s => s.tier === tier && !s.user_id && (s.status === 'active' || !s.status)
+    ).length
+    const pending = pendingInvites.filter(p => p.tier === tier && !p.accepted_at).length
+    return Math.max(0, total - pending)
+  }
   const seatsValue = {
     seats,
     setSeats,
+    pendingInvites,
+    setPendingInvites,
     seatCountsByTier,
     availableSeatsByTier,
+    availableSeatsByTierWithPending,
   }
   const [franchiseRole, setFranchiseRole]   = useState(initialFranchiseRole ?? 'owner') // owner|manager|light|readonly
   const [activeNav, setActiveNav]           = useState('home')

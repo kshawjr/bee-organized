@@ -76,6 +76,17 @@ interface BeeHubProps {
     added_by?: string | null
     notes?: string | null
   }>
+  initialPendingInvites?: Array<{
+    id: string
+    location_id: string
+    email: string
+    full_name?: string | null
+    role?: string
+    tier: 'owner' | 'manager' | 'light' | 'readonly'
+    invite_expires_at?: string
+    accepted_at?: string | null
+    created_at?: string
+  }>
   currentSubscription?: {
     subscription_status?: string
     subscription_plan?: string | null
