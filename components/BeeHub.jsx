@@ -5896,7 +5896,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                   </button>
                 </div>
               )}
-              {payStep==='pricing'&&<button onClick={()=>setPayStep('method')} style={{ width:'100%', padding:'15px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', marginBottom:'10px' }}>Activate for ${proration.prorated} →</button>}
+              {payStep==='pricing'&&<button onClick={()=>setPayStep('method')} style={{ width:'100%', padding:'15px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', marginBottom:'10px' }}>Activate for {formatCurrency(proration.prorated)} →</button>}
               {showSmsModal&&<SmsVoiceInfoModal onClose={()=>setShowSmsModal(false)} />}
               {payStep==='method'&&(
                 <>
