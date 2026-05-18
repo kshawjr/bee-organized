@@ -15451,13 +15451,18 @@ function PricingManagementTab() {
   const tierPrices = tierPricesCtx?.tierPrices ?? []
   const setTierPrices = tierPricesCtx?.setTierPrices ?? (() => {})
   // Local edit buffer — keyed by tier id (matches FRANCHISE_ROLES.key).
+  // Values stored as strings during edit so the controlled <input> can be
+  // emptied/edited mid-stream without parseInt round-tripping every keystroke
+  // (which lost cursor position and silently rejected anything past the first
+  // digit). Parsed back to integers in saveAll().
   // Re-syncs from context whenever the canonical prices change (e.g. another
   // tab saves) so we don't show stale values.
   const initialRolePrices = () => {
     const out = {}
     for (const r of FRANCHISE_ROLES) {
       const row = tierPrices.find(t => t.id === r.key)
-      out[r.key] = row?.price_annual ?? DEFAULT_TIER_PRICES[r.key] ?? 0
+      const n = row?.price_annual ?? DEFAULT_TIER_PRICES[r.key] ?? 0
+      out[r.key] = String(n)
     }
     return out
   }
@@ -15516,8 +15521,8 @@ function PricingManagementTab() {
   }
 
   function updateRolePrice(key, val) {
-    const n = parseInt(val.replace(/\D/g,''))
-    setRolePrices(prev => ({ ...prev, [key]: isNaN(n) ? prev[key] : n }))
+    const clean = String(val).replace(/\D/g, '')
+    setRolePrices(prev => ({ ...prev, [key]: clean }))
   }
 
   function updateAddonPrice(id, val) {
@@ -15576,7 +15581,10 @@ function PricingManagementTab() {
                     <span style={{ fontSize:'14px', color:'#8a9e9a' }}>$</span>
                     <input
                       autoFocus
-                      value={rolePrices[r.key]}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={rolePrices[r.key] ?? ''}
                       onChange={e => updateRolePrice(r.key, e.target.value)}
                       onBlur={() => setEditingRole(null)}
                       onKeyDown={e => { if(e.key==='Enter'||e.key==='Escape') setEditingRole(null) }}
@@ -15586,7 +15594,7 @@ function PricingManagementTab() {
                   </div>
                 ) : (
                   <button onClick={() => setEditingRole(r.key)} style={{ display:'flex', alignItems:'center', gap:'4px', padding:'6px 10px', background:'rgba(0,0,0,0.03)', border:'1px solid rgba(0,0,0,0.08)', borderRadius:'8px', cursor:'pointer', fontFamily:'inherit' }}>
-                    <span style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b' }}>${rolePrices[r.key].toLocaleString()}</span>
+                    <span style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b' }}>${(Number(rolePrices[r.key]) || 0).toLocaleString()}</span>
                     <span style={{ fontSize:'10px', color:'#8a9e9a' }}>/yr</span>
                     <span style={{ fontSize:'11px', color:'#a8c9c4', marginLeft:'2px' }}>✏️</span>
                   </button>
