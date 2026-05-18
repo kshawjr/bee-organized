@@ -14923,7 +14923,7 @@ function ProjectTypeEditModal({ items, onClose, onSave }) {
               {['general','move'].map(cat=>(
                 <button key={cat} onClick={()=>setNewCat(cat)}
                   style={{ flex:1, padding:'7px 0', background:newCat===cat?(cat==='move'?'#0ea5e9':'#10b981'):'transparent', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'11px', fontWeight:newCat===cat?700:400, color:newCat===cat?'white':'#8a9e9a' }}>
-                  {cat==='general'?'General':'Move'}
+                  {cat==='general'?'Organizing':'Move'}
                 </button>
               ))}
             </div>
