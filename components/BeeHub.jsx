@@ -5552,6 +5552,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   const currentLocationCtx = useContext(CurrentLocationContext)
   const currentUserCtx     = useContext(CurrentUserContext)
   const seatsCtx           = useContext(SeatsContext)
+  const tierPricesCtx      = useContext(TierPricesContext)
 
   // ── ALL hooks at top - no conditional returns before these ──────────────────
   const [completedSteps, setCompletedSteps]   = useState({})
@@ -5993,7 +5994,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                   </button>
                 </div>
               )}
-              {payStep==='pricing'&&<button onClick={()=>setPayStep('method')} style={{ width:'100%', padding:'15px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', marginBottom:'10px' }}>Activate for {formatCurrency(proration.prorated)} →</button>}
+              {payStep==='pricing'&&<button onClick={()=>setPayStep(paymentSourceForPay === 'direct' ? 'pay_confirm' : 'method')} style={{ width:'100%', padding:'15px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', marginBottom:'10px' }}>{paymentSourceForPay === 'direct' ? `Activate for ${formatCurrency(proration.prorated)} →` : 'Continue →'}</button>}
               {showSmsModal&&<SmsVoiceInfoModal onClose={()=>setShowSmsModal(false)} />}
               {payStep==='method'&&(
                 <>
@@ -6045,6 +6046,53 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
               <p style={{ fontSize:'11px', color:'#b0c0bc', textAlign:'center' }}>🔒 Secured by Stripe</p>
             </>
           )}
+          {payStep==='pay_confirm'&&(() => {
+            // Line-item breakdown: replicate the SubscriptionCalculator "Breakdown"
+            // shape so the user sees the same per-tier amounts they just configured,
+            // prorated. Co-owner discount (count ≥ 2 Zee Bees) is folded in here so
+            // the line items add up to the total.
+            const livePricesForConfirm = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
+            const confirmManagerProrated = prorateToNextRenewal(livePricesForConfirm.manager || 0)
+            const confirmLineItems = selectedSeats
+              .filter(s => s.count > 0)
+              .flatMap(s => {
+                const meta = SUBSCRIPTION_TIER_META.find(t => t.key === s.tier)
+                const name = meta?.name || s.tier
+                const annualEach = livePricesForConfirm[s.tier] || 0
+                const proratedEach = prorateToNextRenewal(annualEach)
+                if (s.tier === 'owner' && s.count >= 2) {
+                  // Primary owner at full rate, extras at Hive Manager rate.
+                  return [
+                    { label: `1 ${name} (prorated)`, amount: proratedEach },
+                    {
+                      label: `${s.count - 1} co-owner ${name}${s.count - 1 !== 1 ? 's' : ''} (prorated, billed at Hive Manager rate)`,
+                      amount: (s.count - 1) * confirmManagerProrated,
+                    },
+                  ]
+                }
+                return [{
+                  label: `${s.count} ${name}${s.count !== 1 ? 's' : ''} (prorated)`,
+                  amount: s.count * proratedEach,
+                }]
+              })
+            const confirmTotal = confirmLineItems.reduce((sum, li) => sum + li.amount, 0)
+            return (
+              <div style={{ maxWidth:'520px', margin:'0 auto' }}>
+                <div style={{ background:'white', borderRadius:'14px', padding:'18px 18px 16px', border:'1px solid rgba(0,0,0,0.06)', boxShadow:'0 2px 10px rgba(26,46,43,0.05)' }}>
+                  <PaymentConfirmStep
+                    title="Confirm payment"
+                    lineItems={confirmLineItems}
+                    total={confirmTotal}
+                    confirmLabel="Pay & Activate"
+                    onConfirm={() => { setActivateError(''); processPayment() }}
+                    onCancel={() => setPayStep('pricing')}
+                    isProcessing={false}
+                    error={activateError || null}
+                  />
+                </div>
+              </div>
+            )
+          })()}
         </div>
       </div>
     )
@@ -18129,6 +18177,114 @@ function SyncLogContent() {
 //  ROOT APP - Role-aware shell
 // ═══════════════════════════════════════════════════════
 
+// ─── PaymentConfirmStep ────────────────────────────────────────────────────
+// Reusable payment-confirmation interstitial. Drops in between any
+// "buy seats" form and its actual API call. Renders a heading, an
+// order-summary card with line items + total, a stubbed payment-method
+// placeholder ("Card on file: •••• 4242"), and a Back / Pay button
+// row. The card-collection step itself is post-demo (real Stripe
+// Elements); this component exists to make the demo feel deliberate
+// rather than instant.
+//
+// Props:
+//   title        — heading string ("Confirm payment")
+//   lineItems    — Array<{ label, amount }> displayed as rows; amount in dollars
+//   total        — number in dollars, shown in the bold total row
+//   confirmLabel — primary button text ("Pay & Activate", "Pay & Send Invite")
+//   onConfirm    — async fn run when user confirms; caller drives the API call
+//   onCancel     — fn to return to the prior view
+//   isProcessing — bool; disables the confirm button and swaps label to a busy state
+//   error        — optional string rendered inline above the buttons
+function PaymentConfirmStep({
+  title = 'Confirm payment',
+  lineItems = [],
+  total = 0,
+  confirmLabel = 'Pay',
+  onConfirm,
+  onCancel,
+  isProcessing = false,
+  error = null,
+}) {
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:'14px', width:'100%' }}>
+      <div>
+        <h3 style={{ fontSize:'17px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'2px' }}>{title}</h3>
+        <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Review your charge before we finalize it.</p>
+      </div>
+
+      {/* Order summary card */}
+      <div style={{ borderRadius:'12px', border:'1px solid rgba(0,0,0,0.08)', overflow:'hidden', boxShadow:'0 1px 4px rgba(26,46,43,0.04)' }}>
+        <div style={{ padding:'9px 14px', background:'rgba(26,46,43,0.03)', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
+          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px' }}>
+            Order summary
+          </p>
+        </div>
+        <div style={{ background:'white', padding:'10px 14px' }}>
+          {lineItems.length === 0 ? (
+            <p style={{ fontSize:'12px', color:'#8a9e9a', fontStyle:'italic' }}>No line items</p>
+          ) : (
+            <div style={{ display:'grid', gap:'6px' }}>
+              {lineItems.map((li, i) => (
+                <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:'10px', fontSize:'12.5px', color:'#4a5e5a' }}>
+                  <span style={{ flex:1, minWidth:0 }}>{li.label}</span>
+                  <span style={{ fontWeight:600, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
+                    {formatCurrency(li.amount, { showCents:'auto' })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ borderTop:'1px solid rgba(0,0,0,0.08)', marginTop:'10px', paddingTop:'10px', display:'flex', justifyContent:'space-between', alignItems:'baseline' }}>
+            <span style={{ fontSize:'13px', color:'#1a2e2b', fontWeight:700 }}>Total due today</span>
+            <span style={{ fontSize:'19px', fontWeight:700, color:'#d4a046', fontFamily:'Georgia,serif' }}>
+              {formatCurrency(total, { showCents:'auto' })}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Payment method placeholder — visual stub. Real Stripe Elements
+         drop in here post-demo. */}
+      <div style={{ borderRadius:'12px', border:'1.5px solid rgba(168,201,196,0.45)', background:'linear-gradient(135deg, rgba(168,201,196,0.10), rgba(26,46,43,0.04))', padding:'12px 14px' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px' }}>
+          <span style={{ fontSize:'18px' }}>💳</span>
+          <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b', textTransform:'uppercase', letterSpacing:'0.6px' }}>
+            Payment method
+          </p>
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'4px' }}>
+          <div style={{ width:'38px', height:'24px', borderRadius:'4px', background:'linear-gradient(135deg,#1a2e2b,#2a4a40)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+            <span style={{ fontSize:'9px', fontWeight:700, color:'#d4a046', letterSpacing:'0.4px' }}>VISA</span>
+          </div>
+          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
+            Card on file: •••• 4242
+          </p>
+        </div>
+        <p style={{ fontSize:'10.5px', color:'#8a9e9a', lineHeight:1.45, marginTop:'4px' }}>
+          Stripe integration coming soon — for now this is a confirmation step only.
+        </p>
+      </div>
+
+      {error && (
+        <p style={{ padding:'8px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.18)', borderRadius:'9px', color:'#b91c1c', fontSize:'12px' }}>
+          {error}
+        </p>
+      )}
+
+      <div style={{ display:'flex', gap:'8px', marginTop:'2px' }}>
+        <button onClick={onCancel} disabled={isProcessing}
+          style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:isProcessing?'not-allowed':'pointer', opacity:isProcessing?0.5:1 }}>
+          ← Back
+        </button>
+        <button onClick={onConfirm} disabled={isProcessing}
+          style={{ flex:2, padding:'12px', background:isProcessing?'#8a9e9a':'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:isProcessing?'wait':'pointer' }}>
+          {isProcessing ? 'Processing…' : `${confirmLabel} ${formatCurrency(total, { showCents:'auto' })} →`}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── AddSeatsModal ─────────────────────────────────────────────────────────
 // Real "+ Add seats" flow (Dispatch 3). Replaces the stub alert. Owner
 // picks a tier + quantity, sees live prorated cost, POSTs a bulk insert
@@ -18139,6 +18295,7 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
   const tierPricesCtx = useContext(TierPricesContext)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
 
+  const [step, setStep]         = useState('form') // form | paymentConfirm
   const [tier, setTier]         = useState('manager')
   const [quantity, setQuantity] = useState(1)
   const [submitting, setSubmitting] = useState(false)
@@ -18159,8 +18316,18 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
   const proratedEach = prorateToNextRenewal(annualEach)
   const totalProrated = proratedEach * quantity
   const totalAnnual   = annualEach * quantity
+  const tierMeta     = SUBSCRIPTION_TIER_META.find(t => t.key === tier)
+  const renewalLabel = formatRenewalDate(nextRenewalDate())
 
-  async function handlePay() {
+  // Triggered by the form-step Pay button. Just transitions to the
+  // payment-confirmation interstitial; the real /api/seats POST runs
+  // from runAddSeats() when the user confirms there.
+  function handleProceedToConfirm() {
+    setError('')
+    setStep('paymentConfirm')
+  }
+
+  async function runAddSeats() {
     if (submitting) return
     setSubmitting(true)
     setError('')
@@ -18194,14 +18361,38 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
         <div style={{ padding:'18px 22px 4px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
             <div>
-              <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>Add seats to your plan</h2>
-              <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>Pay annually, prorated to next March 1. Once paid, you can invite team members anytime.</p>
+              <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>
+                {step === 'paymentConfirm' ? 'Confirm payment' : 'Add seats to your plan'}
+              </h2>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
+                {step === 'paymentConfirm'
+                  ? `Adds ${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'} to your pool. Invite people later from Settings → Team.`
+                  : 'Pay annually, prorated to next March 1. Once paid, you can invite team members anytime.'}
+              </p>
             </div>
             <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', lineHeight:1, padding:'0 0 0 8px' }}>×</button>
           </div>
         </div>
 
         <div style={{ padding:'14px 22px', overflowY:'auto', flex:1 }}>
+          {step === 'paymentConfirm' && (
+            <PaymentConfirmStep
+              title="Confirm pre-buy"
+              lineItems={[{
+                label: `${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'} (prorated to ${renewalLabel})`,
+                amount: totalProrated,
+              }]}
+              total={totalProrated}
+              confirmLabel="Pay & Add Seats"
+              onConfirm={runAddSeats}
+              onCancel={() => { setError(''); setStep('form') }}
+              isProcessing={submitting}
+              error={error || null}
+            />
+          )}
+
+          {step === 'form' && (
+            <>
           <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'8px' }}>Seat tier</p>
           <div style={{ display:'grid', gap:'8px', marginBottom:'18px' }}>
             {TIER_OPTIONS.map(t => {
@@ -18249,15 +18440,19 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
           {error && (
             <p style={{ marginTop:'12px', padding:'8px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.15)', borderRadius:'8px', color:'#ef4444', fontSize:'12px' }}>{error}</p>
           )}
+            </>
+          )}
         </div>
 
-        <div style={{ padding:'12px 22px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px' }}>
-          <button onClick={onClose} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
-          <button onClick={handlePay} disabled={submitting}
-            style={{ flex:2, padding:'11px', background:submitting?'#8a9e9a':'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:submitting?'wait':'pointer' }}>
-            {submitting ? 'Adding…' : `Pay ${formatCurrency(totalProrated, { showCents:'auto' })} →`}
-          </button>
-        </div>
+        {step === 'form' && (
+          <div style={{ padding:'12px 22px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px' }}>
+            <button onClick={onClose} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
+            <button onClick={handleProceedToConfirm}
+              style={{ flex:2, padding:'11px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+              {`Review payment — ${formatCurrency(totalProrated, { showCents:'auto' })} →`}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -18278,7 +18473,7 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated }) {
   const tierPricesCtx = useContext(TierPricesContext)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
 
-  const [step, setStep] = useState('form') // form | success
+  const [step, setStep] = useState('form') // form | paymentConfirm | success
   const [email, setEmail] = useState('')
   const [fullName, setFullName] = useState('')
   // All 3 employee tiers always selectable — owner tier is special-cased
@@ -18316,6 +18511,10 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated }) {
     return typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim())
   }
 
+  // Form-side submit. When the chosen tier has a free seat, fires
+  // /api/hub_users/invite directly — no payment step needed. When a
+  // purchase is required, hands off to the PaymentConfirmStep view;
+  // the actual buy + invite POST runs from runBuyAndInvite() below.
   async function handleSubmit() {
     if (submitting) return
     if (!isValidEmail(email)) {
@@ -18326,43 +18525,62 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated }) {
       setError('Pick a tier')
       return
     }
+    setError('')
+
+    if (!isAvailable) {
+      setStep('paymentConfirm')
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      const res = await fetch('/api/hub_users/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          full_name: fullName.trim() || null,
+          location_id: locationId,
+          tier,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || 'Failed to create invite')
+      if (json.invite) {
+        seatsCtx?.setPendingInvites?.(prev => [...prev, json.invite])
+      }
+      setCreatedInvite(json)
+      setStep('success')
+      if (onInviteCreated) onInviteCreated(json)
+    } catch (err) {
+      setError(err?.message || 'Could not complete invite')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  // Runs from PaymentConfirmStep's onConfirm. Single combined endpoint
+  // so the seat + invite are written together with server-side rollback
+  // on partial failure.
+  async function runBuyAndInvite() {
+    if (submitting) return
     setSubmitting(true)
     setError('')
     try {
-      const useBuyAndInvite = !isAvailable
-      const endpoint = useBuyAndInvite
-        ? '/api/seats/buy-and-invite'
-        : '/api/hub_users/invite'
-      const payload = useBuyAndInvite
-        ? {
-            location_id: locationId,
-            tier,
-            email: email.trim().toLowerCase(),
-            full_name: fullName.trim() || null,
-            prorated_cost: proratedCents,
-          }
-        : {
-            email: email.trim().toLowerCase(),
-            full_name: fullName.trim() || null,
-            location_id: locationId,
-            tier,
-          }
-
-      const res = await fetch(endpoint, {
+      const res = await fetch('/api/seats/buy-and-invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          location_id: locationId,
+          tier,
+          email: email.trim().toLowerCase(),
+          full_name: fullName.trim() || null,
+          prorated_cost: proratedCents,
+        }),
       })
       const json = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        throw new Error(
-          json.error ||
-            (useBuyAndInvite ? 'Failed to buy seat and invite' : 'Failed to create invite')
-        )
-      }
-      // Sync local context so any open Settings > Billing / Team views
-      // refresh without a page reload.
-      if (useBuyAndInvite && json.seat) {
+      if (!res.ok) throw new Error(json.error || 'Failed to buy seat and invite')
+      if (json.seat) {
         seatsCtx?.setSeats?.(prev => [...prev, json.seat])
       }
       if (json.invite) {
@@ -18405,12 +18623,16 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated }) {
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
             <div>
               <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>
-                {step === 'success' ? 'Invitation created' : 'Invite a team member'}
+                {step === 'success' ? 'Invitation created'
+                  : step === 'paymentConfirm' ? 'Confirm payment'
+                  : 'Invite a team member'}
               </h2>
               <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
                 {step === 'success'
                   ? 'Share this link with the invitee. It expires in 7 days.'
-                  : 'They’ll sign in with Google to claim their seat.'}
+                  : step === 'paymentConfirm'
+                    ? `Buys 1 ${tierMeta?.name || tier} seat and sends the invite to ${email}.`
+                    : 'They’ll sign in with Google to claim their seat.'}
               </p>
             </div>
             <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', lineHeight:1, padding:'0 0 0 8px' }}>×</button>
@@ -18495,6 +18717,22 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated }) {
             </>
           )}
 
+          {step === 'paymentConfirm' && (
+            <PaymentConfirmStep
+              title="Confirm seat purchase"
+              lineItems={[{
+                label: `1 ${tierMeta?.name || tier} seat (prorated to ${renewalLabel})`,
+                amount: proratedDollars,
+              }]}
+              total={proratedDollars}
+              confirmLabel="Pay & Send Invite"
+              onConfirm={runBuyAndInvite}
+              onCancel={() => { setError(''); setStep('form') }}
+              isProcessing={submitting}
+              error={error || null}
+            />
+          )}
+
           {step === 'success' && createdInvite && (
             <>
               <div style={{ marginBottom:'14px' }}>
@@ -18520,22 +18758,24 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated }) {
           )}
         </div>
 
-        <div style={{ padding:'12px 22px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px' }}>
-          {step === 'form' && (
-            <>
-              <button onClick={onClose} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
-              <button onClick={handleSubmit} disabled={submitting}
-                style={{ flex:2, padding:'11px', background:submitting?'#8a9e9a':'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:submitting?'wait':'pointer' }}>
-                {submitLabel}
+        {step !== 'paymentConfirm' && (
+          <div style={{ padding:'12px 22px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px' }}>
+            {step === 'form' && (
+              <>
+                <button onClick={onClose} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
+                <button onClick={handleSubmit} disabled={submitting}
+                  style={{ flex:2, padding:'11px', background:submitting?'#8a9e9a':'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:submitting?'wait':'pointer' }}>
+                  {submitLabel}
+                </button>
+              </>
+            )}
+            {step === 'success' && (
+              <button onClick={onClose} style={{ flex:1, padding:'11px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+                Done
               </button>
-            </>
-          )}
-          {step === 'success' && (
-            <button onClick={onClose} style={{ flex:1, padding:'11px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
-              Done
-            </button>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
