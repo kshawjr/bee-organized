@@ -31,6 +31,14 @@ const CurrentUserContext = createContext(null)
 // Value shape: { id, name, jobber_connected, jobber_account_id, last_sync_status, token_expiry } or null.
 const CurrentLocationContext = createContext(null)
 
+// Real hub_users roster from Supabase. For super_admin / corporate this is
+// the full org (capped at 500 in page.tsx); for franchise sign-ins it's
+// scoped to their location_id. Consumed by TeamSection to replace the
+// USERS_DATA mock. Null falls back to the mock so view-as / demo paths
+// keep working.
+// Value shape: Array<{ id, name, initials, email, locationId, role, status, joined }> or null.
+const LocationUsersContext = createContext(null)
+
 const STAGES = [
   { key:'New',             label:'New',             color:'#6366f1', bg:'rgba(99,102,241,0.08)',  dot:'#6366f1', icon:'✨' },
   { key:'Attempting',      label:'Attempting to Contact', color:'#f97316', bg:'rgba(249,115,22,0.08)',  dot:'#f97316', icon:'📲' },
@@ -10998,10 +11006,15 @@ function SmsVoiceInfoModal({ onClose }) {
 
 
 function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, profile=null, onGoToLocation=()=>{} }) {
+  // Real hub_users from context when page.tsx populates it; otherwise mock.
+  // Initializer reads context once (snapshot at mount) — subsequent invites
+  // mutate local state via addUser/removeUser, which is the existing pattern.
+  const locationUsersCtx = useContext(LocationUsersContext)
+  const usersSource      = locationUsersCtx || USERS_DATA
   const [users, setUsers] = useState(()=>{
-    const fromData = USERS_DATA.filter(u=>u.locationId===locationId)
+    const fromData = usersSource.filter(u=>u.locationId===locationId)
     if (fromData.length > 0) return fromData
-    // Fallback: create owner entry from profile if USERS_DATA has no match
+    // Fallback: create owner entry from profile if source has no match
     if (profile?.firstName||profile?.email) {
       const name = [profile.firstName,profile.lastName].filter(Boolean).join(' ')||'Owner'
       return [{
@@ -11025,7 +11038,7 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
   // Generate subData dynamically from actual users
   const [subData, setSubData] = useState(()=>{
     const data = {}
-    const base = USERS_DATA.filter(u=>u.locationId===locationId)
+    const base = usersSource.filter(u=>u.locationId===locationId)
     const list  = base.length > 0 ? base : (profile?.firstName||profile?.email ? [{ id:`owner_${locationId}`, role:'owner' }] : [])
     list.forEach(u=>{ data[u.id] = { status:'active', method:'ach', last4:'', note:'' } })
     return data
@@ -16712,6 +16725,7 @@ export default function App({
   initialLocFilter,
   initialGuideSlides,        // accepted; not yet consumed — GUIDE_SLIDES const still drives the guide
   initialLocations,          // accepted; not yet consumed — ALL_LOCATIONS mock still drives the picker
+  initialUsers,              // real hub_users roster from Supabase; null → fall back to USERS_DATA mock
   currentSubscription,
   currentLocation,           // real Supabase row for franchise owners; null for elevated users
 } = {}) {
@@ -16744,7 +16758,7 @@ export default function App({
   ])
   const [partners, setPartners]             = useState(PARTNERS_DATA)
   const [companies, setCompanies]           = useState(COMPANIES_DATA)
-  const [users, setUsers]                   = useState(USERS_DATA)
+  const [users, setUsers]                   = useState(initialUsers ?? USERS_DATA)
   // Track CRM status overrides from admin panel
   const [locStatuses, setLocStatuses]       = useState({})
   const [onboardingData, setOnboardingData] = useState(null)
@@ -17095,6 +17109,7 @@ export default function App({
   return (
     <CurrentUserContext.Provider value={currentUser || null}>
     <CurrentLocationContext.Provider value={currentLocation || null}>
+    <LocationUsersContext.Provider value={users}>
     <div>
       <DemoBar />
       <LocBanner />
@@ -17207,6 +17222,7 @@ export default function App({
         />
       )}
     </div>
+    </LocationUsersContext.Provider>
     </CurrentLocationContext.Provider>
     </CurrentUserContext.Provider>
   )

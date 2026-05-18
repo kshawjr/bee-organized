@@ -32,6 +32,50 @@ function fmtJoined(iso: string | null | undefined): string {
   }
 }
 
+function initialsFrom(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase()
+}
+
+// hub_users.role (enforced auth role) → TeamSection's tier-display role
+// (FRANCHISE_ROLES key, drives Queen Bee / Hive Keeper / Worker Bee /
+// Honey Watcher chip + seat pricing). admin → manager is a placeholder
+// until subscription_seats lands and lets us derive tier from purchased
+// seat instead of from auth role.
+function mapTier(dbRole: string | null | undefined): string {
+  switch (dbRole) {
+    case 'super_admin':
+      return 'corporate'
+    case 'admin':
+      return 'manager'
+    case 'owner':
+      return 'owner'
+    case 'lite_user':
+      return 'readonly'
+    default:
+      return 'readonly'
+  }
+}
+
+function buildLocationUser(row: any) {
+  const name = row.full_name || row.email
+  return {
+    id: row.id,
+    name,
+    initials: initialsFrom(name),
+    email: row.email,
+    locationId: row.location_id,
+    role: mapTier(row.role),
+    status: 'active',
+    joined: fmtJoined(row.created_at),
+  }
+}
+
 export default async function HomePage() {
   const authUser = await requireAuth()
   const hubUser = await getHubUser()
@@ -149,6 +193,9 @@ export default async function HomePage() {
   // silent-fail pattern that returns empty arrays on stale sessions.
   // Auth has already been verified via requireAuth + getHubUser + isElevated.
   let initialLocations: any[] | null = null
+  // Team roster: full org for elevated, location-scoped for franchise.
+  // Null falls back to USERS_DATA mock in App / TeamSection (view-as paths).
+  let initialUsers: any[] | null = null
   if (isElevated) {
     const { data: locs, error: locsErr } = await supabaseService
       .from('locations')
@@ -163,16 +210,22 @@ export default async function HomePage() {
       console.log(`[page.tsx] Fetched ${locs?.length ?? 0} locations for ${hubUser.email}`)
     }
 
-    const { data: owners, error: ownersErr } = await supabaseService
+    // Single hub_users fetch powers ownersByLoc + userCountByLoc (location
+    // table) AND initialUsers (Team tab / AdminScreen UsersTab). Broader
+    // than the prior `owners`-only query so super_admin/corporate see every
+    // seat, not just owners+admins. Cap at 500 — headroom for franchise
+    // growth without unbounded read cost.
+    const { data: allUsers, error: usersErr } = await supabaseService
       .from('hub_users')
-      .select('id, full_name, email, location_id, role')
-      .in('role', ['owner', 'admin'])
+      .select('id, full_name, email, location_id, role, created_at')
+      .order('full_name', { ascending: true })
+      .limit(500)
 
-    if (ownersErr) console.error('[page.tsx] owners fetch error:', ownersErr.message)
+    if (usersErr) console.error('[page.tsx] hub_users fetch error:', usersErr.message)
 
     const ownersByLoc: Record<string, { name: string; userCount: number }> = {}
     const userCountByLoc: Record<string, number> = {}
-    ;(owners || []).forEach((u: any) => {
+    ;(allUsers || []).forEach((u: any) => {
       if (!u.location_id) return
       userCountByLoc[u.location_id] = (userCountByLoc[u.location_id] || 0) + 1
       if (u.role === 'owner' && !ownersByLoc[u.location_id]) {
@@ -182,6 +235,8 @@ export default async function HomePage() {
         }
       }
     })
+
+    initialUsers = (allUsers || []).map(buildLocationUser)
 
     initialLocations = (locs || []).map((row: any) => {
       const lifecycle = row.lifecycle_status || 'onboarding'
@@ -227,6 +282,19 @@ export default async function HomePage() {
         joinedDate: fmtJoined(row.created_at),
       }
     })
+  } else if (hubUser.location_id) {
+    // Franchise owner / admin / lite_user: scope users to their location.
+    // Cookie-bound client respects RLS — caller has already been verified
+    // by requireAuth + getHubUser above.
+    const { data: locUsers, error: locUsersErr } = await supabase
+      .from('hub_users')
+      .select('id, full_name, email, location_id, role, created_at')
+      .eq('location_id', hubUser.location_id)
+      .order('full_name', { ascending: true })
+
+    if (locUsersErr) console.error('[page.tsx] location users fetch error:', locUsersErr.message)
+
+    initialUsers = (locUsers || []).map(buildLocationUser)
   }
 
   return (
@@ -236,6 +304,7 @@ export default async function HomePage() {
       initialLocFilter={initialLocFilter}
       initialGuideSlides={initialGuideSlides}
       initialLocations={initialLocations}
+      initialUsers={initialUsers}
       currentSubscription={currentSubscription}
       currentLocation={currentLocation}
       currentUser={{

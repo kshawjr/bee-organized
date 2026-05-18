@@ -35,6 +35,16 @@ interface BeeHubProps {
     joinedDate?: string
     [key: string]: any
   }> | null
+  initialUsers?: Array<{
+    id: string
+    name: string
+    initials: string
+    email: string
+    locationId: string | null
+    role: string
+    status: string
+    joined: string
+  }> | null
   currentSubscription?: {
     subscription_status?: string
     subscription_plan?: string | null
