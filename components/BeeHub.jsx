@@ -6634,15 +6634,8 @@ function OnboardingPathsEditor({ onComplete }) {
 
 
 function OnboardingInviteSheet({ onClose, onDone }) {
-  const [invites, setInvites]   = useState([{ id:1, firstName:'', lastName:'', email:'', role:'manager' }])
-  const [step, setStep]         = useState('form') // form|review|method|ach|cc|processing|done
-  const [method, setMethod]     = useState(null)
-  const [routing, setRouting]   = useState('')
-  const [bankAcct, setBankAcct] = useState('')
-  const [cardNum, setCardNum]   = useState('')
-  const [expiry, setExpiry]     = useState('')
-  const [cvv, setCvv]           = useState('')
-  const [cardName, setCardName] = useState('')
+  const [invites, setInvites] = useState([{ id:1, firstName:'', lastName:'', email:'', role:'manager' }])
+  const [step, setStep]       = useState('form') // form|review|processing|done
 
   React.useEffect(()=>{
     const prev = document.body.style.overflow
@@ -6656,13 +6649,16 @@ function OnboardingInviteSheet({ onClose, onDone }) {
 
   function isValidEmail(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim()) }
   const validInvites = invites.filter(i=>i.firstName.trim()&&i.email.trim()&&isValidEmail(i.email))
-  const totalCost    = validInvites.reduce((s,i)=>s+calcProration(ROLE_PRICING[i.role]||0).prorated, 0)
-  const ccTotal      = Math.round(withCC(totalCost)*100)/100
-  const finalAmt     = method==='cc' ? ccTotal : totalCost
+  const annualAdd  = validInvites.reduce((s,i)=>s+(ROLE_PRICING[i.role]||0), 0)
+  const proratedAdd = validInvites.reduce((s,i)=>s+calcProration(ROLE_PRICING[i.role]||0).prorated, 0)
 
-  function processPayment() {
+  // Local-only stub: there's no real backend seat-add yet (post-demo work
+  // with subscription_seats). For now, "Send Invite" just transitions to
+  // the done state — onDone(validInvites) attaches the rows to local React
+  // state in the parent.
+  function submitInvites() {
     setStep('processing')
-    setTimeout(()=>setStep('done'), 2000)
+    setTimeout(()=>setStep('done'), 1200)
   }
 
   return (
@@ -6685,18 +6681,16 @@ function OnboardingInviteSheet({ onClose, onDone }) {
           <div style={{ padding:'2.5rem 1.5rem', textAlign:'center' }}>
             <div style={{ fontSize:'56px', marginBottom:'12px' }}>📬</div>
             <h2 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'8px' }}>Invites sent!</h2>
-            <p style={{ fontSize:'13px', color:'#4a5e5a', marginBottom:'4px' }}>{validInvites.length} team member{validInvites.length!==1?'s':''} will receive an email shortly</p>
-            <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'24px' }}>${finalAmt} charged via {method==='cc'?'Credit Card':'ACH'}</p>
+            <p style={{ fontSize:'13px', color:'#4a5e5a', marginBottom:'24px' }}>{validInvites.length} team member{validInvites.length!==1?'s':''} will receive an email shortly</p>
             <div style={{ background:'#f7f5f0', borderRadius:'12px', padding:'12px 14px', marginBottom:'20px', textAlign:'left' }}>
               {validInvites.map((inv,i)=>{
                 const rc=FRANCHISE_ROLES.find(r=>r.key===inv.role)
-                const p=calcProration(ROLE_PRICING[inv.role]||0)
                 return (
                   <div key={inv.id} style={{ display:'flex', alignItems:'center', gap:'10px', paddingTop:i>0?'8px':0, marginTop:i>0?'8px':0, borderTop:i>0?'1px solid rgba(0,0,0,0.05)':'none' }}>
                     <span style={{ fontSize:'16px' }}>{rc?.icon}</span>
                     <div style={{ flex:1 }}>
                       <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b' }}>{inv.email}</p>
-                      <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{rc?.label} · ${p.prorated} today</p>
+                      <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{rc?.label}</p>
                     </div>
                   </div>
                 )
@@ -6710,81 +6704,12 @@ function OnboardingInviteSheet({ onClose, onDone }) {
           </div>
         )}
 
-        {/* ── ACH form ── */}
-        {step==='ach' && (
-          <div style={{ padding:'1.25rem' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'16px' }}>
-              <button onClick={()=>setStep('method')} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>←</button>
-              <div><p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>ACH Bank Transfer</p><p style={{ fontSize:'12px', color:'#22c55e' }}>Free - no processing fee</p></div>
-            </div>
-            <div style={{ background:'rgba(168,201,196,0.08)', border:'1px solid rgba(168,201,196,0.2)', borderRadius:'10px', padding:'12px 14px', marginBottom:'20px', display:'flex', justifyContent:'space-between' }}>
-              <span style={{ fontSize:'13px', color:'#4a5e5a' }}>Total due today</span>
-              <span style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>${totalCost}</span>
-            </div>
-            {[{label:'Routing Number',val:routing,set:setRouting,max:9,ph:'9-digit ABA routing'},{label:'Account Number',val:bankAcct,set:setBankAcct,max:17,ph:'Bank account number'}].map(({label,val,set,max,ph})=>(
-              <div key={label} style={{ marginBottom:'14px' }}>
-                <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>{label}</p>
-                <input value={val} onChange={e=>set(e.target.value.replace(/\D/g,'').slice(0,max))} placeholder={ph} inputMode="numeric" style={{ width:'100%', padding:'12px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'15px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-              </div>
-            ))}
-            <button onClick={processPayment} disabled={routing.length<9||bankAcct.length<6} style={{ width:'100%', padding:'14px', background:routing.length>=9&&bankAcct.length>=6?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:routing.length>=9&&bankAcct.length>=6?'white':'#9ca3af', cursor:'pointer', marginBottom:'8px' }}>Pay ${totalCost} & Send Invites</button>
-            <p style={{ fontSize:'11px', color:'#b0c0bc', textAlign:'center' }}>🔒 Secured by Stripe ACH</p>
-            <div style={{ height:'1rem' }} />
-          </div>
-        )}
-
-        {/* ── CC form ── */}
-        {step==='cc' && (
-          <div style={{ padding:'1.25rem' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'16px' }}>
-              <button onClick={()=>setStep('method')} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>←</button>
-              <div><p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Credit Card</p><p style={{ fontSize:'12px', color:'#f59e0b' }}>3% processing fee applied</p></div>
-            </div>
-            <div style={{ background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.15)', borderRadius:'10px', padding:'12px 14px', marginBottom:'20px' }}>
-              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'4px' }}><span style={{ fontSize:'13px', color:'#4a5e5a' }}>Subtotal</span><span style={{ fontSize:'13px' }}>${totalCost}</span></div>
-              <div style={{ display:'flex', justifyContent:'space-between', paddingBottom:'6px', borderBottom:'1px solid rgba(245,158,11,0.12)' }}><span style={{ fontSize:'13px', color:'#4a5e5a' }}>Fee (3%)</span><span style={{ fontSize:'13px', color:'#f59e0b' }}>+${(ccTotal-totalCost).toFixed(2)}</span></div>
-              <div style={{ display:'flex', justifyContent:'space-between', marginTop:'6px' }}><span style={{ fontSize:'14px', fontWeight:600 }}>Total</span><span style={{ fontSize:'18px', fontWeight:700, fontFamily:'Georgia,serif' }}>${ccTotal}</span></div>
-            </div>
-            {[{label:'Name on Card',val:cardName,set:setCardName,ph:'Full name',type:'text',max:50},{label:'Card Number',val:cardNum,set:v=>setCardNum(v.replace(/\D/g,'').slice(0,maxCardLen(v.replace(/\D/g,'')))),ph:'0000 0000 0000 0000',type:'numeric',max:16}].map(({label,val,set,ph,type,max})=>(
-              <div key={label} style={{ marginBottom:'14px' }}>
-                <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>{label}</p>
-                <input value={label==='Card Number'?val.replace(/(\d{4})/g,'$1 ').trim():val} onChange={e=>set(e.target.value)} placeholder={ph} inputMode={type} style={{ width:'100%', padding:'12px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'15px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', letterSpacing:label==='Card Number'?'1px':'normal' }} />
-              </div>
-            ))}
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'20px' }}>
-              <div><p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Expiry</p><input value={expiry} onChange={e=>{ const v=e.target.value.replace(/\D/g,'').slice(0,4); setExpiry(v.length>2?v.slice(0,2)+'/'+v.slice(2):v) }} placeholder="MM/YY" style={{ width:'100%', padding:'12px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'15px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} /></div>
-              <div><p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>CVV</p><input value={cvv} onChange={e=>setCvv(e.target.value.replace(/\D/g,'').slice(0,cvvLen(cardNum)))} placeholder={cvvLen(cardNum)===4?"••••":"•••"} inputMode="numeric" style={{ width:'100%', padding:'12px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'15px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} /></div>
-            </div>
-            <button onClick={processPayment} disabled={!cardReady(cardNum,expiry,cvv,cardName)} style={{ width:'100%', padding:'14px', background:cardReady(cardNum,expiry,cvv,cardName)?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:cardReady(cardNum,expiry,cvv,cardName)?'white':'#9ca3af', cursor:'pointer', marginBottom:'8px' }}>Pay ${ccTotal} & Send Invites</button>
-            <p style={{ fontSize:'11px', color:'#b0c0bc', textAlign:'center' }}>🔒 Secured by Stripe</p>
-            <div style={{ height:'1rem' }} />
-          </div>
-        )}
-
-        {/* ── Method picker ── */}
-        {step==='method' && (
-          <div style={{ padding:'1.25rem' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'16px' }}>
-              <button onClick={()=>setStep('review')} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>←</button>
-              <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Payment Method</p>
-            </div>
-            <div style={{ background:'#f7f5f0', borderRadius:'10px', padding:'12px 14px', display:'flex', justifyContent:'space-between', marginBottom:'16px' }}>
-              <span style={{ fontSize:'13px', color:'#4a5e5a' }}>Total due today</span>
-              <span style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>${totalCost}</span>
-            </div>
-            <div style={{ display:'grid', gap:'10px', marginBottom:'16px' }}>
-              {[{key:'ach',icon:'🏦',label:'ACH / Bank Transfer',sub:'Free - no processing fee'},{key:'cc',icon:'💳',label:'Credit Card',sub:`+3% fee · total $${ccTotal}`}].map(m=>(
-                <button key={m.key} onClick={()=>{ setMethod(m.key); setStep(m.key) }} style={{ width:'100%', padding:'16px', background:'white', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'12px', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'14px', textAlign:'left' }}>
-                  <span style={{ fontSize:'24px' }}>{m.icon}</span>
-                  <div style={{ flex:1 }}><p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>{m.label}</p><p style={{ fontSize:'12px', color:m.key==='ach'?'#22c55e':'#f59e0b' }}>{m.sub}</p></div>
-                  <span style={{ fontSize:'16px', color:'#c8d8d4' }}>→</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ── Review ── */}
+        {/* ── Review ──
+            No payment step. Invites bill against the owner's existing
+            subscription on renewal; this screen just previews the impact
+            on the location's annual cost. Backend seat-add is post-demo
+            (subscription_seats table) — for now submit only updates local
+            React state via onDone in the parent. */}
         {step==='review' && (
           <div style={{ padding:'1.25rem' }}>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'1rem' }}>
@@ -6794,22 +6719,30 @@ function OnboardingInviteSheet({ onClose, onDone }) {
             <div style={{ display:'grid', gap:'8px', marginBottom:'16px' }}>
               {validInvites.map(inv=>{
                 const rc=FRANCHISE_ROLES.find(r=>r.key===inv.role)
-                const p=calcProration(ROLE_PRICING[inv.role]||0)
                 return (
                   <div key={inv.id} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'11px 14px', background:'#f7f5f0', borderRadius:'10px' }}>
                     <span style={{ fontSize:'18px' }}>{rc?.icon}</span>
-                    <div style={{ flex:1 }}><p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{inv.email}</p><p style={{ fontSize:'11px', color:'#8a9e9a' }}>{rc?.label} · ${ROLE_PRICING[inv.role]}/yr</p></div>
-                    <span style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>${p.prorated}</span>
+                    <div style={{ flex:1 }}>
+                      <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{inv.firstName} {inv.lastName}</p>
+                      <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{inv.email} · {rc?.label}</p>
+                    </div>
                   </div>
                 )
               })}
             </div>
-            <div style={{ padding:'12px 14px', background:'rgba(26,46,43,0.04)', borderRadius:'10px', display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'16px' }}>
-              <span style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b' }}>Total due today</span>
-              <span style={{ fontSize:'20px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>${totalCost}</span>
+            <div style={{ padding:'12px 14px', background:'rgba(26,46,43,0.04)', borderRadius:'10px', marginBottom:'16px' }}>
+              <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.5 }}>
+                This will add <strong>${annualAdd.toLocaleString()}</strong> to your annual subscription
+                <span style={{ color:'#8a9e9a' }}> · </span>
+                <strong>${proratedAdd.toLocaleString()}</strong> prorated today.
+              </p>
+              <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'6px', lineHeight:1.5 }}>
+                Charged on your next renewal · manage in Settings → Billing.
+              </p>
             </div>
-            <p style={{ fontSize:'11px', color:'#8a9e9a', marginBottom:'16px', lineHeight:1.5 }}>Prorated to match your March 1 renewal. Each seat renews at full rate annually.</p>
-            <button onClick={()=>setStep('method')} style={{ width:'100%', padding:'14px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Choose Payment Method →</button>
+            <button onClick={submitInvites} style={{ width:'100%', padding:'14px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+              Send {validInvites.length>1?`${validInvites.length} Invites`:'Invite'}
+            </button>
             <div style={{ height:'1rem' }} />
           </div>
         )}
@@ -11114,18 +11047,10 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
 function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdateSub, onRemove }) {
   const [note, setNote]       = useState(sub.note||'')
   const [editingNote, setEditingNote] = useState(false)
-  const [showPayment, setShowPayment] = useState(false)
-  const rc    = FRANCHISE_ROLES.find(r=>r.key===user.role)||FRANCHISE_ROLES[0]
-  const sc    = subConf[sub.status]||subConf.active
-  const price = ROLE_PRICING[user.role]||0
-  const prorated = calcProration(price).prorated
+  const rc = FRANCHISE_ROLES.find(r=>r.key===user.role)||FRANCHISE_ROLES[0]
+  const sc = subConf[sub.status]||subConf.active
 
   React.useEffect(()=>{ const p=document.body.style.overflow; document.body.style.overflow='hidden'; return()=>{ document.body.style.overflow=p } },[])
-
-  function toggleStatus() {
-    const next = sub.status==='active' ? 'inactive' : 'active'
-    onUpdateSub({ status: next })
-  }
 
   function saveNote() { onUpdateSub({ note:note.trim() }); setEditingNote(false) }
 
@@ -11146,44 +11071,15 @@ function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdate
             </div>
             <button onClick={onClose} style={{ background:'rgba(255,255,255,0.1)', border:'none', borderRadius:'8px', width:'32px', height:'32px', color:'rgba(168,201,196,0.8)', fontSize:'18px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>×</button>
           </div>
-          {/* Status + subscription amount */}
+          {/* Status + role */}
           <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
             <span style={{ fontSize:'11px', padding:'3px 10px', borderRadius:'20px', background:sc.bg, color:sc.color, fontWeight:700, border:`1px solid ${sc.color}40` }}>{sc.icon} {sc.label}</span>
-            <span style={{ fontSize:'12px', color:'rgba(168,201,196,0.7)' }}>${price.toLocaleString()}/yr</span>
-            <span style={{ fontSize:'12px', color:'rgba(168,201,196,0.5)' }}>·</span>
             <span style={{ fontSize:'12px', color:'rgba(168,201,196,0.7)' }}>{rc.icon} {rc.label}</span>
           </div>
         </div>
 
         {/* Scrollable content */}
         <div style={{ flex:1, overflowY:'auto', padding:'0' }}>
-
-          {/* Subscription details */}
-          <div style={{ padding:'14px 20px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
-            <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'10px' }}>Subscription</p>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'8px', marginBottom:'12px' }}>
-              {[
-                { label:'Annual Rate',  value:`$${price.toLocaleString()}` },
-                { label:'Payment',      value:`${sub.method==='cc'?'💳':'🏦'} ••••${sub.last4}` },
-                { label:'Renews',       value:'Mar 1, 2027' },
-              ].map(stat=>(
-                <div key={stat.label} style={{ background:'#f7f5f0', borderRadius:'10px', padding:'10px', textAlign:'center' }}>
-                  <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'2px' }}>{stat.value}</p>
-                  <p style={{ fontSize:'10px', color:'#8a9e9a' }}>{stat.label}</p>
-                </div>
-              ))}
-            </div>
-            <div style={{ display:'flex', gap:'8px' }}>
-              <button onClick={()=>setShowPayment(true)}
-                style={{ flex:1, padding:'10px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer', fontWeight:500 }}>
-                💳 Update Payment
-              </button>
-              <button onClick={toggleStatus}
-                style={{ flex:1, padding:'10px', background:sub.status==='active'?'rgba(239,68,68,0.06)':'rgba(34,197,94,0.06)', border:`1.5px solid ${sub.status==='active'?'rgba(239,68,68,0.2)':'rgba(34,197,94,0.2)'}`, borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:sub.status==='active'?'#ef4444':'#22c55e', cursor:'pointer', fontWeight:600 }}>
-                {sub.status==='active'?'⏸ Pause Subscription':'▶ Activate Subscription'}
-              </button>
-            </div>
-          </div>
 
           {/* Role */}
           <div style={{ padding:'14px 20px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
@@ -11195,10 +11091,7 @@ function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdate
                   <button key={r.key} onClick={()=>onUpdateRole(r.key)}
                     style={{ padding:'10px 12px', background:isSelected?'rgba(26,46,43,0.06)':'white', border:`2px solid ${isSelected?'#1a2e2b':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left', display:'flex', alignItems:'center', gap:'8px' }}>
                     <span style={{ fontSize:'16px' }}>{r.icon}</span>
-                    <div>
-                      <p style={{ fontSize:'12px', fontWeight:600, color:isSelected?'#1a2e2b':'#4a5e5a' }}>{r.label}</p>
-                      <p style={{ fontSize:'10px', color:'#8a9e9a' }}>${ROLE_PRICING[r.key]?.toLocaleString()}/yr</p>
-                    </div>
+                    <p style={{ fontSize:'12px', fontWeight:600, color:isSelected?'#1a2e2b':'#4a5e5a' }}>{r.label}</p>
                     {isSelected&&<span style={{ marginLeft:'auto', color:'#1a2e2b', fontSize:'14px' }}>✓</span>}
                   </button>
                 )
@@ -11214,7 +11107,7 @@ function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdate
             </div>
             {editingNote?(
               <div style={{ display:'grid', gap:'6px' }}>
-                <textarea value={note} onChange={e=>setNote(e.target.value)} rows={2} placeholder="Add a note about this member's subscription..."
+                <textarea value={note} onChange={e=>setNote(e.target.value)} rows={2} placeholder="Add a note about this member..."
                   style={{ width:'100%', padding:'8px 10px', border:'1.5px solid rgba(168,201,196,0.4)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', resize:'none', boxSizing:'border-box' }} />
                 <div style={{ display:'flex', gap:'6px' }}>
                   <button onClick={()=>setEditingNote(false)} style={{ flex:1, padding:'7px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>Cancel</button>
@@ -11238,119 +11131,6 @@ function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdate
         </div>
       </div>
 
-      {showPayment&&(
-        <UpdatePaymentSheet
-          userId={user.id}
-          sub={sub}
-          onClose={()=>setShowPayment(false)}
-          onSaved={()=>setShowPayment(false)}
-        />
-      )}
-    </div>
-  )
-}
-
-// ─── Update Payment Sheet ─────────────────────────────────────────────────────
-function UpdatePaymentSheet({ userId, sub, onClose, onSaved }) {
-  const [method, setMethod]     = useState(sub.method||'ach')
-  const [routing, setRouting]   = useState('')
-  const [bankAcct, setBankAcct] = useState('')
-  const [cardNum, setCardNum]   = useState('')
-  const [expiry, setExpiry]     = useState('')
-  const [cvv, setCvv]           = useState('')
-  const [cardName, setCardName] = useState('')
-  const [saved, setSaved]       = useState(false)
-
-  React.useEffect(()=>{
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return ()=>{ document.body.style.overflow = prev }
-  }, [])
-
-  function save() {
-    setSaved(true)
-    setTimeout(onSaved, 1200)
-  }
-
-  const achReady = routing.length>=9 && bankAcct.length>=6
-  const ccReady = cardReady(cardNum,expiry,cvv,cardName)
-
-  return (
-    <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
-      <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, maxHeight:'90vh', overflowY:'auto', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
-        <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'12px auto 0' }} />
-        <div style={{ padding:'1.25rem' }}>
-          {saved ? (
-            <div style={{ textAlign:'center', padding:'1.5rem 0' }}>
-              <div style={{ fontSize:'48px', marginBottom:'12px' }}>✅</div>
-              <p style={{ fontSize:'16px', fontWeight:600, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Payment method updated</p>
-              <p style={{ fontSize:'13px', color:'#8a9e9a', marginTop:'4px' }}>Auto-charge will use the new method on renewal</p>
-            </div>
-          ) : (
-            <>
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'16px' }}>
-                <div>
-                  <p style={{ fontSize:'17px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'2px' }}>Update Payment Method</p>
-                  <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Current: {sub.method==='cc'?'💳':'🏦'} ••••{sub.last4}</p>
-                </div>
-                <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
-              </div>
-
-              {/* Method toggle */}
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'16px' }}>
-                {[{key:'ach',icon:'🏦',label:'ACH / Bank',sub:'Free'},{key:'cc',icon:'💳',label:'Credit Card',sub:'+3% on renewals'}].map(m=>(
-                  <button key={m.key} onClick={()=>setMethod(m.key)} style={{ padding:'12px', background:method===m.key?'rgba(26,46,43,0.05)':'white', border:`1.5px solid ${method===m.key?'#1a2e2b':'rgba(0,0,0,0.1)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
-                    <span style={{ fontSize:'20px', display:'block', marginBottom:'4px' }}>{m.icon}</span>
-                    <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{m.label}</p>
-                    <p style={{ fontSize:'11px', color:m.key==='ach'?'#22c55e':'#f59e0b' }}>{m.sub}</p>
-                  </button>
-                ))}
-              </div>
-
-              {method==='ach'&&(
-                <div style={{ display:'grid', gap:'12px', marginBottom:'20px' }}>
-                  {[{l:'Routing Number',v:routing,s:setRouting,max:9,ph:'9-digit ABA routing'},{l:'Account Number',v:bankAcct,s:setBankAcct,max:17,ph:'Bank account number'}].map(({l,v,s,max,ph})=>(
-                    <div key={l}>
-                      <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>{l}</p>
-                      <input value={v} onChange={e=>s(e.target.value.replace(/\D/g,'').slice(0,max))} placeholder={ph} inputMode="numeric" style={{ width:'100%', padding:'12px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'15px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {method==='cc'&&(
-                <div style={{ display:'grid', gap:'12px', marginBottom:'20px' }}>
-                  <div>
-                    <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Name on Card</p>
-                    <input value={cardName} onChange={e=>setCardName(e.target.value)} placeholder="Full name" style={{ width:'100%', padding:'12px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'15px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-                  </div>
-                  <div>
-                    <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Card Number</p>
-                    <input value={formatCardNum(cardNum)} onChange={e=>setCardNum(e.target.value.replace(/\D/g,'').slice(0,maxCardLen(e.target.value.replace(/\D/g,''))))} placeholder={cardPlaceholder(cardNum)} placeholder="0000 0000 0000 0000" inputMode="numeric" style={{ width:'100%', padding:'12px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'15px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', letterSpacing:'1px' }} />
-                  </div>
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
-                    <div>
-                      <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Expiry</p>
-                      <input value={expiry} onChange={e=>{ const v=e.target.value.replace(/\D/g,'').slice(0,4); setExpiry(v.length>2?v.slice(0,2)+'/'+v.slice(2):v) }} placeholder="MM/YY" style={{ width:'100%', padding:'12px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'15px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-                    </div>
-                    <div>
-                      <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>CVV</p>
-                      <input value={cvv} onChange={e=>setCvv(e.target.value.replace(/\D/g,'').slice(0,cvvLen(cardNum)))} placeholder={cvvLen(cardNum)===4?"••••":"•••"} inputMode="numeric" style={{ width:'100%', padding:'12px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'15px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <button onClick={save} disabled={method==='ach'?!achReady:!ccReady} style={{ width:'100%', padding:'14px', background:(method==='ach'?achReady:ccReady)?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:(method==='ach'?achReady:ccReady)?'white':'#9ca3af', cursor:'pointer', marginBottom:'8px' }}>
-                Save Payment Method
-              </button>
-              <p style={{ fontSize:'11px', color:'#b0c0bc', textAlign:'center' }}>🔒 Secured by Stripe · Used for auto-renewal only</p>
-              <div style={{ height:'1rem' }} />
-            </>
-          )}
-        </div>
-      </div>
     </div>
   )
 }
