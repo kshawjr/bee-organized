@@ -13150,8 +13150,8 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
 // ═══════════════════════════════════════════════════════
 
 const FRANCHISE_ROLES = [
-  { key:'owner',    label:'Queen Bee',     icon:'👑', color:'#d4a046', bg:'rgba(212,160,70,0.1)',  desc:'Full access — billing, settings, Jobber'  },
-  { key:'manager',  label:'Hive Keeper',   icon:'🍯', color:'#6366f1', bg:'rgba(99,102,241,0.1)',  desc:'Operational lead — no billing or Jobber'  },
+  { key:'owner',    label:'Zee Bee',       icon:'👑', color:'#d4a046', bg:'rgba(212,160,70,0.1)',  desc:'Full access — billing, settings, Jobber'  },
+  { key:'manager',  label:'Hive Manager',  icon:'🍯', color:'#6366f1', bg:'rgba(99,102,241,0.1)',  desc:'Operational lead — no billing or Jobber'  },
   { key:'light',    label:'Worker Bee',    icon:'🐝', color:'#10b981', bg:'rgba(16,185,129,0.1)',  desc:'Front office — intake, scheduling, customer service'  },
   { key:'readonly', label:'Honey Watcher', icon:'👁',  color:'#8a9e9a', bg:'rgba(138,158,154,0.1)', desc:'Read-only — accountants, advisors'  },
 ]
@@ -13163,8 +13163,8 @@ const FRANCHISE_ROLES = [
 function TierPlansInline() {
   const [showMatrix, setShowMatrix] = useState(false)
   const tiers = [
-    { key:'owner',    name:'Queen Bee',     icon:'👑', color:'#d4a046', level:'L1', goodFor:'Franchise owners',                       price:550, detail:'Required · One per location' },
-    { key:'manager',  name:'Hive Keeper',   icon:'🍯', color:'#6366f1', level:'L2', goodFor:'Managers, operations leads',             price:400, detail:'No billing or Jobber control' },
+    { key:'owner',    name:'Zee Bee',       icon:'👑', color:'#d4a046', level:'L1', goodFor:'Franchise owners',                       price:550, detail:'Required · One per location' },
+    { key:'manager',  name:'Hive Manager',  icon:'🍯', color:'#6366f1', level:'L2', goodFor:'Managers, operations leads',             price:400, detail:'No billing or Jobber control' },
     { key:'light',    name:'Worker Bee',    icon:'🐝', color:'#10b981', level:'L3', goodFor:'Schedulers, customer service',           price:200, detail:'No financial visibility' },
     { key:'readonly', name:'Honey Watcher', icon:'👁',  color:'#8a9e9a', level:'L4', goodFor:'Accountants, advisors, silent partners', price:50,  detail:'Read-only · Add as many as needed' },
   ]
@@ -13176,7 +13176,7 @@ function TierPlansInline() {
       ['Edit location settings','Business hours, service area, branding',['y','y','n','n']],
     ]},
     { title:'👥 Team Management', rows:[
-      ['Invite / remove Hive Keepers','Add or revoke operational seats',['y','n','n','n']],
+      ['Invite / remove Hive Managers','Add or revoke operational seats',['y','n','n','n']],
       ['Invite / remove Worker Bees & Honey Watchers','Add or revoke lower-access seats',['y','y','n','n']],
       ['Assign clients to team members','Set who owns each client',['y','y','n','n']],
     ]},
@@ -13238,7 +13238,7 @@ function TierPlansInline() {
       <div style={{ padding:'10px 13px', background:'rgba(212,160,70,0.07)', borderLeft:'3px solid #d4a046', borderRadius:'6px', marginBottom:'8px' }}>
         <p style={{ fontSize:'9.5px', color:'#d4a046', letterSpacing:'1px', textTransform:'uppercase', fontWeight:700, marginBottom:'3px' }}>Multiple Owners</p>
         <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.5 }}>
-          Co-owners can add a second Queen Bee seat at <strong style={{ color:'#1a2e2b' }}>$400/yr</strong> — both get full access. Total: <strong style={{ color:'#1a2e2b' }}>$950/yr</strong>.
+          Co-owners can add a second Zee Bee seat at <strong style={{ color:'#1a2e2b' }}>$400/yr</strong> — both get full access. Total: <strong style={{ color:'#1a2e2b' }}>$950/yr</strong>.
         </p>
       </div>
 
@@ -16903,7 +16903,7 @@ export default function App({
             ? (FRANCHISE_ROLES.find(r => r.key === viewAsUser.role)?.label || 'Corporate')
             : role === 'super_admin' ? 'Super Admin'
             : role === 'corporate'   ? 'Corporate'
-            : role === 'franchise' && franchiseRole === 'owner'  ? 'Queen Bee'
+            : role === 'franchise' && franchiseRole === 'owner'  ? 'Zee Bee'
             : role === 'franchise' && franchiseRole === 'viewer' ? 'Honey Watcher'
             : ''
           return (
