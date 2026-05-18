@@ -5419,6 +5419,77 @@ function AttentionCard({ icon, title, desc, urgency='medium', action, onAction }
 }
 
 // ─── Placeholder Screen ───────────────────────────────────────────────────────
+
+// Returns a usable first name from the owner's full name or email, or null
+// when neither yields anything (the default 'there' placeholder counts as null).
+function getFirstName(name, email) {
+  if (name && name !== 'there' && name.trim().length > 1) {
+    return name.trim().split(' ')[0]
+  }
+  if (email && email.includes('@')) {
+    return email.split('@')[0]
+  }
+  return null
+}
+
+// WelcomeStep — first screen of owner onboarding, shown before the pay flow.
+// Personalized greeting + overview of the 7 substantive steps + get-started CTA.
+// Self-completes when the user clicks Continue; the parent re-renders into the
+// pay flow because `completedSteps.welcome` flips to true.
+function WelcomeStep({ ownerName, ownerEmail, topOffset, onContinue }) {
+  const firstName = getFirstName(ownerName, ownerEmail)
+  const greeting  = firstName ? `Welcome aboard, ${firstName}! 🐝` : `Welcome aboard! 🐝`
+  const overview = [
+    { icon:'💳', label:'Confirm your subscription' },
+    { icon:'👤', label:'Set up your profile' },
+    { icon:'📍', label:'Add your franchise location' },
+    { icon:'🔗', label:'Connect to Jobber' },
+    { icon:'📥', label:'Import your clients' },
+    { icon:'📬', label:'Set up drip paths' },
+    { icon:'👥', label:'Invite your team' },
+  ]
+  return (
+    <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'7rem', paddingTop:`${topOffset}px` }}>
+      <div style={{ background:BRAND.dark, padding:'2rem 1.5rem 2.25rem', position:'relative', overflow:'hidden' }}>
+        {/* Subtle hex texture, same idiom as DashboardScreen header */}
+        <div style={{ position:'absolute', right:'-20px', top:'-20px', opacity:0.06 }}>
+          <svg width="160" height="160" viewBox="0 0 160 160">
+            {[[35,20],[70,20],[105,20],[140,20],[17,52],[52,52],[87,52],[122,52],[35,84],[70,84],[105,84],[140,84],[17,116],[52,116],[87,116],[122,116]].map(([x,y],i)=>(
+              <polygon key={i} points={`${x},${y-16} ${x+14},${y-8} ${x+14},${y+8} ${x},${y+16} ${x-14},${y+8} ${x-14},${y-8}`} fill="white" />
+            ))}
+          </svg>
+        </div>
+        <p style={{ fontSize:'11px', color:BRAND.teal, fontWeight:600, marginBottom:'8px', opacity:0.7, textTransform:'uppercase', letterSpacing:'1.5px', position:'relative' }}>The Hive Hub</p>
+        <h1 style={{ fontSize:'32px', lineHeight:1.15, fontFamily:'"Playfair Display",Georgia,serif', color:'white', marginBottom:'10px', position:'relative' }}>{greeting}</h1>
+        <p style={{ fontSize:'15px', lineHeight:1.5, color:'rgba(168,201,196,0.85)', position:'relative' }}>
+          Let's get your Bee Organized franchise running on Hive Hub
+        </p>
+      </div>
+      <div style={{ padding:'1.5rem 1.25rem 1.25rem' }}>
+        <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'12px' }}>
+          Here's what we'll do together
+        </p>
+        <div style={{ display:'grid', gap:'8px', marginBottom:'18px' }}>
+          {overview.map((s,i)=>(
+            <div key={s.label} style={{ display:'flex', alignItems:'center', gap:'12px', background:'white', borderRadius:'12px', border:'1px solid rgba(0,0,0,0.06)', padding:'12px 14px', boxShadow:'0 1px 3px rgba(26,46,43,0.04)' }}>
+              <div style={{ width:'34px', height:'34px', borderRadius:'10px', background:'rgba(26,46,43,0.06)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px', flexShrink:0 }}>{s.icon}</div>
+              <span style={{ fontSize:'14px', color:'#1a2e2b', fontWeight:500 }}>{s.label}</span>
+              <span style={{ marginLeft:'auto', fontSize:'11px', fontWeight:600, color:'#b0c0bc' }}>{String(i+1).padStart(2,'0')}</span>
+            </div>
+          ))}
+        </div>
+        <p style={{ fontSize:'12px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center', marginBottom:'16px' }}>
+          Takes about 10–15 minutes — you can pause and resume anytime
+        </p>
+        <button onClick={onContinue}
+          style={{ width:'100%', padding:'15px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+          Let's get started →
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Onboarding Screen ────────────────────────────────────────────────────────
 function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='owner', topOffset=0, onOpenSettings, onComplete=()=>{}, onSkipOnboarding=()=>{} }) {
   const isOwner   = franchiseRole === 'owner'
@@ -5633,6 +5704,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   }
 
   const OWNER_STEPS = [
+    { id:'welcome',   icon:'👋', label:'Welcome aboard',          desc:'Introduction to your onboarding journey' },
     { id:'pay',       icon:'💳', label:'Activate subscription',   desc:`$${proration.prorated} today · renews ${proration.renewDate}` },
     { id:'profile',   icon:'👤', label:'Complete your profile',   desc:'Your name, email and phone number' },
     { id:'location',  icon:'📍', label:'Set location details',    desc:'Address, send-from email, notifications' },
@@ -5699,6 +5771,19 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
         })}
       </div>
     </div>
+  )
+
+  // ── Owner: welcome intro ────────────────────────────────────────────────────
+  // First-time-only personalized intro. Clicking Continue marks 'welcome' done
+  // and the next render falls through to the pay flow. The sessionStorage
+  // persister picks up completedSteps.welcome so refreshes skip this screen.
+  if (!isDone('welcome')) return (
+    <WelcomeStep
+      ownerName={ownerName}
+      ownerEmail={ownerEmail}
+      topOffset={topOffset}
+      onContinue={()=>markDone('welcome')}
+    />
   )
 
   // ── Owner: payment flow ─────────────────────────────────────────────────────
@@ -5890,17 +5975,17 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px' }}>
           <div>
             <h1 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'white', marginBottom:'2px' }}>Complete your setup</h1>
-            <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.7)' }}>{Math.max(0,doneCount-1)} of {STEPS.length-1} steps done</p>
+            <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.7)' }}>{Math.max(0,doneCount-2)} of {STEPS.length-2} steps done</p>
           </div>
           <span style={{ fontSize:'11px', color:'#22c55e', background:'rgba(34,197,94,0.15)', padding:'4px 10px', borderRadius:'20px', fontWeight:600 }}>✅ Active</span>
         </div>
         <div style={{ height:'4px', background:'rgba(255,255,255,0.1)', borderRadius:'2px', overflow:'hidden' }}>
-          <div style={{ height:'100%', width:`${STEPS.length>1?((Math.max(0,doneCount-1))/(STEPS.length-1))*100:0}%`, background:'#a8c9c4', borderRadius:'2px', transition:'width 0.4s' }} />
+          <div style={{ height:'100%', width:`${STEPS.length>2?((Math.max(0,doneCount-2))/(STEPS.length-2))*100:0}%`, background:'#a8c9c4', borderRadius:'2px', transition:'width 0.4s' }} />
         </div>
       </div>
 
       <div style={{ padding:'1.25rem', display:'grid', gap:'10px' }}>
-        {STEPS.filter(s=>s.id!=='pay').map((step)=>{
+        {STEPS.filter(s=>s.id!=='pay'&&s.id!=='welcome').map((step)=>{
           const done   = isDone(step.id)
           const locked = isLocked(step.id)
           const isOpen = activeStepOpen===step.id && !done && !locked
