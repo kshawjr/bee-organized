@@ -16683,6 +16683,52 @@ function SlideEditFormManual({ slide, isNew, onSave, onCancel, allChapters = [] 
   )
 }
 
+function ContentEditor({ guideSlides, guidePersist, manualSlides, manualPersist }) {
+  const [activeContent, setActiveContent] = useState(() => {
+    if (typeof window === 'undefined') return 'guide'
+    return localStorage.getItem('bee_content_editor_active') || 'guide'
+  })
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('bee_content_editor_active', activeContent)
+    }
+  }, [activeContent])
+
+  return (
+    <div>
+      <div style={{ padding:'14px 1.25rem 0', display:'flex', alignItems:'center', gap:'12px' }}>
+        <label style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Edit:</label>
+        <select
+          value={activeContent}
+          onChange={e => setActiveContent(e.target.value)}
+          style={{
+            padding:'8px 12px',
+            fontSize:'14px',
+            fontFamily:'inherit',
+            border:'1px solid #d4d8d6',
+            borderRadius:'8px',
+            background:'white',
+            color:'#1a2e2b',
+            cursor:'pointer',
+            minWidth:'240px',
+          }}
+        >
+          <option value="guide">📖 Quick Start Guide</option>
+          <option value="manual">📚 Manual</option>
+        </select>
+      </div>
+
+      {activeContent === 'guide' && (
+        <GuideEditor slides={guideSlides} onPersist={guidePersist} />
+      )}
+      {activeContent === 'manual' && (
+        <ManualEditor slides={manualSlides} onPersist={manualPersist} />
+      )}
+    </div>
+  )
+}
+
 function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, onStatusChange, users=USERS_DATA, setUsers=()=>{}, people=[], setPeople=()=>{}, partners=[], setPartners=()=>{}, guideSlides=[], setGuideSlides=()=>{}, manualSlides=[], setManualSlides=()=>{}, initialLocations=null }) {
   const [adminTab, setAdminTab]   = useState('locations')
   // Real Supabase locations when provided by App (super_admin/corporate
@@ -16740,7 +16786,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
 
           {/* Sub-tabs */}
           <div style={{ display:'flex', gap:'4px', background:'rgba(0,0,0,0.15)', borderRadius:'10px', padding:'3px', marginTop:'4px' }}>
-            {[{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'guide',label:'📖 Guide'},{key:'manual',label:'📚 Manual'}]:[]),...(role==='super_admin'?[{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])].map(t=>(
+            {[{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'content',label:'✏️ Content'}]:[]),...(role==='super_admin'?[{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])].map(t=>(
               <button key={t.key} onClick={()=>{ setAdminTab(t.key); setSearch('') }} style={{ flex:1, padding:'7px', borderRadius:'8px', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', fontWeight:adminTab===t.key?600:400, background:adminTab===t.key?'white':'transparent', color:adminTab===t.key?'#1a2e2b':'rgba(168,201,196,0.7)' }}>
                 {t.label}
               </button>
@@ -16795,10 +16841,10 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
 
         {adminTab==='users' ? (
           <UsersTab users={users} setUsers={setUsers} locations={locations} locFilter={locFilter} onInvite={()=>setShowInvite(true)} />
-        ) : adminTab==='guide' ? (
-          <GuideEditor
-            slides={guideSlides}
-            onPersist={async newSlides => {
+        ) : adminTab==='content' ? (
+          <ContentEditor
+            guideSlides={guideSlides}
+            guidePersist={async newSlides => {
               const res = await fetch('/api/guide-slides', {
                 method:'POST',
                 headers:{ 'Content-Type':'application/json' },
@@ -16810,11 +16856,8 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
               }
               setGuideSlides(newSlides)
             }}
-          />
-        ) : adminTab==='manual' ? (
-          <ManualEditor
-            slides={manualSlides}
-            onPersist={async newSlides => {
+            manualSlides={manualSlides}
+            manualPersist={async newSlides => {
               const res = await fetch('/api/manual-slides', {
                 method:'POST',
                 headers:{ 'Content-Type':'application/json' },
