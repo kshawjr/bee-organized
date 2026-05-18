@@ -59,7 +59,7 @@ export function formatCurrency(
       })
     )
   }
-  return '$' + Math.round(amount).toLocaleString('en-US')
+  return '$' + Math.ceil(amount).toLocaleString('en-US')
 }
 
 export function formatRenewalDate(date: Date): string {

@@ -167,16 +167,24 @@ describe('formatCurrency', () => {
     expect(formatCurrency(15.34)).toBe('$15.34')
   })
 
-  it('auto: rounds to whole when >= 100', () => {
+  it('auto: rounds UP (ceil) to whole when >= 100', () => {
     expect(formatCurrency(435.67)).toBe('$436')
+  })
+
+  it('auto: ceils up rather than nearest (432.46 → $433, not $432)', () => {
+    expect(formatCurrency(432.46)).toBe('$433')
+  })
+
+  it('auto: 100.01 → $101 (proves ceil, not round)', () => {
+    expect(formatCurrency(100.01)).toBe('$101')
   })
 
   it("showCents 'always' shows two decimals", () => {
     expect(formatCurrency(15, { showCents: 'always' })).toBe('$15.00')
   })
 
-  it("showCents 'never' rounds to whole", () => {
-    expect(formatCurrency(15.34, { showCents: 'never' })).toBe('$15')
+  it("showCents 'never' ceils to whole", () => {
+    expect(formatCurrency(15.34, { showCents: 'never' })).toBe('$16')
   })
 
   it('comma separator for thousands', () => {
