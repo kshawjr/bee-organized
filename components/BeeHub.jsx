@@ -2293,9 +2293,181 @@ function AddressSheet({ addr=null, onSave, onDelete=null, onClose }) {
   )
 }
 
-// Keep AddAddressPopup as thin wrapper for backward compat
-function AddAddressPopup({ onAdd, onClose }) {
-  return <AddressSheet onSave={onAdd} onClose={onClose} />
+function AddAddressPopup({ person, update, onClose }) {
+  const [mode, setMode] = useState({ kind: 'list', editIndex: null })
+
+  const addrs = person.addresses && person.addresses.length
+    ? person.addresses
+    : (person.address ? [{ type: 'Service', value: person.address }] : [])
+
+  function handleSave(newAddr) {
+    if (mode.kind === 'add') {
+      update({ addresses: [...addrs, newAddr] })
+    } else if (mode.kind === 'edit' && mode.editIndex != null) {
+      const next = addrs.map((a, i) => i === mode.editIndex ? newAddr : a)
+      update({ addresses: next })
+    }
+    setMode({ kind: 'list', editIndex: null })
+  }
+
+  function handleDelete(i) {
+    if (!confirm('Remove this address?')) return
+    update({ addresses: addrs.filter((_, idx) => idx !== i) })
+  }
+
+  // ─── Backdrop + container ─────────────────────────────────────────────────
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 10010,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '24px',
+        background: 'rgba(26,46,43,0.4)',
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: 'white',
+          borderRadius: '20px',
+          width: '100%',
+          maxWidth: '420px',
+          maxHeight: '80vh',
+          overflowY: 'auto',
+          boxShadow: '0 24px 60px rgba(26,46,43,0.25)',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div
+          style={{
+            padding: '18px 20px 14px',
+            borderBottom: '1px solid rgba(0,0,0,0.06)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            position: 'sticky',
+            top: 0,
+            background: 'white',
+            zIndex: 1,
+          }}
+        >
+          <p style={{ fontSize: '16px', fontWeight: 700, color: '#1a2e2b', fontFamily: 'Georgia,serif' }}>
+            Addresses
+          </p>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'none',
+              border: 'none',
+              fontSize: '22px',
+              color: '#8a9e9a',
+              cursor: 'pointer',
+              lineHeight: 1,
+              padding: 0,
+            }}
+            aria-label="Close"
+          >×</button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: '16px 20px', display: 'grid', gap: '10px' }}>
+          {mode.kind === 'list' && addrs.length === 0 && (
+            <p style={{ fontSize: '13px', color: '#8a9e9a', textAlign: 'center', padding: '12px 0' }}>
+              No addresses yet.
+            </p>
+          )}
+
+          {mode.kind === 'list' && addrs.map((a, i) => (
+            <div
+              key={i}
+              style={{
+                padding: '12px 14px',
+                background: '#f7f5f0',
+                borderRadius: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  color: '#8a9e9a',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.4px',
+                  marginBottom: '2px',
+                }}>{a.type || 'Address'}</div>
+                <div style={{ fontSize: '13px', color: '#1a2e2b', lineHeight: 1.35 }}>
+                  {a.value}
+                </div>
+              </div>
+              <button
+                onClick={() => setMode({ kind: 'edit', editIndex: i })}
+                aria-label="Edit address"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  padding: '4px 6px',
+                  borderRadius: '6px',
+                  lineHeight: 1,
+                }}
+              >✏️</button>
+              <button
+                onClick={() => handleDelete(i)}
+                aria-label="Delete address"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  padding: '4px 6px',
+                  borderRadius: '6px',
+                  lineHeight: 1,
+                  opacity: 0.6,
+                }}
+              >🗑️</button>
+            </div>
+          ))}
+
+          {mode.kind === 'list' && (
+            <button
+              onClick={() => setMode({ kind: 'add', editIndex: null })}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                background: 'rgba(168,201,196,0.10)',
+                border: '1.5px dashed rgba(168,201,196,0.5)',
+                borderRadius: '10px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: 600,
+                color: '#1a2e2b',
+                fontFamily: 'inherit',
+              }}
+            >+ Add address</button>
+          )}
+
+          {(mode.kind === 'add' || mode.kind === 'edit') && (
+            <AddressSheet
+              addr={mode.kind === 'edit' ? addrs[mode.editIndex] : null}
+              onSave={handleSave}
+              onClose={() => setMode({ kind: 'list', editIndex: null })}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 
@@ -4171,8 +4343,13 @@ function PersonPanel({
                           background: "none",
                           border: "none",
                           cursor: "pointer",
-                          fontSize: "12px",
-                          padding: "0 3px",
+                          fontSize: "14px",
+                          width: "22px",
+                          height: "22px",
+                          padding: 0,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
                           lineHeight: 1,
                           fontFamily: "inherit",
                           opacity: person.phone ? 0.7 : 0.3,
@@ -4201,8 +4378,13 @@ function PersonPanel({
                           background: "none",
                           border: "none",
                           cursor: "pointer",
-                          fontSize: "12px",
-                          padding: "0 3px",
+                          fontSize: "14px",
+                          width: "22px",
+                          height: "22px",
+                          padding: 0,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
                           lineHeight: 1,
                           fontFamily: "inherit",
                           opacity: person.email ? 0.7 : 0.3,
@@ -4228,8 +4410,13 @@ function PersonPanel({
                           background: "none",
                           border: "none",
                           cursor: "pointer",
-                          fontSize: "12px",
-                          padding: "0 3px",
+                          fontSize: "14px",
+                          width: "22px",
+                          height: "22px",
+                          padding: 0,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
                           lineHeight: 1,
                           fontFamily: "inherit",
                           opacity:
@@ -4300,8 +4487,13 @@ function PersonPanel({
                           background: "none",
                           border: "none",
                           cursor: "pointer",
-                          fontSize: "12px",
-                          padding: "0 3px",
+                          fontSize: "14px",
+                          width: "22px",
+                          height: "22px",
+                          padding: 0,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
                           lineHeight: 1,
                           fontFamily: "inherit",
                           opacity: person.jobDetail ? 0.7 : 0.3,
@@ -4331,8 +4523,13 @@ function PersonPanel({
                           background: "none",
                           border: "none",
                           cursor: "pointer",
-                          fontSize: "12px",
-                          padding: "0 3px",
+                          fontSize: "14px",
+                          width: "22px",
+                          height: "22px",
+                          padding: 0,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
                           lineHeight: 1,
                           fontFamily: "inherit",
                           opacity: 0.7,
@@ -5059,7 +5256,7 @@ function PersonPanel({
                           style: {
                             fontSize: "10px",
                             fontWeight: 700,
-                            color: "#ff0000",
+                            color: "#8a9e9a",
                             textTransform: "uppercase",
                             letterSpacing: "0.5px",
                           },
