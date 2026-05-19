@@ -7,3 +7,63 @@ select{-webkit-appearance:none}
 ::-webkit-scrollbar-thumb{background:rgba(168,201,196,0.3);border-radius:2px}
 @media(min-width:768px){.bee-bottom-nav{display:none!important}.bee-sidebar{display:flex!important}.bee-main{margin-left:220px!important}.bee-loc-banner{left:220px!important}.mobile-fab{display:none!important}.desktop-only{display:inline-flex!important}}
 @media(max-width:767px){.bee-sidebar{display:none!important}.bee-bottom-nav{display:flex!important}.bee-main{margin-left:0!important}.bee-loc-banner{left:0!important}.desktop-only{display:none!important}.mobile-fab{display:flex!important}}
+/* bee-tip — hover/tap tooltip system
+ * Used by PersonPanel icon row + scattered chip tooltips throughout the app.
+ * Was lost in the .js → .jsx migration; restored 5/19.
+ *
+ * Mechanics:
+ *   - Wrap any element + its tooltip in <div class="bee-tip-wrap">…</div>
+ *   - Inside, put the tooltip content as <div class="bee-tip">…</div>
+ *   - Tooltip is display:none by default
+ *   - Becomes display:block on hover of the wrap (desktop)
+ *   - On touch devices, browsers convert first tap to a hover-equivalent
+ *     so a "light tap" reveals the tooltip without firing the underlying click
+ *   - .bee-tip-wrap.left aligns tooltip to left edge instead of centered
+ *     (used for the address tooltip which can be wide)
+ */
+.bee-tip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.bee-tip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  background: #1a2e2b;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  width: max-content;
+  max-width: 280px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  font-family: "DM Sans", system-ui, sans-serif;
+  white-space: normal;
+  font-weight: 400;
+}
+.bee-tip::before {
+  content: "";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-bottom-color: #1a2e2b;
+}
+.bee-tip-wrap.left .bee-tip {
+  left: 0;
+  transform: none;
+}
+.bee-tip-wrap.left .bee-tip::before {
+  left: 12px;
+  transform: none;
+}
+.bee-tip-wrap:hover .bee-tip {
+  display: block;
+}

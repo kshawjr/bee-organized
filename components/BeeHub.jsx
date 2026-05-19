@@ -4162,8 +4162,11 @@ function PersonPanel({
                     React.createElement(
                       "button",
                       {
-                        onClick: () => setShowLeadInfoEdit(true),
-                        "aria-label": "Edit phone",
+                        onClick: () => {
+                          if (person.phone) window.location.href = `tel:${person.phone}`;
+                          else setShowLeadInfoEdit(true);
+                        },
+                        "aria-label": person.phone ? "Call phone" : "Edit phone",
                         style: {
                           background: "none",
                           border: "none",
@@ -4189,8 +4192,11 @@ function PersonPanel({
                     React.createElement(
                       "button",
                       {
-                        onClick: () => setShowLeadInfoEdit(true),
-                        "aria-label": "Edit email",
+                        onClick: () => {
+                          if (person.email) window.location.href = `mailto:${person.email}`;
+                          else setShowLeadInfoEdit(true);
+                        },
+                        "aria-label": person.email ? "Send email" : "Edit email",
                         style: {
                           background: "none",
                           border: "none",
