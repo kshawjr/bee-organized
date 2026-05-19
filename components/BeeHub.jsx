@@ -3296,141 +3296,84 @@ function LeadContactEditModal({ person, onSave, onClose }) {
   )
 }
 
-// ─── Header Chips (Source + Project + Ref) ────────────────────────────────────
-function HeaderChips({ person, update }) {
-  const [editingSource, setEditingSource] = React.useState(false)
-  const [editingProject, setEditingProject] = React.useState(false)
-  const [pickingReferral, setPickingReferral] = React.useState(false)
-  const [referralSearch, setReferralSearch] = React.useState('')
-  const SOURCES = ['Website','Referral','Word of Mouth','Instagram','Facebook','Google','Yelp','NextDoor','Other']
-  const PROJECTS = ['Home Organization','Full Home','Kitchen + Pantry','Closet','Garage','Office','Move-In','Move-Out','Other']
-
-  // Resolve referral - could be a partner or a customer
-  const referredPartner = PARTNERS_DATA.find(p=>p.id===person.referredBy)
-  const referredCustomer = !referredPartner && person.referredBy
-    ? ALL_PEOPLE.find(p=>p.id===person.referredBy)
-    : null
-  const referredLabel = referredPartner ? referredPartner.name : referredCustomer ? referredCustomer.name : null
-
-  const q = referralSearch.toLowerCase()
-  const filteredPartners = PARTNERS_DATA.filter(p=>
-    !q || (p.name||'').toLowerCase().includes(q) || (p.company||'').toLowerCase().includes(q)
-  ).slice(0,5)
-  const filteredCustomers = ALL_PEOPLE.filter(p=>
-    p.id !== person.id &&
-    p.locationId === person.locationId &&
-    !p.isJunk &&
-    (!q || (p.name||'').toLowerCase().includes(q) || (p.email||'').toLowerCase().includes(q))
-  ).slice(0,8)
+// ─── Header Chips (Project + Tags) ────────────────────────────────────────────
+function HeaderChips({ person, update, children }) {
+  const [editingProject, setEditingProject] = useState(false)
+  const PROJECTS = ['Home Organization', 'Full Home', 'Kitchen + Pantry', 'Closet', 'Garage', 'Office', 'Move-In', 'Move-Out', 'Other']
 
   return (
-    <div style={{ display:'flex', gap:'5px', flexWrap:'wrap', marginTop:'4px', alignItems:'center', position:'relative' }}>
-      {/* Source chip */}
-      <div style={{ position:'relative' }}>
-        <button onClick={()=>{ setEditingSource(v=>!v); setEditingProject(false); setPickingReferral(false) }}
-          style={{ display:'flex', alignItems:'center', gap:'3px', fontSize:'10px', padding:'3px 8px', borderRadius:'20px', background:'rgba(14,165,233,0.08)', color:'#0ea5e9', fontWeight:500, border:'1px solid rgba(14,165,233,0.2)', cursor:'pointer', fontFamily:'inherit' }}>
-          📣 {person.source||'Source'} ✏️
+    <div
+      style={{
+        display: 'flex',
+        gap: '6px',
+        flexWrap: 'wrap',
+        marginTop: '4px',
+        alignItems: 'center',
+        position: 'relative',
+      }}
+    >
+      {/* Project type — inline text + chevron, NOT a pill */}
+      <div style={{ position: 'relative' }}>
+        <button
+          onClick={() => setEditingProject(v => !v)}
+          aria-label="Edit project type"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            padding: 0,
+            fontFamily: 'inherit',
+            fontSize: '12px',
+            color: '#1a2e2b',
+            fontWeight: 600,
+          }}
+        >
+          <span>🏠</span>
+          <span style={{ borderBottom: '1px dashed rgba(26,46,43,0.25)' }}>
+            {person.project || 'Project type'}
+          </span>
+          <span style={{ fontSize: '9px', opacity: 0.5 }}>▾</span>
         </button>
-        {editingSource&&(
-          <div style={{ position:'absolute', top:'calc(100% + 4px)', left:0, zIndex:100, background:'white', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'10px', boxShadow:'0 4px 16px rgba(0,0,0,0.12)', padding:'6px', minWidth:'160px' }}>
-            {SOURCES.map(s=>(
-              <button key={s} onClick={()=>{
-                update({...person, source:s, referredBy: s==='Referral' ? person.referredBy : null})
-                setEditingSource(false)
-                if (s==='Referral') setPickingReferral(true)
-              }}
-                style={{ display:'block', width:'100%', padding:'7px 10px', background:person.source===s?'rgba(14,165,233,0.08)':'transparent', border:'none', borderRadius:'7px', fontSize:'12px', fontFamily:'inherit', color:person.source===s?'#0ea5e9':'#1a2e2b', cursor:'pointer', textAlign:'left', fontWeight:person.source===s?600:400 }}>
-                {s}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Referral name chip + picker */}
-      {person.source==='Referral'&&(
-        <div style={{ position:'relative' }}>
-          <button onClick={()=>{ setPickingReferral(v=>!v); setEditingSource(false); setEditingProject(false); setReferralSearch('') }}
-            style={{ display:'flex', alignItems:'center', gap:'3px', fontSize:'10px', padding:'3px 8px', borderRadius:'20px', background:referredPartner?'rgba(16,185,129,0.08)':'rgba(0,0,0,0.04)', color:referredPartner?'#10b981':'#8a9e9a', fontWeight:500, border:`1px solid ${referredPartner?'rgba(16,185,129,0.2)':'rgba(0,0,0,0.1)'}`, cursor:'pointer', fontFamily:'inherit' }}>
-            👤 {referredLabel || 'Who referred?'} ✏️
-          </button>
-          {pickingReferral&&(
-            <div style={{ position:'absolute', top:'calc(100% + 4px)', left:0, zIndex:100, background:'white', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'10px', boxShadow:'0 4px 20px rgba(0,0,0,0.15)', padding:'8px', minWidth:'220px' }}>
-              <input
-                autoFocus
-                value={referralSearch}
-                onChange={e=>setReferralSearch(e.target.value)}
-                placeholder='Search partners...'
-                style={{ width:'100%', padding:'7px 10px', border:'1.5px solid rgba(168,201,196,0.4)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', outline:'none', boxSizing:'border-box', marginBottom:'6px' }}
-              />
-              {filteredPartners.length===0&&filteredCustomers.length===0&&referralSearch.length>1&&(
-                <div style={{ padding:'8px' }}>
-                  <p style={{ fontSize:'11px', color:'#8a9e9a', marginBottom:'6px' }}>No match for "{referralSearch}"</p>
-                  <button onClick={()=>{
-                    const name = referralSearch.trim()
-                    const newPartner = { id:`p_new_${Date.now()}`, locationId:person.locationId, type:'partner', name, title:'', company:'', phone:'', email:'', stage:'Active Partner', specialties:[], tier:null, howWeMet:'', metDate:'', lastContact:'', isCustomer:false, customerLeadId:null, tags:[], nextSteps:[], notes:[], referrals:[], activity:[{ type:'intro', label:`Added as referral source for ${person.name}`, ts:'Just now' }] }
-                    PARTNERS_DATA.push(newPartner)
-                    update({...person, referredBy:newPartner.id})
-                    setPickingReferral(false); setReferralSearch('')
-                  }}
-                    style={{ width:'100%', padding:'7px 10px', background:'#1a2e2b', color:'white', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, cursor:'pointer', textAlign:'left' }}>
-                    + Add "{referralSearch}" as new partner
-                  </button>
-                </div>
-              )}
-              {filteredPartners.length===0&&filteredCustomers.length===0&&referralSearch.length<=1&&<p style={{ fontSize:'11px', color:'#b0c0bc', padding:'4px 8px' }}>Type to search partners or clients</p>}
-              {filteredPartners.length>0&&(
-                <>
-                  <p style={{ fontSize:'9px', fontWeight:700, color:'#b0c0bc', textTransform:'uppercase', letterSpacing:'0.5px', padding:'2px 6px 4px' }}>Partners</p>
-                  {filteredPartners.map(p=>(
-                    <button key={p.id} onClick={()=>{ update({...person, referredBy:p.id}); setPickingReferral(false); setReferralSearch('') }}
-                      style={{ display:'flex', alignItems:'center', gap:'8px', width:'100%', padding:'6px 10px', background:person.referredBy===p.id?'rgba(16,185,129,0.08)':'transparent', border:'none', borderRadius:'7px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
-                      <div style={{ width:'22px', height:'22px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'8px', fontWeight:700, color:'white', flexShrink:0 }}>
-                        {(p.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2)}
-                      </div>
-                      <div style={{ minWidth:0 }}>
-                        <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name}</p>
-                        {p.company&&<p style={{ fontSize:'10px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.company}</p>}
-                      </div>
-                      {person.referredBy===p.id&&<span style={{ marginLeft:'auto', color:'#10b981', fontSize:'12px' }}>✓</span>}
-                    </button>
-                  ))}
-                </>
-              )}
-              {filteredCustomers.length>0&&(
-                <>
-                  <p style={{ fontSize:'9px', fontWeight:700, color:'#b0c0bc', textTransform:'uppercase', letterSpacing:'0.5px', padding:'6px 6px 4px' }}>Clients</p>
-                  {filteredCustomers.map(p=>(
-                    <button key={p.id} onClick={()=>{ update({...person, referredBy:p.id}); setPickingReferral(false); setReferralSearch('') }}
-                      style={{ display:'flex', alignItems:'center', gap:'8px', width:'100%', padding:'6px 10px', background:person.referredBy===p.id?'rgba(212,160,70,0.08)':'transparent', border:'none', borderRadius:'7px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
-                      <div style={{ width:'22px', height:'22px', borderRadius:'50%', background:'linear-gradient(135deg,#d4a046,#c8903a)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'8px', fontWeight:700, color:'white', flexShrink:0 }}>
-                        {(p.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2)}
-                      </div>
-                      <div style={{ minWidth:0 }}>
-                        <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name}</p>
-                        <p style={{ fontSize:'10px', color:'#8a9e9a' }}>Client · {p.stage}</p>
-                      </div>
-                      {person.referredBy===p.id&&<span style={{ marginLeft:'auto', color:'#d4a046', fontSize:'12px' }}>✓</span>}
-                    </button>
-                  ))}
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Project Type chip */}
-      <div style={{ position:'relative' }}>
-        <button onClick={()=>{ setEditingProject(v=>!v); setEditingSource(false) }}
-          style={{ display:'flex', alignItems:'center', gap:'3px', fontSize:'10px', padding:'3px 8px', borderRadius:'20px', background:'rgba(212,160,70,0.08)', color:'#b07a20', fontWeight:500, border:'1px solid rgba(212,160,70,0.2)', cursor:'pointer', fontFamily:'inherit' }}>
-          🏠 {person.project||'Project'} ✏️
-        </button>
-        {editingProject&&(
-          <div style={{ position:'absolute', top:'calc(100% + 4px)', left:0, zIndex:100, background:'white', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'10px', boxShadow:'0 4px 16px rgba(0,0,0,0.12)', padding:'6px', minWidth:'180px' }}>
-            {PROJECTS.map(p=>(
-              <button key={p} onClick={()=>{ update({...person, project:p}); setEditingProject(false) }}
-                style={{ display:'block', width:'100%', padding:'7px 10px', background:person.project===p?'rgba(212,160,70,0.08)':'transparent', border:'none', borderRadius:'7px', fontSize:'12px', fontFamily:'inherit', color:person.project===p?'#b07a20':'#1a2e2b', cursor:'pointer', textAlign:'left', fontWeight:person.project===p?600:400 }}>
+        {editingProject && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 'calc(100% + 4px)',
+              left: 0,
+              zIndex: 100,
+              background: 'white',
+              border: '1px solid rgba(0,0,0,0.1)',
+              borderRadius: '10px',
+              boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+              padding: '6px',
+              minWidth: '180px',
+            }}
+          >
+            {PROJECTS.map(p => (
+              <button
+                key={p}
+                onClick={() => {
+                  update({ ...person, project: p })
+                  setEditingProject(false)
+                }}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  padding: '7px 10px',
+                  background: person.project === p ? 'rgba(212,160,70,0.08)' : 'transparent',
+                  border: 'none',
+                  borderRadius: '7px',
+                  fontSize: '12px',
+                  fontFamily: 'inherit',
+                  color: person.project === p ? '#b07a20' : '#1a2e2b',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  fontWeight: person.project === p ? 600 : 400,
+                }}
+              >
                 {p}
               </button>
             ))}
@@ -3438,13 +3381,16 @@ function HeaderChips({ person, update }) {
         )}
       </div>
 
-      {/* Jobber Ref */}
-      {person.jobberRef&&<span style={{ display:'flex', alignItems:'center', gap:'3px', fontSize:'10px', padding:'3px 8px', borderRadius:'20px', background:'rgba(16,185,129,0.08)', color:'#10b981', fontWeight:500, border:'1px solid rgba(16,185,129,0.15)' }}>
-        <JobberIcon size={14} style={{marginRight:'3px'}} /> {person.jobberRef}
-      </span>}
+      {/* Children: `|` separator + tag pills + `+ tag` button passed in from PersonPanel */}
+      {children}
 
-      {/* Backdrop to close */}
-      {(editingSource||editingProject||pickingReferral)&&<div style={{ position:'fixed', inset:0, zIndex:99 }} onClick={()=>{ setEditingSource(false); setEditingProject(false); setPickingReferral(false) }} />}
+      {/* Backdrop to close the project dropdown on outside click */}
+      {editingProject && (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 99 }}
+          onClick={() => setEditingProject(false)}
+        />
+      )}
     </div>
   )
 }
