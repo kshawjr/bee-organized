@@ -3682,695 +3682,3368 @@ function ContactsTab({ person, onUpdate }) {
   )
 }
 
-function PersonPanel({ person, onClose, onUpdate, onMarkJunk, onResurrect, onAddFollowUp, onViewCard=()=>{}, allPeople=[], onPrev=null, onNext=null, navLabel='' }) {
-  const [activeTab, setActiveTab] = useState('overview')
-  const [popup, setPopup] = useState(null)
-  const [showLeadInfoEdit, setShowLeadInfoEdit] = useState(false)
-  const [showSadAnimation, setShowSadAnimation] = useState(false)
-  const [showAssessmentScheduler, setShowAssessmentScheduler] = useState(false)
-  const [showWonAnimation, setShowWonAnimation] = useState(false)
-  const [showCloseOut, setShowCloseOut] = useState(false)
-  const [showSnooze, setShowSnooze] = useState(false)
-  const [showProcess, setShowProcess] = useState(false)
-  const [searching, setSearching] = useState(false)
-  const [showAssignPicker, setShowAssignPicker] = useState(false)
-  const [editingField, setEditingField] = useState(null)
-  const [fieldVal, setFieldVal] = useState('')
-
-  function startEdit(key, val) { setEditingField(key); setFieldVal(val||'') }
-  function saveField(key) { onUpdate({...person, [key]:fieldVal}); setEditingField(null) }
-
-  // Lock body scroll while panel is open
-  React.useEffect(() => {
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = prev }
-  }, [])
-  const s = stageConf(person.stage)
-  const stageIdx = STAGES.findIndex(x=>x.key===person.stage)
-  const hasReachedOut = !!person.reachOutMethod
-  const isEarlyStage = ['New','Attempting','Nurturing'].includes(person.stage)
-  const canSendToJobber = hasReachedOut && !person.jobberRef && isEarlyStage
-  const hasInvoices = person.invoices?.length>0
-  const total = person.invoices?.reduce((s,i)=>s+i.amount,0)||0
-  const unpaid = person.invoices?.filter(i=>i.status==='Awaiting Payment').length||0
-  const assignedUser = USERS_DATA.find(u=>u.id===person.assignedTo)
-  const assignedRole = FRANCHISE_ROLES.find(r=>r.key===assignedUser?.role)
-  const isLaterStage = ['Request','Request','Job in Progress','Final Processing'].includes(person.stage)
-  const now = 'Just now'
-
-  useEffect(()=>{
-    if (person.jobberSearchStatus==='pending') {
-      setSearching(true)
-      setTimeout(()=>{ setSearching(false); onUpdate({...person, jobberSearchStatus:'not_found', outreachTimeline:[...person.outreachTimeline,{id:`o${Date.now()}`,type:'system',method:'system',label:'Jobber search: no existing client found',ts:now,status:'done'}]}) }, 1600)
-    }
-  },[])
-
-  function update(patch) { onUpdate({...person,...patch}) }
-  function handleReachOut(patch) { update(patch); setPopup(null) }
-  function handleAddNote(text, type) {
-    const newNote = { id:`n${Date.now()}`, text, ts:now, user:'You', synced:type==='job'&&!!person.jobberRef }
-    update(type==='buzz'?{ buzzNotes:[...person.buzzNotes,newNote] }:{ jobNotes:[...person.jobNotes,newNote] })
-    setPopup(null)
+function PersonPanel({
+  person,
+  onClose,
+  onUpdate,
+  onMarkJunk,
+  onResurrect,
+  onAddFollowUp,
+  onViewCard = () => {},
+  allPeople = [],
+  onPrev = null,
+  onNext = null,
+  navLabel = "",
+}) {
+  const [activeTab, setActiveTab] = useState("overview");
+  const [popup, setPopup] = useState(null);
+  const [showLeadInfoEdit, setShowLeadInfoEdit] = useState(false);
+  const [showSadAnimation, setShowSadAnimation] = useState(false);
+  const [showAssessmentScheduler, setShowAssessmentScheduler] = useState(false);
+  const [showWonAnimation, setShowWonAnimation] = useState(false);
+  const [showCloseOut, setShowCloseOut] = useState(false);
+  const [showSnooze, setShowSnooze] = useState(false);
+  const [showProcess, setShowProcess] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [showAssignPicker, setShowAssignPicker] = useState(false);
+  const [editingField, setEditingField] = useState(null);
+  const [editingSource, setEditingSource] = useState(false);
+  const [pickingReferral, setPickingReferral] = useState(false);
+  const [referralSearch, setReferralSearch] = useState("");
+  const [journeyExpanded, setJourneyExpanded] = useState(false);
+  const [jobNoteDraft, setJobNoteDraft] = useState("");
+  const [fieldVal, setFieldVal] = useState("");
+  function startEdit(key, val) {
+    setEditingField(key);
+    setFieldVal(val || "");
   }
-  function handleTags(tags) { update({ tags }); setPopup(null) }
-  function handleSendToJobber(patch) { update(patch); setPopup(null) }
+  function saveField(key) {
+    onUpdate({ ...person, [key]: fieldVal });
+    setEditingField(null);
+  }
+  React.useEffect(() => {
+    const scrollY = window.scrollY || window.pageYOffset || 0;
+    const b = document.body.style;
+    const h = document.documentElement.style;
+    const prev = {
+      pos: b.position,
+      top: b.top,
+      width: b.width,
+      over: b.overflow,
+      hOver: h.overflow,
+    };
+    b.position = "fixed";
+    b.top = "-" + scrollY + "px";
+    b.width = "100%";
+    b.overflow = "hidden";
+    h.overflow = "hidden";
+    return () => {
+      b.position = prev.pos;
+      b.top = prev.top;
+      b.width = prev.width;
+      b.overflow = prev.over;
+      h.overflow = prev.hOver;
+      window.scrollTo(0, scrollY);
+    };
+  }, []);
+  const s = stageConf(person.stage);
+  const stageIdx = STAGES.findIndex((x) => x.key === person.stage);
+  const hasReachedOut = !!person.reachOutMethod;
+  const isEarlyStage = ["New", "Attempting", "Nurturing"].includes(person.stage);
+  const canSendToJobber = hasReachedOut && !person.jobberRef && isEarlyStage;
+  const hasInvoices = person.invoices?.length > 0;
+  const total = person.invoices?.reduce((s, i) => s + i.amount, 0) || 0;
+  const unpaid = person.invoices?.filter((i) => i.status === "Awaiting Payment").length || 0;
+  const assignedIds = Array.isArray(person.assignedTo)
+    ? person.assignedTo
+    : person.assignedTo
+      ? [person.assignedTo]
+      : [];
+  const assignedUsers = assignedIds
+    .map((id) => USERS_DATA.find((u) => u.id === id))
+    .filter(Boolean);
+  const isLaterStage = ["Request", "Request", "Job in Progress", "Final Processing"].includes(
+    person.stage,
+  );
+  const now = "Just now";
+  useEffect(() => {
+    if (person.jobberSearchStatus === "pending") {
+      setSearching(true);
+      setTimeout(() => {
+        setSearching(false);
+        onUpdate({
+          ...person,
+          jobberSearchStatus: "not_found",
+          outreachTimeline: [
+            ...person.outreachTimeline,
+            {
+              id: `o${Date.now()}`,
+              type: "system",
+              method: "system",
+              label: "Jobber search: no existing client found",
+              ts: now,
+              status: "done",
+            },
+          ],
+        });
+      }, 1600);
+    }
+  }, []);
+  function update(patch) {
+    onUpdate({ ...person, ...patch });
+  }
+  function handleReachOut(patch) {
+    update(patch);
+    setPopup(null);
+  }
+  function handleAddNote(text, type) {
+    const newNote = {
+      id: `n${Date.now()}`,
+      text,
+      ts: now,
+      user: "You",
+      synced: type === "job" && !!person.jobberRef,
+    };
+    update(
+      type === "buzz"
+        ? { buzzNotes: [...person.buzzNotes, newNote] }
+        : { jobNotes: [...person.jobNotes, newNote] },
+    );
+    setPopup(null);
+  }
+  function handleTags(tags) {
+    update({ tags });
+    setPopup(null);
+  }
+  function handleSendToJobber(patch) {
+    update(patch);
+    setPopup(null);
+  }
   function handleFinalProcess() {
-    update({ finalProcessed:true, stage:'Closed Won', outreachTimeline:[...person.outreachTimeline,{id:`o${Date.now()}`,type:'system',method:'system',label:'Closed Won - synced to Zoho',ts:'Just now',status:'done'}] })
-    setPopup(null)
-    setShowWonAnimation(true)
-    setTimeout(()=>{ setShowWonAnimation(false); onClose() }, 4500)
+    update({
+      finalProcessed: true,
+      stage: "Closed Won",
+      outreachTimeline: [
+        ...person.outreachTimeline,
+        {
+          id: `o${Date.now()}`,
+          type: "system",
+          method: "system",
+          label: "Closed Won — synced to Zoho",
+          ts: "Just now",
+          status: "done",
+        },
+      ],
+    });
+    setPopup(null);
+    setShowWonAnimation(true);
+    setTimeout(() => {
+      setShowWonAnimation(false);
+      onClose();
+    }, 4500);
   }
   function handleClose(reason, note, followUp) {
-    const now = 'Just now'
+    const now = "Just now";
     const activityEntry = {
-      type:'stage',
-      text:`Record closed - ${reason}${note?' · '+note:''}`,
-      ts:now,
-      user:'You'
-    }
-    const closeNote = note ? {
-      id:`n${Date.now()}`,
-      text:`Close note: ${note}`,
-      ts:now,
-      user:'You'
-    } : null
+      type: "stage",
+      text: `Record closed — ${reason}${note ? " · " + note : ""}`,
+      ts: now,
+      user: "You",
+    };
+    const closeNote = note
+      ? { id: `n${Date.now()}`, text: `Close note: ${note}`, ts: now, user: "You" }
+      : null;
     onUpdate({
       ...person,
-      stage: 'Closed Lost',
-      activity:[...person.activity, activityEntry],
-      buzzNotes: closeNote ? [...person.buzzNotes, closeNote] : person.buzzNotes
-    })
+      stage: "Closed Lost",
+      activity: [...person.activity, activityEntry],
+      buzzNotes: closeNote ? [...person.buzzNotes, closeNote] : person.buzzNotes,
+    });
     if (followUp && onAddFollowUp) {
-      onAddFollowUp({ id:`fu${Date.now()}`, personId:person.id, personName:person.name, date:followUp.date, note:followUp.note, locationId:person.locationId, createdAt:'Just now' })
+      onAddFollowUp({
+        id: `fu${Date.now()}`,
+        personId: person.id,
+        personName: person.name,
+        date: followUp.date,
+        note: followUp.note,
+        locationId: person.locationId,
+        createdAt: "Just now",
+      });
     }
-    setShowSadAnimation(true)
-    setTimeout(()=>{
-      onMarkJunk(person.id, reason, note)
-      setPopup(null)
-      onClose()
-    }, 4000)
+    setShowSadAnimation(true);
+    setTimeout(() => {
+      onMarkJunk(person.id, reason, note);
+      setPopup(null);
+      onClose();
+    }, 4000);
   }
-  function handleAddAddress(addr) { update({ addresses:[...(person.addresses||[]), addr] }); setPopup(null) }
-
-  const methodIcon = m => ({call:'📞',sms:'💬',email:'📧',system:'·',call_prompt:'📞'}[m]||'·')
-  const Tab = (k, label) => (
-    <button key={k} onClick={()=>setActiveTab(k)} style={{ flex:1, padding:'9px', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'13px', fontWeight:activeTab===k?600:400, background:'transparent', color:activeTab===k?'#1a2e2b':'#8a9e9a', borderBottom:`2px solid ${activeTab===k?'#a8c9c4':'transparent'}` }}>{label}</button>
-  )
-
-  return (
-    <>
-      <div style={{ position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'flex-end' }}>
-        <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.25)' }} onClick={onClose} />
-        <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px 16px 0 0', zIndex:1, height:'93vh', display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.15)' }}>
-          <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'12px auto 0' }} />
-
-          <div style={{ padding:'0.75rem 1.25rem 0', borderBottom:'1px solid rgba(0,0,0,0.06)', flexShrink:0 }}>
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-                <div style={{ flex:1 }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px', flexWrap:'wrap' }}>
-                    <h2 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>{person.name}</h2>
-                    <button onClick={()=>onViewCard(person)}
-                      style={{ background:'none', border:'none', cursor:'pointer', fontSize:'16px', padding:0, flexShrink:0, lineHeight:1, touchAction:'manipulation', opacity:0.5 }}>
-                      📇
-                    </button>
-                    <button onClick={()=>setPopup('account')} style={{ fontSize:'10px', color:'#a8c9c4', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', padding:0, fontWeight:500, marginLeft:'2px' }}>account profile →</button>
-                  </div>
-                  {/* Status row - stage pill + job number for Job in Progress */}
-                  <div style={{ display:'flex', gap:'4px', flexWrap:'wrap', alignItems:'center', marginBottom:'4px' }}>
-                    <span style={{ fontSize:'11px', padding:'2px 8px', borderRadius:'20px', background:s.bg, color:s.color, fontWeight:600 }}>{s.icon} {s.label}</span>
-                    {person.stage==='Job in Progress'&&person.jobs?.[0]&&(
-                      <span style={{ fontSize:'10px', color:'#10b981', background:'rgba(16,185,129,0.08)', padding:'2px 7px', borderRadius:'20px', fontWeight:500 }}>
-                        {person.jobs[0].jobberRef||person.jobs[0].id}
-                      </span>
-                    )}
-                  </div>
-                  {/* Row 1: Phone + Email with pencil */}
-                  <div style={{ display:'flex', alignItems:'center', gap:'14px', marginTop:'4px', flexWrap:'wrap' }}>
-                    {person.phone
-                      ? <a href={`tel:${person.phone}`} style={{ display:'flex', alignItems:'center', gap:'4px', fontSize:'12px', color:'#4a5e5a', textDecoration:'none', fontWeight:500 }}>📞 {person.phone}</a>
-                      : <span style={{ fontSize:'12px', color:'#c8d8d4' }}>📞 No phone</span>}
-                    {person.email
-                      ? <a href={`mailto:${person.email}`} style={{ display:'flex', alignItems:'center', gap:'4px', fontSize:'12px', color:'#4a5e5a', textDecoration:'none', fontWeight:500 }}>✉️ {person.email}</a>
-                      : <span style={{ fontSize:'12px', color:'#c8d8d4' }}>✉️ No email</span>}
-                    <button onClick={()=>setShowLeadInfoEdit(true)} style={{ fontSize:'11px', color:'#a8c9c4', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', padding:0 }}>✏️</button>
-                  </div>
-                  {/* Row 2: Source + Project Type + Jobber Ref */}
-                  <HeaderChips person={person} update={update} />
-                  {/* Row 3: Tags */}
-                  <div style={{ display:'flex', gap:'5px', flexWrap:'wrap', marginTop:'6px', alignItems:'center' }}>
-                    {person.tags.map(tid=>{ const t=tagConf(tid); return (
-                      <span key={tid} style={{ display:'flex', alignItems:'center', gap:'3px', fontSize:'10px', color:t.color, background:t.bg, padding:'2px 7px 2px 8px', borderRadius:'20px', fontWeight:500 }}>
-                        {t.label}
-                        <button onClick={e=>{e.stopPropagation();update({tags:person.tags.filter(x=>x!==tid)})}} style={{ background:'none', border:'none', cursor:'pointer', color:t.color, fontSize:'11px', lineHeight:1, padding:'0 1px', opacity:0.6 }}>×</button>
-                      </span>
-                    )})}
-                    <button onClick={()=>setPopup('tags')} style={{ fontSize:'10px', color:'#b0c0bc', background:'rgba(0,0,0,0.04)', border:'1px dashed rgba(0,0,0,0.1)', borderRadius:'20px', padding:'2px 8px', cursor:'pointer', fontFamily:'inherit' }}>+ Tag</button>
-                  </div>
-                  {/* Row 4: Jobber status */}
-                  <div style={{ display:'flex', alignItems:'center', gap:'6px', marginTop:'6px' }}>
-                    {(searching||person.jobberSearchStatus==='pending') ? (
-                      <span style={{ fontSize:'10px', color:'#6366f1', background:'rgba(99,102,241,0.07)', border:'1px solid rgba(99,102,241,0.15)', padding:'2px 8px', borderRadius:'20px', fontWeight:500 }}>🔍 Searching Jobber...</span>
-                    ) : (person.jobberRef || (person.jobberSearchStatus==='found' && person.jobberClient)) ? (
-                      <div style={{ display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap' }}>
-                        <button onClick={()=>setPopup('jobber-history')}
-                          style={{ fontSize:'10px', color:'#10b981', background:'rgba(16,185,129,0.07)', border:'1px solid rgba(16,185,129,0.2)', padding:'3px 10px', borderRadius:'20px', fontWeight:600, cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'4px' }}>
-                          ✅ {person.jobberRef||person.jobberClient?.clientId} <span style={{ fontSize:'9px', opacity:0.7 }}>history ↗</span>
-                        </button>
-                        {person.jobberClient?.clientId&&(
-                          <a href={`https://app.jobber.com/clients/${person.jobberClient.clientId}`} target='_blank' rel='noreferrer'
-                            style={{ fontSize:'10px', color:'#6366f1', background:'rgba(99,102,241,0.07)', border:'1px solid rgba(99,102,241,0.2)', padding:'3px 10px', borderRadius:'20px', fontWeight:600, textDecoration:'none', display:'flex', alignItems:'center', gap:'3px' }}>
-                            Open in Jobber ↗
-                          </a>
-                        )}
-                      </div>
-                    ) : person.jobberSearchStatus==='not_found' ? (
-                      <span style={{ fontSize:'10px', color:'#8a9e9a', background:'rgba(0,0,0,0.04)', border:'1px solid rgba(0,0,0,0.08)', padding:'2px 8px', borderRadius:'20px' }}>👤 New Client</span>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-              <div style={{ display:'flex', alignItems:'center', gap:'4px', alignSelf:'flex-start' }}>
-                {(onPrev||onNext)&&(
-                  <div style={{ display:'flex', alignItems:'center', gap:'2px', marginRight:'4px' }}>
-                    <button onClick={onPrev} disabled={!onPrev} style={{ background:'none', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'6px', fontSize:'14px', color:onPrev?'#4a5e5a':'#d0d8d5', cursor:onPrev?'pointer':'default', padding:'1px 7px', lineHeight:1.4 }}>‹</button>
-                    {navLabel&&<span style={{ fontSize:'10px', color:'#b0c0bc', minWidth:'36px', textAlign:'center' }}>{navLabel}</span>}
-                    <button onClick={onNext} disabled={!onNext} style={{ background:'none', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'6px', fontSize:'14px', color:onNext?'#4a5e5a':'#d0d8d5', cursor:onNext?'pointer':'default', padding:'1px 7px', lineHeight:1.4 }}>›</button>
-                  </div>
-                )}
-                <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
-              </div>
-            </div>
-            {/* Request count + last activity */}
-            {(()=>{
-              const reqCount = (person.jobs?.length||0) + (person.jobberClient?.jobs?.length||0) + (person.stage&&person.stage!=='New'?1:0)
-              return reqCount>0 ? (
-                <div style={{ display:'flex', gap:'6px', marginBottom:'6px', flexWrap:'wrap' }}>
-                  <span style={{ fontSize:'10px', color:'#4a5e5a', background:'rgba(168,201,196,0.12)', border:'1px solid rgba(168,201,196,0.25)', padding:'2px 8px', borderRadius:'20px', fontWeight:600 }}>
-                    {reqCount} request{reqCount>1?'s':''}
-                  </span>
-                </div>
-              ) : null
-            })()}
-            <div style={{ display:'flex', alignItems:'center', gap:'3px', marginBottom:'8px', overflowX:'auto' }}>
-              {STAGES.map((st,i)=>(
-                <div key={st.key} style={{ display:'flex', alignItems:'center', gap:'3px', flexShrink:0 }}>
-                  <div style={{ width:'7px', height:'7px', borderRadius:'50%', background:st.key===person.stage?st.dot:i<stageIdx?'#a8c9c4':'rgba(0,0,0,0.1)', boxShadow:st.key===person.stage?`0 0 0 3px ${st.dot}25`:'none' }} />
-                  {i<STAGES.length-1&&<div style={{ width:'12px', height:'2px', background:i<stageIdx?'#a8c9c4':'rgba(0,0,0,0.08)', borderRadius:'1px' }} />}
-                </div>
-              ))}
-            </div>
-            <div style={{ display:'flex' }}>
-              {Tab('overview','Overview')}
-              {Tab('contacts',`Job Contacts${(person.jobContacts?.length||0)>0?' ('+person.jobContacts.length+')':''}`)}
-              {Tab('outreach',`Outreach (${person.outreachTimeline.length})`)}
-            </div>
-          </div>
-
-          <div key={activeTab} style={{ flex:1, overflowY:'auto', padding:'1rem 1.25rem' }}>
-            {activeTab==='overview'&&(
-              <div style={{ display:'grid', gap:'12px' }}>
-                {/* Quick capture / snooze wake-up banner */}
-                {(person.quickCapture||person.snoozeUntil)&&(
-                  <button onClick={()=>setShowProcess(true)} style={{ display:'flex', alignItems:'center', gap:'12px', padding:'12px 14px', background:person.snoozeUntil?'rgba(99,102,241,0.06)':'rgba(212,160,70,0.06)', border:`1.5px solid ${person.snoozeUntil?'rgba(99,102,241,0.25)':'rgba(212,160,70,0.25)'}`, borderRadius:'12px', cursor:'pointer', fontFamily:'inherit', textAlign:'left', width:'100%' }}>
-                    <span style={{ fontSize:'20px' }}>{person.snoozeUntil?'⏰':'⚡'}</span>
-                    <div style={{ flex:1 }}>
-                      <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', marginBottom:'2px' }}>
-                        {person.snoozeUntil?'This client woke up - ready to re-engage?':'Quick capture - needs to be processed'}
-                      </p>
-                      <p style={{ fontSize:'11px', color:'#8a9e9a' }}>
-                        {person.snoozeUntil
-                          ? `Snoozed note: ${person.snoozeNote||'none'}`
-                          : (person.quickNote ? `Note: ${person.quickNote}` : 'Missing project type and New Lead Drip')}
-                      </p>
-                    </div>
-                    <span style={{ fontSize:'13px', fontWeight:600, color:person.snoozeUntil?'#6366f1':'#d4a046', flexShrink:0 }}>Process →</span>
-                  </button>
-                )}
-
-
-                {/* Addresses - card style matching notes */}
-                <div style={{ background:'#f8faf8', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'10px', padding:'10px 12px' }}>
-                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'6px' }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:'5px' }}>
-                      <span>📍</span>
-                      <span style={{ fontSize:'10px', fontWeight:700, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px' }}>Address</span>
-                    </div>
-                    <button onClick={()=>setPopup('add-address')} style={{ fontSize:'11px', color:'#a8c9c4', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', fontWeight:500 }}>+ Add</button>
-                  </div>
-                  {(person.addresses||[{type:'Service',value:person.address}]).filter(a=>a.value).length===0 ? (
-                    <p style={{ fontSize:'11px', color:'#c8d8d4', fontStyle:'italic' }}>No address yet</p>
-                  ) : (person.addresses||[{type:'Service',value:person.address}]).filter(a=>a.value).map((addr,i)=>(
-                    <AddressRow
-                      key={i}
-                      addr={addr}
-                      onUpdate={updated=>{
-                        const newAddresses = [...(person.addresses||[{type:'Service',value:person.address}])]
-                        newAddresses[i] = updated
-                        update({ addresses: newAddresses })
-                      }}
-                      onDelete={()=>{
-                        const newAddresses = (person.addresses||[{type:'Service',value:person.address}]).filter((_,idx)=>idx!==i)
-                        update({ addresses: newAddresses })
-                      }}
-                    />
-                  ))}
-                </div>
-
-                {/* What They're Looking For - client-submitted job detail */}
-                <div style={{ background:'#f8faf8', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'10px', padding:'10px 12px' }}>
-                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'6px' }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:'5px' }}>
-                      <span>📝</span>
-                      <span style={{ fontSize:'10px', fontWeight:700, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px' }}>What They're Looking For</span>
-                    </div>
-                    <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-                      {person.jobDetail&&person.jobDetail.length>160&&<button onClick={()=>setPopup('job-detail')} style={{ fontSize:'11px', color:'#a8c9c4', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', fontWeight:500 }}>See more →</button>}
-                      <button onClick={()=>setPopup('edit-job-detail')} style={{ fontSize:'11px', color:'#c8d8d4', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit' }}>✏️</button>
-                    </div>
-                  </div>
-                  {person.jobDetail
-                    ? <p style={{ fontSize:'12px', color:'#2a3e3b', lineHeight:1.6 }}>{person.jobDetail.length>160 ? person.jobDetail.slice(0,160)+'...' : person.jobDetail}</p>
-                    : <p style={{ fontSize:'11px', color:'#b0c0bc', fontStyle:'italic', lineHeight:1.5 }}>No details yet - can be captured on intake form or added from a phone call.</p>
-                  }
-                </div>
-                {/* Notes */}
-                <div style={{ background:'#f8faf8', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'10px', padding:'10px 12px' }}>
-                  {/* Buzz Notes */}
-                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'6px' }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:'5px' }}><span>🐝</span><span style={{ fontSize:'10px', fontWeight:700, color:'#b07a20', textTransform:'uppercase', letterSpacing:'0.4px' }}>Buzz Notes</span>{person.buzzNotes.length>0&&<span style={{ fontSize:'10px', color:'#c8a050', background:'rgba(212,160,70,0.1)', padding:'1px 6px', borderRadius:'20px' }}>{person.buzzNotes.length}</span>}</div>
-                    {person.buzzNotes.length>2&&<button onClick={()=>setActiveTab('notes')} style={{ fontSize:'11px', color:'#d4a046', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', fontWeight:600 }}>See all →</button>}
-                  </div>
-                  {person.buzzNotes.length>0
-                    ? person.buzzNotes.slice(0,2).map(n=><p key={n.id} style={{ fontSize:'12px', color:'#7a5010', lineHeight:1.4, marginBottom:'4px', padding:'4px 8px', background:'rgba(212,160,70,0.06)', borderRadius:'6px' }}>· {n.text}</p>)
-                    : <p style={{ fontSize:'11px', color:'#c8a050', fontStyle:'italic', marginBottom:'6px' }}>No buzz notes yet</p>
-                  }
-                  {/* Job Notes */}
-                  {(person.jobNotes?.length>0)&&(
-                    <>
-                      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', margin:'8px 0 6px', paddingTop:'8px', borderTop:'1px solid rgba(0,0,0,0.06)' }}>
-                        <div style={{ display:'flex', alignItems:'center', gap:'5px' }}><span>🔑</span><span style={{ fontSize:'10px', fontWeight:700, color:'#0369a1', textTransform:'uppercase', letterSpacing:'0.4px' }}>Job Notes</span><span style={{ fontSize:'10px', color:'#7ab5d4', background:'rgba(14,165,233,0.08)', padding:'1px 6px', borderRadius:'20px' }}>{person.jobNotes.length}</span></div>
-                        {person.jobNotes.length>2&&<button onClick={()=>setActiveTab('notes')} style={{ fontSize:'11px', color:'#0ea5e9', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', fontWeight:600 }}>See all →</button>}
-                      </div>
-                      {person.jobNotes.slice(0,2).map(n=><p key={n.id} style={{ fontSize:'12px', color:'#0369a1', lineHeight:1.4, marginBottom:'4px', padding:'4px 8px', background:'rgba(14,165,233,0.05)', borderRadius:'6px' }}>· {n.text}</p>)}
-                    </>
-                  )}
-                  <QuickNoteInput onAdd={(text,type)=>{
-                    const note={id:`${type==='job'?'jn':'bn'}${Date.now()}`,text,ts:'Just now',user:'You',synced:false}
-                    if(type==='job') update({jobNotes:[...(person.jobNotes||[]),note]})
-                    else update({buzzNotes:[...person.buzzNotes,note]})
-                  }} />
-                </div>
-                {person.buzzNotes.length>0&&false&&(
-                  <div style={{ padding:'10px 12px', background:'linear-gradient(135deg,rgba(212,160,70,0.07),rgba(212,160,70,0.03))', border:'1px solid rgba(212,160,70,0.2)', borderRadius:'10px', borderLeft:'3px solid #d4a046' }}>
-                    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'6px' }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:'5px' }}><span>🐝</span><span style={{ fontSize:'10px', fontWeight:700, color:'#b07a20', textTransform:'uppercase', letterSpacing:'0.4px' }}>Buzz Notes</span></div>
-                      {person.buzzNotes.length>2&&<button onClick={()=>setActiveTab('notes')} style={{ fontSize:'11px', color:'#d4a046', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', fontWeight:600 }}>See all {person.buzzNotes.length} →</button>}
-                    </div>
-                    {person.buzzNotes.slice(0,2).map(n=><p key={n.id} style={{ fontSize:'13px', color:'#7a5010', lineHeight:1.4, marginBottom:'2px' }}>· {n.text}</p>)}
-                  </div>
-                )}
-
-                {hasInvoices&&(
-                  <button onClick={()=>setPopup('invoice')} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 14px', background:unpaid>0?'rgba(245,158,11,0.06)':'rgba(34,197,94,0.06)', border:`1px solid ${unpaid>0?'rgba(245,158,11,0.2)':'rgba(34,197,94,0.2)'}`, borderRadius:'10px', cursor:'pointer', width:'100%', fontFamily:'inherit', textAlign:'left' }}>
-                    <div><p style={{ fontSize:'10px', color:unpaid>0?'#f59e0b':'#22c55e', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'2px' }}>{unpaid>0?`⚠️ ${unpaid} unpaid`:'✅ All paid'}</p><p style={{ fontSize:'13px', color:'#1a2e2b', fontWeight:500 }}>{person.invoices.length} invoice{person.invoices.length>1?'s':''} · {fmt(total)}</p></div>
-                    <span style={{ fontSize:'12px', color:unpaid>0?'#f59e0b':'#22c55e' }}>View →</span>
-                  </button>
-                )}
-                {/* ── Client Stats Strip ── */}
-                {(()=>{
-                  const allJobs = [...(person.jobs||[]), ...(person.jobberClient?.jobs||[])]
-                  const revenue = person.invoices?.reduce((s,i)=>s+i.amount,0)||0
-                  const paid    = person.invoices?.filter(i=>i.status==='Paid').reduce((s,i)=>s+i.amount,0)||0
-                  const balance = revenue - paid
-                  const lastAct = person.outreachTimeline?.[person.outreachTimeline.length-1]?.ts
-                  if (!revenue && !allJobs.length && !lastAct) return null
-                  return (
-                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
-                      {revenue>0&&<div style={{ padding:'10px 12px', background:'#f8faf8', borderRadius:'10px', border:'1px solid rgba(0,0,0,0.07)' }}>
-                        <p style={{ fontSize:'9px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'3px' }}>Total Revenue</p>
-                        <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b' }}>{fmt(revenue)}</p>
-                      </div>}
-                      {balance>0&&<div style={{ padding:'10px 12px', background:'rgba(245,158,11,0.05)', borderRadius:'10px', border:'1px solid rgba(245,158,11,0.15)' }}>
-                        <p style={{ fontSize:'9px', fontWeight:700, color:'#f59e0b', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'3px' }}>Outstanding</p>
-                        <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b' }}>{fmt(balance)}</p>
-                      </div>}
-                      {allJobs.length>0&&<div style={{ padding:'10px 12px', background:'#f8faf8', borderRadius:'10px', border:'1px solid rgba(0,0,0,0.07)' }}>
-                        <p style={{ fontSize:'9px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'3px' }}>Jobs</p>
-                        <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b' }}>{allJobs.length}</p>
-                      </div>}
-                      {lastAct&&<div style={{ padding:'10px 12px', background:'#f8faf8', borderRadius:'10px', border:'1px solid rgba(0,0,0,0.07)' }}>
-                        <p style={{ fontSize:'9px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'3px' }}>Last Activity</p>
-                        <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b' }}>{lastAct}</p>
-                      </div>}
-                    </div>
-                  )
-                })()}
-
-                {/* ── Milestone Status Strip ───────────────────── */}
-                <div style={{ background:'#f8faf8', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'10px', padding:'10px 12px' }}>
-                  <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'8px' }}>Journey</p>
-                  <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
-                    {[
-                      { label:'Client Created',       done:true,                               icon:'✨', date:person.created },
-                      { label:'First Reach-Out',      done:!!person.reachOutMethod,            icon:'📲', date:person.outreachTimeline?.find(o=>o.type==='manual')?.ts },
-                      { label:'Assessment Scheduled', done:!!person.assessment,                icon:'📅', date:person.assessment },
-                      { label:'Assessment Completed', done:!!person.assessmentCompleted,        icon:'✅', date:person.assessmentCompleted },
-                      { label:'Estimate Sent',        done:!!person.estimateSent,              icon:'📋', date:person.estimateSent,
-        sub: person.estimateSent&&person.invoices?.length>0 ? `${fmt(person.invoices.reduce((s,i)=>s+i.amount,0))} · ${person.estimateApproved?'Approved':'Pending'}` : null },
-                      { label:'Estimate Approved',    done:!!person.estimateApproved,          icon:'✅', date:person.estimateApproved },
-                      { label:'Job Scheduled',        done:person.jobs?.some(j=>j.scheduledDate), icon:'🔨', date:person.jobs?.[0]?.scheduledDate },
-                      { label:'Invoice Sent',         done:person.invoices?.length>0,          icon:'🧾', date:person.invoices?.[0]?.date },
-                      { label:'Paid',                 done:person.invoices?.some(i=>i.status==='Paid'), icon:'💰', date:person.invoices?.find(i=>i.status==='Paid')?.date },
-                    ].map(m=>(
-                      <div key={m.label} style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-                        <div style={{ width:'18px', height:'18px', borderRadius:'50%', background:m.done?'rgba(34,197,94,0.12)':'rgba(0,0,0,0.05)', border:`1.5px solid ${m.done?'#22c55e':'rgba(0,0,0,0.1)'}`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:'10px' }}>
-                          {m.done ? '✓' : ''}
-                        </div>
-                        <div style={{ flex:1, minWidth:0 }}>
-                          <span style={{ fontSize:'12px', fontWeight:m.done?500:400, color:m.done?'#1a2e2b':'#b0c0bc' }}>{m.label}</span>
-                          {m.done&&m.sub&&<span style={{ fontSize:'10px', color:'#8a9e9a', marginLeft:'6px' }}>{m.sub}</span>}
-                        </div>
-                        {m.done&&m.date&&<span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{fmtDate(m.date)}</span>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div style={{ display:'grid', gap:'8px', paddingTop:'4px', borderTop:'1px solid rgba(0,0,0,0.06)' }}>
-                  {/* Log reach out + Close on same line */}
-                  {!person.finalProcessed&&(
-                    <div style={{ display:'flex', gap:'8px' }}>
-                      {(person.stage==='New'||person.stage==='Attempting')&&(
-                        <button onClick={()=>setPopup('reachout')} style={{ flex:1, padding:'11px', background:person.stage==='New'?'#f97316':'transparent', border:`1.5px solid ${person.stage==='New'?'transparent':'#f97316'}`, borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:person.stage==='New'?'white':'#f97316', cursor:'pointer' }}>
-                          📲 {person.stage==='New'?'Log Reach Out':'Log Again'}
-                        </button>
-                      )}
-                      {(person.stage==='Closed Lost'||person.isJunk)&&onResurrect&&(
-                        <button onClick={onResurrect} style={{ flex:1, padding:'11px', background:'rgba(16,185,129,0.08)', border:'1.5px solid rgba(16,185,129,0.3)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#10b981', cursor:'pointer' }}>
-                          🌱 Resurrect Lead
-                        </button>
-                      )}
-                      {!person.isJunk&&person.stage!=='Closed Lost'&&person.stage!=='Closed Won'&&(
-                        <button onClick={()=>setShowSnooze(true)} style={{ padding:'11px 14px', background:person.snoozeUntil?'rgba(99,102,241,0.08)':'transparent', border:`1.5px solid ${person.snoozeUntil?'rgba(99,102,241,0.3)':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:person.snoozeUntil?'#6366f1':'#8a9e9a', cursor:'pointer', flexShrink:0 }}>
-                          💤
-                        </button>
-                      )}
-                      {!person.isJunk&&person.stage!=='Closed Lost'&&person.stage!=='Closed Won'&&(
-                        <button onClick={()=>setPopup('close')} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.08)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>
-                          Close Record
-                        </button>
-                      )}
-                      {!person.jobberRef&&(
-                        <button onClick={()=>setPopup('delete')} style={{ padding:'11px 14px', background:'rgba(239,68,68,0.06)', border:'1.5px solid rgba(239,68,68,0.2)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#ef4444', cursor:'pointer', flexShrink:0 }}>
-                          🗑
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {/* Send to Jobber - unlock message inside button */}
-                  {isEarlyStage&&!person.jobberRef&&(
-                    <button onClick={()=>canSendToJobber&&setPopup('send-jobber')} style={{ width:'100%', padding:'11px', background:canSendToJobber?'#1a2e2b':'rgba(0,0,0,0.04)', border:`1.5px solid ${canSendToJobber?'transparent':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:canSendToJobber?'white':'#b0c0bc', cursor:canSendToJobber?'pointer':'not-allowed' }}>
-                      {canSendToJobber ? <><JobberIcon size={18} style={{marginRight:'6px'}} />Send to Jobber</> : <><JobberIcon size={18} style={{marginRight:'6px'}} />Send to Jobber - log a reach-out first</>}
-                    </button>
-                  )}
-                  {/* Close-Out trigger - Job in Progress with invoices */}
-                  {person.stage==='Job in Progress'&&hasInvoices&&!person.finalProcessed&&(
-                    <button onClick={()=>setShowCloseOut(true)} style={{ width:'100%', padding:'12px 14px', background:'rgba(34,197,94,0.06)', border:'1.5px solid rgba(34,197,94,0.25)', borderRadius:'12px', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
-                      <span style={{ fontSize:'20px' }}>✅</span>
-                      <div style={{ flex:1 }}>
-                        <p style={{ fontSize:'13px', fontWeight:700, color:'#15803d', marginBottom:'1px' }}>Ready to Close Out?</p>
-                        <p style={{ fontSize:'11px', color:'#4a8a5a' }}>Invoice on record · Tap to begin close-out flow</p>
-                      </div>
-                      <span style={{ fontSize:'12px', color:'#22c55e' }}>→</span>
-                    </button>
-                  )}
-                  {/* Final Processing - already in that stage */}
-                  {person.stage==='Final Processing'&&!person.finalProcessed&&(
-                    <button onClick={()=>setShowCloseOut(true)} style={{ width:'100%', padding:'11px', background:'#22c55e', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>✅ Complete Close-Out</button>
-                  )}
-                  {person.finalProcessed&&(
-                    <div style={{ padding:'11px', background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:'10px', textAlign:'center' }}>
-                      <p style={{ fontSize:'13px', fontWeight:600, color:'#22c55e' }}>✅ Job Closed · Synced to Zoho</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Referred by this client */}
-                {(()=>{
-                  const referrals = allPeople ? allPeople.filter(p=>p.referredBy===person.id && p.id!==person.id && p.locationId===person.locationId) : []
-                  if (!referrals.length) return null
-                  return (
-                    <div style={{ background:'rgba(16,185,129,0.05)', border:'1px solid rgba(16,185,129,0.15)', borderRadius:'10px', padding:'10px 12px' }}>
-                      <p style={{ fontSize:'10px', fontWeight:700, color:'#10b981', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'7px' }}>🌱 Referred {referrals.length} client{referrals.length!==1?'s':''}</p>
-                      {referrals.map(r=>(
-                        <div key={r.id} style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'5px' }}>
-                          <div style={{ width:'20px', height:'20px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'8px', fontWeight:700, color:'white', flexShrink:0 }}>
-                            {(r.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2)}
-                          </div>
-                          <div style={{ flex:1 }}>
-                            <span style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b' }}>{r.name}</span>
-                            <span style={{ fontSize:'11px', color:'#8a9e9a', marginLeft:'6px' }}>{r.stage}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )
-                })()}
-
-                {/* Admin Section - compact */}
-                <div style={{ display:'grid', gap:'6px' }}>
-                  <p style={{ fontSize:'10px', fontWeight:700, color:'#b0c0bc', textTransform:'uppercase', letterSpacing:'0.6px', paddingLeft:'2px' }}>Admin</p>
-                <div style={{ background:'white', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'12px', overflow:'hidden' }}>
-                    {/* Assigned To */}
-                    <div style={{ padding:'9px 12px', borderBottom:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:'10px' }}>
-                      <div style={{ width:'32px', height:'32px', borderRadius:'50%', background:assignedUser?'linear-gradient(135deg,#a8c9c4,#7ab5af)':'rgba(0,0,0,0.06)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                        {assignedUser
-                          ? <span style={{ fontSize:'11px', fontWeight:700, color:'white' }}>{assignedUser.initials}</span>
-                          : <span style={{ fontSize:'14px' }}>👤</span>
-                        }
-                      </div>
-                      <div style={{ flex:1 }}>
-                        <p style={{ fontSize:'10px', color:'#8a9e9a', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'2px' }}>Assigned To</p>
-                        <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
-                          <p style={{ fontSize:'13px', fontWeight:600, color:assignedUser?'#1a2e2b':'#b0c0bc' }}>{assignedUser?.name||'Unassigned'}</p>
-                          {assignedRole&&<span style={{ fontSize:'10px', color:assignedRole.color, background:assignedRole.bg, padding:'1px 6px', borderRadius:'10px', fontWeight:600 }}>{assignedRole.icon} {assignedRole.label}</span>}
-                        </div>
-                      </div>
-                      <button onClick={()=>setShowAssignPicker(true)} style={{ fontSize:'11px', color:'#6366f1', background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.15)', borderRadius:'7px', padding:'5px 10px', cursor:'pointer', fontFamily:'inherit', fontWeight:600, flexShrink:0 }}>
-                        {assignedUser?'Reassign':'Assign'}
-                      </button>
-                    </div>
-                    {/* Meta rows */}
-                    {[
-                      { icon:'📅', label:'Date Added', val:fmtCreated(person.created, person.id) },
-                    ].map(({icon,label,val},i,arr)=>(
-                      <div key={label} style={{ padding:'8px 12px', borderBottom:i<arr.length-1?'1px solid rgba(0,0,0,0.05)':'none', display:'flex', alignItems:'center', gap:'10px' }}>
-                        <span style={{ fontSize:'14px', width:'20px', textAlign:'center', flexShrink:0 }}>{icon}</span>
-                        <div style={{ flex:1 }}>
-                          <p style={{ fontSize:'10px', color:'#8a9e9a', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'1px' }}>{label}</p>
-                          <p style={{ fontSize:'13px', color:'#1a2e2b' }}>{val}</p>
-                        </div>
-                      </div>
-                    ))}
-                    {/* New Lead Drip - combined path + pause */}
-                    <div style={{ padding:'10px 12px', display:'flex', alignItems:'center', gap:'10px', borderTop:'1px solid rgba(0,0,0,0.05)' }}>
-                      <span style={{ fontSize:'14px', width:'20px', textAlign:'center', flexShrink:0 }}>🔁</span>
-                      <div style={{ flex:1 }}>
-                        <p style={{ fontSize:'10px', color:'#8a9e9a', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'2px' }}>New Lead Drip</p>
-                        <div style={{ display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap' }}>
-                          <span style={{ fontSize:'12px', color:'#1a2e2b' }}>{(()=>{
-                            const p = DRIP_PATHS_CONFIG.find(d=>d.id===person.path)
-                            if (p) return p.name
-                            const m={'email-nurture':'Organizing · New Lead Path A','quick-connect':'Organizing · New Lead Path C','personal-touch':'Organizing · New Lead Path D','general-a':'Organizing · New Lead Path A','general-b':'Organizing · New Lead Path B','move-a':'Move · New Lead Path A','move-b':'Move · New Lead Path B'}
-                            return m[person.path]||person.path||'No path assigned'
-                          })()}</span>
-                          <span style={{ fontSize:'10px', padding:'1px 7px', borderRadius:'20px', fontWeight:600, background:person.paused?'rgba(245,158,11,0.1)':'rgba(16,185,129,0.08)', color:person.paused?'#f59e0b':'#10b981' }}>{person.paused?'⏸ Paused':'▶ Active'}</span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={()=>update({paused:!person.paused})}
-                        style={{ padding:'5px 12px', borderRadius:'20px', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'11px', fontWeight:600,
-                          background:person.paused ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)',
-                          color:person.paused ? '#10b981' : '#f59e0b'
-                        }}>
-                        {person.paused ? '▶ Resume' : '⏸ Pause'}
-                      </button>
-                    </div>
-
-                    {/* Marketing emails - bottom, out of the way */}
-                    <div style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 14px', borderTop:'1px solid rgba(0,0,0,0.05)' }}>
-                      <span style={{ fontSize:'14px', width:'20px', textAlign:'center', flexShrink:0 }}>{person.marketingOptOut?'🚫':'📧'}</span>
-                      <div style={{ flex:1 }}>
-                        <p style={{ fontSize:'10px', color:'#8a9e9a', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'1px' }}>Marketing Emails</p>
-                        <p style={{ fontSize:'13px', color:person.marketingOptOut?'#ef4444':'#22c55e', fontWeight:500 }}>{person.marketingOptOut?'Opted out':'Subscribed'}</p>
-                      </div>
-                      <button onClick={()=>onUpdate({...person, marketingOptOut:!person.marketingOptOut})}
-                        style={{ padding:'5px 12px', background:person.marketingOptOut?'rgba(34,197,94,0.07)':'rgba(239,68,68,0.05)', border:`1px solid ${person.marketingOptOut?'rgba(34,197,94,0.2)':'rgba(239,68,68,0.15)'}`, borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:person.marketingOptOut?'#22c55e':'#ef4444', cursor:'pointer', flexShrink:0 }}>
-                        {person.marketingOptOut?'Re-subscribe':'Opt out'}
-                      </button>
-                    </div>
-                  </div>
-
-                </div>
-              </div>
-            )}
-            {activeTab==='contacts'&&(
-              <ContactsTab person={person} onUpdate={onUpdate} />
-            )}
-            {activeTab==='outreach'&&(
-              <div>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'1rem' }}>
-                  <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Drips + manual reach-outs in one view</p>
-                  <button onClick={()=>setPopup('reachout')} style={{ fontSize:'12px', color:'#f97316', background:'rgba(249,115,22,0.08)', border:'1px solid rgba(249,115,22,0.2)', borderRadius:'8px', padding:'5px 10px', cursor:'pointer', fontFamily:'inherit', fontWeight:600 }}>+ Log</button>
-                </div>
-                <div style={{ position:'relative' }}>
-                  <div style={{ position:'absolute', left:'13px', top:'8px', bottom:'8px', width:'2px', background:'rgba(0,0,0,0.06)', borderRadius:'1px' }} />
-                  <div style={{ display:'grid', gap:'10px' }}>
-                    {person.outreachTimeline.map((entry,i)=>{
-                      const isDrip=entry.type==='drip', isSystem=entry.type==='system', isSched=entry.status==='scheduled'
-                      return (
-                        <div key={entry.id} style={{ display:'flex', gap:'12px', alignItems:'flex-start' }}>
-                          <div style={{ width:'28px', height:'28px', borderRadius:'50%', background:isSystem?'rgba(0,0,0,0.04)':isDrip?'rgba(99,102,241,0.1)':'rgba(249,115,22,0.1)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px', flexShrink:0, position:'relative', zIndex:1, opacity:isSched?0.5:1 }}>
-                            {isSystem?'·':isDrip?(TOUCH_CONFIG[entry.method]?.icon||'📧'):'📲'}
-                          </div>
-                          <div style={{ flex:1, paddingTop:'4px', opacity:isSched?0.6:1 }}>
-                            <div style={{ display:'flex', gap:'5px', marginBottom:'2px', flexWrap:'wrap' }}>
-                              {isDrip&&<span style={{ fontSize:'10px', color:'#6366f1', background:'rgba(99,102,241,0.08)', padding:'1px 6px', borderRadius:'20px' }}>Drip</span>}
-                              {!isDrip&&!isSystem&&<span style={{ fontSize:'10px', color:'#f97316', background:'rgba(249,115,22,0.08)', padding:'1px 6px', borderRadius:'20px' }}>Manual</span>}
-                              {isSched&&<span style={{ fontSize:'10px', color:'#8a9e9a', background:'rgba(0,0,0,0.05)', padding:'1px 6px', borderRadius:'20px' }}>Scheduled</span>}
-                              {entry.status==='sent'&&<span style={{ fontSize:'10px', color:'#22c55e', background:'rgba(34,197,94,0.08)', padding:'1px 6px', borderRadius:'20px' }}>Sent ✓</span>}
-                            </div>
-                            <p style={{ fontSize:'13px', color:isSched?'#8a9e9a':'#1a2e2b', lineHeight:1.4 }}>{entry.label}</p>
-                            <p style={{ fontSize:'10px', color:'#b0c0bc', marginTop:'2px' }}>{expandTs(entry.ts)}{entry.user?` · ${entry.user}`:''}</p>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-      {popup==='reachout'       &&<ReachOutPopup     person={person} onDone={handleReachOut}    onClose={()=>setPopup(null)} />}
-      {popup==='account'        &&<AccountPanel       person={person} allPeople={[person]}        onClose={()=>setPopup(null)} onUpdatePerson={onUpdate} />}
-      {popup==='tags'           &&<TagPopup           person={person} onSave={handleTags}         onClose={()=>setPopup(null)} />}
-      {popup==='close'          &&<ClosePopup         person={person} onConfirm={handleClose}     onClose={()=>setPopup(null)} />}
-      {showAssessmentScheduler&&(
-        <AssessmentSchedulerSheet
-          person={person}
-          onSave={(date, time, type)=>{
-            onUpdate({...person, assessment:`${date} at ${time}`, assessmentType:type,
-              outreachTimeline:[...person.outreachTimeline, { id:`o${Date.now()}`, type:'system', method:'system', label:`${type==='virtual'?'Virtual':'In-person'} assessment scheduled - ${date} at ${time}`, ts:'Just now', status:'done' }]
-            })
-            setShowAssessmentScheduler(false)
-          }}
-          onRemove={()=>{ onUpdate({...person, assessment:null, assessmentType:null}); setShowAssessmentScheduler(false) }}
-          onClose={()=>setShowAssessmentScheduler(false)}
-        />
-      )}
-      {showSadAnimation&&<SadAnimation />}
-      {showWonAnimation&&<WonAnimation />}
-      {showAssignPicker&&(
-        <AssignUserPicker
-          locationId={person.locationId}
-          currentUserId={person.assignedTo}
-          onSelect={uid=>onUpdate({...person, assignedTo:uid})}
-          onClose={()=>setShowAssignPicker(false)}
-        />
-      )}
-      {popup==='job-detail'&&person.jobDetail&&<JobDetailModal text={person.jobDetail} onClose={()=>setPopup(null)} />}
-      {popup==='add-job-contact'&&<JobContactModal onSave={c=>{ update({jobContacts:[...(person.jobContacts||[]),c]}); setPopup(null) }} onClose={()=>setPopup(null)} />}
-      {popup==='edit-job-detail'&&<EditJobDetailModal person={person} onSave={text=>{ update({jobDetail:text}); setPopup(null) }} onClose={()=>setPopup(null)} />}
-      {popup==='note'           &&<AddNotePopup                       onAdd={handleAddNote}        onClose={()=>setPopup(null)} />}
-      {showProcess&&<ProcessLeadSheet person={person} onClose={()=>setShowProcess(false)} onSave={updated=>{ onUpdate(updated); setShowProcess(false) }} />}
-      {showLeadInfoEdit&&(
-        <LeadContactEditModal
-          person={person}
-          onSave={(vals)=>{ update({ name:`${vals.firstName} ${vals.lastName}`.trim(), phone:vals.phone, email:vals.email }); setShowLeadInfoEdit(false) }}
-          onClose={()=>setShowLeadInfoEdit(false)}
-        />
-      )}
-      {showSnooze&&<SnoozePopup person={person} onClose={()=>setShowSnooze(false)} onSave={(date,note)=>{
-        onUpdate({...person, snoozeUntil:date, snoozeNote:note, stage:'Nurturing',
-          buzzNotes: note ? [...(person.buzzNotes||[]), { id:`bn${Date.now()}`, text:`💤 Snoozed: ${note}`, ts:'Just now', user:'You' }] : (person.buzzNotes||[]),
-          activity:[...person.activity,{type:'snooze',label:`Snoozed until ${new Date(date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'})}${note?` · ${note}`:''}`,ts:'Just now',user:'You'}]
-        }); setShowSnooze(false)
-      }} />}
-      {showCloseOut&&(
-        <CloseOutFlow
-          person={person}
-          onComplete={(updated)=>{
-            update(updated)
-            setShowCloseOut(false)
-            setShowWonAnimation(true)
-            setTimeout(()=>{ setShowWonAnimation(false); onClose() }, 4500)
-          }}
-          onClose={()=>setShowCloseOut(false)}
-          onAddFollowUp={onAddFollowUp}
-        />
-      )}
-      {popup==='invoice'        &&<InvoicePopup       person={person} onFinalProcess={handleFinalProcess} onUpdate={p=>update(p)} onClose={()=>setPopup(null)} />}
-      {popup==='send-jobber'    &&<SendToJobberPopup  person={person} onDone={handleSendToJobber} onClose={()=>setPopup(null)} />}
-      {popup==='delete'&&(
-        <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'flex-end' }}>
-          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={()=>setPopup(null)} />
-          <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, padding:'1.5rem', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
-            <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'-0.5rem auto 1rem' }} />
-            <div style={{ textAlign:'center', marginBottom:'1.25rem' }}>
-              <div style={{ fontSize:'40px', marginBottom:'10px' }}>🗑️</div>
-              <p style={{ fontSize:'17px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'6px' }}>Delete this record?</p>
-              <p style={{ fontSize:'13px', color:'#8a9e9a', lineHeight:1.5 }}><strong>{person.name}</strong> will be permanently removed. This cannot be undone.</p>
-            </div>
-            <div style={{ display:'flex', gap:'10px' }}>
-              <button onClick={()=>setPopup(null)} style={{ flex:1, padding:'13px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
-              <button onClick={()=>{ onMarkJunk(person.id, 'Deleted', 'Permanently deleted'); onClose() }} style={{ flex:1, padding:'13px', background:'#ef4444', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:'pointer' }}>Delete Permanently</button>
-            </div>
-            <div style={{ height:'0.5rem' }} />
-          </div>
-        </div>
-      )}
-      {popup==='add-address'    &&<AddAddressPopup                    onAdd={handleAddAddress}     onClose={()=>setPopup(null)} />}
-      {popup==='jobber-history'&&(
-        <div style={{ position:'fixed', inset:0, zIndex:10010, display:'flex', alignItems:'center', justifyContent:'center', padding:'24px' }} onClick={()=>setPopup(null)}>
-          <div style={{ background:'white', borderRadius:'20px', width:'100%', maxWidth:'420px', maxHeight:'80vh', overflowY:'auto', boxShadow:'0 24px 60px rgba(26,46,43,0.25)' }} onClick={e=>e.stopPropagation()}>
-            <div style={{ padding:'18px 20px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', justifyContent:'space-between', alignItems:'center', position:'sticky', top:0, background:'white' }}>
-              <div>
-                <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Jobber History</p>
-                {person.jobberClient&&<p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'1px' }}>{person.jobberClient.clientId}</p>}
-              </div>
-              <button onClick={()=>setPopup(null)} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>×</button>
-            </div>
-            <div style={{ padding:'16px 20px', display:'grid', gap:'8px' }}>
-              {person.jobberClient?.jobs?.length>0 ? person.jobberClient.jobs.map(j=>(
-                <div key={j.id} style={{ padding:'12px 14px', background:'#f7f5f0', borderRadius:'10px' }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'6px' }}>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>{j.title}</p>
-                      <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{j.date&&fmtDate(j.date)}{j.scheduledDate&&!j.date&&fmtDate(j.scheduledDate)}</p>
-                    </div>
-                    <div style={{ textAlign:'right', flexShrink:0 }}>
-                      <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'20px', fontWeight:600, background:j.status==='Completed'?'rgba(34,197,94,0.1)':'rgba(245,158,11,0.1)', color:j.status==='Completed'?'#22c55e':'#f59e0b' }}>{j.status}</span>
-                      {(j.amount||j.total)&&<p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', marginTop:'3px' }}>{fmt(j.amount||j.total)}</p>}
-                    </div>
-                  </div>
-                  <div style={{ display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap' }}>
-                    {j.completedDate&&<span style={{ fontSize:'10px', color:'#8a9e9a' }}>✓ Completed {fmtDate(j.completedDate)}</span>}
-                    {j.id&&<a href={`https://app.jobber.com/jobs/${j.id}`} target='_blank' rel='noreferrer' style={{ fontSize:'10px', color:'#6366f1', textDecoration:'none', fontWeight:600 }}>View in Jobber ↗</a>}
-                  </div>
-                </div>
-              )) : (
-                <p style={{ fontSize:'13px', color:'#8a9e9a', textAlign:'center', padding:'24px 0' }}>No job history found</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  )
+  function handleAddAddress(addr) {
+    update({ addresses: [...(person.addresses || []), addr] });
+    setPopup(null);
+  }
+  const methodIcon = (m) =>
+    ({ call: "📞", sms: "💬", email: "📧", system: "·", call_prompt: "📞" })[m] || "·";
+  const Tab = (k, label) =>
+    React.createElement(
+      "button",
+      {
+        key: k,
+        onClick: () => setActiveTab(k),
+        style: {
+          flex: 1,
+          padding: "9px",
+          border: "none",
+          cursor: "pointer",
+          fontFamily: "inherit",
+          fontSize: "13px",
+          fontWeight: activeTab === k ? 600 : 400,
+          background: "transparent",
+          color: activeTab === k ? "#1a2e2b" : "#8a9e9a",
+          borderBottom: `2px solid ${activeTab === k ? "#a8c9c4" : "transparent"}`,
+        },
+      },
+      label,
+    );
+  return React.createElement(
+    React.Fragment,
+    null,
+    React.createElement(
+      "div",
+      {
+        style: {
+          position: "fixed",
+          inset: 0,
+          zIndex: 9999,
+          display: "flex",
+          alignItems: "flex-end",
+        },
+      },
+      React.createElement("div", {
+        style: { position: "absolute", inset: 0, background: "rgba(26,46,43,0.25)" },
+        onClick: onClose,
+      }),
+      React.createElement(
+        "div",
+        {
+          style: {
+            position: "relative",
+            background: "white",
+            width: "100%",
+            borderRadius: "16px 16px 0 0",
+            zIndex: 1,
+            height: "93vh",
+            display: "flex",
+            flexDirection: "column",
+            boxShadow: "0 -8px 40px rgba(26,46,43,0.15)",
+            overscrollBehavior: "contain",
+          },
+        },
+        React.createElement("div", {
+          style: {
+            width: "36px",
+            height: "4px",
+            background: "rgba(0,0,0,0.12)",
+            borderRadius: "2px",
+            margin: "12px auto 0",
+          },
+        }),
+        React.createElement(
+          "div",
+          {
+            style: {
+              padding: "0.75rem 1.25rem 0",
+              borderBottom: "1px solid rgba(0,0,0,0.06)",
+              flexShrink: 0,
+            },
+          },
+          React.createElement(
+            "div",
+            {
+              style: {
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: "8px",
+              },
+            },
+            React.createElement(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "10px" } },
+              React.createElement(
+                "div",
+                { style: { flex: 1 } },
+                React.createElement(
+                  "div",
+                  {
+                    style: {
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "2px",
+                      marginBottom: "6px",
+                      minWidth: 0,
+                    },
+                  },
+                  React.createElement(
+                    "div",
+                    {
+                      style: {
+                        display: "flex",
+                        alignItems: "baseline",
+                        gap: "10px",
+                        flexWrap: "wrap",
+                      },
+                    },
+                    React.createElement(
+                      "h2",
+                      {
+                        onClick: () => setPopup("account"),
+                        style: {
+                          fontSize: "22px",
+                          fontFamily: "Georgia,serif",
+                          color: "#1a2e2b",
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "baseline",
+                          gap: "4px",
+                          lineHeight: 1.1,
+                        },
+                      },
+                      person.name,
+                      React.createElement(
+                        "span",
+                        { style: { fontSize: "14px", opacity: 0.35, fontFamily: "inherit" } },
+                        "\u2197",
+                      ),
+                    ),
+                    searching || person.jobberSearchStatus === "pending"
+                      ? React.createElement(
+                          "span",
+                          { style: { color: "#6366f1", fontWeight: 600, fontSize: "13px" } },
+                          "\uD83D\uDD0D Checking\u2026",
+                        )
+                      : person.jobberRef ||
+                          (person.jobberSearchStatus === "found" && person.jobberClient)
+                        ? React.createElement(
+                            "button",
+                            {
+                              onClick: () => setPopup("jobber-history"),
+                              "aria-label": "View Jobber history",
+                              style: {
+                                background: "none",
+                                border: "none",
+                                cursor: "pointer",
+                                fontFamily: "inherit",
+                                padding: 0,
+                                fontSize: "13px",
+                                color: "#10b981",
+                                fontWeight: 600,
+                              },
+                            },
+                            "\u2705 Existing Client",
+                          )
+                        : person.jobberSearchStatus === "not_found"
+                          ? React.createElement(
+                              "button",
+                              {
+                                onClick: () => setPopup("send-jobber"),
+                                "aria-label": "Send to Jobber",
+                                style: {
+                                  background: "none",
+                                  border: "none",
+                                  cursor: "pointer",
+                                  fontFamily: "inherit",
+                                  padding: 0,
+                                  fontSize: "13px",
+                                  color: "#8a9e9a",
+                                  fontWeight: 600,
+                                },
+                              },
+                              "\uD83C\uDD95 New Client",
+                            )
+                          : null,
+                    React.createElement(
+                      "div",
+                      { className: "bee-tip-wrap" },
+                      React.createElement(
+                        "button",
+                        {
+                          onClick: () => setPopup("note"),
+                          "aria-label": "Buzz notes",
+                          style: {
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                            padding: 0,
+                            fontSize: "13px",
+                            color: "#d4a046",
+                            fontWeight: 600,
+                            opacity: person.buzzNotes && person.buzzNotes.length > 0 ? 1 : 0.4,
+                          },
+                        },
+                        React.createElement("span", null, "\uD83D\uDC1D"),
+                        React.createElement(
+                          "span",
+                          null,
+                          (person.buzzNotes && person.buzzNotes.length) || 0,
+                        ),
+                      ),
+                      React.createElement(
+                        "div",
+                        { className: "bee-tip" },
+                        person.buzzNotes && person.buzzNotes.length > 0
+                          ? person.buzzNotes
+                              .slice(0, 4)
+                              .map((n) => n.text)
+                              .join(" \u00b7 ") +
+                              (person.buzzNotes.length > 4
+                                ? ` \u00b7 +${person.buzzNotes.length - 4} more`
+                                : "")
+                          : "No buzz notes \u2014 click to add",
+                      ),
+                    ),
+                  ),
+                  React.createElement(
+                    "div",
+                    {
+                      style: {
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        fontSize: "12px",
+                        flexWrap: "wrap",
+                        marginTop: "4px",
+                      },
+                    },
+                    React.createElement(
+                      "button",
+                      {
+                        onClick: () => setPopup("stage"),
+                        "aria-label": "Edit stage",
+                        style: {
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          padding: 0,
+                          fontFamily: "inherit",
+                          fontSize: "12px",
+                          color: "#1a2e2b",
+                          fontWeight: 600,
+                        },
+                      },
+                      React.createElement("span", {
+                        style: {
+                          width: "8px",
+                          height: "8px",
+                          borderRadius: "50%",
+                          background: s.dot || s.color,
+                          display: "inline-block",
+                          boxShadow: `0 0 0 2.5px ${s.dot || s.color}22`,
+                        },
+                      }),
+                      s.label,
+                    ),
+                  ),
+                ),
+                React.createElement(
+                  "div",
+                  {
+                    style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" },
+                  },
+                  React.createElement(
+                    "div",
+                    { className: "bee-tip-wrap left" },
+                    React.createElement(
+                      "button",
+                      {
+                        onClick: () => setShowLeadInfoEdit(true),
+                        "aria-label": "Edit phone",
+                        style: {
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          fontSize: "10px",
+                          padding: "0 2px",
+                          lineHeight: 1,
+                          fontFamily: "inherit",
+                          opacity: person.phone ? 0.7 : 0.3,
+                        },
+                      },
+                      "\uD83D\uDCDE",
+                    ),
+                    React.createElement(
+                      "div",
+                      { className: "bee-tip" },
+                      person.phone || "No phone — click to add",
+                    ),
+                  ),
+                  React.createElement(
+                    "div",
+                    { className: "bee-tip-wrap" },
+                    React.createElement(
+                      "button",
+                      {
+                        onClick: () => setShowLeadInfoEdit(true),
+                        "aria-label": "Edit email",
+                        style: {
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          fontSize: "10px",
+                          padding: "0 2px",
+                          lineHeight: 1,
+                          fontFamily: "inherit",
+                          opacity: person.email ? 0.7 : 0.3,
+                        },
+                      },
+                      "\u2709\uFE0F",
+                    ),
+                    React.createElement(
+                      "div",
+                      { className: "bee-tip" },
+                      person.email || "No email — click to add",
+                    ),
+                  ),
+                  React.createElement(
+                    "div",
+                    { className: "bee-tip-wrap left" },
+                    React.createElement(
+                      "button",
+                      {
+                        onClick: () => setPopup("add-address"),
+                        "aria-label": "Edit address",
+                        style: {
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          fontSize: "10px",
+                          padding: "0 2px",
+                          lineHeight: 1,
+                          fontFamily: "inherit",
+                          opacity:
+                            (person.addresses && person.addresses.some((a) => a.value)) ||
+                            person.address
+                              ? 0.7
+                              : 0.3,
+                        },
+                      },
+                      "\uD83D\uDCCD",
+                    ),
+                    React.createElement(
+                      "div",
+                      { className: "bee-tip" },
+                      (() => {
+                        const list =
+                          person.addresses && person.addresses.length
+                            ? person.addresses.filter((a) => a.value)
+                            : person.address
+                              ? [{ type: "Service", value: person.address }]
+                              : [];
+                        if (list.length === 0) return "No address \u2014 click to add";
+                        return list.map((a, i) =>
+                          React.createElement(
+                            "div",
+                            {
+                              key: i,
+                              style: {
+                                marginBottom: i < list.length - 1 ? "6px" : 0,
+                                paddingBottom: i < list.length - 1 ? "6px" : 0,
+                                borderBottom:
+                                  i < list.length - 1 ? "1px solid rgba(255,255,255,0.12)" : "none",
+                              },
+                            },
+                            React.createElement(
+                              "div",
+                              {
+                                style: {
+                                  fontSize: "9px",
+                                  fontWeight: 700,
+                                  opacity: 0.55,
+                                  letterSpacing: "0.5px",
+                                  textTransform: "uppercase",
+                                  marginBottom: "2px",
+                                },
+                              },
+                              a.type || "Address",
+                            ),
+                            React.createElement(
+                              "div",
+                              { style: { fontSize: "11px", lineHeight: 1.4 } },
+                              a.value,
+                            ),
+                          ),
+                        );
+                      })(),
+                    ),
+                  ),
+                  React.createElement(
+                    "div",
+                    { className: "bee-tip-wrap" },
+                    React.createElement(
+                      "button",
+                      {
+                        onClick: () => setPopup("edit-job-detail"),
+                        "aria-label": "Edit project description",
+                        style: {
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          fontSize: "10px",
+                          padding: "0 2px",
+                          lineHeight: 1,
+                          fontFamily: "inherit",
+                          opacity: person.jobDetail ? 0.7 : 0.3,
+                        },
+                      },
+                      "\uD83D\uDCAC",
+                    ),
+                    React.createElement(
+                      "div",
+                      { className: "bee-tip" },
+                      person.jobDetail
+                        ? person.jobDetail.length > 200
+                          ? person.jobDetail.slice(0, 200) + "\u2026"
+                          : person.jobDetail
+                        : "No description \u2014 click to add",
+                    ),
+                  ),
+                  React.createElement(
+                    "div",
+                    { className: "bee-tip-wrap" },
+                    React.createElement(
+                      "button",
+                      {
+                        onClick: () => onViewCard(person),
+                        "aria-label": "View business card",
+                        style: {
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          fontSize: "10px",
+                          padding: "0 2px",
+                          lineHeight: 1,
+                          fontFamily: "inherit",
+                          opacity: 0.7,
+                        },
+                      },
+                      "\uD83D\uDCC7",
+                    ),
+                    React.createElement("div", { className: "bee-tip" }, "View business card"),
+                  ),
+                  React.createElement(
+                    "div",
+                    { style: { position: "relative" } },
+                    React.createElement(
+                      "button",
+                      {
+                        onClick: () => {
+                          setEditingSource((v) => !v);
+                          setPickingReferral(false);
+                        },
+                        "aria-label": "Edit source",
+                        style: {
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          fontSize: "10px",
+                          padding: "2px 4px",
+                          lineHeight: 1.2,
+                          fontFamily: "inherit",
+                          color: "#4a5e5a",
+                          fontWeight: 500,
+                        },
+                      },
+                      React.createElement("span", { style: { fontSize: "10px" } }, "\uD83D\uDCE3"),
+                      React.createElement(
+                        "span",
+                        { style: { opacity: person.source ? 1 : 0.5 } },
+                        person.source || "Set source",
+                      ),
+                    ),
+                    editingSource &&
+                      React.createElement(
+                        "div",
+                        {
+                          style: {
+                            position: "absolute",
+                            top: "calc(100% + 6px)",
+                            left: 0,
+                            zIndex: 200,
+                            background: "white",
+                            border: "1px solid rgba(0,0,0,0.1)",
+                            borderRadius: "10px",
+                            boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+                            padding: "6px",
+                            minWidth: "160px",
+                          },
+                        },
+                        [
+                          "Website",
+                          "Referral",
+                          "Word of Mouth",
+                          "Instagram",
+                          "Facebook",
+                          "Google",
+                          "Yelp",
+                          "NextDoor",
+                          "Other",
+                        ].map((s) =>
+                          React.createElement(
+                            "button",
+                            {
+                              key: s,
+                              onClick: () => {
+                                update({
+                                  ...person,
+                                  source: s,
+                                  referredBy: s === "Referral" ? person.referredBy : null,
+                                });
+                                setEditingSource(false);
+                                if (s === "Referral") setPickingReferral(true);
+                              },
+                              style: {
+                                display: "block",
+                                width: "100%",
+                                padding: "7px 10px",
+                                background:
+                                  person.source === s ? "rgba(14,165,233,0.08)" : "transparent",
+                                border: "none",
+                                borderRadius: "8px",
+                                fontSize: "12px",
+                                fontFamily: "inherit",
+                                color: person.source === s ? "#0ea5e9" : "#1a2e2b",
+                                cursor: "pointer",
+                                textAlign: "left",
+                                fontWeight: person.source === s ? 600 : 400,
+                              },
+                            },
+                            s,
+                          ),
+                        ),
+                      ),
+                  ),
+                  person.source === "Referral" &&
+                    (() => {
+                      const referredPartner = PARTNERS_DATA.find((p) => p.id === person.referredBy);
+                      const referredCustomer =
+                        !referredPartner && person.referredBy
+                          ? ALL_PEOPLE.find((p) => p.id === person.referredBy)
+                          : null;
+                      const referredLabel = referredPartner
+                        ? referredPartner.name
+                        : referredCustomer
+                          ? referredCustomer.name
+                          : null;
+                      const q = referralSearch.toLowerCase();
+                      const filteredPartners = PARTNERS_DATA.filter(
+                        (p) =>
+                          !q ||
+                          (p.name || "").toLowerCase().includes(q) ||
+                          (p.company || "").toLowerCase().includes(q),
+                      ).slice(0, 5);
+                      const filteredCustomers = ALL_PEOPLE.filter(
+                        (p) =>
+                          p.id !== person.id &&
+                          p.locationId === person.locationId &&
+                          !p.isJunk &&
+                          (!q ||
+                            (p.name || "").toLowerCase().includes(q) ||
+                            (p.email || "").toLowerCase().includes(q)),
+                      ).slice(0, 6);
+                      return React.createElement(
+                        "div",
+                        { style: { position: "relative" } },
+                        React.createElement(
+                          "button",
+                          {
+                            onClick: () => {
+                              setPickingReferral((v) => !v);
+                              setEditingSource(false);
+                              setReferralSearch("");
+                            },
+                            "aria-label": "Edit referrer",
+                            style: {
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              background: "none",
+                              border: "none",
+                              cursor: "pointer",
+                              fontSize: "10px",
+                              padding: "2px 4px",
+                              lineHeight: 1.2,
+                              fontFamily: "inherit",
+                              color: "#4a5e5a",
+                              fontWeight: 500,
+                            },
+                          },
+                          React.createElement(
+                            "span",
+                            { style: { fontSize: "10px" } },
+                            "\uD83D\uDC64",
+                          ),
+                          React.createElement(
+                            "span",
+                            { style: { opacity: referredLabel ? 1 : 0.5 } },
+                            referredLabel || "Add referrer",
+                          ),
+                        ),
+                        pickingReferral &&
+                          React.createElement(
+                            "div",
+                            {
+                              style: {
+                                position: "absolute",
+                                top: "calc(100% + 6px)",
+                                left: 0,
+                                zIndex: 200,
+                                background: "white",
+                                border: "1px solid rgba(0,0,0,0.1)",
+                                borderRadius: "10px",
+                                boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
+                                padding: "8px",
+                                minWidth: "240px",
+                              },
+                            },
+                            React.createElement("input", {
+                              autoFocus: true,
+                              value: referralSearch,
+                              onChange: (e) => setReferralSearch(e.target.value),
+                              placeholder: "Search partners or clients…",
+                              style: {
+                                width: "100%",
+                                padding: "7px 10px",
+                                border: "1.5px solid rgba(168,201,196,0.4)",
+                                borderRadius: "8px",
+                                fontSize: "12px",
+                                fontFamily: "inherit",
+                                outline: "none",
+                                boxSizing: "border-box",
+                                marginBottom: "6px",
+                              },
+                            }),
+                            filteredPartners.length > 0 &&
+                              React.createElement(
+                                React.Fragment,
+                                null,
+                                React.createElement(
+                                  "p",
+                                  {
+                                    style: {
+                                      fontSize: "9px",
+                                      fontWeight: 700,
+                                      color: "#b0c0bc",
+                                      textTransform: "uppercase",
+                                      letterSpacing: "0.5px",
+                                      padding: "2px 6px 4px",
+                                    },
+                                  },
+                                  "Partners",
+                                ),
+                                filteredPartners.map((p) =>
+                                  React.createElement(
+                                    "button",
+                                    {
+                                      key: p.id,
+                                      onClick: () => {
+                                        update({ ...person, referredBy: p.id });
+                                        setPickingReferral(false);
+                                        setReferralSearch("");
+                                      },
+                                      style: {
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "8px",
+                                        width: "100%",
+                                        padding: "6px 10px",
+                                        background:
+                                          person.referredBy === p.id
+                                            ? "rgba(16,185,129,0.08)"
+                                            : "transparent",
+                                        border: "none",
+                                        borderRadius: "8px",
+                                        cursor: "pointer",
+                                        fontFamily: "inherit",
+                                        textAlign: "left",
+                                      },
+                                    },
+                                    React.createElement(
+                                      "div",
+                                      { style: { minWidth: 0 } },
+                                      React.createElement(
+                                        "p",
+                                        {
+                                          style: {
+                                            fontSize: "12px",
+                                            fontWeight: 600,
+                                            color: "#1a2e2b",
+                                          },
+                                        },
+                                        p.name,
+                                      ),
+                                      p.company &&
+                                        React.createElement(
+                                          "p",
+                                          { style: { fontSize: "10px", color: "#8a9e9a" } },
+                                          p.company,
+                                        ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            filteredCustomers.length > 0 &&
+                              React.createElement(
+                                React.Fragment,
+                                null,
+                                React.createElement(
+                                  "p",
+                                  {
+                                    style: {
+                                      fontSize: "9px",
+                                      fontWeight: 700,
+                                      color: "#b0c0bc",
+                                      textTransform: "uppercase",
+                                      letterSpacing: "0.5px",
+                                      padding: "6px 6px 4px",
+                                    },
+                                  },
+                                  "Clients",
+                                ),
+                                filteredCustomers.map((p) =>
+                                  React.createElement(
+                                    "button",
+                                    {
+                                      key: p.id,
+                                      onClick: () => {
+                                        update({ ...person, referredBy: p.id });
+                                        setPickingReferral(false);
+                                        setReferralSearch("");
+                                      },
+                                      style: {
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "8px",
+                                        width: "100%",
+                                        padding: "6px 10px",
+                                        background:
+                                          person.referredBy === p.id
+                                            ? "rgba(212,160,70,0.08)"
+                                            : "transparent",
+                                        border: "none",
+                                        borderRadius: "8px",
+                                        cursor: "pointer",
+                                        fontFamily: "inherit",
+                                        textAlign: "left",
+                                      },
+                                    },
+                                    React.createElement(
+                                      "p",
+                                      {
+                                        style: {
+                                          fontSize: "12px",
+                                          fontWeight: 600,
+                                          color: "#1a2e2b",
+                                        },
+                                      },
+                                      p.name,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ),
+                      );
+                    })(),
+                  (editingSource || pickingReferral) &&
+                    React.createElement("div", {
+                      style: { position: "fixed", inset: 0, zIndex: 99 },
+                      onClick: () => {
+                        setEditingSource(false);
+                        setPickingReferral(false);
+                      },
+                    }),
+                ),
+                React.createElement(
+                  HeaderChips,
+                  { person: person, update: update },
+                  React.createElement(
+                    "span",
+                    {
+                      style: {
+                        color: "rgba(0,0,0,0.18)",
+                        fontSize: "13px",
+                        padding: "0 2px",
+                        opacity: 0.7,
+                      },
+                    },
+                    "|",
+                  ),
+                  person.tags.map((tid) => {
+                    const t = tagConf(tid);
+                    return React.createElement(
+                      "span",
+                      {
+                        key: tid,
+                        style: {
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "3px",
+                          fontSize: "10px",
+                          color: t.color,
+                          background: t.bg,
+                          padding: "2px 7px",
+                          borderRadius: "20px",
+                          fontWeight: 500,
+                          border: "1px solid transparent",
+                        },
+                      },
+                      t.label,
+                      React.createElement(
+                        "button",
+                        {
+                          onClick: (e) => {
+                            e.stopPropagation();
+                            update({ tags: person.tags.filter((x) => x !== tid) });
+                          },
+                          style: {
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            color: t.color,
+                            fontSize: "11px",
+                            lineHeight: 1,
+                            padding: "0 1px",
+                            opacity: 0.6,
+                          },
+                        },
+                        "\xD7",
+                      ),
+                    );
+                  }),
+                  React.createElement(
+                    "button",
+                    {
+                      onClick: () => setPopup("tags"),
+                      style: {
+                        fontSize: "10px",
+                        color: "#c0d0cc",
+                        background: "none",
+                        border: "none",
+                        padding: "2px 4px",
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                        fontWeight: 500,
+                      },
+                    },
+                    "+ tag",
+                  ),
+                ),
+              ),
+            ),
+            React.createElement(
+              "div",
+              {
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  alignSelf: "flex-start",
+                },
+              },
+              (onPrev || onNext) &&
+                React.createElement(
+                  "div",
+                  {
+                    style: {
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "2px",
+                      marginRight: "4px",
+                    },
+                  },
+                  React.createElement(
+                    "button",
+                    {
+                      onClick: onPrev,
+                      disabled: !onPrev,
+                      style: {
+                        background: "none",
+                        border: "1px solid rgba(0,0,0,0.1)",
+                        borderRadius: "6px",
+                        fontSize: "16px",
+                        color: onPrev ? "#4a5e5a" : "#d0d8d5",
+                        cursor: onPrev ? "pointer" : "default",
+                        padding: "1px 7px",
+                        lineHeight: 1.4,
+                      },
+                    },
+                    "\u2039",
+                  ),
+                  navLabel &&
+                    React.createElement(
+                      "span",
+                      {
+                        style: {
+                          fontSize: "11px",
+                          color: "#b0c0bc",
+                          minWidth: "36px",
+                          textAlign: "center",
+                        },
+                      },
+                      navLabel,
+                    ),
+                  React.createElement(
+                    "button",
+                    {
+                      onClick: onNext,
+                      disabled: !onNext,
+                      style: {
+                        background: "none",
+                        border: "1px solid rgba(0,0,0,0.1)",
+                        borderRadius: "6px",
+                        fontSize: "16px",
+                        color: onNext ? "#4a5e5a" : "#d0d8d5",
+                        cursor: onNext ? "pointer" : "default",
+                        padding: "1px 7px",
+                        lineHeight: 1.4,
+                      },
+                    },
+                    "\u203A",
+                  ),
+                ),
+              React.createElement(
+                "button",
+                {
+                  onClick: onClose,
+                  style: {
+                    background: "none",
+                    border: "none",
+                    fontSize: "22px",
+                    color: "#8a9e9a",
+                    cursor: "pointer",
+                  },
+                },
+                "\xD7",
+              ),
+            ),
+          ),
+          (() => {
+            const reqCount =
+              (person.jobs?.length || 0) +
+              (person.jobberClient?.jobs?.length || 0) +
+              (person.stage && person.stage !== "New" ? 1 : 0);
+            return reqCount > 0
+              ? React.createElement(
+                  "div",
+                  { style: { display: "flex", gap: "6px", marginBottom: "6px", flexWrap: "wrap" } },
+                  React.createElement(
+                    "span",
+                    {
+                      style: {
+                        fontSize: "11px",
+                        color: "#4a5e5a",
+                        background: "rgba(168,201,196,0.12)",
+                        border: "1px solid rgba(168,201,196,0.25)",
+                        padding: "2px 8px",
+                        borderRadius: "20px",
+                        fontWeight: 600,
+                      },
+                    },
+                    reqCount,
+                    " request",
+                    reqCount > 1 ? "s" : "",
+                  ),
+                )
+              : null;
+          })(),
+          React.createElement(
+            "div",
+            { style: { display: "flex" } },
+            Tab("overview", "Overview"),
+            Tab(
+              "contacts",
+              `Job Contacts${(person.jobContacts?.length || 0) > 0 ? " (" + person.jobContacts.length + ")" : ""}`,
+            ),
+            Tab("outreach", `Outreach (${person.outreachTimeline.length})`),
+          ),
+        ),
+        React.createElement(
+          "div",
+          {
+            key: activeTab,
+            style: {
+              flex: 1,
+              overflowY: "auto",
+              overscrollBehavior: "contain",
+              WebkitOverflowScrolling: "touch",
+              padding: "1rem 1.25rem",
+            },
+          },
+          activeTab === "overview" &&
+            React.createElement(
+              "div",
+              { style: { display: "grid", gap: "12px" } },
+              (person.quickCapture || person.snoozeUntil) &&
+                React.createElement(
+                  "button",
+                  {
+                    onClick: () => setShowProcess(true),
+                    style: {
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                      padding: "12px 14px",
+                      background: person.snoozeUntil
+                        ? "rgba(99,102,241,0.06)"
+                        : "rgba(212,160,70,0.06)",
+                      border: `1.5px solid ${person.snoozeUntil ? "rgba(99,102,241,0.25)" : "rgba(212,160,70,0.25)"}`,
+                      borderRadius: "12px",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      textAlign: "left",
+                      width: "100%",
+                    },
+                  },
+                  React.createElement(
+                    "span",
+                    { style: { fontSize: "20px" } },
+                    person.snoozeUntil ? "⏰" : "⚡",
+                  ),
+                  React.createElement(
+                    "div",
+                    { style: { flex: 1 } },
+                    React.createElement(
+                      "p",
+                      {
+                        style: {
+                          fontSize: "13px",
+                          fontWeight: 700,
+                          color: "#1a2e2b",
+                          marginBottom: "2px",
+                        },
+                      },
+                      person.snoozeUntil
+                        ? "This lead woke up — ready to re-engage?"
+                        : "Quick capture — needs to be processed",
+                    ),
+                    React.createElement(
+                      "p",
+                      { style: { fontSize: "11px", color: "#8a9e9a" } },
+                      person.snoozeUntil
+                        ? `Snoozed note: ${person.snoozeNote || "none"}`
+                        : person.quickNote
+                          ? `Note: ${person.quickNote}`
+                          : "Missing project type and New Lead Drip",
+                    ),
+                  ),
+                  React.createElement(
+                    "span",
+                    {
+                      style: {
+                        fontSize: "13px",
+                        fontWeight: 600,
+                        color: person.snoozeUntil ? "#6366f1" : "#d4a046",
+                        flexShrink: 0,
+                      },
+                    },
+                    "Process \u2192",
+                  ),
+                ),
+              React.createElement(
+                "div",
+                {
+                  style: {
+                    background: "white",
+                    border: "1px solid rgba(0,0,0,0.07)",
+                    borderRadius: "10px",
+                    padding: "12px 14px",
+                  },
+                },
+                (() => {
+                  const milestones = [
+                    {
+                      label: "Lead Created",
+                      done: true,
+                      icon: "\u2728",
+                      date: person.created,
+                      big: true,
+                    },
+                    {
+                      label: "First Reach-Out",
+                      done: !!person.reachOutMethod,
+                      icon: "\uD83D\uDCF2",
+                      date: person.outreachTimeline?.find((o) => o.type === "manual")?.ts,
+                      big: true,
+                    },
+                    {
+                      label: "Assessment Scheduled",
+                      done: !!person.assessment,
+                      icon: "\uD83D\uDCC5",
+                      date: person.assessment,
+                    },
+                    {
+                      label: "Assessment Completed",
+                      done: !!person.assessmentCompleted,
+                      icon: "\u2705",
+                      date: person.assessmentCompleted,
+                    },
+                    {
+                      label: "Estimate Sent",
+                      done: !!person.estimateSent,
+                      icon: "\uD83D\uDCCB",
+                      date: person.estimateSent,
+                      sub:
+                        person.estimateSent && person.invoices?.length > 0
+                          ? `${fmt(person.invoices.reduce((s, i) => s + i.amount, 0))} \xb7 ${person.estimateApproved ? "Approved" : "Pending"}`
+                          : null,
+                    },
+                    {
+                      label: "Estimate Approved",
+                      done: !!person.estimateApproved,
+                      icon: "\u2705",
+                      date: person.estimateApproved,
+                      big: true,
+                    },
+                    {
+                      label: "Job Scheduled",
+                      done: person.jobs?.some((j) => j.scheduledDate),
+                      icon: "\uD83D\uDD28",
+                      date: person.jobs?.[0]?.scheduledDate,
+                      big: true,
+                    },
+                    {
+                      label: "Invoice Sent",
+                      done: person.invoices?.length > 0,
+                      icon: "\uD83E\uDDFE",
+                      date: person.invoices?.[0]?.date,
+                    },
+                    {
+                      label: "Paid",
+                      done: person.invoices?.some((i) => i.status === "Paid"),
+                      icon: "\uD83D\uDCB0",
+                      date: person.invoices?.find((i) => i.status === "Paid")?.date,
+                      big: true,
+                    },
+                  ];
+                  const bigOnes = milestones.filter((m) => m.big);
+                  return React.createElement(
+                    React.Fragment,
+                    null,
+                    React.createElement(
+                      "div",
+                      {
+                        style: {
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          marginBottom: "10px",
+                        },
+                      },
+                      React.createElement(
+                        "p",
+                        {
+                          style: {
+                            fontSize: "10px",
+                            fontWeight: 700,
+                            color: "#8a9e9a",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.5px",
+                          },
+                        },
+                        "Journey",
+                      ),
+                      React.createElement(
+                        "button",
+                        {
+                          onClick: () => setJourneyExpanded((v) => !v),
+                          style: {
+                            fontSize: "11px",
+                            color: "#a8c9c4",
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                            fontWeight: 500,
+                            padding: 0,
+                          },
+                        },
+                        journeyExpanded ? "See less \u2191" : "See more \u2193",
+                      ),
+                    ),
+                    journeyExpanded
+                      ? React.createElement(
+                          "div",
+                          { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+                          milestones.map((m) =>
+                            React.createElement(
+                              "div",
+                              {
+                                key: m.label,
+                                style: { display: "flex", alignItems: "center", gap: "8px" },
+                              },
+                              React.createElement(
+                                "div",
+                                {
+                                  style: {
+                                    width: "18px",
+                                    height: "18px",
+                                    borderRadius: "50%",
+                                    background: m.done
+                                      ? "rgba(34,197,94,0.12)"
+                                      : "rgba(0,0,0,0.05)",
+                                    border: `1.5px solid ${m.done ? "#22c55e" : "rgba(0,0,0,0.1)"}`,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    flexShrink: 0,
+                                    fontSize: "10px",
+                                    color: "#22c55e",
+                                    fontWeight: 700,
+                                  },
+                                },
+                                m.done ? "\u2713" : "",
+                              ),
+                              React.createElement(
+                                "div",
+                                { style: { flex: 1, minWidth: 0 } },
+                                React.createElement(
+                                  "span",
+                                  {
+                                    style: {
+                                      fontSize: "12px",
+                                      fontWeight: m.done ? 500 : 400,
+                                      color: m.done ? "#1a2e2b" : "#b0c0bc",
+                                    },
+                                  },
+                                  m.label,
+                                ),
+                                m.done &&
+                                  m.sub &&
+                                  React.createElement(
+                                    "span",
+                                    {
+                                      style: {
+                                        fontSize: "10px",
+                                        color: "#8a9e9a",
+                                        marginLeft: "6px",
+                                      },
+                                    },
+                                    m.sub,
+                                  ),
+                              ),
+                              m.done &&
+                                m.date &&
+                                React.createElement(
+                                  "span",
+                                  { style: { fontSize: "11px", color: "#8a9e9a", flexShrink: 0 } },
+                                  fmtDate(m.date),
+                                ),
+                            ),
+                          ),
+                        )
+                      : React.createElement(
+                          "div",
+                          { style: { display: "flex", alignItems: "flex-start", gap: "2px" } },
+                          bigOnes.map((m, i) =>
+                            React.createElement(
+                              React.Fragment,
+                              { key: m.label },
+                              i > 0 &&
+                                React.createElement("div", {
+                                  style: {
+                                    flex: 1,
+                                    height: "2px",
+                                    marginTop: "7px",
+                                    background: bigOnes[i - 1].done
+                                      ? "#a8c9c4"
+                                      : "rgba(0,0,0,0.08)",
+                                    borderRadius: "1px",
+                                  },
+                                }),
+                              React.createElement(
+                                "div",
+                                {
+                                  style: {
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    alignItems: "center",
+                                    gap: "3px",
+                                    flexShrink: 0,
+                                    minWidth: "52px",
+                                  },
+                                },
+                                React.createElement(
+                                  "div",
+                                  {
+                                    style: {
+                                      width: "16px",
+                                      height: "16px",
+                                      borderRadius: "50%",
+                                      background: m.done ? "#22c55e" : "white",
+                                      border: `1.5px solid ${m.done ? "#22c55e" : "rgba(0,0,0,0.15)"}`,
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      flexShrink: 0,
+                                      fontSize: "9px",
+                                      color: "white",
+                                      fontWeight: 700,
+                                      lineHeight: 1,
+                                      marginBottom: "2px",
+                                    },
+                                  },
+                                  m.done ? "\u2713" : "",
+                                ),
+                                React.createElement(
+                                  "span",
+                                  {
+                                    style: {
+                                      fontSize: "9px",
+                                      color: m.done ? "#1a2e2b" : "#b0c0bc",
+                                      fontWeight: m.done ? 600 : 400,
+                                      textAlign: "center",
+                                      lineHeight: 1.2,
+                                      letterSpacing: "0.1px",
+                                    },
+                                  },
+                                  m.label,
+                                ),
+                                m.done &&
+                                  m.date &&
+                                  React.createElement(
+                                    "span",
+                                    {
+                                      style: {
+                                        fontSize: "8px",
+                                        color: "#c0d0cc",
+                                        fontWeight: 400,
+                                        textAlign: "center",
+                                        lineHeight: 1,
+                                        whiteSpace: "nowrap",
+                                      },
+                                    },
+                                    fmtDate(m.date),
+                                  ),
+                              ),
+                            ),
+                          ),
+                        ),
+                  );
+                })(),
+              ),
+              React.createElement(
+                "div",
+                {
+                  style: {
+                    background: "rgba(14,165,233,0.04)",
+                    border: "1px solid rgba(14,165,233,0.15)",
+                    borderRadius: "10px",
+                    padding: "12px 14px",
+                  },
+                },
+                React.createElement(
+                  "div",
+                  {
+                    style: {
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: "10px",
+                    },
+                  },
+                  React.createElement(
+                    "div",
+                    { style: { display: "flex", alignItems: "center", gap: "6px" } },
+                    React.createElement("span", { style: { fontSize: "13px" } }, "\uD83D\uDD11"),
+                    React.createElement(
+                      "p",
+                      {
+                        style: {
+                          fontSize: "10px",
+                          fontWeight: 700,
+                          color: "#0ea5e9",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.4px",
+                        },
+                      },
+                      "Job Notes",
+                    ),
+                    person.jobNotes &&
+                      person.jobNotes.length > 0 &&
+                      React.createElement(
+                        "span",
+                        {
+                          style: {
+                            fontSize: "10px",
+                            color: "#0ea5e9",
+                            background: "rgba(14,165,233,0.1)",
+                            padding: "1px 6px",
+                            borderRadius: "10px",
+                            fontWeight: 600,
+                          },
+                        },
+                        person.jobNotes.length,
+                      ),
+                    person.jobberRef &&
+                      React.createElement(
+                        "span",
+                        { style: { fontSize: "9px", color: "#10b981", fontWeight: 500 } },
+                        "\u2713 Synced",
+                      ),
+                  ),
+                  person.jobNotes &&
+                    person.jobNotes.length > 2 &&
+                    React.createElement(
+                      "button",
+                      {
+                        onClick: () => setActiveTab("outreach"),
+                        style: {
+                          fontSize: "10px",
+                          color: "#0ea5e9",
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                          fontWeight: 600,
+                          padding: 0,
+                        },
+                      },
+                      "See all \u2192",
+                    ),
+                ),
+                React.createElement("input", {
+                  value: jobNoteDraft,
+                  onChange: (e) => setJobNoteDraft(e.target.value),
+                  onKeyDown: (e) => {
+                    if (e.key === "Enter" && jobNoteDraft.trim()) {
+                      update({
+                        jobNotes: [
+                          ...(person.jobNotes || []),
+                          {
+                            id: `jn${Date.now()}`,
+                            text: jobNoteDraft.trim(),
+                            ts: "Just now",
+                            user: "You",
+                            synced: !!person.jobberRef,
+                          },
+                        ],
+                      });
+                      setJobNoteDraft("");
+                    }
+                  },
+                  placeholder: "+ Add a job note (e.g. gate code, parking, prefs\u2026)",
+                  style: {
+                    width: "100%",
+                    padding: "8px 12px",
+                    border: "1.5px solid rgba(14,165,233,0.2)",
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                    fontFamily: "inherit",
+                    color: "#1a2e2b",
+                    outline: "none",
+                    boxSizing: "border-box",
+                    background: "white",
+                  },
+                }),
+                person.jobNotes &&
+                  person.jobNotes.length > 0 &&
+                  React.createElement(
+                    "div",
+                    {
+                      style: {
+                        marginTop: "8px",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "4px",
+                      },
+                    },
+                    person.jobNotes
+                      .slice(0, 2)
+                      .map((n) =>
+                        React.createElement(
+                          "div",
+                          {
+                            key: n.id,
+                            style: {
+                              fontSize: "12px",
+                              color: "#0369a1",
+                              lineHeight: 1.4,
+                              padding: "6px 10px",
+                              background: "rgba(14,165,233,0.05)",
+                              borderRadius: "6px",
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "flex-start",
+                              gap: "8px",
+                            },
+                          },
+                          React.createElement("span", null, n.text),
+                          React.createElement(
+                            "span",
+                            {
+                              style: {
+                                fontSize: "10px",
+                                color: "#7ab5d4",
+                                flexShrink: 0,
+                                whiteSpace: "nowrap",
+                              },
+                            },
+                            n.ts,
+                          ),
+                        ),
+                      ),
+                  ),
+              ),
+              hasInvoices &&
+                React.createElement(
+                  "button",
+                  {
+                    onClick: () => setPopup("invoice"),
+                    style: {
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "10px 14px",
+                      background: unpaid > 0 ? "rgba(245,158,11,0.06)" : "rgba(34,197,94,0.06)",
+                      border: `1px solid ${unpaid > 0 ? "rgba(245,158,11,0.2)" : "rgba(34,197,94,0.2)"}`,
+                      borderRadius: "10px",
+                      cursor: "pointer",
+                      width: "100%",
+                      fontFamily: "inherit",
+                      textAlign: "left",
+                    },
+                  },
+                  React.createElement(
+                    "div",
+                    null,
+                    React.createElement(
+                      "p",
+                      {
+                        style: {
+                          fontSize: "10px",
+                          color: unpaid > 0 ? "#f59e0b" : "#22c55e",
+                          fontWeight: 700,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.4px",
+                          marginBottom: "2px",
+                        },
+                      },
+                      unpaid > 0 ? `⚠️ ${unpaid} unpaid` : "✅ All paid",
+                    ),
+                    React.createElement(
+                      "p",
+                      { style: { fontSize: "13px", color: "#1a2e2b", fontWeight: 500 } },
+                      person.invoices.length,
+                      " invoice",
+                      person.invoices.length > 1 ? "s" : "",
+                      " \xB7 ",
+                      fmt(total),
+                    ),
+                  ),
+                  React.createElement(
+                    "span",
+                    { style: { fontSize: "12px", color: unpaid > 0 ? "#f59e0b" : "#22c55e" } },
+                    "View \u2192",
+                  ),
+                ),
+              (() => {
+                const allJobs = [...(person.jobs || []), ...(person.jobberClient?.jobs || [])];
+                const revenue = person.invoices?.reduce((s, i) => s + i.amount, 0) || 0;
+                const paid =
+                  person.invoices
+                    ?.filter((i) => i.status === "Paid")
+                    .reduce((s, i) => s + i.amount, 0) || 0;
+                const balance = revenue - paid;
+                const lastAct = person.outreachTimeline?.[person.outreachTimeline.length - 1]?.ts;
+                if (!revenue && !allJobs.length && !lastAct) return null;
+                return React.createElement(
+                  "div",
+                  { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" } },
+                  revenue > 0 &&
+                    React.createElement(
+                      "div",
+                      {
+                        style: {
+                          padding: "10px 12px",
+                          background: "white",
+                          borderRadius: "10px",
+                          border: "1px solid rgba(0,0,0,0.07)",
+                        },
+                      },
+                      React.createElement(
+                        "p",
+                        {
+                          style: {
+                            fontSize: "9px",
+                            fontWeight: 700,
+                            color: "#8a9e9a",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.5px",
+                            marginBottom: "3px",
+                          },
+                        },
+                        "Total Revenue",
+                      ),
+                      React.createElement(
+                        "p",
+                        { style: { fontSize: "16px", fontWeight: 700, color: "#1a2e2b" } },
+                        fmt(revenue),
+                      ),
+                    ),
+                  balance > 0 &&
+                    React.createElement(
+                      "div",
+                      {
+                        style: {
+                          padding: "10px 12px",
+                          background: "rgba(245,158,11,0.05)",
+                          borderRadius: "10px",
+                          border: "1px solid rgba(245,158,11,0.15)",
+                        },
+                      },
+                      React.createElement(
+                        "p",
+                        {
+                          style: {
+                            fontSize: "9px",
+                            fontWeight: 700,
+                            color: "#f59e0b",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.5px",
+                            marginBottom: "3px",
+                          },
+                        },
+                        "Outstanding",
+                      ),
+                      React.createElement(
+                        "p",
+                        { style: { fontSize: "16px", fontWeight: 700, color: "#1a2e2b" } },
+                        fmt(balance),
+                      ),
+                    ),
+                  allJobs.length > 0 &&
+                    React.createElement(
+                      "div",
+                      {
+                        style: {
+                          padding: "10px 12px",
+                          background: "white",
+                          borderRadius: "10px",
+                          border: "1px solid rgba(0,0,0,0.07)",
+                        },
+                      },
+                      React.createElement(
+                        "p",
+                        {
+                          style: {
+                            fontSize: "9px",
+                            fontWeight: 700,
+                            color: "#8a9e9a",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.5px",
+                            marginBottom: "3px",
+                          },
+                        },
+                        "Jobs",
+                      ),
+                      React.createElement(
+                        "p",
+                        { style: { fontSize: "16px", fontWeight: 700, color: "#1a2e2b" } },
+                        allJobs.length,
+                      ),
+                    ),
+                );
+              })(),
+              React.createElement(
+                "div",
+                {
+                  style: {
+                    display: "grid",
+                    gap: "8px",
+                    paddingTop: "4px",
+                    borderTop: "1px solid rgba(0,0,0,0.06)",
+                  },
+                },
+                !person.finalProcessed &&
+                  React.createElement(
+                    "div",
+                    { style: { display: "flex", gap: "8px" } },
+                    (person.stage === "New" || person.stage === "Attempting") &&
+                      React.createElement(
+                        "button",
+                        {
+                          onClick: () => setPopup("reachout"),
+                          style: {
+                            flex: 1,
+                            padding: "11px",
+                            background: person.stage === "New" ? "#f97316" : "transparent",
+                            border: `1.5px solid ${person.stage === "New" ? "transparent" : "#f97316"}`,
+                            borderRadius: "10px",
+                            fontSize: "13px",
+                            fontFamily: "inherit",
+                            fontWeight: 500,
+                            color: person.stage === "New" ? "white" : "#f97316",
+                            cursor: "pointer",
+                          },
+                        },
+                        "\uD83D\uDCF2 ",
+                        person.stage === "New" ? "Log Reach Out" : "Log Again",
+                      ),
+                    (person.stage === "Closed Lost" || person.isJunk) &&
+                      onResurrect &&
+                      React.createElement(
+                        "button",
+                        {
+                          onClick: onResurrect,
+                          style: {
+                            flex: 1,
+                            padding: "11px",
+                            background: "rgba(16,185,129,0.08)",
+                            border: "1.5px solid rgba(16,185,129,0.3)",
+                            borderRadius: "10px",
+                            fontSize: "13px",
+                            fontFamily: "inherit",
+                            fontWeight: 600,
+                            color: "#10b981",
+                            cursor: "pointer",
+                          },
+                        },
+                        "\uD83C\uDF31 Resurrect Lead",
+                      ),
+                    !person.isJunk &&
+                      person.stage !== "Closed Lost" &&
+                      person.stage !== "Closed Won" &&
+                      React.createElement(
+                        "button",
+                        {
+                          onClick: () => setShowSnooze(true),
+                          style: {
+                            padding: "11px 14px",
+                            background: person.snoozeUntil
+                              ? "rgba(99,102,241,0.08)"
+                              : "transparent",
+                            border: `1.5px solid ${person.snoozeUntil ? "rgba(99,102,241,0.3)" : "rgba(0,0,0,0.08)"}`,
+                            borderRadius: "10px",
+                            fontSize: "13px",
+                            fontFamily: "inherit",
+                            color: person.snoozeUntil ? "#6366f1" : "#8a9e9a",
+                            cursor: "pointer",
+                            flexShrink: 0,
+                          },
+                        },
+                        "\uD83D\uDCA4",
+                      ),
+                    !person.isJunk &&
+                      person.stage !== "Closed Lost" &&
+                      person.stage !== "Closed Won" &&
+                      React.createElement(
+                        "button",
+                        {
+                          onClick: () => setPopup("close"),
+                          style: {
+                            flex: 1,
+                            padding: "11px",
+                            background: "transparent",
+                            border: "1.5px solid rgba(0,0,0,0.08)",
+                            borderRadius: "10px",
+                            fontSize: "13px",
+                            fontFamily: "inherit",
+                            color: "#8a9e9a",
+                            cursor: "pointer",
+                          },
+                        },
+                        "Close Record",
+                      ),
+                    !person.jobberRef &&
+                      React.createElement(
+                        "button",
+                        {
+                          onClick: () => setPopup("delete"),
+                          style: {
+                            padding: "11px 14px",
+                            background: "rgba(239,68,68,0.06)",
+                            border: "1.5px solid rgba(239,68,68,0.2)",
+                            borderRadius: "10px",
+                            fontSize: "13px",
+                            fontFamily: "inherit",
+                            color: "#ef4444",
+                            cursor: "pointer",
+                            flexShrink: 0,
+                          },
+                        },
+                        "\uD83D\uDDD1",
+                      ),
+                  ),
+                isEarlyStage &&
+                  !person.jobberRef &&
+                  React.createElement(
+                    "button",
+                    {
+                      onClick: () => canSendToJobber && setPopup("send-jobber"),
+                      style: {
+                        width: "100%",
+                        padding: "11px",
+                        background: canSendToJobber ? "#1a2e2b" : "rgba(0,0,0,0.04)",
+                        border: `1.5px solid ${canSendToJobber ? "transparent" : "rgba(0,0,0,0.08)"}`,
+                        borderRadius: "10px",
+                        fontSize: "13px",
+                        fontFamily: "inherit",
+                        fontWeight: 500,
+                        color: canSendToJobber ? "white" : "#b0c0bc",
+                        cursor: canSendToJobber ? "pointer" : "not-allowed",
+                      },
+                    },
+                    canSendToJobber
+                      ? React.createElement(
+                          React.Fragment,
+                          null,
+                          React.createElement(JobberIcon, {
+                            size: 18,
+                            style: { marginRight: "6px" },
+                          }),
+                          "Send to Jobber",
+                        )
+                      : React.createElement(
+                          React.Fragment,
+                          null,
+                          React.createElement(JobberIcon, {
+                            size: 18,
+                            style: { marginRight: "6px" },
+                          }),
+                          "Send to Jobber \u2014 log a reach-out first",
+                        ),
+                  ),
+                person.stage === "Job in Progress" &&
+                  hasInvoices &&
+                  !person.finalProcessed &&
+                  React.createElement(
+                    "button",
+                    {
+                      onClick: () => setShowCloseOut(true),
+                      style: {
+                        width: "100%",
+                        padding: "12px 14px",
+                        background: "rgba(34,197,94,0.06)",
+                        border: "1.5px solid rgba(34,197,94,0.25)",
+                        borderRadius: "12px",
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        textAlign: "left",
+                      },
+                    },
+                    React.createElement("span", { style: { fontSize: "20px" } }, "\u2705"),
+                    React.createElement(
+                      "div",
+                      { style: { flex: 1 } },
+                      React.createElement(
+                        "p",
+                        {
+                          style: {
+                            fontSize: "13px",
+                            fontWeight: 700,
+                            color: "#15803d",
+                            marginBottom: "1px",
+                          },
+                        },
+                        "Ready to Close Out?",
+                      ),
+                      React.createElement(
+                        "p",
+                        { style: { fontSize: "11px", color: "#4a8a5a" } },
+                        "Invoice on record \xB7 Tap to begin close-out flow",
+                      ),
+                    ),
+                    React.createElement(
+                      "span",
+                      { style: { fontSize: "12px", color: "#22c55e" } },
+                      "\u2192",
+                    ),
+                  ),
+                person.stage === "Final Processing" &&
+                  !person.finalProcessed &&
+                  React.createElement(
+                    "button",
+                    {
+                      onClick: () => setShowCloseOut(true),
+                      style: {
+                        width: "100%",
+                        padding: "11px",
+                        background: "#22c55e",
+                        border: "none",
+                        borderRadius: "10px",
+                        fontSize: "13px",
+                        fontFamily: "inherit",
+                        fontWeight: 600,
+                        color: "white",
+                        cursor: "pointer",
+                      },
+                    },
+                    "\u2705 Complete Close-Out",
+                  ),
+                person.finalProcessed &&
+                  React.createElement(
+                    "div",
+                    {
+                      style: {
+                        padding: "11px",
+                        background: "rgba(34,197,94,0.06)",
+                        border: "1px solid rgba(34,197,94,0.2)",
+                        borderRadius: "10px",
+                        textAlign: "center",
+                      },
+                    },
+                    React.createElement(
+                      "p",
+                      { style: { fontSize: "13px", fontWeight: 600, color: "#22c55e" } },
+                      "\u2705 Job Closed \xB7 Synced to Zoho",
+                    ),
+                  ),
+              ),
+              React.createElement(
+                "div",
+                { style: { display: "grid", gap: "6px" } },
+                React.createElement(
+                  "p",
+                  {
+                    style: {
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      color: "#b0c0bc",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.6px",
+                      paddingLeft: "2px",
+                    },
+                  },
+                  "Admin",
+                ),
+                React.createElement(
+                  "div",
+                  {
+                    style: {
+                      background: "white",
+                      border: "1px solid rgba(0,0,0,0.07)",
+                      borderRadius: "12px",
+                      overflow: "hidden",
+                    },
+                  },
+                  React.createElement(
+                    "div",
+                    {
+                      onClick: () => setShowAssignPicker(true),
+                      style: {
+                        padding: "9px 12px",
+                        borderBottom: "1px solid rgba(0,0,0,0.05)",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        cursor: "pointer",
+                      },
+                    },
+                    React.createElement(
+                      "div",
+                      { style: { display: "flex", flexShrink: 0 } },
+                      assignedUsers.length === 0
+                        ? React.createElement(
+                            "div",
+                            {
+                              style: {
+                                width: "32px",
+                                height: "32px",
+                                borderRadius: "50%",
+                                background: "rgba(0,0,0,0.06)",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                              },
+                            },
+                            React.createElement(
+                              "span",
+                              { style: { fontSize: "14px" } },
+                              "\uD83D\uDC64",
+                            ),
+                          )
+                        : assignedUsers
+                            .slice(0, 3)
+                            .map((u, i) =>
+                              React.createElement(
+                                "div",
+                                {
+                                  key: u.id,
+                                  style: {
+                                    width: "32px",
+                                    height: "32px",
+                                    borderRadius: "50%",
+                                    background: "linear-gradient(135deg,#a8c9c4,#7ab5af)",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    flexShrink: 0,
+                                    marginLeft: i === 0 ? 0 : "-10px",
+                                    border: "2px solid white",
+                                    zIndex: 10 - i,
+                                  },
+                                },
+                                React.createElement(
+                                  "span",
+                                  { style: { fontSize: "11px", fontWeight: 700, color: "white" } },
+                                  u.initials,
+                                ),
+                              ),
+                            ),
+                      assignedUsers.length > 3 &&
+                        React.createElement(
+                          "div",
+                          {
+                            style: {
+                              width: "32px",
+                              height: "32px",
+                              borderRadius: "50%",
+                              background: "rgba(0,0,0,0.08)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              marginLeft: "-10px",
+                              border: "2px solid white",
+                              fontSize: "10px",
+                              fontWeight: 700,
+                              color: "#4a5e5a",
+                            },
+                          },
+                          `+${assignedUsers.length - 3}`,
+                        ),
+                    ),
+                    React.createElement(
+                      "div",
+                      { style: { flex: 1, minWidth: 0 } },
+                      React.createElement(
+                        "p",
+                        {
+                          style: {
+                            fontSize: "10px",
+                            color: "#8a9e9a",
+                            fontWeight: 600,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.4px",
+                            marginBottom: "2px",
+                          },
+                        },
+                        "Assigned To",
+                      ),
+                      React.createElement(
+                        "div",
+                        {
+                          style: {
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            flexWrap: "wrap",
+                          },
+                        },
+                        React.createElement(
+                          "p",
+                          {
+                            style: {
+                              fontSize: "13px",
+                              fontWeight: 600,
+                              color: assignedUsers.length ? "#1a2e2b" : "#b0c0bc",
+                            },
+                          },
+                          assignedUsers.length === 0
+                            ? "Unassigned"
+                            : assignedUsers.map((u) => u.name).join(", "),
+                        ),
+                        assignedUsers.length === 1 &&
+                          (() => {
+                            const rc = FRANCHISE_ROLES.find((r) => r.key === assignedUsers[0].role);
+                            return rc
+                              ? React.createElement(
+                                  "span",
+                                  {
+                                    style: {
+                                      fontSize: "10px",
+                                      color: rc.color,
+                                      background: rc.bg,
+                                      padding: "1px 6px",
+                                      borderRadius: "10px",
+                                      fontWeight: 600,
+                                    },
+                                  },
+                                  rc.icon,
+                                  " ",
+                                  rc.label,
+                                )
+                              : null;
+                          })(),
+                      ),
+                    ),
+                    React.createElement(
+                      "span",
+                      {
+                        style: {
+                          fontSize: "11px",
+                          color: "#6366f1",
+                          fontWeight: 600,
+                          flexShrink: 0,
+                        },
+                      },
+                      assignedUsers.length ? "Edit" : "+ Assign",
+                    ),
+                  ),
+                  React.createElement(
+                    "div",
+                    {
+                      style: {
+                        padding: "8px 12px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                      },
+                    },
+                    React.createElement(
+                      "span",
+                      {
+                        style: {
+                          fontSize: "14px",
+                          width: "20px",
+                          textAlign: "center",
+                          flexShrink: 0,
+                        },
+                      },
+                      "📅",
+                    ),
+                    React.createElement(
+                      "div",
+                      {
+                        style: {
+                          flex: 1,
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: "12px",
+                          alignItems: "flex-start",
+                        },
+                      },
+                      React.createElement(
+                        "div",
+                        null,
+                        React.createElement(
+                          "p",
+                          {
+                            style: {
+                              fontSize: "10px",
+                              color: "#8a9e9a",
+                              fontWeight: 600,
+                              textTransform: "uppercase",
+                              letterSpacing: "0.4px",
+                              marginBottom: "1px",
+                            },
+                          },
+                          "Date Added",
+                        ),
+                        React.createElement(
+                          "p",
+                          { style: { fontSize: "13px", color: "#1a2e2b" } },
+                          fmtCreated(person.created, person.id),
+                        ),
+                      ),
+                      React.createElement(
+                        "div",
+                        { style: { textAlign: "right" } },
+                        React.createElement(
+                          "p",
+                          {
+                            style: {
+                              fontSize: "10px",
+                              color: "#8a9e9a",
+                              fontWeight: 600,
+                              textTransform: "uppercase",
+                              letterSpacing: "0.4px",
+                              marginBottom: "1px",
+                            },
+                          },
+                          "Last Activity",
+                        ),
+                        React.createElement(
+                          "p",
+                          { style: { fontSize: "13px", color: "#1a2e2b" } },
+                          person.outreachTimeline && person.outreachTimeline.length > 0
+                            ? person.outreachTimeline[person.outreachTimeline.length - 1].ts
+                            : "\u2014",
+                        ),
+                      ),
+                    ),
+                  ),
+                  (() => {
+                    const refs = (ALL_PEOPLE || []).filter(
+                      (p) => p.referredBy === person.id && !p.isJunk,
+                    );
+                    if (refs.length === 0) return null;
+                    const names = refs
+                      .slice(0, 2)
+                      .map((p) => p.name)
+                      .join(" \xb7 ");
+                    const more = refs.length > 2 ? ` \xb7 +${refs.length - 2}` : "";
+                    return React.createElement(
+                      "div",
+                      {
+                        style: {
+                          padding: "10px 12px",
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: "10px",
+                          borderTop: "1px solid rgba(0,0,0,0.05)",
+                        },
+                      },
+                      React.createElement(
+                        "span",
+                        {
+                          style: {
+                            fontSize: "14px",
+                            width: "20px",
+                            textAlign: "center",
+                            flexShrink: 0,
+                            paddingTop: "1px",
+                          },
+                        },
+                        "🤝",
+                      ),
+                      React.createElement(
+                        "div",
+                        { style: { flex: 1, minWidth: 0 } },
+                        React.createElement(
+                          "div",
+                          {
+                            style: {
+                              display: "flex",
+                              alignItems: "baseline",
+                              gap: "6px",
+                              marginBottom: "1px",
+                            },
+                          },
+                          React.createElement(
+                            "p",
+                            {
+                              style: {
+                                fontSize: "10px",
+                                color: "#8a9e9a",
+                                fontWeight: 600,
+                                textTransform: "uppercase",
+                                letterSpacing: "0.4px",
+                              },
+                            },
+                            "Referred Us",
+                          ),
+                          React.createElement(
+                            "span",
+                            {
+                              style: {
+                                fontSize: "10px",
+                                color: "#10b981",
+                                background: "rgba(16,185,129,0.08)",
+                                padding: "1px 6px",
+                                borderRadius: "10px",
+                                fontWeight: 600,
+                              },
+                            },
+                            refs.length,
+                          ),
+                        ),
+                        React.createElement(
+                          "p",
+                          {
+                            style: {
+                              fontSize: "12px",
+                              color: "#4a5e5a",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            },
+                          },
+                          names,
+                          more,
+                        ),
+                      ),
+                    );
+                  })(),
+                  React.createElement(
+                    "div",
+                    {
+                      style: {
+                        padding: "10px 12px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        borderTop: "1px solid rgba(0,0,0,0.05)",
+                      },
+                    },
+                    React.createElement(
+                      "span",
+                      {
+                        style: {
+                          fontSize: "14px",
+                          width: "20px",
+                          textAlign: "center",
+                          flexShrink: 0,
+                        },
+                      },
+                      "\uD83D\uDD01",
+                    ),
+                    React.createElement(
+                      "div",
+                      { style: { flex: 1 } },
+                      React.createElement(
+                        "p",
+                        {
+                          style: {
+                            fontSize: "10px",
+                            color: "#8a9e9a",
+                            fontWeight: 600,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.4px",
+                            marginBottom: "2px",
+                          },
+                        },
+                        "New Lead Drip",
+                      ),
+                      React.createElement(
+                        "div",
+                        {
+                          style: {
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            flexWrap: "wrap",
+                          },
+                        },
+                        React.createElement(
+                          "span",
+                          { style: { fontSize: "12px", color: "#1a2e2b" } },
+                          (() => {
+                            const p = DRIP_PATHS_CONFIG.find((d) => d.id === person.path);
+                            if (p) return p.name;
+                            const m = {
+                              "email-nurture": "General · New Lead Path A",
+                              "quick-connect": "General · New Lead Path C",
+                              "personal-touch": "General · New Lead Path D",
+                              "general-a": "General · New Lead Path A",
+                              "general-b": "General · New Lead Path B",
+                              "move-a": "Move · New Lead Path A",
+                              "move-b": "Move · New Lead Path B",
+                            };
+                            return m[person.path] || person.path || "No path assigned";
+                          })(),
+                        ),
+                        React.createElement(
+                          "span",
+                          {
+                            style: {
+                              fontSize: "10px",
+                              padding: "1px 7px",
+                              borderRadius: "20px",
+                              fontWeight: 600,
+                              background: person.paused
+                                ? "rgba(245,158,11,0.1)"
+                                : "rgba(16,185,129,0.08)",
+                              color: person.paused ? "#f59e0b" : "#10b981",
+                            },
+                          },
+                          person.paused ? "⏸ Paused" : "▶ Active",
+                        ),
+                      ),
+                    ),
+                    React.createElement(
+                      "button",
+                      {
+                        onClick: () => update({ paused: !person.paused }),
+                        style: {
+                          padding: "4px 6px",
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                          fontSize: "10px",
+                          fontWeight: 500,
+                          color: "#8a9e9a",
+                          flexShrink: 0,
+                        },
+                      },
+                      person.paused ? "Resume" : "Pause",
+                    ),
+                  ),
+                  React.createElement(
+                    "div",
+                    {
+                      style: {
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        padding: "10px 14px",
+                        borderTop: "1px solid rgba(0,0,0,0.05)",
+                      },
+                    },
+                    React.createElement(
+                      "span",
+                      {
+                        style: {
+                          fontSize: "14px",
+                          width: "20px",
+                          textAlign: "center",
+                          flexShrink: 0,
+                        },
+                      },
+                      person.marketingOptOut ? "🚫" : "📧",
+                    ),
+                    React.createElement(
+                      "div",
+                      { style: { flex: 1 } },
+                      React.createElement(
+                        "p",
+                        {
+                          style: {
+                            fontSize: "10px",
+                            color: "#8a9e9a",
+                            fontWeight: 600,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.4px",
+                            marginBottom: "1px",
+                          },
+                        },
+                        "Marketing Emails",
+                      ),
+                      React.createElement(
+                        "p",
+                        {
+                          style: {
+                            fontSize: "13px",
+                            color: person.marketingOptOut ? "#ef4444" : "#22c55e",
+                            fontWeight: 500,
+                          },
+                        },
+                        person.marketingOptOut ? "Opted out" : "Subscribed",
+                      ),
+                    ),
+                    React.createElement(
+                      "button",
+                      {
+                        onClick: () =>
+                          onUpdate({ ...person, marketingOptOut: !person.marketingOptOut }),
+                        style: {
+                          padding: "4px 6px",
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                          fontSize: "10px",
+                          fontWeight: 500,
+                          color: "#8a9e9a",
+                          flexShrink: 0,
+                        },
+                      },
+                      person.marketingOptOut ? "Re-subscribe" : "Opt out",
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          activeTab === "contacts" &&
+            React.createElement(ContactsTab, { person: person, onUpdate: onUpdate }),
+          activeTab === "outreach" &&
+            React.createElement(
+              "div",
+              null,
+              React.createElement(
+                "div",
+                {
+                  style: {
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: "1rem",
+                  },
+                },
+                React.createElement(
+                  "p",
+                  { style: { fontSize: "12px", color: "#8a9e9a" } },
+                  "Drips + manual reach-outs in one view",
+                ),
+                React.createElement(
+                  "button",
+                  {
+                    onClick: () => setPopup("reachout"),
+                    style: {
+                      fontSize: "12px",
+                      color: "#f97316",
+                      background: "rgba(249,115,22,0.08)",
+                      border: "1px solid rgba(249,115,22,0.2)",
+                      borderRadius: "8px",
+                      padding: "5px 10px",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      fontWeight: 600,
+                    },
+                  },
+                  "+ Log",
+                ),
+              ),
+              React.createElement(
+                "div",
+                { style: { position: "relative" } },
+                React.createElement("div", {
+                  style: {
+                    position: "absolute",
+                    left: "13px",
+                    top: "8px",
+                    bottom: "8px",
+                    width: "2px",
+                    background: "rgba(0,0,0,0.06)",
+                    borderRadius: "1px",
+                  },
+                }),
+                React.createElement(
+                  "div",
+                  { style: { display: "grid", gap: "10px" } },
+                  person.outreachTimeline.map((entry, i) => {
+                    const isDrip = entry.type === "drip",
+                      isSystem = entry.type === "system",
+                      isSched = entry.status === "scheduled";
+                    return React.createElement(
+                      "div",
+                      {
+                        key: entry.id,
+                        style: { display: "flex", gap: "12px", alignItems: "flex-start" },
+                      },
+                      React.createElement(
+                        "div",
+                        {
+                          style: {
+                            width: "28px",
+                            height: "28px",
+                            borderRadius: "50%",
+                            background: isSystem
+                              ? "rgba(0,0,0,0.04)"
+                              : isDrip
+                                ? "rgba(99,102,241,0.1)"
+                                : "rgba(249,115,22,0.1)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: "13px",
+                            flexShrink: 0,
+                            position: "relative",
+                            zIndex: 1,
+                            opacity: isSched ? 0.5 : 1,
+                          },
+                        },
+                        isSystem ? "·" : isDrip ? TOUCH_CONFIG[entry.method]?.icon || "📧" : "📲",
+                      ),
+                      React.createElement(
+                        "div",
+                        { style: { flex: 1, paddingTop: "4px", opacity: isSched ? 0.6 : 1 } },
+                        React.createElement(
+                          "div",
+                          {
+                            style: {
+                              display: "flex",
+                              gap: "5px",
+                              marginBottom: "2px",
+                              flexWrap: "wrap",
+                            },
+                          },
+                          isDrip &&
+                            React.createElement(
+                              "span",
+                              {
+                                style: {
+                                  fontSize: "10px",
+                                  color: "#6366f1",
+                                  background: "rgba(99,102,241,0.08)",
+                                  padding: "1px 6px",
+                                  borderRadius: "20px",
+                                },
+                              },
+                              "Drip",
+                            ),
+                          !isDrip &&
+                            !isSystem &&
+                            React.createElement(
+                              "span",
+                              {
+                                style: {
+                                  fontSize: "10px",
+                                  color: "#f97316",
+                                  background: "rgba(249,115,22,0.08)",
+                                  padding: "1px 6px",
+                                  borderRadius: "20px",
+                                },
+                              },
+                              "Manual",
+                            ),
+                          isSched &&
+                            React.createElement(
+                              "span",
+                              {
+                                style: {
+                                  fontSize: "10px",
+                                  color: "#8a9e9a",
+                                  background: "rgba(0,0,0,0.05)",
+                                  padding: "1px 6px",
+                                  borderRadius: "20px",
+                                },
+                              },
+                              "Scheduled",
+                            ),
+                          entry.status === "sent" &&
+                            React.createElement(
+                              "span",
+                              {
+                                style: {
+                                  fontSize: "10px",
+                                  color: "#22c55e",
+                                  background: "rgba(34,197,94,0.08)",
+                                  padding: "1px 6px",
+                                  borderRadius: "20px",
+                                },
+                              },
+                              "Sent \u2713",
+                            ),
+                        ),
+                        React.createElement(
+                          "p",
+                          {
+                            style: {
+                              fontSize: "13px",
+                              color: isSched ? "#8a9e9a" : "#1a2e2b",
+                              lineHeight: 1.4,
+                            },
+                          },
+                          entry.label,
+                        ),
+                        React.createElement(
+                          "p",
+                          { style: { fontSize: "10px", color: "#b0c0bc", marginTop: "2px" } },
+                          expandTs(entry.ts),
+                          entry.user ? ` · ${entry.user}` : "",
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+              ),
+            ),
+        ),
+      ),
+    ),
+    popup === "reachout" &&
+      React.createElement(ReachOutPopup, {
+        person: person,
+        onDone: handleReachOut,
+        onClose: () => setPopup(null),
+      }),
+    popup === "account" &&
+      React.createElement(AccountPanel, {
+        person: person,
+        allPeople: [person],
+        onClose: () => setPopup(null),
+        onUpdatePerson: onUpdate,
+      }),
+    popup === "tags" &&
+      React.createElement(TagPopup, {
+        person: person,
+        onSave: handleTags,
+        onClose: () => setPopup(null),
+      }),
+    popup === "close" &&
+      React.createElement(ClosePopup, {
+        person: person,
+        onConfirm: handleClose,
+        onClose: () => setPopup(null),
+      }),
+    showAssessmentScheduler &&
+      React.createElement(AssessmentSchedulerSheet, {
+        person: person,
+        onSave: (date, time, type) => {
+          onUpdate({
+            ...person,
+            assessment: `${date} at ${time}`,
+            assessmentType: type,
+            outreachTimeline: [
+              ...person.outreachTimeline,
+              {
+                id: `o${Date.now()}`,
+                type: "system",
+                method: "system",
+                label: `${type === "virtual" ? "Virtual" : "In-person"} assessment scheduled — ${date} at ${time}`,
+                ts: "Just now",
+                status: "done",
+              },
+            ],
+          });
+          setShowAssessmentScheduler(false);
+        },
+        onRemove: () => {
+          onUpdate({ ...person, assessment: null, assessmentType: null });
+          setShowAssessmentScheduler(false);
+        },
+        onClose: () => setShowAssessmentScheduler(false),
+      }),
+    showSadAnimation && React.createElement(SadAnimation, null),
+    showWonAnimation && React.createElement(WonAnimation, null),
+    showAssignPicker &&
+      React.createElement(AssignUserPicker, {
+        locationId: person.locationId,
+        currentUserIds: assignedIds,
+        onSelect: (ids) => onUpdate({ ...person, assignedTo: ids }),
+        onClose: () => setShowAssignPicker(false),
+      }),
+    popup === "job-detail" &&
+      person.jobDetail &&
+      React.createElement(JobDetailModal, {
+        text: person.jobDetail,
+        onClose: () => setPopup(null),
+      }),
+    popup === "add-job-contact" &&
+      React.createElement(JobContactModal, {
+        onSave: (c) => {
+          update({ jobContacts: [...(person.jobContacts || []), c] });
+          setPopup(null);
+        },
+        onClose: () => setPopup(null),
+      }),
+    popup === "edit-job-detail" &&
+      React.createElement(EditJobDetailModal, {
+        person: person,
+        onSave: (text) => {
+          update({ jobDetail: text });
+          setPopup(null);
+        },
+        onClose: () => setPopup(null),
+      }),
+    popup === "note" &&
+      React.createElement(AddNotePopup, { onAdd: handleAddNote, onClose: () => setPopup(null) }),
+    showProcess &&
+      React.createElement(ProcessLeadSheet, {
+        person: person,
+        onClose: () => setShowProcess(false),
+        onSave: (updated) => {
+          onUpdate(updated);
+          setShowProcess(false);
+        },
+      }),
+    showLeadInfoEdit &&
+      React.createElement(LeadContactEditModal, {
+        person: person,
+        onSave: (vals) => {
+          update({
+            name: `${vals.firstName} ${vals.lastName}`.trim(),
+            phone: vals.phone,
+            email: vals.email,
+          });
+          setShowLeadInfoEdit(false);
+        },
+        onClose: () => setShowLeadInfoEdit(false),
+      }),
+    showSnooze &&
+      React.createElement(SnoozePopup, {
+        person: person,
+        onClose: () => setShowSnooze(false),
+        onSave: (date, note) => {
+          onUpdate({
+            ...person,
+            snoozeUntil: date,
+            snoozeNote: note,
+            stage: "Nurturing",
+            buzzNotes: note
+              ? [
+                  ...(person.buzzNotes || []),
+                  {
+                    id: `bn${Date.now()}`,
+                    text: `💤 Snoozed: ${note}`,
+                    ts: "Just now",
+                    user: "You",
+                  },
+                ]
+              : person.buzzNotes || [],
+            activity: [
+              ...person.activity,
+              {
+                type: "snooze",
+                label: `Snoozed until ${new Date(date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}${note ? ` · ${note}` : ""}`,
+                ts: "Just now",
+                user: "You",
+              },
+            ],
+          });
+          setShowSnooze(false);
+        },
+      }),
+    showCloseOut &&
+      React.createElement(CloseOutFlow, {
+        person: person,
+        onComplete: (updated) => {
+          update(updated);
+          setShowCloseOut(false);
+          setShowWonAnimation(true);
+          setTimeout(() => {
+            setShowWonAnimation(false);
+            onClose();
+          }, 4500);
+        },
+        onClose: () => setShowCloseOut(false),
+        onAddFollowUp: onAddFollowUp,
+      }),
+    popup === "invoice" &&
+      React.createElement(InvoicePopup, {
+        person: person,
+        onFinalProcess: handleFinalProcess,
+        onUpdate: (p) => update(p),
+        onClose: () => setPopup(null),
+      }),
+    popup === "send-jobber" &&
+      React.createElement(SendToJobberPopup, {
+        person: person,
+        onDone: handleSendToJobber,
+        onClose: () => setPopup(null),
+      }),
+    popup === "delete" &&
+      React.createElement(
+        "div",
+        {
+          style: {
+            position: "fixed",
+            inset: 0,
+            zIndex: 10005,
+            display: "flex",
+            alignItems: "flex-end",
+          },
+        },
+        React.createElement("div", {
+          style: { position: "absolute", inset: 0, background: "rgba(26,46,43,0.5)" },
+          onClick: () => setPopup(null),
+        }),
+        React.createElement(
+          "div",
+          {
+            style: {
+              position: "relative",
+              background: "white",
+              width: "100%",
+              borderRadius: "16px",
+              zIndex: 1,
+              padding: "1.5rem",
+              boxShadow: "0 -8px 40px rgba(26,46,43,0.2)",
+            },
+          },
+          React.createElement("div", {
+            style: {
+              width: "36px",
+              height: "4px",
+              background: "rgba(0,0,0,0.12)",
+              borderRadius: "2px",
+              margin: "-0.5rem auto 1rem",
+            },
+          }),
+          React.createElement(
+            "div",
+            { style: { textAlign: "center", marginBottom: "1.25rem" } },
+            React.createElement(
+              "div",
+              { style: { fontSize: "40px", marginBottom: "10px" } },
+              "\uD83D\uDDD1\uFE0F",
+            ),
+            React.createElement(
+              "p",
+              {
+                style: {
+                  fontSize: "16px",
+                  fontWeight: 700,
+                  color: "#1a2e2b",
+                  fontFamily: "Georgia,serif",
+                  marginBottom: "6px",
+                },
+              },
+              "Delete this record?",
+            ),
+            React.createElement(
+              "p",
+              { style: { fontSize: "13px", color: "#8a9e9a", lineHeight: 1.5 } },
+              React.createElement("strong", null, person.name),
+              " will be permanently removed. This cannot be undone.",
+            ),
+          ),
+          React.createElement(
+            "div",
+            { style: { display: "flex", gap: "10px" } },
+            React.createElement(
+              "button",
+              {
+                onClick: () => setPopup(null),
+                style: {
+                  flex: 1,
+                  padding: "13px",
+                  background: "transparent",
+                  border: "1.5px solid rgba(0,0,0,0.1)",
+                  borderRadius: "12px",
+                  fontSize: "14px",
+                  fontFamily: "inherit",
+                  color: "#4a5e5a",
+                  cursor: "pointer",
+                },
+              },
+              "Cancel",
+            ),
+            React.createElement(
+              "button",
+              {
+                onClick: () => {
+                  onMarkJunk(person.id, "Deleted", "Permanently deleted");
+                  onClose();
+                },
+                style: {
+                  flex: 1,
+                  padding: "13px",
+                  background: "#ef4444",
+                  border: "none",
+                  borderRadius: "12px",
+                  fontSize: "14px",
+                  fontFamily: "inherit",
+                  fontWeight: 700,
+                  color: "white",
+                  cursor: "pointer",
+                },
+              },
+              "Delete Permanently",
+            ),
+          ),
+          React.createElement("div", { style: { height: "0.5rem" } }),
+        ),
+      ),
+    popup === "add-address" &&
+      React.createElement(AddAddressPopup, {
+        person: person,
+        update: update,
+        onClose: () => setPopup(null),
+      }),
+    popup === "jobber-history" &&
+      React.createElement(
+        "div",
+        {
+          style: {
+            position: "fixed",
+            inset: 0,
+            zIndex: 10010,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "24px",
+          },
+          onClick: () => setPopup(null),
+        },
+        React.createElement(
+          "div",
+          {
+            style: {
+              background: "white",
+              borderRadius: "20px",
+              width: "100%",
+              maxWidth: "420px",
+              maxHeight: "80vh",
+              overflowY: "auto",
+              boxShadow: "0 24px 60px rgba(26,46,43,0.25)",
+            },
+            onClick: (e) => e.stopPropagation(),
+          },
+          React.createElement(
+            "div",
+            {
+              style: {
+                padding: "18px 20px 14px",
+                borderBottom: "1px solid rgba(0,0,0,0.06)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                position: "sticky",
+                top: 0,
+                background: "white",
+              },
+            },
+            React.createElement(
+              "div",
+              null,
+              React.createElement(
+                "p",
+                {
+                  style: {
+                    fontSize: "16px",
+                    fontWeight: 700,
+                    color: "#1a2e2b",
+                    fontFamily: "Georgia,serif",
+                  },
+                },
+                "Jobber History",
+              ),
+              person.jobberClient &&
+                React.createElement(
+                  "p",
+                  { style: { fontSize: "11px", color: "#8a9e9a", marginTop: "1px" } },
+                  person.jobberClient.clientId,
+                ),
+            ),
+            React.createElement(
+              "button",
+              {
+                onClick: () => setPopup(null),
+                style: {
+                  background: "none",
+                  border: "none",
+                  fontSize: "22px",
+                  color: "#8a9e9a",
+                  cursor: "pointer",
+                  lineHeight: 1,
+                },
+              },
+              "\xD7",
+            ),
+          ),
+          React.createElement(
+            "div",
+            { style: { padding: "16px 20px", display: "grid", gap: "8px" } },
+            person.jobberClient?.jobs?.length > 0
+              ? person.jobberClient.jobs.map((j) =>
+                  React.createElement(
+                    "div",
+                    {
+                      key: j.id,
+                      style: { padding: "12px 14px", background: "#f7f5f0", borderRadius: "10px" },
+                    },
+                    React.createElement(
+                      "div",
+                      {
+                        style: {
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "flex-start",
+                          marginBottom: "6px",
+                        },
+                      },
+                      React.createElement(
+                        "div",
+                        { style: { flex: 1, minWidth: 0 } },
+                        React.createElement(
+                          "p",
+                          {
+                            style: {
+                              fontSize: "13px",
+                              fontWeight: 600,
+                              color: "#1a2e2b",
+                              marginBottom: "2px",
+                            },
+                          },
+                          j.title,
+                        ),
+                        React.createElement(
+                          "p",
+                          { style: { fontSize: "11px", color: "#8a9e9a" } },
+                          j.date && fmtDate(j.date),
+                          j.scheduledDate && !j.date && fmtDate(j.scheduledDate),
+                        ),
+                      ),
+                      React.createElement(
+                        "div",
+                        { style: { textAlign: "right", flexShrink: 0 } },
+                        React.createElement(
+                          "span",
+                          {
+                            style: {
+                              fontSize: "10px",
+                              padding: "2px 8px",
+                              borderRadius: "20px",
+                              fontWeight: 600,
+                              background:
+                                j.status === "Completed"
+                                  ? "rgba(34,197,94,0.1)"
+                                  : "rgba(245,158,11,0.1)",
+                              color: j.status === "Completed" ? "#22c55e" : "#f59e0b",
+                            },
+                          },
+                          j.status,
+                        ),
+                        (j.amount || j.total) &&
+                          React.createElement(
+                            "p",
+                            {
+                              style: {
+                                fontSize: "12px",
+                                fontWeight: 600,
+                                color: "#1a2e2b",
+                                marginTop: "3px",
+                              },
+                            },
+                            fmt(j.amount || j.total),
+                          ),
+                      ),
+                    ),
+                    React.createElement(
+                      "div",
+                      {
+                        style: {
+                          display: "flex",
+                          gap: "8px",
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                        },
+                      },
+                      j.completedDate &&
+                        React.createElement(
+                          "span",
+                          { style: { fontSize: "10px", color: "#8a9e9a" } },
+                          "\u2713 Completed ",
+                          fmtDate(j.completedDate),
+                        ),
+                      j.id &&
+                        React.createElement(
+                          "a",
+                          {
+                            href: `https://app.jobber.com/jobs/${j.id}`,
+                            target: "_blank",
+                            rel: "noreferrer",
+                            style: {
+                              fontSize: "10px",
+                              color: "#6366f1",
+                              textDecoration: "none",
+                              fontWeight: 600,
+                            },
+                          },
+                          "View in Jobber \u2197",
+                        ),
+                    ),
+                  ),
+                )
+              : React.createElement(
+                  "p",
+                  {
+                    style: {
+                      fontSize: "13px",
+                      color: "#8a9e9a",
+                      textAlign: "center",
+                      padding: "24px 0",
+                    },
+                  },
+                  "No job history found",
+                ),
+          ),
+        ),
+      ),
+  );
 }
 
 
