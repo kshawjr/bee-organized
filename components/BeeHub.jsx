@@ -587,7 +587,7 @@ const PEOPLE = [
 // the seed only generates client-side after mount.
 const generateExtraPeople = () => {
   const stages = ['New','Attempting','Nurturing','Request','Job in Progress','Final Processing','Closed Won','Closed Lost']
-  const sources = ['Website','Referral','Google','Instagram','Facebook','Word of Mouth','Yelp','NextDoor']
+  const sources = getLeadSources()
   const projects = ['Home Organization','Kitchen + Pantry','Closet + Office','Garage','Full Home','Move-In Organization','Bedroom + Closet','Basement','Attic','Master Closet','Pantry','Mudroom + Entry']
   const paths = ['email-nurture','quick-connect','personal-touch','general-a','general-b']
   const tags = [['hot'],['referral'],['returning'],['vip'],['warm'],[],['hot','referral'],[]]
@@ -16048,90 +16048,656 @@ function TierEditModal({ tiers, onClose, onSave }) {
   )
 }
 
-function ConfigureTab() {
-  const [lostReasons, setLostReasons] = useState(DEFAULT_CLOSE_REASONS)
-  const [tags, setTags]               = useState(['hot','referral','returning','vip','warm','partner','corporate','hot-lead'])
-  const [projects, setProjects]       = useState(PROJECT_TYPES)
-  const [specialties, setSpecialties] = useState(SPECIALTIES.map(s=>s.label))
-  const [tiers, setTiers]             = useState(PARTNER_TIERS.map(t=>({...t})))
-  const [open, setOpen]               = useState(null)
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-  function updateLostReasons(list) { setLostReasons(list) }
-  useEffect(()=>{ setCloseLostReasons(lostReasons) }, [lostReasons])
-  useEffect(()=>{ setAdminSpecialties(specialties.map((label,i)=>{ const orig=SPECIALTIES[i]; return orig?{...orig,label}:{id:'custom-'+i,label,color:'#8a9e9a',bg:'rgba(138,158,154,0.1)'} })) }, [specialties])
-  useEffect(()=>{ setAdminPartnerTiers(tiers) }, [tiers])
+function hexToRgba(hex, alpha = 0.1) {
+  if (!hex || typeof hex !== 'string') return `rgba(138,158,154,${alpha})`
+  let h = hex.replace('#', '').trim()
+  if (h.length === 3) h = h.split('').map(c => c + c).join('')
+  if (h.length !== 6) return `rgba(138,158,154,${alpha})`
+  const r = parseInt(h.slice(0, 2), 16)
+  const g = parseInt(h.slice(2, 4), 16)
+  const b = parseInt(h.slice(4, 6), 16)
+  if ([r, g, b].some(n => isNaN(n))) return `rgba(138,158,154,${alpha})`
+  return `rgba(${r},${g},${b},${alpha})`
+}
 
-  const leadLists = [
-    { key:'lost',     label:'Closed Lost Reasons', desc:"Shown when closing a lead as lost",         count:lostReasons.length, items:lostReasons, setItems:updateLostReasons, placeholder:'Add a reason…' },
-    { key:'tags',     label:'Client Tags',          desc:"Used to label and filter clients",          count:tags.length,        items:tags,        setItems:setTags,           placeholder:'Add a tag…' },
-  ]
-  const partnerLists = [
-    { key:'specialties', label:'Partner Specialties', desc:"What partners do - shown in the Partners module", count:specialties.length, items:specialties, setItems:setSpecialties, placeholder:'Add a specialty…' },
-  ]
+// Per-category UI config: label, section, which fields the editor exposes,
+// default color for new items, and the corresponding in-memory setter to
+// push DB changes into so other screens reflect edits without full reload.
+const LOOKUP_CATEGORIES_CONFIG = {
+  closed_lost_reasons: {
+    label: 'Closed Lost Reasons',
+    desc: 'Shown when closing a lead as lost',
+    section: 'CLIENTS',
+    fields: ['label'],
+    defaultColor: '#8a9e9a',
+    syncGetter: 'closed_lost',
+  },
+  client_tags: {
+    label: 'Client Tags',
+    desc: 'Used to label and filter clients',
+    section: 'CLIENTS',
+    fields: ['label', 'color', 'icon'],
+    defaultColor: '#6366f1',
+    syncGetter: 'client_tags',
+  },
+  project_types: {
+    label: 'Project Types',
+    desc: 'Each tagged Move or Organizing — determines New Lead Drip used',
+    section: 'CLIENTS',
+    fields: ['label', 'drip_category'],
+    defaultColor: '#8a9e9a',
+    syncGetter: 'project_types',
+  },
+  client_stages: {
+    label: 'Client Stages',
+    desc: 'Kanban columns for the Hive (Clients) screen',
+    section: 'CLIENTS',
+    fields: ['label', 'color', 'icon'],
+    defaultColor: '#6366f1',
+    syncGetter: 'client_stages',
+  },
+  lead_sources: {
+    label: 'Lead Sources',
+    desc: 'Where new leads come from (Website, Referral, etc.)',
+    section: 'CLIENTS',
+    fields: ['label'],
+    defaultColor: '#8a9e9a',
+    syncGetter: 'lead_sources',
+  },
+  partner_specialties: {
+    label: 'Partner Specialties',
+    desc: 'What partners do — shown in the Partners module',
+    section: 'PARTNERS',
+    fields: ['label', 'color', 'icon'],
+    defaultColor: '#6366f1',
+    syncGetter: 'partner_specialties',
+  },
+  partner_tiers: {
+    label: 'Partner Tiers',
+    desc: 'Relationship levels with brand colors',
+    section: 'PARTNERS',
+    fields: ['label', 'color', 'description'],
+    defaultColor: '#A8C9C4',
+    syncGetter: 'partner_tiers',
+  },
+  partner_stages: {
+    label: 'Partner Stages',
+    desc: 'Kanban columns for the Partners screen',
+    section: 'PARTNERS',
+    fields: ['label', 'color', 'icon'],
+    defaultColor: '#6366f1',
+    syncGetter: 'partner_stages',
+  },
+  touchpoint_types: {
+    label: 'Touchpoint Types',
+    desc: 'Categories for logging partner interactions',
+    section: 'PARTNERS',
+    fields: ['label', 'icon'],
+    defaultColor: '#8a9e9a',
+    syncGetter: 'touchpoint_types',
+  },
+}
 
-  function Section({ title, children }) {
-    return (
-      <div style={{ marginBottom:'20px' }}>
-        <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>{title}</p>
-        <div style={{ background:'white', borderRadius:'12px', border:'1px solid rgba(0,0,0,0.07)', overflow:'hidden' }}>
-          {children}
+// Push DB-shaped rows into the existing in-memory getters so other screens
+// reflect changes after admin edits. Mirrors the hydration logic in App().
+function pushLookupsToGetters(category, rows) {
+  if (!Array.isArray(rows)) return
+  const toStageShape = (r) => rows.map(x => ({
+    key: (x.attrs && x.attrs.key) || x.label,
+    label: x.label,
+    color: x.color || '#8a9e9a',
+    bg: x.bg_color || 'rgba(138,158,154,0.08)',
+    dot: x.color || '#8a9e9a',
+    icon: x.icon || '',
+  }))
+  const toTagShape = () => rows.map(x => ({
+    id: (x.attrs && x.attrs.key) || x.id,
+    label: x.icon ? `${x.icon} ${x.label}` : x.label,
+    color: x.color || '#8a9e9a',
+    bg: x.bg_color || 'rgba(138,158,154,0.1)',
+  }))
+  const toTierShape = () => rows.map(x => ({
+    id: (x.attrs && x.attrs.key) || x.id,
+    label: x.label,
+    color: x.color || '#8a9e9a',
+    bg: x.bg_color || 'rgba(138,158,154,0.15)',
+    desc: x.description || '',
+  }))
+  const toTouchpointShape = () => rows.map(x => ({
+    key: (x.attrs && x.attrs.key) || x.id,
+    icon: x.icon || '',
+    label: x.label,
+  }))
+
+  switch (category) {
+    case 'client_stages':       setAdminClientStages(toStageShape()); break
+    case 'partner_stages':      setAdminPartnerStages(toStageShape()); break
+    case 'client_tags':         setAdminClientTags(toTagShape()); break
+    case 'partner_specialties': setAdminSpecialties(toTagShape()); break
+    case 'partner_tiers':       setAdminPartnerTiers(toTierShape()); break
+    case 'touchpoint_types':    setAdminTouchpointTypes(toTouchpointShape()); break
+    case 'lead_sources':        setAdminLeadSources(rows.map(r => r.label)); break
+    case 'closed_lost_reasons': setCloseLostReasons(rows.map(r => r.label)); break
+    case 'project_types':       setAdminProjectTypes(rows.map(r => ({
+      label: r.label,
+      drip_category: (r.attrs && r.attrs.drip_category) || 'general',
+    }))); break
+  }
+}
+
+// ─── Sub-component: LookupRow (one row in the editor list) ───────────────────
+
+function LookupRow({ row, config, isFirst, isLast, busy, onEdit, onMoveUp, onMoveDown, onDelete }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '10px',
+      padding: '10px 12px',
+      borderBottom: '1px solid rgba(0,0,0,0.06)',
+      background: 'white',
+    }}>
+      {/* Color swatch */}
+      {config.fields.includes('color') && (
+        <div style={{
+          width: 14, height: 14, borderRadius: '50%',
+          background: row.color || '#cccccc',
+          border: '1px solid rgba(0,0,0,0.15)',
+          flexShrink: 0,
+        }} />
+      )}
+      {/* Icon */}
+      {config.fields.includes('icon') && row.icon && (
+        <span style={{ fontSize: 16, flexShrink: 0 }}>{row.icon}</span>
+      )}
+      {/* Label + optional description */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ fontSize: 13, color: '#1a2e2b', fontWeight: 500, margin: 0 }}>{row.label}</p>
+        {config.fields.includes('description') && row.description && (
+          <p style={{ fontSize: 11, color: '#8a9e9a', margin: '2px 0 0 0' }}>{row.description}</p>
+        )}
+        {config.fields.includes('drip_category') && row.attrs && row.attrs.drip_category && (
+          <p style={{ fontSize: 11, color: '#8a9e9a', margin: '2px 0 0 0' }}>
+            Drip: <span style={{ fontWeight: 600, color: row.attrs.drip_category === 'move' ? '#0ea5e9' : '#1a2e2b' }}>
+              {row.attrs.drip_category === 'move' ? 'Move' : 'Organizing'}
+            </span>
+          </p>
+        )}
+      </div>
+      {/* Actions */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+        <button onClick={onMoveUp} disabled={busy || isFirst} style={iconBtnStyle(isFirst || busy)} title="Move up">↑</button>
+        <button onClick={onMoveDown} disabled={busy || isLast} style={iconBtnStyle(isLast || busy)} title="Move down">↓</button>
+        <button onClick={onEdit} disabled={busy} style={iconBtnStyle(busy)} title="Edit">✏️</button>
+        <button onClick={onDelete} disabled={busy} style={iconBtnStyle(busy)} title="Delete">🗑️</button>
+      </div>
+    </div>
+  )
+}
+
+function iconBtnStyle(disabled) {
+  return {
+    width: 28, height: 28, borderRadius: 6,
+    background: disabled ? 'rgba(0,0,0,0.02)' : 'rgba(168,201,196,0.12)',
+    border: '1px solid rgba(0,0,0,0.07)',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    opacity: disabled ? 0.4 : 1,
+    fontSize: 12,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    padding: 0,
+  }
+}
+
+// ─── Sub-component: LookupForm (inline add or edit form) ─────────────────────
+
+function LookupForm({ row, config, busy, onSave, onCancel }) {
+  const [label, setLabel] = useState(row?.label || '')
+  const [color, setColor] = useState(row?.color || config.defaultColor)
+  const [icon, setIcon]   = useState(row?.icon || '')
+  const [description, setDescription] = useState(row?.description || '')
+  const [dripCategory, setDripCategory] = useState((row?.attrs && row?.attrs.drip_category) || 'general')
+
+  const canSave = label.trim().length > 0 && !busy
+
+  function submit() {
+    if (!canSave) return
+    const payload = { label: label.trim() }
+    if (config.fields.includes('color')) {
+      payload.color = color
+      payload.bg_color = hexToRgba(color, 0.1)
+    }
+    if (config.fields.includes('icon')) payload.icon = icon.trim()
+    if (config.fields.includes('description')) payload.description = description.trim()
+    if (config.fields.includes('drip_category')) {
+      payload.attrs = { ...(row?.attrs || {}), drip_category: dripCategory }
+    }
+    onSave(payload)
+  }
+
+  return (
+    <div style={{
+      padding: '12px 12px 14px',
+      background: 'rgba(168,201,196,0.06)',
+      border: '1.5px dashed rgba(168,201,196,0.4)',
+      borderRadius: 10,
+      display: 'grid', gap: 10,
+      marginTop: 6,
+    }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <input
+          autoFocus
+          value={label}
+          onChange={e => setLabel(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel() }}
+          placeholder="Label…"
+          style={{
+            flex: 1, minWidth: 180,
+            padding: '7px 10px',
+            border: '1.5px solid rgba(0,0,0,0.1)',
+            borderRadius: 7,
+            fontSize: 13, fontFamily: 'inherit', color: '#1a2e2b',
+            outline: 'none', background: 'white',
+          }}
+        />
+        {config.fields.includes('color') && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#8a9e9a' }}>
+            Color
+            <input
+              type="color"
+              value={color}
+              onChange={e => setColor(e.target.value)}
+              style={{ width: 36, height: 28, border: 'none', cursor: 'pointer', background: 'transparent', padding: 0 }}
+            />
+          </label>
+        )}
+        {config.fields.includes('icon') && (
+          <input
+            value={icon}
+            onChange={e => setIcon(e.target.value)}
+            placeholder="🌱"
+            maxLength={4}
+            style={{
+              width: 60,
+              padding: '7px 8px',
+              border: '1.5px solid rgba(0,0,0,0.1)',
+              borderRadius: 7,
+              fontSize: 16, textAlign: 'center',
+              outline: 'none', background: 'white',
+            }}
+          />
+        )}
+        {config.fields.includes('drip_category') && (
+          <select
+            value={dripCategory}
+            onChange={e => setDripCategory(e.target.value)}
+            style={{
+              padding: '7px 10px',
+              border: '1.5px solid rgba(0,0,0,0.1)',
+              borderRadius: 7,
+              fontSize: 13, fontFamily: 'inherit',
+              outline: 'none', background: 'white',
+            }}
+          >
+            <option value="general">Organizing drip</option>
+            <option value="move">Move drip</option>
+          </select>
+        )}
+      </div>
+      {config.fields.includes('description') && (
+        <input
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          placeholder="Description (optional)"
+          style={{
+            padding: '7px 10px',
+            border: '1.5px solid rgba(0,0,0,0.1)',
+            borderRadius: 7,
+            fontSize: 12, fontFamily: 'inherit', color: '#1a2e2b',
+            outline: 'none', background: 'white',
+          }}
+        />
+      )}
+      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+        <button onClick={onCancel} disabled={busy} style={{
+          padding: '6px 12px',
+          background: 'white',
+          border: '1px solid rgba(0,0,0,0.1)',
+          borderRadius: 7,
+          fontSize: 12, cursor: busy ? 'not-allowed' : 'pointer',
+        }}>Cancel</button>
+        <button onClick={submit} disabled={!canSave} style={{
+          padding: '6px 14px',
+          background: canSave ? '#1a2e2b' : 'rgba(0,0,0,0.1)',
+          color: 'white',
+          border: 'none',
+          borderRadius: 7,
+          fontSize: 12, fontWeight: 600,
+          cursor: canSave ? 'pointer' : 'not-allowed',
+        }}>{busy ? 'Saving…' : 'Save'}</button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Sub-component: LookupEditor (one category's full edit screen) ───────────
+
+function LookupEditor({ category, rows, onRefresh, onBack }) {
+  const config = LOOKUP_CATEGORIES_CONFIG[category]
+  const [editingId, setEditingId] = useState(null)  // 'new' | uuid | null
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  if (!config) return <div>Unknown category: {category}</div>
+
+  async function apiCreate(payload) {
+    setBusy(true); setError(null)
+    try {
+      const res = await fetch('/api/lookups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category, ...payload }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        throw new Error(j.error || `HTTP ${res.status}`)
+      }
+      setEditingId(null)
+      await onRefresh()
+    } catch (e) {
+      setError(e.message || 'Failed to create')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function apiUpdate(id, payload) {
+    setBusy(true); setError(null)
+    try {
+      const res = await fetch(`/api/lookups/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        throw new Error(j.error || `HTTP ${res.status}`)
+      }
+      setEditingId(null)
+      await onRefresh()
+    } catch (e) {
+      setError(e.message || 'Failed to update')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function apiDelete(id) {
+    if (!confirm('Remove this item? It will no longer appear in lists.')) return
+    setBusy(true); setError(null)
+    try {
+      const res = await fetch(`/api/lookups/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        throw new Error(j.error || `HTTP ${res.status}`)
+      }
+      await onRefresh()
+    } catch (e) {
+      setError(e.message || 'Failed to delete')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function apiReorder(items) {
+    setBusy(true); setError(null)
+    try {
+      const res = await fetch('/api/lookups/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        throw new Error(j.error || `HTTP ${res.status}`)
+      }
+      await onRefresh()
+    } catch (e) {
+      setError(e.message || 'Failed to reorder')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function move(rowIdx, direction) {
+    const newRows = [...rows]
+    const j = rowIdx + direction
+    if (j < 0 || j >= newRows.length) return
+    ;[newRows[rowIdx], newRows[j]] = [newRows[j], newRows[rowIdx]]
+    // Renumber with spacing of 10
+    const items = newRows.map((r, i) => ({ id: r.id, sort_order: (i + 1) * 10 }))
+    apiReorder(items)
+  }
+
+  return (
+    <div style={{ padding: '0 0 30px' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0' }}>
+        <button onClick={onBack} style={{
+          padding: '6px 10px',
+          background: 'rgba(168,201,196,0.12)',
+          border: '1px solid rgba(0,0,0,0.07)',
+          borderRadius: 7,
+          fontSize: 12, cursor: 'pointer',
+        }}>← Back</button>
+        <div>
+          <p style={{ fontSize: 16, fontWeight: 700, color: '#1a2e2b', margin: 0 }}>{config.label}</p>
+          <p style={{ fontSize: 11, color: '#8a9e9a', margin: '2px 0 0 0' }}>{config.desc}</p>
         </div>
+      </div>
+
+      {/* Error banner */}
+      {error && (
+        <div style={{
+          padding: '8px 12px',
+          background: 'rgba(239,68,68,0.08)',
+          border: '1px solid rgba(239,68,68,0.3)',
+          borderLeft: '4px solid #ef4444',
+          borderRadius: 8,
+          color: '#7f1d1d',
+          fontSize: 12,
+          marginBottom: 10,
+        }}>{error}</div>
+      )}
+
+      {/* List */}
+      <div style={{
+        background: 'white',
+        borderRadius: 12,
+        border: '1px solid rgba(0,0,0,0.07)',
+        overflow: 'hidden',
+      }}>
+        {rows.length === 0 && (
+          <div style={{ padding: '24px 16px', textAlign: 'center', color: '#8a9e9a', fontSize: 13 }}>
+            No items yet. Add one below.
+          </div>
+        )}
+        {rows.map((row, i) => (
+          <React.Fragment key={row.id}>
+            {editingId === row.id ? (
+              <div style={{ padding: '10px 12px' }}>
+                <LookupForm
+                  row={row}
+                  config={config}
+                  busy={busy}
+                  onSave={(payload) => apiUpdate(row.id, payload)}
+                  onCancel={() => setEditingId(null)}
+                />
+              </div>
+            ) : (
+              <LookupRow
+                row={row}
+                config={config}
+                isFirst={i === 0}
+                isLast={i === rows.length - 1}
+                busy={busy}
+                onEdit={() => setEditingId(row.id)}
+                onMoveUp={() => move(i, -1)}
+                onMoveDown={() => move(i, 1)}
+                onDelete={() => apiDelete(row.id)}
+              />
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+
+      {/* Add new */}
+      <div style={{ marginTop: 12 }}>
+        {editingId === 'new' ? (
+          <LookupForm
+            config={config}
+            busy={busy}
+            onSave={(payload) => apiCreate(payload)}
+            onCancel={() => setEditingId(null)}
+          />
+        ) : (
+          <button onClick={() => setEditingId('new')} disabled={busy} style={{
+            width: '100%',
+            padding: '10px 12px',
+            background: 'rgba(168,201,196,0.08)',
+            border: '1.5px dashed rgba(168,201,196,0.5)',
+            borderRadius: 10,
+            cursor: busy ? 'not-allowed' : 'pointer',
+            fontSize: 13, fontWeight: 600,
+            color: '#1a2e2b',
+          }}>+ Add {config.label.replace(/s$/, '')}</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Main: ConfigureTab ──────────────────────────────────────────────────────
+
+function ConfigureTab() {
+  const [lookups, setLookups] = useState({})  // { category: [rows] }
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [openCategory, setOpenCategory] = useState(null)
+
+  async function refresh() {
+    try {
+      const res = await fetch('/api/lookups')
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const json = await res.json()
+      const grouped = {}
+      for (const row of (json.lookups || [])) {
+        if (!grouped[row.category]) grouped[row.category] = []
+        grouped[row.category].push(row)
+      }
+      // Sort each category by sort_order (API already does this, but defensive)
+      for (const cat of Object.keys(grouped)) {
+        grouped[cat].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+        // Push into in-memory getters so other screens see edits
+        pushLookupsToGetters(cat, grouped[cat])
+      }
+      setLookups(grouped)
+      setError(null)
+    } catch (e) {
+      setError(e.message || 'Failed to load lookups')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { refresh() }, [])
+
+  if (loading) {
+    return <div style={{ padding: 30, textAlign: 'center', color: '#8a9e9a' }}>Loading…</div>
+  }
+  if (error) {
+    return (
+      <div style={{
+        padding: '12px 16px',
+        background: 'rgba(239,68,68,0.08)',
+        border: '1px solid rgba(239,68,68,0.3)',
+        borderLeft: '4px solid #ef4444',
+        borderRadius: 8,
+        color: '#7f1d1d',
+        fontSize: 13,
+      }}>
+        Failed to load lookups: {error}
+        <button onClick={refresh} style={{ marginLeft: 12, padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}>Retry</button>
       </div>
     )
   }
 
-  function ListRow({ list, i, total, onTap }) {
+  // Drill-down view
+  if (openCategory) {
     return (
-      <button onClick={onTap} style={{ width:'100%', padding:'13px 16px', background:'none', border:'none', borderBottom:i<total-1?'1px solid rgba(0,0,0,0.05)':'none', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left' }}>
-        <div style={{ flex:1, minWidth:0 }}>
-          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{list.label}</p>
-          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{list.desc}</p>
-        </div>
-        <div style={{ display:'flex', alignItems:'center', gap:'8px', flexShrink:0 }}>
-          <span style={{ fontSize:'12px', color:'#a8c9c4', fontWeight:600, background:'rgba(168,201,196,0.1)', padding:'2px 8px', borderRadius:'10px' }}>{list.count}</span>
-          <span style={{ fontSize:'16px', color:'#c8d8d4' }}>›</span>
-        </div>
-      </button>
+      <LookupEditor
+        category={openCategory}
+        rows={lookups[openCategory] || []}
+        onRefresh={refresh}
+        onBack={() => setOpenCategory(null)}
+      />
     )
   }
 
-  const currentList = open ? [...leadLists,...partnerLists].find(l=>l.key===open) : null
+  // Overview view: tiles grouped by section
+  const sections = [
+    { key: 'CLIENTS',  cats: ['closed_lost_reasons', 'client_tags', 'project_types', 'client_stages', 'lead_sources'] },
+    { key: 'PARTNERS', cats: ['partner_specialties', 'partner_tiers', 'partner_stages', 'touchpoint_types'] },
+  ]
 
   return (
-    <div style={{ padding:'1rem 1.25rem' }}>
-
-      <Section title="Clients">
-        {leadLists.map((list,i)=><ListRow key={list.key} list={list} i={i} total={leadLists.length+1} onTap={()=>setOpen(list.key)} />)}
-        <button onClick={()=>setOpen('projects')} style={{ width:'100%', padding:'13px 16px', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left' }}>
-          <div style={{ flex:1, minWidth:0 }}>
-            <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Project Types</p>
-            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Each tagged Move or Organizing - determines New Lead Drip used</p>
+    <div>
+      {sections.map(section => (
+        <div key={section.key} style={{ marginBottom: 20 }}>
+          <p style={{ fontSize: 10, fontWeight: 700, color: '#8a9e9a', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 8 }}>
+            {section.key}
+          </p>
+          <div style={{ background: 'white', borderRadius: 12, border: '1px solid rgba(0,0,0,0.07)', overflow: 'hidden' }}>
+            {section.cats.map((cat, i) => {
+              const config = LOOKUP_CATEGORIES_CONFIG[cat]
+              const rows = lookups[cat] || []
+              if (!config) return null
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setOpenCategory(cat)}
+                  style={{
+                    width: '100%',
+                    padding: '13px 16px',
+                    background: 'none',
+                    border: 'none',
+                    borderBottom: i < section.cats.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    textAlign: 'left',
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: '#1a2e2b', marginBottom: 1 }}>{config.label}</p>
+                    <p style={{ fontSize: 11, color: '#8a9e9a' }}>{config.desc}</p>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    <span style={{
+                      fontSize: 12,
+                      color: '#a8c9c4',
+                      fontWeight: 600,
+                      background: 'rgba(168,201,196,0.1)',
+                      padding: '2px 8px',
+                      borderRadius: 10,
+                    }}>{rows.length}</span>
+                    <span style={{ fontSize: 16, color: '#c8d8d4' }}>›</span>
+                  </div>
+                </button>
+              )
+            })}
           </div>
-          <div style={{ display:'flex', alignItems:'center', gap:'8px', flexShrink:0 }}>
-            <span style={{ fontSize:'12px', color:'#a8c9c4', fontWeight:600, background:'rgba(168,201,196,0.1)', padding:'2px 8px', borderRadius:'10px' }}>{projects.length}</span>
-            <span style={{ fontSize:'16px', color:'#c8d8d4' }}>›</span>
-          </div>
-        </button>
-      </Section>
-
-      <Section title="Partners">
-        {partnerLists.map((list,i)=><ListRow key={list.key} list={list} i={i} total={partnerLists.length+1} onTap={()=>setOpen(list.key)} />)}
-        {/* Tiers row */}
-        <button onClick={()=>setOpen('tiers')} style={{ width:'100%', padding:'13px 16px', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left' }}>
-          <div style={{ flex:1, minWidth:0 }}>
-            <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Partner Tiers</p>
-            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Relationship levels with brand colors</p>
-          </div>
-          <div style={{ display:'flex', alignItems:'center', gap:'8px', flexShrink:0 }}>
-            <div style={{ display:'flex', gap:'3px' }}>{tiers.map(t=><div key={t.id} style={{ width:'10px', height:'10px', borderRadius:'50%', background:t.color }} />)}</div>
-            <span style={{ fontSize:'16px', color:'#c8d8d4' }}>›</span>
-          </div>
-        </button>
-      </Section>
-
-      {currentList&&<ListEditModal list={currentList} onClose={()=>setOpen(null)} />}
-      {open==='projects'&&<ProjectTypeEditModal items={projects} onClose={()=>setOpen(null)} onSave={(labels,map)=>{ setProjects(labels); setProjectTypeCategories(map) }} />}
-      {open==='tiers'&&<TierEditModal tiers={tiers} onClose={()=>setOpen(null)} onSave={updated=>{ setTiers(updated) }} />}
+        </div>
+      ))}
     </div>
   )
 }
