@@ -2293,29 +2293,78 @@ function AddressSheet({ addr=null, onSave, onDelete=null, onClose }) {
   )
 }
 
+// AddAddressPopup v2 — fully self-contained centered modal
+//
+// Previous version delegated the add/edit form to <AddressSheet>, which
+// apparently renders as its own out-of-modal half-sheet at the bottom of
+// the viewport. That broke the centered-modal experience for the add
+// path. This version inlines the form so the whole flow lives in one
+// centered modal.
+//
+// Replaces the function at components/BeeHub.jsx:2297.
+
 function AddAddressPopup({ person, update, onClose }) {
   const [mode, setMode] = useState({ kind: 'list', editIndex: null })
+  const [fType, setFType] = useState('Service')
+  const [fValue, setFValue] = useState('')
 
   const addrs = person.addresses && person.addresses.length
     ? person.addresses
     : (person.address ? [{ type: 'Service', value: person.address }] : [])
 
-  function handleSave(newAddr) {
+  function startAdd() {
+    setFType('Service')
+    setFValue('')
+    setMode({ kind: 'add', editIndex: null })
+  }
+  function startEdit(i) {
+    const a = addrs[i] || { type: 'Service', value: '' }
+    setFType(a.type || 'Service')
+    setFValue(a.value || '')
+    setMode({ kind: 'edit', editIndex: i })
+  }
+  function cancelForm() {
+    setMode({ kind: 'list', editIndex: null })
+  }
+  function saveForm() {
+    const value = fValue.trim()
+    if (!value) return
     if (mode.kind === 'add') {
-      update({ addresses: [...addrs, newAddr] })
+      update({ addresses: [...addrs, { type: fType, value }] })
     } else if (mode.kind === 'edit' && mode.editIndex != null) {
-      const next = addrs.map((a, i) => i === mode.editIndex ? newAddr : a)
+      const next = addrs.map((a, i) => i === mode.editIndex ? { type: fType, value } : a)
       update({ addresses: next })
     }
     setMode({ kind: 'list', editIndex: null })
   }
-
-  function handleDelete(i) {
+  function deleteAddr(i) {
     if (!confirm('Remove this address?')) return
     update({ addresses: addrs.filter((_, idx) => idx !== i) })
   }
 
-  // ─── Backdrop + container ─────────────────────────────────────────────────
+  const lbl = {
+    fontSize: '10px',
+    fontWeight: 700,
+    color: '#8a9e9a',
+    textTransform: 'uppercase',
+    letterSpacing: '0.4px',
+    marginBottom: '5px',
+    display: 'block',
+  }
+  const inp = {
+    width: '100%',
+    padding: '9px 11px',
+    border: '1.5px solid rgba(0,0,0,0.1)',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontFamily: 'inherit',
+    color: '#1a2e2b',
+    outline: 'none',
+    boxSizing: 'border-box',
+    background: 'white',
+  }
+  const TYPES = ['Service', 'Billing', 'Other']
+
   return (
     <div
       style={{
@@ -2359,7 +2408,7 @@ function AddAddressPopup({ person, update, onClose }) {
           }}
         >
           <p style={{ fontSize: '16px', fontWeight: 700, color: '#1a2e2b', fontFamily: 'Georgia,serif' }}>
-            Addresses
+            {mode.kind === 'add' ? 'Add address' : mode.kind === 'edit' ? 'Edit address' : 'Addresses'}
           </p>
           <button
             onClick={onClose}
@@ -2378,92 +2427,136 @@ function AddAddressPopup({ person, update, onClose }) {
 
         {/* Body */}
         <div style={{ padding: '16px 20px', display: 'grid', gap: '10px' }}>
-          {mode.kind === 'list' && addrs.length === 0 && (
-            <p style={{ fontSize: '13px', color: '#8a9e9a', textAlign: 'center', padding: '12px 0' }}>
-              No addresses yet.
-            </p>
+
+          {/* LIST mode */}
+          {mode.kind === 'list' && (
+            <>
+              {addrs.length === 0 && (
+                <p style={{ fontSize: '13px', color: '#8a9e9a', textAlign: 'center', padding: '12px 0' }}>
+                  No addresses yet.
+                </p>
+              )}
+              {addrs.map((a, i) => (
+                <div
+                  key={i}
+                  style={{
+                    padding: '12px 14px',
+                    background: '#f7f5f0',
+                    borderRadius: '10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={lbl}>{a.type || 'Address'}</div>
+                    <div style={{ fontSize: '13px', color: '#1a2e2b', lineHeight: 1.35 }}>
+                      {a.value}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => startEdit(i)}
+                    aria-label="Edit address"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', padding: '4px 6px', borderRadius: '6px', lineHeight: 1 }}
+                  >✏️</button>
+                  <button
+                    onClick={() => deleteAddr(i)}
+                    aria-label="Delete address"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', padding: '4px 6px', borderRadius: '6px', lineHeight: 1, opacity: 0.6 }}
+                  >🗑️</button>
+                </div>
+              ))}
+              <button
+                onClick={startAdd}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  background: 'rgba(168,201,196,0.10)',
+                  border: '1.5px dashed rgba(168,201,196,0.5)',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: '#1a2e2b',
+                  fontFamily: 'inherit',
+                }}
+              >+ Add address</button>
+            </>
           )}
 
-          {mode.kind === 'list' && addrs.map((a, i) => (
-            <div
-              key={i}
-              style={{
-                padding: '12px 14px',
-                background: '#f7f5f0',
-                borderRadius: '10px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-              }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{
-                  fontSize: '10px',
-                  fontWeight: 700,
-                  color: '#8a9e9a',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.4px',
-                  marginBottom: '2px',
-                }}>{a.type || 'Address'}</div>
-                <div style={{ fontSize: '13px', color: '#1a2e2b', lineHeight: 1.35 }}>
-                  {a.value}
+          {/* ADD / EDIT mode — inline form, stays inside this centered modal */}
+          {(mode.kind === 'add' || mode.kind === 'edit') && (
+            <>
+              <div>
+                <label style={lbl}>Type</label>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {TYPES.map(t => (
+                    <button
+                      key={t}
+                      onClick={() => setFType(t)}
+                      style={{
+                        flex: 1,
+                        padding: '7px 10px',
+                        background: fType === t ? 'rgba(168,201,196,0.18)' : 'white',
+                        border: fType === t ? '1.5px solid #a8c9c4' : '1.5px solid rgba(0,0,0,0.1)',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        fontSize: '13px',
+                        fontWeight: fType === t ? 600 : 400,
+                        color: fType === t ? '#1a2e2b' : '#4a5e5a',
+                        fontFamily: 'inherit',
+                      }}
+                    >{t}</button>
+                  ))}
                 </div>
               </div>
-              <button
-                onClick={() => setMode({ kind: 'edit', editIndex: i })}
-                aria-label="Edit address"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  padding: '4px 6px',
-                  borderRadius: '6px',
-                  lineHeight: 1,
-                }}
-              >✏️</button>
-              <button
-                onClick={() => handleDelete(i)}
-                aria-label="Delete address"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  padding: '4px 6px',
-                  borderRadius: '6px',
-                  lineHeight: 1,
-                  opacity: 0.6,
-                }}
-              >🗑️</button>
-            </div>
-          ))}
-
-          {mode.kind === 'list' && (
-            <button
-              onClick={() => setMode({ kind: 'add', editIndex: null })}
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                background: 'rgba(168,201,196,0.10)',
-                border: '1.5px dashed rgba(168,201,196,0.5)',
-                borderRadius: '10px',
-                cursor: 'pointer',
-                fontSize: '13px',
-                fontWeight: 600,
-                color: '#1a2e2b',
-                fontFamily: 'inherit',
-              }}
-            >+ Add address</button>
+              <div>
+                <label style={lbl}>Address</label>
+                <textarea
+                  value={fValue}
+                  onChange={(e) => setFValue(e.target.value)}
+                  placeholder="123 Main St, City ST 12345"
+                  rows={2}
+                  style={{ ...inp, resize: 'vertical', minHeight: '60px' }}
+                  autoFocus
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                <button
+                  onClick={cancelForm}
+                  style={{
+                    flex: 1,
+                    padding: '10px 14px',
+                    background: 'white',
+                    border: '1.5px solid rgba(0,0,0,0.1)',
+                    borderRadius: '10px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    color: '#4a5e5a',
+                    fontFamily: 'inherit',
+                  }}
+                >Cancel</button>
+                <button
+                  onClick={saveForm}
+                  disabled={!fValue.trim()}
+                  style={{
+                    flex: 1,
+                    padding: '10px 14px',
+                    background: fValue.trim() ? '#1a2e2b' : 'rgba(26,46,43,0.3)',
+                    border: 'none',
+                    borderRadius: '10px',
+                    cursor: fValue.trim() ? 'pointer' : 'not-allowed',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: 'white',
+                    fontFamily: 'inherit',
+                  }}
+                >Save</button>
+              </div>
+            </>
           )}
 
-          {(mode.kind === 'add' || mode.kind === 'edit') && (
-            <AddressSheet
-              addr={mode.kind === 'edit' ? addrs[mode.editIndex] : null}
-              onSave={handleSave}
-              onClose={() => setMode({ kind: 'list', editIndex: null })}
-            />
-          )}
         </div>
       </div>
     </div>
@@ -3324,16 +3417,17 @@ function HeaderChips({ person, update, children }) {
             background: 'none',
             border: 'none',
             cursor: 'pointer',
-            padding: 0,
+            padding: '2px 4px',
             fontFamily: 'inherit',
-            fontSize: '12px',
-            color: '#1a2e2b',
-            fontWeight: 600,
+            fontSize: '10px',
+            color: '#4a5e5a',
+            fontWeight: 500,
+            lineHeight: 1.2,
           }}
         >
           <span>🏠</span>
-          <span style={{ borderBottom: '1px dashed rgba(26,46,43,0.25)' }}>
-            {person.project || 'Project type'}
+          <span style={{ opacity: person.project ? 1 : 0.5 }}>
+            {person.project || 'Set project'}
           </span>
           <span style={{ fontSize: '9px', opacity: 0.5 }}>▾</span>
         </button>
