@@ -33,7 +33,7 @@ Multi-tenant client web app — Next.js + Supabase, with Jobber integration.
   `git log --oneline -1 HEAD` (worktree) vs `cd /Users/flightdeck/projects/clients/bee-organized/repo && git fetch origin && git log --oneline -1 origin/main`
   If the worktree forked from an older commit, halt and surface this — do not apply patches built against newer main.
 - Worktrees DO NOT inherit `.env.local` from the main checkout. Before first `npm run build` in a new worktree:
-  `ln -s ../../../../.env.local .env.local` (relative path, worktree-local; `.env.local` is already gitignored)
+  `ln -s ../../../.env.local .env.local` (relative path, worktree-local; `.env.local` is already gitignored)
 - `package-lock.json` sometimes shows as modified from cross-worktree npm operations. Safe to `git checkout package-lock.json` to revert if not intentionally changed.
 
 ## Files to be careful with
