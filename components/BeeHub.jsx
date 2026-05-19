@@ -5059,7 +5059,7 @@ function PersonPanel({
                           style: {
                             fontSize: "10px",
                             fontWeight: 700,
-                            color: "#8a9e9a",
+                            color: "#ff0000",
                             textTransform: "uppercase",
                             letterSpacing: "0.5px",
                           },
