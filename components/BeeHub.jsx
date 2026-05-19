@@ -1415,8 +1415,8 @@ function AddNotePopup({ onAdd, onClose }) {
         </button>
         <button onClick={()=>setNoteType('job')} style={{ padding:'12px', borderRadius:'12px', cursor:'pointer', border:'2px solid', borderColor:noteType==='job'?'#0ea5e9':'rgba(0,0,0,0.08)', background:noteType==='job'?'rgba(14,165,233,0.06)':'white', fontFamily:'inherit', textAlign:'left' }}>
           <div style={{ fontSize:'18px', marginBottom:'3px' }}>🔑</div>
-          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Job Note</p>
-          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>This record · syncs Jobber</p>
+          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Note</p>
+          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>This record · internal only</p>
         </button>
       </div>
       <textarea value={text} onChange={e=>setText(e.target.value)} placeholder={noteType==='buzz'?'e.g. Prefers mornings, has a dog...':'e.g. Gate code 1234, park in driveway...'} style={{...inp, height:'90px', resize:'none', marginBottom:'1.25rem'}} autoFocus />
@@ -2303,32 +2303,80 @@ function AddressSheet({ addr=null, onSave, onDelete=null, onClose }) {
 //
 // Replaces the function at components/BeeHub.jsx:2297.
 
+// AddAddressPopup v3 — multi-field form with AddressAutofill on the street
+//
+// Replaces the single-textarea form with: Type buttons + Street (with
+// Google Places autocomplete) + City + State + Zip. AddressAutofill's
+// onParsed callback auto-fills city/state/zip when a suggestion is picked,
+// but each field is editable so users can correct anything.
+//
+// The composed full-address string is stored as { type, value } to match
+// the existing data shape.
+
 function AddAddressPopup({ person, update, onClose }) {
   const [mode, setMode] = useState({ kind: 'list', editIndex: null })
   const [fType, setFType] = useState('Service')
-  const [fValue, setFValue] = useState('')
+  const [fStreet, setFStreet] = useState('')
+  const [fCity, setFCity] = useState('')
+  const [fState, setFState] = useState('')
+  const [fZip, setFZip] = useState('')
 
   const addrs = person.addresses && person.addresses.length
     ? person.addresses
     : (person.address ? [{ type: 'Service', value: person.address }] : [])
 
-  function startAdd() {
+  function resetForm() {
     setFType('Service')
-    setFValue('')
+    setFStreet('')
+    setFCity('')
+    setFState('')
+    setFZip('')
+  }
+
+  function parseExisting(value) {
+    // Best-effort split of "street, city ST zip" or "street, city, ST zip"
+    if (!value) return { street: '', city: '', state: '', zip: '' }
+    const parts = value.split(',').map(s => s.trim()).filter(Boolean)
+    const street = parts[0] || ''
+    let city = '', state = '', zip = ''
+    if (parts.length >= 2) {
+      const tail = parts.slice(1).join(' ').trim()
+      // Tail looks like "City ST 12345" or "City ST" or "City"
+      const m = tail.match(/^(.+?)\s+([A-Za-z]{2})\s*(\d{5}(?:-\d{4})?)?$/)
+      if (m) { city = m[1].trim(); state = m[2].toUpperCase(); zip = m[3] || '' }
+      else { city = tail }
+    }
+    return { street, city, state, zip }
+  }
+
+  function startAdd() {
+    resetForm()
     setMode({ kind: 'add', editIndex: null })
   }
   function startEdit(i) {
     const a = addrs[i] || { type: 'Service', value: '' }
+    const parsed = parseExisting(a.value)
     setFType(a.type || 'Service')
-    setFValue(a.value || '')
+    setFStreet(parsed.street)
+    setFCity(parsed.city)
+    setFState(parsed.state)
+    setFZip(parsed.zip)
     setMode({ kind: 'edit', editIndex: i })
   }
   function cancelForm() {
     setMode({ kind: 'list', editIndex: null })
   }
+
+  const composedValue = (() => {
+    const street = fStreet.trim()
+    const tail = [fCity.trim(), fState.trim(), fZip.trim()].filter(Boolean).join(' ')
+    return [street, tail].filter(Boolean).join(', ')
+  })()
+  const canSave = fStreet.trim().length > 3
+
   function saveForm() {
-    const value = fValue.trim()
-    if (!value) return
+    if (!canSave) return
+    const value = composedValue
     if (mode.kind === 'add') {
       update({ addresses: [...addrs, { type: fType, value }] })
     } else if (mode.kind === 'edit' && mode.editIndex != null) {
@@ -2384,8 +2432,8 @@ function AddAddressPopup({ person, update, onClose }) {
           background: 'white',
           borderRadius: '20px',
           width: '100%',
-          maxWidth: '420px',
-          maxHeight: '80vh',
+          maxWidth: '460px',
+          maxHeight: '85vh',
           overflowY: 'auto',
           boxShadow: '0 24px 60px rgba(26,46,43,0.25)',
           display: 'flex',
@@ -2426,7 +2474,7 @@ function AddAddressPopup({ person, update, onClose }) {
         </div>
 
         {/* Body */}
-        <div style={{ padding: '16px 20px', display: 'grid', gap: '10px' }}>
+        <div style={{ padding: '16px 20px', display: 'grid', gap: '12px' }}>
 
           {/* LIST mode */}
           {mode.kind === 'list' && (
@@ -2484,7 +2532,7 @@ function AddAddressPopup({ person, update, onClose }) {
             </>
           )}
 
-          {/* ADD / EDIT mode — inline form, stays inside this centered modal */}
+          {/* ADD / EDIT mode — multi-field form with AddressAutofill on street */}
           {(mode.kind === 'add' || mode.kind === 'edit') && (
             <>
               <div>
@@ -2510,17 +2558,53 @@ function AddAddressPopup({ person, update, onClose }) {
                   ))}
                 </div>
               </div>
+
               <div>
-                <label style={lbl}>Address</label>
-                <textarea
-                  value={fValue}
-                  onChange={(e) => setFValue(e.target.value)}
-                  placeholder="123 Main St, City ST 12345"
-                  rows={2}
-                  style={{ ...inp, resize: 'vertical', minHeight: '60px' }}
-                  autoFocus
+                <label style={lbl}>Street</label>
+                <AddressAutofill
+                  value={fStreet}
+                  onChange={(v) => setFStreet(v)}
+                  onParsed={(parsed) => {
+                    if (parsed.street) setFStreet(parsed.street)
+                    if (parsed.city) setFCity(parsed.city)
+                    if (parsed.state) setFState(parsed.state)
+                    if (parsed.zip) setFZip(parsed.zip)
+                  }}
+                  placeholder="Start typing a street address..."
                 />
               </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 110px', gap: '8px' }}>
+                <div>
+                  <label style={lbl}>City</label>
+                  <input
+                    value={fCity}
+                    onChange={(e) => setFCity(e.target.value)}
+                    placeholder="City"
+                    style={inp}
+                  />
+                </div>
+                <div>
+                  <label style={lbl}>State</label>
+                  <input
+                    value={fState}
+                    onChange={(e) => setFState(e.target.value.toUpperCase().slice(0, 2))}
+                    placeholder="ST"
+                    maxLength={2}
+                    style={{ ...inp, textTransform: 'uppercase' }}
+                  />
+                </div>
+                <div>
+                  <label style={lbl}>Zip</label>
+                  <input
+                    value={fZip}
+                    onChange={(e) => setFZip(e.target.value)}
+                    placeholder="12345"
+                    style={inp}
+                  />
+                </div>
+              </div>
+
               <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
                 <button
                   onClick={cancelForm}
@@ -2539,14 +2623,14 @@ function AddAddressPopup({ person, update, onClose }) {
                 >Cancel</button>
                 <button
                   onClick={saveForm}
-                  disabled={!fValue.trim()}
+                  disabled={!canSave}
                   style={{
                     flex: 1,
                     padding: '10px 14px',
-                    background: fValue.trim() ? '#1a2e2b' : 'rgba(26,46,43,0.3)',
+                    background: canSave ? '#1a2e2b' : 'rgba(26,46,43,0.3)',
                     border: 'none',
                     borderRadius: '10px',
-                    cursor: fValue.trim() ? 'pointer' : 'not-allowed',
+                    cursor: canSave ? 'pointer' : 'not-allowed',
                     fontSize: '14px',
                     fontWeight: 600,
                     color: 'white',
