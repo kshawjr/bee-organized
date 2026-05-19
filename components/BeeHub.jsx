@@ -4236,16 +4236,9 @@ function PersonPanel({
                       : person.jobberRef ||
                           (person.jobberSearchStatus === "found" && person.jobberClient)
                         ? React.createElement(
-                            "button",
+                            "span",
                             {
-                              onClick: () => setPopup("jobber-history"),
-                              "aria-label": "View Jobber history",
                               style: {
-                                background: "none",
-                                border: "none",
-                                cursor: "pointer",
-                                fontFamily: "inherit",
-                                padding: 0,
                                 fontSize: "13px",
                                 color: "#10b981",
                                 fontWeight: 600,
@@ -4255,16 +4248,9 @@ function PersonPanel({
                           )
                         : person.jobberSearchStatus === "not_found"
                           ? React.createElement(
-                              "button",
+                              "span",
                               {
-                                onClick: () => setPopup("send-jobber"),
-                                "aria-label": "Send to Jobber",
                                 style: {
-                                  background: "none",
-                                  border: "none",
-                                  cursor: "pointer",
-                                  fontFamily: "inherit",
-                                  padding: 0,
                                   fontSize: "13px",
                                   color: "#8a9e9a",
                                   fontWeight: 600,
@@ -5517,7 +5503,7 @@ function PersonPanel({
                           letterSpacing: "0.4px",
                         },
                       },
-                      "Job Notes",
+                      "Notes",
                     ),
                     person.jobNotes &&
                       person.jobNotes.length > 0 &&
@@ -5582,7 +5568,7 @@ function PersonPanel({
                       setJobNoteDraft("");
                     }
                   },
-                  placeholder: "+ Add a job note (e.g. gate code, parking, prefs\u2026)",
+                  placeholder: "This note is internal only and will not go to Jobber",
                   style: {
                     width: "100%",
                     padding: "8px 12px",
