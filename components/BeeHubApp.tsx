@@ -25,10 +25,19 @@ export default function BeeHubApp({
   initialRoute,
   currentUser,
   currentLocation,
+  initialLookups,
 }: {
   initialRoute?: string
   currentUser?: CurrentUser
   currentLocation?: CurrentLocation | null
+  initialLookups?: Record<string, any[]>
 }) {
-  return <App initialRoute={initialRoute} currentUser={currentUser} currentLocation={currentLocation} />
+  return (
+    <App
+      initialRoute={initialRoute}
+      currentUser={currentUser}
+      currentLocation={currentLocation}
+      initialLookups={initialLookups}
+    />
+  )
 }

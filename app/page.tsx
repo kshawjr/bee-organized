@@ -426,6 +426,30 @@ export default async function HomePage() {
     initialUsers = (locUsers || []).map(buildLocationUser)
   }
 
+  // ─── Admin-managed lookups (Sitting 1A) ───
+  // Single query for all active lookups, grouped client-side by category.
+  // Cheap (~150 rows seeded). Result feeds the in-memory getter hydration
+  // in BeeHub.jsx so the existing constant-fallback pattern picks up DB data.
+  const initialLookups: Record<string, any[]> = {}
+  {
+    const { data: lookups, error: lookupsError } = await supabaseService
+      .from('lookups')
+      .select('id, category, label, sort_order, color, bg_color, icon, description, attrs, is_active')
+      .eq('is_active', true)
+      .order('category', { ascending: true })
+      .order('sort_order', { ascending: true })
+
+    if (lookupsError) {
+      console.error('[page.tsx] lookups fetch error:', lookupsError.message)
+    } else if (lookups) {
+      for (const row of lookups) {
+        const cat = row.category as string
+        if (!initialLookups[cat]) initialLookups[cat] = []
+        initialLookups[cat].push(row)
+      }
+    }
+  }
+
   return (
     <BeeHub
       initialRole={role}
@@ -438,6 +462,7 @@ export default async function HomePage() {
       initialUsers={initialUsers}
       initialSeats={initialSeats}
       initialPendingInvites={initialPendingInvites}
+      initialLookups={initialLookups}
       currentSubscription={currentSubscription}
       currentLocation={currentLocation}
       currentUser={{

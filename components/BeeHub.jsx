@@ -996,6 +996,45 @@ function getDefaultPathForProject(projectType) {
   return DRIP_PATHS_CONFIG.find(p=>p.id===id) || DRIP_PATHS_CONFIG.find(p=>p.projectType===cat) || DRIP_PATHS_CONFIG[0]
 }
 
+// Admin-managed client kanban stages (Hive)
+let _clientStages = null
+function getClientStages() { return _clientStages || STAGES }
+function setAdminClientStages(list) { if(Array.isArray(list)) _clientStages = list }
+
+// Admin-managed partner kanban stages
+let _partnerStages = null
+function getPartnerStages() { return _partnerStages || PARTNER_STAGES }
+function setAdminPartnerStages(list) { if(Array.isArray(list)) _partnerStages = list }
+
+// Admin-managed lead sources (replaces local `const sources` at NewLeadModal)
+let _leadSources = null
+function getLeadSources() {
+  if (_leadSources) return _leadSources
+  return ['Website','Referral','Google','Instagram','Facebook','Word of Mouth','Yelp','NextDoor']
+}
+function setAdminLeadSources(list) { if(Array.isArray(list)) _leadSources = list }
+
+// Admin-managed client tags (replaces ALL_TAGS hardcoded const for reads)
+let _clientTags = null
+function getClientTags() { return _clientTags || ALL_TAGS }
+function setAdminClientTags(list) { if(Array.isArray(list)) _clientTags = list }
+
+// Admin-managed touchpoint types (replaces TOUCHPOINT_TYPES hardcoded const)
+let _touchpointTypes = null
+function getTouchpointTypes() { return _touchpointTypes || TOUCHPOINT_TYPES }
+function setAdminTouchpointTypes(list) { if(Array.isArray(list)) _touchpointTypes = list }
+
+// Admin-managed project types — replaces PROJECT_TYPES string array AND
+// _projectTypeCategories map. Returns array of { label, drip_category } so
+// callers can read both at once.
+let _projectTypes = null
+function getProjectTypes() {
+  if (_projectTypes) return _projectTypes
+  const cats = getProjectTypeCategories()
+  return PROJECT_TYPES.map(t => ({ label: t, drip_category: cats[t] || 'general' }))
+}
+function setAdminProjectTypes(list) { if(Array.isArray(list)) _projectTypes = list }
+
 function ProcessLeadSheet({ person, onSave, onClose }) {
   const isWakeUp    = !!person.snoozeUntil
   const isCapture   = !!person.quickCapture
@@ -19139,6 +19178,7 @@ export default function App({
   initialUsers,              // real hub_users roster from Supabase; null → fall back to USERS_DATA mock
   initialSeats,              // server-rendered subscription_seats for the current location (empty array for elevated users)
   initialPendingInvites,     // server-rendered pending_invites for the current location (empty array for elevated users)
+  initialLookups,            // server-rendered admin-managed lookups grouped by category (Sitting 1A)
   currentSubscription,
   currentLocation,           // real Supabase row for franchise owners; null for elevated users
 } = {}) {
@@ -19154,6 +19194,75 @@ export default function App({
     } catch (e) { /* private mode / disabled storage */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Hydrate admin-managed lookups from DB on mount (Sitting 1A).
+  // initialLookups comes from page.tsx server-side fetch keyed by category.
+  // Each branch reshapes to the legacy in-memory format expected by existing
+  // getters so UI call sites (getSpecialties, getPartnerTiers, etc.) keep
+  // working without changes. ConfigureTab edits remain in-memory in 1A —
+  // Sitting 1B wires the writes through to the lookups API.
+  useEffect(() => {
+    if (!initialLookups || typeof initialLookups !== 'object') return
+
+    const toStageShape = (rows) => rows.map(r => ({
+      key:   (r.attrs && r.attrs.key) || r.label,
+      label: r.label,
+      color: r.color || '#8a9e9a',
+      bg:    r.bg_color || 'rgba(138,158,154,0.08)',
+      dot:   r.color || '#8a9e9a',
+      icon:  r.icon || '',
+    }))
+    const toTagShape = (rows) => rows.map(r => ({
+      id:    (r.attrs && r.attrs.key) || r.id,
+      label: r.icon ? `${r.icon} ${r.label}` : r.label,
+      color: r.color || '#8a9e9a',
+      bg:    r.bg_color || 'rgba(138,158,154,0.1)',
+    }))
+    const toSpecialtyShape = (rows) => rows.map(r => ({
+      id:    (r.attrs && r.attrs.key) || r.id,
+      label: r.icon ? `${r.icon} ${r.label}` : r.label,
+      color: r.color || '#8a9e9a',
+      bg:    r.bg_color || 'rgba(138,158,154,0.1)',
+    }))
+    const toTierShape = (rows) => rows.map(r => ({
+      id:    (r.attrs && r.attrs.key) || r.id,
+      label: r.label,
+      color: r.color || '#8a9e9a',
+      bg:    r.bg_color || 'rgba(138,158,154,0.15)',
+      desc:  r.description || '',
+    }))
+    const toTouchpointShape = (rows) => rows.map(r => ({
+      key:   (r.attrs && r.attrs.key) || r.id,
+      icon:  r.icon || '',
+      label: r.label,
+    }))
+
+    if (Array.isArray(initialLookups.client_stages))       setAdminClientStages(toStageShape(initialLookups.client_stages))
+    if (Array.isArray(initialLookups.partner_stages))      setAdminPartnerStages(toStageShape(initialLookups.partner_stages))
+    if (Array.isArray(initialLookups.client_tags))         setAdminClientTags(toTagShape(initialLookups.client_tags))
+    if (Array.isArray(initialLookups.partner_specialties)) setAdminSpecialties(toSpecialtyShape(initialLookups.partner_specialties))
+    if (Array.isArray(initialLookups.partner_tiers))       setAdminPartnerTiers(toTierShape(initialLookups.partner_tiers))
+    if (Array.isArray(initialLookups.touchpoint_types))    setAdminTouchpointTypes(toTouchpointShape(initialLookups.touchpoint_types))
+
+    if (Array.isArray(initialLookups.lead_sources)) {
+      setAdminLeadSources(initialLookups.lead_sources.map(r => r.label))
+    }
+
+    if (Array.isArray(initialLookups.closed_lost_reasons)) {
+      setCloseLostReasons(initialLookups.closed_lost_reasons.map(r => r.label))
+    }
+
+    if (Array.isArray(initialLookups.project_types)) {
+      setAdminProjectTypes(
+        initialLookups.project_types.map(r => ({
+          label: r.label,
+          drip_category: (r.attrs && r.attrs.drip_category) || 'general',
+        }))
+      )
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Hive Hub Manual: reference-only, never auto-opens, no dismiss flag.
   const [manualSlides, setManualSlides]     = useState(Array.isArray(initialManualSlides) ? initialManualSlides : [])
   const [showManual, setShowManual]         = useState(false)

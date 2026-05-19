@@ -1,5 +1,22 @@
 import * as React from 'react'
 
+export interface Lookup {
+  id: string
+  category: string
+  label: string
+  sort_order: number
+  color: string | null
+  bg_color: string | null
+  icon: string | null
+  description: string | null
+  attrs: Record<string, any>
+  is_active: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+export type LookupsByCategory = Record<string, Lookup[]>
+
 interface BeeHubProps {
   initialRole?: string
   initialFranchiseRole?: string
@@ -144,6 +161,7 @@ interface BeeHubProps {
     last_name?: string | null
     phone?: string | null
   }
+  initialLookups?: LookupsByCategory
 }
 
 declare const BeeHub: React.FC<BeeHubProps>
