@@ -2090,7 +2090,7 @@ function AddressAutofill({ value, onChange, onSelect, onParsed, placeholder='Sta
     onChange(val)
     if (debounceRef.current) clearTimeout(debounceRef.current)
     if (val.length > 2) {
-      debounceRef.current = setTimeout(() => fetchPredictions(val), 300)
+      debounceRef.current = setTimeout(() => fetchPredictions(val), 175)
     } else {
       setSuggestions([])
       setShowDrop(false)
@@ -2125,10 +2125,6 @@ function AddressAutofill({ value, onChange, onSelect, onParsed, placeholder='Sta
           state:  json.state     || '',
           zip:    json.zip       || '',
         })
-        // After parsing, set the input to just the street (matches the
-        // original behavior where onChange + onParsed both fire and the
-        // form fields split out city/state/zip into separate inputs).
-        if (json.street) onChange(json.street)
       } else if (onParsed) {
         // /details failed — best-effort parse from the description string.
         onParsed(parseAddress(prediction.description))
