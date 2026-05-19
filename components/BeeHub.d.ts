@@ -59,6 +59,7 @@ interface BeeHubProps {
     }
     default_drip_path?: string
     default_move_drip_path?: string
+    activated_at?: string | null
     [key: string]: any
   }> | null
   initialUsers?: Array<{
@@ -109,6 +110,7 @@ interface BeeHubProps {
     jobber_account_id: string | null
     last_sync_status: string | null
     token_expiry: string | null
+    lifecycle_status?: string
     onboarding_state?: {
       completedSteps?: Record<string, boolean>
       activeStepOpen?: string | null
@@ -116,6 +118,20 @@ interface BeeHubProps {
     }
     default_drip_path?: string
     default_move_drip_path?: string
+    // Pass 2 — location-step + paths-step + launch fields
+    address?: string
+    city?: string
+    state?: string
+    zip?: string
+    phone?: string
+    email?: string
+    timezone?: string
+    sender_name?: string
+    send_from_email?: string
+    reply_to_email?: string
+    reviews_link?: string
+    calendar_link?: string
+    activated_at?: string | null
   } | null
   currentUser?: {
     id: string
@@ -123,6 +139,10 @@ interface BeeHubProps {
     name: string
     role: string
     locationId?: string | null
+    // Pass 2 — profile fields for pre-filling the profile step form
+    first_name?: string | null
+    last_name?: string | null
+    phone?: string | null
   }
 }
 

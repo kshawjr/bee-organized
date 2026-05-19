@@ -1,70 +1,93 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { requireAuth, getHubUser } from '@/lib/auth'
+import { supabaseService } from '@/lib/supabase-service'
 
-// PATCH /api/locations/[id] — update top-level location fields. Super_admin only.
-// For subscription-specific fields, use /api/locations/[id]/subscription
+// PATCH /api/locations/[id]
+// Body: { address?, city?, state?, zip?, phone?, email?, timezone?,
+//         sender_name?, send_from_email?, reply_to_email?,
+//         reviews_link?, calendar_link? }
+//
+// Updates the location row. Authorization:
+//   - super_admin: can edit any location
+//   - admin / owner: can edit ONLY their assigned location
+//   - lite_user: 403 (read-only)
+//
+// All fields optional in the body — sparse patch, only provided fields are
+// written. Empty strings clear (set to null); undefined leaves alone.
+
+const ALLOWED_FIELDS = [
+  'address',
+  'city',
+  'state',
+  'zip',
+  'phone',
+  'email',
+  'timezone',
+  'sender_name',
+  'send_from_email',
+  'reply_to_email',
+  'reviews_link',
+  'calendar_link',
+] as const
+
 export async function PATCH(
-  request: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const supabase = await createServerSupabaseClient()
+  try {
+    await requireAuth()
+    const hubUser = await getHubUser()
+    if (!hubUser) {
+      return NextResponse.json({ error: 'No hub user profile' }, { status: 403 })
+    }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
-  }
+    const locId = params.id
+    const role = hubUser.role
 
-  const { data: hubUser } = await supabase
-    .from('hub_users')
-    .select('role')
-    .eq('id', user.id)
-    .single()
-
-  if (!hubUser || hubUser.role !== 'super_admin') {
-    return NextResponse.json(
-      { error: 'forbidden — super_admin only' },
-      { status: 403 }
-    )
-  }
-
-  const body = await request.json().catch(() => ({}))
-
-  const allowedLifecycle = ['onboarding', 'active', 'paused', 'inactive']
-  const update: Record<string, any> = {}
-
-  if (typeof body.lifecycle_status === 'string') {
-    if (!allowedLifecycle.includes(body.lifecycle_status)) {
+    if (role === 'lite_user') {
+      return NextResponse.json({ error: 'Read-only role' }, { status: 403 })
+    }
+    if (role !== 'super_admin' && hubUser.location_id !== locId) {
       return NextResponse.json(
-        {
-          error: `invalid lifecycle_status — must be one of: ${allowedLifecycle.join(', ')}`,
-        },
-        { status: 400 }
+        { error: 'Cannot edit other locations' },
+        { status: 403 }
       )
     }
-    update.lifecycle_status = body.lifecycle_status
+
+    const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
+    const patch: Record<string, any> = { updated_at: new Date().toISOString() }
+
+    for (const field of ALLOWED_FIELDS) {
+      const v = body?.[field]
+      if (typeof v === 'string') {
+        patch[field] = v.trim() || null
+      }
+    }
+
+    if (Object.keys(patch).length === 1) {
+      // Only updated_at — nothing to write
+      return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
+    }
+
+    const { error, data } = await supabaseService
+      .from('locations')
+      .update(patch)
+      .eq('id', locId)
+      .select(
+        'id, name, address, city, state, zip, phone, email, timezone, sender_name, send_from_email, reply_to_email, reviews_link, calendar_link'
+      )
+      .single()
+
+    if (error) {
+      console.error(`[/api/locations/${locId} PATCH] error:`, error.message)
+      return NextResponse.json({ error: 'Failed to update location' }, { status: 500 })
+    }
+    return NextResponse.json({ ok: true, location: data })
+  } catch (err: any) {
+    console.error('[/api/locations/[id] PATCH] error:', err?.message || err)
+    return NextResponse.json(
+      { error: err?.message || 'Server error' },
+      { status: 500 }
+    )
   }
-
-  if (typeof body.name === 'string' && body.name.trim()) {
-    update.name = body.name.trim()
-  }
-
-  if (Object.keys(update).length === 0) {
-    return NextResponse.json({ error: 'no fields to update' }, { status: 400 })
-  }
-
-  const { data, error } = await supabase
-    .from('locations')
-    .update(update)
-    .eq('id', params.id)
-    .select('id, name, lifecycle_status')
-    .single()
-
-  if (error) {
-    console.error('[locations PATCH]', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  return NextResponse.json({ ok: true, location: data })
 }

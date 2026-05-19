@@ -129,6 +129,24 @@ export default async function HomePage() {
   // Cookie-bound client — used for user-scoped reads (their own location, guide slides)
   const supabase = await createServerSupabaseClient()
 
+  // ─── Profile fields (Pass 2) ───
+  // getHubUser() returns the basics; explicit select for the new profile
+  // columns lets us pre-fill the onboarding profile step without depending
+  // on lib/auth.ts. Falls back to empty if unmigrated.
+  let profileFields: { first_name: string | null; last_name: string | null; phone: string | null } = {
+    first_name: null,
+    last_name: null,
+    phone: null,
+  }
+  {
+    const { data: profileRow } = await supabaseService
+      .from('hub_users')
+      .select('first_name, last_name, phone')
+      .eq('id', hubUser.id)
+      .maybeSingle()
+    if (profileRow) profileFields = profileRow as any
+  }
+
   // ─── Guide slides ───
   const { data: slidesData } = await supabase
     .from('guide_slides')
@@ -204,7 +222,7 @@ export default async function HomePage() {
     const { data: locRow, error: subErr } = await supabase
       .from('locations')
       .select(
-        'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes, jobber_account_id, last_sync_status, token_expiry, onboarding_state, default_drip_path, default_move_drip_path'
+        'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes, jobber_account_id, last_sync_status, token_expiry, onboarding_state, default_drip_path, default_move_drip_path, address, city, state, zip, phone, email, timezone, sender_name, send_from_email, reply_to_email, reviews_link, calendar_link, activated_at, lifecycle_status'
       )
       .eq('id', hubUser.location_id)
       .single()
@@ -231,6 +249,7 @@ export default async function HomePage() {
         subscription_status: locRow.subscription_status || 'deferred',
         subscription_plan: locRow.subscription_plan || null,
         paid_through_date: locRow.paid_through_date || null,
+        lifecycle_status: locRow.lifecycle_status || 'onboarding',
         // Onboarding persistence — read on every page load for cross-device
         // continuity. OnboardingChecklist seeds React state from this and
         // falls back to sessionStorage if absent. Writes go through
@@ -238,6 +257,21 @@ export default async function HomePage() {
         onboarding_state: locRow.onboarding_state || {},
         default_drip_path: locRow.default_drip_path || 'general-a',
         default_move_drip_path: locRow.default_move_drip_path || 'move-a',
+        // Pass 2 — location-step content fields. Used to pre-fill the
+        // location form on remount so partial onboarders see their progress.
+        address: locRow.address || '',
+        city: locRow.city || '',
+        state: locRow.state || '',
+        zip: locRow.zip || '',
+        phone: locRow.phone || '',
+        email: locRow.email || '',
+        timezone: locRow.timezone || '',
+        sender_name: locRow.sender_name || '',
+        send_from_email: locRow.send_from_email || '',
+        reply_to_email: locRow.reply_to_email || '',
+        reviews_link: locRow.reviews_link || '',
+        calendar_link: locRow.calendar_link || '',
+        activated_at: locRow.activated_at || null,
       }
     }
   }
@@ -289,7 +323,7 @@ export default async function HomePage() {
     const { data: locs, error: locsErr } = await supabaseService
       .from('locations')
       .select(
-        'id, name, state, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, last_sync_status, created_at, onboarding_state, default_drip_path, default_move_drip_path'
+        'id, name, state, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, last_sync_status, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at'
       )
       .order('name', { ascending: true })
 
@@ -374,6 +408,7 @@ export default async function HomePage() {
         onboarding_state: row.onboarding_state || {},
         default_drip_path: row.default_drip_path || 'general-a',
         default_move_drip_path: row.default_move_drip_path || 'move-a',
+        activated_at: row.activated_at || null,
       }
     })
   } else if (hubUser.location_id) {
@@ -411,6 +446,10 @@ export default async function HomePage() {
         name: hubUser.full_name || hubUser.email,
         role: hubUser.role,
         locationId: hubUser.location_id,
+        // Pass 2 — profile fields for pre-filling the profile step form
+        first_name: profileFields.first_name,
+        last_name: profileFields.last_name,
+        phone: profileFields.phone,
       }}
     />
   )

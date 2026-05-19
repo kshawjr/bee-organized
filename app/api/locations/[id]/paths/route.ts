@@ -1,0 +1,82 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { requireAuth, getHubUser } from '@/lib/auth'
+import { supabaseService } from '@/lib/supabase-service'
+
+// POST /api/locations/[id]/paths
+// Body: { default_drip_path?, default_move_drip_path?, calendar_link? }
+//
+// Persists the onboarding paths-step selections to the location. Currently
+// the onboarding wizard only lets users PICK from preset drip paths (path-a
+// through path-e). Future Settings → Paths tab will let them build custom
+// paths; that's a separate feature.
+//
+// calendar_link is also stored here (not just on the location step) because
+// some drip paths embed it in their templates. It's the SAME column as the
+// location step's calendarLink — whichever step the user completes first
+// pre-fills the other.
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    await requireAuth()
+    const hubUser = await getHubUser()
+    if (!hubUser) {
+      return NextResponse.json({ error: 'No hub user profile' }, { status: 403 })
+    }
+
+    const locId = params.id
+    const role = hubUser.role
+    if (role === 'lite_user') {
+      return NextResponse.json({ error: 'Read-only role' }, { status: 403 })
+    }
+    if (role !== 'super_admin' && hubUser.location_id !== locId) {
+      return NextResponse.json(
+        { error: 'Cannot edit other locations' },
+        { status: 403 }
+      )
+    }
+
+    const body = await req.json().catch(() => ({}))
+    const { default_drip_path, default_move_drip_path, calendar_link } =
+      (body || {}) as {
+        default_drip_path?: string
+        default_move_drip_path?: string
+        calendar_link?: string
+      }
+
+    const patch: Record<string, any> = { updated_at: new Date().toISOString() }
+    if (typeof default_drip_path === 'string' && default_drip_path) {
+      patch.default_drip_path = default_drip_path
+    }
+    if (typeof default_move_drip_path === 'string' && default_move_drip_path) {
+      patch.default_move_drip_path = default_move_drip_path
+    }
+    // calendar_link is optional — only required if the selected drip path
+    // needs one. Empty string clears (set to null) so users can switch from
+    // a calendar-requiring path to one that doesn't.
+    if (typeof calendar_link === 'string') {
+      patch.calendar_link = calendar_link.trim() || null
+    }
+
+    const { error, data } = await supabaseService
+      .from('locations')
+      .update(patch)
+      .eq('id', locId)
+      .select('id, default_drip_path, default_move_drip_path, calendar_link')
+      .single()
+
+    if (error) {
+      console.error(`[/api/locations/${locId}/paths POST] error:`, error.message)
+      return NextResponse.json({ error: 'Failed to save paths' }, { status: 500 })
+    }
+    return NextResponse.json({ ok: true, location: data })
+  } catch (err: any) {
+    console.error('[/api/locations/[id]/paths POST] error:', err?.message || err)
+    return NextResponse.json(
+      { error: err?.message || 'Server error' },
+      { status: 500 }
+    )
+  }
+}

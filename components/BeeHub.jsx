@@ -5596,14 +5596,26 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   const [cvv, setCvv]           = useState('')
   const [cardName, setCardName] = useState('')
 
-  // Per-step forms - prefilled from invite data
+  // Per-step forms - prefilled from invite data, or from DB on remount (Pass 2)
   const [profileForm, setProfileForm] = useState({
-    firstName: nameParts[0]||'',
-    lastName:  nameParts.slice(1).join(' ')||'',
-    email:     ownerEmail||'',
-    phone:     '',
+    firstName: currentUserCtx?.first_name || nameParts[0]||'',
+    lastName:  currentUserCtx?.last_name  || nameParts.slice(1).join(' ')||'',
+    email:     currentUserCtx?.email      || ownerEmail||'',
+    phone:     currentUserCtx?.phone      || '',
   })
-  const [locationForm, setLocationForm] = useState({ address:'', city:'', state:'', zip:'', phone:'', senderName:'', sendFromEmail:'', replyToEmail:'', timezone:'', reviewsLink:'', calendarLink:'' })
+  const [locationForm, setLocationForm] = useState({
+    address:         currentLocationCtx?.address          || '',
+    city:            currentLocationCtx?.city             || '',
+    state:           currentLocationCtx?.state            || '',
+    zip:             currentLocationCtx?.zip              || '',
+    phone:           currentLocationCtx?.phone            || '',
+    senderName:      currentLocationCtx?.sender_name      || '',
+    sendFromEmail:   currentLocationCtx?.send_from_email  || '',
+    replyToEmail:    currentLocationCtx?.reply_to_email   || '',
+    timezone:        currentLocationCtx?.timezone         || '',
+    reviewsLink:     currentLocationCtx?.reviews_link     || '',
+    calendarLink:    currentLocationCtx?.calendar_link    || '',
+  })
   const [jobberKey, setJobberKey]       = useState('')
   const [showSkipModal, setShowSkipModal]           = useState(false)
   const [showAdvancedSender, setShowAdvancedSender] = useState(false)
@@ -5611,26 +5623,173 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   const [launching, setLaunching]                   = useState(false)
   const [launchStep, setLaunchStep]                 = useState(0)
 
+  // Pass 2 — per-step async save state. `savingStep` is the id of whichever
+  // step is currently mid-save (or null). `stepError` is keyed by step id
+  // and holds the error message to show inline if the save failed. Used
+  // by Mark Complete buttons + error banners in each step's content.
+  const [savingStep, setSavingStep] = useState(null)
+  const [stepError, setStepError]   = useState({})
+
   const LAUNCH_STEPS = ['Saving your profile…', 'Setting up your paths…', 'Configuring your location…', 'Launching your Hub…']
 
-  function launch() {
+  // Pass 2 — async per-step writes. Each follows the same pattern:
+  //   1. Guard against double-save (savingStep already set)
+  //   2. Set savingStep + clear stepError
+  //   3. POST/PATCH to the relevant API
+  //   4. On success: markDone (which fires persistStep audit + cache write)
+  //      and close the step panel
+  //   5. On failure: surface error inline, leave panel open for retry
+  // view-as / demo paths (no currentLocationCtx) skip the network and just
+  // advance locally — keeps mock flows working in admin "view as" mode.
+
+  async function saveProfile() {
+    if (savingStep) return
+    setSavingStep('profile')
+    setStepError(e => ({ ...e, profile: '' }))
+    try {
+      if (currentUserCtx?.id) {
+        const res = await fetch('/api/hub_users/me', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            first_name: profileForm.firstName,
+            last_name:  profileForm.lastName,
+            phone:      profileForm.phone,
+          }),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(json.error || 'Failed to save profile')
+      }
+      markDone('profile')
+      setActiveStepOpen(null)
+    } catch (err) {
+      setStepError(e => ({ ...e, profile: (err && err.message) || 'Save failed — try again' }))
+    } finally {
+      setSavingStep(null)
+    }
+  }
+
+  async function saveLocation() {
+    if (savingStep) return
+    const locId = currentLocationCtx?.id
+    setSavingStep('location')
+    setStepError(e => ({ ...e, location: '' }))
+    try {
+      if (locId) {
+        const res = await fetch(`/api/locations/${locId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            address:         locationForm.address,
+            city:            locationForm.city,
+            state:           locationForm.state,
+            zip:             locationForm.zip,
+            phone:           locationForm.phone,
+            timezone:        locationForm.timezone,
+            sender_name:     locationForm.senderName,
+            send_from_email: locationForm.sendFromEmail,
+            reply_to_email:  locationForm.replyToEmail,
+            reviews_link:    locationForm.reviewsLink,
+            calendar_link:   locationForm.calendarLink,
+          }),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(json.error || 'Failed to save location')
+      }
+      markDone('location')
+      setActiveStepOpen(null)
+    } catch (err) {
+      setStepError(e => ({ ...e, location: (err && err.message) || 'Save failed — try again' }))
+    } finally {
+      setSavingStep(null)
+    }
+  }
+
+  async function savePaths(prefs) {
+    if (savingStep) return
+    const locId = currentLocationCtx?.id
+    setSavingStep('paths')
+    setStepError(e => ({ ...e, paths: '' }))
+    try {
+      // Map onboarding wizard's path-X selections to our DB convention.
+      // wizard returns { moveDefault: 'path-a', generalDefault: 'path-c', calendarLink: '...' }
+      // DB stores      { default_drip_path: 'general-c', default_move_drip_path: 'move-a', calendar_link: '...' }
+      const dripGeneral = prefs?.generalDefault ? 'general-' + prefs.generalDefault.replace('path-','') : null
+      const dripMove    = prefs?.moveDefault    ? 'move-'    + prefs.moveDefault.replace('path-','')    : null
+      if (locId) {
+        const res = await fetch(`/api/locations/${locId}/paths`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            default_drip_path:      dripGeneral,
+            default_move_drip_path: dripMove,
+            calendar_link:          prefs?.calendarLink || '',
+          }),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(json.error || 'Failed to save paths')
+      }
+      setSavedPaths(prefs)
+      // Module-level state for in-session client creation flows. DB read on
+      // next page load supersedes this.
+      if (dripGeneral) setDefaultPathId(dripGeneral)
+      markDone('paths')
+      setActiveStepOpen(null)
+    } catch (err) {
+      setStepError(e => ({ ...e, paths: (err && err.message) || 'Save failed — try again' }))
+    } finally {
+      setSavingStep(null)
+    }
+  }
+
+  // Pass 2 — real launch: API call + animation in parallel, both must finish.
+  // Failure mode: animation completes but API errored, we surface the error
+  // and reset launching state so the user can retry. sessionStorage cleared
+  // on success since onboarding is permanently done.
+  async function launch() {
+    if (launching) return
     const data = { profile: profileForm, location: { ...locationForm }, paths: savedPaths }
+    const locId = currentLocationCtx?.id
     setLaunching(true)
     setLaunchStep(0)
-    const tick = (i) => {
-      if (i >= LAUNCH_STEPS.length) {
-        onComplete(data)
-        // For real franchise owner sign-ins, onComplete's updateLocStatus is
-        // a no-op (franchiseLoc is null). Without this fallback the launch
-        // animation reaches step 4 and the user is silently stuck on the
-        // onboarding screen with nowhere to go.
-        if (onSkipOnboarding) onSkipOnboarding()
-        return
+    setStepError(e => ({ ...e, launch: '' }))
+
+    // Animation runs through LAUNCH_STEPS at 750ms each
+    const animationPromise = new Promise(resolve => {
+      const tick = (i) => {
+        if (i >= LAUNCH_STEPS.length) { resolve(); return }
+        setLaunchStep(i)
+        setTimeout(() => tick(i + 1), 750)
       }
-      setLaunchStep(i)
-      setTimeout(()=>tick(i+1), 750)
+      setTimeout(() => tick(0), 100)
+    })
+
+    // Real DB flip — view-as / demo paths skip the network
+    const apiPromise = locId
+      ? fetch(`/api/locations/${locId}/launch`, { method: 'POST' })
+          .then(async (r) => {
+            if (!r.ok) {
+              const j = await r.json().catch(() => ({}))
+              throw new Error(j.error || 'Launch failed')
+            }
+            return r.json()
+          })
+      : Promise.resolve()
+
+    try {
+      await Promise.all([animationPromise, apiPromise])
+      try { sessionStorage.removeItem('bee.onboarding.state') } catch {}
+      onComplete(data)
+      // For real franchise owner sign-ins, onComplete's updateLocStatus is
+      // a no-op (franchiseLoc is null). Without this fallback the launch
+      // animation reaches step 4 and the user is silently stuck on the
+      // onboarding screen with nowhere to go.
+      if (onSkipOnboarding) onSkipOnboarding()
+    } catch (err) {
+      setStepError(e => ({ ...e, launch: (err && err.message) || 'Launch failed — try again' }))
+      setLaunching(false)
+      setLaunchStep(0)
     }
-    setTimeout(()=>tick(0), 100)
   }
 
   // Autofill location send-from email from profile when profile email is set
@@ -5661,8 +5820,14 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     // us cross-device / cross-browser continuity. sessionStorage stays as
     // the same-tab safety net for an unmount-mid-write race (and for
     // view-as / demo paths where currentLocationCtx is null).
-    const dbState = currentLocationCtx?.onboarding_state
-    if (dbState && (dbState.completedSteps || dbState.activeStepOpen)) {
+    //
+    // Pass 2 bug fix — for real franchise users (currentLocationCtx.id set),
+    // DB is the source of truth even when onboarding_state is empty {}. An
+    // empty cache means "this location has nothing completed yet", NOT
+    // "fall through to sessionStorage". Without this, wiping a previously-
+    // onboarded location's DB state still showed stale sessionStorage.
+    if (currentLocationCtx?.id) {
+      const dbState = currentLocationCtx?.onboarding_state || {}
       if (dbState.completedSteps) setCompletedSteps(dbState.completedSteps)
       if (dbState.activeStepOpen) setActiveStepOpen(dbState.activeStepOpen)
       return
@@ -5691,6 +5856,10 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
       }))
       setCompletedSteps(prev => ({ ...prev, jobber: true }))
       setActiveStepOpen('import')
+      // Pass 2 — also persist 'jobber' completion to DB. Pass explicit
+      // activeStepOpen since setActiveStepOpen('import') above hasn't been
+      // applied yet in this closure.
+      persistStep('jobber', null, { activeStepOpen: 'import' })
       setToast({ kind: 'success', msg: 'Jobber connected ✓' })
     } else if (result === 'error') {
       const reason = params.get('reason') || 'unknown'
@@ -5731,6 +5900,10 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     if (payload.kind === 'jobber-connected') {
       setCompletedSteps(prev => ({ ...prev, jobber: true }))
       setActiveStepOpen('import')
+      // Pass 2 — also persist 'jobber' completion to DB. Pass explicit
+      // activeStepOpen since setActiveStepOpen('import') above hasn't been
+      // applied yet in this closure.
+      persistStep('jobber', null, { activeStepOpen: 'import' })
       setToast({ kind: 'success', msg: 'Jobber connected ✓' })
     } else if (payload.kind === 'jobber-error') {
       setActiveStepOpen('jobber')
@@ -5765,16 +5938,22 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   // /api/onboarding/progress route dual-writes onboarding_progress (audit)
   // and locations.onboarding_state (cached snapshot read on next page load).
   // view-as / demo paths (no real currentUser) skip the network.
-  function persistStep(stepId, metadata) {
+  // Pass 2 — opts.activeStepOpen lets callers override the captured closure
+  // value, needed when setActiveStepOpen was just called in the same handler
+  // (the new state isn't visible in this closure until next render).
+  function persistStep(stepId, metadata, opts) {
     if (typeof window === 'undefined') return
     if (!currentUserCtx?.id) return
+    const aso = opts && Object.prototype.hasOwnProperty.call(opts, 'activeStepOpen')
+      ? opts.activeStepOpen
+      : activeStepOpen
     fetch('/api/onboarding/progress', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         step: stepId,
         metadata: metadata || {},
-        activeStepOpen,
+        activeStepOpen: aso,
       }),
     }).catch(err => console.error('[persistStep]', stepId, err?.message || err))
   }
@@ -6167,6 +6346,16 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
         <div style={{ height:'3px', background:'rgba(255,255,255,0.08)', borderRadius:'2px', overflow:'hidden' }}>
           <div style={{ height:'100%', width:`${(launchStep / LAUNCH_STEPS_LABELS.length) * 100}%`, background:'#a8c9c4', borderRadius:'2px', transition:'width 0.7s ease' }} />
         </div>
+
+        {/* Pass 2 — launch error (API call failed). Animation kept user busy,
+            now we surface what went wrong. setLaunching(false) in catch() means
+            we won't actually be here if the error fired — but defensive render
+            in case state is mid-update. */}
+        {stepError && stepError.launch && (
+          <div style={{ marginTop:'24px', padding:'12px 14px', background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.3)', borderRadius:'10px', fontSize:'12px', color:'#fca5a5' }}>
+            {stepError.launch}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -6216,7 +6405,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                 {!locked&&!done&&step.id==='invite'&&<span style={{ fontSize:'14px', color:'#c8d8d4', transform:isOpen?'rotate(90deg)':'none', display:'inline-block', transition:'transform 0.15s', marginLeft:'4px' }}>›</span>}
               </div>
               {done&&<div style={{ margin:'0 14px 14px', padding:'9px 14px', background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:'9px', display:'flex', alignItems:'center', gap:'8px' }}><span>✅</span><span style={{ fontSize:'12px', fontWeight:600, color:'#22c55e' }}>Completed</span></div>}
-              {isOpen&&<div style={{ padding:'0 14px 14px' }}><StepContent step={step} profileForm={profileForm} setProfileForm={setProfileForm} locationForm={locationForm} setLocationForm={setLocationForm} jobberKey={jobberKey} setJobberKey={setJobberKey} showAdvancedSender={showAdvancedSender} setShowAdvancedSender={setShowAdvancedSender} markDone={markDone} setActiveStepOpen={setActiveStepOpen} setShowInviteFlow={setShowInviteFlow} onOpenSettings={onOpenSettings} setSavedPaths={setSavedPaths} onSkipOnboarding={onSkipOnboarding} onAdvanceFromStep={advanceFromStep} /></div>}
+              {isOpen&&<div style={{ padding:'0 14px 14px' }}><StepContent step={step} profileForm={profileForm} setProfileForm={setProfileForm} locationForm={locationForm} setLocationForm={setLocationForm} jobberKey={jobberKey} setJobberKey={setJobberKey} showAdvancedSender={showAdvancedSender} setShowAdvancedSender={setShowAdvancedSender} markDone={markDone} setActiveStepOpen={setActiveStepOpen} setShowInviteFlow={setShowInviteFlow} onOpenSettings={onOpenSettings} setSavedPaths={setSavedPaths} onSkipOnboarding={onSkipOnboarding} onAdvanceFromStep={advanceFromStep} savingStep={savingStep} stepError={stepError} saveProfile={saveProfile} saveLocation={saveLocation} savePaths={savePaths} /></div>}
             </div>
           )
         })}
@@ -6229,6 +6418,11 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
               style={{ width:'100%', padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
               Go to Bee Hub →
             </button>
+            {stepError && stepError.launch && (
+              <div style={{ marginTop:'10px', padding:'9px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'9px', fontSize:'12px', color:'#b91c1c', textAlign:'left' }}>
+                {stepError.launch}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -6532,7 +6726,7 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
   )
 }
 
-function StepContent({ step, profileForm, setProfileForm, locationForm, setLocationForm, jobberKey, setJobberKey, showAdvancedSender, setShowAdvancedSender, markDone, setActiveStepOpen, setShowInviteFlow, onOpenSettings, setSavedPaths=()=>{}, onSkipOnboarding, onAdvanceFromStep }) {
+function StepContent({ step, profileForm, setProfileForm, locationForm, setLocationForm, jobberKey, setJobberKey, showAdvancedSender, setShowAdvancedSender, markDone, setActiveStepOpen, setShowInviteFlow, onOpenSettings, setSavedPaths=()=>{}, onSkipOnboarding, onAdvanceFromStep, savingStep, stepError, saveProfile, saveLocation, savePaths }) {
 const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }
   if (step.id==='profile') {
     const phoneDigits = profileForm.phone.replace(/\D/g,'')
@@ -6557,10 +6751,15 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
             style={{ ...inp, borderColor: profileForm.phone && !phoneValid ? 'rgba(239,68,68,0.4)' : 'rgba(0,0,0,0.1)' }} />
           <p style={{ fontSize:'11px', color:'#a8c9c4', marginTop:'4px' }}>This is your personal contact number. Your location's business phone is set in the next step.</p>
         </div>
-        <button onClick={()=>{ if(ready){ markDone('profile'); setActiveStepOpen(null) } }} disabled={!ready}
-          style={{ width:'100%', padding:'11px', background:ready?'#22c55e':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:ready?'white':'#9ca3af', cursor:ready?'pointer':'not-allowed' }}>
-          {ready?'✓ Save & Complete':'Fill in all fields to continue'}
+        <button onClick={()=>{ if(ready) saveProfile && saveProfile() }} disabled={!ready || savingStep==='profile'}
+          style={{ width:'100%', padding:'11px', background:ready?'#22c55e':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:ready?'white':'#9ca3af', cursor:(ready && savingStep!=='profile')?'pointer':'not-allowed', opacity:savingStep==='profile'?0.7:1 }}>
+          {savingStep==='profile' ? 'Saving…' : (ready?'✓ Save & Complete':'Fill in all fields to continue')}
         </button>
+        {stepError && stepError.profile && (
+          <div style={{ marginTop:'8px', padding:'9px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'9px', fontSize:'12px', color:'#b91c1c' }}>
+            {stepError.profile}
+          </div>
+        )}
       </div>
     )
   }
@@ -6671,10 +6870,15 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
           <input type="url" value={locationForm.reviewsLink} onChange={e=>setLocationForm(f=>({...f,reviewsLink:e.target.value}))} placeholder="https://g.page/your-business/review" style={inp} />
         </div>
 
-        <button onClick={()=>{ if(ready){ markDone('location'); setActiveStepOpen(null) } }} disabled={!ready}
-          style={{ width:'100%', padding:'11px', background:ready?'#22c55e':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:ready?'white':'#9ca3af', cursor:ready?'pointer':'not-allowed' }}>
-          {ready?'✓ Save & Complete':'Fill in all required fields'}
+        <button onClick={()=>{ if(ready) saveLocation && saveLocation() }} disabled={!ready || savingStep==='location'}
+          style={{ width:'100%', padding:'11px', background:ready?'#22c55e':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:ready?'white':'#9ca3af', cursor:(ready && savingStep!=='location')?'pointer':'not-allowed', opacity:savingStep==='location'?0.7:1 }}>
+          {savingStep==='location' ? 'Saving…' : (ready?'✓ Save & Complete':'Fill in all required fields')}
         </button>
+        {stepError && stepError.location && (
+          <div style={{ marginTop:'8px', padding:'9px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'9px', fontSize:'12px', color:'#b91c1c' }}>
+            {stepError.location}
+          </div>
+        )}
       </div>
     )
   }
@@ -6692,7 +6896,12 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
   if (step.id==='paths') {
     return (
       <div style={{ paddingTop:'12px' }}>
-        <OnboardingPathsEditor onComplete={(prefs)=>{ setSavedPaths(prefs); markDone('paths'); setActiveStepOpen(null); if(prefs?.generalDefault) setDefaultPathId('general-'+prefs.generalDefault.replace('path-','')) }} />
+        <OnboardingPathsEditor onComplete={(prefs)=>{ savePaths ? savePaths(prefs) : (setSavedPaths(prefs), markDone('paths'), setActiveStepOpen(null), prefs?.generalDefault && setDefaultPathId('general-'+prefs.generalDefault.replace('path-',''))) }} />
+        {stepError && stepError.paths && (
+          <div style={{ marginTop:'8px', padding:'9px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'9px', fontSize:'12px', color:'#b91c1c' }}>
+            {stepError.paths}
+          </div>
+        )}
       </div>
     )
   }
