@@ -13718,27 +13718,66 @@ function JobberConnectionCard({ settings, updateLocation }) {
 }
 
 // ─── Client Import Card ────────────────────────────────────────────────────────
+// Wired to the real import endpoint at /api/import/jobber-clients.
+// Polls /api/import/status/[jobId] every 1.5s for real progress.
+// No localStorage cache — server is source of truth.
 function ClientImportCard({ isJobberConnected, locationId }) {
-  const STORAGE_KEY = `import_complete_${locationId}`
-  // Default 'idle' on SSR + initial client render; hydrate from localStorage
-  // post-mount so the rendered HTML matches between server and client.
-  const [importState, setImportState] = useState('idle')
+  const [importState, setImportState] = useState('idle') // idle | running | complete | error
+  const [jobId, setJobId]             = useState(null)
+  const [status, setStatus]           = useState(null)   // { processed_records, status_label, ... }
+  const [summary, setSummary]         = useState(null)   // { total_clients, leads_created, ... }
+  const [error, setError]             = useState(null)
+  const [skipped, setSkipped]         = useState(false)  // session-only collapse
+
+  // Status polling
   useEffect(() => {
-    try { const v = localStorage.getItem(STORAGE_KEY); if (v) setImportState(v) } catch {}
-  }, [STORAGE_KEY])
-  const [progress, setProgress]     = useState(0)
-  const [clientCount, setClientCount] = useState(0)
-  const [skipped, setSkipped]       = useState(false)
+    if (importState !== 'running' || !jobId) return
+    let cancelled = false
+    let timer = null
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/import/status/${jobId}`)
+        const d = await r.json()
+        if (cancelled) return
+        if (!r.ok) {
+          setError(d.error || 'status_fetch_failed')
+          setImportState('error')
+          return
+        }
+        setStatus(d)
+        if (d.status === 'complete' || d.status === 'completed' || d.status === 'success') {
+          setSummary(d)
+          setImportState('complete')
+          return
+        }
+        if (d.status === 'failed' || d.status === 'error') {
+          setError(d.error || d.status_message || 'import_failed')
+          setImportState('error')
+          return
+        }
+        // still running — schedule next poll
+        timer = setTimeout(poll, 1500)
+      } catch (e) {
+        if (cancelled) return
+        setError(String(e?.message || e))
+        setImportState('error')
+      }
+    }
+    poll()
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [importState, jobId])
 
   if (!isJobberConnected) return null
-  if (importState === 'complete') return null
   if (skipped) return (
     <div style={{ margin:'0 12px', borderRadius:'12px', background:'white', border:'1px solid rgba(0,0,0,0.07)', padding:'12px 14px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
       <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
         <span style={{ fontSize:'16px' }}>📋</span>
         <div>
           <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Client Import</p>
-          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Skipped - tap to import when ready</p>
+          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Skipped — tap to import when ready</p>
         </div>
       </div>
       <button onClick={()=>setSkipped(false)}
@@ -13748,27 +13787,41 @@ function ClientImportCard({ isJobberConnected, locationId }) {
     </div>
   )
 
-  function startImport() {
+  async function startImport() {
+    if (!locationId) { setError('no_location_id'); setImportState('error'); return }
+    setError(null); setStatus(null); setSummary(null)
     setImportState('running')
-    setProgress(0)
-    const total = Math.floor(Math.random() * 80) + 40
-    let current = 0
-    const interval = setInterval(() => {
-      current += Math.floor(Math.random() * 8) + 2
-      if (current >= total) {
-        current = total
-        clearInterval(interval)
-        setProgress(100)
-        setClientCount(total)
-        setTimeout(() => {
-          setImportState('complete')
-          try { localStorage.setItem(STORAGE_KEY, 'complete') } catch {}
-        }, 800)
+    try {
+      const r = await fetch(
+        '/api/import/jobber-clients?location_id=' + encodeURIComponent(locationId),
+        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+      )
+      const d = await r.json()
+      if (!r.ok || d.success === false) {
+        setError(d.error || `import_failed_${r.status}`)
+        setImportState('error')
+        return
       }
-      setProgress(Math.round((current / total) * 100))
-      setClientCount(current)
-    }, 180)
+      // Some endpoint shapes return the full summary synchronously; others return
+      // a job_id and require polling. Handle both.
+      if (d.job_id) {
+        setJobId(d.job_id)
+        // polling useEffect picks this up
+      } else {
+        // synchronous summary — skip polling
+        setSummary(d)
+        setImportState('complete')
+      }
+    } catch (e) {
+      setError(String(e?.message || e))
+      setImportState('error')
+    }
   }
+
+  // ─── Display helpers ──
+  const progressPct = status?.processed_records && status?.total_records
+    ? Math.min(100, Math.round((status.processed_records / status.total_records) * 100))
+    : null
 
   return (
     <div style={{ margin:'0 12px', borderRadius:'12px', background:'white', border:'1px solid rgba(0,0,0,0.07)', overflow:'hidden' }}>
@@ -13778,13 +13831,19 @@ function ClientImportCard({ isJobberConnected, locationId }) {
           <span style={{ fontSize:'16px' }}>📋</span>
         </div>
         <div style={{ flex:1, minWidth:0 }}>
-          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Import Clients from Jobber</p>
+          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>
+            {importState === 'complete' ? 'Jobber Sync' : 'Import Clients from Jobber'}
+          </p>
           <p style={{ fontSize:'11px', color:'#8a9e9a' }}>
-            {importState==='idle' && 'Bring your existing clients into Bee Hub'}
-            {importState==='running' && `Importing… ${clientCount} clients so far`}
+            {importState === 'idle' && 'Bring your existing clients into Bee Hub'}
+            {importState === 'running' && (status?.processed_records != null
+              ? `Importing… ${status.processed_records} of ${status.total_records ?? '?'} clients`
+              : 'Starting import…')}
+            {importState === 'complete' && `${summary?.total_clients ?? status?.processed_records ?? 0} clients imported`}
+            {importState === 'error' && (error || 'Import failed')}
           </p>
         </div>
-        {importState==='idle' && (
+        {importState === 'idle' && (
           <button onClick={()=>setSkipped(true)}
             style={{ fontSize:'11px', color:'#8a9e9a', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', padding:'4px 8px', flexShrink:0 }}>
             Skip
@@ -13793,23 +13852,57 @@ function ClientImportCard({ isJobberConnected, locationId }) {
       </div>
 
       {/* Progress bar */}
-      {importState==='running' && (
+      {importState === 'running' && progressPct != null && (
         <div style={{ padding:'0 14px 12px' }}>
           <div style={{ height:'6px', background:'rgba(168,201,196,0.2)', borderRadius:'3px', overflow:'hidden' }}>
-            <div style={{ height:'100%', width:`${progress}%`, background:'linear-gradient(90deg,#1a2e2b,#a8c9c4)', borderRadius:'3px', transition:'width 0.2s ease' }} />
+            <div style={{ height:'100%', width:`${progressPct}%`, background:'linear-gradient(90deg,#1a2e2b,#a8c9c4)', borderRadius:'3px', transition:'width 0.2s ease' }} />
           </div>
-          <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'5px', textAlign:'right' }}>{progress}%</p>
+          <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'5px', textAlign:'right' }}>{progressPct}%</p>
+        </div>
+      )}
+
+      {/* Summary on complete */}
+      {importState === 'complete' && summary && (
+        <div style={{ padding:'0 14px 12px' }}>
+          <p style={{ fontSize:'10px', color:'#8a9e9a', lineHeight:1.5 }}>
+            Leads: {summary.leads_created ?? 0} new
+            {summary.leads_updated ? `, ${summary.leads_updated} updated` : ''}
+            {' · '}Requests: {summary.requests_created ?? 0}
+            {summary.requests_updated ? `, ${summary.requests_updated} updated` : ''}
+            {' · '}Jobs: {summary.jobs_created ?? 0}
+            {' · '}Invoices: {summary.invoices_created ?? 0}
+          </p>
         </div>
       )}
 
       {/* Action */}
-      {importState==='idle' && (
+      {importState === 'idle' && (
         <div style={{ padding:'0 14px 12px' }}>
           <button onClick={startImport}
             style={{ width:'100%', padding:'10px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
             Start Import
           </button>
           <p style={{ fontSize:'10px', color:'#b0c0bc', textAlign:'center', marginTop:'6px' }}>Future client syncs happen automatically</p>
+        </div>
+      )}
+
+      {/* Sync Again after complete */}
+      {importState === 'complete' && (
+        <div style={{ padding:'0 14px 12px' }}>
+          <button onClick={()=>{ setImportState('idle'); setStatus(null); setSummary(null); setJobId(null); setError(null) }}
+            style={{ width:'100%', padding:'8px', background:'transparent', border:'1px solid rgba(26,46,43,0.2)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:500, color:'#1a2e2b', cursor:'pointer' }}>
+            Sync Again
+          </button>
+        </div>
+      )}
+
+      {/* Try Again after error */}
+      {importState === 'error' && (
+        <div style={{ padding:'0 14px 12px' }}>
+          <button onClick={()=>{ setImportState('idle'); setError(null); setStatus(null) }}
+            style={{ width:'100%', padding:'10px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+            Try Again
+          </button>
         </div>
       )}
     </div>
