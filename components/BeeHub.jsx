@@ -22729,8 +22729,9 @@ export default function App({
   initialLocations,          // accepted; not yet consumed — ALL_LOCATIONS mock still drives the picker
   initialUsers,              // real hub_users roster from Supabase; null → fall back to USERS_DATA mock
   initialSeats,              // server-rendered subscription_seats for the current location (empty array for elevated users)
-  initialPendingInvites,     // server-rendered pending_invites for the current location (empty array for elevated users)
-initialPeople,             // server-rendered Supabase leads → Person shape (Phase 3A); null/empty → fall back to ALL_PEOPLE mock
+ initialPendingInvites,     // server-rendered pending_invites for the current location (empty array for elevated users)
+  initialLookups,            // server-rendered admin-managed lookups grouped by category (Sitting 1A)
+  initialPeople,             // server-rendered Supabase leads → Person shape (Phase 3A); null/empty → fall back to ALL_PEOPLE mock
   currentSubscription,
   currentLocation,           // real Supabase row for franchise owners; null for elevated users
 } = {}) {
