@@ -22730,7 +22730,7 @@ export default function App({
   initialUsers,              // real hub_users roster from Supabase; null → fall back to USERS_DATA mock
   initialSeats,              // server-rendered subscription_seats for the current location (empty array for elevated users)
   initialPendingInvites,     // server-rendered pending_invites for the current location (empty array for elevated users)
-  initialLookups,            // server-rendered admin-managed lookups grouped by category (Sitting 1A)
+initialPeople,             // server-rendered Supabase leads → Person shape (Phase 3A); null/empty → fall back to ALL_PEOPLE mock
   currentSubscription,
   currentLocation,           // real Supabase row for franchise owners; null for elevated users
 } = {}) {
@@ -22899,10 +22899,12 @@ export default function App({
   const [showGlobalSearch, setShowGlobalSearch] = useState(false)
   const [globalSelectedPerson, setGlobalSelectedPerson]   = useState(null)
   const [globalSelectedPartner, setGlobalSelectedPartner] = useState(null)
-  const [people, setPeople]                 = useState(ALL_PEOPLE)
-  // Extend with randomized mock data post-mount. Module-level Math.random
+const [people, setPeople]                 = useState(Array.isArray(initialPeople) && initialPeople.length > 0 ? initialPeople : ALL_PEOPLE)
+ // Extend with randomized mock data post-mount. Module-level Math.random
   // would diverge between SSR and client → hydration mismatch.
+  // Skipped when initialPeople has real Supabase data — mocks are mock-only.
   useEffect(() => {
+    if (Array.isArray(initialPeople) && initialPeople.length > 0) return
     setPeople(prev => [...prev, ...generateExtraPeople()])
   }, [])
   const [followUps, setFollowUps]           = useState([
