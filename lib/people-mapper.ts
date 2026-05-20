@@ -3,21 +3,11 @@
 // Maps Supabase rows (leads + joined tables) into the Person shape that
 // components/BeeHub.jsx consumes. Centralized here so both initial-hydration
 // (in app/page.tsx) and any future refetch path can use the same logic.
-//
-// The Person shape has many fields with no DB-column source today:
-//   path, assessment, assessmentType, jobs, invoices, outreachTimeline,
-//   activity, jobberRef, jobberClient, jobberSearchStatus, reachOutMethod,
-//   estimateSent, estimateApproved, finalProcessed
-//
-// Those default to safe empty values. As the corresponding tables come
-// online (assessments, jobs, invoices already exist — wiring later;
-// touchpoints and lead_notes are written by APIs, read here once we add
-// the joined queries in Phase 3B).
 
 type LeadRow = {
   id: string
   location_uuid: string | null
-  location_id: string // legacy slug, still populated by Jobber import
+  location_id: string
   assigned_to: string | null
   name: string | null
   first_name: string | null
@@ -47,6 +37,20 @@ type LeadRow = {
   updated_at: string | null
 }
 
+// Joined data — all optional. Anything passed populates richer Person fields.
+type JoinedData = {
+  lead_notes?: any[]
+  touchpoints?: any[]
+  lead_contacts?: any[]
+  lead_tags?: any[]
+  assessments?: any[]
+  quotes?: any[]
+  jobs?: any[]
+  invoices?: any[]
+  // Lookup table for tag IDs → tag definitions (id, label, color, etc.)
+  tag_lookups?: Record<string, any>
+}
+
 function fmtCreatedShort(iso: string | null | undefined): string {
   if (!iso) return ''
   try {
@@ -58,87 +62,180 @@ function fmtCreatedShort(iso: string | null | undefined): string {
   }
 }
 
-export function mapLeadToPerson(row: LeadRow) {
-  // Addresses jsonb is already the right shape ({type, value, street, city, state, zip}).
-  // Empty array if no addresses set. Legacy single-field address from the
-  // `leads.address` column gets shimmed when addresses is empty so the UI
-  // can show *something* for leads that came in pre-migration.
+function fmtDateTime(iso: string | null | undefined): string {
+  if (!iso) return ''
+  try {
+    const d = new Date(iso)
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    let hours = d.getHours()
+    const minutes = String(d.getMinutes()).padStart(2, '0')
+    const ampm = hours >= 12 ? 'PM' : 'AM'
+    hours = hours % 12 || 12
+    return `${months[d.getMonth()]} ${d.getDate()} at ${hours}:${minutes} ${ampm}`
+  } catch {
+    return ''
+  }
+}
+
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return ''
+  try {
+    const d = new Date(iso)
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`
+  } catch {
+    return ''
+  }
+}
+
+export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
+  // Addresses
   const addresses = Array.isArray(row.addresses) ? row.addresses : []
   const legacyAddr = addresses.length === 0 && row.address
     ? [{ type: 'Service', value: row.address, street: row.address, city: row.city || '', state: row.state || '', zip: row.zip || '' }]
     : []
   const finalAddresses = addresses.length > 0 ? addresses : legacyAddr
 
+  // Notes — split by kind
+  const allNotes = joined.lead_notes || []
+  const buzzNotes = allNotes.filter(n => n.kind === 'buzz').map(n => ({
+    id: n.id,
+    text: n.text,
+    ts: fmtCreatedShort(n.created_at),
+    user: n.user_label || 'Unknown',
+  }))
+  const jobNotes = allNotes.filter(n => n.kind === 'job').map(n => ({
+    id: n.id,
+    text: n.text,
+    ts: fmtCreatedShort(n.created_at),
+    user: n.user_label || 'Unknown',
+  }))
+  const closeNotes = allNotes.filter(n => n.kind === 'close').map(n => ({
+    id: n.id,
+    text: n.text,
+    ts: fmtCreatedShort(n.created_at),
+    user: n.user_label || 'Unknown',
+  }))
+
+  // Touchpoints → split into outreachTimeline (everything) + activity (system events)
+  const allTouchpoints = (joined.touchpoints || []).slice().sort(
+    (a, b) => new Date(a.occurred_at).getTime() - new Date(b.occurred_at).getTime()
+  )
+  const outreachTimeline = allTouchpoints.map(t => ({
+    id: t.id,
+    type: t.kind,
+    method: t.method,
+    label: t.label,
+    ts: fmtDateTime(t.occurred_at),
+    status: t.status || 'done',
+  }))
+  const activity = allTouchpoints
+    .filter(t => t.kind === 'system' || t.kind === 'stage_change')
+    .map(t => ({
+      type: t.kind,
+      text: t.label,
+      ts: fmtDateTime(t.occurred_at),
+    }))
+
+  // Reach-out method = most recent reach_out touchpoint's method
+  const lastReachOut = [...allTouchpoints].reverse().find(t => t.kind === 'reach_out')
+  const reachOutMethod = lastReachOut?.method || null
+
+  // Job contacts
+  const jobContacts = (joined.lead_contacts || []).map(c => ({
+    id: c.id,
+    name: c.name,
+    role: c.role || '',
+    phone: c.phone || '',
+    email: c.email || '',
+  }))
+
+  // Tags — junction row gives us tag_lookup_id; resolve via tag_lookups
+  const tags = (joined.lead_tags || [])
+    .map(lt => {
+      const def = joined.tag_lookups?.[lt.tag_lookup_id]
+      if (!def) return null
+      // Tag ID format must match what BeeHub expects (from ALL_TAGS list).
+      // Lookups have attrs.key for the tag ID, fall back to lookup id.
+      return def.attrs?.key || def.id
+    })
+    .filter(Boolean)
+
+  // Assessment — most recent
+  const assessmentRow = (joined.assessments || [])
+    .slice()
+    .sort((a, b) => new Date(b.scheduled_at || b.created_at).getTime() - new Date(a.scheduled_at || a.created_at).getTime())[0]
+  const assessment = assessmentRow?.scheduled_at ? fmtDateTime(assessmentRow.scheduled_at) : null
+  const assessmentType = null // Schema doesn't have a type column yet
+
+  // Estimate sent — most recent quote
+  const quoteRow = (joined.quotes || [])
+    .slice()
+    .sort((a, b) => new Date(b.sent_at || b.created_at).getTime() - new Date(a.sent_at || a.created_at).getTime())[0]
+  const estimateSent = quoteRow?.sent_at ? fmtDate(quoteRow.sent_at) : null
+  const estimateApproved = quoteRow?.approved_at ? fmtDate(quoteRow.approved_at) : null
+
+  // Jobs
+  const jobs = (joined.jobs || []).map(j => ({
+    id: j.id,
+    title: j.title || 'Job',
+    status: j.status || 'pending',
+    scheduledStart: j.scheduled_start ? fmtDate(j.scheduled_start) : null,
+    total: j.total || 0,
+    jobberRef: j.jobber_job_id || null,
+  }))
+
+  // Invoices
+  const invoices = (joined.invoices || []).map(inv => ({
+    id: inv.id,
+    amount: inv.total || 0,
+    paidAmount: inv.paid_amount || 0,
+    balance: inv.balance_owing || 0,
+    status: inv.status || 'Draft',
+    issuedAt: inv.issued_at ? fmtDate(inv.issued_at) : null,
+    paidAt: inv.paid_at ? fmtDate(inv.paid_at) : null,
+    invoiceUrl: inv.invoice_url || null,
+  }))
+
   return {
     id: row.id,
     assignedTo: row.assigned_to,
-   locationId: row.location_uuid || row.location_id, // UUID matches hub_users.location_id (BeeHub's locFilter)
-
-    // Identity
+    locationId: row.location_uuid || row.location_id, // UUID matches BeeHub's locFilter
     name: row.name || [row.first_name, row.last_name].filter(Boolean).join(' ').trim() || '(unnamed)',
     phone: row.phone || '',
     email: row.email || '',
-
-    // Address (legacy + new jsonb)
     address: finalAddresses[0]?.value || row.address || '',
     addresses: finalAddresses,
-
-    // Pipeline
     stage: row.stage || 'New',
     source: row.source || '',
     project: row.project_type || '',
     created: fmtCreatedShort(row.created_at),
-
-    // Tags — empty for now, populated by Phase 3B's joined query
-    tags: [],
-
-    // Junk / final processed
+    tags,
     isJunk: row.is_junk || false,
     finalProcessed: row.final_processed || false,
-
-    // Referral
     referredBy: row.referred_by_id || null,
     referredByKind: row.referred_by_kind || null,
-
-    // Drip path
     path: row.drip_path || null,
     moveDripPath: row.move_drip_path || null,
-
-    // Close-out
     closedLostReason: row.closed_lost_reason || null,
     closedLostNote: row.closed_lost_note || null,
-
-    // Jobber state — derived from current columns
     jobberRef: row.jobber_client_id || null,
-    jobberClient: null, // joined query in Phase 3B
+    jobberClient: null,
     jobberSearchStatus: row.jobber_client_id ? 'found' : 'not_found',
-
-    // Notes — empty for now, joined query in Phase 3B
-    buzzNotes: [],
-    jobNotes: [],
-
-    // Job contacts — empty for now, joined query in Phase 3B
-    jobContacts: [],
-
-    // Activity / timeline — empty for now, joined query in Phase 3B
-    outreachTimeline: [],
-    activity: [],
-
-    // Jobs / invoices — empty for now, joined query in Phase 3B
-    jobs: [],
-    invoices: [],
-
-    // Assessment — empty for now, joined query in Phase 3B
-    assessment: null,
-    assessmentType: null,
-
-    // Reach-out — derived in Phase 3B from latest touchpoint
-    reachOutMethod: null,
-
-    // Other Person fields the UI may reference — safe defaults
+    buzzNotes,
+    jobNotes,
+    closeNotes,
+    jobContacts,
+    outreachTimeline,
+    activity,
+    jobs,
+    invoices,
+    assessment,
+    assessmentType,
+    estimateSent,
+    estimateApproved,
+    reachOutMethod,
     jobDetail: '',
     paused: false,
-    estimateSent: false,
-    estimateApproved: false,
   }
 }

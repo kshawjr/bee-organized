@@ -426,11 +426,12 @@ export default async function HomePage() {
     initialUsers = (locUsers || []).map(buildLocationUser)
   }
 
-  // ─── Hive clients (leads) — Phase 3A ───
-  // Read-only initial hydration. Joined tables (lead_notes, touchpoints,
-  // lead_contacts, lead_tags, jobs, invoices, assessments) come in Phase 3B.
-  // For now: just the leads themselves, location-scoped and mapped through
-  // lib/people-mapper.
+  // ─── Hive clients (leads + joined data) — Phase 3B-extended ───
+  // Pulls leads with their related lead_notes, touchpoints, lead_contacts,
+  // lead_tags, assessments, quotes, jobs, invoices. All scoped by the same
+  // location filter as the leads query so non-elevated users get only their
+  // own location's data. Joined data is grouped by lead_id and passed into
+  // mapLeadToPerson for in-memory join.
   let initialPeople: any[] = []
   {
     let q = supabaseService
@@ -440,7 +441,6 @@ export default async function HomePage() {
       .order('created_at', { ascending: false })
       .limit(1000)
 
-    // Scope by location for non-elevated users
     if (!isElevated && hubUser.location_id) {
       q = q.eq('location_uuid', hubUser.location_id)
     }
@@ -449,10 +449,77 @@ export default async function HomePage() {
 
     if (leadsError) {
       console.error('[page.tsx] leads fetch error:', leadsError.message)
-    } else if (leadsRaw) {
+    } else if (leadsRaw && leadsRaw.length > 0) {
+      const leadIds = leadsRaw.map((l: any) => l.id)
+
+      // Parallel-fetch all joined tables
+      const [
+        { data: leadNotesRaw },
+        { data: touchpointsRaw },
+        { data: leadContactsRaw },
+        { data: leadTagsRaw },
+        { data: assessmentsRaw },
+        { data: quotesRaw },
+        { data: jobsRaw },
+        { data: invoicesRaw },
+      ] = await Promise.all([
+        supabaseService.from('lead_notes').select('*').in('lead_id', leadIds).order('created_at', { ascending: false }),
+        supabaseService.from('touchpoints').select('*').in('lead_id', leadIds).order('occurred_at', { ascending: false }),
+        supabaseService.from('lead_contacts').select('*').in('lead_id', leadIds).order('created_at', { ascending: true }),
+        supabaseService.from('lead_tags').select('*').in('lead_id', leadIds),
+        supabaseService.from('assessments').select('*').in('lead_id', leadIds).order('scheduled_at', { ascending: false }),
+        supabaseService.from('quotes').select('*').in('lead_id', leadIds).order('sent_at', { ascending: false }),
+        supabaseService.from('jobs').select('*').in('lead_id', leadIds).order('scheduled_start', { ascending: false }),
+        supabaseService.from('invoices').select('*').in('lead_id', leadIds).order('issued_at', { ascending: false }),
+      ])
+
+      // Build a single tag_lookups map (id → lookup row) for all client_tags lookups
+      const tagLookupIds = [...new Set((leadTagsRaw || []).map((lt: any) => lt.tag_lookup_id))]
+      let tag_lookups: Record<string, any> = {}
+      if (tagLookupIds.length > 0) {
+        const { data: tagLookupRows } = await supabaseService
+          .from('lookups')
+          .select('*')
+          .in('id', tagLookupIds)
+        ;(tagLookupRows || []).forEach((row: any) => {
+          tag_lookups[row.id] = row
+        })
+      }
+
+      // Group each joined dataset by lead_id
+      const groupBy = <T extends { lead_id: string }>(rows: T[] | null) => {
+        const out: Record<string, T[]> = {}
+        ;(rows || []).forEach(r => {
+          if (!out[r.lead_id]) out[r.lead_id] = []
+          out[r.lead_id].push(r)
+        })
+        return out
+      }
+
+      const notesByLead     = groupBy(leadNotesRaw)
+      const touchByLead     = groupBy(touchpointsRaw)
+      const contactsByLead  = groupBy(leadContactsRaw)
+      const tagsByLead      = groupBy(leadTagsRaw)
+      const assessByLead    = groupBy(assessmentsRaw)
+      const quotesByLead    = groupBy(quotesRaw)
+      const jobsByLead      = groupBy(jobsRaw)
+      const invoicesByLead  = groupBy(invoicesRaw)
+
       const { mapLeadToPerson } = await import('@/lib/people-mapper')
-      initialPeople = leadsRaw.map(mapLeadToPerson)
-      console.log(`[page.tsx] Fetched ${initialPeople.length} leads for ${hubUser.email}`)
+      initialPeople = leadsRaw.map((row: any) =>
+        mapLeadToPerson(row, {
+          lead_notes:    notesByLead[row.id]    || [],
+          touchpoints:   touchByLead[row.id]    || [],
+          lead_contacts: contactsByLead[row.id] || [],
+          lead_tags:     tagsByLead[row.id]     || [],
+          assessments:   assessByLead[row.id]   || [],
+          quotes:        quotesByLead[row.id]   || [],
+          jobs:          jobsByLead[row.id]     || [],
+          invoices:      invoicesByLead[row.id] || [],
+          tag_lookups,
+        })
+      )
+      console.log(`[page.tsx] Fetched ${initialPeople.length} leads + joined data for ${hubUser.email}`)
     }
   }
 
