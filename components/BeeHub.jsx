@@ -4086,7 +4086,7 @@ function PersonPanel({
     }
   }, []);
   function update(patch) {
-    onUpdate({ ...person, ...patch });
+    onUpdate({ ...person, ...patch }, patch);
   }
   function handleReachOut(patch) {
     update(patch);
@@ -7910,7 +7910,56 @@ function QuickNoteInput({ onAdd }) {
   )
 }
 
-function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='all', isElevated=false, initialSelected=null, onInitialSelectedConsumed=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11' }) {
+// camelCase Person field → snake_case leads column. Fields not in this map and
+// not in PASSTHROUGH_API_FIELDS are dropped silently (client-only fields that
+// the API neither persists nor accepts).
+const PERSON_TO_API_FIELD = {
+  isJunk: 'is_junk',
+  projectType: 'project_type',
+  project: 'project_type',
+  dripPath: 'drip_path',
+  moveDripPath: 'move_drip_path',
+  assignedTo: 'assigned_to',
+  closedLostReason: 'closed_lost_reason',
+  closedLostNote: 'closed_lost_note',
+  referredByKind: 'referred_by_kind',
+  referredBy: 'referred_by_id',
+  finalProcessed: 'final_processed',
+}
+const PASSTHROUGH_API_FIELDS = new Set([
+  'stage','source','name','first_name','last_name',
+  'email','phone','address','addresses','city','state','zip',
+])
+
+async function patchLeadAPI(leadId, patch) {
+  const body = {}
+  for (const [k, v] of Object.entries(patch || {})) {
+    if (PERSON_TO_API_FIELD[k]) {
+      body[PERSON_TO_API_FIELD[k]] = v
+    } else if (PASSTHROUGH_API_FIELDS.has(k)) {
+      body[k] = v
+    }
+    // else: client-only field, drop silently
+  }
+  if (Object.keys(body).length === 0) return { ok: true }
+  try {
+    const res = await fetch(`/api/leads/${leadId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      let err = `HTTP ${res.status}`
+      try { const j = await res.json(); if (j?.error) err = j.error } catch {}
+      return { ok: false, error: err }
+    }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e) }
+  }
+}
+
+function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='all', isElevated=false, initialSelected=null, onInitialSelectedConsumed=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{} }) {
   if (!people) return null
   const allPeople = locFilter==='all' ? people : people.filter(p=>p.locationId===locFilter)
   // Default 'list' on both SSR and client. Hydrate from localStorage after
@@ -7971,7 +8020,29 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
     })
   }
 
-  function updatePerson(updated) { setPeople(p=>p.map(x=>x.id===updated.id?updated:x)); setSelected(updated) }
+  function updatePerson(updated, patch) {
+    // Capture previous person for rollback before optimistic write.
+    const prev = people.find(x => x.id === updated.id)
+    setPeople(p => p.map(x => x.id === updated.id ? updated : x))
+    setSelected(updated)
+    // Only persist when caller passed a patch object — calls without it
+    // are state-only updates (e.g. local UI fields not in the API surface).
+    if (!patch || typeof patch !== 'object') return
+    // Detect whether the patch contains anything the API will accept.
+    // patchLeadAPI() drops client-only fields; if nothing remains, skip
+    // the network round-trip entirely.
+    const willSend = Object.keys(patch).some(k =>
+      PERSON_TO_API_FIELD[k] || PASSTHROUGH_API_FIELDS.has(k)
+    )
+    if (!willSend) return
+    patchLeadAPI(updated.id, patch).then(r => {
+      if (r.ok || !prev) return
+      // Rollback on failure.
+      setPeople(p => p.map(x => x.id === prev.id ? prev : x))
+      setSelected(prev)
+      setToast({ kind: 'error', msg: 'Failed to save — please try again' })
+    })
+  }
   function markJunk(id, reason, note) { setPeople(p=>p.map(x=>x.id===id?{...x,isJunk:true,junkReason:reason,junkNote:note}:x)); setSelected(null) }
   function resurrectPerson(id) {
     setPeople(p=>p.map(x=>x.id===id?{
@@ -16269,6 +16340,12 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
   const [showNewLead, setShowNewLead] = useState(false)
   const [onboardingSection, setOnboardingSection] = useState(null)
+  const [toast, setToast] = useState(null)
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 3000)
+    return () => clearTimeout(t)
+  }, [toast])
   // Client-side override to dismiss onboarding after a milestone (e.g. import
   // succeeds). The real source of truth is locations.subscription_status; this
   // state lets the user exit without a DB write. Resets on page reload —
@@ -16445,7 +16522,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     // allow browsing but read-only during grace
   }
 
-  if (activeNav==='hive') return <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} /></>
+  if (activeNav==='hive') return <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} setToast={setToast} />{toast && <InlineToast {...toast} />}</>
 
   if (activeNav==='schedule') return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'5rem' }}>
@@ -22845,6 +22922,12 @@ export default function App({
 } = {}) {
   const router = useRouter()
   const [role, setRole]                     = useState(initialRole ?? 'super_admin')
+  const [toast, setToast]                   = useState(null)
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 3000)
+    return () => clearTimeout(t)
+  }, [toast])
   // Hive Hub Guide: slides come from Supabase via page.tsx → initialGuideSlides.
   // No client-side defaults — empty array stays empty, modal stays hidden.
   const [guideSlides, setGuideSlides]       = useState(Array.isArray(initialGuideSlides) ? initialGuideSlides : [])
@@ -23281,7 +23364,8 @@ if (Array.isArray(initialPeople)) return
     )
     if (activeNav==='hive') return (
       <div style={pageStyle}>
-        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} locFilter={locFilter} isElevated={isElevated} initialSelected={globalSelectedPerson} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} />
+        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} locFilter={locFilter} isElevated={isElevated} initialSelected={globalSelectedPerson} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} />
+        {toast && <InlineToast {...toast} />}
       </div>
     )
     if (activeNav==='partners') return (
