@@ -22900,12 +22900,12 @@ export default function App({
   const [showGlobalSearch, setShowGlobalSearch] = useState(false)
   const [globalSelectedPerson, setGlobalSelectedPerson]   = useState(null)
   const [globalSelectedPartner, setGlobalSelectedPartner] = useState(null)
-const [people, setPeople]                 = useState(Array.isArray(initialPeople) && initialPeople.length > 0 ? initialPeople : ALL_PEOPLE)
+const [people, setPeople]                 = useState(Array.isArray(initialPeople) ? initialPeople : ALL_PEOPLE)
  // Extend with randomized mock data post-mount. Module-level Math.random
   // would diverge between SSR and client → hydration mismatch.
   // Skipped when initialPeople has real Supabase data — mocks are mock-only.
   useEffect(() => {
-    if (Array.isArray(initialPeople) && initialPeople.length > 0) return
+if (Array.isArray(initialPeople)) return
     setPeople(prev => [...prev, ...generateExtraPeople()])
   }, [])
   const [followUps, setFollowUps]           = useState([
