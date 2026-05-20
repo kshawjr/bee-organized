@@ -474,7 +474,7 @@ export default async function HomePage() {
       ])
 
       // Build a single tag_lookups map (id → lookup row) for all client_tags lookups
-      const tagLookupIds = [...new Set((leadTagsRaw || []).map((lt: any) => lt.tag_lookup_id))]
+      const tagLookupIds = Array.from(new Set((leadTagsRaw || []).map((lt: any) => lt.tag_lookup_id)))
       let tag_lookups: Record<string, any> = {}
       if (tagLookupIds.length > 0) {
         const { data: tagLookupRows } = await supabaseService
