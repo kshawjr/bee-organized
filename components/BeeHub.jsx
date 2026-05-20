@@ -1019,6 +1019,23 @@ let _clientTags = null
 function getClientTags() { return _clientTags || ALL_TAGS }
 function setAdminClientTags(list) { if(Array.isArray(list)) _clientTags = list }
 
+// Raw client_tags lookup rows (for resolving BeeHub tag IDs → lookups.id when
+// calling the /api/lead-tags endpoint, which keys on lookup UUIDs).
+let _clientTagsRaw = null
+function setAdminClientTagsRaw(rows) { if(Array.isArray(rows)) _clientTagsRaw = rows }
+function resolveClientTagLookupId(beeTagId) {
+  if (!_clientTagsRaw || !beeTagId) return null
+  // Prefer attrs.key match (canonical), fall back to case-insensitive label match.
+  const byKey = _clientTagsRaw.find(r => r.attrs && r.attrs.key === beeTagId)
+  if (byKey) return byKey.id
+  const lower = String(beeTagId).toLowerCase()
+  const byLabel = _clientTagsRaw.find(r => String(r.label || '').toLowerCase() === lower)
+  if (byLabel) return byLabel.id
+  // Last resort: if the BeeHub id is itself already a lookup UUID, accept it.
+  if (_clientTagsRaw.find(r => r.id === beeTagId)) return beeTagId
+  return null
+}
+
 // Admin-managed touchpoint types (replaces TOUCHPOINT_TYPES hardcoded const)
 let _touchpointTypes = null
 function getTouchpointTypes() { return _touchpointTypes || TOUCHPOINT_TYPES }
@@ -1034,6 +1051,89 @@ function getProjectTypes() {
   return PROJECT_TYPES.map(t => ({ label: t, drip_category: cats[t] || 'general' }))
 }
 function setAdminProjectTypes(list) { if(Array.isArray(list)) _projectTypes = list }
+
+// ─── Lead API helpers ─────────────────────────────────────────────────────────
+// Each returns { ok: boolean, data?: any, error?: string }. They never throw —
+// callers branch on `ok` and decide how to surface failure (toast, rollback).
+async function _fetchJSON(url, init) {
+  try {
+    const res = await fetch(url, init)
+    let body = null
+    try { body = await res.json() } catch { /* non-JSON body is fine */ }
+    if (!res.ok) {
+      return { ok: false, error: (body && body.error) || `http_${res.status}`, data: body }
+    }
+    return { ok: true, data: body }
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || 'network_error' }
+  }
+}
+
+async function postLeadNote(leadId, kind, text) {
+  return _fetchJSON('/api/lead-notes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lead_id: leadId, kind, text }),
+  })
+}
+
+async function deleteLeadNote(noteId) {
+  return _fetchJSON(`/api/lead-notes/${encodeURIComponent(noteId)}`, { method: 'DELETE' })
+}
+
+async function postLeadTag(leadId, tagLookupId) {
+  return _fetchJSON('/api/lead-tags', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lead_id: leadId, tag_lookup_id: tagLookupId }),
+  })
+}
+
+async function deleteLeadTag(leadId, tagLookupId) {
+  const qs = `lead_id=${encodeURIComponent(leadId)}&tag_lookup_id=${encodeURIComponent(tagLookupId)}`
+  return _fetchJSON(`/api/lead-tags?${qs}`, { method: 'DELETE' })
+}
+
+async function postLeadContact(leadId, contact) {
+  return _fetchJSON('/api/lead-contacts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      lead_id: leadId,
+      name: contact.name,
+      role: contact.role || null,
+      phone: contact.phone || null,
+      email: contact.email || null,
+    }),
+  })
+}
+
+async function patchLeadContact(contactId, fields) {
+  return _fetchJSON(`/api/lead-contacts/${encodeURIComponent(contactId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields),
+  })
+}
+
+async function deleteLeadContact(contactId) {
+  return _fetchJSON(`/api/lead-contacts/${encodeURIComponent(contactId)}`, { method: 'DELETE' })
+}
+
+async function postTouchpoint(leadId, kind, method, label, extra) {
+  const body = { lead_id: leadId, kind, label }
+  if (method) body.method = method
+  if (extra && typeof extra === 'object') {
+    if (extra.status != null) body.status = extra.status
+    if (extra.notes != null) body.notes = extra.notes
+    if (extra.occurred_at != null) body.occurred_at = extra.occurred_at
+  }
+  return _fetchJSON('/api/touchpoints', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
 
 function ProcessLeadSheet({ person, onSave, onClose }) {
   const isWakeUp    = !!person.snoozeUntil
@@ -3831,11 +3931,12 @@ function PartnerAddressSection({ partner, onUpdate }) {
 }
 
 // ─── Contacts Tab ─────────────────────────────────────────────────────────────
-function ContactsTab({ person, onUpdate }) {
+function ContactsTab({ person, onUpdate, onError }) {
   const [search, setSearch] = React.useState('')
   const [addingNew, setAddingNew] = React.useState(false)
   const [editingContact, setEditingContact] = React.useState(null)
   const contacts = person.jobContacts || []
+  const notifyError = (msg) => { if (typeof onError === 'function') onError(msg) }
 
   const q = search.toLowerCase()
   const partnerResults = search.length > 1
@@ -3850,17 +3951,51 @@ function ContactsTab({ person, onUpdate }) {
       ).slice(0, 4)
     : []
 
+  function persistNewContact(stub, fallbackErr) {
+    const tempId = stub.id
+    const optimistic = [...contacts, stub]
+    onUpdate({ ...person, jobContacts: optimistic })
+    postLeadContact(person.id, stub).then(r => {
+      if (r.ok && r.data && r.data.contact) {
+        const real = r.data.contact
+        const replacement = {
+          id: real.id,
+          name: real.name,
+          role: real.role || '',
+          phone: real.phone || '',
+          email: real.email || '',
+          sourceId: stub.sourceId,
+        }
+        onUpdate({ ...person, jobContacts: optimistic.map(c => c.id === tempId ? replacement : c) })
+      } else {
+        onUpdate({ ...person, jobContacts: optimistic.filter(c => c.id !== tempId) })
+        notifyError(fallbackErr || "Could not save contact")
+      }
+    })
+  }
+
   function addFromPartner(p) {
-    const c = { id:`jc${Date.now()}`, name:p.name, role:'Partner', phone:p.phone||'', email:p.email||'', sourceId:p.id }
-    onUpdate({...person, jobContacts:[...contacts, c]})
+    const stub = { id:`tmp_jc${Date.now()}`, name:p.name, role:'Partner', phone:p.phone||'', email:p.email||'', sourceId:p.id }
+    persistNewContact(stub, "Could not link partner contact")
     setSearch('')
   }
   function addFromClient(p) {
-    const c = { id:`jc${Date.now()}`, name:p.name, role:'Client Contact', phone:p.phone||'', email:p.email||'', sourceId:p.id }
-    onUpdate({...person, jobContacts:[...contacts, c]})
+    const stub = { id:`tmp_jc${Date.now()}`, name:p.name, role:'Client Contact', phone:p.phone||'', email:p.email||'', sourceId:p.id }
+    persistNewContact(stub, "Could not link client contact")
     setSearch('')
   }
-  function removeContact(id) { onUpdate({...person, jobContacts:contacts.filter(c=>c.id!==id)}) }
+  function removeContact(id) {
+    const removed = contacts.find(c => c.id === id)
+    const optimistic = contacts.filter(c => c.id !== id)
+    onUpdate({...person, jobContacts: optimistic})
+    if (!removed || String(id).startsWith('tmp_')) return
+    deleteLeadContact(id).then(r => {
+      if (!r.ok) {
+        onUpdate({ ...person, jobContacts: [...optimistic, removed] })
+        notifyError("Could not remove contact")
+      }
+    })
+  }
 
   return (
     <div style={{ display:'grid', gap:'14px' }}>
@@ -3968,11 +4103,32 @@ function ContactsTab({ person, onUpdate }) {
       )}
 
       {editingContact&&<JobContactModal contact={editingContact}
-        onSave={updated=>{ onUpdate({...person, jobContacts:contacts.map(c=>c.id===updated.id?updated:c)}); setEditingContact(null) }}
+        onSave={updated=>{
+          const original = contacts.find(c => c.id === updated.id)
+          const optimistic = contacts.map(c => c.id === updated.id ? updated : c)
+          onUpdate({...person, jobContacts: optimistic})
+          setEditingContact(null)
+          if (!original || String(updated.id).startsWith('tmp_')) return
+          const changed = {}
+          if (updated.name !== original.name) changed.name = updated.name
+          if ((updated.role || '') !== (original.role || '')) changed.role = updated.role || null
+          if ((updated.phone || '') !== (original.phone || '')) changed.phone = updated.phone || null
+          if ((updated.email || '') !== (original.email || '')) changed.email = updated.email || null
+          if (Object.keys(changed).length === 0) return
+          patchLeadContact(updated.id, changed).then(r => {
+            if (!r.ok) {
+              onUpdate({ ...person, jobContacts: optimistic.map(c => c.id === updated.id ? original : c) })
+              notifyError("Could not update contact")
+            }
+          })
+        }}
         onClose={()=>setEditingContact(null)} />}
 
       {addingNew&&<JobContactModal
-        onSave={c=>{ onUpdate({...person, jobContacts:[...contacts,{...c,id:`jc${Date.now()}`}]}); setAddingNew(false) }}
+        onSave={c=>{
+          persistNewContact({ ...c, id: `tmp_jc${Date.now()}` })
+          setAddingNew(false)
+        }}
         onClose={()=>setAddingNew(false)} />}
     </div>
   )
@@ -4009,6 +4165,13 @@ function PersonPanel({
   const [journeyExpanded, setJourneyExpanded] = useState(false);
   const [jobNoteDraft, setJobNoteDraft] = useState("");
   const [fieldVal, setFieldVal] = useState("");
+  const [toast, setToast] = useState(null);
+  React.useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
+  function showError(msg) { setToast({ kind: "error", msg }); }
   function startEdit(key, val) {
     setEditingField(key);
     setFieldVal(val || "");
@@ -4089,27 +4252,87 @@ function PersonPanel({
     onUpdate({ ...person, ...patch }, patch);
   }
   function handleReachOut(patch) {
+    // Local UI update is the source of truth for the reach-out action; the
+    // touchpoint POST is additive logging. If logging fails we surface a toast
+    // but don't roll back the local patch.
     update(patch);
     setPopup(null);
+    const method = patch && patch.reachOutMethod ? patch.reachOutMethod : null;
+    const labelByMethod = {
+      call: "Called",
+      sms: "Sent SMS",
+      email: "Emailed",
+      in_person: "In-person visit",
+    };
+    const label = (method && labelByMethod[method]) || "Reached out";
+    postTouchpoint(person.id, "reach_out", method, label).then((r) => {
+      if (!r.ok) {
+        console.error("touchpoint log failed", r.error);
+        showError("Activity log didn't save");
+      }
+    });
   }
   function handleAddNote(text, type) {
-    const newNote = {
-      id: `n${Date.now()}`,
+    const kind = type === "job" ? "job" : "buzz";
+    const tempId = `tmp_${Date.now()}`;
+    const tempNote = {
+      id: tempId,
       text,
       ts: now,
       user: "You",
-      synced: type === "job" && !!person.jobberRef,
+      synced: kind === "job" && !!person.jobberRef,
     };
-    update(
-      type === "buzz"
-        ? { buzzNotes: [...person.buzzNotes, newNote] }
-        : { jobNotes: [...person.jobNotes, newNote] },
-    );
+    const noteListKey = kind === "buzz" ? "buzzNotes" : "jobNotes";
+    const optimisticList = [...(person[noteListKey] || []), tempNote];
+    update({ [noteListKey]: optimisticList });
     setPopup(null);
+    postLeadNote(person.id, kind, text).then((r) => {
+      if (r.ok && r.data && r.data.note) {
+        const real = r.data.note;
+        const replacement = {
+          id: real.id,
+          text: real.text,
+          ts: "Just now",
+          user: real.user_label || "You",
+          synced: kind === "job" && !!person.jobberRef,
+        };
+        onUpdate({
+          ...person,
+          [noteListKey]: optimisticList.map((n) => (n.id === tempId ? replacement : n)),
+        });
+      } else {
+        onUpdate({
+          ...person,
+          [noteListKey]: optimisticList.filter((n) => n.id !== tempId),
+        });
+        showError("Could not save note");
+      }
+    });
   }
   function handleTags(tags) {
-    update({ tags });
+    const oldTags = Array.isArray(person.tags) ? person.tags.slice() : [];
+    const newTags = Array.isArray(tags) ? tags.slice() : [];
+    update({ tags: newTags });
     setPopup(null);
+    const added = newTags.filter((t) => !oldTags.includes(t));
+    const removed = oldTags.filter((t) => !newTags.includes(t));
+    const calls = [];
+    for (const tid of added) {
+      const lookupId = resolveClientTagLookupId(tid);
+      if (lookupId) calls.push(postLeadTag(person.id, lookupId));
+    }
+    for (const tid of removed) {
+      const lookupId = resolveClientTagLookupId(tid);
+      if (lookupId) calls.push(deleteLeadTag(person.id, lookupId));
+    }
+    if (calls.length === 0) return;
+    Promise.all(calls).then((results) => {
+      const failed = results.some((r) => !r.ok);
+      if (failed) {
+        onUpdate({ ...person, tags: oldTags });
+        showError("Could not update tags");
+      }
+    });
   }
   function handleSendToJobber(patch) {
     update(patch);
@@ -4203,6 +4426,7 @@ function PersonPanel({
   return React.createElement(
     React.Fragment,
     null,
+    toast && React.createElement(InlineToast, { kind: toast.kind, msg: toast.msg }),
     React.createElement(
       "div",
       {
@@ -6669,7 +6893,7 @@ function PersonPanel({
               ),
             ),
           activeTab === "contacts" &&
-            React.createElement(ContactsTab, { person: person, onUpdate: onUpdate }),
+            React.createElement(ContactsTab, { person: person, onUpdate: onUpdate, onError: showError }),
           activeTab === "outreach" &&
             React.createElement(
               "div",
@@ -6868,6 +7092,7 @@ function PersonPanel({
         allPeople: [person],
         onClose: () => setPopup(null),
         onUpdatePerson: onUpdate,
+        onError: showError,
       }),
     popup === "tags" &&
       React.createElement(TagPopup, {
@@ -6927,8 +7152,33 @@ function PersonPanel({
     popup === "add-job-contact" &&
       React.createElement(JobContactModal, {
         onSave: (c) => {
-          update({ jobContacts: [...(person.jobContacts || []), c] });
+          const stub = { ...c, id: `tmp_jc${Date.now()}` };
+          const baseList = person.jobContacts || [];
+          const optimistic = [...baseList, stub];
+          update({ jobContacts: optimistic });
           setPopup(null);
+          postLeadContact(person.id, stub).then((r) => {
+            if (r.ok && r.data && r.data.contact) {
+              const real = r.data.contact;
+              const replacement = {
+                id: real.id,
+                name: real.name,
+                role: real.role || '',
+                phone: real.phone || '',
+                email: real.email || '',
+              };
+              onUpdate({
+                ...person,
+                jobContacts: optimistic.map((x) => x.id === stub.id ? replacement : x),
+              });
+            } else {
+              onUpdate({
+                ...person,
+                jobContacts: optimistic.filter((x) => x.id !== stub.id),
+              });
+              showError("Could not save contact");
+            }
+          });
         },
         onClose: () => setPopup(null),
       }),
@@ -7389,14 +7639,32 @@ function AccountEditableRow({ icon, label, value, onSave, readOnly, last }) {
 }
 
 
-function BuzzNotesSection({ person, onUpdatePerson }) {
+function BuzzNotesSection({ person, onUpdatePerson, onError }) {
   const [newNote, setNewNote] = useState('')
   const [adding, setAdding]   = useState(false)
   function saveBuzzNote() {
     if (!newNote.trim()) return
-    const note = { id:`bn${Date.now()}`, text:newNote.trim(), ts:'Just now', user:'You' }
-    onUpdatePerson({...person, buzzNotes:[...person.buzzNotes, note]})
+    const text = newNote.trim()
+    const tempId = `tmp_bn${Date.now()}`
+    const tempNote = { id: tempId, text, ts:'Just now', user:'You' }
+    const optimisticList = [...(person.buzzNotes || []), tempNote]
+    onUpdatePerson({...person, buzzNotes: optimisticList})
     setNewNote(''); setAdding(false)
+    postLeadNote(person.id, 'buzz', text).then(r => {
+      if (r.ok && r.data && r.data.note) {
+        const real = r.data.note
+        const replacement = {
+          id: real.id,
+          text: real.text,
+          ts: 'Just now',
+          user: real.user_label || 'You',
+        }
+        onUpdatePerson({...person, buzzNotes: optimisticList.map(n => n.id === tempId ? replacement : n)})
+      } else {
+        onUpdatePerson({...person, buzzNotes: optimisticList.filter(n => n.id !== tempId)})
+        if (typeof onError === 'function') onError("Could not save note")
+      }
+    })
   }
   return (
     <div style={{ padding:'12px 14px', background:'linear-gradient(135deg,rgba(212,160,70,0.08),rgba(212,160,70,0.03))', border:'1px solid rgba(212,160,70,0.2)', borderRadius:'10px', borderLeft:'3px solid #d4a046' }}>
@@ -7432,7 +7700,7 @@ function BuzzNotesSection({ person, onUpdatePerson }) {
   )
 }
 
-function AccountPanel({ person, allPeople, onClose, onUpdatePerson }) {
+function AccountPanel({ person, allPeople, onClose, onUpdatePerson, onError }) {
   React.useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -7663,7 +7931,7 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson }) {
 
             {/* Buzz Notes - always top */}
             {/* Buzz Notes - always top */}
-            <BuzzNotesSection person={person} onUpdatePerson={onUpdatePerson} />
+            <BuzzNotesSection person={person} onUpdatePerson={onUpdatePerson} onError={onError} />
 
             {/* Client Details - editable */}
             <Section title="Client Details">
@@ -19345,7 +19613,7 @@ function pushLookupsToGetters(category, rows) {
   switch (category) {
     case 'client_stages':       setAdminClientStages(toStageShape()); break
     case 'partner_stages':      setAdminPartnerStages(toStageShape()); break
-    case 'client_tags':         setAdminClientTags(toTagShape()); break
+    case 'client_tags':         setAdminClientTags(toTagShape()); setAdminClientTagsRaw(rows); break
     case 'partner_specialties': setAdminSpecialties(toTagShape()); break
     case 'partner_tiers':       setAdminPartnerTiers(toTierShape()); break
     case 'touchpoint_types':    setAdminTouchpointTypes(toTouchpointShape()); break
@@ -22983,7 +23251,10 @@ export default function App({
 
     if (Array.isArray(initialLookups.client_stages))       setAdminClientStages(toStageShape(initialLookups.client_stages))
     if (Array.isArray(initialLookups.partner_stages))      setAdminPartnerStages(toStageShape(initialLookups.partner_stages))
-    if (Array.isArray(initialLookups.client_tags))         setAdminClientTags(toTagShape(initialLookups.client_tags))
+    if (Array.isArray(initialLookups.client_tags)) {
+      setAdminClientTags(toTagShape(initialLookups.client_tags))
+      setAdminClientTagsRaw(initialLookups.client_tags)
+    }
     if (Array.isArray(initialLookups.partner_specialties)) setAdminSpecialties(toSpecialtyShape(initialLookups.partner_specialties))
     if (Array.isArray(initialLookups.partner_tiers))       setAdminPartnerTiers(toTierShape(initialLookups.partner_tiers))
     if (Array.isArray(initialLookups.touchpoint_types))    setAdminTouchpointTypes(toTouchpointShape(initialLookups.touchpoint_types))
