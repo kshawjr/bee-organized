@@ -426,6 +426,36 @@ export default async function HomePage() {
     initialUsers = (locUsers || []).map(buildLocationUser)
   }
 
+  // ─── Hive clients (leads) — Phase 3A ───
+  // Read-only initial hydration. Joined tables (lead_notes, touchpoints,
+  // lead_contacts, lead_tags, jobs, invoices, assessments) come in Phase 3B.
+  // For now: just the leads themselves, location-scoped and mapped through
+  // lib/people-mapper.
+  let initialPeople: any[] = []
+  {
+    let q = supabaseService
+      .from('leads')
+      .select('*')
+      .eq('is_junk', false)
+      .order('created_at', { ascending: false })
+      .limit(1000)
+
+    // Scope by location for non-elevated users
+    if (!isElevated && hubUser.location_id) {
+      q = q.eq('location_uuid', hubUser.location_id)
+    }
+
+    const { data: leadsRaw, error: leadsError } = await q
+
+    if (leadsError) {
+      console.error('[page.tsx] leads fetch error:', leadsError.message)
+    } else if (leadsRaw) {
+      const { mapLeadToPerson } = await import('@/lib/people-mapper')
+      initialPeople = leadsRaw.map(mapLeadToPerson)
+      console.log(`[page.tsx] Fetched ${initialPeople.length} leads for ${hubUser.email}`)
+    }
+  }
+
   // ─── Admin-managed lookups (Sitting 1A) ───
   // Single query for all active lookups, grouped client-side by category.
   // Cheap (~150 rows seeded). Result feeds the in-memory getter hydration
@@ -463,6 +493,7 @@ export default async function HomePage() {
       initialSeats={initialSeats}
       initialPendingInvites={initialPendingInvites}
       initialLookups={initialLookups}
+      initialPeople={initialPeople}
       currentSubscription={currentSubscription}
       currentLocation={currentLocation}
       currentUser={{

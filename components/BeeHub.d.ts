@@ -162,6 +162,7 @@ interface BeeHubProps {
     phone?: string | null
   }
   initialLookups?: LookupsByCategory
+  initialPeople?: any[]
 }
 
 declare const BeeHub: React.FC<BeeHubProps>
