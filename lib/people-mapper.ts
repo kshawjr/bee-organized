@@ -72,7 +72,7 @@ export function mapLeadToPerson(row: LeadRow) {
   return {
     id: row.id,
     assignedTo: row.assigned_to,
-    locationId: row.location_id, // slug — keeps existing BeeHub filtering working
+   locationId: row.location_uuid || row.location_id, // UUID matches hub_users.location_id (BeeHub's locFilter)
 
     // Identity
     name: row.name || [row.first_name, row.last_name].filter(Boolean).join(' ').trim() || '(unnamed)',
