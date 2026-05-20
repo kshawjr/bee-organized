@@ -9736,9 +9736,12 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
 
   // ─── done ──
   if (isDone) {
-    const IMPORT_STAGE_ORDER = ['New Request','Assessment Scheduled','Estimate Sent','Job in Progress','Final Processing','Nurturing']
+    // Stage keys must match determineStage() output in
+    // /api/import/jobber-clients/route.ts — summary.requests_by_stage is
+    // keyed by those canonical names.
+    const IMPORT_STAGE_ORDER = ['New','Request','Estimate Sent','Job in Progress','Final Processing','Nurturing']
     const IMPORT_STAGE_ABBR  = {
-      'New Request':'New', 'Assessment Scheduled':'Assessment', 'Estimate Sent':'Estimate',
+      'New':'New', 'Request':'Request', 'Estimate Sent':'Estimate',
       'Job in Progress':'Job', 'Final Processing':'Final', 'Nurturing':'Nurturing',
     }
     const fmtCount = (label, c, u) => u ? `${label}: ${c} new, ${u} updated` : `${label}: ${c}`
@@ -13722,6 +13725,7 @@ function JobberConnectionCard({ settings, updateLocation }) {
 // Polls /api/import/status/[jobId] every 1.5s for real progress.
 // No localStorage cache — server is source of truth.
 function ClientImportCard({ isJobberConnected, locationId }) {
+  const router = useRouter()
   const [importState, setImportState] = useState('idle') // idle | running | complete | error
   const [jobId, setJobId]             = useState(null)
   const [status, setStatus]           = useState(null)   // { processed_records, status_label, ... }
@@ -13746,8 +13750,11 @@ function ClientImportCard({ isJobberConnected, locationId }) {
         }
         setStatus(d)
         if (d.status === 'complete' || d.status === 'completed' || d.status === 'success') {
-          setSummary(d)
+          // Preserve full summary if already captured from sync POST response.
+          // Status endpoint only returns progress fields, not leads_created etc.
+          setSummary(prev => prev && prev.leads_created != null ? prev : d)
           setImportState('complete')
+          router.refresh()
           return
         }
         if (d.status === 'failed' || d.status === 'error') {
@@ -13802,15 +13809,21 @@ function ClientImportCard({ isJobberConnected, locationId }) {
         setImportState('error')
         return
       }
-      // Some endpoint shapes return the full summary synchronously; others return
-      // a job_id and require polling. Handle both.
-      if (d.job_id) {
+      // The POST currently returns the full summary synchronously alongside
+      // job_id. Prefer that — polling status only returns progress fields.
+      // Fall back to polling only if no summary fields are present.
+      const hasFullSummary = d.leads_created != null || d.total_clients != null
+      if (hasFullSummary) {
+        setSummary(d)
+        if (d.job_id) setJobId(d.job_id)
+        setImportState('complete')
+        router.refresh()
+      } else if (d.job_id) {
         setJobId(d.job_id)
         // polling useEffect picks this up
       } else {
-        // synchronous summary — skip polling
-        setSummary(d)
-        setImportState('complete')
+        setError('unexpected_response')
+        setImportState('error')
       }
     } catch (e) {
       setError(String(e?.message || e))
@@ -13861,8 +13874,10 @@ function ClientImportCard({ isJobberConnected, locationId }) {
         </div>
       )}
 
-      {/* Summary on complete */}
-      {importState === 'complete' && summary && (
+      {/* Summary on complete — only show detail rows if we have the full
+          summary from the sync POST. The status-polling response lacks these
+          fields, so showing it would render "0 new · 0 · 0 · 0". */}
+      {importState === 'complete' && summary && summary.leads_created != null && (
         <div style={{ padding:'0 14px 12px' }}>
           <p style={{ fontSize:'10px', color:'#8a9e9a', lineHeight:1.5 }}>
             Leads: {summary.leads_created ?? 0} new
