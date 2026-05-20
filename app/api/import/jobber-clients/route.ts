@@ -10,13 +10,22 @@
 // All child writes use the slug for consistency with hub_users.location_id
 // and the rest of the codebase.
 //
-// Stage classification (see determineStage):
-//   Final Processing → Job in Progress → Estimate Sent → Assessment Scheduled
-//   → Nurturing (no downstream activity AND createdAt > 30 days ago)
-//   → New Request (default)
+// Stage classification (see determineStage) — returns canonical Bee Hub
+// stage values matching components/BeeHub.jsx STAGES array:
+//   'Final Processing' (has invoice)
+//   'Job in Progress'  (has job)
+//   'Estimate Sent'    (has quote)
+//   'Request'          (has assessment, no quote yet — "Request | Assessment")
+//   'Nurturing'        (no downstream activity AND createdAt > 30 days ago)
+//   'New'              (default — fresh request, no other activity)
+//
 // The Nurturing bucket exists because the franchise historically used Jobber
 // as a parking lot for stale leads — old untouched requests should not show
-// up as "fresh and actionable" New Request rows.
+// up as "fresh and actionable" New rows.
+//
+// Promotion: after upsertServiceRequest, leads.stage is bumped to match the
+// SR's classification — but only if it represents forward progress. Prevents
+// older SRs processed later from demoting a lead from Final Processing → New.
 //
 // KNOWN: leads/assessments/payments/notes lack UNIQUE on jobber_*_id.
 // Re-running this import concurrently could create dup rows in those tables.
@@ -102,6 +111,21 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 const NURTURING_AGE_MS = 30 * 24 * 60 * 60 * 1000  // 30 days
 
+// Stage ranking for forward-progress check during stage promotion.
+// Higher rank = further along the funnel. Used so an older SR upserted
+// later doesn't drag a Lead back from Final Processing to New.
+const STAGE_RANK: Record<string, number> = {
+  'New':              0,
+  'Nurturing':        1,
+  'Attempting':       2,
+  'Request':          3,
+  'Estimate Sent':    4,
+  'Job in Progress':  5,
+  'Final Processing': 6,
+  'Closed Won':       7,
+  'Closed Lost':      7,
+}
+
 // ── helpers ───────────────────────────────────────────────────
 
 async function lookupLocation(input: string) {
@@ -154,14 +178,14 @@ function determineStage(request: any): string {
   if (request._hasInvoice)    return 'Final Processing'
   if (request._hasJob)        return 'Job in Progress'
   if (request._hasQuote)      return 'Estimate Sent'
-  if (request._hasAssessment) return 'Assessment Scheduled'
+  if (request._hasAssessment) return 'Request'
   // No downstream activity. If the request was created > 30 days ago it's
   // a stale parked lead, not a fresh actionable request.
   if (request.createdAt) {
     const ageMs = Date.now() - new Date(request.createdAt).getTime()
     if (ageMs > NURTURING_AGE_MS) return 'Nurturing'
   }
-  return 'New Request'
+  return 'New'
 }
 
 // ── handler ───────────────────────────────────────────────────
@@ -217,6 +241,7 @@ export async function POST(req: NextRequest) {
   }
 
   const locSlug: string = location.location_id
+  const locUuid: string = location.id
 
   // ─── create import_jobs row ──
   const { data: importJob, error: jobErr } = await supabaseService
@@ -311,7 +336,7 @@ export async function POST(req: NextRequest) {
     let processed = 0
     for (const client of clients) {
       try {
-        const { id: leadId, created } = await upsertLead(client, locSlug)
+        const { id: leadId, created } = await upsertLead(client, locSlug, locUuid)
         created ? stats.leads_created++ : stats.leads_updated++
 
         for (const request of (reqByClient[client.id] || [])) {
@@ -399,7 +424,7 @@ export async function POST(req: NextRequest) {
 
 // ── upserts ───────────────────────────────────────────────────
 
-async function upsertLead(client: any, location_id: string) {
+async function upsertLead(client: any, location_id: string, location_uuid: string) {
   const email = client.emails?.find((e: any) => e.primary)?.address ?? client.emails?.[0]?.address ?? null
   const phone = client.phones?.find((p: any) => p.primary)?.number  ?? client.phones?.[0]?.number  ?? null
   const addr  = client.billingAddress
@@ -413,6 +438,7 @@ async function upsertLead(client: any, location_id: string) {
 
   const payload = {
     location_id,
+    location_uuid,
     jobber_client_id: client.id,
     name: `${client.firstName || ''} ${client.lastName || ''}`.trim() || client.companyName || 'Unknown',
     first_name: client.firstName || null,
@@ -464,17 +490,42 @@ async function upsertServiceRequest(request: any, lead_id: string, location_id: 
     .select('id')
     .eq('jobber_request_id', request.id)
     .maybeSingle()
+
+  let srId: string
+  let created: boolean
   if (existing) {
     await supabaseService.from('service_requests').update(payload).eq('id', existing.id)
-    return { id: existing.id, created: false, stage }
+    srId = existing.id
+    created = false
+  } else {
+    const { data, error } = await supabaseService
+      .from('service_requests')
+      .insert({ ...payload, created_at: request.createdAt || new Date().toISOString() })
+      .select('id')
+      .single()
+    if (error) throw new Error(error.message)
+    srId = data.id
+    created = true
   }
-  const { data, error } = await supabaseService
-    .from('service_requests')
-    .insert({ ...payload, created_at: request.createdAt || new Date().toISOString() })
-    .select('id')
+
+  // Promote leads.stage to mirror this SR's classification, but only if
+  // the new stage represents forward progress. Prevents demoting a lead
+  // from Final Processing back to New when an older SR is processed later.
+  const { data: currentLead } = await supabaseService
+    .from('leads')
+    .select('stage')
+    .eq('id', lead_id)
     .single()
-  if (error) throw new Error(error.message)
-  return { id: data.id, created: true, stage }
+  const currentRank = STAGE_RANK[currentLead?.stage || 'New'] ?? 0
+  const newRank = STAGE_RANK[stage] ?? 0
+  if (newRank > currentRank) {
+    await supabaseService
+      .from('leads')
+      .update({ stage })
+      .eq('id', lead_id)
+  }
+
+  return { id: srId, created, stage }
 }
 
 async function upsertAssessment(
