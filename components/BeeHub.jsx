@@ -8062,6 +8062,7 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson, onError }) {
 // ─── Stage Group (Hive list view) ────────────────────────────────────────────
 function StageGroup({ stage, stageConf: s, records, selectedIds, setSelectedIds, setSelected }) {
   const SHOW = 5
+  const allUsers = useContext(LocationUsersContext) || USERS_DATA
   const [expanded, setExpanded] = useState(false)
   const [collapsed, setCollapsed] = useState(()=>{
     try { const v=JSON.parse(localStorage.getItem('bee_collapsed_stages')||'{}'); return !!v[stage] } catch(e){ return false }
@@ -8113,7 +8114,7 @@ function StageGroup({ stage, stageConf: s, records, selectedIds, setSelectedIds,
           </div>
         </div>
         <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:'4px', flexShrink:0 }}>
-          {(()=>{ const u=USERS_DATA.find(u=>u.id===person.assignedTo); return u?<div style={{ width:'20px', height:'20px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'8px', fontWeight:700, color:'white' }} title={u.name}>{u.initials}</div>:null })()}
+          {(()=>{ const u=allUsers.find(u=>u.id===person.assignedTo); return u?<div style={{ width:'20px', height:'20px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'8px', fontWeight:700, color:'white' }} title={u.name}>{u.initials}</div>:null })()}
           <span style={{ fontSize:'11px', color:'#8a9e9a' }}>{fmtCreated(person.created, person.id)}</span>
         </div>
       </div>
