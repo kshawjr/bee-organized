@@ -49,6 +49,7 @@ type JoinedData = {
   lead_contacts?: any[]
   lead_tags?: any[]
   assessments?: any[]
+  service_requests?: any[]
   quotes?: any[]
   jobs?: any[]
   invoices?: any[]
@@ -180,6 +181,12 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
   const estimateSent = quoteRow?.sent_at ? fmtDate(quoteRow.sent_at) : null
   const estimateApproved = quoteRow?.approved_at ? fmtDate(quoteRow.approved_at) : null
 
+  // Most recent service_request — drives Assessment milestone hyperlinks
+  // (assessments don't have their own URL; they live on the parent request).
+  const requestRow = (joined.service_requests || [])
+    .slice()
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+
   // Jobs
   const jobs = (joined.jobs || []).map(j => ({
     id: j.id,
@@ -200,6 +207,7 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     issuedAt: inv.issued_at ? fmtDate(inv.issued_at) : null,
     paidAt: inv.paid_at ? fmtDate(inv.paid_at) : null,
     invoiceUrl: inv.invoice_url || null,
+    jobberRef: inv.jobber_invoice_id || null,
   }))
 
   return {
@@ -227,6 +235,9 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     jobberRef: row.jobber_client_id || null,
     jobberClient: null,
     jobberSearchStatus: row.jobber_client_id ? 'found' : 'not_found',
+    // Derived refs for Journey milestone hyperlinks
+    requestRef: requestRow?.jobber_request_id || null,
+    quoteRef: quoteRow?.jobber_quote_id || null,
     buzzNotes,
     jobNotes,
     closeNotes,

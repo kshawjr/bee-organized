@@ -5466,6 +5466,24 @@ function PersonPanel({
                   },
                 },
                 (() => {
+                  const requestUrl = person.requestRef
+                    ? `https://secure.getjobber.com/requests/${person.requestRef}`
+                    : null;
+                  const quoteUrl = person.quoteRef
+                    ? `https://secure.getjobber.com/quotes/${person.quoteRef}`
+                    : null;
+                  const jobUrl = person.jobs?.[0]?.jobberRef
+                    ? `https://secure.getjobber.com/jobs/${person.jobs[0].jobberRef}`
+                    : null;
+                  const invoiceUrl = person.invoices?.[0]?.jobberRef
+                    ? `https://secure.getjobber.com/invoices/${person.invoices[0].jobberRef}`
+                    : null;
+                  const paidInvoiceRef = person.invoices?.find(
+                    (i) => i.status === "Paid",
+                  )?.jobberRef;
+                  const paidUrl = paidInvoiceRef
+                    ? `https://secure.getjobber.com/invoices/${paidInvoiceRef}`
+                    : null;
                   const milestones = [
                     {
                       label: "Lead Created",
@@ -5486,12 +5504,14 @@ function PersonPanel({
                       done: !!person.assessment,
                       icon: "\uD83D\uDCC5",
                       date: person.assessment,
+                      url: requestUrl,
                     },
                     {
                       label: "Assessment Completed",
                       done: !!person.assessmentCompleted,
                       icon: "\u2705",
                       date: person.assessmentCompleted,
+                      url: requestUrl,
                     },
                     {
                       label: "Estimate Sent",
@@ -5502,6 +5522,7 @@ function PersonPanel({
                         person.estimateSent && person.invoices?.length > 0
                           ? `${fmt(person.invoices.reduce((s, i) => s + i.amount, 0))} \xb7 ${person.estimateApproved ? "Approved" : "Pending"}`
                           : null,
+                      url: quoteUrl,
                     },
                     {
                       label: "Estimate Approved",
@@ -5509,6 +5530,7 @@ function PersonPanel({
                       icon: "\u2705",
                       date: person.estimateApproved,
                       big: true,
+                      url: quoteUrl,
                     },
                     {
                       label: "Job Scheduled",
@@ -5516,12 +5538,14 @@ function PersonPanel({
                       icon: "\uD83D\uDD28",
                       date: person.jobs?.[0]?.scheduledDate,
                       big: true,
+                      url: jobUrl,
                     },
                     {
                       label: "Invoice Sent",
                       done: person.invoices?.length > 0,
                       icon: "\uD83E\uDDFE",
                       date: person.invoices?.[0]?.date,
+                      url: invoiceUrl,
                     },
                     {
                       label: "Paid",
@@ -5529,6 +5553,7 @@ function PersonPanel({
                       icon: "\uD83D\uDCB0",
                       date: person.invoices?.find((i) => i.status === "Paid")?.date,
                       big: true,
+                      url: paidUrl,
                     },
                   ];
                   const bigOnes = milestones.filter((m) => m.big);
@@ -5612,17 +5637,45 @@ function PersonPanel({
                               React.createElement(
                                 "div",
                                 { style: { flex: 1, minWidth: 0 } },
-                                React.createElement(
-                                  "span",
-                                  {
-                                    style: {
-                                      fontSize: "12px",
-                                      fontWeight: m.done ? 500 : 400,
-                                      color: m.done ? "#1a2e2b" : "#b0c0bc",
-                                    },
-                                  },
-                                  m.label,
-                                ),
+                                m.done && m.url
+                                  ? React.createElement(
+                                      "a",
+                                      {
+                                        href: m.url,
+                                        target: "_blank",
+                                        rel: "noopener noreferrer",
+                                        style: {
+                                          fontSize: "12px",
+                                          fontWeight: 500,
+                                          color: "#1a2e2b",
+                                          textDecoration: "none",
+                                          borderBottom: "1px dotted rgba(26,46,43,0.3)",
+                                        },
+                                      },
+                                      m.label,
+                                      React.createElement(
+                                        "span",
+                                        {
+                                          style: {
+                                            fontSize: "10px",
+                                            color: "#8a9e9a",
+                                            marginLeft: "3px",
+                                          },
+                                        },
+                                        "↗",
+                                      ),
+                                    )
+                                  : React.createElement(
+                                      "span",
+                                      {
+                                        style: {
+                                          fontSize: "12px",
+                                          fontWeight: m.done ? 500 : 400,
+                                          color: m.done ? "#1a2e2b" : "#b0c0bc",
+                                        },
+                                      },
+                                      m.label,
+                                    ),
                                 m.done &&
                                   m.sub &&
                                   React.createElement(
@@ -5700,20 +5753,40 @@ function PersonPanel({
                                   },
                                   m.done ? "\u2713" : "",
                                 ),
-                                React.createElement(
-                                  "span",
-                                  {
-                                    style: {
-                                      fontSize: "9px",
-                                      color: m.done ? "#1a2e2b" : "#b0c0bc",
-                                      fontWeight: m.done ? 600 : 400,
-                                      textAlign: "center",
-                                      lineHeight: 1.2,
-                                      letterSpacing: "0.1px",
-                                    },
-                                  },
-                                  m.label,
-                                ),
+                                m.done && m.url
+                                  ? React.createElement(
+                                      "a",
+                                      {
+                                        href: m.url,
+                                        target: "_blank",
+                                        rel: "noopener noreferrer",
+                                        style: {
+                                          fontSize: "9px",
+                                          color: "#1a2e2b",
+                                          fontWeight: 600,
+                                          textAlign: "center",
+                                          lineHeight: 1.2,
+                                          letterSpacing: "0.1px",
+                                          textDecoration: "none",
+                                          borderBottom: "1px dotted rgba(26,46,43,0.3)",
+                                        },
+                                      },
+                                      m.label,
+                                    )
+                                  : React.createElement(
+                                      "span",
+                                      {
+                                        style: {
+                                          fontSize: "9px",
+                                          color: m.done ? "#1a2e2b" : "#b0c0bc",
+                                          fontWeight: m.done ? 600 : 400,
+                                          textAlign: "center",
+                                          lineHeight: 1.2,
+                                          letterSpacing: "0.1px",
+                                        },
+                                      },
+                                      m.label,
+                                    ),
                                 m.done &&
                                   m.date &&
                                   React.createElement(

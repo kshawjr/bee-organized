@@ -459,6 +459,7 @@ export default async function HomePage() {
         { data: leadContactsRaw },
         { data: leadTagsRaw },
         { data: assessmentsRaw },
+        { data: serviceRequestsRaw },
         { data: quotesRaw },
         { data: jobsRaw },
         { data: invoicesRaw },
@@ -468,6 +469,7 @@ export default async function HomePage() {
         supabaseService.from('lead_contacts').select('*').in('lead_id', leadIds).order('created_at', { ascending: true }),
         supabaseService.from('lead_tags').select('*').in('lead_id', leadIds),
         supabaseService.from('assessments').select('*').in('lead_id', leadIds).order('scheduled_at', { ascending: false }),
+        supabaseService.from('service_requests').select('*').in('lead_id', leadIds).order('created_at', { ascending: false }),
         supabaseService.from('quotes').select('*').in('lead_id', leadIds).order('sent_at', { ascending: false }),
         supabaseService.from('jobs').select('*').in('lead_id', leadIds).order('scheduled_start', { ascending: false }),
         supabaseService.from('invoices').select('*').in('lead_id', leadIds).order('issued_at', { ascending: false }),
@@ -496,26 +498,28 @@ export default async function HomePage() {
         return out
       }
 
-      const notesByLead     = groupBy(leadNotesRaw)
-      const touchByLead     = groupBy(touchpointsRaw)
-      const contactsByLead  = groupBy(leadContactsRaw)
-      const tagsByLead      = groupBy(leadTagsRaw)
-      const assessByLead    = groupBy(assessmentsRaw)
-      const quotesByLead    = groupBy(quotesRaw)
-      const jobsByLead      = groupBy(jobsRaw)
-      const invoicesByLead  = groupBy(invoicesRaw)
+      const notesByLead       = groupBy(leadNotesRaw)
+      const touchByLead       = groupBy(touchpointsRaw)
+      const contactsByLead    = groupBy(leadContactsRaw)
+      const tagsByLead        = groupBy(leadTagsRaw)
+      const assessByLead      = groupBy(assessmentsRaw)
+      const serviceReqsByLead = groupBy(serviceRequestsRaw)
+      const quotesByLead      = groupBy(quotesRaw)
+      const jobsByLead        = groupBy(jobsRaw)
+      const invoicesByLead    = groupBy(invoicesRaw)
 
       const { mapLeadToPerson } = await import('@/lib/people-mapper')
       initialPeople = leadsRaw.map((row: any) =>
         mapLeadToPerson(row, {
-          lead_notes:    notesByLead[row.id]    || [],
-          touchpoints:   touchByLead[row.id]    || [],
-          lead_contacts: contactsByLead[row.id] || [],
-          lead_tags:     tagsByLead[row.id]     || [],
-          assessments:   assessByLead[row.id]   || [],
-          quotes:        quotesByLead[row.id]   || [],
-          jobs:          jobsByLead[row.id]     || [],
-          invoices:      invoicesByLead[row.id] || [],
+          lead_notes:       notesByLead[row.id]       || [],
+          touchpoints:      touchByLead[row.id]       || [],
+          lead_contacts:    contactsByLead[row.id]    || [],
+          lead_tags:        tagsByLead[row.id]        || [],
+          assessments:      assessByLead[row.id]      || [],
+          service_requests: serviceReqsByLead[row.id] || [],
+          quotes:           quotesByLead[row.id]      || [],
+          jobs:             jobsByLead[row.id]        || [],
+          invoices:         invoicesByLead[row.id]    || [],
           tag_lookups,
         })
       )

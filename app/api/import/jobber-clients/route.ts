@@ -131,13 +131,14 @@ const STAGE_RANK: Record<string, number> = {
 // Jobber's GraphQL API returns IDs as base64-encoded global IDs like
 // "Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYxMjM5NzY=" which decodes to
 // "gid://Jobber/Client/136123976". We persist the numeric portion so
-// secure.getjobber.com/clients/{id} links resolve.
+// secure.getjobber.com/{type}/{id} links resolve for Clients, Requests,
+// Quotes, Jobs, Invoices, and Assessments.
 function extractJobberId(globalId: string | null): string | null {
   if (!globalId) return null
   if (/^\d+$/.test(globalId)) return globalId
   try {
     const decoded = Buffer.from(globalId, 'base64').toString('utf8')
-    const match = decoded.match(/Client\/(\d+)$/)
+    const match = decoded.match(/\/(\d+)$/)
     return match ? match[1] : null
   } catch {
     return null
@@ -492,9 +493,10 @@ async function upsertLead(client: any, location_id: string, location_uuid: strin
 
 async function upsertServiceRequest(request: any, lead_id: string, location_id: string) {
   const stage = determineStage(request)
+  const jobberRequestId = extractJobberId(request.id)
   const payload = {
     lead_id, location_id,
-    jobber_request_id: request.id,
+    jobber_request_id: jobberRequestId,
     request_url: request.jobberWebUri || null,
     stage,
     status: 'active',
@@ -506,7 +508,7 @@ async function upsertServiceRequest(request: any, lead_id: string, location_id: 
   const { data: existing } = await supabaseService
     .from('service_requests')
     .select('id')
-    .eq('jobber_request_id', request.id)
+    .eq('jobber_request_id', jobberRequestId)
     .maybeSingle()
 
   let srId: string
@@ -554,7 +556,7 @@ async function upsertAssessment(
 ) {
   const payload = {
     service_request_id, lead_id, location_id,
-    jobber_request_id: request.id,
+    jobber_request_id: extractJobberId(request.id),
     scheduled_at: request.assessment.startAt || null,
     status: 'scheduled',
     source: 'jobber',
@@ -588,9 +590,10 @@ async function upsertQuote(
   lead_id: string,
   location_id: string,
 ) {
+  const jobberQuoteId = extractJobberId(quote.id)
   const payload = {
     service_request_id, lead_id, location_id,
-    jobber_quote_id: quote.id,
+    jobber_quote_id: jobberQuoteId,
     quote_url: quote.jobberWebUri || null,
     status: 'sent',
     subtotal:        quote.amounts?.subtotal       ? parseFloat(quote.amounts.subtotal)       : null,
@@ -604,7 +607,7 @@ async function upsertQuote(
   const { data: existing } = await supabaseService
     .from('quotes')
     .select('id')
-    .eq('jobber_quote_id', quote.id)
+    .eq('jobber_quote_id', jobberQuoteId)
     .maybeSingle()
   if (existing) {
     await supabaseService.from('quotes').update(payload).eq('id', existing.id)
@@ -625,9 +628,10 @@ async function upsertJob(
   lead_id: string,
   location_id: string,
 ) {
+  const jobberJobId = extractJobberId(job.id)
   const payload = {
     service_request_id, lead_id, location_id,
-    jobber_job_id: job.id,
+    jobber_job_id: jobberJobId,
     job_url: job.jobberWebUri || null,
     title: job.title || null,
     status: JOB_STATUS[job.jobStatus?.toUpperCase()] ?? 'unknown',
@@ -640,7 +644,7 @@ async function upsertJob(
   const { data: existing } = await supabaseService
     .from('jobs')
     .select('id')
-    .eq('jobber_job_id', job.id)
+    .eq('jobber_job_id', jobberJobId)
     .maybeSingle()
   if (existing) {
     await supabaseService.from('jobs').update(payload).eq('id', existing.id)
@@ -662,9 +666,10 @@ async function upsertInvoice(
   lead_id: string,
   location_id: string,
 ) {
+  const jobberInvoiceId = extractJobberId(invoice.id)
   const payload = {
     job_id, service_request_id, lead_id, location_id,
-    jobber_invoice_id: invoice.id,
+    jobber_invoice_id: jobberInvoiceId,
     invoice_url: invoice.jobberWebUri || null,
     status: 'sent',
     subtotal:        invoice.amounts?.subtotal       ? parseFloat(invoice.amounts.subtotal)       : null,
@@ -678,7 +683,7 @@ async function upsertInvoice(
   const { data: existing } = await supabaseService
     .from('invoices')
     .select('id')
-    .eq('jobber_invoice_id', invoice.id)
+    .eq('jobber_invoice_id', jobberInvoiceId)
     .maybeSingle()
   if (existing) {
     await supabaseService.from('invoices').update(payload).eq('id', existing.id)
