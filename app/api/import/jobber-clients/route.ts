@@ -128,6 +128,22 @@ const STAGE_RANK: Record<string, number> = {
 
 // ── helpers ───────────────────────────────────────────────────
 
+// Jobber's GraphQL API returns IDs as base64-encoded global IDs like
+// "Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYxMjM5NzY=" which decodes to
+// "gid://Jobber/Client/136123976". We persist the numeric portion so
+// secure.getjobber.com/clients/{id} links resolve.
+function extractJobberId(globalId: string | null): string | null {
+  if (!globalId) return null
+  if (/^\d+$/.test(globalId)) return globalId
+  try {
+    const decoded = Buffer.from(globalId, 'base64').toString('utf8')
+    const match = decoded.match(/Client\/(\d+)$/)
+    return match ? match[1] : null
+  } catch {
+    return null
+  }
+}
+
 async function lookupLocation(input: string) {
   const field = UUID_RE.test(input) ? 'id' : 'location_id'
   const { data, error } = await supabaseService
@@ -436,10 +452,12 @@ async function upsertLead(client: any, location_id: string, location_uuid: strin
       ].filter(Boolean).join(', ')
     : null
 
+  const jobberClientId = extractJobberId(client.id)
+
   const payload = {
     location_id,
     location_uuid,
-    jobber_client_id: client.id,
+    jobber_client_id: jobberClientId,
     name: `${client.firstName || ''} ${client.lastName || ''}`.trim() || client.companyName || 'Unknown',
     first_name: client.firstName || null,
     last_name:  client.lastName  || null,
@@ -455,7 +473,7 @@ async function upsertLead(client: any, location_id: string, location_uuid: strin
   const { data: existing } = await supabaseService
     .from('leads')
     .select('id')
-    .eq('jobber_client_id', client.id)
+    .eq('jobber_client_id', jobberClientId)
     .eq('location_id', location_id)
     .maybeSingle()
 
