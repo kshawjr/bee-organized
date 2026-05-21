@@ -35,6 +35,11 @@ type LeadRow = {
   jobber_synced_at: string | null
   created_at: string | null
   updated_at: string | null
+  request_details: string | null
+  snoozed_until: string | null
+  snoozed_note: string | null
+  marketing_opt_out: boolean | null
+  paused: boolean | null
 }
 
 // Joined data — all optional. Anything passed populates richer Person fields.
@@ -235,7 +240,10 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     estimateSent,
     estimateApproved,
     reachOutMethod,
-    jobDetail: '',
-    paused: false,
+    jobDetail: row.request_details || '',
+    snoozeUntil: row.snoozed_until || null,
+    snoozeNote: row.snoozed_note || '',
+    marketingOptOut: !!row.marketing_opt_out,
+    paused: !!row.paused,
   }
 }
