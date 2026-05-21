@@ -7123,7 +7123,7 @@ function PersonPanel({
       React.createElement(AssignUserPicker, {
         locationId: person.locationId,
         currentUserIds: assignedIds,
-        onSelect: (ids) => update({ assignedTo: ids }),
+        onSelect: (ids) => update({ assignedTo: ids[0] || null }),
         onClose: () => setShowAssignPicker(false),
       }),
     popup === "job-detail" &&
@@ -19017,37 +19017,64 @@ function MassUpdateModal({ count, locationId, onApply, onClose }) {
 }
 
 // ─── Assign User Picker ────────────────────────────────────────────────────────
-function AssignUserPicker({ locationId, currentUserId, onSelect, onClose }) {
+// Roster source: LocationUsersContext (real hub_users from page.tsx) with
+// USERS_DATA fallback for view-as / demo paths where the context is null.
+// Multi-select to match the call site's plural shape: receives currentUserIds
+// (array) and emits onSelect(updatedIdsArray) on Apply.
+function AssignUserPicker({ locationId, currentUserIds=[], onSelect, onClose }) {
   React.useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = prev }
   }, [])
-  const locUsers = USERS_DATA.filter(u=>u.locationId===locationId&&u.status==='active')
+  const usersCtx = useContext(LocationUsersContext)
+  const usersSource = usersCtx || USERS_DATA
+  const locUsers = usersSource.filter(u=>u.locationId===locationId&&u.status==='active')
+  const [selectedIds, setSelectedIds] = useState(currentUserIds)
+  function toggle(id) {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id])
+  }
+  function apply() {
+    onSelect(selectedIds)
+    onClose()
+  }
   return (
     <div style={{ position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
       <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.4)' }} onClick={onClose} />
-      <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, boxShadow:'0 -8px 40px rgba(26,46,43,0.15)', maxHeight:'60vh', overflowY:'auto' }}>
+      <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, boxShadow:'0 -8px 40px rgba(26,46,43,0.15)', maxHeight:'70vh', display:'flex', flexDirection:'column' }}>
         <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'12px auto 0' }} />
         <div style={{ padding:'14px 16px 10px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
           <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Assign Record</p>
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
         </div>
-        <div>
+        <div style={{ overflowY:'auto', flex:1 }}>
+          {locUsers.length === 0 && (
+            <div style={{ padding:'24px 16px', textAlign:'center', color:'#8a9e9a', fontSize:'13px' }}>
+              No active team members for this location.
+            </div>
+          )}
           {locUsers.map((u,i)=>{
             const rc = FRANCHISE_ROLES.find(r=>r.key===u.role)
-            const active = u.id===currentUserId
+            const active = selectedIds.includes(u.id)
             return (
-              <button key={u.id} onClick={()=>{ onSelect(u.id); onClose() }} style={{ width:'100%', padding:'12px 16px', background:active?'rgba(26,46,43,0.04)':'white', border:'none', borderBottom:i<locUsers.length-1?'1px solid rgba(0,0,0,0.05)':'none', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left' }}>
+              <button key={u.id} onClick={()=>toggle(u.id)} style={{ width:'100%', padding:'12px 16px', background:active?'rgba(26,46,43,0.04)':'white', border:'none', borderBottom:i<locUsers.length-1?'1px solid rgba(0,0,0,0.05)':'none', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left' }}>
                 <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'12px', fontWeight:700, color:'white', flexShrink:0 }}>{u.initials}</div>
                 <div style={{ flex:1 }}>
                   <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>{u.name}</p>
-                  <span style={{ fontSize:'10px', color:rc?.color, background:rc?.bg, padding:'1px 7px', borderRadius:'10px', fontWeight:600 }}>{rc?.icon} {rc?.label}</span>
+                  {rc && <span style={{ fontSize:'10px', color:rc.color, background:rc.bg, padding:'1px 7px', borderRadius:'10px', fontWeight:600 }}>{rc.icon} {rc.label}</span>}
                 </div>
-                {active&&<span style={{ fontSize:'14px', color:'#a8c9c4' }}>✓ Assigned</span>}
+                <div style={{ width:'20px', height:'20px', borderRadius:'50%', border:`2px solid ${active?'#1a2e2b':'rgba(0,0,0,0.12)'}`, background:active?'#1a2e2b':'white', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                  {active && <span style={{ color:'white', fontSize:'10px', fontWeight:700 }}>✓</span>}
+                </div>
               </button>
             )
           })}
+        </div>
+        <div style={{ padding:'12px 16px', borderTop:'1px solid rgba(0,0,0,0.06)' }}>
+          <button onClick={apply} style={{ width:'100%', padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+            {selectedIds.length === 0 ? 'Clear Assignment' : `Apply (${selectedIds.length})`}
+          </button>
+          <div style={{ height:'0.5rem' }} />
         </div>
       </div>
     </div>
