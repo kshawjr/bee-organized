@@ -9,7 +9,7 @@
 // Auth: must be a logged-in hub_user.
 // Scope: super_admin/admin can update any lead. owner/lite_user can only
 //        update leads in their own location.
-// Validation: stage values are checked against the 7 allowed; addresses
+// Validation: stage values are checked against the 9 allowed; addresses
 //             must be an array; is_junk must be boolean.
 
 import { NextResponse } from 'next/server'
@@ -20,12 +20,14 @@ import { isAdmin } from '@/lib/auth'
 
 const VALID_STAGES = [
   'New',
+  'Attempting',
   'Nurturing',
-  'Estimate',
+  'Request',
+  'Estimate Sent',
   'Job in Progress',
   'Final Processing',
-  'Won',
-  'Lost',
+  'Closed Won',
+  'Closed Lost',
 ] as const
 
 // Fields a client request can update. Anything not in this list is dropped
@@ -62,14 +64,6 @@ const PATCHABLE_FIELDS = new Set([
   'request_details',
   'paused',
 ])
-
-// UI stage labels → DB enum. The Hive UI uses 'Closed Won' / 'Closed Lost'
-// for display; the leads.stage enum stores 'Won' / 'Lost'. Translate on the
-// way in so client patches don't have to know the server vocabulary.
-const STAGE_ALIASES: Record<string, string> = {
-  'Closed Won': 'Won',
-  'Closed Lost': 'Lost',
-}
 
 export async function PATCH(
   req: Request,
@@ -138,11 +132,8 @@ export async function PATCH(
     patch[key] = value
   }
 
-  // Stage alias translation + validation
+  // Stage validation
   if ('stage' in patch) {
-    if (typeof patch.stage === 'string' && STAGE_ALIASES[patch.stage]) {
-      patch.stage = STAGE_ALIASES[patch.stage]
-    }
     if (typeof patch.stage !== 'string' || !VALID_STAGES.includes(patch.stage as typeof VALID_STAGES[number])) {
       return NextResponse.json(
         { error: 'invalid_stage', allowed: VALID_STAGES },
