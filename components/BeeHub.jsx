@@ -8275,7 +8275,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
   const [activeNav, setActiveNav] = useState('hive')
   const [showJunk, setShowJunk] = useState(false)
   const [viewMode, setViewMode] = useState('open')
-  const [closedFilter, setClosedFilter] = useState('won')
+  const [closedFilter, setClosedFilter] = useState('all')
   const [showNewLead, setShowNewLead] = useState(false)
   const [showHomeCapture, setShowHomeCapture] = useState(false)
   const [selectedIds, setSelectedIds] = useState([]) // multi-select
