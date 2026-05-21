@@ -733,53 +733,29 @@ const MOTIVATIONAL = [
 ]
 
 function SadAnimation() {
-  const message = MOTIVATIONAL[Math.floor(Math.random() * MOTIVATIONAL.length)]
-  const [particles] = useState(() =>
-    Array.from({ length: 24 }, (_, i) => ({
-      id: i,
-      emoji: SAD_FACES[Math.floor(Math.random() * SAD_FACES.length)],
-      left: Math.random() * 100,
-      delay: Math.random() * 2.5,
-      size: 20 + Math.floor(Math.random() * 24),
-      duration: 2.0 + Math.random() * 1.5,
-    }))
-  )
+  const [message] = useState(() => MOTIVATIONAL[Math.floor(Math.random() * MOTIVATIONAL.length)])
+  const [face] = useState(() => SAD_FACES[Math.floor(Math.random() * SAD_FACES.length)])
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:20000, pointerEvents:'none', overflow:'hidden' }}>
       <style>{`
-        @keyframes sadFall {
-          0%   { transform: translateY(-60px) rotate(0deg); opacity:1; }
-          80%  { opacity:1; }
-          100% { transform: translateY(110vh) rotate(20deg); opacity:0; }
-        }
-        @keyframes fadeInUp {
+        @keyframes sadFadeInUp {
           0%   { opacity:0; transform:translateY(16px); }
           100% { opacity:1; transform:translateY(0); }
         }
-        .sad-particle {
-          position: absolute;
-          top: -60px;
-          animation: sadFall var(--dur) ease-in var(--delay) forwards;
-        }
         .sad-card {
-          animation: fadeInUp 0.4s ease forwards;
+          animation: sadFadeInUp 0.35s ease forwards;
         }
       `}</style>
-      {particles.map(p => (
-        <div key={p.id} className="sad-particle" style={{ left:`${p.left}%`, fontSize:`${p.size}px`, '--dur':`${p.duration}s`, '--delay':`${p.delay}s` }}>
-          {p.emoji}
-        </div>
-      ))}
       <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center' }}>
         <div className="sad-card" style={{ background:'rgba(26,46,43,0.92)', borderRadius:'20px', padding:'28px 32px', textAlign:'center', maxWidth:'280px', boxShadow:'0 8px 40px rgba(0,0,0,0.3)' }}>
-          <p style={{ fontSize:'40px', marginBottom:'10px' }}>😢</p>
+          <p style={{ fontSize:'96px', lineHeight:1, marginBottom:'14px' }}>{face}</p>
           <p style={{ fontSize:'15px', color:'white', fontWeight:600, marginBottom:'8px' }}>Record closed</p>
           <p style={{ fontSize:'13px', color:'rgba(168,201,196,0.9)', lineHeight:1.5, marginBottom:'14px' }}>{message}</p>
           <div style={{ height:'3px', background:'rgba(168,201,196,0.2)', borderRadius:'2px', overflow:'hidden' }}>
-            <div style={{ height:'100%', background:'#a8c9c4', borderRadius:'2px', animation:'progress 3.5s linear forwards' }} />
+            <div style={{ height:'100%', background:'#a8c9c4', borderRadius:'2px', animation:'sadProgress 2s linear forwards' }} />
           </div>
-          <style>{`@keyframes progress { from { width:0% } to { width:100% } }`}</style>
+          <style>{`@keyframes sadProgress { from { width:0% } to { width:100% } }`}</style>
         </div>
       </div>
     </div>
@@ -816,49 +792,24 @@ const WON_MESSAGES = [
 ]
 
 function WonAnimation() {
-  const message = WON_MESSAGES[Math.floor(Math.random() * WON_MESSAGES.length)]
-  const [particles] = useState(() =>
-    Array.from({ length: 24 }, (_, i) => ({
-      id: i,
-      emoji: WON_EMOJIS[Math.floor(Math.random() * WON_EMOJIS.length)],
-      left: Math.random() * 100,
-      delay: Math.random() * 2.5,
-      size: 20 + Math.floor(Math.random() * 24),
-      duration: 2.0 + Math.random() * 1.5,
-    }))
-  )
+  const [message] = useState(() => WON_MESSAGES[Math.floor(Math.random() * WON_MESSAGES.length)])
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:20000, pointerEvents:'none', overflow:'hidden' }}>
       <style>{`
-        @keyframes wonFall {
-          0%   { transform: translateY(-60px) rotate(0deg); opacity:1; }
-          80%  { opacity:1; }
-          100% { transform: translateY(110vh) rotate(20deg); opacity:0; }
-        }
         @keyframes wonSlideUp {
           0%   { opacity:0; transform:translateY(16px); }
           100% { opacity:1; transform:translateY(0); }
         }
-        .won-particle {
-          position: absolute;
-          top: -60px;
-          animation: wonFall var(--dur) ease-in var(--delay) forwards;
-        }
-        .won-card { animation: wonSlideUp 0.4s ease forwards; }
+        .won-card { animation: wonSlideUp 0.35s ease forwards; }
       `}</style>
-      {particles.map(p => (
-        <div key={p.id} className="won-particle" style={{ left:`${p.left}%`, fontSize:`${p.size}px`, '--dur':`${p.duration}s`, '--delay':`${p.delay}s` }}>
-          {p.emoji}
-        </div>
-      ))}
       <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center' }}>
         <div className="won-card" style={{ background:'linear-gradient(135deg,#d4a046,#e8c060)', borderRadius:'20px', padding:'28px 32px', textAlign:'center', maxWidth:'280px', boxShadow:'0 8px 40px rgba(212,160,70,0.5)' }}>
-          <p style={{ fontSize:'40px', marginBottom:'10px' }}>🏆</p>
+          <p style={{ fontSize:'96px', lineHeight:1, marginBottom:'14px' }}>🏆</p>
           <p style={{ fontSize:'15px', color:'#1a2e2b', fontWeight:600, marginBottom:'8px' }}>Closed Won!</p>
           <p style={{ fontSize:'13px', color:'rgba(26,46,43,0.75)', lineHeight:1.5, marginBottom:'14px' }}>{message}</p>
           <div style={{ height:'3px', background:'rgba(26,46,43,0.15)', borderRadius:'2px', overflow:'hidden' }}>
-            <div style={{ height:'100%', background:'#1a2e2b', borderRadius:'2px', animation:'wonProgress 4s linear forwards' }} />
+            <div style={{ height:'100%', background:'#1a2e2b', borderRadius:'2px', animation:'wonProgress 2s linear forwards' }} />
           </div>
           <style>{`@keyframes wonProgress { from { width:0% } to { width:100% } }`}</style>
         </div>
@@ -4359,7 +4310,7 @@ function PersonPanel({
     setTimeout(() => {
       setShowWonAnimation(false);
       onClose();
-    }, 4500);
+    }, 2000);
   }
   function handleClose(reason, note, followUp) {
     const now = "Just now";
@@ -4369,14 +4320,24 @@ function PersonPanel({
       ts: now,
       user: "You",
     };
-    const closeNote = note
-      ? { id: `n${Date.now()}`, text: `Close note: ${note}`, ts: now, user: "You" }
-      : null;
-    onUpdate({
-      ...person,
+    const closeNoteText = note ? `${reason}: ${note}` : reason;
+    const patch = {
       stage: "Closed Lost",
-      activity: [...person.activity, activityEntry],
-      buzzNotes: closeNote ? [...person.buzzNotes, closeNote] : person.buzzNotes,
+      closedLostReason: reason,
+      closedLostNote: note || null,
+    };
+    onUpdate(
+      {
+        ...person,
+        stage: "Closed Lost",
+        closedLostReason: reason,
+        closedLostNote: note || null,
+        activity: [...person.activity, activityEntry],
+      },
+      patch,
+    );
+    postLeadNote(person.id, "close", closeNoteText).then((r) => {
+      if (!r.ok) showError("Close note didn't save");
     });
     if (followUp && onAddFollowUp) {
       onAddFollowUp({
@@ -4391,10 +4352,9 @@ function PersonPanel({
     }
     setShowSadAnimation(true);
     setTimeout(() => {
-      onMarkJunk(person.id, reason, note);
       setPopup(null);
       onClose();
-    }, 4000);
+    }, 2000);
   }
   function handleAddAddress(addr) {
     update({ addresses: [...(person.addresses || []), addr] });
@@ -5861,19 +5821,42 @@ function PersonPanel({
                   onChange: (e) => setJobNoteDraft(e.target.value),
                   onKeyDown: (e) => {
                     if (e.key === "Enter" && jobNoteDraft.trim()) {
-                      update({
-                        jobNotes: [
-                          ...(person.jobNotes || []),
-                          {
-                            id: `jn${Date.now()}`,
-                            text: jobNoteDraft.trim(),
-                            ts: "Just now",
-                            user: "You",
-                            synced: !!person.jobberRef,
-                          },
-                        ],
-                      });
+                      const text = jobNoteDraft.trim();
+                      const tempId = `tmp_jn${Date.now()}`;
+                      const tempNote = {
+                        id: tempId,
+                        text,
+                        ts: "Just now",
+                        user: "You",
+                        synced: !!person.jobberRef,
+                      };
+                      const optimisticList = [...(person.jobNotes || []), tempNote];
+                      update({ jobNotes: optimisticList });
                       setJobNoteDraft("");
+                      postLeadNote(person.id, "job", text).then((r) => {
+                        if (r.ok && r.data && r.data.note) {
+                          const real = r.data.note;
+                          const replacement = {
+                            id: real.id,
+                            text: real.text,
+                            ts: "Just now",
+                            user: real.user_label || "You",
+                            synced: !!person.jobberRef,
+                          };
+                          onUpdate({
+                            ...person,
+                            jobNotes: optimisticList.map((n) =>
+                              n.id === tempId ? replacement : n,
+                            ),
+                          });
+                        } else {
+                          onUpdate({
+                            ...person,
+                            jobNotes: optimisticList.filter((n) => n.id !== tempId),
+                          });
+                          showError("Could not save note");
+                        }
+                      });
                     }
                   },
                   placeholder: "This note is internal only and will not go to Jobber",
@@ -6873,7 +6856,7 @@ function PersonPanel({
                       "button",
                       {
                         onClick: () =>
-                          onUpdate({ ...person, marketingOptOut: !person.marketingOptOut }),
+                          update({ marketingOptOut: !person.marketingOptOut }),
                         style: {
                           padding: "4px 6px",
                           background: "none",
@@ -7140,7 +7123,7 @@ function PersonPanel({
       React.createElement(AssignUserPicker, {
         locationId: person.locationId,
         currentUserIds: assignedIds,
-        onSelect: (ids) => onUpdate({ ...person, assignedTo: ids }),
+        onSelect: (ids) => update({ assignedTo: ids }),
         onClose: () => setShowAssignPicker(false),
       }),
     popup === "job-detail" &&
@@ -7198,7 +7181,18 @@ function PersonPanel({
         person: person,
         onClose: () => setShowProcess(false),
         onSave: (updated) => {
-          onUpdate(updated);
+          // ProcessLeadSheet writes the chosen drip into person.path for the
+          // UI; rename it to dripPath in the patch so PERSON_TO_API_FIELD
+          // maps it to drip_path.
+          const patch = {
+            stage: updated.stage,
+            source: updated.source,
+            project: updated.project,
+            dripPath: updated.path,
+            snoozeUntil: updated.snoozeUntil,
+            snoozeNote: updated.snoozeNote,
+          };
+          onUpdate(updated, patch);
           setShowProcess(false);
         },
       }),
@@ -7220,32 +7214,40 @@ function PersonPanel({
         person: person,
         onClose: () => setShowSnooze(false),
         onSave: (date, note) => {
-          onUpdate({
-            ...person,
+          const patch = {
             snoozeUntil: date,
             snoozeNote: note,
             stage: "Nurturing",
-            buzzNotes: note
-              ? [
-                  ...(person.buzzNotes || []),
-                  {
-                    id: `bn${Date.now()}`,
-                    text: `💤 Snoozed: ${note}`,
-                    ts: "Just now",
-                    user: "You",
-                  },
-                ]
-              : person.buzzNotes || [],
-            activity: [
-              ...person.activity,
-              {
-                type: "snooze",
-                label: `Snoozed until ${new Date(date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}${note ? ` · ${note}` : ""}`,
-                ts: "Just now",
-                user: "You",
-              },
-            ],
-          });
+          };
+          onUpdate(
+            {
+              ...person,
+              snoozeUntil: date,
+              snoozeNote: note,
+              stage: "Nurturing",
+              buzzNotes: note
+                ? [
+                    ...(person.buzzNotes || []),
+                    {
+                      id: `bn${Date.now()}`,
+                      text: `💤 Snoozed: ${note}`,
+                      ts: "Just now",
+                      user: "You",
+                    },
+                  ]
+                : person.buzzNotes || [],
+              activity: [
+                ...person.activity,
+                {
+                  type: "snooze",
+                  label: `Snoozed until ${new Date(date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}${note ? ` · ${note}` : ""}`,
+                  ts: "Just now",
+                  user: "You",
+                },
+              ],
+            },
+            patch,
+          );
           setShowSnooze(false);
         },
       }),
@@ -7253,13 +7255,20 @@ function PersonPanel({
       React.createElement(CloseOutFlow, {
         person: person,
         onComplete: (updated) => {
-          update(updated);
+          // Patch is the subset the API understands; updateLead translates
+          // 'Closed Won' → 'Won'. Other fields (invoices, satisfaction,
+          // reviewSent, outreachTimeline) stay client-only.
+          const patch = {
+            stage: updated.stage,
+            finalProcessed: updated.finalProcessed,
+          };
+          onUpdate(updated, patch);
           setShowCloseOut(false);
           setShowWonAnimation(true);
           setTimeout(() => {
             setShowWonAnimation(false);
             onClose();
-          }, 4500);
+          }, 2000);
         },
         onClose: () => setShowCloseOut(false),
         onAddFollowUp: onAddFollowUp,
@@ -8193,10 +8202,15 @@ const PERSON_TO_API_FIELD = {
   referredByKind: 'referred_by_kind',
   referredBy: 'referred_by_id',
   finalProcessed: 'final_processed',
+  snoozeUntil: 'snoozed_until',
+  snoozeNote: 'snoozed_note',
+  marketingOptOut: 'marketing_opt_out',
+  jobDetail: 'request_details',
 }
 const PASSTHROUGH_API_FIELDS = new Set([
   'stage','source','name','first_name','last_name',
   'email','phone','address','addresses','city','state','zip',
+  'paused',
 ])
 
 async function patchLeadAPI(leadId, patch) {
@@ -8313,12 +8327,20 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
   }
   function markJunk(id, reason, note) { setPeople(p=>p.map(x=>x.id===id?{...x,isJunk:true,junkReason:reason,junkNote:note}:x)); setSelected(null) }
   function resurrectPerson(id) {
-    setPeople(p=>p.map(x=>x.id===id?{
-      ...x, isJunk:false, finalProcessed:false,
+    const prev = people.find(x => x.id === id)
+    if (!prev) return
+    const updated = {
+      ...prev, isJunk:false, finalProcessed:false,
       stage:'New', junkReason:undefined, junkNote:undefined,
-      activity:[...x.activity, { type:'stage', text:'Record resurrected - returned to pipeline', ts:'Just now', user:'You' }]
-    }:x))
+      activity:[...prev.activity, { type:'stage', text:'Record resurrected - returned to pipeline', ts:'Just now', user:'You' }]
+    }
+    setPeople(p=>p.map(x=>x.id===id?updated:x))
     setViewMode('open')
+    patchLeadAPI(id, { stage:'New', isJunk:false, finalProcessed:false }).then(r => {
+      if (r.ok) return
+      setPeople(p=>p.map(x=>x.id===id?prev:x))
+      setToast({ kind: 'error', msg: 'Failed to resurrect — please try again' })
+    })
   }
 
   const captures = allPeople.filter(p => p.quickCapture && !p.isJunk)
@@ -16602,7 +16624,7 @@ function FollowUpReminders({ followUps, setFollowUps, locFilter }) {
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=PARTNERS_DATA, setPartners=()=>{}, companies=COMPANIES_DATA, setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, onboardingData=null }) {
+function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=PARTNERS_DATA, setPartners=()=>{}, companies=COMPANIES_DATA, setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, onboardingData=null, currentUserId='u11' }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
@@ -23686,6 +23708,7 @@ if (Array.isArray(initialPeople)) return
           }}
           onboardingData={onboardingData}
           setFollowUps={setFollowUps}
+          currentUserId={viewAsUser?.id || currentUser?.id || 'u11'}
         />
       </div>
     )

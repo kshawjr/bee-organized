@@ -55,7 +55,21 @@ const PATCHABLE_FIELDS = new Set([
   'city',
   'state',
   'zip',
+  // Phase 4 additions — see migrations/hive_clients_phase4_columns.sql
+  'snoozed_until',
+  'snoozed_note',
+  'marketing_opt_out',
+  'request_details',
+  'paused',
 ])
+
+// UI stage labels → DB enum. The Hive UI uses 'Closed Won' / 'Closed Lost'
+// for display; the leads.stage enum stores 'Won' / 'Lost'. Translate on the
+// way in so client patches don't have to know the server vocabulary.
+const STAGE_ALIASES: Record<string, string> = {
+  'Closed Won': 'Won',
+  'Closed Lost': 'Lost',
+}
 
 export async function PATCH(
   req: Request,
@@ -124,8 +138,11 @@ export async function PATCH(
     patch[key] = value
   }
 
-  // Stage validation
+  // Stage alias translation + validation
   if ('stage' in patch) {
+    if (typeof patch.stage === 'string' && STAGE_ALIASES[patch.stage]) {
+      patch.stage = STAGE_ALIASES[patch.stage]
+    }
     if (typeof patch.stage !== 'string' || !VALID_STAGES.includes(patch.stage as typeof VALID_STAGES[number])) {
       return NextResponse.json(
         { error: 'invalid_stage', allowed: VALID_STAGES },
