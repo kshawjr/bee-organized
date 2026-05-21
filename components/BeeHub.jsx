@@ -6242,6 +6242,49 @@ function PersonPanel({
                           "Send to Jobber \u2014 log a reach-out first",
                         ),
                   ),
+                isEarlyStage &&
+                  person.jobberRef &&
+                  React.createElement(
+                    "a",
+                    {
+                      href: `https://secure.getjobber.com/clients/${person.jobberRef}`,
+                      target: "_blank",
+                      rel: "noopener noreferrer",
+                      style: {
+                        display: "block",
+                        width: "100%",
+                        padding: "11px",
+                        background: "transparent",
+                        border: "1.5px solid rgba(0,0,0,0.1)",
+                        borderRadius: "10px",
+                        fontSize: "13px",
+                        fontFamily: "inherit",
+                        fontWeight: 500,
+                        color: "#1a2e2b",
+                        cursor: "pointer",
+                        textAlign: "center",
+                        textDecoration: "none",
+                        boxSizing: "border-box",
+                        transition: "background 0.15s",
+                      },
+                      onMouseEnter: (e) => {
+                        e.currentTarget.style.background = "rgba(0,0,0,0.04)";
+                      },
+                      onMouseLeave: (e) => {
+                        e.currentTarget.style.background = "transparent";
+                      },
+                    },
+                    React.createElement(JobberIcon, {
+                      size: 18,
+                      style: { marginRight: "6px", verticalAlign: "middle" },
+                    }),
+                    "View in Jobber ",
+                    React.createElement(
+                      "span",
+                      { style: { fontSize: "11px" } },
+                      "\u2197",
+                    ),
+                  ),
                 person.stage === "Job in Progress" &&
                   hasInvoices &&
                   !person.finalProcessed &&
