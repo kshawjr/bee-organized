@@ -4169,8 +4169,9 @@ function PersonPanel({
     : person.assignedTo
       ? [person.assignedTo]
       : [];
+  const allUsers = useContext(LocationUsersContext) || USERS_DATA;
   const assignedUsers = assignedIds
-    .map((id) => USERS_DATA.find((u) => u.id === id))
+    .map((id) => allUsers.find((u) => u.id === id))
     .filter(Boolean);
   const isLaterStage = ["Request", "Request", "Job in Progress", "Final Processing"].includes(
     person.stage,
