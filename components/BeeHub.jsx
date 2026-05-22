@@ -123,6 +123,17 @@ const FAKE_SUGGESTIONS = [
   '2001 Colorado Blvd, Denver CO 80205','10 Civic Center Plaza, Denver CO 80202',
 ]
 
+// ─── Limited launch feature gate (REMOVE after full rollout) ─────────────
+// Locations on the limited launch: Contacts and Reports tabs disabled.
+// Delete this constant + LIMITED_LAUNCH_TOOLTIP + all usages once these
+// locations get full access. Target removal: end of next week.
+const LIMITED_LAUNCH_LOCATION_IDS = new Set([
+  '1b62628f-e3be-4024-be2d-e8179f09f740', // Palm Beach
+  '132b42c2-9566-43cc-85dc-f90fae4ba1b1', // Scottsdale
+  'dca50888-949f-436d-b24e-b6c8a4984905', // Kansas City
+])
+const LIMITED_LAUNCH_TOOLTIP = 'Coming Soon'
+
 const ALL_TAGS = [
   { id:'hot',       label:'🔥 Hot Lead',     color:'#ef4444', bg:'rgba(239,68,68,0.1)'   },
   { id:'vip',       label:'⭐ VIP',           color:'#f59e0b', bg:'rgba(245,158,11,0.1)'  },
@@ -23588,6 +23599,10 @@ if (Array.isArray(initialPeople)) return
   // ── Nav ────────────────────────────────────────────────────────────────────
   // `action:'openManual'` is a soft route — sidebar/bottom-nav buttons call
   // setShowManual(true) instead of nav(key). No activeNav highlight either.
+  // Limited-launch gate: when locFilter is exactly one of the three flagged
+  // locations, gray out Contacts + Reports tabs. 'all' (elevated default) and
+  // every other location retain full access.
+  const isLimitedLaunch = LIMITED_LAUNCH_LOCATION_IDS.has(locFilter)
   const navItems = [
     { key:'home',     icon:'🏠', label:'Home'    },
     { key:'hive',     icon:'🐝', label:'Clients'    },
@@ -23740,9 +23755,10 @@ if (Array.isArray(initialPeople)) return
         )}
         <div style={{ display:'flex', justifyContent:'space-around', width:'100%', paddingBottom:'max(20px, env(safe-area-inset-bottom))', paddingTop:'8px' }}>
           {navItems.map(item=>{
-            const isLocked = (isOnboardingState && item.key!=='home' && item.key!=='settings') || (item.key==='reports' && !['super_admin','corporate','franchise'].includes(role))
+            const isLimitedLaunchGated = isLimitedLaunch && (item.key==='partners' || item.key==='reports')
+            const isLocked = (isOnboardingState && item.key!=='home' && item.key!=='settings') || (item.key==='reports' && !['super_admin','corporate','franchise'].includes(role)) || isLimitedLaunchGated
             return (
-              <button key={item.key} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'3px', padding:'4px 8px', background:'none', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', opacity:isLocked?0.25:1 }}>
+              <button key={item.key} title={isLimitedLaunchGated ? LIMITED_LAUNCH_TOOLTIP : undefined} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'3px', padding:'4px 8px', background:'none', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', opacity:isLocked?0.25:1 }}>
                 <span style={{ fontSize:'20px', lineHeight:1 }}>{item.icon}</span>
                 <span style={{ fontSize:'9px', color:activeNav===item.key?'#a8c9c4':'rgba(168,201,196,0.45)', fontWeight:activeNav===item.key?600:400 }}>{item.label}</span>
               </button>
@@ -23954,10 +23970,11 @@ if (Array.isArray(initialPeople)) return
             const isReports  = item.key==='reports'  && !['super_admin','corporate'].includes(role) && !['owner','manager'].includes(fr)
             const isSettings = item.key==='settings' && ['readonly'].includes(fr)
             const isPartners = item.key==='partners' && ['readonly'].includes(fr)
-            const isLocked = (isOnboardingState && item.key!=='home' && item.key!=='settings') || isReports || isSettings || isPartners
+            const isLimitedLaunchGated = isLimitedLaunch && (item.key==='partners' || item.key==='reports')
+            const isLocked = (isOnboardingState && item.key!=='home' && item.key!=='settings') || isReports || isSettings || isPartners || isLimitedLaunchGated
             const isActive = activeNav===item.key
             return (
-              <button key={item.key} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ width:'100%', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left', background:isActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>
+              <button key={item.key} title={isLimitedLaunchGated ? LIMITED_LAUNCH_TOOLTIP : undefined} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ width:'100%', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left', background:isActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>
                 <span style={{ fontSize:'18px', lineHeight:1, flexShrink:0 }}>{item.icon}</span>
                 <span style={{ fontSize:'13px', fontWeight:isActive?600:400, color:isActive?'#a8c9c4':'rgba(168,201,196,0.6)' }}>{item.label}</span>
                 {isActive&&<div style={{ marginLeft:'auto', width:'4px', height:'4px', borderRadius:'50%', background:'#a8c9c4' }} />}
