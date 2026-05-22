@@ -23548,6 +23548,10 @@ const [people, setPeople]                 = useState(Array.isArray(initialPeople
 if (Array.isArray(initialPeople)) return
     setPeople(prev => [...prev, ...generateExtraPeople()])
   }, [])
+  // Sync prop → state after router.refresh() (e.g. post-import) so new leads appear without a reload.
+  useEffect(() => {
+    if (Array.isArray(initialPeople)) setPeople(initialPeople)
+  }, [initialPeople])
   const [followUps, setFollowUps]           = useState([
     { id:'fu1', personId:'3',  personName:'Lisa Patel',      note:'Assessment follow-up - did she book?',       date:'2026-05-07', locationId:'loc_kc', createdAt:'May 5' },
     { id:'fu2', personId:'2',  personName:'Jennifer Torres', note:'Re-engage - went quiet after first call',     date:'2026-05-09', locationId:'loc_kc', createdAt:'May 4' },
