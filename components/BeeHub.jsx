@@ -8470,6 +8470,12 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
       setPeople(p=>p.map(x=>x.id===id?prev:x))
       setToast({ kind: 'error', msg: 'Failed to resurrect — please try again' })
     })
+    // Persist resurrection as a system touchpoint so the audit trail
+    // survives refresh. Activity timeline is built from touchpoints
+    // (kind='system' or 'stage_change'), not from lead_notes.
+    postTouchpoint(id, 'system', 'system', 'Record resurrected — returned to pipeline').then(r => {
+      if (!r.ok) console.warn('Failed to log resurrection touchpoint:', r.error)
+    })
   }
 
   const captures = allPeople.filter(p => p.quickCapture && !p.isJunk)
