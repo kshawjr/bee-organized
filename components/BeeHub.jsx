@@ -10306,6 +10306,44 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
     const phaseLabel = status?.phase || 'starting'
     return (
       <div style={{ display:'grid', gap:'8px' }}>
+        {/* Bee swarm — duplicated from ClientImportCard. DRY into a shared
+            component if a third instance shows up. */}
+        <style>{`
+          @keyframes bee-fly-1 {
+            0%   { transform: translate(0, 0) rotate(-10deg); }
+            25%  { transform: translate(40px, -8px) rotate(5deg); }
+            50%  { transform: translate(80px, 6px) rotate(-5deg); }
+            75%  { transform: translate(40px, 14px) rotate(10deg); }
+            100% { transform: translate(0, 0) rotate(-10deg); }
+          }
+          @keyframes bee-fly-2 {
+            0%   { transform: translate(0, 0) rotate(8deg); }
+            25%  { transform: translate(-30px, 10px) rotate(-8deg); }
+            50%  { transform: translate(-60px, -4px) rotate(12deg); }
+            75%  { transform: translate(-25px, -12px) rotate(-6deg); }
+            100% { transform: translate(0, 0) rotate(8deg); }
+          }
+          @keyframes bee-fly-3 {
+            0%   { transform: translate(0, 0) rotate(-6deg); }
+            20%  { transform: translate(25px, 12px) rotate(8deg); }
+            45%  { transform: translate(55px, -10px) rotate(-10deg); }
+            70%  { transform: translate(20px, -14px) rotate(6deg); }
+            100% { transform: translate(0, 0) rotate(-6deg); }
+          }
+          @keyframes bee-fly-4 {
+            0%   { transform: translate(0, 0) rotate(10deg); }
+            30%  { transform: translate(-35px, -10px) rotate(-12deg); }
+            55%  { transform: translate(-15px, 12px) rotate(4deg); }
+            80%  { transform: translate(-50px, 4px) rotate(-8deg); }
+            100% { transform: translate(0, 0) rotate(10deg); }
+          }
+        `}</style>
+        <div style={{ position:'relative', height:'50px', overflow:'hidden' }}>
+          <span style={{ position:'absolute', top:'14px', left:'10%', fontSize:'24px', animation:'bee-fly-1 3.2s ease-in-out infinite' }}>🐝</span>
+          <span style={{ position:'absolute', top:'18px', left:'35%', fontSize:'24px', animation:'bee-fly-2 4.1s ease-in-out infinite' }}>🐝</span>
+          <span style={{ position:'absolute', top:'10px', left:'55%', fontSize:'24px', animation:'bee-fly-3 3.7s ease-in-out infinite' }}>🐝</span>
+          <span style={{ position:'absolute', top:'20px', left:'80%', fontSize:'24px', animation:'bee-fly-4 4.5s ease-in-out infinite' }}>🐝</span>
+        </div>
         <p style={{ fontSize:'12px', color:'#4a5e5a' }}>
           {phaseLabel} — {status?.processed_records || 0}
           {hasTotal ? ` of ${status.total_records}` : ''}
