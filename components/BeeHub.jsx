@@ -14370,7 +14370,7 @@ function ClientImportCard({ isJobberConnected, locationId }) {
       {importState === 'complete' && summary && summary.leads_created != null && (
         <div style={{ padding:'0 14px 12px' }}>
           <p style={{ fontSize:'10px', color:'#8a9e9a', lineHeight:1.5 }}>
-            Leads: {summary.leads_created ?? 0} new
+           Clients: {summary.leads_created ?? 0} new
             {summary.leads_updated ? `, ${summary.leads_updated} updated` : ''}
             {' · '}Requests: {summary.requests_created ?? 0}
             {summary.requests_updated ? `, ${summary.requests_updated} updated` : ''}
