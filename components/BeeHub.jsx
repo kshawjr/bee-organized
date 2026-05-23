@@ -10108,8 +10108,9 @@ function JobberConnectStep({ markDone, setActiveStepOpen }) {
 
   // Treat 'connected' as a UI-only confirmation flag — markDone is the
   // source of truth for whether the step is complete in the onboarding flow.
-  const [connected, setConnected] = useState(false)
-  const [toast, setToast]         = useState(null)
+  const [connected, setConnected]   = useState(false)
+  const [toast, setToast]           = useState(null)
+  const [connecting, setConnecting] = useState(false)
 
   // OAuth return handler — fires once on mount.
   useEffect(() => {
@@ -10137,7 +10138,8 @@ function JobberConnectStep({ markDone, setActiveStepOpen }) {
   }, [toast])
 
   function handleConnect() {
-    if (!locationId) return
+    if (!locationId || connecting) return
+    setConnecting(true)
     window.location.href = '/api/jobber/connect?location_id=' + encodeURIComponent(locationId)
   }
 
@@ -10162,9 +10164,17 @@ function JobberConnectStep({ markDone, setActiveStepOpen }) {
       <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>
         Connect your Jobber account to sync clients, jobs, and invoices automatically. You'll be redirected to Jobber to authorize access.
       </p>
-      <button onClick={handleConnect} disabled={!locationId}
-        style={{ width:'100%', padding:'11px', background: locationId ? '#1a2e2b' : '#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color: locationId ? 'white' : '#9ca3af', cursor: locationId ? 'pointer' : 'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
-        <span>⚡</span> Connect Jobber
+      <style>{`@keyframes jobberConnectBuzz { 0%,100% { transform: translateX(-4px) rotate(-8deg); } 50% { transform: translateX(4px) rotate(8deg); } }`}</style>
+      <button onClick={handleConnect} disabled={!locationId || connecting}
+        style={{ width:'100%', padding:'11px', background: connecting ? '#2a4540' : (locationId ? '#1a2e2b' : '#e5e7eb'), border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color: (locationId || connecting) ? 'white' : '#9ca3af', cursor: connecting ? 'wait' : (locationId ? 'pointer' : 'not-allowed'), display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
+        {connecting ? (
+          <>
+            <span style={{ display:'inline-block', animation:'jobberConnectBuzz 0.6s ease-in-out infinite' }}>🐝</span>
+            Connecting to Jobber…
+          </>
+        ) : (
+          <><span>⚡</span> Connect Jobber</>
+        )}
       </button>
       {!locationId && (
         <p style={{ fontSize:'11px', color:'#ef4444', textAlign:'center' }}>
