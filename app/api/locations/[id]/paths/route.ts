@@ -14,6 +14,11 @@ import { supabaseService } from '@/lib/supabase-service'
 // some drip paths embed it in their templates. It's the SAME column as the
 // location step's calendarLink — whichever step the user completes first
 // pre-fills the other.
+//
+// NOTE: the path_key values written here ('general-a', 'move-a', etc.)
+// correspond to real drip_paths rows seeded for the 4 launch locations by
+// migrations/drips_infrastructure.sql. Session 2 will resolve this text key
+// into a drip_paths.id when a lead enters "New" to start their drip.
 
 export async function POST(
   req: NextRequest,
