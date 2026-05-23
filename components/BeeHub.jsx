@@ -9176,7 +9176,7 @@ function WelcomeStep({ ownerName, ownerEmail, topOffset, onContinue }) {
 }
 
 // ─── Onboarding Screen ────────────────────────────────────────────────────────
-function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='owner', topOffset=0, onOpenSettings, onComplete=()=>{}, onSkipOnboarding=()=>{} }) {
+function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='owner', topOffset=0, onComplete=()=>{}, onSkipOnboarding=()=>{} }) {
   const isOwner   = franchiseRole === 'owner'
   const nameParts = (ownerName||'').split(' ')
   const currentLocationCtx = useContext(CurrentLocationContext)
@@ -9723,7 +9723,6 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
               {!done&&!locked&&activeStepOpen===step.id&&(
                 <div style={{ padding:'0 14px 14px' }}>
                   <div style={{ paddingTop:'10px', display:'grid', gap:'8px' }}>
-                    {step.section&&<button onClick={()=>{ markDone(step.id); onOpenSettings&&onOpenSettings(step.section) }} style={{ width:'100%', padding:'11px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:'pointer' }}>Open Settings →</button>}
                     <button onClick={()=>{ markDone(step.id); setActiveStepOpen(null) }} style={{ width:'100%', padding:'9px', background:'transparent', border:'1px solid rgba(34,197,94,0.3)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#22c55e', cursor:'pointer' }}>✓ Mark as complete</button>
                   </div>
                 </div>
@@ -10035,7 +10034,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                 {!locked&&!done&&step.id==='invite'&&<span style={{ fontSize:'14px', color:'#c8d8d4', transform:isOpen?'rotate(90deg)':'none', display:'inline-block', transition:'transform 0.15s', marginLeft:'4px' }}>›</span>}
               </div>
               {done&&<div style={{ margin:'0 14px 14px', padding:'9px 14px', background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:'9px', display:'flex', alignItems:'center', gap:'8px' }}><span>✅</span><span style={{ fontSize:'12px', fontWeight:600, color:'#22c55e' }}>Completed</span></div>}
-              {isOpen&&<div style={{ padding:'0 14px 14px' }}><StepContent step={step} profileForm={profileForm} setProfileForm={setProfileForm} locationForm={locationForm} setLocationForm={setLocationForm} jobberKey={jobberKey} setJobberKey={setJobberKey} showAdvancedSender={showAdvancedSender} setShowAdvancedSender={setShowAdvancedSender} markDone={markDone} setActiveStepOpen={setActiveStepOpen} setShowInviteFlow={setShowInviteFlow} onOpenSettings={onOpenSettings} setSavedPaths={setSavedPaths} onSkipOnboarding={onSkipOnboarding} onAdvanceFromStep={advanceFromStep} savingStep={savingStep} stepError={stepError} saveProfile={saveProfile} saveLocation={saveLocation} savePaths={savePaths} /></div>}
+              {isOpen&&<div style={{ padding:'0 14px 14px' }}><StepContent step={step} profileForm={profileForm} setProfileForm={setProfileForm} locationForm={locationForm} setLocationForm={setLocationForm} jobberKey={jobberKey} setJobberKey={setJobberKey} showAdvancedSender={showAdvancedSender} setShowAdvancedSender={setShowAdvancedSender} markDone={markDone} setActiveStepOpen={setActiveStepOpen} setShowInviteFlow={setShowInviteFlow} setSavedPaths={setSavedPaths} onSkipOnboarding={onSkipOnboarding} onAdvanceFromStep={advanceFromStep} savingStep={savingStep} stepError={stepError} saveProfile={saveProfile} saveLocation={saveLocation} savePaths={savePaths} /></div>}
             </div>
           )
         })}
@@ -10397,7 +10396,7 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
   )
 }
 
-function StepContent({ step, profileForm, setProfileForm, locationForm, setLocationForm, jobberKey, setJobberKey, showAdvancedSender, setShowAdvancedSender, markDone, setActiveStepOpen, setShowInviteFlow, onOpenSettings, setSavedPaths=()=>{}, onSkipOnboarding, onAdvanceFromStep, savingStep, stepError, saveProfile, saveLocation, savePaths }) {
+function StepContent({ step, profileForm, setProfileForm, locationForm, setLocationForm, jobberKey, setJobberKey, showAdvancedSender, setShowAdvancedSender, markDone, setActiveStepOpen, setShowInviteFlow, setSavedPaths=()=>{}, onSkipOnboarding, onAdvanceFromStep, savingStep, stepError, saveProfile, saveLocation, savePaths }) {
 const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }
   if (step.id==='profile') {
     const phoneDigits = profileForm.phone.replace(/\D/g,'')
@@ -15779,7 +15778,7 @@ function TemplatePreviewModal({ template, settings, onClose }) {
   )
 }
 
-function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null, onboardingBack=null, isPastDue=false, graceDaysLeft=14, locationId='loc1', onPaymentResolved, people=[], franchiseRole='owner', isSuperAdmin=false, onboardingData=null, onOpenManual=null }) {
+function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null, isPastDue=false, graceDaysLeft=14, locationId='loc1', onPaymentResolved, people=[], franchiseRole='owner', isSuperAdmin=false, onOpenManual=null }) {
   // Real franchise owner sign-ins get currentLocation from context (populated
   // by App from page.tsx's Supabase fetch). Used as a higher-priority source
   // than the ALL_LOCATIONS mock for the location settings panel.
@@ -15791,19 +15790,9 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   const [showAddSeatsModal, setShowAddSeatsModal] = useState(false)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
   const livePrices = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
-  // Build settings from selected location if provided, with onboarding data taking priority
-  const od = onboardingData  // shorthand
-  const locProfile = od?.profile ? {
-    firstName: od.profile.firstName,
-    lastName:  od.profile.lastName,
-    email:     od.profile.email,
-    phone:     od.profile.phone,
-    role:      'Franchise Owner',
-    plan:      'owner',
-    subStatus: 'active',
-    renewDate: 'March 1, 2027',
-    nextAmount: calcProration(getTierPrice('owner')).prorated,
-  } : selectedLoc ? {
+  // Build settings from selected location if provided. Reads only real saved
+  // data — no onboarding overlay (onboarding flow handles its own state).
+  const locProfile = selectedLoc ? {
     firstName: (selectedLoc.owner||'').split(' ')[0],
     lastName:  (selectedLoc.owner||'').split(' ').slice(1).join(' '),
     email:     `${((selectedLoc.owner||'').split(' ')[0]||'owner').toLowerCase()}@beehub.io`,
@@ -15828,19 +15817,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     }
   })()
 
-  const locLocation = od?.location ? {
-    ...DEFAULT_SETTINGS.location,
-    locId:         od.location.locId || locationId || '',
-    name:          od.location.locationName || '',
-    address:       [od.location.address, od.location.city, od.location.state, od.location.zip].filter(Boolean).join(', ').replace(/,\s*$/, ''),
-    phone:         od.location.phone || od.profile?.phone || '',
-    timezone:      od.location.timezone || '',
-    reviewsLink:   od.location.reviewsLink || '',
-    bookingLink:   od.paths?.calendarLink || '',
-    sendFromEmail: od.location.sendFromEmail || '',
-    sendFromName:  od.location.senderName || '',
-    replyToEmail:  od.location.replyToEmail || od.location.sendFromEmail || '',
-  } : selectedLoc ? {
+  const locLocation = selectedLoc ? {
     locId:          selectedLoc.id,
     name:           selectedLoc.name,
     address:        selectedLoc.address,
@@ -15973,12 +15950,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem', width:'100%', position:'relative' }}>
 
       {/* Header */}
-      <div style={{ background:'#1a2e2b', padding:'1.25rem 1.25rem 0' }}> 
-        {onboardingBack&&(
-          <button onClick={onboardingBack} style={{ display:'flex', alignItems:'center', gap:'6px', background:'rgba(168,201,196,0.12)', border:'none', borderRadius:'8px', padding:'6px 12px', cursor:'pointer', fontFamily:'inherit', color:'#a8c9c4', fontSize:'12px', fontWeight:500, marginBottom:'10px' }}>
-            ← Back to Setup
-          </button>
-        )}
+      <div style={{ background:'#1a2e2b', padding:'1.25rem 1.25rem 0' }}>
         <h1 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'white', marginBottom:'1rem' }}>Settings ⚙️</h1>
         {/* Section tabs - short labels fit portrait mobile without overflow */}
         <div style={{ position:'relative', width:'100%', overflowX:'hidden' }}>
@@ -16846,12 +16818,11 @@ function FollowUpReminders({ followUps, setFollowUps, locFilter }) {
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=PARTNERS_DATA, setPartners=()=>{}, companies=COMPANIES_DATA, setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, onboardingData=null, currentUserId='u11', onClickLocation=null }) {
+function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=PARTNERS_DATA, setPartners=()=>{}, companies=COMPANIES_DATA, setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
   const [showNewLead, setShowNewLead] = useState(false)
-  const [onboardingSection, setOnboardingSection] = useState(null)
   const [locIndicatorHover, setLocIndicatorHover] = useState(false)
   const [toast, setToast] = useState(null)
   useEffect(() => {
@@ -16988,31 +16959,19 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
 
   const BottomNav = () => null
 
-  // Onboarding screen - allow settings for setup steps, block everything else.
+  // Onboarding state: home-only. Anywhere else snaps back to home.
   // Wrapped in useEffect to avoid setState-during-render — the previous inline
   // form called nav() during render, triggering a re-render cycle that briefly
   // unmounted OnboardingScreen and discarded its URL-handler state updates.
   useEffect(() => {
-    if (isOnboarding && activeNav !== 'home' && activeNav !== 'settings') {
+    if (isOnboarding && activeNav !== 'home') {
       nav('home')
     }
   }, [isOnboarding, activeNav])
 
 
-  if (isOnboarding && activeNav === 'settings') return (
-    <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
-      <SettingsScreen
-        onStatusChange={s=>setCrmStatus(s)}
-        initialSection={onboardingSection}
-        onboardingBack={()=>{ nav('home'); setOnboardingSection(null) }}
-        people={people}
-        onboardingData={onboardingData}
-      />
-    </div>
-  )
-
   if (isOnboarding && !onboardingDismissed) return (
-    <OnboardingScreen ownerName={ownerName} ownerEmail={ownerEmail} franchiseRole={franchiseRole} topOffset={topOffset} onOpenSettings={(section)=>{ nav('settings'); setOnboardingSection(section) }} onComplete={onCompleteOnboarding} onSkipOnboarding={()=>{
+    <OnboardingScreen ownerName={ownerName} ownerEmail={ownerEmail} franchiseRole={franchiseRole} topOffset={topOffset} onComplete={onCompleteOnboarding} onSkipOnboarding={()=>{
       if (typeof window !== 'undefined') {
         sessionStorage.removeItem('bee.onboarding.state')
         sessionStorage.removeItem('bee.oauth.return')
@@ -17090,8 +17049,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       <PastDueBar />
       <SettingsScreen
         onStatusChange={s=>setCrmStatus(s)}
-        initialSection={isPastDue?'profile':onboardingSection}
-        onboardingBack={onboardingSection?()=>{ setOnboardingSection(null); nav('home') }:null}
+        initialSection={isPastDue?'profile':null}
         isPastDue={isPastDue}
         graceDaysLeft={graceDaysLeft}
         locationId='loc1'
@@ -23675,7 +23633,6 @@ if (Array.isArray(initialPeople)) return
   const [users, setUsers]                   = useState(initialUsers ?? USERS_DATA)
   // Track CRM status overrides from admin panel
   const [locStatuses, setLocStatuses]       = useState({})
-  const [onboardingData, setOnboardingData] = useState(null)
 
   const roleConf    = ROLES.find(r=>r.key===role)
   const isElevated  = role==='corporate' || role==='super_admin'
@@ -23869,7 +23826,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         <div style={{ display:'flex', justifyContent:'space-around', width:'100%', paddingBottom:'max(20px, env(safe-area-inset-bottom))', paddingTop:'8px' }}>
           {navItems.map(item=>{
             const isLimitedLaunchGated = isLimitedLaunch && (item.key==='partners' || item.key==='reports')
-            const isLocked = (isOnboardingState && !isElevated && item.key!=='home' && item.key!=='settings') || (item.key==='reports' && !['super_admin','corporate','franchise'].includes(role)) || isLimitedLaunchGated
+            const isLocked = (isOnboardingState && !isElevated && item.key!=='home') || (item.key==='reports' && !['super_admin','corporate','franchise'].includes(role)) || isLimitedLaunchGated
             return (
               <button key={item.key} title={isLimitedLaunchGated ? LIMITED_LAUNCH_TOOLTIP : undefined} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'3px', padding:'4px 8px', background:'none', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', opacity:isLocked?0.25:1 }}>
                 <span style={{ fontSize:'20px', lineHeight:1 }}>{item.icon}</span>
@@ -23926,7 +23883,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             </p>
           </div>
         )}
-        {(!isElevated||locFilter!=='all')&&<SettingsScreen onStatusChange={()=>{}} selectedLoc={selectedLoc} locationId={viewAsUser?.locationId || (locFilter==='all'?'loc_kc':locFilter)} franchiseRole={franchiseRole} isSuperAdmin={role==='super_admin'&&!viewAsUser} onboardingData={onboardingData} onOpenManual={()=>setShowManual(true)} />}
+        {(!isElevated||locFilter!=='all')&&<SettingsScreen onStatusChange={()=>{}} selectedLoc={selectedLoc} locationId={viewAsUser?.locationId || (locFilter==='all'?'loc_kc':locFilter)} franchiseRole={franchiseRole} isSuperAdmin={role==='super_admin'&&!viewAsUser} onOpenManual={()=>setShowManual(true)} />}
       </div>
     )
     if (activeNav==='hive') return (
@@ -23965,13 +23922,12 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           nav={nav}
           onOpenRecord={(person)=>{ setGlobalSelectedPerson(person); nav('hive') }}
           followUps={followUps}
-          onCompleteOnboarding={(data)=>{
+          onCompleteOnboarding={()=>{
             // Real franchise owners have franchiseLoc=null (no selectedLoc,
             // no viewAsUser) — fall back to their currentUser.locationId so
             // the dismissal works in both view-as and real-sign-in cases.
             const locId = franchiseLoc?.id || currentUser?.locationId || null
             if (locId) updateLocStatus(locId, 'active')
-            if (data) setOnboardingData({...data, location:{...data.location, locId: locId || '', locationName: franchiseLoc?.name || ''}})
             setActiveNav('home')
             // Persist to DB so refreshing doesn't resurface onboarding.
             // Fire and forget — the launch animation's onSkipOnboarding already
@@ -23982,7 +23938,6 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
                 .catch(e => console.error('[onboarding complete] server write failed:', e))
             }
           }}
-          onboardingData={onboardingData}
           setFollowUps={setFollowUps}
           currentUserId={viewAsUser?.id || currentUser?.id || 'u11'}
         />
@@ -24088,7 +24043,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             const isLimitedLaunchGated = isLimitedLaunch && (item.key==='partners' || item.key==='reports')
             // Onboarding lockdown only applies to franchise users mid-setup —
             // super_admin / corporate are always elevated and never "onboarding."
-            const isLocked = (isOnboardingState && !isElevated && item.key!=='home' && item.key!=='settings') || isReports || isSettings || isPartners || isLimitedLaunchGated
+            const isLocked = (isOnboardingState && !isElevated && item.key!=='home') || isReports || isSettings || isPartners || isLimitedLaunchGated
             const isActive = activeNav===item.key
             return (
               <button key={item.key} title={isLimitedLaunchGated ? LIMITED_LAUNCH_TOOLTIP : undefined} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ width:'100%', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left', background:isActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>
