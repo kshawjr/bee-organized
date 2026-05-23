@@ -4261,6 +4261,306 @@ function DripSection({ leadId, isSuperAdminUser }) {
   )
 }
 
+// ─── Outreach Tab (PersonPanel) ───────────────────────────────────────────
+// Unified per-lead timeline. Merges drip steps from the DB
+// (/api/leads/:id/outreach-timeline) with stage changes + manual reach-outs
+// still living in person.outreachTimeline (in-memory React state). Drip
+// entries from outreachTimeline are filtered out so they don't double-up.
+//
+// Sort order: oldest first → newest last, matching the existing tab. With
+// future scheduled items included, the bottom of the list is "what's
+// coming next."
+function OutreachTab({ person, setPopup }) {
+  const [data, setData]     = React.useState(null) // null=loading
+  const [acting, setActing] = React.useState(false)
+  const [err, setErr]       = React.useState(null)
+
+  const leadId = person.id
+  const isRealLead = !!leadId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leadId)
+
+  const reload = React.useCallback(() => {
+    if (!isRealLead) { setData({ items: [], paused: false, stopped: false, completed: false }); return }
+    setErr(null)
+    fetch(`/api/leads/${leadId}/outreach-timeline`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(j => setData(j))
+      .catch(e => setErr(String(e?.message || e)))
+  }, [leadId, isRealLead])
+
+  React.useEffect(() => { reload() }, [reload])
+
+  async function act(endpoint) {
+    if (acting) return
+    setActing(true)
+    setErr(null)
+    try {
+      const res = await fetch(`/api/leads/${leadId}/${endpoint}`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const j = await res.json().catch(()=>({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      reload()
+    } catch (e) {
+      setErr(String(e?.message || e))
+    } finally {
+      setActing(false)
+    }
+  }
+
+  // Format any timestamp shape we encounter (ISO from API; seed strings
+  // like "May 2, 9:00am" or "Just now" from in-memory entries) into a
+  // sortable epoch ms. Falls back to insertion order via index when
+  // unparseable.
+  function tsToEpoch(ts) {
+    if (!ts) return null
+    if (ts instanceof Date) return ts.getTime()
+    const s = String(ts).trim()
+    if (s.toLowerCase() === 'just now') return Date.now()
+    // ISO-ish — Date constructor handles these.
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+      const t = new Date(s).getTime()
+      return Number.isFinite(t) ? t : null
+    }
+    // "May 2", "May 2, 9:00am", "May 2, 2026", etc. Try expandTs's output
+    // first since the seed data is in that format.
+    const expanded = expandTs(s)
+    const m = expanded.match(/^([A-Za-z]+)\s+(\d+)(?:,\s+(\d{4}))?(?:\s+·\s+(\d+):(\d+)\s*(AM|PM))?/i)
+    if (m) {
+      const monIdx = MONTH_MAP[m[1].slice(0,3)]
+      if (monIdx != null) {
+        const day = parseInt(m[2], 10)
+        const yr  = m[3] ? parseInt(m[3], 10) : new Date().getFullYear()
+        let hr = m[4] ? parseInt(m[4], 10) : 9
+        const mn = m[5] ? parseInt(m[5], 10) : 0
+        const ap = (m[6] || '').toUpperCase()
+        if (ap === 'PM' && hr < 12) hr += 12
+        if (ap === 'AM' && hr === 12) hr = 0
+        return new Date(yr, monIdx, day, hr, mn).getTime()
+      }
+    }
+    // "May 2, 9:00am" without expandTs preserving it — handle directly
+    const tm = s.match(/^([A-Za-z]+)\s+(\d+),\s+(\d+):(\d+)\s*(am|pm)/i)
+    if (tm) {
+      const monIdx = MONTH_MAP[tm[1].slice(0,3)]
+      if (monIdx != null) {
+        const day = parseInt(tm[2], 10)
+        let hr = parseInt(tm[3], 10)
+        const mn = parseInt(tm[4], 10)
+        if (tm[5].toLowerCase() === 'pm' && hr < 12) hr += 12
+        if (tm[5].toLowerCase() === 'am' && hr === 12) hr = 0
+        return new Date(new Date().getFullYear(), monIdx, day, hr, mn).getTime()
+      }
+    }
+    const fallback = new Date(s).getTime()
+    return Number.isFinite(fallback) ? fallback : null
+  }
+
+  function fmtSent(iso) {
+    if (!iso) return '—'
+    try {
+      const d = new Date(iso)
+      return d.toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })
+    } catch { return iso }
+  }
+
+  function channelIcon(channel) {
+    if (channel === 'sms')  return '💬'
+    if (channel === 'call') return '📞'
+    return '📧'
+  }
+
+  // ─── Build the unified, sorted list ───────────────────────────────
+  const apiItems = (data?.items || []).map((it, idx) => ({
+    kind: 'drip',
+    raw: it,
+    epoch: tsToEpoch(it.fired_at || it.scheduled_at),
+    order: idx,
+  }))
+
+  // Strip type='drip' from in-memory entries — drips now come from the
+  // API. Keep system/manual/anything-else.
+  const localEntries = (person.outreachTimeline || []).filter(e => e.type !== 'drip')
+  const localItems = localEntries.map((e, idx) => ({
+    kind: 'local',
+    raw: e,
+    epoch: tsToEpoch(e.ts),
+    order: idx + apiItems.length,
+  }))
+
+  const merged = [...apiItems, ...localItems].sort((a, b) => {
+    // Items without a parseable timestamp sink to the bottom, keeping
+    // their insertion order via `order`.
+    const ae = a.epoch == null ? Infinity : a.epoch
+    const be = b.epoch == null ? Infinity : b.epoch
+    if (ae !== be) return ae - be
+    return a.order - b.order
+  })
+
+  const paused = !!data?.paused
+  const stopped = !!data?.stopped
+  const completed = !!data?.completed
+  const hasAnyDripItems = apiItems.length > 0
+  const hasUpcoming = apiItems.some(i => i.raw.status === 'scheduled' || i.raw.status === 'scheduled_future' || i.raw.status === 'paused' || i.raw.status === 'paused_future')
+
+  // ─── Render ────────────────────────────────────────────────────────
+  return (
+    <div>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'1rem' }}>
+        <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Drips + manual reach-outs in one view</p>
+        <button
+          onClick={() => setPopup('reachout')}
+          style={{ fontSize:'12px', color:'#f97316', background:'rgba(249,115,22,0.08)', border:'1px solid rgba(249,115,22,0.2)', borderRadius:'8px', padding:'5px 10px', cursor:'pointer', fontFamily:'inherit', fontWeight:600 }}>
+          + Log
+        </button>
+      </div>
+
+      {paused && hasUpcoming && (
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px', background:'rgba(245,158,11,0.08)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'10px', padding:'10px 12px', marginBottom:'12px' }}>
+          <p style={{ fontSize:'12px', color:'#92580f' }}>
+            <strong>Drip paused.</strong> No upcoming sends will go out until you resume.
+          </p>
+          <button onClick={() => act('drip-resume')} disabled={acting}
+            style={{ padding:'6px 12px', background:'rgba(16,185,129,0.12)', border:'1px solid rgba(16,185,129,0.3)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#0d8056', cursor: acting ? 'wait' : 'pointer', fontWeight:600 }}>
+            {acting ? '…' : '▶ Resume'}
+          </button>
+        </div>
+      )}
+
+      {!paused && hasUpcoming && (
+        <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:'8px' }}>
+          <button onClick={() => act('drip-pause')} disabled={acting}
+            style={{ padding:'5px 10px', background:'rgba(245,158,11,0.08)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#b07a20', cursor: acting ? 'wait' : 'pointer', fontWeight:600 }}>
+            {acting ? '…' : '⏸ Pause upcoming'}
+          </button>
+        </div>
+      )}
+
+      {completed && data?.completed_at && (
+        <div style={{ background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'10px', padding:'10px 12px', marginBottom:'12px' }}>
+          <p style={{ fontSize:'12px', color:'#4f46e5' }}>
+            ✓ Drip completed {fmtSent(data.completed_at)}
+          </p>
+        </div>
+      )}
+
+      {stopped && data?.stopped_at && (
+        <div style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'10px', padding:'10px 12px', marginBottom:'12px' }}>
+          <p style={{ fontSize:'12px', color:'#dc2626' }}>
+            ✕ Drip stopped {fmtSent(data.stopped_at)}
+          </p>
+        </div>
+      )}
+
+      {err && (
+        <p style={{ fontSize:'11px', color:'#ef4444', marginBottom:'8px' }}>{err}</p>
+      )}
+
+      {data === null ? (
+        <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Loading timeline…</p>
+      ) : merged.length === 0 ? (
+        <p style={{ fontSize:'12px', color:'#8a9e9a' }}>
+          {hasAnyDripItems
+            ? 'No outreach yet.'
+            : 'No outreach yet. Use + Log to add a manual touchpoint, or change the lead’s stage to start a drip.'}
+        </p>
+      ) : (
+        <div style={{ position:'relative' }}>
+          <div style={{ position:'absolute', left:'13px', top:'8px', bottom:'8px', width:'2px', background:'rgba(0,0,0,0.06)', borderRadius:'1px' }} />
+          <div style={{ display:'grid', gap:'10px' }}>
+            {merged.map((item, idx) => {
+              if (item.kind === 'drip') {
+                const it = item.raw
+                const isSent     = it.status === 'sent'
+                const isScheduled = it.status === 'scheduled'
+                const isFuture   = it.status === 'scheduled_future'
+                const isPaused   = it.status === 'paused' || it.status === 'paused_future'
+                // Visual accents per state
+                let iconBg = 'rgba(99,102,241,0.1)'
+                let iconColor = '#6366f1'
+                let opacity = 1
+                let badgeColor = '#6366f1'
+                let badgeBg = 'rgba(99,102,241,0.08)'
+                let badgeLabel = 'Drip'
+                let statusBadge = null
+                let statusText = ''
+                if (isSent) {
+                  iconBg = 'rgba(34,197,94,0.12)'
+                  iconColor = '#16a34a'
+                  statusBadge = { color:'#22c55e', bg:'rgba(34,197,94,0.08)', label:'Sent ✓' }
+                  statusText = it.fired_at ? `Sent ${fmtSent(it.fired_at)}` : 'Sent'
+                } else if (isScheduled) {
+                  iconBg = 'rgba(249,115,22,0.12)'
+                  iconColor = '#f97316'
+                  statusBadge = { color:'#f97316', bg:'rgba(249,115,22,0.08)', label:'Scheduled' }
+                  statusText = it.scheduled_at ? `Scheduled for ${fmtSent(it.scheduled_at)}` : 'Scheduled'
+                } else if (isFuture) {
+                  iconBg = 'rgba(0,0,0,0.04)'
+                  iconColor = '#8a9e9a'
+                  statusBadge = { color:'#8a9e9a', bg:'rgba(0,0,0,0.05)', label:'Coming up' }
+                  statusText = it.scheduled_at ? `Coming up ${fmtSent(it.scheduled_at)}` : 'Coming up'
+                }
+                if (isPaused) {
+                  opacity = 0.4
+                  badgeLabel = 'Drip · Paused'
+                  statusBadge = { color:'#92580f', bg:'rgba(245,158,11,0.1)', label:'Paused' }
+                  statusText = it.scheduled_at ? `Paused (was ${fmtSent(it.scheduled_at)})` : 'Paused'
+                }
+                const label = it.template_name || `Step ${it.step_order}`
+                const subjectPreview = it.subject && it.subject !== label ? it.subject : null
+                return (
+                  <div key={it.id} style={{ display:'flex', gap:'12px', alignItems:'flex-start', opacity }}>
+                    <div style={{ width:'28px', height:'28px', borderRadius:'50%', background:iconBg, color:iconColor, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px', flexShrink:0, position:'relative', zIndex:1 }}>
+                      {channelIcon(it.channel)}
+                    </div>
+                    <div style={{ flex:1, paddingTop:'4px' }}>
+                      <div style={{ display:'flex', gap:'5px', marginBottom:'2px', flexWrap:'wrap' }}>
+                        <span style={{ fontSize:'10px', color:badgeColor, background:badgeBg, padding:'1px 6px', borderRadius:'20px' }}>{badgeLabel}</span>
+                        {statusBadge && (
+                          <span style={{ fontSize:'10px', color:statusBadge.color, background:statusBadge.bg, padding:'1px 6px', borderRadius:'20px' }}>{statusBadge.label}</span>
+                        )}
+                      </div>
+                      <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.4, fontWeight:600 }}>{label}</p>
+                      {subjectPreview && (
+                        <p style={{ fontSize:'11px', color:'#6b7c79', marginTop:'2px', lineHeight:1.4 }}>{subjectPreview}</p>
+                      )}
+                      <p style={{ fontSize:'10px', color:'#b0c0bc', marginTop:'2px' }}>{statusText}</p>
+                    </div>
+                  </div>
+                )
+              }
+
+              // Local entry (manual or system / stage change) — keep
+              // visual treatment close to the existing tab so manual logs
+              // look the same as before.
+              const entry = item.raw
+              const isSystem = entry.type === 'system' || entry.type === 'stage_change'
+              return (
+                <div key={entry.id || `local-${idx}`} style={{ display:'flex', gap:'12px', alignItems:'flex-start' }}>
+                  <div style={{ width:'28px', height:'28px', borderRadius:'50%', background: isSystem ? 'rgba(0,0,0,0.04)' : 'rgba(249,115,22,0.1)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px', flexShrink:0, position:'relative', zIndex:1 }}>
+                    {isSystem ? '·' : '📲'}
+                  </div>
+                  <div style={{ flex:1, paddingTop:'4px' }}>
+                    <div style={{ display:'flex', gap:'5px', marginBottom:'2px', flexWrap:'wrap' }}>
+                      {!isSystem && (
+                        <span style={{ fontSize:'10px', color:'#f97316', background:'rgba(249,115,22,0.08)', padding:'1px 6px', borderRadius:'20px' }}>Manual</span>
+                      )}
+                    </div>
+                    <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.4 }}>{entry.label}</p>
+                    <p style={{ fontSize:'10px', color:'#b0c0bc', marginTop:'2px' }}>
+                      {expandTs(entry.ts)}{entry.user ? ` · ${entry.user}` : ''}
+                    </p>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PersonPanel({
   person,
   onClose,
@@ -7174,188 +7474,7 @@ function PersonPanel({
           activeTab === "contacts" &&
             React.createElement(ContactsTab, { person: person, onUpdate: onUpdate, onError: showError }),
           activeTab === "outreach" &&
-            React.createElement(
-              "div",
-              null,
-              React.createElement(
-                "div",
-                {
-                  style: {
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    marginBottom: "1rem",
-                  },
-                },
-                React.createElement(
-                  "p",
-                  { style: { fontSize: "12px", color: "#8a9e9a" } },
-                  "Drips + manual reach-outs in one view",
-                ),
-                React.createElement(
-                  "button",
-                  {
-                    onClick: () => setPopup("reachout"),
-                    style: {
-                      fontSize: "12px",
-                      color: "#f97316",
-                      background: "rgba(249,115,22,0.08)",
-                      border: "1px solid rgba(249,115,22,0.2)",
-                      borderRadius: "8px",
-                      padding: "5px 10px",
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                      fontWeight: 600,
-                    },
-                  },
-                  "+ Log",
-                ),
-              ),
-              React.createElement(
-                "div",
-                { style: { position: "relative" } },
-                React.createElement("div", {
-                  style: {
-                    position: "absolute",
-                    left: "13px",
-                    top: "8px",
-                    bottom: "8px",
-                    width: "2px",
-                    background: "rgba(0,0,0,0.06)",
-                    borderRadius: "1px",
-                  },
-                }),
-                React.createElement(
-                  "div",
-                  { style: { display: "grid", gap: "10px" } },
-                  person.outreachTimeline.map((entry, i) => {
-                    const isDrip = entry.type === "drip",
-                      isSystem = entry.type === "system",
-                      isSched = entry.status === "scheduled";
-                    return React.createElement(
-                      "div",
-                      {
-                        key: entry.id,
-                        style: { display: "flex", gap: "12px", alignItems: "flex-start" },
-                      },
-                      React.createElement(
-                        "div",
-                        {
-                          style: {
-                            width: "28px",
-                            height: "28px",
-                            borderRadius: "50%",
-                            background: isSystem
-                              ? "rgba(0,0,0,0.04)"
-                              : isDrip
-                                ? "rgba(99,102,241,0.1)"
-                                : "rgba(249,115,22,0.1)",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontSize: "13px",
-                            flexShrink: 0,
-                            position: "relative",
-                            zIndex: 1,
-                            opacity: isSched ? 0.5 : 1,
-                          },
-                        },
-                        isSystem ? "·" : isDrip ? TOUCH_CONFIG[entry.method]?.icon || "📧" : "📲",
-                      ),
-                      React.createElement(
-                        "div",
-                        { style: { flex: 1, paddingTop: "4px", opacity: isSched ? 0.6 : 1 } },
-                        React.createElement(
-                          "div",
-                          {
-                            style: {
-                              display: "flex",
-                              gap: "5px",
-                              marginBottom: "2px",
-                              flexWrap: "wrap",
-                            },
-                          },
-                          isDrip &&
-                            React.createElement(
-                              "span",
-                              {
-                                style: {
-                                  fontSize: "10px",
-                                  color: "#6366f1",
-                                  background: "rgba(99,102,241,0.08)",
-                                  padding: "1px 6px",
-                                  borderRadius: "20px",
-                                },
-                              },
-                              "Drip",
-                            ),
-                          !isDrip &&
-                            !isSystem &&
-                            React.createElement(
-                              "span",
-                              {
-                                style: {
-                                  fontSize: "10px",
-                                  color: "#f97316",
-                                  background: "rgba(249,115,22,0.08)",
-                                  padding: "1px 6px",
-                                  borderRadius: "20px",
-                                },
-                              },
-                              "Manual",
-                            ),
-                          isSched &&
-                            React.createElement(
-                              "span",
-                              {
-                                style: {
-                                  fontSize: "10px",
-                                  color: "#8a9e9a",
-                                  background: "rgba(0,0,0,0.05)",
-                                  padding: "1px 6px",
-                                  borderRadius: "20px",
-                                },
-                              },
-                              "Scheduled",
-                            ),
-                          entry.status === "sent" &&
-                            React.createElement(
-                              "span",
-                              {
-                                style: {
-                                  fontSize: "10px",
-                                  color: "#22c55e",
-                                  background: "rgba(34,197,94,0.08)",
-                                  padding: "1px 6px",
-                                  borderRadius: "20px",
-                                },
-                              },
-                              "Sent \u2713",
-                            ),
-                        ),
-                        React.createElement(
-                          "p",
-                          {
-                            style: {
-                              fontSize: "13px",
-                              color: isSched ? "#8a9e9a" : "#1a2e2b",
-                              lineHeight: 1.4,
-                            },
-                          },
-                          entry.label,
-                        ),
-                        React.createElement(
-                          "p",
-                          { style: { fontSize: "10px", color: "#b0c0bc", marginTop: "2px" } },
-                          expandTs(entry.ts),
-                          entry.user ? ` · ${entry.user}` : "",
-                        ),
-                      ),
-                    );
-                  }),
-                ),
-              ),
-            ),
+            React.createElement(OutreachTab, { person: person, setPopup: setPopup }),
         ),
       ),
     ),
