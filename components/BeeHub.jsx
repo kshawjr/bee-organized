@@ -16846,12 +16846,13 @@ function FollowUpReminders({ followUps, setFollowUps, locFilter }) {
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=PARTNERS_DATA, setPartners=()=>{}, companies=COMPANIES_DATA, setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, onboardingData=null, currentUserId='u11' }) {
+function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=PARTNERS_DATA, setPartners=()=>{}, companies=COMPANIES_DATA, setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, onboardingData=null, currentUserId='u11', onClickLocation=null }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
   const [showNewLead, setShowNewLead] = useState(false)
   const [onboardingSection, setOnboardingSection] = useState(null)
+  const [locIndicatorHover, setLocIndicatorHover] = useState(false)
   const [toast, setToast] = useState(null)
   useEffect(() => {
     if (!toast) return
@@ -17120,6 +17121,21 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         <h1 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'white', marginBottom:'4px' }}>
           {now.getHours()<12?'Good morning':now.getHours()<17?'Good afternoon':'Good evening'}{ownerName&&ownerName!=='there'&&ownerName.trim().length>1?`, ${ownerName.trim().split(' ')[0]}`:''} 👋
         </h1>
+        <button
+          onClick={()=>{ if (onClickLocation) onClickLocation() }}
+          onMouseEnter={()=>setLocIndicatorHover(true)}
+          onMouseLeave={()=>setLocIndicatorHover(false)}
+          style={{
+            display:'flex', alignItems:'center', gap:'4px',
+            background:'none', border:'none', padding:0, marginBottom:'4px',
+            fontFamily:'inherit', fontSize:'12px', textAlign:'left',
+            cursor:'pointer',
+            color: locIndicatorHover ? BRAND.teal : 'rgba(168,201,196,0.7)',
+            textDecoration: locIndicatorHover ? 'underline' : 'none',
+          }}
+        >
+          📍 {locFilter==='all' ? 'All Locations' : (selectedLoc?.name || locationName || '')}
+        </button>
         <p style={{ fontSize:'13px', color:'rgba(168,201,196,0.7)', marginBottom:'0' }}>
           {isElevated && locFilter==='all'
   ? `${ALL_LOCATIONS.length} locations`
@@ -23932,6 +23948,8 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           franchiseRole={role==='franchise'?franchiseRole:'owner'}
           locFilter={locFilter}
           selectedLoc={selectedLoc}
+          locationName={selectedLoc?.name || null}
+          onClickLocation={()=>setShowLocPicker(true)}
           isElevated={isElevated}
           crmStatus={effectiveCrmStatus}
           ownerName={getFirstName(viewAsUser?.name || selectedLoc?.owner || currentUser?.name, viewAsUser?.email || currentUser?.email) || 'Kevin Shaw'}
