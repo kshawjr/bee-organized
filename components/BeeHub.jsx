@@ -10056,7 +10056,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
         )}
       </div>
       {toast && <InlineToast {...toast} />}
-      {showInviteFlow&&<OnboardingInviteSheet onClose={()=>setShowInviteFlow(false)} onDone={()=>{ markDone('invite'); setShowInviteFlow(false) }} />}
+      {showInviteFlow&&<OnboardingInviteSheet locationId={currentLocationCtx?.id || null} onClose={()=>setShowInviteFlow(false)} onDone={()=>{ markDone('invite'); setShowInviteFlow(false) }} />}
 
       {/* Skip invite modal */}
       {showSkipModal&&(
@@ -10820,11 +10820,16 @@ function OnboardingPathsEditor({ onComplete }) {
 }
 
 
-function OnboardingInviteSheet({ onClose, onDone }) {
+function OnboardingInviteSheet({ onClose, onDone, locationId }) {
   const tierPricesCtx = useContext(TierPricesContext)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
   const [invites, setInvites] = useState([{ id:1, firstName:'', lastName:'', email:'', role:'manager' }])
   const [step, setStep]       = useState('form') // form|review|processing|done
+  // Per-row result of the invite POST: { id, email, full_name, tier,
+  // status:'ok'|'error', invite_url?, error_message? }. Populated by
+  // submitInvites; the 'done' step renders one card per entry.
+  const [inviteResults, setInviteResults] = useState([])
+  const [copiedId, setCopiedId] = useState(null)
 
   React.useEffect(()=>{
     const prev = document.body.style.overflow
@@ -10841,13 +10846,61 @@ function OnboardingInviteSheet({ onClose, onDone }) {
   const annualAdd  = validInvites.reduce((s,i)=>s+getTierPrice(i.role), 0)
   const proratedAdd = validInvites.reduce((s,i)=>s+calcProration(getTierPrice(i.role)).prorated, 0)
 
-  // Local-only stub: there's no real backend seat-add yet (post-demo work
-  // with subscription_seats). For now, "Send Invite" just transitions to
-  // the done state — onDone(validInvites) attaches the rows to local React
-  // state in the parent.
-  function submitInvites() {
+  // POST one invite per valid row. Backend is /api/hub_users/invite which
+  // creates a pending_invites row and returns { invite, invite_url }. Runs
+  // requests in parallel; partial failure is fine — each result is rendered
+  // independently on the 'done' step.
+  async function submitInvites() {
+    if (!locationId) {
+      console.error('No locationId for invite — cannot proceed')
+      return
+    }
     setStep('processing')
-    setTimeout(()=>setStep('done'), 1200)
+    const results = await Promise.all(validInvites.map(async inv => {
+      const full_name = [inv.firstName, inv.lastName].filter(Boolean).join(' ')
+      try {
+        const r = await fetch('/api/hub_users/invite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: inv.email,
+            full_name: full_name || null,
+            location_id: locationId,
+            tier: inv.role,
+          }),
+        })
+        const data = await r.json().catch(() => ({}))
+        if (!r.ok) {
+          return {
+            id: inv.id,
+            email: inv.email,
+            full_name,
+            tier: inv.role,
+            status: 'error',
+            error_message: data.error || `HTTP ${r.status}`,
+          }
+        }
+        return {
+          id: inv.id,
+          email: inv.email,
+          full_name,
+          tier: inv.role,
+          status: 'ok',
+          invite_url: data.invite_url,
+        }
+      } catch (e) {
+        return {
+          id: inv.id,
+          email: inv.email,
+          full_name,
+          tier: inv.role,
+          status: 'error',
+          error_message: String(e?.message || e),
+        }
+      }
+    }))
+    setInviteResults(results)
+    setStep('done')
   }
 
   return (
@@ -10867,29 +10920,51 @@ function OnboardingInviteSheet({ onClose, onDone }) {
 
         {/* ── Done ── */}
         {step==='done' && (
-          <div style={{ padding:'2.5rem 1.5rem', textAlign:'center' }}>
-            <div style={{ fontSize:'56px', marginBottom:'12px' }}>📬</div>
-            <h2 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'8px' }}>Invites sent!</h2>
-            <p style={{ fontSize:'13px', color:'#4a5e5a', marginBottom:'24px' }}>{validInvites.length} team member{validInvites.length!==1?'s':''} will receive an email shortly</p>
-            <div style={{ background:'#f7f5f0', borderRadius:'12px', padding:'12px 14px', marginBottom:'20px', textAlign:'left' }}>
-              {validInvites.map((inv,i)=>{
-                const rc=FRANCHISE_ROLES.find(r=>r.key===inv.role)
+          <div style={{ padding:'2rem 1.5rem 1.5rem' }}>
+            <div style={{ textAlign:'center', marginBottom:'18px' }}>
+              <div style={{ fontSize:'48px', marginBottom:'10px' }}>📬</div>
+              <h2 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'6px' }}>Invite links created</h2>
+              <p style={{ fontSize:'13px', color:'#4a5e5a' }}>Share each link with your team member</p>
+            </div>
+            <div style={{ display:'grid', gap:'10px', marginBottom:'18px' }}>
+              {inviteResults.map(res=>{
+                const rc=FRANCHISE_ROLES.find(r=>r.key===res.tier)
+                const isErr = res.status==='error'
                 return (
-                  <div key={inv.id} style={{ display:'flex', alignItems:'center', gap:'10px', paddingTop:i>0?'8px':0, marginTop:i>0?'8px':0, borderTop:i>0?'1px solid rgba(0,0,0,0.05)':'none' }}>
-                    <span style={{ fontSize:'16px' }}>{rc?.icon}</span>
-                    <div style={{ flex:1 }}>
-                      <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b' }}>{inv.email}</p>
-                      <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{rc?.label}</p>
+                  <div key={res.id} style={{ padding:'12px 14px', background:isErr?'rgba(239,68,68,0.06)':'#f7f5f0', border:`1px solid ${isErr?'rgba(239,68,68,0.25)':'rgba(0,0,0,0.06)'}`, borderRadius:'12px' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:isErr?'4px':'8px' }}>
+                      <span style={{ fontSize:'16px' }}>{rc?.icon}</span>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{res.full_name || res.email}</p>
+                        <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{rc?.label}{res.full_name?` · ${res.email}`:''}</p>
+                      </div>
                     </div>
+                    {isErr ? (
+                      <p style={{ fontSize:'11px', color:'#b91c1c', marginLeft:'26px' }}>⚠ {res.error_message}</p>
+                    ) : (
+                      <div style={{ display:'flex', alignItems:'center', gap:'6px', marginLeft:'26px' }}>
+                        <div style={{ flex:1, minWidth:0, background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'6px', padding:'8px 10px', fontFamily:'ui-monospace,SFMono-Regular,Menlo,monospace', fontSize:'11px', color:'#1a2e2b', whiteSpace:'nowrap', overflowX:'auto' }}>
+                          {res.invite_url}
+                        </div>
+                        <button
+                          onClick={()=>{
+                            navigator.clipboard.writeText(res.invite_url)
+                            setCopiedId(res.id)
+                            setTimeout(()=>setCopiedId(p=>p===res.id?null:p), 1500)
+                          }}
+                          style={{ padding:'6px 10px', background:copiedId===res.id?'#22c55e':'#1a2e2b', border:'none', borderRadius:'6px', fontSize:'10px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', flexShrink:0 }}>
+                          {copiedId===res.id?'Copied!':'Copy'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )
               })}
             </div>
-            <button onClick={()=>validInvites.length>0&&onDone&&onDone(validInvites)} disabled={validInvites.length===0}
-              style={{ width:'100%', padding:'13px', background:validInvites.length>0?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:validInvites.length>0?'white':'#9ca3af', cursor:validInvites.length>0?'pointer':'not-allowed' }}>
-              {validInvites.length>0?'Done →':'Add at least one valid email'}
+            <button onClick={()=>onDone&&onDone(validInvites)}
+              style={{ width:'100%', padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+              Done →
             </button>
-            <div style={{ height:'1rem' }} />
           </div>
         )}
 
@@ -15418,7 +15493,7 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
       {showInvite && !dbLocationId && (
         // Demo / view-as path — falls back to the existing local-state sheet
         // since there's no real DB location to invite into.
-        <OnboardingInviteSheet onClose={()=>setShowInvite(false)} onDone={invited=>{ if(invited) invited.forEach(u=>addUser(u)); setShowInvite(false) }} />
+        <OnboardingInviteSheet locationId={dbLocationId} onClose={()=>setShowInvite(false)} onDone={invited=>{ if(invited) invited.forEach(u=>addUser(u)); setShowInvite(false) }} />
       )}
 
       {selectedMember&&(
