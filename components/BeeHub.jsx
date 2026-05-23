@@ -9253,7 +9253,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     city:            currentLocationCtx?.city             || '',
     state:           currentLocationCtx?.state            || '',
     zip:             currentLocationCtx?.zip              || '',
-    phone:           currentLocationCtx?.phone            || '',
+    phone:           currentLocationCtx?.phone            || currentUserCtx?.phone || '',
     senderName:      currentLocationCtx?.sender_name      || '',
     sendFromEmail:   currentLocationCtx?.send_from_email  || '',
     replyToEmail:    currentLocationCtx?.reply_to_email   || '',
@@ -9329,7 +9329,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
             city:            locationForm.city,
             state:           locationForm.state,
             zip:             locationForm.zip,
-            phone:           locationForm.phone,
+            phone:           locationForm.phone || profileForm.phone,
             timezone:        locationForm.timezone,
             sender_name:     locationForm.senderName,
             send_from_email: locationForm.sendFromEmail,
@@ -10493,14 +10493,14 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
         <div>
           <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:'4px' }}>
             <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>📞 Location Phone</p>
-            {!locationForm.phone && profileForm.phone && <span style={{ fontSize:'10px', color:'#a8c9c4', fontStyle:'italic' }}>Prefilled from your profile</span>}
+            {locationForm.phone && locationForm.phone===profileForm.phone && <span style={{ fontSize:'10px', color:'#a8c9c4', fontStyle:'italic' }}>Prefilled from your profile</span>}
           </div>
           <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'6px' }}>This is the business number shown in your emails. Prefilled from your profile - change it if you have a dedicated business line.</p>
           <input type="tel"
-            value={locationForm.phone || profileForm.phone}
+            value={locationForm.phone}
             onChange={e=>setLocationForm(f=>({...f,phone:e.target.value}))}
             placeholder="(555) 000-0000"
-            style={{ ...inp, background: !locationForm.phone && profileForm.phone ? 'rgba(168,201,196,0.06)' : 'white', borderColor: !locationForm.phone && profileForm.phone ? 'rgba(168,201,196,0.4)' : 'rgba(0,0,0,0.1)' }} />
+            style={{ ...inp, background: locationForm.phone===profileForm.phone ? 'rgba(168,201,196,0.06)' : 'white', borderColor: locationForm.phone===profileForm.phone ? 'rgba(168,201,196,0.4)' : 'rgba(0,0,0,0.1)' }} />
         </div>
 
         {/* Send-from email */}
