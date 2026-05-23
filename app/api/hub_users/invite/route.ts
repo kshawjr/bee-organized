@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'node:crypto'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
+import { sendEmail } from '@/lib/resend'
 
 export const runtime = 'nodejs'
 
@@ -35,6 +36,97 @@ function isElevated(role: string) {
 
 function isValidEmail(s: string): boolean {
   return typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim())
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function formatExpiry(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString('en-US', {
+      year: 'numeric', month: 'long', day: 'numeric',
+    })
+  } catch {
+    return iso
+  }
+}
+
+function buildInviteEmail(args: {
+  inviteUrl: string
+  locationName: string
+  inviterName: string
+  expiresAt: string
+  inviteeName: string | null
+}): { html: string; text: string } {
+  const { inviteUrl, locationName, inviterName, expiresAt, inviteeName } = args
+  const expiryFormatted = formatExpiry(expiresAt)
+  const greeting = inviteeName ? `Hi ${inviteeName},` : 'Hello,'
+
+  const html = `<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f7f5f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1a2e2b;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f5f0;padding:32px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;box-shadow:0 4px 24px rgba(26,46,43,0.08);overflow:hidden;">
+            <tr>
+              <td style="padding:32px 32px 24px;">
+                <div style="font-size:32px;margin-bottom:8px;">🐝</div>
+                <h1 style="margin:0 0 16px;font-family:Georgia,serif;font-size:22px;color:#1a2e2b;">You've been invited to ${escapeHtml(locationName)}</h1>
+                <p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#1a2e2b;">${escapeHtml(greeting)}</p>
+                <p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#1a2e2b;">
+                  <strong>${escapeHtml(inviterName)}</strong> has invited you to join <strong>${escapeHtml(locationName)}</strong> on Bee Hub —
+                  the operations platform we use to manage clients, jobs, and our team day to day.
+                </p>
+                <p style="margin:0 0 24px;font-size:15px;line-height:1.55;color:#1a2e2b;">
+                  Accept the invitation below to set up your account.
+                </p>
+                <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+                  <tr>
+                    <td style="background:#1a2e2b;border-radius:10px;">
+                      <a href="${inviteUrl}" style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;font-family:inherit;">Accept Invitation</a>
+                    </td>
+                  </tr>
+                </table>
+                <p style="margin:0 0 8px;font-size:12px;color:#8a9e9a;">Or paste this link into your browser:</p>
+                <p style="margin:0 0 20px;font-size:12px;color:#4a5e5a;word-break:break-all;font-family:ui-monospace,Menlo,monospace;">${escapeHtml(inviteUrl)}</p>
+                <p style="margin:0;font-size:12px;color:#8a9e9a;line-height:1.5;">This invitation expires on <strong>${escapeHtml(expiryFormatted)}</strong>. If you weren't expecting this email, you can safely ignore it.</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:16px 32px 24px;border-top:1px solid rgba(0,0,0,0.06);">
+                <p style="margin:0;font-size:11px;color:#8a9e9a;">Sent by Bee Organized · You're receiving this because ${escapeHtml(inviterName)} invited you to ${escapeHtml(locationName)}.</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`
+
+  const text = [
+    greeting,
+    '',
+    `${inviterName} has invited you to join ${locationName} on Bee Hub — the operations platform we use to manage clients, jobs, and our team day to day.`,
+    '',
+    'Accept the invitation here:',
+    inviteUrl,
+    '',
+    `This invitation expires on ${expiryFormatted}.`,
+    'If you weren\'t expecting this email, you can safely ignore it.',
+    '',
+    '—',
+    'Bee Organized',
+  ].join('\n')
+
+  return { html, text }
 }
 
 export async function POST(request: NextRequest) {
@@ -163,5 +255,65 @@ export async function POST(request: NextRequest) {
     request.nextUrl.origin
   const invite_url = `${origin}/auth/invite/${inviteToken}`
 
-  return NextResponse.json({ invite, invite_url }, { status: 201 })
+  // Send invite email. Failure here doesn't roll back the invite row — the
+  // owner can still copy the link from the UI as a fallback. We surface the
+  // outcome via email_sent / email_error so the client can adjust messaging.
+  let email_sent = false
+  let email_error: string | undefined
+  try {
+    const [{ data: location }, { data: inviter }] = await Promise.all([
+      supabaseService
+        .from('locations')
+        .select('name')
+        .eq('id', location_id)
+        .single(),
+      supabaseService
+        .from('hub_users')
+        .select('full_name, first_name, email')
+        .eq('id', caller.id)
+        .single(),
+    ])
+
+    const locationName = location?.name || 'Bee Hub'
+    const inviterName =
+      inviter?.full_name?.trim() ||
+      inviter?.first_name?.trim() ||
+      inviter?.email ||
+      'Your team'
+    const inviteeName =
+      typeof full_name === 'string' && full_name.trim()
+        ? full_name.trim().split(/\s+/)[0]
+        : null
+
+    const { html, text } = buildInviteEmail({
+      inviteUrl: invite_url,
+      locationName,
+      inviterName,
+      expiresAt: expiresAt,
+      inviteeName,
+    })
+
+    const result = await sendEmail({
+      locationId: location_id,
+      to: normalizedEmail,
+      subject: `You've been invited to join ${locationName} on Bee Hub`,
+      html,
+      text,
+    })
+
+    if (result.success) {
+      email_sent = true
+    } else {
+      email_error = result.error
+      console.error('[invite email send]', email_error)
+    }
+  } catch (err) {
+    email_error = err instanceof Error ? err.message : String(err)
+    console.error('[invite email send] unexpected error', err)
+  }
+
+  return NextResponse.json(
+    { invite, invite_url, email_sent, ...(email_error ? { email_error } : {}) },
+    { status: 201 }
+  )
 }

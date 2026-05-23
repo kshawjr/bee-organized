@@ -10966,6 +10966,8 @@ function OnboardingInviteSheet({ onClose, onDone, locationId }) {
           tier: inv.role,
           status: 'ok',
           invite_url: data.invite_url,
+          email_sent: !!data.email_sent,
+          email_error: data.email_error || null,
         }
       } catch (e) {
         return {
@@ -10998,12 +11000,27 @@ function OnboardingInviteSheet({ onClose, onDone, locationId }) {
         )}
 
         {/* ── Done ── */}
-        {step==='done' && (
+        {step==='done' && (() => {
+          const okResults = inviteResults.filter(r=>r.status==='ok')
+          const emailedCount = okResults.filter(r=>r.email_sent).length
+          const allEmailed = okResults.length>0 && emailedCount===okResults.length
+          const someEmailFailed = okResults.length>0 && emailedCount<okResults.length
+          const headerCopy = allEmailed
+            ? (okResults.length>1 ? 'Invitations sent' : 'Invitation sent')
+            : someEmailFailed
+              ? 'Invite links created'
+              : 'Invite links created'
+          const subCopy = allEmailed
+            ? 'Each team member will receive an email with their link.'
+            : someEmailFailed
+              ? 'Some emails couldn\'t be sent — share the link manually.'
+              : 'Share each link with your team member'
+          return (
           <div style={{ padding:'2rem 1.5rem 1.5rem' }}>
             <div style={{ textAlign:'center', marginBottom:'18px' }}>
               <div style={{ fontSize:'48px', marginBottom:'10px' }}>📬</div>
-              <h2 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'6px' }}>Invite links created</h2>
-              <p style={{ fontSize:'13px', color:'#4a5e5a' }}>Share each link with your team member</p>
+              <h2 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'6px' }}>{headerCopy}</h2>
+              <p style={{ fontSize:'13px', color:'#4a5e5a' }}>{subCopy}</p>
             </div>
             <div style={{ display:'grid', gap:'10px', marginBottom:'18px' }}>
               {inviteResults.map(res=>{
@@ -11021,19 +11038,26 @@ function OnboardingInviteSheet({ onClose, onDone, locationId }) {
                     {isErr ? (
                       <p style={{ fontSize:'11px', color:'#b91c1c', marginLeft:'26px' }}>⚠ {res.error_message}</p>
                     ) : (
-                      <div style={{ display:'flex', alignItems:'center', gap:'6px', marginLeft:'26px' }}>
-                        <div style={{ flex:1, minWidth:0, background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'6px', padding:'8px 10px', fontFamily:'ui-monospace,SFMono-Regular,Menlo,monospace', fontSize:'11px', color:'#1a2e2b', whiteSpace:'nowrap', overflowX:'auto' }}>
-                          {res.invite_url}
+                      <div style={{ marginLeft:'26px' }}>
+                        <p style={{ fontSize:'11px', color: res.email_sent ? '#3a6d62' : '#b45309', marginBottom:'6px', lineHeight:1.4 }}>
+                          {res.email_sent
+                            ? `✉ Invitation email sent to ${res.email}. They can also use this link:`
+                            : '⚠ Email send failed — share this link manually:'}
+                        </p>
+                        <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+                          <div style={{ flex:1, minWidth:0, background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'6px', padding:'8px 10px', fontFamily:'ui-monospace,SFMono-Regular,Menlo,monospace', fontSize:'11px', color:'#1a2e2b', whiteSpace:'nowrap', overflowX:'auto' }}>
+                            {res.invite_url}
+                          </div>
+                          <button
+                            onClick={()=>{
+                              navigator.clipboard.writeText(res.invite_url)
+                              setCopiedId(res.id)
+                              setTimeout(()=>setCopiedId(p=>p===res.id?null:p), 1500)
+                            }}
+                            style={{ padding:'6px 10px', background:copiedId===res.id?'#22c55e':'#1a2e2b', border:'none', borderRadius:'6px', fontSize:'10px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', flexShrink:0 }}>
+                            {copiedId===res.id?'Copied!':'Copy'}
+                          </button>
                         </div>
-                        <button
-                          onClick={()=>{
-                            navigator.clipboard.writeText(res.invite_url)
-                            setCopiedId(res.id)
-                            setTimeout(()=>setCopiedId(p=>p===res.id?null:p), 1500)
-                          }}
-                          style={{ padding:'6px 10px', background:copiedId===res.id?'#22c55e':'#1a2e2b', border:'none', borderRadius:'6px', fontSize:'10px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', flexShrink:0 }}>
-                          {copiedId===res.id?'Copied!':'Copy'}
-                        </button>
                       </div>
                     )}
                   </div>
@@ -11045,7 +11069,8 @@ function OnboardingInviteSheet({ onClose, onDone, locationId }) {
               Done →
             </button>
           </div>
-        )}
+          )
+        })()}
 
         {/* ── Review ──
             No payment step. Invites bill against the owner's existing
