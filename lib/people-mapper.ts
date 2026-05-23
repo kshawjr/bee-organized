@@ -133,6 +133,9 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     method: t.method,
     label: t.label,
     ts: fmtDateTime(t.occurred_at),
+    // Raw ISO for accurate sorting alongside drip items (which come from
+    // the API as ISO). `ts` is the human-readable display string.
+    occurred_at: t.occurred_at,
     status: t.status || 'done',
   }))
   const activity = allTouchpoints

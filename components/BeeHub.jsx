@@ -4309,9 +4309,9 @@ function OutreachTab({ person, setPopup }) {
   }
 
   // Format any timestamp shape we encounter (ISO from API; seed strings
-  // like "May 2, 9:00am" or "Just now" from in-memory entries) into a
-  // sortable epoch ms. Falls back to insertion order via index when
-  // unparseable.
+  // like "May 2, 9:00am", "May 23 at 7:22 PM", or "Just now" from in-memory
+  // entries) into a sortable epoch ms. Falls back to insertion order via
+  // index when unparseable.
   function tsToEpoch(ts) {
     if (!ts) return null
     if (ts instanceof Date) return ts.getTime()
@@ -4321,6 +4321,23 @@ function OutreachTab({ person, setPopup }) {
     if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
       const t = new Date(s).getTime()
       return Number.isFinite(t) ? t : null
+    }
+    // "May 23 at 7:22 PM" — the fmtDateTime format from people-mapper.
+    // Match this BEFORE the looser "Month Day" pattern below, which would
+    // otherwise greedily consume just "May 23" and lose the time.
+    const at = s.match(/^([A-Za-z]+)\s+(\d+)(?:,\s+(\d{4}))?\s+at\s+(\d+):(\d+)\s*(AM|PM)/i)
+    if (at) {
+      const monIdx = MONTH_MAP[at[1].slice(0,3)]
+      if (monIdx != null) {
+        const day = parseInt(at[2], 10)
+        const yr  = at[3] ? parseInt(at[3], 10) : new Date().getFullYear()
+        let hr = parseInt(at[4], 10)
+        const mn = parseInt(at[5], 10)
+        const ap = at[6].toUpperCase()
+        if (ap === 'PM' && hr < 12) hr += 12
+        if (ap === 'AM' && hr === 12) hr = 0
+        return new Date(yr, monIdx, day, hr, mn).getTime()
+      }
     }
     // "May 2", "May 2, 9:00am", "May 2, 2026", etc. Try expandTs's output
     // first since the seed data is in that format.
@@ -4384,7 +4401,10 @@ function OutreachTab({ person, setPopup }) {
   const localItems = localEntries.map((e, idx) => ({
     kind: 'local',
     raw: e,
-    epoch: tsToEpoch(e.ts),
+    // Prefer the raw ISO from people-mapper; fall back to parsing the
+    // human-readable `ts` for in-memory optimistic entries ("Just now")
+    // or legacy items without occurred_at.
+    epoch: tsToEpoch(e.occurred_at || e.ts),
     order: idx + apiItems.length,
   }))
 
