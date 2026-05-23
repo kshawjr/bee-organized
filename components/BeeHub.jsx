@@ -23679,11 +23679,11 @@ if (Array.isArray(initialPeople)) return
 
   const roleConf    = ROLES.find(r=>r.key===role)
   const isElevated  = role==='corporate' || role==='super_admin'
-  const selectedLoc = locFilter==='all' ? null : ALL_LOCATIONS.find(l=>l.id===locFilter)
+  const selectedLoc = locFilter==='all' ? null : (initialLocations || ALL_LOCATIONS).find(l=>l.id===locFilter)
 
   // For franchise users, use their location's status
   const franchiseLoc = !isElevated && viewAsUser?.locationId
-    ? ALL_LOCATIONS.find(l=>l.id===viewAsUser.locationId)
+    ? (initialLocations || ALL_LOCATIONS).find(l=>l.id===viewAsUser.locationId)
     : selectedLoc
 
   // Real franchise user: derive crmStatus from currentSubscription.
