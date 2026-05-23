@@ -23722,15 +23722,25 @@ if (Array.isArray(initialPeople)) return
     ? (initialLocations || ALL_LOCATIONS).find(l=>l.id===viewAsUser.locationId)
     : selectedLoc
 
-  // Real franchise user: derive crmStatus from currentSubscription.
-  // super_admin / corporate sign in with currentSubscription=null and fall
-  // through to the existing mock/view-as path.
+  // Real franchise user: derive crmStatus from currentSubscription +
+  // currentLocation.lifecycle_status. super_admin / corporate sign in with
+  // currentSubscription=null and fall through to the existing mock/view-as
+  // path.
+  //
+  // Billing state (subscription_status) and setup state (lifecycle_status)
+  // are tracked separately on locations — the pay step flips
+  // subscription_status='deferred'→'active' early in onboarding, but
+  // lifecycle_status stays 'onboarding' until the launch step at the end.
+  // Without consulting lifecycle_status here, a server redirect mid-flow
+  // (e.g. Jobber OAuth callback) would re-render with subscription_status=
+  // 'active' and drop the owner onto the home page, skipping the remaining
+  // onboarding steps. past_due / inactive remain billing-state overrides.
   const effectiveCrmStatus = (() => {
     if (!isElevated && currentSubscription) {
       const s = currentSubscription.subscription_status
-      if (s === 'deferred') return 'onboarding'
       if (s === 'past_due') return 'pastdue'
       if (s === 'inactive') return 'inactive'
+      if (s === 'deferred' || currentLocation?.lifecycle_status === 'onboarding') return 'onboarding'
       return 'active'
     }
     if (franchiseLoc) return locStatuses[franchiseLoc.id] || franchiseLoc.crmStatus
