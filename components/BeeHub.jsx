@@ -23773,7 +23773,7 @@ if (Array.isArray(initialPeople)) return
     if (!showLocPicker) return null
 
     const q = locSearch.toLowerCase()
-    const allLocs = ALL_LOCATIONS.filter(l =>
+const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
       !q || l.name.toLowerCase().includes(q) || (l.owner||'').toLowerCase().includes(q) || l.state.toLowerCase().includes(q)
     )
     const active     = allLocs.filter(l=>(locStatuses[l.id]||l.crmStatus)==='active')
