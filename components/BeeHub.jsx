@@ -9185,8 +9185,23 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   const tierPricesCtx      = useContext(TierPricesContext)
 
   // ── ALL hooks at top - no conditional returns before these ──────────────────
-  const [completedSteps, setCompletedSteps]   = useState({})
-  const [activeStepOpen, setActiveStepOpen]   = useState(null)
+  // Lazy initializers seed completedSteps + activeStepOpen from the DB cache
+  // (currentLocationCtx.onboarding_state) on the very first render. Without
+  // this, the initial render had empty state, briefly showing WelcomeStep
+  // (line ~9741, `isDone('welcome')` false) before the hydrate useEffect
+  // below ran and the correct active step replaced it on the next render.
+  // SSR-safe: currentLocation is a server-rendered prop from app/page.tsx,
+  // so the value is identical on the server and the first client render.
+  // sessionStorage fallback stays in the useEffect — reading it here would
+  // mismatch SSR (no window on the server).
+  const [completedSteps, setCompletedSteps]   = useState(() => {
+    if (currentLocationCtx?.id) return currentLocationCtx?.onboarding_state?.completedSteps || {}
+    return {}
+  })
+  const [activeStepOpen, setActiveStepOpen]   = useState(() => {
+    if (currentLocationCtx?.id) return currentLocationCtx?.onboarding_state?.activeStepOpen || null
+    return null
+  })
   const [showInviteFlow, setShowInviteFlow]   = useState(false)
 
   // Live seat configuration on the pay step. Lives in React state only —
@@ -9443,25 +9458,19 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   // step they completed BEFORE clicking Connect Jobber is reset to incomplete.
   // Must run BEFORE the OAuth handler below so prior state is restored first,
   // then the jobber=done + activeStepOpen='import' overlay applies cleanly.
+  //
+  // DB-cache hydration was moved into the useState lazy initializers above
+  // (eliminates the WelcomeStep flash for real franchise users). This effect
+  // now only handles the sessionStorage fallback — used on view-as / demo
+  // paths where currentLocationCtx.id is null, and as a same-tab safety net
+  // for an unmount-mid-write race.
+  //
+  // Pass 2 bug fix carried over — for real franchise users (currentLocationCtx.id
+  // set), DB is authoritative even when onboarding_state is empty {}. We early-
+  // return so sessionStorage can't overwrite a fresh empty DB cache.
   useEffect(() => {
     if (typeof window === 'undefined') return
-    // Task 4 Pass 1 — DB cache wins over sessionStorage on initial mount.
-    // currentLocationCtx.onboarding_state comes from app/page.tsx and gives
-    // us cross-device / cross-browser continuity. sessionStorage stays as
-    // the same-tab safety net for an unmount-mid-write race (and for
-    // view-as / demo paths where currentLocationCtx is null).
-    //
-    // Pass 2 bug fix — for real franchise users (currentLocationCtx.id set),
-    // DB is the source of truth even when onboarding_state is empty {}. An
-    // empty cache means "this location has nothing completed yet", NOT
-    // "fall through to sessionStorage". Without this, wiping a previously-
-    // onboarded location's DB state still showed stale sessionStorage.
-    if (currentLocationCtx?.id) {
-      const dbState = currentLocationCtx?.onboarding_state || {}
-      if (dbState.completedSteps) setCompletedSteps(dbState.completedSteps)
-      if (dbState.activeStepOpen) setActiveStepOpen(dbState.activeStepOpen)
-      return
-    }
+    if (currentLocationCtx?.id) return
     try {
       const saved = sessionStorage.getItem('bee.onboarding.state')
       if (!saved) return
