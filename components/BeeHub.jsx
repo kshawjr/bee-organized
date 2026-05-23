@@ -15873,10 +15873,15 @@ function TemplatePreviewModal({ template, settings, onClose }) {
 }
 
 function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null, isPastDue=false, graceDaysLeft=14, locationId='loc1', onPaymentResolved, people=[], franchiseRole='owner', isSuperAdmin=false, onOpenManual=null }) {
-  // Real franchise owner sign-ins get currentLocation from context (populated
-  // by App from page.tsx's Supabase fetch). Used as a higher-priority source
-  // than the ALL_LOCATIONS mock for the location settings panel.
+  // Real franchise owner sign-ins get currentLocation/currentUser from context
+  // (populated by App from page.tsx's Supabase fetch). These are the
+  // highest-priority source: signed-in franchise user → use their real DB row.
+  // selectedLoc is the super_admin's explicit pick (null for franchise users
+  // because their locFilter resolves a real UUID that doesn't exist in the
+  // ALL_LOCATIONS mock and initialLocations is only fetched for elevated
+  // roles). ALL_LOCATIONS / USERS_DATA are mock-data fallbacks for demo paths.
   const currentLocationCtx = useContext(CurrentLocationContext)
+  const currentUserCtx     = useContext(CurrentUserContext)
   const tierPricesCtx = useContext(TierPricesContext)
   const seatsCtx = useContext(SeatsContext)
   // Lifted modal state for Settings > Billing (the billing branch renders via
@@ -15886,7 +15891,14 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   const livePrices = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
   // Build settings from selected location if provided. Reads only real saved
   // data — no onboarding overlay (onboarding flow handles its own state).
-  const locProfile = selectedLoc ? {
+  const locProfile = currentUserCtx ? {
+    ...DEFAULT_SETTINGS.profile,
+    firstName: currentUserCtx.first_name || (currentUserCtx.name||'').split(' ')[0] || '',
+    lastName:  currentUserCtx.last_name  || (currentUserCtx.name||'').split(' ').slice(1).join(' ') || '',
+    email:     currentUserCtx.email      || '',
+    phone:     currentUserCtx.phone      || '',
+    nextAmount: calcProration(getTierPrice('owner')).prorated,
+  } : selectedLoc ? {
     firstName: (selectedLoc.owner||'').split(' ')[0],
     lastName:  (selectedLoc.owner||'').split(' ').slice(1).join(' '),
     email:     `${((selectedLoc.owner||'').split(' ')[0]||'owner').toLowerCase()}@beehub.io`,
@@ -15911,7 +15923,33 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     }
   })()
 
-  const locLocation = selectedLoc ? {
+  const locLocation = currentLocationCtx ? (()=>{
+    // Real franchise owner sign-in: hydrate every field from the locations
+    // row that page.tsx fetched. DB stores address parts separately
+    // (address / city / state / zip); Settings UI shows a single address
+    // line, so we combine them as "Street, City, ST Zip".
+    const cityStateZip = [
+      currentLocationCtx.city,
+      [currentLocationCtx.state, currentLocationCtx.zip].filter(Boolean).join(' '),
+    ].filter(Boolean).join(', ')
+    const combinedAddress = [currentLocationCtx.address, cityStateZip].filter(Boolean).join(', ')
+    return {
+      ...DEFAULT_SETTINGS.location,
+      locId:           currentLocationCtx.id,
+      name:            currentLocationCtx.name || '',
+      address:         combinedAddress,
+      phone:           currentLocationCtx.phone || '',
+      timezone:        currentLocationCtx.timezone || '',
+      reviewsLink:     currentLocationCtx.reviews_link || '',
+      bookingLink:     currentLocationCtx.calendar_link || '',
+      jobberStatus:    currentLocationCtx.jobber_connected ? 'connected' : 'disconnected',
+      jobberAccountId: currentLocationCtx.jobber_account_id || '',
+      sendFromName:    currentLocationCtx.sender_name || '',
+      sendFromEmail:   currentLocationCtx.send_from_email || '',
+      replyToEmail:    currentLocationCtx.reply_to_email || '',
+      notifEmails:     currentLocationCtx.send_from_email ? [currentLocationCtx.send_from_email] : [],
+    }
+  })() : selectedLoc ? {
     locId:          selectedLoc.id,
     name:           selectedLoc.name,
     address:        selectedLoc.address,
@@ -15929,15 +15967,6 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     sendFromEmail:  selectedLoc.email || '',
     replyToEmail:   selectedLoc.email || '',
     notifEmails:    selectedLoc.email ? [selectedLoc.email] : [],
-  } : currentLocationCtx ? {
-    // Real franchise owner sign-in: hydrate from Supabase via context.
-    // Only jobberStatus + jobberAccountId are wired so far; other fields
-    // fall back to defaults until page.tsx fetches them.
-    ...DEFAULT_SETTINGS.location,
-    locId:           currentLocationCtx.id,
-    name:            currentLocationCtx.name,
-    jobberStatus:    currentLocationCtx.jobber_connected ? 'connected' : 'disconnected',
-    jobberAccountId: currentLocationCtx.jobber_account_id || '',
   } : (()=>{
     // Look up from ALL_LOCATIONS by locationId
     const loc = ALL_LOCATIONS.find(l=>l.id===locationId)
