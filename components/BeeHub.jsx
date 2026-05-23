@@ -9075,12 +9075,18 @@ function AttentionCard({ icon, title, desc, urgency='medium', action, onAction }
 
 // Returns a usable first name from the owner's full name or email, or null
 // when neither yields anything (the default 'there' placeholder counts as null).
+// If `name` itself looks like an email (full_name fell back to email upstream),
+// fall through to the email branch instead of returning the whole address as
+// a "first name". Email-derived first names are capitalized so the greeting
+// reads "Kevin" not "kevin".
 function getFirstName(name, email) {
-  if (name && name !== 'there' && name.trim().length > 1) {
+  if (name && name !== 'there' && name.trim().length > 1 && !name.includes('@')) {
     return name.trim().split(' ')[0]
   }
-  if (email && email.includes('@')) {
-    return email.split('@')[0]
+  const emailSource = (name && name.includes('@')) ? name : email
+  if (emailSource && emailSource.includes('@')) {
+    const local = emailSource.split('@')[0]
+    return local.charAt(0).toUpperCase() + local.slice(1)
   }
   return null
 }
@@ -23847,7 +23853,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         <div style={{ display:'flex', justifyContent:'space-around', width:'100%', paddingBottom:'max(20px, env(safe-area-inset-bottom))', paddingTop:'8px' }}>
           {navItems.map(item=>{
             const isLimitedLaunchGated = isLimitedLaunch && (item.key==='partners' || item.key==='reports')
-            const isLocked = (isOnboardingState && item.key!=='home' && item.key!=='settings') || (item.key==='reports' && !['super_admin','corporate','franchise'].includes(role)) || isLimitedLaunchGated
+            const isLocked = (isOnboardingState && !isElevated && item.key!=='home' && item.key!=='settings') || (item.key==='reports' && !['super_admin','corporate','franchise'].includes(role)) || isLimitedLaunchGated
             return (
               <button key={item.key} title={isLimitedLaunchGated ? LIMITED_LAUNCH_TOOLTIP : undefined} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'3px', padding:'4px 8px', background:'none', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', opacity:isLocked?0.25:1 }}>
                 <span style={{ fontSize:'20px', lineHeight:1 }}>{item.icon}</span>
@@ -23928,7 +23934,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           selectedLoc={selectedLoc}
           isElevated={isElevated}
           crmStatus={effectiveCrmStatus}
-          ownerName={viewAsUser?.name || selectedLoc?.owner || currentUser?.name || 'Kevin Shaw'}
+          ownerName={getFirstName(viewAsUser?.name || selectedLoc?.owner || currentUser?.name, viewAsUser?.email || currentUser?.email) || 'Kevin Shaw'}
           ownerEmail={viewAsUser?.email || currentUser?.email || ''}
           topOffset={TOTAL_TOP}
           partners={partners}
@@ -24062,7 +24068,9 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             const isSettings = item.key==='settings' && ['readonly'].includes(fr)
             const isPartners = item.key==='partners' && ['readonly'].includes(fr)
             const isLimitedLaunchGated = isLimitedLaunch && (item.key==='partners' || item.key==='reports')
-            const isLocked = (isOnboardingState && item.key!=='home' && item.key!=='settings') || isReports || isSettings || isPartners || isLimitedLaunchGated
+            // Onboarding lockdown only applies to franchise users mid-setup —
+            // super_admin / corporate are always elevated and never "onboarding."
+            const isLocked = (isOnboardingState && !isElevated && item.key!=='home' && item.key!=='settings') || isReports || isSettings || isPartners || isLimitedLaunchGated
             const isActive = activeNav===item.key
             return (
               <button key={item.key} title={isLimitedLaunchGated ? LIMITED_LAUNCH_TOOLTIP : undefined} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ width:'100%', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left', background:isActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>
