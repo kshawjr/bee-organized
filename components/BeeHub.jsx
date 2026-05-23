@@ -4120,6 +4120,147 @@ function ContactsTab({ person, onUpdate, onError }) {
   )
 }
 
+// ─── Drip Section (PersonPanel) ───────────────────────────────────────────
+// Shows the lead's active/paused/stopped/completed drip status with pause/
+// resume controls. Pulls from GET /api/leads/:id/drip on mount and refreshes
+// after every state-change action.
+function DripSection({ leadId, isSuperAdminUser }) {
+  const [data, setData]       = React.useState(null) // null=loading, {}=empty, {progress}=loaded
+  const [acting, setActing]   = React.useState(false)
+  const [err, setErr]         = React.useState(null)
+
+  const isRealLead = !!leadId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leadId)
+
+  const reload = React.useCallback(() => {
+    if (!isRealLead) { setData({ progress: null }); return }
+    setErr(null)
+    fetch(`/api/leads/${leadId}/drip`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(j => setData(j))
+      .catch(e => setErr(String(e?.message || e)))
+  }, [leadId, isRealLead])
+
+  React.useEffect(() => { reload() }, [reload])
+
+  async function act(endpoint) {
+    if (acting) return
+    setActing(true)
+    setErr(null)
+    try {
+      const res = await fetch(`/api/leads/${leadId}/${endpoint}`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const j = await res.json().catch(()=>({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      reload()
+    } catch (e) {
+      setErr(String(e?.message || e))
+    } finally {
+      setActing(false)
+    }
+  }
+
+  if (!isRealLead) return null // demo data path
+  if (data === null) {
+    return (
+      <div style={{ background:'white', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'10px', padding:'12px 14px' }}>
+        <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Loading drip…</p>
+      </div>
+    )
+  }
+
+  const prog = data.progress
+  if (!prog) {
+    return (
+      <div style={{ background:'white', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'10px', padding:'12px 14px' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'4px' }}>
+          <span style={{ fontSize:'14px' }}>📧</span>
+          <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>Drip</p>
+        </div>
+        <p style={{ fontSize:'11px', color:'#8a9e9a' }}>No drip active. Set stage to "New" to start the location's default sequence.</p>
+        {isSuperAdminUser && (
+          <button onClick={()=>act('drip-restart')} disabled={acting}
+            style={{ marginTop:'8px', padding:'6px 12px', background:'#1a2e2b', border:'none', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'white', cursor: acting ? 'wait' : 'pointer' }}>
+            {acting ? 'Starting…' : '🔄 Start Default Drip'}
+          </button>
+        )}
+        {err && <p style={{ fontSize:'10px', color:'#ef4444', marginTop:'6px' }}>{err}</p>}
+      </div>
+    )
+  }
+
+  const statusConf = {
+    active:    { color:'#10b981', bg:'rgba(16,185,129,0.1)',  border:'rgba(16,185,129,0.25)', label:'Active' },
+    paused:    { color:'#f59e0b', bg:'rgba(245,158,11,0.1)',  border:'rgba(245,158,11,0.25)', label:'Paused' },
+    stopped:   { color:'#ef4444', bg:'rgba(239,68,68,0.1)',   border:'rgba(239,68,68,0.25)',  label:'Stopped' },
+    completed: { color:'#6366f1', bg:'rgba(99,102,241,0.1)',  border:'rgba(99,102,241,0.25)', label:'Completed' },
+  }[prog.status] || { color:'#8a9e9a', bg:'rgba(0,0,0,0.05)', border:'rgba(0,0,0,0.1)', label: prog.status }
+
+  function fmtDt(iso) {
+    if (!iso) return '—'
+    try {
+      const d = new Date(iso)
+      return d.toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })
+    } catch { return iso }
+  }
+
+  return (
+    <div style={{ background:'white', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'10px', padding:'12px 14px' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}>
+        <span style={{ fontSize:'14px' }}>📧</span>
+        <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>Drip</p>
+        <span style={{ fontSize:'10px', fontWeight:600, color:statusConf.color, background:statusConf.bg, border:`1px solid ${statusConf.border}`, padding:'2px 8px', borderRadius:'20px' }}>
+          {statusConf.label}
+        </span>
+      </div>
+      <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5, marginBottom:'4px' }}>
+        On <strong>{prog.path_name || prog.path_key || 'drip'}</strong>{' '}
+        – step <strong>{prog.current_step}</strong>{prog.total_steps ? ` of ${prog.total_steps}` : ''}
+      </p>
+      {prog.current_template_name && (
+        <p style={{ fontSize:'11px', color:'#8a9e9a', marginBottom:'4px' }}>
+          Current: {prog.current_template_name}
+        </p>
+      )}
+      {prog.status === 'active' && prog.next_send_at && (
+        <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Next send: {fmtDt(prog.next_send_at)}</p>
+      )}
+      {prog.status === 'paused' && (
+        <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Paused since {fmtDt(prog.paused_at)}</p>
+      )}
+      {prog.status === 'stopped' && (
+        <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Stopped {fmtDt(prog.stopped_at)} — reason: {prog.stopped_reason || 'unknown'}</p>
+      )}
+      {prog.status === 'completed' && (
+        <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Completed {fmtDt(prog.completed_at)}</p>
+      )}
+
+      <div style={{ display:'flex', gap:'6px', marginTop:'10px', flexWrap:'wrap' }}>
+        {prog.status === 'active' && (
+          <button onClick={()=>act('drip-pause')} disabled={acting}
+            style={{ padding:'6px 12px', background:'rgba(245,158,11,0.1)', border:'1px solid rgba(245,158,11,0.3)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#b07a20', cursor: acting ? 'wait' : 'pointer', fontWeight:600 }}>
+            {acting ? '…' : '⏸ Pause'}
+          </button>
+        )}
+        {prog.status === 'paused' && (
+          <button onClick={()=>act('drip-resume')} disabled={acting}
+            style={{ padding:'6px 12px', background:'rgba(16,185,129,0.1)', border:'1px solid rgba(16,185,129,0.3)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#0d8056', cursor: acting ? 'wait' : 'pointer', fontWeight:600 }}>
+            {acting ? '…' : '▶ Resume'}
+          </button>
+        )}
+        {isSuperAdminUser && (prog.status === 'stopped' || prog.status === 'completed') && (
+          <button onClick={()=>act('drip-restart')} disabled={acting}
+            style={{ padding:'6px 12px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.3)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#6366f1', cursor: acting ? 'wait' : 'pointer', fontWeight:600 }}>
+            {acting ? '…' : '🔄 Restart'}
+          </button>
+        )}
+      </div>
+      {err && <p style={{ fontSize:'10px', color:'#ef4444', marginTop:'6px' }}>{err}</p>}
+    </div>
+  )
+}
+
 function PersonPanel({
   person,
   onClose,
@@ -4134,6 +4275,8 @@ function PersonPanel({
   navLabel = "",
 }) {
   const [activeTab, setActiveTab] = useState("overview");
+  const currentUserPP = useContext(CurrentUserContext);
+  const isSuperAdminUser = currentUserPP?.role === "super_admin";
   const [popup, setPopup] = useState(null);
   const [showLeadInfoEdit, setShowLeadInfoEdit] = useState(false);
   const [showSadAnimation, setShowSadAnimation] = useState(false);
@@ -5424,6 +5567,7 @@ function PersonPanel({
             React.createElement(
               "div",
               { style: { display: "grid", gap: "12px" } },
+              React.createElement(DripSection, { leadId: person.id, isSuperAdminUser }),
               (person.quickCapture || person.snoozeUntil) &&
                 React.createElement(
                   "button",
@@ -15870,13 +16014,28 @@ function TemplatePreviewModal({ template, settings, onClose }) {
   const locName   = settings?.location?.name  || 'Bee Organized'
   const fromName  = settings?.location?.sendFromName  || `Bee Organized ${locName}`
   const fromEmail = settings?.location?.sendFromEmail || 'hello@beeorganized.com'
-  const recipientName = 'Sarah'
+  const recipientName = 'John'
 
-  // Merge template variables
-  const body = (template.body||'')
-    .replace(/\{\{first_name\}\}/gi, recipientName)
-    .replace(/\{\{location\}\}/gi, locName)
-    .replace(/\{\{owner\}\}/gi, settings?.profile?.name?.split(' ')[0] || 'Jennifer')
+  // Build the variable map mirroring lib/resend.ts RenderContext, with
+  // sensible fallbacks so an unset location field doesn't render as a
+  // literal "{{phone}}" in the preview.
+  const previewVars = {
+    first_name:     recipientName,
+    organizer_name: settings?.location?.sendFromName || settings?.profile?.firstName || 'Sarah',
+    location_name:  locName,
+    phone:          settings?.location?.phone || '(555) 123-4567',
+    booking_link:   settings?.location?.bookingLink || 'https://example.com/book',
+    service_area:   [settings?.location?.city, settings?.location?.state].filter(Boolean).join(', ') || locName,
+  }
+  function applyPreviewVars(text) {
+    if (!text) return ''
+    return String(text).replace(/\{\{(\w+)\}\}/g, (_, key) => {
+      const v = previewVars[key]
+      return v === undefined || v === null ? '' : String(v)
+    })
+  }
+  const body = applyPreviewVars(template.body)
+  const subjectPreview = applyPreviewVars(template.subject || '')
 
   const isSMS = template.type === 'sms'
   const isCall = template.type === 'call'
@@ -15888,7 +16047,7 @@ function TemplatePreviewModal({ template, settings, onClose }) {
         <p style="color:white;font-size:18px;margin:0">🐝</p>
       </div>
       <div style="padding:28px 24px;">
-        ${template.subject ? `<p style="font-size:20px;font-weight:700;color:#1a2e2b;margin-bottom:18px;">${template.subject}</p>` : ''}
+        ${subjectPreview ? `<p style="font-size:20px;font-weight:700;color:#1a2e2b;margin-bottom:18px;">${subjectPreview}</p>` : ''}
         <p style="font-size:14px;line-height:1.7;color:#374151;white-space:pre-wrap">${body}</p>
       </div>
       <div style="background:#f7f5f0;padding:16px 24px;border-top:1px solid #e5e7eb;text-align:center;">
@@ -15947,7 +16106,7 @@ function TemplatePreviewModal({ template, settings, onClose }) {
             </div>
           ) : viewMode==='text' ? (
             <div style={{ background:'white', borderRadius:'12px', padding:'12px', maxWidth:'480px', margin:'0 auto' }}>
-              {template.subject&&<p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'12px', paddingBottom:'10px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>Subject: {template.subject}</p>}
+              {subjectPreview&&<p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'12px', paddingBottom:'10px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>Subject: {subjectPreview}</p>}
               <p style={{ fontSize:'13px', color:'#374151', lineHeight:1.8, whiteSpace:'pre-wrap', fontFamily:'monospace' }}>{body}</p>
             </div>
           ) : (
@@ -16112,9 +16271,51 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     })
   }
 
+  // Templates load from /api/templates on mount. Falls back to DEFAULT_TEMPLATES
+  // so the UI renders something on first paint (and during failed-fetch dev paths)
+  // — the DB-backed list replaces it once the request resolves. Each row maps
+  // legacy_id → id so existing in-memory references (step.templateId='t1' etc.)
+  // keep working.
   const [templates, setTemplates]   = useState(DEFAULT_TEMPLATES)
+  const [templatesLoading, setTemplatesLoading] = useState(true)
+  const [templatesError, setTemplatesError]     = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    setTemplatesLoading(true)
+    fetch('/api/templates', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(j => {
+        if (cancelled) return
+        const rows = Array.isArray(j?.templates) ? j.templates : []
+        if (rows.length === 0) return
+        setTemplates(rows.map(r => ({
+          id: r.legacy_id || r.id, // prefer legacy for path step refs
+          dbId: r.id,
+          legacyId: r.legacy_id,
+          name: r.name,
+          type: r.type,
+          tag: r.tag || '',
+          subject: r.subject || '',
+          body: r.body || '',
+          isActive: r.is_active !== false,
+          usedIn: [],
+        })))
+        setTemplatesError(null)
+      })
+      .catch(e => { if (!cancelled) setTemplatesError(String(e?.message || e)) })
+      .finally(() => { if (!cancelled) setTemplatesLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+
   const [locationOverrides, setLocationOverrides] = useState({}) // masterTemplateId → customized copy
   const [pathSteps, setPathSteps]   = useState(DEFAULT_PATH_STEPS)
+  // dbPaths is keyed by path_key (e.g. 'general-a') so the UI's existing
+  // pathId mental model maps 1:1. Each entry holds the DB row's id so
+  // saves know whether to insert or update. Populated by the load effect
+  // below for real franchise locations only.
+  const [dbPaths, setDbPaths] = useState({})
+  const [pathsSaving, setPathsSaving] = useState(null) // pathId currently being saved
+  const [pathsErr, setPathsErr] = useState(null)
   const [editingTemplate, setEditingTemplate] = useState(null) // template obj or 'new'
   const [previewTemplate, setPreviewTemplate] = useState(null)
   const [editingStep, setEditingStep]         = useState(null) // { pathId, step }
@@ -16123,26 +16324,217 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
 
   const [showCustomBuilder, setShowCustomBuilder] = useState(false)
 
+  // Real franchise location? settings.location.locId will be a Supabase UUID.
+  // Demo / view-as paths get string ids like 'loc_kc' — skip DB writes there.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const realLocId = UUID_RE.test(settings.location.locId || '') ? settings.location.locId : null
+
+  // Translate the UI's delay strings ("3 days later", "Immediately") into
+  // an integer day count for the DB. We accept anything with a number; the
+  // EditableDelay save() emits "N days after sign-up" which has the same
+  // shape, so this catches both formats.
+  function delayToDays(s) {
+    if (!s) return 0
+    const lower = String(s).toLowerCase()
+    if (lower.includes('immediately') || lower.includes('right away')) return 0
+    const m = lower.match(/(\d+)/)
+    return m ? parseInt(m[1], 10) : 0
+  }
+  function daysToDelayLabel(days) {
+    if (!days || days <= 0) return 'Immediately'
+    return `${days} day${days === 1 ? '' : 's'} later`
+  }
+
+  // Load DB drip paths + their steps. Merges into pathSteps using path_key
+  // as the UI's pathId. Leaves DEFAULT_PATH_STEPS untouched for path_keys
+  // that aren't in the DB yet (general-b/c/d, move-b/c/d, custom) so the
+  // user can still preview them.
+  useEffect(() => {
+    if (!realLocId) return
+    let cancelled = false
+    fetch(`/api/locations/${realLocId}/drip-paths`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(j => {
+        if (cancelled) return
+        const paths = Array.isArray(j?.paths) ? j.paths : []
+        const newDbPaths = {}
+        const newSteps = {}
+        for (const p of paths) {
+          newDbPaths[p.path_key] = { id: p.id, name: p.name, is_default: p.is_default, location_uuid: p.location_uuid }
+          newSteps[p.path_key] = (p.steps || []).map((s, i) => ({
+            id: `db_${s.id}`,
+            dbId: s.id,
+            order: s.step_order,
+            name: s.template_name || `Step ${s.step_order}`,
+            type: s.channel,
+            delay: daysToDelayLabel(s.delay_days),
+            templateId: s.template_legacy_id || s.master_template_id,
+            masterTemplateId: s.master_template_id,
+          }))
+        }
+        setDbPaths(newDbPaths)
+        setPathSteps(prev => ({ ...prev, ...newSteps }))
+        // Hydrate defaults from DB location row.
+        if (j.default_drip_path) {
+          setSettings(s => ({ ...s, paths: { ...s.paths, generalDefault: j.default_drip_path } }))
+        }
+        if (j.default_move_drip_path) {
+          setSettings(s => ({ ...s, paths: { ...s.paths, moveDefault: j.default_move_drip_path } }))
+        }
+        setPathsErr(null)
+      })
+      .catch(e => { if (!cancelled) setPathsErr(String(e?.message || e)) })
+    return () => { cancelled = true }
+  }, [realLocId])
+
+  // Save a path's current steps to DB. Creates the drip_paths row first if
+  // it doesn't exist yet (e.g. user is editing general-b for a location
+  // that was seeded with only general-a + move-a).
+  async function savePathToDb(pathId) {
+    if (!realLocId) {
+      alert('Pick a real location first.')
+      return
+    }
+    if (pathId === 'custom') return
+    const steps = pathSteps[pathId] || []
+    setPathsSaving(pathId)
+    try {
+      let dbPath = dbPaths[pathId]
+      if (!dbPath) {
+        // Friendly name from style label; fallback to path key.
+        const friendly = (PATH_STYLES.find(s => pathId.endsWith(s.id.replace('path-','')))?.label) || pathId
+        const res = await fetch(`/api/locations/${realLocId}/drip-paths`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path_key: pathId, name: friendly }),
+        })
+        const j = await res.json().catch(()=>({}))
+        if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+        dbPath = { id: j.path.id, name: j.path.name, is_default: !!j.path.is_default, location_uuid: realLocId }
+        setDbPaths(prev => ({ ...prev, [pathId]: dbPath }))
+      }
+      const payload = steps.map((s, i) => {
+        const tmpl = templates.find(t => t.id === s.templateId)
+        return {
+          step_order: s.order ?? (i + 1),
+          delay_days: delayToDays(s.delay),
+          channel: s.type === 'sms' ? 'sms' : 'email',
+          master_template_id: tmpl?.dbId || s.masterTemplateId || null,
+        }
+      })
+      const res2 = await fetch(`/api/drip-paths/${dbPath.id}/steps`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ steps: payload }),
+      })
+      const j2 = await res2.json().catch(()=>({}))
+      if (!res2.ok) throw new Error(j2?.error || `HTTP ${res2.status}`)
+      setPathsErr(null)
+    } catch (e) {
+      setPathsErr(String(e?.message || e))
+      alert('Could not save path: ' + (e?.message || e))
+    } finally {
+      setPathsSaving(null)
+    }
+  }
+
+  // Persist a default selection to the location row in DB.
+  async function persistDefault(sectionKey, pathId) {
+    if (!realLocId) return
+    const fieldKey = sectionKey === 'moveDefault' ? 'default_move' : 'default'
+    try {
+      const res = await fetch(`/api/locations/${realLocId}/drip-paths`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [fieldKey]: pathId }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(()=>({}))
+        console.error('default save failed', j)
+      }
+    } catch (e) {
+      console.error('default save threw', e)
+    }
+  }
+
   function saveCustomPath({ pathId, pathName, projectType, steps }) {
     setPathSteps(prev=>({...prev,[pathId]:steps}))
     setSettings(s=>({...s, paths:{...s.paths, active:[...s.paths.active, pathId]}}))
     setShowCustomBuilder(false)
   }
 
-  function saveTemplate(data) {
-    if (editingTemplate==='new') {
-      // Super admin creating a new master template
-      const newT = { ...data, id:`t${Date.now()}`, tag:'custom', usedIn:[] }
-      setTemplates(prev=>[...prev, newT])
-    } else if (isSuperAdmin) {
-      // Super admin editing master - updates master for all
-      setTemplates(prev=>prev.map(t=>t.id===editingTemplate.master.id?{...t,...data}:t))
-    } else {
-      // Franchise editing - saves as location copy, master untouched
-      const masterId = editingTemplate.master.id
+  // Persist template changes to /api/templates. Super admin only path; franchise
+  // owners currently fall back to in-memory locationOverrides (location-level
+  // overrides on master_templates aren't a DB feature yet).
+  async function saveTemplate(data) {
+    const isNew = editingTemplate === 'new'
+    const target = !isNew ? (editingTemplate.master || editingTemplate.tpl) : null
+
+    if (!isSuperAdmin && !isNew) {
+      const masterId = target.id
       setLocationOverrides(prev=>({ ...prev, [masterId]:{ ...data, masterTemplateId:masterId, savedAt:new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'}) } }))
+      setEditingTemplate(null)
+      return
+    }
+
+    try {
+      if (isNew) {
+        const res = await fetch('/api/templates', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: data.name, type: data.type, subject: data.subject || null, body: data.body, tag: data.tag || 'custom' }),
+        })
+        const j = await res.json().catch(()=>({}))
+        if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+        const r = j.template
+        setTemplates(prev => [...prev, {
+          id: r.legacy_id || r.id, dbId: r.id, legacyId: r.legacy_id,
+          name: r.name, type: r.type, tag: r.tag || '', subject: r.subject || '', body: r.body || '',
+          isActive: r.is_active !== false, usedIn: [],
+        }])
+      } else {
+        const refId = target.dbId || target.legacyId || target.id
+        const res = await fetch(`/api/templates/${encodeURIComponent(refId)}`, {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: data.name, type: data.type, subject: data.subject || null, body: data.body }),
+        })
+        const j = await res.json().catch(()=>({}))
+        if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+        const r = j.template
+        setTemplates(prev => prev.map(t => (t.dbId === r.id || t.id === target.id) ? {
+          ...t,
+          name: r.name, type: r.type, tag: r.tag || '', subject: r.subject || '', body: r.body || '',
+          isActive: r.is_active !== false,
+        } : t))
+      }
+    } catch (e) {
+      alert('Could not save template: ' + (e?.message || e))
+      return
     }
     setEditingTemplate(null)
+  }
+
+  async function deleteTemplate(tpl) {
+    if (!isSuperAdmin) return
+    if (!confirm(`Delete template "${tpl.name}"? This cannot be undone.`)) return
+    const refId = tpl.dbId || tpl.legacyId || tpl.id
+    try {
+      const res = await fetch(`/api/templates/${encodeURIComponent(refId)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      const j = await res.json().catch(()=>({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      setTemplates(prev => prev.filter(t => t.id !== tpl.id))
+    } catch (e) {
+      alert('Could not delete template: ' + (e?.message || e))
+    }
   }
 
   function assignTemplate(pathId, stepId, templateId) {
@@ -16448,7 +16840,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                         <div style={{ padding:'12px 16px', display:'flex', alignItems:'center', gap:'12px', cursor:'pointer' }}
                           onClick={()=>setExpandedPath(expandedPath===pathId?null:pathId)}>
                           {/* Radio */}
-                          <div onClick={e=>{e.stopPropagation();setSettings(s=>({...s,paths:{...s.paths,[section.key]:pathId}})); if(section.key==='generalDefault') setDefaultPathId(pathId); if(section.key==='moveDefault') setDefaultMovePathId(pathId)}}
+                          <div onClick={e=>{e.stopPropagation();setSettings(s=>({...s,paths:{...s.paths,[section.key]:pathId}})); if(section.key==='generalDefault') setDefaultPathId(pathId); if(section.key==='moveDefault') setDefaultMovePathId(pathId); persistDefault(section.key, pathId)}}
                             style={{ width:'22px', height:'22px', borderRadius:'50%', border:`2px solid ${isDefault?'#1a2e2b':'rgba(0,0,0,0.15)'}`, background:isDefault?'#1a2e2b':'white', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, cursor:'pointer' }}>
                             {isDefault&&<div style={{ width:'8px', height:'8px', borderRadius:'50%', background:'white' }} />}
                           </div>
@@ -16521,6 +16913,15 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                                 style={{ width:'100%', padding:'8px', background:'transparent', border:'1px dashed rgba(168,201,196,0.4)', borderRadius:'8px', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', color:'#a8c9c4', fontWeight:500, marginTop:'4px' }}
                               >
                                 + Add Step
+                              </button>
+                            )}
+                            {realLocId && style.id !== 'custom' && (
+                              <button
+                                onClick={()=>savePathToDb(pathId)}
+                                disabled={pathsSaving===pathId}
+                                style={{ width:'100%', padding:'9px', background: pathsSaving===pathId ? '#9ca3af' : '#1a2e2b', border:'none', borderRadius:'8px', cursor: pathsSaving===pathId ? 'wait' : 'pointer', fontFamily:'inherit', fontSize:'12px', color:'white', fontWeight:600, marginTop:'6px' }}
+                              >
+                                {pathsSaving===pathId ? 'Saving…' : dbPaths[pathId] ? '💾 Save Changes' : '💾 Save Path to DB'}
                               </button>
                             )}
                           </div>
@@ -16610,6 +17011,9 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                               <div style={{ display:'flex', gap:'6px', flexShrink:0 }}>
                                 <button onClick={()=>setPreviewTemplate(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
                                 <button onClick={()=>setEditingTemplate({ master, tpl })} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Edit</button>
+                                {isSuperAdmin && !master.legacyId && (
+                                  <button onClick={()=>deleteTemplate(master)} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#ef4444', cursor:'pointer' }}>Delete</button>
+                                )}
                               </div>
                             </div>
                             {/* Reset to master row - only if customized */}

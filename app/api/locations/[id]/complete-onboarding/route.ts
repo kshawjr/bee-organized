@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseService } from '@/lib/supabase-service'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { seedDefaultDripPaths } from '@/lib/drip-lifecycle'
 
 export const runtime = 'nodejs'
 
@@ -53,6 +54,13 @@ export async function POST(
     console.error('[complete-onboarding]', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
+
+  // Seed the location's default drip paths (general-a + move-a) once the
+  // subscription flips active. Idempotent — skips paths that already
+  // exist, so re-running this endpoint is safe.
+  void seedDefaultDripPaths(params.id).catch((err) =>
+    console.error('[complete-onboarding] seedDefaultDripPaths threw', err),
+  )
 
   return NextResponse.json({ ok: true, location: data })
 }

@@ -234,3 +234,141 @@ export async function applyDripSideEffects(args: {
 
 // Used by location ctx in cron — exported so the cron file can reuse it.
 export type { LocationCtx }
+
+// ─── Default drip path seeding ────────────────────────────────────────
+// Mirrors the SQL seed in migrations/drips_infrastructure.sql for the
+// 4 launch locations but works for any new location.
+//
+// Step legacy_ids match the master_templates seed; we look up the master
+// row by legacy_id, then insert the path + steps with master_template_id
+// references. Subject/body are left null so the cron renders from the
+// linked master template.
+//
+// Idempotent: skips locations that already have general-a/move-a paths.
+
+const DEFAULT_DRIP_PATHS = {
+  'general-a': {
+    name: 'General Outreach',
+    is_default: true,
+    steps: [
+      { step_order: 1, delay_days: 0,  legacy: 't1'  },
+      { step_order: 2, delay_days: 2,  legacy: 't2'  },
+      { step_order: 3, delay_days: 4,  legacy: 'ta2' },
+      { step_order: 4, delay_days: 6,  legacy: 't3'  },
+      { step_order: 5, delay_days: 8,  legacy: 't4'  },
+      { step_order: 6, delay_days: 11, legacy: 't9'  },
+    ],
+  },
+  'move-a': {
+    name: 'Move Outreach',
+    is_default: false,
+    steps: [
+      { step_order: 1, delay_days: 0, legacy: 't1'  },
+      { step_order: 2, delay_days: 2, legacy: 'ta1' },
+      { step_order: 3, delay_days: 4, legacy: 't2'  },
+      { step_order: 4, delay_days: 6, legacy: 't3'  },
+      { step_order: 5, delay_days: 8, legacy: 't9'  },
+    ],
+  },
+} as const
+
+export async function seedDefaultDripPaths(locationUuid: string): Promise<void> {
+  try {
+    // What does this location already have?
+    const { data: existing, error: existErr } = await supabaseService
+      .from('drip_paths')
+      .select('path_key')
+      .eq('location_uuid', locationUuid)
+
+    if (existErr) {
+      console.error('[drip] seed: list existing failed', { locationUuid, existErr })
+      return
+    }
+
+    const have = new Set((existing ?? []).map(r => r.path_key))
+    const wanted = Object.keys(DEFAULT_DRIP_PATHS) as Array<keyof typeof DEFAULT_DRIP_PATHS>
+    const missing = wanted.filter(k => !have.has(k))
+    if (missing.length === 0) return
+
+    // Resolve legacy ids → master_template uuids in one round trip.
+    const allLegacy = new Set<string>()
+    for (const k of missing) {
+      for (const s of DEFAULT_DRIP_PATHS[k].steps) allLegacy.add(s.legacy)
+    }
+    const { data: masters, error: mtErr } = await supabaseService
+      .from('master_templates')
+      .select('id, legacy_id')
+      .in('legacy_id', Array.from(allLegacy))
+    if (mtErr) {
+      console.error('[drip] seed: master_templates lookup failed', mtErr)
+      return
+    }
+    const byLegacy = new Map<string, string>()
+    for (const m of masters ?? []) {
+      if (m.legacy_id) byLegacy.set(m.legacy_id, m.id)
+    }
+
+    for (const path_key of missing) {
+      const spec = DEFAULT_DRIP_PATHS[path_key]
+      const { data: pathRow, error: pathErr } = await supabaseService
+        .from('drip_paths')
+        .insert({
+          location_uuid: locationUuid,
+          path_key,
+          name: spec.name,
+          is_active: true,
+          is_default: spec.is_default,
+        })
+        .select('id')
+        .single()
+
+      if (pathErr || !pathRow) {
+        console.error('[drip] seed: drip_paths insert failed', { path_key, pathErr })
+        continue
+      }
+
+      const stepRows = spec.steps
+        .map(s => {
+          const mid = byLegacy.get(s.legacy)
+          if (!mid) return null
+          return {
+            drip_path_id: pathRow.id,
+            step_order: s.step_order,
+            delay_days: s.delay_days,
+            channel: 'email' as const,
+            master_template_id: mid,
+            is_active: true,
+          }
+        })
+        .filter(Boolean)
+
+      if (stepRows.length > 0) {
+        const { error: stepsErr } = await supabaseService
+          .from('drip_path_steps')
+          .insert(stepRows as Array<Record<string, unknown>>)
+        if (stepsErr) {
+          console.error('[drip] seed: drip_path_steps insert failed', { path_key, stepsErr })
+        }
+      }
+    }
+
+    // Set the location's default_drip_path if not already set.
+    const { data: loc } = await supabaseService
+      .from('locations')
+      .select('default_drip_path, default_move_drip_path')
+      .eq('id', locationUuid)
+      .maybeSingle()
+    const patch: Record<string, unknown> = {}
+    if (!loc?.default_drip_path) patch.default_drip_path = 'general-a'
+    if (!loc?.default_move_drip_path) patch.default_move_drip_path = 'move-a'
+    if (Object.keys(patch).length > 0) {
+      const { error: updErr } = await supabaseService
+        .from('locations')
+        .update(patch)
+        .eq('id', locationUuid)
+      if (updErr) console.error('[drip] seed: location default update failed', updErr)
+    }
+  } catch (err) {
+    console.error('[drip] seed: unexpected error', { locationUuid, err })
+  }
+}
