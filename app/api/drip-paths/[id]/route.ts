@@ -48,7 +48,7 @@ export async function GET(
 
   const { data: steps, error } = await supabaseService
     .from('drip_path_steps')
-    .select('id, step_order, delay_days, channel, subject, body, master_template_id, is_active, master_templates(name, legacy_id)')
+    .select('id, step_order, delay_days, channel, subject, body, master_template_id, is_active, templates:master_template_id(name, legacy_id)')
     .eq('drip_path_id', params.id)
     .order('step_order', { ascending: true })
 
@@ -60,9 +60,9 @@ export async function GET(
   return NextResponse.json({
     path: result.path,
     steps: (steps ?? []).map(s => {
-      const tpl = Array.isArray((s as any).master_templates)
-        ? (s as any).master_templates[0]
-        : (s as any).master_templates
+      const tpl = Array.isArray((s as any).templates)
+        ? (s as any).templates[0]
+        : (s as any).templates
       return {
         id: s.id,
         step_order: s.step_order,

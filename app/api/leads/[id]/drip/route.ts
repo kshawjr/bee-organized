@@ -75,7 +75,7 @@ export async function GET(
       .eq('drip_path_id', prog.drip_path_id),
     supabaseService
       .from('drip_path_steps')
-      .select('id, step_order, channel, master_template_id, master_templates(name)')
+      .select('id, step_order, channel, master_template_id, templates:master_template_id(name)')
       .eq('drip_path_id', prog.drip_path_id)
       .eq('step_order', prog.current_step)
       .maybeSingle(),
@@ -84,9 +84,9 @@ export async function GET(
   const totalSteps = totalRes.count ?? 0
   const currentStepRow = stepRes.data
   const currentTpl = currentStepRow
-    ? (Array.isArray((currentStepRow as any).master_templates)
-        ? (currentStepRow as any).master_templates[0]
-        : (currentStepRow as any).master_templates)
+    ? (Array.isArray((currentStepRow as any).templates)
+        ? (currentStepRow as any).templates[0]
+        : (currentStepRow as any).templates)
     : null
 
   // Effective status: stopped > completed > paused > active.

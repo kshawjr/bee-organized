@@ -1,71 +1,106 @@
 // app/api/templates/[id]/route.ts
 //
-// GET    /api/templates/:id  — fetch single master template (any logged-in)
-// PATCH  /api/templates/:id  — edit (super_admin only)
-// DELETE /api/templates/:id  — delete (super_admin only)
+// GET    /api/templates/:id  — fetch single template the caller can see
+// PATCH  /api/templates/:id  — edit (super_admin/admin any; owner only own customs)
+// DELETE /api/templates/:id  — delete (same rules as PATCH)
 //
-// :id accepts either the master_templates.id uuid or the legacy_id text
-// ('t1', 'ta2', etc.) so the UI can keep its existing string IDs in
-// in-memory state.
+// :id accepts either the templates.id uuid or the legacy_id text
+// ('t1', 'ta2', …) — legacy_ids only exist on masters; customs are
+// uuid-only.
+//
+// Owners cannot edit or delete a master (location_uuid IS NULL) — 403.
+// drip_path_steps.master_template_id is ON DELETE SET NULL so deleting
+// a template leaves its referencing steps in place with no linked
+// template (cron falls back to inline subject/body or skips).
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
-import { isSuperAdmin } from '@/lib/auth'
+import { isAdmin } from '@/lib/auth'
 
 const VALID_TYPES = new Set(['email', 'sms', 'call'])
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const SELECT_COLS =
+  'id, legacy_id, name, type, tag, subject, body, is_active, location_uuid, cloned_from_id, created_by, created_at, updated_at'
 
 function matchColumn(id: string) {
   return UUID_RE.test(id) ? 'id' : 'legacy_id'
+}
+
+function decorate(row: any, ownLocId: string | null) {
+  const isMaster = row.location_uuid == null
+  return {
+    ...row,
+    is_master: isMaster,
+    is_own_custom: !isMaster && ownLocId != null && row.location_uuid === ownLocId,
+  }
+}
+
+async function loadCallerAndTemplate(id: string) {
+  const supabase = await createServerSupabaseClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'unauthorized', status: 401 as const }
+
+  const { data: hubUser } = await supabase
+    .from('hub_users')
+    .select('id, role, location_id')
+    .eq('id', user.id)
+    .single()
+  if (!hubUser) return { error: 'no_hub_user_profile', status: 403 as const }
+
+  const { data: tpl, error } = await supabaseService
+    .from('templates')
+    .select(SELECT_COLS)
+    .eq(matchColumn(id), id)
+    .maybeSingle()
+
+  if (error) return { error: 'fetch_failed', status: 500 as const }
+  if (!tpl) return { error: 'not_found', status: 404 as const }
+
+  return { hubUser, tpl }
+}
+
+function ownerCanRead(hubUser: { role: string; location_id: string | null }, tpl: any) {
+  if (isAdmin(hubUser.role)) return true
+  // Masters are readable by anyone logged in. Customs only by their own location.
+  if (tpl.location_uuid == null) return true
+  return hubUser.location_id != null && tpl.location_uuid === hubUser.location_id
+}
+
+function ownerCanWrite(hubUser: { role: string; location_id: string | null }, tpl: any) {
+  if (isAdmin(hubUser.role)) return true
+  if (hubUser.role === 'lite_user') return false
+  // Owners can only modify customs in their own location. Masters are off-limits.
+  return tpl.location_uuid != null
+    && hubUser.location_id != null
+    && tpl.location_uuid === hubUser.location_id
 }
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const result = await loadCallerAndTemplate(params.id)
+  if ('error' in result) return NextResponse.json({ error: result.error }, { status: result.status })
+  const { hubUser, tpl } = result
 
-  const { data: hubUser } = await supabase
-    .from('hub_users')
-    .select('id, role')
-    .eq('id', user.id)
-    .single()
-  if (!hubUser) return NextResponse.json({ error: 'no_hub_user_profile' }, { status: 403 })
-
-  const { data, error } = await supabaseService
-    .from('master_templates')
-    .select('id, legacy_id, name, type, tag, subject, body, is_active, created_at, updated_at')
-    .eq(matchColumn(params.id), params.id)
-    .maybeSingle()
-
-  if (error) {
-    console.error('[/api/templates/[id] GET] error:', error.message)
-    return NextResponse.json({ error: 'fetch_failed' }, { status: 500 })
+  if (!ownerCanRead(hubUser, tpl)) {
+    return NextResponse.json({ error: 'forbidden_wrong_location' }, { status: 403 })
   }
-  if (!data) return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
-  return NextResponse.json({ template: data })
+  return NextResponse.json({ template: decorate(tpl, hubUser.location_id ?? null) })
 }
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const result = await loadCallerAndTemplate(params.id)
+  if ('error' in result) return NextResponse.json({ error: result.error }, { status: result.status })
+  const { hubUser, tpl } = result
 
-  const { data: hubUser } = await supabase
-    .from('hub_users')
-    .select('id, role')
-    .eq('id', user.id)
-    .single()
-  if (!hubUser) return NextResponse.json({ error: 'no_hub_user_profile' }, { status: 403 })
-  if (!isSuperAdmin(hubUser.role)) {
-    return NextResponse.json({ error: 'forbidden_super_admin_only' }, { status: 403 })
+  if (!ownerCanWrite(hubUser, tpl)) {
+    return NextResponse.json({ error: 'forbidden_cannot_edit_master' }, { status: 403 })
   }
 
   let body: Record<string, unknown>
@@ -97,10 +132,10 @@ export async function PATCH(
   }
 
   const { data, error } = await supabaseService
-    .from('master_templates')
+    .from('templates')
     .update(patch)
-    .eq(matchColumn(params.id), params.id)
-    .select('id, legacy_id, name, type, tag, subject, body, is_active, created_at, updated_at')
+    .eq('id', tpl.id)
+    .select(SELECT_COLS)
     .maybeSingle()
 
   if (error) {
@@ -109,36 +144,32 @@ export async function PATCH(
   }
   if (!data) return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
-  return NextResponse.json({ template: data })
+  return NextResponse.json({ template: decorate(data, hubUser.location_id ?? null) })
 }
 
 export async function DELETE(
   _req: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const result = await loadCallerAndTemplate(params.id)
+  if ('error' in result) return NextResponse.json({ error: result.error }, { status: result.status })
+  const { hubUser, tpl } = result
 
-  const { data: hubUser } = await supabase
-    .from('hub_users')
-    .select('id, role')
-    .eq('id', user.id)
-    .single()
-  if (!hubUser) return NextResponse.json({ error: 'no_hub_user_profile' }, { status: 403 })
-  if (!isSuperAdmin(hubUser.role)) {
-    return NextResponse.json({ error: 'forbidden_super_admin_only' }, { status: 403 })
+  if (!ownerCanWrite(hubUser, tpl)) {
+    return NextResponse.json({ error: 'forbidden_cannot_delete_master' }, { status: 403 })
   }
 
   const { error } = await supabaseService
-    .from('master_templates')
+    .from('templates')
     .delete()
-    .eq(matchColumn(params.id), params.id)
+    .eq('id', tpl.id)
 
   if (error) {
     console.error('[/api/templates/[id] DELETE] error:', error.message)
     return NextResponse.json({ error: 'delete_failed', detail: error.message }, { status: 500 })
   }
 
+  // Suppress unused-var lint warning while keeping hubUser in scope for future audit.
+  void hubUser
   return NextResponse.json({ ok: true })
 }

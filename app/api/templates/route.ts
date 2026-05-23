@@ -1,19 +1,35 @@
 // app/api/templates/route.ts
 //
-// GET  /api/templates       — list all master_templates (any logged-in hub_user)
-// POST /api/templates       — create a master template (super_admin only)
+// GET  /api/templates  — list templates visible to the caller:
+//   - super_admin / admin: all rows (every master + every location's customs)
+//   - owner:               masters (location_uuid IS NULL) + own location's customs
+//   - lite_user:           same as owner read scope
 //
-// The UI in components/BeeHub.jsx (Settings → Templates) reads these to
-// replace the in-memory DEFAULT_TEMPLATES constant. Franchise owners get
-// read-only access here; location-level overrides are a separate feature
-// (deferred — see Session 3 doc).
+// POST /api/templates  — create a template:
+//   - super_admin / admin: location_uuid optional (NULL → master, set → that location's custom)
+//   - owner:               location_uuid forced to caller's own location_id
+//
+// Response rows include `is_master` and `is_own_custom` convenience flags so
+// the UI can render the master vs. my-templates split without inspecting
+// location_uuid itself.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
-import { isSuperAdmin } from '@/lib/auth'
+import { isAdmin } from '@/lib/auth'
 
 const VALID_TYPES = new Set(['email', 'sms', 'call'])
+const SELECT_COLS =
+  'id, legacy_id, name, type, tag, subject, body, is_active, location_uuid, cloned_from_id, created_by, created_at, updated_at'
+
+function decorate(row: any, ownLocId: string | null) {
+  const isMaster = row.location_uuid == null
+  return {
+    ...row,
+    is_master: isMaster,
+    is_own_custom: !isMaster && ownLocId != null && row.location_uuid === ownLocId,
+  }
+}
 
 export async function GET() {
   const supabase = await createServerSupabaseClient()
@@ -22,23 +38,38 @@ export async function GET() {
 
   const { data: hubUser } = await supabase
     .from('hub_users')
-    .select('id, role')
+    .select('id, role, location_id')
     .eq('id', user.id)
     .single()
   if (!hubUser) return NextResponse.json({ error: 'no_hub_user_profile' }, { status: 403 })
 
-  const { data, error } = await supabaseService
-    .from('master_templates')
-    .select('id, legacy_id, name, type, tag, subject, body, is_active, created_at, updated_at')
+  let query = supabaseService
+    .from('templates')
+    .select(SELECT_COLS)
     .order('type', { ascending: true })
+    .order('location_uuid', { ascending: true, nullsFirst: true })
     .order('name', { ascending: true })
+
+  if (!isAdmin(hubUser.role)) {
+    // Owners/lite see masters + own location's customs only. Postgrest .or()
+    // takes a comma-separated list of conditions to OR together.
+    if (hubUser.location_id) {
+      query = query.or(`location_uuid.is.null,location_uuid.eq.${hubUser.location_id}`)
+    } else {
+      query = query.is('location_uuid', null)
+    }
+  }
+
+  const { data, error } = await query
 
   if (error) {
     console.error('[/api/templates GET] error:', error.message)
     return NextResponse.json({ error: 'list_failed' }, { status: 500 })
   }
 
-  return NextResponse.json({ templates: data ?? [] })
+  return NextResponse.json({
+    templates: (data ?? []).map(r => decorate(r, hubUser.location_id ?? null)),
+  })
 }
 
 export async function POST(req: NextRequest) {
@@ -48,12 +79,13 @@ export async function POST(req: NextRequest) {
 
   const { data: hubUser } = await supabase
     .from('hub_users')
-    .select('id, role')
+    .select('id, role, location_id')
     .eq('id', user.id)
     .single()
   if (!hubUser) return NextResponse.json({ error: 'no_hub_user_profile' }, { status: 403 })
-  if (!isSuperAdmin(hubUser.role)) {
-    return NextResponse.json({ error: 'forbidden_super_admin_only' }, { status: 403 })
+
+  if (hubUser.role === 'lite_user') {
+    return NextResponse.json({ error: 'forbidden_read_only' }, { status: 403 })
   }
 
   let body: Record<string, unknown>
@@ -75,8 +107,25 @@ export async function POST(req: NextRequest) {
   }
   if (!tplBody.trim()) return NextResponse.json({ error: 'body_required' }, { status: 400 })
 
+  // Owners can only create customs scoped to their own location. Admins
+  // can pass an explicit location_uuid (null for master, uuid for a
+  // specific location's custom).
+  let location_uuid: string | null = null
+  if (isAdmin(hubUser.role)) {
+    if (body.location_uuid === null) {
+      location_uuid = null
+    } else if (typeof body.location_uuid === 'string' && body.location_uuid) {
+      location_uuid = body.location_uuid
+    }
+  } else {
+    if (!hubUser.location_id) {
+      return NextResponse.json({ error: 'owner_has_no_location' }, { status: 400 })
+    }
+    location_uuid = hubUser.location_id
+  }
+
   const { data, error } = await supabaseService
-    .from('master_templates')
+    .from('templates')
     .insert({
       name,
       type,
@@ -84,8 +133,10 @@ export async function POST(req: NextRequest) {
       subject: type === 'email' ? subject : null,
       body: tplBody,
       is_active: true,
+      location_uuid,
+      created_by: hubUser.id,
     })
-    .select('id, legacy_id, name, type, tag, subject, body, is_active, created_at, updated_at')
+    .select(SELECT_COLS)
     .single()
 
   if (error) {
@@ -93,5 +144,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'create_failed', detail: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ template: data }, { status: 201 })
+  return NextResponse.json(
+    { template: decorate(data, hubUser.location_id ?? null) },
+    { status: 201 },
+  )
 }

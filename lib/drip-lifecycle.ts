@@ -239,10 +239,10 @@ export type { LocationCtx }
 // Mirrors the SQL seed in migrations/drips_infrastructure.sql for the
 // 4 launch locations but works for any new location.
 //
-// Step legacy_ids match the master_templates seed; we look up the master
+// Step legacy_ids match the templates seed; we look up the master
 // row by legacy_id, then insert the path + steps with master_template_id
 // references. Subject/body are left null so the cron renders from the
-// linked master template.
+// linked template.
 //
 // Idempotent: skips locations that already have general-a/move-a paths.
 
@@ -296,11 +296,12 @@ export async function seedDefaultDripPaths(locationUuid: string): Promise<void> 
       for (const s of DEFAULT_DRIP_PATHS[k].steps) allLegacy.add(s.legacy)
     }
     const { data: masters, error: mtErr } = await supabaseService
-      .from('master_templates')
+      .from('templates')
       .select('id, legacy_id')
+      .is('location_uuid', null)
       .in('legacy_id', Array.from(allLegacy))
     if (mtErr) {
-      console.error('[drip] seed: master_templates lookup failed', mtErr)
+      console.error('[drip] seed: templates lookup failed', mtErr)
       return
     }
     const byLegacy = new Map<string, string>()

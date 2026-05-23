@@ -81,13 +81,13 @@ export async function GET(req: NextRequest) {
       continue
     }
 
-    // Step for current_step + the linked master template
+    // Step for current_step + the linked template (master or location custom)
     const { data: step, error: stepErr } = await supabaseService
       .from('drip_path_steps')
       .select(
         `
         id, step_order, delay_days, channel, subject, body, master_template_id,
-        master_templates ( subject, body )
+        templates:master_template_id ( subject, body )
         `,
       )
       .eq('drip_path_id', path.id)
@@ -156,13 +156,13 @@ export async function GET(req: NextRequest) {
       phone = owner?.phone ?? null
     }
 
-    // Subject/body: step override > template
-    const masterTpl = (Array.isArray((step as any).master_templates)
-      ? (step as any).master_templates[0]
-      : (step as any).master_templates) as { subject: string | null; body: string } | null
+    // Subject/body: step override > linked template
+    const linkedTpl = (Array.isArray((step as any).templates)
+      ? (step as any).templates[0]
+      : (step as any).templates) as { subject: string | null; body: string } | null
 
-    const subjectSource = step.subject ?? masterTpl?.subject ?? null
-    const bodySource = step.body ?? masterTpl?.body ?? null
+    const subjectSource = step.subject ?? linkedTpl?.subject ?? null
+    const bodySource = step.body ?? linkedTpl?.body ?? null
 
     if (!bodySource) {
       failed++

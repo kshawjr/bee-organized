@@ -69,7 +69,7 @@ export async function GET(
       .order('name', { ascending: true }),
     supabaseService
       .from('drip_path_steps')
-      .select('id, drip_path_id, step_order, delay_days, channel, subject, body, master_template_id, is_active, master_templates(name, legacy_id, subject, body)')
+      .select('id, drip_path_id, step_order, delay_days, channel, subject, body, master_template_id, is_active, templates:master_template_id(name, legacy_id, subject, body)')
       .order('step_order', { ascending: true }),
     supabaseService
       .from('locations')
@@ -96,9 +96,9 @@ export async function GET(
     steps: allSteps
       .filter(s => s.drip_path_id === p.id && pathIds.has(s.drip_path_id))
       .map(s => {
-        const tpl = Array.isArray((s as any).master_templates)
-          ? (s as any).master_templates[0]
-          : (s as any).master_templates
+        const tpl = Array.isArray((s as any).templates)
+          ? (s as any).templates[0]
+          : (s as any).templates
         return {
           id: s.id,
           step_order: s.step_order,

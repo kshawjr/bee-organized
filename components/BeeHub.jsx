@@ -14293,6 +14293,34 @@ function StepTemplatePicker({ step, templates, onSelect, onClose, smsEnabled=tru
     (smsEnabled || t.type !== 'sms') &&
     (!search || t.name.toLowerCase().includes(search.toLowerCase()))
   )
+  // Split into Master Templates vs My Templates so owners can clearly see
+  // what's HQ-provided vs. their own customs. Falls back to a single group
+  // when neither flag is present (legacy state from DEFAULT_TEMPLATES seed).
+  const masters = compatible.filter(t => t.isMaster)
+  const myTemplates = compatible.filter(t => t.isOwnCustom)
+  const unflagged = compatible.filter(t => !t.isMaster && !t.isOwnCustom)
+
+  function renderRow(t) {
+    return (
+      <button key={t.dbId || t.id} onClick={()=>onSelect(t.id)} style={{ padding:'12px 14px', background:step.templateId===t.id?'rgba(168,201,196,0.12)':'white', border:`1.5px solid ${step.templateId===t.id?'#a8c9c4':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'3px' }}>
+          <span style={{ fontSize:'14px' }}>{t.type==='email'?'📧':t.type==='sms'?'💬':'📞'}</span>
+          <span style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{t.name}</span>
+          {step.templateId===t.id&&<span style={{ marginLeft:'auto', color:'#a8c9c4' }}>✓ Current</span>}
+        </div>
+        <p style={{ fontSize:'12px', color:'#8a9e9a', marginLeft:'22px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+          {t.type==='email'&&t.subject?t.subject:(t.body||'').slice(0,60)+'...'}
+        </p>
+      </button>
+    )
+  }
+
+  function renderGroupLabel(label) {
+    return (
+      <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', padding:'8px 4px 4px' }}>{label}</p>
+    )
+  }
+
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10004, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
       <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
@@ -14303,20 +14331,23 @@ function StepTemplatePicker({ step, templates, onSelect, onClose, smsEnabled=tru
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
         </div>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder='Search templates...' style={{ width:'100%', padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', marginBottom:'10px', flexShrink:0 }} />
-        <div style={{ flex:1, overflowY:'auto', display:'grid', gap:'6px' }}>
-          {compatible.length===0&&<p style={{ fontSize:'13px', color:'#8a9e9a', textAlign:'center', padding:'1rem' }}>No {step.type} templates found</p>}
-          {compatible.map(t=>(
-            <button key={t.id} onClick={()=>onSelect(t.id)} style={{ padding:'12px 14px', background:step.templateId===t.id?'rgba(168,201,196,0.12)':'white', border:`1.5px solid ${step.templateId===t.id?'#a8c9c4':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'3px' }}>
-                <span style={{ fontSize:'14px' }}>{t.type==='email'?'📧':t.type==='sms'?'💬':'📞'}</span>
-                <span style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{t.name}</span>
-                {step.templateId===t.id&&<span style={{ marginLeft:'auto', color:'#a8c9c4' }}>✓ Current</span>}
-              </div>
-              <p style={{ fontSize:'12px', color:'#8a9e9a', marginLeft:'22px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                {t.type==='email'&&t.subject?t.subject:t.body.slice(0,60)+'...'}
-              </p>
-            </button>
-          ))}
+        <div style={{ flex:1, overflowY:'auto', display:'flex', flexDirection:'column' }}>
+          {compatible.length===0 && <p style={{ fontSize:'13px', color:'#8a9e9a', textAlign:'center', padding:'1rem' }}>No {step.type} templates found</p>}
+          {masters.length > 0 && (
+            <>
+              {renderGroupLabel('📚 Master Templates')}
+              <div style={{ display:'grid', gap:'6px' }}>{masters.map(renderRow)}</div>
+            </>
+          )}
+          {myTemplates.length > 0 && (
+            <>
+              {renderGroupLabel('✏️ My Templates')}
+              <div style={{ display:'grid', gap:'6px' }}>{myTemplates.map(renderRow)}</div>
+            </>
+          )}
+          {unflagged.length > 0 && masters.length === 0 && myTemplates.length === 0 && (
+            <div style={{ display:'grid', gap:'6px' }}>{unflagged.map(renderRow)}</div>
+          )}
         </div>
       </div>
     </div>
@@ -16275,7 +16306,8 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   // so the UI renders something on first paint (and during failed-fetch dev paths)
   // — the DB-backed list replaces it once the request resolves. Each row maps
   // legacy_id → id so existing in-memory references (step.templateId='t1' etc.)
-  // keep working.
+  // keep working. After the templates rework the list is a mix of masters
+  // (isMaster=true, no location) and own customs (isMaster=false).
   const [templates, setTemplates]   = useState(DEFAULT_TEMPLATES)
   const [templatesLoading, setTemplatesLoading] = useState(true)
   const [templatesError, setTemplatesError]     = useState(null)
@@ -16298,6 +16330,10 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
           subject: r.subject || '',
           body: r.body || '',
           isActive: r.is_active !== false,
+          locationUuid: r.location_uuid || null,
+          isMaster: r.is_master === true,
+          isOwnCustom: r.is_own_custom === true,
+          clonedFromId: r.cloned_from_id || null,
           usedIn: [],
         })))
         setTemplatesError(null)
@@ -16306,8 +16342,6 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
       .finally(() => { if (!cancelled) setTemplatesLoading(false) })
     return () => { cancelled = true }
   }, [])
-
-  const [locationOverrides, setLocationOverrides] = useState({}) // masterTemplateId → customized copy
   const [pathSteps, setPathSteps]   = useState(DEFAULT_PATH_STEPS)
   // dbPaths is keyed by path_key (e.g. 'general-a') so the UI's existing
   // pathId mental model maps 1:1. Each entry holds the DB row's id so
@@ -16466,27 +16500,24 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     setShowCustomBuilder(false)
   }
 
-  // Persist template changes to /api/templates. Super admin only path; franchise
-  // owners currently fall back to in-memory locationOverrides (location-level
-  // overrides on master_templates aren't a DB feature yet).
+  // Persist template changes to /api/templates. Super admins edit masters or
+  // their own customs; owners edit only their location's customs (the API
+  // enforces this regardless of what the UI sends).
   async function saveTemplate(data) {
     const isNew = editingTemplate === 'new'
     const target = !isNew ? (editingTemplate.master || editingTemplate.tpl) : null
 
-    if (!isSuperAdmin && !isNew) {
-      const masterId = target.id
-      setLocationOverrides(prev=>({ ...prev, [masterId]:{ ...data, masterTemplateId:masterId, savedAt:new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'}) } }))
-      setEditingTemplate(null)
-      return
-    }
-
     try {
       if (isNew) {
+        // For non-admin callers the API forces location_uuid to their own
+        // location anyway, but we still include the explicit hint when known.
+        const payload = { name: data.name, type: data.type, subject: data.subject || null, body: data.body, tag: data.tag || 'custom' }
+        if (data.location_uuid !== undefined) payload.location_uuid = data.location_uuid
         const res = await fetch('/api/templates', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: data.name, type: data.type, subject: data.subject || null, body: data.body, tag: data.tag || 'custom' }),
+          body: JSON.stringify(payload),
         })
         const j = await res.json().catch(()=>({}))
         if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
@@ -16494,7 +16525,12 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
         setTemplates(prev => [...prev, {
           id: r.legacy_id || r.id, dbId: r.id, legacyId: r.legacy_id,
           name: r.name, type: r.type, tag: r.tag || '', subject: r.subject || '', body: r.body || '',
-          isActive: r.is_active !== false, usedIn: [],
+          isActive: r.is_active !== false,
+          locationUuid: r.location_uuid || null,
+          isMaster: r.is_master === true,
+          isOwnCustom: r.is_own_custom === true,
+          clonedFromId: r.cloned_from_id || null,
+          usedIn: [],
         }])
       } else {
         const refId = target.dbId || target.legacyId || target.id
@@ -16521,7 +16557,6 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   }
 
   async function deleteTemplate(tpl) {
-    if (!isSuperAdmin) return
     if (!confirm(`Delete template "${tpl.name}"? This cannot be undone.`)) return
     const refId = tpl.dbId || tpl.legacyId || tpl.id
     try {
@@ -16534,6 +16569,37 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
       setTemplates(prev => prev.filter(t => t.id !== tpl.id))
     } catch (e) {
       alert('Could not delete template: ' + (e?.message || e))
+    }
+  }
+
+  // Duplicate a master into the caller's location. On success, push the new
+  // custom into local state and immediately open the editor.
+  async function duplicateMasterTemplate(master) {
+    const refId = master.dbId || master.legacyId || master.id
+    try {
+      const res = await fetch(`/api/templates/${encodeURIComponent(refId)}/duplicate`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      const j = await res.json().catch(()=>({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      const r = j.template
+      const newTpl = {
+        id: r.legacy_id || r.id, dbId: r.id, legacyId: r.legacy_id,
+        name: r.name, type: r.type, tag: r.tag || '', subject: r.subject || '', body: r.body || '',
+        isActive: r.is_active !== false,
+        locationUuid: r.location_uuid || null,
+        isMaster: r.is_master === true,
+        isOwnCustom: r.is_own_custom === true,
+        clonedFromId: r.cloned_from_id || null,
+        usedIn: [],
+      }
+      setTemplates(prev => [...prev, newTpl])
+      // Open the editor on the new custom so the user can immediately tweak it.
+      setEditingTemplate({ master: newTpl, tpl: newTpl })
+    } catch (e) {
+      alert('Could not duplicate template: ' + (e?.message || e))
     }
   }
 
@@ -16940,95 +17006,102 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
 
         {/* ── Templates ── */}
         {activeSection==='templates'&&(()=>{
-          // Effective template for this location: override if exists, else master
-          function effectiveTemplate(master) {
-            const override = locationOverrides[master.id]
-            return override ? { ...master, ...override, isCustomized:true } : { ...master, isCustomized:false }
+          // After the templates rework: list contains masters (isMaster=true)
+          // and the caller's own customs (isOwnCustom=true). Owners cannot
+          // edit/delete masters; that lives in the Admin/Corp → Content tab.
+          const masters = templates.filter(t => t.isMaster)
+          const myCustoms = templates.filter(t => t.isOwnCustom)
+          const TYPE_META = {
+            email: { icon:'📧', label:'Email Templates', color:'#6366f1' },
+            sms:   { icon:'💬', label:'SMS Templates',   color:'#10b981' },
+            call:  { icon:'📞', label:'Call Scripts',    color:'#f59e0b' },
           }
-          function saveLocationCopy(master, data) {
-            setLocationOverrides(prev=>({ ...prev, [master.id]:{ ...data, masterTemplateId:master.id, savedAt:new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'}) } }))
+          function renderTplRow(tpl, opts) {
+            const { actions } = opts
+            const tc = TYPE_META[tpl.type] || TYPE_META.email
+            return (
+              <div style={{ background:'white', borderBottom:opts.lastInGroup?'none':'1px solid rgba(0,0,0,0.05)' }}>
+                <div style={{ display:'flex', alignItems:'flex-start', gap:'12px', padding:'12px 14px' }}>
+                  <div style={{ width:'36px', height:'36px', borderRadius:'9px', background:`${tc.color}12`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px', flexShrink:0, marginTop:'1px' }}>{tc.icon}</div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:'7px', marginBottom:'2px' }}>
+                      <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{tpl.name}</p>
+                      {tpl.tag && <span style={{ fontSize:'10px', color:'#8a9e9a', background:'rgba(0,0,0,0.05)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>{tpl.tag}</span>}
+                    </div>
+                    <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {tpl.type==='email' && tpl.subject ? tpl.subject : tpl.body.slice(0,60)+'…'}
+                    </p>
+                  </div>
+                  <div style={{ display:'flex', gap:'6px', flexShrink:0 }}>
+                    {actions}
+                  </div>
+                </div>
+              </div>
+            )
           }
-          function resetToMaster(masterId) {
-            setLocationOverrides(prev=>{ const n={...prev}; delete n[masterId]; return n })
+          function renderTypedGroup(rows, opts) {
+            return ['email','sms','call'].map(type=>{
+              const group = rows.filter(t=>t.type===type)
+              if (!group.length) return null
+              const tc = TYPE_META[type]
+              const isLocked = type==='sms' && !settings.location.smsEnabled
+              return (
+                <div key={type} style={{ marginBottom:'16px', opacity:isLocked?0.5:1, pointerEvents:isLocked?'none':'auto' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'8px' }}>
+                    <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px' }}>{tc.icon} {tc.label}</p>
+                    {isLocked&&<span style={{ fontSize:'10px', color:'#d4a046', background:'rgba(212,160,70,0.1)', padding:'2px 8px', borderRadius:'20px', fontWeight:600 }}>Add-on needed</span>}
+                  </div>
+                  <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+                    {group.map((tpl, i)=>(
+                      <div key={tpl.dbId || tpl.id}>
+                        {renderTplRow(tpl, {
+                          lastInGroup: i === group.length - 1,
+                          actions: opts.actions(tpl),
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })
           }
-
-          const MERGE_FIELDS = ['{{first_name}}','{{last_name}}','{{organizer_name}}','{{location_name}}','{{phone}}','{{booking_link}}','{{service_area}}']
 
           return (
             <div style={{ padding:'0 12px 32px' }}>
-              {/* Header */}
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 0 12px' }}>
-                <div>
-                  <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>📧 Email Templates</p>
-                  <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>
-                    {isSuperAdmin ? 'Master templates · changes here update the default for all locations' : 'Your location\'s templates · edits here only affect your location'}
-                  </p>
-                </div>
-                {isSuperAdmin&&(
-                  <button onClick={()=>setEditingTemplate('new')} style={{ padding:'8px 14px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>+ New Template</button>
-                )}
+              {/* ── Section 1: Master Templates (read-only for owners) ── */}
+              <div style={{ padding:'16px 0 6px' }}>
+                <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>📚 Master Templates</p>
+                <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>Provided by Bee Organized HQ. To customize, duplicate one to your own library.</p>
               </div>
+              {renderTypedGroup(masters, {
+                actions: (tpl) => (
+                  <>
+                    <button onClick={()=>setPreviewTemplate(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
+                    <button onClick={()=>duplicateMasterTemplate(tpl)} style={{ padding:'5px 10px', background:'#1a2e2b', border:'1px solid #1a2e2b', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'white', cursor:'pointer' }}>Duplicate</button>
+                  </>
+                ),
+              })}
 
-              {/* Legend - franchise only */}
-              {!isSuperAdmin&&(
-                <div style={{ display:'flex', gap:'10px', marginBottom:'14px', flexWrap:'wrap' }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:'5px' }}><span style={{ width:'8px', height:'8px', borderRadius:'50%', background:'#8a9e9a', display:'inline-block' }} /><span style={{ fontSize:'11px', color:'#8a9e9a' }}>Using master</span></div>
-                  <div style={{ display:'flex', alignItems:'center', gap:'5px' }}><span style={{ width:'8px', height:'8px', borderRadius:'50%', background:'#a8c9c4', display:'inline-block' }} /><span style={{ fontSize:'11px', color:'#8a9e9a' }}>Customized by you</span></div>
+              {/* ── Section 2: My Templates ── */}
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'18px 0 6px' }}>
+                <div>
+                  <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>✏️ Your Custom Templates</p>
+                  <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>Templates you&rsquo;ve created or customized &mdash; only your location uses these.</p>
                 </div>
-              )}
-
-              {/* Templates grouped by type */}
-              {['email','sms','call'].map(type=>{
-                const group = templates.filter(t=>t.type===type)
-                if (!group.length) return null
-                const tc = {email:{icon:'📧',label:'Email Templates',color:'#6366f1'},sms:{icon:'💬',label:'SMS Templates',color:'#10b981'},call:{icon:'📞',label:'Call Scripts',color:'#f59e0b'}}[type]
-                const isLocked = type==='sms'&&!settings.location.smsEnabled
-                return (
-                  <div key={type} style={{ marginBottom:'20px', opacity:isLocked?0.5:1, pointerEvents:isLocked?'none':'auto' }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'8px' }}>
-                      <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px' }}>{tc.icon} {tc.label}</p>
-                      {isLocked&&<span style={{ fontSize:'10px', color:'#d4a046', background:'rgba(212,160,70,0.1)', padding:'2px 8px', borderRadius:'20px', fontWeight:600 }}>Add-on needed</span>}
-                    </div>
-                    <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
-                      {group.map((master, i)=>{
-                        const tpl = effectiveTemplate(master)
-                        const isCustomized = !isSuperAdmin && tpl.isCustomized
-                        return (
-                          <div key={master.id} style={{ background:'white', borderBottom:i<group.length-1?'1px solid rgba(0,0,0,0.05)':'none' }}>
-                            <div style={{ display:'flex', alignItems:'flex-start', gap:'12px', padding:'12px 14px' }}>
-                              <div style={{ width:'36px', height:'36px', borderRadius:'9px', background:`${tc.color}12`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px', flexShrink:0, marginTop:'1px' }}>{tc.icon}</div>
-                              <div style={{ flex:1, minWidth:0 }}>
-                                <div style={{ display:'flex', alignItems:'center', gap:'7px', marginBottom:'2px' }}>
-                                  <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{tpl.name}</p>
-                                  {isSuperAdmin && <span style={{ fontSize:'10px', color:'#8a9e9a', background:'rgba(0,0,0,0.05)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>Master</span>}
-                                  {isCustomized && <span style={{ fontSize:'10px', color:'#a8c9c4', background:'rgba(168,201,196,0.12)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>✓ Customized {tpl.savedAt?'· '+tpl.savedAt:''}</span>}
-                                  {!isSuperAdmin && !isCustomized && <span style={{ fontSize:'10px', color:'#8a9e9a', background:'rgba(0,0,0,0.04)', padding:'1px 7px', borderRadius:'20px' }}>Using master</span>}
-                                </div>
-                                <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                                  {type==='email' && tpl.subject ? tpl.subject : tpl.body.slice(0,60)+'…'}
-                                </p>
-                              </div>
-                              <div style={{ display:'flex', gap:'6px', flexShrink:0 }}>
-                                <button onClick={()=>setPreviewTemplate(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
-                                <button onClick={()=>setEditingTemplate({ master, tpl })} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Edit</button>
-                                {isSuperAdmin && !master.legacyId && (
-                                  <button onClick={()=>deleteTemplate(master)} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#ef4444', cursor:'pointer' }}>Delete</button>
-                                )}
-                              </div>
-                            </div>
-                            {/* Reset to master row - only if customized */}
-                            {isCustomized&&(
-                              <div style={{ borderTop:'1px solid rgba(0,0,0,0.04)', padding:'8px 14px 8px 62px', display:'flex', alignItems:'center', gap:'8px' }}>
-                                <span style={{ fontSize:'11px', color:'#c8d8d4' }}>↩ Reverts to master if reset</span>
-                                <button onClick={()=>resetToMaster(master.id)} style={{ marginLeft:'auto', fontSize:'11px', color:'#ef4444', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', padding:0 }}>Reset to master</button>
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
+                <button onClick={()=>setEditingTemplate('new')} style={{ padding:'8px 14px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>+ Create Template</button>
+              </div>
+              {myCustoms.length === 0 ? (
+                <div style={{ background:'white', padding:'18px 14px', borderRadius:'12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', textAlign:'center' }}>
+                  <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>No custom templates yet. Duplicate a master template above or create one from scratch to get started.</p>
+                </div>
+              ) : renderTypedGroup(myCustoms, {
+                actions: (tpl) => (
+                  <>
+                    <button onClick={()=>setPreviewTemplate(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
+                    <button onClick={()=>setEditingTemplate({ master: tpl, tpl })} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Edit</button>
+                    <button onClick={()=>deleteTemplate(tpl)} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#ef4444', cursor:'pointer' }}>Delete</button>
+                  </>
+                ),
               })}
             </div>
           )
@@ -22562,6 +22635,7 @@ function ContentEditor({ guideSlides, guidePersist, manualSlides, manualPersist 
         >
           <option value="guide">📖 Quick Start Guide</option>
           <option value="manual">📚 Manual</option>
+          <option value="templates">📧 Email Templates (Master)</option>
         </select>
       </div>
 
@@ -22570,6 +22644,161 @@ function ContentEditor({ guideSlides, guidePersist, manualSlides, manualPersist 
       )}
       {activeContent === 'manual' && (
         <ManualEditor slides={manualSlides} onPersist={manualPersist} />
+      )}
+      {activeContent === 'templates' && (
+        <MasterTemplatesEditor />
+      )}
+    </div>
+  )
+}
+
+// MasterTemplatesEditor — admin-only surface for managing the corp-owned
+// master template library. Lives in Admin/Corp → Content tab. Edits here
+// propagate live to every drip path step that still references a master
+// (no copy semantics).
+function MasterTemplatesEditor() {
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState(null)
+  const [editing, setEditing] = useState(null) // 'new' | { tpl }
+  const [previewing, setPreviewing] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    fetch('/api/templates', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(j => {
+        if (cancelled) return
+        const all = Array.isArray(j?.templates) ? j.templates : []
+        setRows(all.filter(r => r.is_master))
+        setErr(null)
+      })
+      .catch(e => { if (!cancelled) setErr(String(e?.message || e)) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+
+  async function saveMaster(data) {
+    try {
+      if (editing === 'new') {
+        const res = await fetch('/api/templates', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: data.name, type: data.type, subject: data.subject || null,
+            body: data.body, tag: data.tag || 'custom', location_uuid: null,
+          }),
+        })
+        const j = await res.json().catch(()=>({}))
+        if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+        setRows(prev => [...prev, j.template])
+      } else {
+        const id = editing.tpl.id
+        const res = await fetch(`/api/templates/${encodeURIComponent(id)}`, {
+          method: 'PATCH', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: data.name, type: data.type, subject: data.subject || null, body: data.body,
+          }),
+        })
+        const j = await res.json().catch(()=>({}))
+        if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+        setRows(prev => prev.map(r => r.id === j.template.id ? j.template : r))
+      }
+      setEditing(null)
+    } catch (e) {
+      alert('Could not save master template: ' + (e?.message || e))
+    }
+  }
+
+  async function deleteMaster(tpl) {
+    if (!confirm(`Delete master "${tpl.name}"? Drip steps referencing it will lose their link (cron will skip them).`)) return
+    try {
+      const res = await fetch(`/api/templates/${encodeURIComponent(tpl.id)}`, {
+        method: 'DELETE', credentials: 'include',
+      })
+      const j = await res.json().catch(()=>({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      setRows(prev => prev.filter(r => r.id !== tpl.id))
+    } catch (e) {
+      alert('Could not delete: ' + (e?.message || e))
+    }
+  }
+
+  const TYPE_META = {
+    email: { icon:'📧', label:'Email Templates', color:'#6366f1' },
+    sms:   { icon:'💬', label:'SMS Templates',   color:'#10b981' },
+    call:  { icon:'📞', label:'Call Scripts',    color:'#f59e0b' },
+  }
+
+  return (
+    <div style={{ padding:'14px 1.25rem 32px' }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'10px' }}>
+        <div>
+          <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>📧 Master Email Templates</p>
+          <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>Edits here propagate live to every drip step that references this master (no copy semantics).</p>
+        </div>
+        <button onClick={()=>setEditing('new')} style={{ padding:'8px 14px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>+ New Master</button>
+      </div>
+
+      {loading && <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Loading masters…</p>}
+      {err && <p style={{ fontSize:'12px', color:'#ef4444' }}>Could not load masters: {err}</p>}
+
+      {!loading && !err && ['email','sms','call'].map(type => {
+        const group = rows.filter(r => r.type === type)
+        if (!group.length) return null
+        const tc = TYPE_META[type]
+        return (
+          <div key={type} style={{ marginBottom:'18px' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'8px' }}>
+              <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px' }}>{tc.icon} {tc.label}</p>
+            </div>
+            <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+              {group.map((tpl, i) => (
+                <div key={tpl.id} style={{ background:'white', borderBottom: i < group.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
+                  <div style={{ display:'flex', alignItems:'flex-start', gap:'12px', padding:'12px 14px' }}>
+                    <div style={{ width:'36px', height:'36px', borderRadius:'9px', background:`${tc.color}12`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px', flexShrink:0, marginTop:'1px' }}>{tc.icon}</div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:'7px', marginBottom:'2px' }}>
+                        <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{tpl.name}</p>
+                        <span style={{ fontSize:'10px', color:'#8a9e9a', background:'rgba(0,0,0,0.05)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>Master</span>
+                        {tpl.legacy_id && <span style={{ fontSize:'10px', color:'#8a9e9a' }}>· {tpl.legacy_id}</span>}
+                      </div>
+                      <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        {type === 'email' && tpl.subject ? tpl.subject : (tpl.body || '').slice(0, 60) + '…'}
+                      </p>
+                    </div>
+                    <div style={{ display:'flex', gap:'6px', flexShrink:0 }}>
+                      <button onClick={()=>setPreviewing(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
+                      <button onClick={()=>setEditing({ tpl })} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Edit</button>
+                      {!tpl.legacy_id && (
+                        <button onClick={()=>deleteMaster(tpl)} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#ef4444', cursor:'pointer' }}>Delete</button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+
+      {previewing && (
+        <TemplatePreviewModal
+          template={{ ...previewing, body: previewing.body || '' }}
+          settings={{ profile:{}, location:{} }}
+          onClose={()=>setPreviewing(null)}
+        />
+      )}
+      {editing && (
+        <TemplateEditorPopup
+          template={editing === 'new' ? null : editing.tpl}
+          isNew={editing === 'new'}
+          isMasterEdit={editing !== 'new'}
+          onSave={saveMaster}
+          onClose={()=>setEditing(null)}
+        />
       )}
     </div>
   )
