@@ -41,6 +41,14 @@ Multi-tenant client web app — Next.js + Supabase, with Jobber integration.
 - middleware.ts — auth gating, affects every request
 - /app/api/ — server routes touching real production data
 
+## Drip system (cron)
+- Vercel cron hits `/api/cron/send-drips` hourly (see vercel.json).
+- Endpoint requires `CRON_SECRET` env var. Vercel cron sends it as
+  `Authorization: Bearer <CRON_SECRET>`; manual testing also accepts
+  `?secret=<value>`. Set in Vercel project settings (Production +
+  Preview). Generate with `openssl rand -hex 32`.
+- Without `CRON_SECRET`, the route returns 500 — fail-closed.
+
 ## Known issues / tech debt
 - Next.js 14.2.3 has a security vulnerability — planned upgrade to latest patched 14.x
 - npm audit shows 1 critical + 1 moderate — do not run `npm audit fix --force`, fix deliberately

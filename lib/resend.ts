@@ -31,6 +31,40 @@ interface SendEmailDirectArgs {
   text?: string
 }
 
+// ─── Template variable substitution ──────────────────────────────────
+// Replaces {{variable}} placeholders in a subject + body. Missing or
+// null/undefined values substitute as empty string so unrendered
+// "{{first_name}}" never reaches the recipient.
+export interface RenderContext {
+  first_name?: string | null
+  organizer_name?: string | null
+  location_name?: string | null
+  phone?: string | null
+  booking_link?: string | null
+  service_area?: string | null
+}
+
+const VAR_RE = /\{\{(\w+)\}\}/g
+
+function applyVars(input: string | null | undefined, ctx: RenderContext): string {
+  if (!input) return ''
+  return input.replace(VAR_RE, (_match, key: string) => {
+    const v = (ctx as Record<string, unknown>)[key]
+    if (v === null || v === undefined) return ''
+    return String(v)
+  })
+}
+
+export function renderTemplate(
+  template: { subject: string | null; body: string },
+  context: RenderContext,
+): { subject: string; body: string } {
+  return {
+    subject: applyVars(template.subject, context),
+    body: applyVars(template.body, context),
+  }
+}
+
 export async function sendEmail(args: SendEmailArgs): Promise<SendResult> {
   const { locationId, to, subject, html, text } = args
 

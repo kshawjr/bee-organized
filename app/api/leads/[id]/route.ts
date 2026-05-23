@@ -17,6 +17,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { updateLead } from '@/lib/dual-write'
 import { isAdmin } from '@/lib/auth'
+import { applyDripSideEffects } from '@/lib/drip-lifecycle'
 
 const VALID_STAGES = [
   'New',
@@ -196,6 +197,19 @@ export async function PATCH(
       user_id: hubUser.id,
       occurred_at: new Date().toISOString(),
     })
+  }
+
+  // ─── Drip lifecycle side-effects ─────────────────────────────
+  // Fire-and-forget: start on stage→'New', stop on exit, pause/resume on
+  // paused toggle, stop on junk. Each branch swallows its own errors so
+  // PATCH responses are never blocked by drip bookkeeping.
+  if (existing.location_uuid) {
+    void applyDripSideEffects({
+      leadId: id,
+      locationUuid: existing.location_uuid,
+      prevStage: existing.stage ?? null,
+      patch,
+    }).catch((err) => console.error('[drip] applyDripSideEffects threw', err))
   }
 
   // ─── Return fresh row ─────────────────────────────────────────
