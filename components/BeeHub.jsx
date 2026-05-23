@@ -19503,7 +19503,7 @@ function LocationCard({ loc, role, onSelect, onStatusChange, onViewLocation, onD
 }
 
 
-function LocationDetailSheet({ loc, onClose, onStatusChange, onViewLocation, onDrilldown, role }) {
+function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, onViewLocation, onDrilldown, role }) {
   const router = useRouter()
   React.useEffect(() => {
     const prev = document.body.style.overflow
@@ -19565,12 +19565,13 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onViewLocation, onD
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json.error || 'Save failed')
-      setCurrentLoc(prev => ({
-        ...prev,
+      const nextFields = {
         payment_source:    json.location?.payment_source    ?? paymentSource,
         paid_through_date: json.location?.paid_through_date ?? null,
         billing_notes:     json.location?.billing_notes     ?? null,
-      }))
+      }
+      setCurrentLoc(prev => ({ ...prev, ...nextFields }))
+      onLocationUpdate && onLocationUpdate(currentLoc.id, nextFields)
       setSubSuccess(true)
       router.refresh()
     } catch (err) {
@@ -22960,6 +22961,11 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
     if (onStatusChange) onStatusChange(id, status)
   }
 
+  function updateLocationFields(id, fields) {
+    setLocations(prev=>prev.map(l=>l.id===id?{...l,...fields}:l))
+    setSelectedLoc(prev=>prev&&prev.id===id?{...prev,...fields}:prev)
+  }
+
   const filtered = locations.filter(l=>{
     const q = search.toLowerCase()
     const matchSearch = !search||l.name.toLowerCase().includes(q)||(l.owner||'').toLowerCase().includes(q)
@@ -23137,6 +23143,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
             updateStatus(id,status)
             setSelectedLoc(prev=>({...prev,crmStatus:status}))
           }}
+          onLocationUpdate={updateLocationFields}
           onViewLocation={onViewLocation}
         />
       )}
