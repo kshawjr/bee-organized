@@ -17011,8 +17011,12 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   const stageCounts   = STAGES.filter(s=>s.key!=='Closed Won'&&s.key!=='Closed Lost').map(s=>({...s,count:activePeople.filter(l=>l.stage===s.key).length})).filter(s=>s.count>0)
   const maxCount      = Math.max(...stageCounts.map(s=>s.count), 1)
 
-  const now = new Date()
-  const dateStr = now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})
+  // Initialize to null so SSR doesn't pick a server-side time that
+  // mismatches client time on hydration (caused React errors #418,
+  // #423, #425). Effect sets it to client time after mount.
+  const [now, setNow] = useState(null)
+  useEffect(() => { setNow(new Date()) }, [])
+  const dateStr = now ? now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}) : ''
 
 
   const navItems = isOnboarding
@@ -17152,7 +17156,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         <p style={{ fontSize:'11px', color:BRAND.teal, fontWeight:600, marginBottom:'2px', opacity:0.7, textTransform:'uppercase', letterSpacing:'1.5px' }}>The Hive Hub</p>
         <p style={{ fontSize:'12px', color:BRAND.teal, fontWeight:500, marginBottom:'4px', opacity:0.7 }}>{dateStr}</p>
         <h1 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'white', marginBottom:'4px' }}>
-          {now.getHours()<12?'Good morning':now.getHours()<17?'Good afternoon':'Good evening'}{ownerName&&ownerName!=='there'&&ownerName.trim().length>1?`, ${ownerName.trim().split(' ')[0]}`:''} 👋
+          {!now?'Hello':now.getHours()<12?'Good morning':now.getHours()<17?'Good afternoon':'Good evening'}{ownerName&&ownerName!=='there'&&ownerName.trim().length>1?`, ${ownerName.trim().split(' ')[0]}`:''} 👋
         </h1>
         <button
           onClick={()=>{ if (onClickLocation) onClickLocation() }}
