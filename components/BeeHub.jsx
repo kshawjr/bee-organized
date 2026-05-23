@@ -12,6 +12,30 @@ import {
   prorateToNextRenewal,
 } from "@/lib/subscription-math"
 
+// Reviews-link URL validation. Used by onboarding location step + Settings
+// "Google Reviews" row. Required field — owners must enter a real review URL
+// so the New Lead Drip "request a review" template renders correctly.
+// Returns null when valid, otherwise an error message ready to render inline.
+// Uses the URL constructor (try-catch) instead of regex: it catches edge
+// cases like "https:google.com" (missing //) or "https://" (no host) that
+// a naive /^https?:\/\// regex would let through.
+function validateReviewsLink(raw) {
+  const value = (raw || '').trim()
+  if (!value) return 'Google review link is required'
+  if (!/^https?:\/\//i.test(value)) {
+    return 'Please enter a valid URL starting with http:// or https://'
+  }
+  try {
+    const u = new URL(value)
+    if (!u.hostname || !u.hostname.includes('.')) {
+      return 'Please enter a valid URL starting with http:// or https://'
+    }
+  } catch {
+    return 'Please enter a valid URL starting with http:// or https://'
+  }
+  return null
+}
+
 // ═══════════════════════════════════════════════════════
 //  BEE HUB - Combined App Preview
 //  Dashboard + The Hive in one navigable experience
@@ -9213,14 +9237,34 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     currentLocationCtx?.payment_source === 'prepaid_corporate' || currentLocationCtx?.payment_source === 'corporate_sponsored'
       ? currentLocationCtx.payment_source
       : 'direct'
-  const paySubDisplay = getSubscriptionDisplay(paymentSourceForPay, selectedSeats)
-  const ccAmount = Math.round(paySubDisplay.prorated * 1.03 * 100) / 100
+  // Use the same price source + co-owner discount logic as the inner
+  // SubscriptionCalculator (which renders the "Due Today" card). Previously
+  // the outer paySubDisplay used DEFAULT_TIER_PRICES and skipped the
+  // co-owner discount, so the "Activate for" button label (and the actual
+  // /api/seats prorated_cost we send) disagreed with the displayed
+  // "Due Today" total — under-charging the customer.
+  const livePricesForPay = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
+  const paySubDisplay = getSubscriptionDisplay(
+    paymentSourceForPay,
+    selectedSeats,
+    new Date(),
+    livePricesForPay,
+  )
+  const ownerCountForPay = (selectedSeats.find(s => s.tier === 'owner')?.count) || 0
+  const ownerPriceForPay = livePricesForPay.owner || 0
+  const managerPriceForPay = livePricesForPay.manager || 0
+  const coOwnerDiscountForPay =
+    ownerCountForPay >= 2 ? (ownerCountForPay - 1) * (ownerPriceForPay - managerPriceForPay) : 0
+  const effectiveAnnualForPay = paySubDisplay.annual - coOwnerDiscountForPay
+  const effectiveProratedForPay =
+    paymentSourceForPay === 'direct' ? prorateToNextRenewal(effectiveAnnualForPay) : 0
+  const ccAmount = Math.round(effectiveProratedForPay * 1.03 * 100) / 100
   // Back-compat shim — the legacy payment screens (method picker, ACH form,
   // CC form, post-pay confirm) read `proration.*`. Map to the new display
   // so we don't have to touch every downstream string.
   const proration = {
-    prorated: paySubDisplay.prorated,
-    annual:   paySubDisplay.annual,
+    prorated: effectiveProratedForPay,
+    annual:   effectiveAnnualForPay,
     days:     paySubDisplay.daysUntilRenewal,
     renewDate: formatRenewalDate(paySubDisplay.renewalDate),
   }
@@ -9316,6 +9360,13 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
 
   async function saveLocation() {
     if (savingStep) return
+    // Reviews link is required + must be a valid URL. Guard at the
+    // save boundary so a broken validator UI doesn't let bad data through.
+    const reviewsLinkErr = validateReviewsLink(locationForm.reviewsLink)
+    if (reviewsLinkErr) {
+      setStepError(e => ({ ...e, location: reviewsLinkErr }))
+      return
+    }
     const locId = currentLocationCtx?.id
     setSavingStep('location')
     setStepError(e => ({ ...e, location: '' }))
@@ -10455,7 +10506,8 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
   if (step.id==='location') {
     // Autofill phone from profile if not yet set
     const locPhone = locationForm.phone || profileForm.phone
-    const ready = locationForm.address && locationForm.city && locationForm.state && locPhone && locationForm.sendFromEmail && locationForm.timezone
+    const reviewsLinkError = validateReviewsLink(locationForm.reviewsLink)
+    const ready = locationForm.address && locationForm.city && locationForm.state && locPhone && locationForm.sendFromEmail && locationForm.timezone && !reviewsLinkError
 
     return (
       <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
@@ -10552,11 +10604,19 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
           </select>
         </div>
 
-        {/* Google Review link */}
+        {/* Google Review link — required, validated. Surfaces in New Lead Drip
+           "request a review" template; bad/missing URL = broken email. */}
         <div>
-          <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'4px' }}>⭐ Google Review Link</p>
+          <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:'4px' }}>
+            <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>⭐ Google Review Link <span style={{ color:'#ef4444' }}>*</span></p>
+            <span style={{ fontSize:'10px', color:'#ef4444', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px' }}>Required</span>
+          </div>
           <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'6px' }}>Included in your follow-up emails to encourage reviews. Find it in your Google Business Profile.</p>
-          <input type="url" value={locationForm.reviewsLink} onChange={e=>setLocationForm(f=>({...f,reviewsLink:e.target.value}))} placeholder="https://g.page/your-business/review" style={inp} />
+          <input type="url" value={locationForm.reviewsLink} onChange={e=>setLocationForm(f=>({...f,reviewsLink:e.target.value}))} placeholder="https://g.page/your-business/review"
+            style={{ ...inp, borderColor: locationForm.reviewsLink && reviewsLinkError ? 'rgba(239,68,68,0.45)' : (inp.borderColor || 'rgba(0,0,0,0.1)') }} />
+          {locationForm.reviewsLink && reviewsLinkError && (
+            <p style={{ fontSize:'11px', color:'#b91c1c', marginTop:'4px' }}>{reviewsLinkError}</p>
+          )}
         </div>
 
         <button onClick={()=>{ if(ready) saveLocation && saveLocation() }} disabled={!ready || savingStep==='location'}
@@ -15632,34 +15692,48 @@ function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdate
   )
 }
 
-function SettingsEditRow({ label, value, onSave, readOnly, hint, type='text' }) {
+function SettingsEditRow({ label, value, onSave, readOnly, hint, type='text', required=false, validate=null }) {
   const [editing, setEditing] = useState(false)
   const [val, setVal] = useState(value)
 
-  function save() { if (val.trim()) { onSave(val.trim()); setEditing(false) } }
+  // Inline validation — `validate(v)` returns null on success or an error
+  // string. Used by the "Google Reviews" row so owners can't blank/break
+  // the required URL post-onboarding.
+  const errorMsg = validate ? validate(val) : null
+  const saveDisabled = errorMsg !== null || (required && !val.trim())
+
+  function save() {
+    if (saveDisabled) return
+    if (!val.trim() && !required) { onSave(val.trim()); setEditing(false); return }
+    onSave(val.trim())
+    setEditing(false)
+  }
   function cancel() { setVal(value); setEditing(false) }
 
   return (
     <div style={{ padding:'12px 16px', borderBottom:'1px solid rgba(0,0,0,0.05)', background:'white' }}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px' }}>
         <div style={{ flex:1, minWidth:0 }}>
-          <p style={{ fontSize:'11px', color:'#8a9e9a', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'2px' }}>{label}</p>
+          <p style={{ fontSize:'11px', color:'#8a9e9a', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'2px' }}>
+            {label}{required && <span style={{ color:'#ef4444', marginLeft:'4px' }}>*</span>}
+          </p>
           {editing ? (
             <input
               autoFocus type={type} value={val}
               onChange={e=>setVal(e.target.value)}
               onKeyDown={e=>{ if(e.key==='Enter') save(); if(e.key==='Escape') cancel() }}
-              style={{ width:'100%', padding:'6px 8px', border:'1.5px solid #a8c9c4', borderRadius:'6px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }}
+              style={{ width:'100%', padding:'6px 8px', border:`1.5px solid ${errorMsg ? 'rgba(239,68,68,0.5)' : '#a8c9c4'}`, borderRadius:'6px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }}
             />
           ) : (
             <p style={{ fontSize:'14px', color:readOnly?'#8a9e9a':'#1a2e2b', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{value||<span style={{ color:'#c8d8d4' }}>Not set</span>}</p>
           )}
+          {editing && errorMsg && <p style={{ fontSize:'11px', color:'#b91c1c', marginTop:'4px' }}>{errorMsg}</p>}
           {hint&&!editing&&<p style={{ fontSize:'11px', color:'#b0c0bc', marginTop:'2px' }}>{hint}</p>}
         </div>
         {!readOnly&&(
           editing ? (
             <div style={{ display:'flex', gap:'6px', flexShrink:0 }}>
-              <button onClick={save}   style={{ fontSize:'12px', color:'white', background:'#1a2e2b', border:'none', borderRadius:'6px', padding:'5px 10px', cursor:'pointer', fontFamily:'inherit' }}>Save</button>
+              <button onClick={save} disabled={saveDisabled} style={{ fontSize:'12px', color:saveDisabled?'#9ca3af':'white', background:saveDisabled?'#e5e7eb':'#1a2e2b', border:'none', borderRadius:'6px', padding:'5px 10px', cursor:saveDisabled?'not-allowed':'pointer', fontFamily:'inherit' }}>Save</button>
               <button onClick={cancel} style={{ fontSize:'18px', color:'#8a9e9a', background:'none', border:'none', cursor:'pointer', lineHeight:1 }}>×</button>
             </div>
           ) : (
@@ -16170,7 +16244,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             <SectionHeader title="Online Presence" />
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
               <SettingsEditRow label="Booking Link"     value={settings.location.bookingLink}  onSave={v=>updateLocation('bookingLink',v)}  hint="Shared in New Lead Drip emails" />
-              <SettingsEditRow label="Google Reviews"   value={settings.location.reviewsLink}  onSave={v=>updateLocation('reviewsLink',v)}  hint="Sent to completed clients" />
+              <SettingsEditRow label="Google Reviews"   value={settings.location.reviewsLink}  onSave={v=>updateLocation('reviewsLink',v)}  hint="Sent to completed clients" required validate={validateReviewsLink} />
             </div>
 
             <SectionHeader title="Assessment Default" desc="Used when scheduling - can be overridden per client" />
