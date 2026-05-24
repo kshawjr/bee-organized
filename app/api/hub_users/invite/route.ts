@@ -73,9 +73,12 @@ function formatExpiry(iso: string): string {
   }
 }
 
+// locationName is null for corporate (admin-tier) invites — those have no
+// location, so the email drops the "join <location>" framing and skips the
+// 5-step franchise onboarding outline.
 function buildInviteEmail(args: {
   inviteUrl: string
-  locationName: string
+  locationName: string | null
   inviterName: string
   expiresAt: string
   inviteeName: string | null
@@ -83,6 +86,40 @@ function buildInviteEmail(args: {
   const { inviteUrl, locationName, inviterName, expiresAt, inviteeName } = args
   const expiryFormatted = formatExpiry(expiresAt)
   const greeting = inviteeName ? `Hi ${inviteeName},` : 'Hello,'
+  const isCorporate = !locationName
+
+  const headline = isCorporate
+    ? 'You\'ve been invited to Bee Hub'
+    : `You've been invited to ${escapeHtml(locationName!)}`
+  const intro = isCorporate
+    ? `<strong>${escapeHtml(inviterName)}</strong> has invited you to join Bee Hub — the operations platform Bee Organized uses to manage clients, jobs, and your team day to day.`
+    : `<strong>${escapeHtml(inviterName)}</strong> has invited you to join <strong>${escapeHtml(locationName!)}</strong> on Bee Hub — the operations platform Bee Organized uses to manage clients, jobs, and your team day to day.`
+  const footerLocation = isCorporate ? 'Bee Hub' : escapeHtml(locationName!)
+
+  const onboardingBlockHtml = isCorporate
+    ? `<p style="margin:0 0 24px;font-size:15px;line-height:1.55;color:#1a2e2b;">
+                  Once you accept, you'll set up your account. Bee Hub uses Google Sign-In — no password needed.
+                </p>`
+    : `<p style="margin:0 0 6px;font-size:15px;font-weight:600;line-height:1.55;color:#1a2e2b;">What to expect during onboarding:</p>
+                <p style="margin:0 0 10px;font-size:15px;line-height:1.55;color:#1a2e2b;">
+                  Once you accept the invitation, we'll walk you through 5 quick steps:
+                </p>
+                <ol style="margin:0 0 18px;padding-left:22px;font-size:15px;line-height:1.6;color:#1a2e2b;">
+                  <li>Set up your business details (name, phone, address)</li>
+                  <li>Connect your Jobber account to sync existing clients</li>
+                  <li>Configure drip paths for nurturing new leads</li>
+                  <li>Set your email and notification preferences</li>
+                  <li>Invite any team members</li>
+                </ol>
+                <p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#1a2e2b;">
+                  Before you start, please have your Google Business Reviews link ready.
+                </p>
+                <p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#1a2e2b;">
+                  <strong>Estimated time:</strong> 15 minutes.
+                </p>
+                <p style="margin:0 0 24px;font-size:15px;line-height:1.55;color:#1a2e2b;">
+                  Bee Hub uses Google Sign-In — no password needed. Just click the link below to get started.
+                </p>`
 
   const html = `<!doctype html>
 <html>
@@ -94,15 +131,12 @@ function buildInviteEmail(args: {
             <tr>
               <td style="padding:32px 32px 24px;">
                 <div style="font-size:32px;margin-bottom:8px;">🐝</div>
-                <h1 style="margin:0 0 16px;font-family:Georgia,serif;font-size:22px;color:#1a2e2b;">You've been invited to ${escapeHtml(locationName)}</h1>
+                <h1 style="margin:0 0 16px;font-family:Georgia,serif;font-size:22px;color:#1a2e2b;">${headline}</h1>
                 <p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#1a2e2b;">${escapeHtml(greeting)}</p>
-                <p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#1a2e2b;">
-                  <strong>${escapeHtml(inviterName)}</strong> has invited you to join <strong>${escapeHtml(locationName)}</strong> on Bee Hub —
-                  the operations platform we use to manage clients, jobs, and our team day to day.
+                <p style="margin:0 0 18px;font-size:15px;line-height:1.55;color:#1a2e2b;">
+                  ${intro}
                 </p>
-                <p style="margin:0 0 24px;font-size:15px;line-height:1.55;color:#1a2e2b;">
-                  Accept the invitation below to set up your account.
-                </p>
+                ${onboardingBlockHtml}
                 <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
                   <tr>
                     <td style="background:#1a2e2b;border-radius:10px;">
@@ -117,7 +151,7 @@ function buildInviteEmail(args: {
             </tr>
             <tr>
               <td style="padding:16px 32px 24px;border-top:1px solid rgba(0,0,0,0.06);">
-                <p style="margin:0;font-size:11px;color:#8a9e9a;">Sent by Bee Organized · You're receiving this because ${escapeHtml(inviterName)} invited you to ${escapeHtml(locationName)}.</p>
+                <p style="margin:0;font-size:11px;color:#8a9e9a;">Sent by Bee Organized · You're receiving this because ${escapeHtml(inviterName)} invited you to ${footerLocation}.</p>
               </td>
             </tr>
           </table>
@@ -127,10 +161,38 @@ function buildInviteEmail(args: {
   </body>
 </html>`
 
+  const introText = isCorporate
+    ? `${inviterName} has invited you to join Bee Hub — the operations platform Bee Organized uses to manage clients, jobs, and your team day to day.`
+    : `${inviterName} has invited you to join ${locationName} on Bee Hub — the operations platform Bee Organized uses to manage clients, jobs, and your team day to day.`
+
+  const onboardingText = isCorporate
+    ? [
+        '',
+        'Once you accept, you\'ll set up your account. Bee Hub uses Google Sign-In — no password needed.',
+      ]
+    : [
+        '',
+        'What to expect during onboarding:',
+        '',
+        'Once you accept the invitation, we\'ll walk you through 5 quick steps:',
+        '  1. Set up your business details (name, phone, address)',
+        '  2. Connect your Jobber account to sync existing clients',
+        '  3. Configure drip paths for nurturing new leads',
+        '  4. Set your email and notification preferences',
+        '  5. Invite any team members',
+        '',
+        'Before you start, please have your Google Business Reviews link ready.',
+        '',
+        'Estimated time: 15 minutes.',
+        '',
+        'Bee Hub uses Google Sign-In — no password needed. Just click the link below to get started.',
+      ]
+
   const text = [
     greeting,
     '',
-    `${inviterName} has invited you to join ${locationName} on Bee Hub — the operations platform we use to manage clients, jobs, and our team day to day.`,
+    introText,
+    ...onboardingText,
     '',
     'Accept the invitation here:',
     inviteUrl,
@@ -332,7 +394,7 @@ export async function POST(request: NextRequest) {
       inviterPromise,
     ])
 
-    const locationName = location?.name || 'Bee Organized'
+    const locationName = location?.name ?? null
     const inviterName =
       inviter?.full_name?.trim() ||
       inviter?.first_name?.trim() ||
@@ -356,7 +418,9 @@ export async function POST(request: NextRequest) {
       fromName: INVITE_FROM_NAME,
       replyTo: INVITE_REPLY_TO_EMAIL,
       to: normalizedEmail,
-      subject: `You've been invited to join ${locationName} on Bee Hub`,
+      subject: locationName
+        ? `You've been invited to join ${locationName} on Bee Hub`
+        : `You've been invited to join Bee Hub`,
       html,
       text,
     })
