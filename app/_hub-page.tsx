@@ -386,6 +386,7 @@ export default async function HubPage({
   }
 
   let initialPeople: any[] = []
+  let initialBinPeople: any[] = []
   {
     let q = supabaseService
       .from('leads')
@@ -477,6 +478,36 @@ export default async function HubPage({
     }
   }
 
+  // Recycle Bin: load is_junk=true leads, same location-scoping as the main
+  // query. Joined-table data (notes, touchpoints, etc.) is skipped — the bin
+  // only renders name/location/timestamp, and on restore the PATCH response
+  // returns the full row. 90-day retention keeps this bounded.
+  {
+    let binQ = supabaseService
+      .from('leads')
+      .select('*')
+      .eq('is_junk', true)
+      .order('updated_at', { ascending: false })
+      .limit(500)
+
+    if (!isElevated && hubUser.location_id) {
+      binQ = binQ.eq('location_uuid', hubUser.location_id)
+    }
+
+    const { data: binRaw, error: binError } = await binQ
+
+    if (binError) {
+      console.error('[hub-page] bin leads fetch error:', binError.message)
+    } else if (binRaw && binRaw.length > 0) {
+      const { mapLeadToPerson } = await import('@/lib/people-mapper')
+      initialBinPeople = binRaw.map((row: any) => ({
+        ...mapLeadToPerson(row, {}),
+        deletedAt: row.updated_at || row.created_at || null,
+      }))
+      console.log(`[hub-page] Fetched ${initialBinPeople.length} bin leads for ${hubUser.email}`)
+    }
+  }
+
   // /clients/[id] passes initialSelectedLeadId — if the id doesn't exist in
   // the user's accessible leads (deleted, wrong location, or invalid uuid),
   // bounce to /clients with notfound=1 so the panel doesn't open and the
@@ -525,6 +556,7 @@ export default async function HubPage({
       initialPendingInvites={initialPendingInvites}
       initialLookups={initialLookups}
       initialPeople={initialPeople}
+      initialBinPeople={initialBinPeople}
       currentSubscription={currentSubscription}
       currentLocation={currentLocation}
       currentUser={{

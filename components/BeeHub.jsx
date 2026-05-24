@@ -21964,41 +21964,96 @@ function PricingManagementTab() {
 }
 
 // ─── Recycle Bin Tab ──────────────────────────────────────────────────────────
-function RecycleBinTab({ people, setPeople, partners, setPartners }) {
+function RecycleBinTab({ binPeople=[], setBinPeople=()=>{}, setPeople=()=>{}, partners=[], setPartners=()=>{}, locations=null }) {
   const RETENTION_DAYS = 90
-  const now = new Date('2026-05-05')
+  const now = Date.now()
+  const locList = Array.isArray(locations) && locations.length > 0 ? locations : ALL_LOCATIONS
+  const [pendingId, setPendingId] = useState(null)
 
-  const deletedPeople = people
-    .filter(p => p.isJunk && p.junkReason === 'Deleted')
-    .map((p, i) => ({ ...p, type:'client', deletedAt: new Date(now - (i * 4 + 1) * 24 * 60 * 60 * 1000) }))
-    .map(p => ({ ...p, daysLeft: RETENTION_DAYS - Math.floor((now - p.deletedAt) / 86400000) }))
-    .filter(p => p.daysLeft > 0)
+  const deletedPeople = binPeople
+    .map(p => {
+      const deletedAt = p.deletedAt ? new Date(p.deletedAt) : null
+      const daysSince = deletedAt ? Math.floor((now - deletedAt.getTime()) / 86400000) : 0
+      return { ...p, type:'client', deletedAt, daysLeft: RETENTION_DAYS - daysSince }
+    })
 
   const deletedPartners = partners
     .filter(p => p.isDeleted)
-    .map((p, i) => ({ ...p, type:'partner', deletedAt: new Date(p.deletedAt || (now - (i * 3 + 2) * 24 * 60 * 60 * 1000)) }))
-    .map(p => ({ ...p, daysLeft: RETENTION_DAYS - Math.floor((now - new Date(p.deletedAt)) / 86400000) }))
-    .filter(p => p.daysLeft > 0)
+    .map(p => {
+      const deletedAt = p.deletedAt ? new Date(p.deletedAt) : new Date(now)
+      const daysSince = Math.floor((now - deletedAt.getTime()) / 86400000)
+      return { ...p, type:'partner', deletedAt, daysLeft: RETENTION_DAYS - daysSince }
+    })
 
   const allDeleted = [...deletedPeople, ...deletedPartners].sort((a,b) => a.daysLeft - b.daysLeft)
   const total = allDeleted.length
 
-  function restore(item) {
-    if (item.type === 'client') {
-      setPeople(prev => prev.map(p => p.id === item.id ? {...p, isJunk:false, junkReason:null, stage:'New'} : p))
-    } else {
+  async function restore(item) {
+    if (item.type === 'partner') {
       setPartners(prev => prev.map(p => p.id === item.id ? {...p, isDeleted:false, deletedAt:null} : p))
+      return
+    }
+    if (pendingId) return
+    setPendingId(item.id)
+    const prevBin = binPeople
+    setBinPeople(prev => prev.filter(p => p.id !== item.id))
+    try {
+      const res = await fetch(`/api/leads/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_junk: false, stage: 'New' }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const restored = { ...item, isJunk: false, stage: 'New' }
+      delete restored.deletedAt
+      delete restored.daysLeft
+      delete restored.type
+      setPeople(prev => [restored, ...prev.filter(p => p.id !== item.id)])
+    } catch (e) {
+      setBinPeople(prevBin)
+      alert('Failed to restore — please try again')
+    } finally {
+      setPendingId(null)
     }
   }
 
-  function purge(item) {
-    if (item.type === 'client') setPeople(prev => prev.filter(p => p.id !== item.id))
-    else setPartners(prev => prev.filter(p => p.id !== item.id))
+  async function purge(item) {
+    if (item.type === 'partner') {
+      setPartners(prev => prev.filter(p => p.id !== item.id))
+      return
+    }
+    if (pendingId) return
+    if (!window.confirm(`Permanently delete "${item.name}"? This cannot be undone.`)) return
+    setPendingId(item.id)
+    const prevBin = binPeople
+    setBinPeople(prev => prev.filter(p => p.id !== item.id))
+    try {
+      const res = await fetch(`/api/leads/${item.id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    } catch (e) {
+      setBinPeople(prevBin)
+      alert('Failed to delete — please try again')
+    } finally {
+      setPendingId(null)
+    }
   }
 
-  function emptyBin() {
-    setPeople(prev => prev.filter(p => !(p.isJunk && p.junkReason === 'Deleted')))
+  async function emptyBin() {
+    if (!window.confirm(`Permanently delete all ${binPeople.length} bin item${binPeople.length!==1?'s':''}? This cannot be undone.`)) return
     setPartners(prev => prev.filter(p => !p.isDeleted))
+    const ids = binPeople.map(p => p.id)
+    const prevBin = binPeople
+    setBinPeople([])
+    const results = await Promise.allSettled(
+      ids.map(id => fetch(`/api/leads/${id}`, { method: 'DELETE' }))
+    )
+    const failed = results
+      .map((r, i) => (r.status === 'rejected' || !r.value?.ok ? ids[i] : null))
+      .filter(Boolean)
+    if (failed.length > 0) {
+      setBinPeople(prevBin.filter(p => failed.includes(p.id)))
+      alert(`Failed to delete ${failed.length} item${failed.length!==1?'s':''} — please try again`)
+    }
   }
 
   return (
@@ -22025,8 +22080,9 @@ function RecycleBinTab({ people, setPeople, partners, setPartners }) {
 
       <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
         {allDeleted.map((item, i) => {
-          const loc = ALL_LOCATIONS.find(l => l.id === item.locationId)
+          const loc = locList.find(l => l.id === item.locationId)
           const urgent = item.daysLeft <= 7
+          const isPending = pendingId === item.id
           return (
             <div key={item.id} style={{ background:'white', borderBottom: i < allDeleted.length-1 ? '1px solid rgba(0,0,0,0.05)' : 'none', padding:'12px 16px', display:'flex', alignItems:'center', gap:'12px' }}>
               <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:item.type==='partner'?'rgba(212,160,70,0.08)':'rgba(239,68,68,0.08)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
@@ -22044,8 +22100,8 @@ function RecycleBinTab({ people, setPeople, partners, setPartners }) {
               <div style={{ textAlign:'right', flexShrink:0 }}>
                 <p style={{ fontSize:'11px', fontWeight:600, color:urgent?'#ef4444':'#f59e0b', marginBottom:'4px' }}>{item.daysLeft}d left</p>
                 <div style={{ display:'flex', gap:'5px' }}>
-                  <button onClick={()=>restore(item)} style={{ padding:'4px 10px', background:'rgba(34,197,94,0.08)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#22c55e', cursor:'pointer' }}>Restore</button>
-                  <button onClick={()=>purge(item)} style={{ padding:'4px 8px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.15)', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', color:'#ef4444', cursor:'pointer' }}>×</button>
+                  <button disabled={isPending} onClick={()=>restore(item)} style={{ padding:'4px 10px', background:'rgba(34,197,94,0.08)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#22c55e', cursor:isPending?'wait':'pointer', opacity:isPending?0.5:1 }}>{isPending?'…':'Restore'}</button>
+                  <button disabled={isPending} onClick={()=>purge(item)} style={{ padding:'4px 8px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.15)', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', color:'#ef4444', cursor:isPending?'wait':'pointer', opacity:isPending?0.5:1 }}>×</button>
                 </div>
               </div>
             </div>
@@ -23394,7 +23450,7 @@ function MasterTemplatesEditor() {
   )
 }
 
-function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, onStatusChange, users=USERS_DATA, setUsers=()=>{}, people=[], setPeople=()=>{}, partners=[], setPartners=()=>{}, guideSlides=[], setGuideSlides=()=>{}, manualSlides=[], setManualSlides=()=>{}, initialLocations=null }) {
+function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, onStatusChange, users=USERS_DATA, setUsers=()=>{}, people=[], setPeople=()=>{}, binPeople=[], setBinPeople=()=>{}, partners=[], setPartners=()=>{}, guideSlides=[], setGuideSlides=()=>{}, manualSlides=[], setManualSlides=()=>{}, initialLocations=null }) {
   const [adminTab, setAdminTab]   = useState('locations')
   // Real Supabase locations when provided by App (super_admin/corporate
   // sign-ins via page.tsx fetch); falls back to mock for view-as flows
@@ -23545,7 +23601,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
         ) : adminTab==='configure' ? (
           <ConfigureTab />
         ) : adminTab==='bin' ? (
-          <RecycleBinTab people={people} setPeople={setPeople} partners={partners} setPartners={setPartners} />
+          <RecycleBinTab binPeople={binPeople} setBinPeople={setBinPeople} setPeople={setPeople} partners={partners} setPartners={setPartners} locations={initialLocations} />
         ) : (
         <div style={{ padding:'0 1.25rem 1rem', display:'grid', gap:'10px' }}>
           {/* Search */}
@@ -24920,6 +24976,7 @@ export default function App({
  initialPendingInvites,     // server-rendered pending_invites for the current location (empty array for elevated users)
   initialLookups,            // server-rendered admin-managed lookups grouped by category (Sitting 1A)
   initialPeople,             // server-rendered Supabase leads → Person shape (Phase 3A); null/empty → fall back to ALL_PEOPLE mock
+  initialBinPeople,          // server-rendered is_junk=true leads (Recycle Bin)
   currentSubscription,
   currentLocation,           // real Supabase row for franchise owners; null for elevated users
 } = {}) {
@@ -25112,6 +25169,12 @@ if (Array.isArray(initialPeople)) return
   useEffect(() => {
     if (Array.isArray(initialPeople)) setPeople(initialPeople)
   }, [initialPeople])
+  // Recycle Bin — is_junk=true leads loaded server-side. Kept in its own
+  // state so the main `people` array stays bin-free for HiveScreen / Reports.
+  const [binPeople, setBinPeople] = useState(Array.isArray(initialBinPeople) ? initialBinPeople : [])
+  useEffect(() => {
+    if (Array.isArray(initialBinPeople)) setBinPeople(initialBinPeople)
+  }, [initialBinPeople])
   const [followUps, setFollowUps]           = useState([
     { id:'fu1', personId:'3',  personName:'Lisa Patel',      note:'Assessment follow-up - did she book?',       date:'2026-05-07', locationId:'loc_kc', createdAt:'May 5' },
     { id:'fu2', personId:'2',  personName:'Jennifer Torres', note:'Re-engage - went quiet after first call',     date:'2026-05-09', locationId:'loc_kc', createdAt:'May 4' },
@@ -25405,6 +25468,8 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           setUsers={setUsers}
           people={people}
           setPeople={setPeople}
+          binPeople={binPeople}
+          setBinPeople={setBinPeople}
           partners={partners}
           setPartners={setPartners}
           guideSlides={guideSlides}

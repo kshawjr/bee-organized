@@ -1,6 +1,9 @@
 // app/api/leads/[id]/route.ts
 //
 // PATCH /api/leads/:id — update a lead (Hive client record)
+// DELETE /api/leads/:id — permanently delete a soft-deleted (is_junk=true)
+//   lead. Only the Recycle Bin should call this; active leads must be
+//   soft-deleted via PATCH { is_junk: true } first.
 //
 // Used by PersonPanel's update() function. Accepts a partial body containing
 // any of the updatable fields. Validates inputs, enforces location scoping
@@ -224,4 +227,70 @@ export async function PATCH(
   }
 
   return NextResponse.json({ lead: fresh }, { status: 200 })
+}
+
+export async function DELETE(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+
+  // ─── Auth ──────────────────────────────────────────────────────
+  const supabase = await createServerSupabaseClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) {
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  }
+
+  const { data: hubUser, error: hubUserError } = await supabase
+    .from('hub_users')
+    .select('id, role, location_id')
+    .eq('id', user.id)
+    .single()
+
+  if (hubUserError || !hubUser) {
+    return NextResponse.json({ error: 'no_hub_user_profile' }, { status: 403 })
+  }
+
+  // ─── Load existing lead ───────────────────────────────────────
+  const { data: existing, error: loadError } = await supabaseService
+    .from('leads')
+    .select('id, location_uuid, is_junk')
+    .eq('id', id)
+    .single()
+
+  if (loadError || !existing) {
+    return NextResponse.json({ error: 'lead_not_found' }, { status: 404 })
+  }
+
+  // ─── Scoping ──────────────────────────────────────────────────
+  if (!isAdmin(hubUser.role)) {
+    if (hubUser.location_id !== existing.location_uuid) {
+      return NextResponse.json({ error: 'forbidden_wrong_location' }, { status: 403 })
+    }
+    if (hubUser.role === 'lite_user') {
+      return NextResponse.json({ error: 'forbidden_read_only_role' }, { status: 403 })
+    }
+  }
+
+  // ─── Safety: only soft-deleted rows are eligible for hard delete ──
+  if (!existing.is_junk) {
+    return NextResponse.json(
+      { error: 'lead_not_in_bin', detail: 'Soft-delete via PATCH is_junk=true before permanent delete' },
+      { status: 409 }
+    )
+  }
+
+  // All FKs to leads(id) declare ON DELETE CASCADE (lead_notes, touchpoints,
+  // lead_contacts, lead_tags, lead_drip_progress, etc.) — single DELETE here
+  // wipes children atomically.
+  const { error: delError } = await supabaseService.from('leads').delete().eq('id', id)
+
+  if (delError) {
+    return NextResponse.json({ error: 'delete_failed', detail: delError.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ ok: true, id }, { status: 200 })
 }
