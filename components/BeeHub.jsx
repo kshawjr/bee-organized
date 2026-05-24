@@ -19953,7 +19953,7 @@ function LocationCard({ loc, role, onSelect, onStatusChange, onViewLocation, onD
 }
 
 
-function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, onViewLocation, onDrilldown, role }) {
+function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, onViewLocation, onDrilldown, role, users=[], locations=[] }) {
   const router = useRouter()
   React.useEffect(() => {
     const prev = document.body.style.overflow
@@ -19964,7 +19964,99 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
   const sc = CRM_STATUS_CONF[currentLoc.crmStatus]
   const showRevenue = role==='corporate' || role==='super_admin'
   const canEditSubscription = role==='super_admin' || role==='corporate'
+  const canInviteOwner = role==='super_admin' || role==='corporate'
+  // Two flavors deliberately:
+  //   - locUsers : the legacy mock-USERS_DATA filter, preserved as-is for
+  //     the demo Team list further down (which references render helpers
+  //     that aren't in scope here and only "works" because real
+  //     deployments hit locUsers.length === 0 for mock ids).
+  //   - realLocUserCount : Supabase-backed count of hub_users at this
+  //     location, used by the subtitle and quick-info row so super_admin
+  //     sees the truthful count, not "0 users" for every real location.
   const locUsers = USERS_DATA.filter(u=>u.locationId===currentLoc.id)
+  const realLocUserCount = Array.isArray(users)
+    ? users.filter(u => u.locationId === currentLoc.id).length
+    : locUsers.length
+
+  // Owner-seat status fetched from /api/locations/[id]/owner-status. Kicks
+  // off whenever the sheet opens for a different location. While loading
+  // we render a small spinner row; on success we show either the claimed
+  // owner card, a pending invitation card (resend/revoke), or the
+  // "Invite Owner" CTA. Refetched after every mutation.
+  const [ownerStatus, setOwnerStatus]       = useState(null)
+  const [ownerStatusError, setOwnerStatusError] = useState('')
+  const [ownerStatusLoading, setOwnerStatusLoading] = useState(false)
+  const [showInviteOwner, setShowInviteOwner]   = useState(false)
+  const [pendingActionId, setPendingActionId]   = useState('') // resend | revoke
+  const [pendingActionError, setPendingActionError] = useState('')
+  const [resendResult, setResendResult]         = useState(null)
+
+  const fetchOwnerStatus = React.useCallback(async () => {
+    if (!currentLoc?.id) return
+    setOwnerStatusLoading(true)
+    setOwnerStatusError('')
+    try {
+      const res = await fetch(`/api/locations/${currentLoc.id}/owner-status`)
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`)
+      setOwnerStatus(json)
+    } catch (err) {
+      setOwnerStatusError(err?.message || 'Could not load owner status')
+    } finally {
+      setOwnerStatusLoading(false)
+    }
+  }, [currentLoc?.id])
+
+  React.useEffect(() => { fetchOwnerStatus() }, [fetchOwnerStatus])
+
+  async function revokeInvite(inviteId) {
+    if (!inviteId) return
+    if (typeof window !== 'undefined' &&
+        !window.confirm('Revoke this invitation? The current link will stop working immediately.')) {
+      return
+    }
+    setPendingActionId('revoke')
+    setPendingActionError('')
+    try {
+      const res = await fetch(`/api/pending_invites/${inviteId}`, { method: 'DELETE' })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`)
+      await fetchOwnerStatus()
+    } catch (err) {
+      setPendingActionError(err?.message || 'Could not revoke invitation')
+    } finally {
+      setPendingActionId('')
+    }
+  }
+
+  async function resendInvite(inviteId) {
+    if (!inviteId) return
+    setPendingActionId('resend')
+    setPendingActionError('')
+    setResendResult(null)
+    try {
+      const res = await fetch(`/api/pending_invites/${inviteId}/resend`, { method: 'POST' })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`)
+      setResendResult(json)
+      await fetchOwnerStatus()
+    } catch (err) {
+      setPendingActionError(err?.message || 'Could not resend invitation')
+    } finally {
+      setPendingActionId('')
+    }
+  }
+
+  // Subtitle: prefer the claimed owner's name; fall back to the
+  // legacy currentLoc.owner string (server-derived from hub_users),
+  // then "No owner yet" when neither resolves. joinedDate ties to the
+  // location row's created_at — keep it but only when an owner is in
+  // place, so empty locations don't show a misleading join date.
+  const subtitleOwner = ownerStatus?.owner_user?.full_name || currentLoc.owner || null
+  const subtitleJoined = subtitleOwner && currentLoc.joinedDate ? ` · joined ${currentLoc.joinedDate}` : ''
+  const subtitleText = subtitleOwner
+    ? `${currentLoc.state} · ${subtitleOwner}${subtitleJoined}`
+    : `${currentLoc.state} · No owner yet`
 
   // Subscription editor state
   const initialPaymentSource = currentLoc.payment_source || 'none'
@@ -20045,7 +20137,7 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
         <div style={{ padding:'14px 16px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', alignItems:'center', gap:'10px', flexShrink:0 }}>
           <div style={{ flex:1, minWidth:0 }}>
             <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Bee Organized {currentLoc.name}</p>
-            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{currentLoc.state} · {currentLoc.owner||'No owner'} · joined {currentLoc.joinedDate}</p>
+            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{subtitleText}</p>
           </div>
           <span style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:sc.bg, color:sc.color, border:`1px solid ${sc.border}`, fontWeight:600, flexShrink:0 }}>{sc.icon} {sc.label}</span>
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer', flexShrink:0, lineHeight:1 }}>×</button>
@@ -20076,7 +20168,7 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
               ['📞', currentLoc.phone||'—'],
               ['📍', currentLoc.address||'—'],
               ['⚡', currentLoc.jobberConnected ? `Jobber connected · ${currentLoc.jobberAccountId||''}` : 'Jobber not connected'],
-              ['👥', `${currentLoc.leads||0} clients · ${locUsers.length} user${locUsers.length!==1?'s':''}`],
+              ['👥', `${currentLoc.leads||0} clients · ${realLocUserCount} user${realLocUserCount!==1?'s':''}`],
             ].map(([icon, val])=>(
               <div key={icon} style={{ display:'flex', gap:'8px', alignItems:'center' }}>
                 <span style={{ fontSize:'13px', flexShrink:0 }}>{icon}</span>
@@ -20084,6 +20176,85 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
               </div>
             ))}
           </div>
+
+          {/* Owner seat — claimed user, pending invite, or unclaimed-with-CTA.
+              Only renders for super_admin/corporate; owners managing their
+              own team have a different surface in Settings → Team. */}
+          {canInviteOwner && (
+            <div>
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Owner</p>
+              <div style={{ background:'#f7f5f0', borderRadius:'10px', padding:'12px' }}>
+                {ownerStatusLoading && !ownerStatus && (
+                  <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Loading owner status…</p>
+                )}
+                {ownerStatusError && (
+                  <p style={{ fontSize:'12px', color:'#b91c1c' }}>{ownerStatusError}</p>
+                )}
+                {ownerStatus && ownerStatus.owner_user && (
+                  <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+                    <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:'linear-gradient(135deg,#d4a046,#b07a20)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'12px', fontWeight:700, color:'white', flexShrink:0 }}>
+                      {(ownerStatus.owner_user.full_name||ownerStatus.owner_user.email||'?').split(/\s+/).map(w=>w[0]).join('').slice(0,2).toUpperCase()}
+                    </div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{ownerStatus.owner_user.full_name||ownerStatus.owner_user.email}</p>
+                      <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        {ownerStatus.owner_user.email}
+                        {ownerStatus.owner_user.joined_at ? ` · joined ${new Date(ownerStatus.owner_user.joined_at).toLocaleDateString('en-US',{month:'short', year:'numeric'})}` : ''}
+                      </p>
+                    </div>
+                    <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'10px', background:'rgba(34,197,94,0.1)', color:'#15803d', fontWeight:600, flexShrink:0 }}>✓ Claimed</span>
+                  </div>
+                )}
+                {ownerStatus && !ownerStatus.owner_user && ownerStatus.pending_invite && (
+                  <div>
+                    <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'10px' }}>
+                      <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:'rgba(245,158,11,0.15)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'14px', flexShrink:0 }}>📬</div>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{ownerStatus.pending_invite.full_name||ownerStatus.pending_invite.email}</p>
+                        <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                          {ownerStatus.pending_invite.email}
+                          {ownerStatus.pending_invite.invite_expires_at
+                            ? ` · expires ${new Date(ownerStatus.pending_invite.invite_expires_at).toLocaleDateString('en-US',{month:'short', day:'numeric'})}`
+                            : ''}
+                        </p>
+                      </div>
+                      <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'10px', background:'rgba(245,158,11,0.1)', color:'#92400e', fontWeight:600, flexShrink:0 }}>Pending</span>
+                    </div>
+                    {resendResult && (
+                      <div style={{ marginBottom:'8px', padding:'8px 10px', background:'white', border:'1px solid rgba(0,0,0,0.08)', borderRadius:'8px' }}>
+                        <p style={{ fontSize:'10px', color:'#8a9e9a', marginBottom:'4px' }}>Fresh invite link</p>
+                        <p style={{ fontSize:'11px', color:'#1a2e2b', fontFamily:'ui-monospace,Menlo,monospace', wordBreak:'break-all' }}>{resendResult.invite_url}</p>
+                      </div>
+                    )}
+                    {pendingActionError && (
+                      <p style={{ fontSize:'11px', color:'#b91c1c', marginBottom:'8px' }}>{pendingActionError}</p>
+                    )}
+                    <div style={{ display:'flex', gap:'8px' }}>
+                      <button
+                        onClick={()=>resendInvite(ownerStatus.pending_invite.id)}
+                        disabled={!!pendingActionId}
+                        style={{ flex:1, padding:'9px', background:'white', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#1a2e2b', cursor:pendingActionId?'wait':'pointer', opacity:pendingActionId?0.6:1 }}
+                      >{pendingActionId==='resend' ? 'Resending…' : 'Resend'}</button>
+                      <button
+                        onClick={()=>revokeInvite(ownerStatus.pending_invite.id)}
+                        disabled={!!pendingActionId}
+                        style={{ flex:1, padding:'9px', background:'white', border:'1px solid rgba(239,68,68,0.3)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#b91c1c', cursor:pendingActionId?'wait':'pointer', opacity:pendingActionId?0.6:1 }}
+                      >{pendingActionId==='revoke' ? 'Revoking…' : 'Revoke'}</button>
+                    </div>
+                  </div>
+                )}
+                {ownerStatus && !ownerStatus.owner_user && !ownerStatus.pending_invite && (
+                  <div>
+                    <p style={{ fontSize:'12px', color:'#4a5e5a', marginBottom:'10px' }}>Owner seat unclaimed. Send an invitation to bring the franchise owner onboard.</p>
+                    <button
+                      onClick={()=>setShowInviteOwner(true)}
+                      style={{ width:'100%', padding:'10px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}
+                    >👑 Invite Owner</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Team */}
           {locUsers.length>0&&(
@@ -20208,6 +20379,15 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
           </div>
         </div>
       </div>
+      {showInviteOwner && (
+        <InviteModal
+          locations={locations}
+          lockedLocationId={currentLoc.id}
+          lockedTier="owner"
+          onSuccess={()=>{ fetchOwnerStatus() }}
+          onClose={()=>setShowInviteOwner(false)}
+        />
+      )}
     </div>
   )
 }
@@ -20305,41 +20485,93 @@ function UsersTab({ users, setUsers, locations, locFilter, onInvite }) {
 }
 
 // ─── Invite Modal ──────────────────────────────────────────────────────────────
-function InviteModal({ locations, preselectedLocId, onInvite, onClose }) {
+// Backed by /api/hub_users/invite. The UI's `role` selector keys line up
+// 1:1 with the API's `tier` field (owner/manager/light/readonly), so we
+// send them straight through. Corporate invites send tier='admin' with no
+// location_id; the accept route then creates the user with
+// hub_users.role='admin'.
+//
+// lockedLocationId + lockedTier let callers open the modal pre-filled and
+// hide the corporate/role/location selectors — used by LocationDetailSheet
+// for the "Invite Owner" entry point.
+function InviteModal({
+  locations,
+  preselectedLocId,
+  lockedLocationId = null,
+  lockedTier = null,
+  onSuccess,
+  onClose,
+}) {
   React.useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = prev }
   }, [])
 
+  const isLocked = !!(lockedLocationId && lockedTier)
+  const initialLocId =
+    lockedLocationId ||
+    preselectedLocId ||
+    locations.find(l=>l.crmStatus==='active'||l.crmStatus==='onboarding')?.id ||
+    ''
+
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName]   = useState('')
   const [email, setEmail]         = useState('')
-  const [locId, setLocId]       = useState(preselectedLocId||locations.find(l=>l.crmStatus==='active'||l.crmStatus==='onboarding')?.id||'')
-  const [role, setRole]         = useState('owner')
+  const [locId, setLocId]         = useState(initialLocId)
+  const [role, setRole]           = useState(lockedTier || 'manager')
   const [isCorporate, setIsCorporate] = useState(false)
-  const [step, setStep]         = useState('form')
+  const [step, setStep]           = useState('form') // form | sent
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError]         = useState('')
+  const [result, setResult]       = useState(null) // { invite, invite_url, email_sent, email_error }
+  const [copied, setCopied]       = useState(false)
 
-  function send() {
+  async function send() {
+    if (submitting) return
     if (!email.trim() || !firstName.trim() || !lastName.trim()) return
+    if (!isCorporate && !locId) return
+    setSubmitting(true)
+    setError('')
+
     const fullName = `${firstName.trim()} ${lastName.trim()}`
-    const initials = (firstName[0]||'') + (lastName[0]||'')
-    onInvite({
-      id: `u${Date.now()}`,
-      locationId: isCorporate ? null : locId,
-      name: fullName,
-      email: email.trim(),
-      role: isCorporate ? 'corporate' : role,
-      status: 'invited',
-      initials: initials.toUpperCase(),
-      joined: '—',
-    })
-    setStep('sent')
+    const payload = isCorporate
+      ? { email: email.trim().toLowerCase(), full_name: fullName, tier: 'admin' }
+      : { email: email.trim().toLowerCase(), full_name: fullName, location_id: locId, tier: role }
+
+    try {
+      const res = await fetch('/api/hub_users/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`)
+      setResult(json)
+      setStep('sent')
+      if (onSuccess) onSuccess(json)
+    } catch (err) {
+      setError(err?.message || 'Could not send invitation')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function copyLink() {
+    if (!result?.invite_url) return
+    try {
+      await navigator.clipboard.writeText(result.invite_url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {}
   }
 
   const loc = locations.find(l=>l.id===locId)
-  const rc  = isCorporate ? {icon:'🏢',label:'Corporate'} : FRANCHISE_ROLES.find(r=>r.key===role)||FRANCHISE_ROLES[0]
-  const canSend = firstName.trim() && lastName.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && (isCorporate || locId)
+  const rc  = isCorporate
+    ? {icon:'🏢',label:'Corporate'}
+    : FRANCHISE_ROLES.find(r=>r.key===role) || FRANCHISE_ROLES[0]
+  const canSend = !submitting && firstName.trim() && lastName.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && (isCorporate || locId)
+  const titleText = isLocked && lockedTier === 'owner' ? 'Invite Owner' : 'Invite User'
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
@@ -20347,23 +20579,65 @@ function InviteModal({ locations, preselectedLocId, onInvite, onClose }) {
       <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'480px', borderRadius:'16px', zIndex:1, maxHeight:'92vh', overflowY:'auto', boxShadow:'0 20px 60px rgba(26,46,43,0.25)' }}>
         <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'12px auto 0' }} />
 
-        {step==='sent' ? (
-          <div style={{ padding:'2rem', textAlign:'center' }}>
-            <div style={{ fontSize:'48px', marginBottom:'12px' }}>📬</div>
-            <h2 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'8px' }}>Invite Sent!</h2>
-            <p style={{ fontSize:'14px', color:'#1a2e2b', fontWeight:500, marginBottom:'4px', wordBreak:'break-all' }}>{email}</p>
-            <p style={{ fontSize:'13px', color:'#8a9e9a', marginBottom:'24px' }}>
-              as {rc.icon} {rc.label}{!isCorporate&&loc?` at ${loc.name}`:''}
-            </p>
+        {step==='sent' && result ? (
+          <div style={{ padding:'1.5rem' }}>
+            <div style={{ textAlign:'center', marginBottom:'18px' }}>
+              <div style={{ fontSize:'48px', marginBottom:'10px' }}>📬</div>
+              <h2 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'6px' }}>Invitation Created</h2>
+              <p style={{ fontSize:'14px', color:'#1a2e2b', fontWeight:500, marginBottom:'2px', wordBreak:'break-all' }}>{email}</p>
+              <p style={{ fontSize:'12px', color:'#8a9e9a' }}>
+                as {rc.icon} {rc.label}{!isCorporate&&loc?` at ${loc.name}`:''}
+              </p>
+            </div>
+
+            {result.email_sent ? (
+              <div style={{ padding:'10px 12px', background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.18)', borderRadius:'9px', marginBottom:'14px' }}>
+                <p style={{ fontSize:'12px', color:'#15803d', fontWeight:500 }}>✓ Invitation email sent. They can also use the link below.</p>
+              </div>
+            ) : (
+              <div style={{ padding:'10px 12px', background:'rgba(245,158,11,0.07)', border:'1px solid rgba(245,158,11,0.22)', borderRadius:'9px', marginBottom:'14px' }}>
+                <p style={{ fontSize:'12px', color:'#92400e', fontWeight:500 }}>
+                  {isCorporate
+                    ? 'Corporate invites do not send email automatically — share the link below.'
+                    : 'Email could not be sent. Share the link below as a fallback.'}
+                </p>
+                {result.email_error && !isCorporate && (
+                  <p style={{ fontSize:'11px', color:'#92400e', marginTop:'4px', wordBreak:'break-all' }}>{result.email_error}</p>
+                )}
+              </div>
+            )}
+
+            <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Invite Link</p>
+            <div style={{ display:'flex', gap:'6px', alignItems:'stretch', marginBottom:'14px' }}>
+              <input readOnly value={result.invite_url}
+                style={{ flex:1, padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.08)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', background:'rgba(26,46,43,0.02)', boxSizing:'border-box' }}
+                onClick={e=>e.currentTarget.select()}
+              />
+              <button onClick={copyLink}
+                style={{ padding:'10px 14px', background:copied?'#22c55e':'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', flexShrink:0 }}>
+                {copied ? 'Copied ✓' : 'Copy'}
+              </button>
+            </div>
+
             <button onClick={onClose} style={{ width:'100%', padding:'14px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Done</button>
-            <div style={{ height:'1rem' }} />
           </div>
         ) : (
           <div style={{ padding:'1.25rem' }}>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'1.25rem' }}>
-              <h2 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>Invite User</h2>
+              <h2 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>{titleText}</h2>
               <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
             </div>
+
+            {/* Locked-context summary — replaces the role/location pickers
+                when the modal was opened from a specific seat. */}
+            {isLocked && (
+              <div style={{ marginBottom:'14px', padding:'10px 12px', background:'rgba(26,46,43,0.04)', border:'1px solid rgba(0,0,0,0.06)', borderRadius:'10px' }}>
+                <p style={{ fontSize:'11px', color:'#8a9e9a', marginBottom:'2px' }}>Inviting as</p>
+                <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>
+                  {rc.icon} {rc.label}{loc?` · ${loc.name}${loc.state?', '+loc.state:''}`:''}
+                </p>
+              </div>
+            )}
 
             {/* Name fields - stacked for mobile */}
             <div style={{ display:'grid', gap:'10px', marginBottom:'14px' }}>
@@ -20383,7 +20657,7 @@ function InviteModal({ locations, preselectedLocId, onInvite, onClose }) {
               <input
                 value={email}
                 onChange={e=>setEmail(e.target.value)}
-                onKeyDown={e=>e.key==='Enter'&&send()}
+                onKeyDown={e=>e.key==='Enter'&&canSend&&send()}
                 placeholder="name@example.com"
                 type="email"
                 style={{ width:'100%', padding:'12px 14px', border:`1.5px solid ${email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)?'rgba(239,68,68,0.4)':'rgba(0,0,0,0.1)'}`, borderRadius:'10px', fontSize:'15px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }}
@@ -20391,60 +20665,69 @@ function InviteModal({ locations, preselectedLocId, onInvite, onClose }) {
               {email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)&&<p style={{ fontSize:'11px', color:'#ef4444', marginTop:'4px' }}>Enter a valid email address</p>}
             </div>
 
-            {/* User type toggle */}
-            <div style={{ marginBottom:'14px' }}>
-              <p style={{ fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>User Type</p>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
-                <button onClick={()=>setIsCorporate(false)} style={{ padding:'11px', background:!isCorporate?'rgba(26,46,43,0.06)':'white', border:`1.5px solid ${!isCorporate?'#1a2e2b':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'center' }}>
-                  <p style={{ fontSize:'18px', marginBottom:'3px' }}>🏠</p>
-                  <p style={{ fontSize:'12px', fontWeight:600, color:!isCorporate?'#1a2e2b':'#8a9e9a' }}>Franchise</p>
-                  <p style={{ fontSize:'10px', color:'#b0c0bc' }}>Location user</p>
-                </button>
-                <button onClick={()=>setIsCorporate(true)} style={{ padding:'11px', background:isCorporate?'rgba(99,102,241,0.08)':'white', border:`1.5px solid ${isCorporate?'#6366f1':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'center' }}>
-                  <p style={{ fontSize:'18px', marginBottom:'3px' }}>🏢</p>
-                  <p style={{ fontSize:'12px', fontWeight:600, color:isCorporate?'#6366f1':'#8a9e9a' }}>Corporate</p>
-                  <p style={{ fontSize:'10px', color:'#b0c0bc' }}>All locations</p>
-                </button>
-              </div>
-            </div>
-
-            {/* Location - only for franchise */}
-            {!isCorporate && (
-              <div style={{ marginBottom:'14px' }}>
-                <p style={{ fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Location</p>
-                <select value={locId} onChange={e=>setLocId(e.target.value)} style={{ width:'100%', padding:'12px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', background:'white', boxSizing:'border-box' }}>
-                  {locations.filter(l=>l.crmStatus==='active'||l.crmStatus==='onboarding').map(l=><option key={l.id} value={l.id}>{l.name}, {l.state}{l.owner?' - '+l.owner:''} {l.crmStatus==='onboarding'?'🐣':''}</option>)}
-                </select>
-              </div>
-            )}
-
-            {/* Role - only for franchise */}
-            {!isCorporate && (
-              <div style={{ marginBottom:'20px' }}>
-                <p style={{ fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Role</p>
-                <div style={{ display:'grid', gap:'6px' }}>
-                  {FRANCHISE_ROLES.map(r=>(
-                    <button key={r.key} onClick={()=>setRole(r.key)} style={{ padding:'11px 14px', background:role===r.key?r.bg:'white', border:`1.5px solid ${role===r.key?r.color+'60':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', display:'flex', alignItems:'center', gap:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
-                      <span style={{ fontSize:'18px' }}>{r.icon}</span>
-                      <div style={{ flex:1 }}>
-                        <p style={{ fontSize:'13px', fontWeight:600, color:role===r.key?r.color:'#1a2e2b', marginBottom:'1px' }}>{r.label}</p>
-                        <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{r.desc}</p>
-                      </div>
-                      {role===r.key&&<span style={{ color:r.color }}>✓</span>}
+            {/* User type / location / role — hidden when the modal is locked
+                to a specific seat (Owner invite from LocationDetailSheet). */}
+            {!isLocked && (
+              <>
+                <div style={{ marginBottom:'14px' }}>
+                  <p style={{ fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>User Type</p>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
+                    <button onClick={()=>setIsCorporate(false)} style={{ padding:'11px', background:!isCorporate?'rgba(26,46,43,0.06)':'white', border:`1.5px solid ${!isCorporate?'#1a2e2b':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'center' }}>
+                      <p style={{ fontSize:'18px', marginBottom:'3px' }}>🏠</p>
+                      <p style={{ fontSize:'12px', fontWeight:600, color:!isCorporate?'#1a2e2b':'#8a9e9a' }}>Franchise</p>
+                      <p style={{ fontSize:'10px', color:'#b0c0bc' }}>Location user</p>
                     </button>
-                  ))}
+                    <button onClick={()=>setIsCorporate(true)} style={{ padding:'11px', background:isCorporate?'rgba(99,102,241,0.08)':'white', border:`1.5px solid ${isCorporate?'#6366f1':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'center' }}>
+                      <p style={{ fontSize:'18px', marginBottom:'3px' }}>🏢</p>
+                      <p style={{ fontSize:'12px', fontWeight:600, color:isCorporate?'#6366f1':'#8a9e9a' }}>Corporate</p>
+                      <p style={{ fontSize:'10px', color:'#b0c0bc' }}>All locations</p>
+                    </button>
+                  </div>
                 </div>
-              </div>
+
+                {!isCorporate && (
+                  <div style={{ marginBottom:'14px' }}>
+                    <p style={{ fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Location</p>
+                    <select value={locId} onChange={e=>setLocId(e.target.value)} style={{ width:'100%', padding:'12px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', background:'white', boxSizing:'border-box' }}>
+                      {locations.filter(l=>l.crmStatus==='active'||l.crmStatus==='onboarding').map(l=><option key={l.id} value={l.id}>{l.name}, {l.state}{l.owner?' - '+l.owner:''} {l.crmStatus==='onboarding'?'🐣':''}</option>)}
+                    </select>
+                  </div>
+                )}
+
+                {!isCorporate && (
+                  <div style={{ marginBottom:'20px' }}>
+                    <p style={{ fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Role</p>
+                    <div style={{ display:'grid', gap:'6px' }}>
+                      {FRANCHISE_ROLES.map(r=>(
+                        <button key={r.key} onClick={()=>setRole(r.key)} style={{ padding:'11px 14px', background:role===r.key?r.bg:'white', border:`1.5px solid ${role===r.key?r.color+'60':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', display:'flex', alignItems:'center', gap:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
+                          <span style={{ fontSize:'18px' }}>{r.icon}</span>
+                          <div style={{ flex:1 }}>
+                            <p style={{ fontSize:'13px', fontWeight:600, color:role===r.key?r.color:'#1a2e2b', marginBottom:'1px' }}>{r.label}</p>
+                            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{r.desc}</p>
+                          </div>
+                          {role===r.key&&<span style={{ color:r.color }}>✓</span>}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {isCorporate && (
+                  <div style={{ marginBottom:'20px', padding:'14px', background:'rgba(99,102,241,0.06)', border:'1px solid rgba(99,102,241,0.15)', borderRadius:'10px' }}>
+                    <p style={{ fontSize:'13px', color:'#6366f1', fontWeight:500, lineHeight:1.5 }}>Corporate users can see all locations, the royalty dashboard, and location performance — but cannot edit location settings or records. (Invitation will not auto-send email; share the link from the next screen.)</p>
+                  </div>
+                )}
+              </>
             )}
 
-            {isCorporate && (
-              <div style={{ marginBottom:'20px', padding:'14px', background:'rgba(99,102,241,0.06)', border:'1px solid rgba(99,102,241,0.15)', borderRadius:'10px' }}>
-                <p style={{ fontSize:'13px', color:'#6366f1', fontWeight:500, lineHeight:1.5 }}>Corporate users can see all locations, the royalty dashboard, and location performance - but cannot edit location settings or records.</p>
+            {error && (
+              <div style={{ marginBottom:'12px', padding:'9px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.18)', borderRadius:'9px' }}>
+                <p style={{ fontSize:'12px', color:'#b91c1c', fontWeight:500 }}>{error}</p>
               </div>
             )}
 
             <button onClick={send} disabled={!canSend} style={{ width:'100%', padding:'14px', background:canSend?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:canSend?'white':'#9ca3af', cursor:canSend?'pointer':'not-allowed' }}>
-              Send Invite
+              {submitting ? 'Sending…' : 'Send Invite'}
             </button>
             <div style={{ height:'1rem' }} />
           </div>
@@ -23644,6 +23927,8 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
         <LocationDetailSheet
           loc={selectedLoc}
           role={role}
+          users={users}
+          locations={locations}
           onClose={()=>setSelectedLoc(null)}
           onStatusChange={(id,status)=>{
             updateStatus(id,status)
@@ -23657,7 +23942,12 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
         <InviteModal
           locations={locations}
           preselectedLocId={locFilter!=='all'?locFilter:null}
-          onInvite={(newUser)=>{ setUsers(prev=>[...prev,newUser]); setShowInvite(false) }}
+          // onSuccess fires when the API returns 201 — the modal then
+          // shows its own "Invitation Created" view with the copy-link
+          // affordance, so we don't mutate users state here. New hub_users
+          // rows appear when the invitee accepts; pending invites surface
+          // in LocationDetailSheet's owner panel.
+          onSuccess={()=>{}}
           onClose={()=>setShowInvite(false)}
         />
       )}

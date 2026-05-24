@@ -2,12 +2,27 @@
 //
 // Consume a pending_invites token: create the hub_users row keyed by
 // auth.uid(), PATCH one available subscription_seats row to claim the
-// seat, and mark the invite accepted. Called by /auth/invite/[token]
-// after the invitee signs in with Google.
+// seat (franchise tiers only), and mark the invite accepted. Called by
+// /auth/invite/[token] after the invitee signs in with Google.
 //
 // Email matching: the Google-authenticated email MUST equal the invite's
 // email (case-insensitive). We refuse the accept otherwise to prevent
 // link-forwarding from granting a seat to a different account.
+//
+// Atomicity / drift policy: the three writes (hub_users insert, seat
+// claim, invite mark) are NOT wrapped in a single transaction — Supabase
+// REST doesn't expose one. Instead the order is deliberate and each step
+// is retry-safe:
+//   1. hub_users insert — idempotent via the existingHubUser short-circuit.
+//   2. subscription_seats claim — picks ANY unclaimed seat at the tier;
+//      if step 3 fails on retry we just re-claim the same row to the same
+//      user_id (no-op).
+//   3. pending_invites.accepted_at — set last. If a transient failure
+//      occurs after step 2 succeeds, we leave accepted_at null and log
+//      the error so the invitee can retry the link (steps 1 & 2 are
+//      no-ops on retry, step 3 succeeds, drift resolves).
+// Corporate (tier='admin') invites skip step 2 entirely — admins have no
+// location and don't claim a seat.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
@@ -84,41 +99,44 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Claim one available seat at the invite tier. If none are free (owner
-  // removed seats between invite + accept), surface a clear error rather
-  // than letting them in without a seat.
-  const { data: availableSeats, error: seatsErr } = await supabaseService
-    .from('subscription_seats')
-    .select('id')
-    .eq('location_id', invite.location_id)
-    .eq('tier', invite.tier)
-    .eq('status', 'active')
-    .is('user_id', null)
-    .order('added_at', { ascending: true })
-    .limit(1)
-  if (seatsErr) {
-    console.error('[accept seats fetch]', seatsErr)
-    return NextResponse.json({ error: seatsErr.message }, { status: 500 })
-  }
-  if (!availableSeats || availableSeats.length === 0) {
-    return NextResponse.json(
-      {
-        error:
-          'No available seats remain at your tier. Ask the location owner to add a seat.',
-        code: 'no_available_seats',
-      },
-      { status: 409 }
-    )
-  }
+  // Claim one available seat at the invite tier. Skipped for tier='admin'
+  // (corporate invites — no subscription_seat exists). For franchise tiers,
+  // if no seat is free (owner removed seats between invite + accept) we
+  // surface a clear error rather than letting them in without a seat.
+  if (invite.tier !== 'admin') {
+    const { data: availableSeats, error: seatsErr } = await supabaseService
+      .from('subscription_seats')
+      .select('id')
+      .eq('location_id', invite.location_id)
+      .eq('tier', invite.tier)
+      .eq('status', 'active')
+      .is('user_id', null)
+      .order('added_at', { ascending: true })
+      .limit(1)
+    if (seatsErr) {
+      console.error('[accept seats fetch]', seatsErr)
+      return NextResponse.json({ error: seatsErr.message }, { status: 500 })
+    }
+    if (!availableSeats || availableSeats.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            'No available seats remain at your tier. Ask the location owner to add a seat.',
+          code: 'no_available_seats',
+        },
+        { status: 409 }
+      )
+    }
 
-  const seatId = availableSeats[0].id
-  const { error: claimErr } = await supabaseService
-    .from('subscription_seats')
-    .update({ user_id: user.id, updated_at: new Date().toISOString() })
-    .eq('id', seatId)
-  if (claimErr) {
-    console.error('[accept seat claim]', claimErr)
-    return NextResponse.json({ error: claimErr.message }, { status: 500 })
+    const seatId = availableSeats[0].id
+    const { error: claimErr } = await supabaseService
+      .from('subscription_seats')
+      .update({ user_id: user.id, updated_at: new Date().toISOString() })
+      .eq('id', seatId)
+    if (claimErr) {
+      console.error('[accept seat claim]', claimErr)
+      return NextResponse.json({ error: claimErr.message }, { status: 500 })
+    }
   }
 
   // Mark invite consumed last — if it fails the seat claim still stands,

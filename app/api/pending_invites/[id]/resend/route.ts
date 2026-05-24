@@ -1,0 +1,237 @@
+// app/api/pending_invites/[id]/resend/route.ts
+//
+// Rotate an outstanding invite — generate a new invite_token, extend
+// invite_expires_at by another 7 days, and re-send the invitation email.
+// Rotating the token (vs. just re-sending the existing one) means a
+// previously-leaked link stops working: the user is asking for a fresh
+// invitation, and that should be exactly what they get.
+//
+// Corporate (tier='admin') invites don't re-send email — same reason as
+// the invite route — but they DO get a fresh token + expiry so the
+// super_admin can copy the new link.
+//
+// Auth: super_admin/admin OR the owner of the invite's location.
+// Corporate (location-less) invites: super_admin only.
+
+import { NextRequest, NextResponse } from 'next/server'
+import crypto from 'node:crypto'
+import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { supabaseService } from '@/lib/supabase-service'
+import { sendEmail } from '@/lib/resend'
+
+export const runtime = 'nodejs'
+
+const INVITE_TTL_DAYS = 7
+
+function isElevated(role: string) {
+  return role === 'super_admin' || role === 'admin'
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function formatExpiry(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    })
+  } catch {
+    return iso
+  }
+}
+
+function buildResendEmail(args: {
+  inviteUrl: string
+  locationName: string
+  inviterName: string
+  expiresAt: string
+}): { html: string; text: string } {
+  const { inviteUrl, locationName, inviterName, expiresAt } = args
+  const expiryFormatted = formatExpiry(expiresAt)
+
+  const html = `<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f7f5f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1a2e2b;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f5f0;padding:32px 16px;">
+      <tr><td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;box-shadow:0 4px 24px rgba(26,46,43,0.08);overflow:hidden;">
+          <tr><td style="padding:32px 32px 24px;">
+            <div style="font-size:32px;margin-bottom:8px;">🐝</div>
+            <h1 style="margin:0 0 16px;font-family:Georgia,serif;font-size:22px;color:#1a2e2b;">A fresh invitation to ${escapeHtml(locationName)}</h1>
+            <p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#1a2e2b;">
+              <strong>${escapeHtml(inviterName)}</strong> re-sent your invitation to join <strong>${escapeHtml(locationName)}</strong> on Bee Hub. The previous invite link is no longer valid — use the one below.
+            </p>
+            <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+              <tr><td style="background:#1a2e2b;border-radius:10px;">
+                <a href="${inviteUrl}" style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;font-family:inherit;">Accept Invitation</a>
+              </td></tr>
+            </table>
+            <p style="margin:0 0 8px;font-size:12px;color:#8a9e9a;">Or paste this link into your browser:</p>
+            <p style="margin:0 0 20px;font-size:12px;color:#4a5e5a;word-break:break-all;font-family:ui-monospace,Menlo,monospace;">${escapeHtml(inviteUrl)}</p>
+            <p style="margin:0;font-size:12px;color:#8a9e9a;line-height:1.5;">This invitation expires on <strong>${escapeHtml(expiryFormatted)}</strong>.</p>
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+</html>`
+
+  const text = [
+    `${inviterName} re-sent your invitation to join ${locationName} on Bee Hub. The previous invite link is no longer valid — use the one below.`,
+    '',
+    inviteUrl,
+    '',
+    `This invitation expires on ${expiryFormatted}.`,
+    '',
+    '—',
+    'Bee Organized',
+  ].join('\n')
+
+  return { html, text }
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const inviteId = params.id
+  if (!inviteId) {
+    return NextResponse.json({ error: 'id required' }, { status: 400 })
+  }
+
+  const supabase = await createServerSupabaseClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) {
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  }
+
+  const { data: caller } = await supabase
+    .from('hub_users')
+    .select('id, role, location_id')
+    .eq('id', user.id)
+    .single()
+  if (!caller) {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  }
+
+  const { data: invite, error: inviteErr } = await supabaseService
+    .from('pending_invites')
+    .select('id, location_id, email, full_name, tier, accepted_at')
+    .eq('id', inviteId)
+    .maybeSingle()
+  if (inviteErr) {
+    console.error('[pending_invites resend fetch]', inviteErr)
+    return NextResponse.json({ error: inviteErr.message }, { status: 500 })
+  }
+  if (!invite) {
+    return NextResponse.json({ error: 'invite not found' }, { status: 404 })
+  }
+  if (invite.accepted_at) {
+    return NextResponse.json(
+      { error: 'invite already accepted — cannot resend' },
+      { status: 409 }
+    )
+  }
+
+  const isCorporateInvite = invite.tier === 'admin' || !invite.location_id
+  if (isCorporateInvite) {
+    if (caller.role !== 'super_admin') {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+    }
+  } else {
+    const isOwnerOfLocation =
+      caller.role === 'owner' && caller.location_id === invite.location_id
+    if (!isElevated(caller.role) && !isOwnerOfLocation) {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+    }
+  }
+
+  const newToken = crypto.randomBytes(24).toString('hex')
+  const newExpiresAt = new Date(
+    Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000
+  ).toISOString()
+
+  const { data: updated, error: updateErr } = await supabaseService
+    .from('pending_invites')
+    .update({
+      invite_token: newToken,
+      invite_expires_at: newExpiresAt,
+    })
+    .eq('id', inviteId)
+    .select('id, email, full_name, role, tier, location_id, invite_token, invite_expires_at, created_at')
+    .single()
+  if (updateErr) {
+    console.error('[pending_invites resend update]', updateErr)
+    return NextResponse.json({ error: updateErr.message }, { status: 500 })
+  }
+
+  const origin =
+    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
+    request.nextUrl.origin
+  const invite_url = `${origin}/auth/invite/${newToken}`
+
+  let email_sent = false
+  let email_error: string | undefined
+  if (isCorporateInvite) {
+    email_error = 'corporate invites do not send email — copy invite_url from response'
+  } else if (invite.location_id) {
+    try {
+      const [{ data: location }, { data: inviter }] = await Promise.all([
+        supabaseService
+          .from('locations')
+          .select('name')
+          .eq('id', invite.location_id)
+          .single(),
+        supabaseService
+          .from('hub_users')
+          .select('full_name, first_name, email')
+          .eq('id', caller.id)
+          .single(),
+      ])
+      const locationName = location?.name || 'Bee Hub'
+      const inviterName =
+        inviter?.full_name?.trim() ||
+        inviter?.first_name?.trim() ||
+        inviter?.email ||
+        'Your team'
+      const { html, text } = buildResendEmail({
+        inviteUrl: invite_url,
+        locationName,
+        inviterName,
+        expiresAt: newExpiresAt,
+      })
+      const result = await sendEmail({
+        locationId: invite.location_id,
+        to: invite.email,
+        subject: `Fresh invitation to ${locationName} on Bee Hub`,
+        html,
+        text,
+      })
+      if (result.success) {
+        email_sent = true
+      } else {
+        email_error = result.error
+      }
+    } catch (err) {
+      email_error = err instanceof Error ? err.message : String(err)
+      console.error('[pending_invites resend email]', err)
+    }
+  }
+
+  return NextResponse.json({
+    invite: updated,
+    invite_url,
+    email_sent,
+    ...(email_error ? { email_error } : {}),
+  })
+}

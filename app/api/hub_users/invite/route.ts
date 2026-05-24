@@ -17,16 +17,21 @@ import { sendEmail } from '@/lib/resend'
 
 export const runtime = 'nodejs'
 
-const VALID_TIERS = ['owner', 'manager', 'light', 'readonly'] as const
+// 'admin' is the corporate-invite tier — no location, no subscription_seat
+// claim, role becomes 'admin' in hub_users. Franchise tiers (owner/manager/
+// light/readonly) all require a location_id and claim one seat at accept.
+const VALID_TIERS = ['owner', 'manager', 'light', 'readonly', 'admin'] as const
 type Tier = (typeof VALID_TIERS)[number]
 
 const INVITE_TTL_DAYS = 7
 
-// hub_users.role enum lookup — invited team members are 'lite_user' regardless
-// of seat tier (manager / light / readonly). Owner-tier seats only get created
-// during onboarding co-owner flow (out of scope here).
+// hub_users.role enum lookup. Two carve-outs from the default 'lite_user':
+// tier='owner' → role='owner' (full location access), tier='admin' →
+// role='admin' (corporate, no location). super_admin is intentionally not
+// invitable here; promotions are a manual Supabase touch.
 function roleForTier(tier: Tier): string {
   if (tier === 'owner') return 'owner'
+  if (tier === 'admin') return 'admin'
   return 'lite_user'
 }
 
@@ -146,13 +151,16 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => ({}))
-  const { email, full_name, location_id, tier } = body || {}
+  const { email, full_name, tier } = body || {}
+  // tier='admin' invites are location-less corporate invites; everything
+  // else (owner/manager/light/readonly) is franchise and requires a location.
+  const isCorporateTier = tier === 'admin'
+  const location_id: string | null = isCorporateTier
+    ? null
+    : (typeof body?.location_id === 'string' ? body.location_id : null)
 
   if (!isValidEmail(email)) {
     return NextResponse.json({ error: 'valid email required' }, { status: 400 })
-  }
-  if (typeof location_id !== 'string' || !location_id) {
-    return NextResponse.json({ error: 'location_id required' }, { status: 400 })
   }
   if (!VALID_TIERS.includes(tier)) {
     return NextResponse.json(
@@ -160,66 +168,96 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     )
   }
+  if (!isCorporateTier && !location_id) {
+    return NextResponse.json({ error: 'location_id required' }, { status: 400 })
+  }
 
-  const isOwnerOfLocation =
-    caller.role === 'owner' && caller.location_id === location_id
-  if (!isElevated(caller.role) && !isOwnerOfLocation) {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  // Authorization:
+  //   - Corporate (admin) invites: super_admin only. Existing admins can't
+  //     invite more admins — privilege escalation is intentionally a
+  //     super_admin touch.
+  //   - Franchise invites: super_admin/admin OR owner of the target location.
+  if (isCorporateTier) {
+    if (caller.role !== 'super_admin') {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+    }
+  } else {
+    const isOwnerOfLocation =
+      caller.role === 'owner' && caller.location_id === location_id
+    if (!isElevated(caller.role) && !isOwnerOfLocation) {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+    }
   }
 
   const normalizedEmail = String(email).trim().toLowerCase()
 
-  // Refuse if the email is already a hub_user at this location — they'd
-  // double-claim a seat on accept. (We tolerate the same email at a
-  // different location; that's a separate identity story.)
-  const { data: existing } = await supabaseService
+  // Duplicate check.
+  //   - Corporate invites: refuse if the email is ANY existing hub_user. A
+  //     single human shouldn't accept a corporate invite while already
+  //     holding a franchise seat (or vice versa) — the accept route would
+  //     overwrite their location/role.
+  //   - Franchise invites: refuse only if the email already holds a seat at
+  //     this location (same email at a different location is a separate
+  //     identity story we tolerate).
+  let dupeQuery = supabaseService
     .from('hub_users')
     .select('id, location_id, email')
     .eq('email', normalizedEmail)
-    .eq('location_id', location_id)
     .limit(1)
+  if (!isCorporateTier && location_id) {
+    dupeQuery = dupeQuery.eq('location_id', location_id)
+  }
+  const { data: existing } = await dupeQuery
   if (existing && existing.length > 0) {
     return NextResponse.json(
-      { error: 'A team member with this email already exists at this location.' },
-      { status: 409 }
-    )
-  }
-
-  // Available seats at the requested tier (subtract pending invites at the
-  // same tier — we don't pre-claim seats, but counts must reflect outstanding
-  // reservations so two invites can't be issued against one slot).
-  const { data: seatsAtTier, error: seatsErr } = await supabaseService
-    .from('subscription_seats')
-    .select('id, user_id, status')
-    .eq('location_id', location_id)
-    .eq('tier', tier)
-    .eq('status', 'active')
-  if (seatsErr) {
-    console.error('[invite seats fetch]', seatsErr)
-    return NextResponse.json({ error: seatsErr.message }, { status: 500 })
-  }
-  const availableSeats = (seatsAtTier || []).filter((s: any) => !s.user_id).length
-
-  const { count: pendingCount, error: pendingErr } = await supabaseService
-    .from('pending_invites')
-    .select('id', { count: 'exact', head: true })
-    .eq('location_id', location_id)
-    .eq('tier', tier)
-    .is('accepted_at', null)
-  if (pendingErr) {
-    console.error('[invite pending count]', pendingErr)
-    return NextResponse.json({ error: pendingErr.message }, { status: 500 })
-  }
-
-  if (availableSeats - (pendingCount || 0) < 1) {
-    return NextResponse.json(
       {
-        error:
-          'No available seats at this tier. Add more seats before inviting.',
-        code: 'no_available_seats',
+        error: isCorporateTier
+          ? 'A user with this email already exists.'
+          : 'A team member with this email already exists at this location.',
       },
       { status: 409 }
     )
+  }
+
+  // Seat availability is a franchise-tier concept. Corporate invites don't
+  // claim a subscription_seats row, so we skip the gate.
+  if (!isCorporateTier && location_id) {
+    // Available seats at the requested tier (subtract pending invites at the
+    // same tier — we don't pre-claim seats, but counts must reflect outstanding
+    // reservations so two invites can't be issued against one slot).
+    const { data: seatsAtTier, error: seatsErr } = await supabaseService
+      .from('subscription_seats')
+      .select('id, user_id, status')
+      .eq('location_id', location_id)
+      .eq('tier', tier)
+      .eq('status', 'active')
+    if (seatsErr) {
+      console.error('[invite seats fetch]', seatsErr)
+      return NextResponse.json({ error: seatsErr.message }, { status: 500 })
+    }
+    const availableSeats = (seatsAtTier || []).filter((s: any) => !s.user_id).length
+
+    const { count: pendingCount, error: pendingErr } = await supabaseService
+      .from('pending_invites')
+      .select('id', { count: 'exact', head: true })
+      .eq('location_id', location_id)
+      .eq('tier', tier)
+      .is('accepted_at', null)
+    if (pendingErr) {
+      console.error('[invite pending count]', pendingErr)
+      return NextResponse.json({ error: pendingErr.message }, { status: 500 })
+    }
+
+    if (availableSeats - (pendingCount || 0) < 1) {
+      return NextResponse.json(
+        {
+          error:
+            'No available seats at this tier. Add more seats before inviting.',
+          code: 'no_available_seats',
+        },
+        { status: 409 }
+      )
+    }
   }
 
   const inviteToken = crypto.randomBytes(24).toString('hex')
@@ -256,60 +294,71 @@ export async function POST(request: NextRequest) {
   const invite_url = `${origin}/auth/invite/${inviteToken}`
 
   // Send invite email. Failure here doesn't roll back the invite row — the
-  // owner can still copy the link from the UI as a fallback. We surface the
-  // outcome via email_sent / email_error so the client can adjust messaging.
+  // inviter can still copy the link from the UI as a fallback. We surface
+  // the outcome via email_sent / email_error so the client can adjust
+  // messaging.
+  //
+  // Corporate (admin-tier) invites skip the email send: sendEmail() resolves
+  // sender config from a location row, and corporate invites have no
+  // location. Super_admin copies the invite_url from the success modal and
+  // hands it off out-of-band. (Pre-launch the volume is single digits;
+  // adding a system-sender wiring path is post-launch tech debt.)
   let email_sent = false
   let email_error: string | undefined
-  try {
-    const [{ data: location }, { data: inviter }] = await Promise.all([
-      supabaseService
-        .from('locations')
-        .select('name')
-        .eq('id', location_id)
-        .single(),
-      supabaseService
-        .from('hub_users')
-        .select('full_name, first_name, email')
-        .eq('id', caller.id)
-        .single(),
-    ])
+  if (isCorporateTier) {
+    email_error = 'corporate invites do not send email — copy invite_url from response'
+  } else if (location_id) {
+    try {
+      const [{ data: location }, { data: inviter }] = await Promise.all([
+        supabaseService
+          .from('locations')
+          .select('name')
+          .eq('id', location_id)
+          .single(),
+        supabaseService
+          .from('hub_users')
+          .select('full_name, first_name, email')
+          .eq('id', caller.id)
+          .single(),
+      ])
 
-    const locationName = location?.name || 'Bee Hub'
-    const inviterName =
-      inviter?.full_name?.trim() ||
-      inviter?.first_name?.trim() ||
-      inviter?.email ||
-      'Your team'
-    const inviteeName =
-      typeof full_name === 'string' && full_name.trim()
-        ? full_name.trim().split(/\s+/)[0]
-        : null
+      const locationName = location?.name || 'Bee Hub'
+      const inviterName =
+        inviter?.full_name?.trim() ||
+        inviter?.first_name?.trim() ||
+        inviter?.email ||
+        'Your team'
+      const inviteeName =
+        typeof full_name === 'string' && full_name.trim()
+          ? full_name.trim().split(/\s+/)[0]
+          : null
 
-    const { html, text } = buildInviteEmail({
-      inviteUrl: invite_url,
-      locationName,
-      inviterName,
-      expiresAt: expiresAt,
-      inviteeName,
-    })
+      const { html, text } = buildInviteEmail({
+        inviteUrl: invite_url,
+        locationName,
+        inviterName,
+        expiresAt: expiresAt,
+        inviteeName,
+      })
 
-    const result = await sendEmail({
-      locationId: location_id,
-      to: normalizedEmail,
-      subject: `You've been invited to join ${locationName} on Bee Hub`,
-      html,
-      text,
-    })
+      const result = await sendEmail({
+        locationId: location_id,
+        to: normalizedEmail,
+        subject: `You've been invited to join ${locationName} on Bee Hub`,
+        html,
+        text,
+      })
 
-    if (result.success) {
-      email_sent = true
-    } else {
-      email_error = result.error
-      console.error('[invite email send]', email_error)
+      if (result.success) {
+        email_sent = true
+      } else {
+        email_error = result.error
+        console.error('[invite email send]', email_error)
+      }
+    } catch (err) {
+      email_error = err instanceof Error ? err.message : String(err)
+      console.error('[invite email send] unexpected error', err)
     }
-  } catch (err) {
-    email_error = err instanceof Error ? err.message : String(err)
-    console.error('[invite email send] unexpected error', err)
   }
 
   return NextResponse.json(
