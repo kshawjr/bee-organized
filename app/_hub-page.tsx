@@ -333,12 +333,17 @@ export default async function HubPage({
     initialLocations = (locs || []).map((row: any) => {
       const lifecycle = row.lifecycle_status || 'onboarding'
       const subStatus = row.subscription_status || 'deferred'
+      // lifecycle_status drives onboarding vs active; subscription_status only
+      // overrides for billing UI (past_due, inactive) once the location is
+      // past launch. Corp-sponsored locations stay subscription_status=
+      // 'deferred' through their sponsorship window (March 2027) and must
+      // still register as 'active' once lifecycle_status flips.
       const crmStatus =
-        subStatus === 'past_due'              ? 'pastdue'
+        lifecycle === 'onboarding'            ? 'onboarding'
+        : subStatus === 'past_due'            ? 'pastdue'
         : lifecycle === 'paused'              ? 'inactive'
         : subStatus === 'inactive'            ? 'inactive'
-        : subStatus === 'active'              ? 'active'
-        :                                       'onboarding'
+        :                                       'active'
 
       return {
         id: row.id,

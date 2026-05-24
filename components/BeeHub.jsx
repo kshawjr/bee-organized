@@ -25281,6 +25281,11 @@ export default function App({
   const [guideSlides, setGuideSlides]       = useState(Array.isArray(initialGuideSlides) ? initialGuideSlides : [])
   const [showGuide, setShowGuide]           = useState(false) // SSR-safe: open only after client-side localStorage check
   useEffect(() => {
+    // Skip auto-open while the user is still in onboarding — the modal is a
+    // full-screen fixed overlay and covers OnboardingScreen, so a fresh owner
+    // sees the Guide instead of step 1 of the setup flow. They can still open
+    // it manually from the sidebar after launch.
+    if (currentLocation?.lifecycle_status === 'onboarding') return
     try {
       if (guideSlides.length > 0 && !localStorage.getItem('bee_guide_dismissed')) setShowGuide(true)
     } catch (e) { /* private mode / disabled storage */ }
@@ -25487,25 +25492,23 @@ if (Array.isArray(initialPeople)) return
     ? (initialLocations || ALL_LOCATIONS).find(l=>l.id===viewAsUser.locationId)
     : selectedLoc
 
-  // Real franchise user: derive crmStatus from currentSubscription +
-  // currentLocation.lifecycle_status. super_admin / corporate sign in with
-  // currentSubscription=null and fall through to the existing mock/view-as
-  // path.
+  // Real franchise user: lifecycle_status is the source of truth for
+  // onboarding vs active routing. subscription_status is a billing concern
+  // and only overrides AFTER launch (lifecycle_status='active') to surface
+  // past_due / inactive UI states. super_admin / corporate sign in with
+  // currentSubscription=null and fall through to the view-as path below.
   //
-  // Billing state (subscription_status) and setup state (lifecycle_status)
-  // are tracked separately on locations — the pay step flips
-  // subscription_status='deferred'→'active' early in onboarding, but
-  // lifecycle_status stays 'onboarding' until the launch step at the end.
-  // Without consulting lifecycle_status here, a server redirect mid-flow
-  // (e.g. Jobber OAuth callback) would re-render with subscription_status=
-  // 'active' and drop the owner onto the home page, skipping the remaining
-  // onboarding steps. past_due / inactive remain billing-state overrides.
+  // 'deferred' must NOT route to 'onboarding' — corp-sponsored locations
+  // (payment_source='corporate_sponsored') stay subscription_status='deferred'
+  // through the sponsorship window (currently March 2027). Pre-fix, a
+  // launched corp-sponsored location would be stuck in onboarding mode
+  // forever because the OR-clause treated 'deferred' as an onboarding signal.
   const effectiveCrmStatus = (() => {
     if (!isElevated && currentSubscription) {
+      if (currentLocation?.lifecycle_status === 'onboarding') return 'onboarding'
       const s = currentSubscription.subscription_status
       if (s === 'past_due') return 'pastdue'
       if (s === 'inactive') return 'inactive'
-      if (s === 'deferred' || currentLocation?.lifecycle_status === 'onboarding') return 'onboarding'
       return 'active'
     }
     if (franchiseLoc) return locStatuses[franchiseLoc.id] || franchiseLoc.crmStatus

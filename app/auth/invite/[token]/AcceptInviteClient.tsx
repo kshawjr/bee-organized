@@ -68,6 +68,10 @@ export default function AcceptInviteClient({
     setStep('done')
     // Flag a fresh accept so DashboardScreen knows to render the lightweight
     // employee onboarding once. Cleared when they finish or skip.
+    // TODO: scope to non-owner invites only. Owners ignore this flag
+    // (DashboardScreen gates on franchiseRole !== 'owner'), so it's harmless
+    // today, but the server page already knows the invite tier — pipe it
+    // through and only set sessionStorage for tier !== 'owner'.
     try { sessionStorage.setItem('bee.employeeOnboarding', '1') } catch {}
     router.push('/')
   }
