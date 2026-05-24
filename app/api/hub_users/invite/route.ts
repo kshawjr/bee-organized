@@ -34,6 +34,11 @@ const INVITE_REPLY_TO_EMAIL =
 const VALID_TIERS = ['owner', 'manager', 'light', 'readonly', 'admin'] as const
 type Tier = (typeof VALID_TIERS)[number]
 
+// Worker Bee (light) and Honey Watcher (readonly) tiers ship later. UI
+// disables those options; this is the server-side backstop that 503s any
+// request for them. Owner / manager / admin invites are unaffected.
+const DEFERRED_TIERS: ReadonlySet<string> = new Set(['light', 'readonly'])
+
 const INVITE_TTL_DAYS = 7
 
 // hub_users.role enum lookup. Two carve-outs from the default 'lite_user':
@@ -239,6 +244,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: `invalid tier — must be one of: ${VALID_TIERS.join(', ')}` },
       { status: 400 }
+    )
+  }
+  if (DEFERRED_TIERS.has(tier)) {
+    return NextResponse.json(
+      {
+        error: 'Tier not yet available. Worker Bee and Honey Watcher seats ship in a later release.',
+        code: 'tier_deferred',
+      },
+      { status: 503 }
     )
   }
   if (!isCorporateTier && !location_id) {

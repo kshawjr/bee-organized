@@ -11872,7 +11872,11 @@ function OnboardingInviteSheet({ onClose, onDone, locationId }) {
                     </div>
                     <div style={{ display:'flex', gap:'6px' }}>
                       <select value={inv.role} onChange={e=>updateRow(inv.id,'role',e.target.value)} style={{ flex:1, padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none' }}>
-                        {FRANCHISE_ROLES.filter(r=>r.key!=='owner').map(r=><option key={r.key} value={r.key}>{r.icon} {r.label}</option>)}
+                        {FRANCHISE_ROLES.filter(r=>r.key!=='owner').map(r=>(
+                          <option key={r.key} value={r.key} disabled={isDeferredTier(r.key)}>
+                            {r.icon} {r.label}{isDeferredTier(r.key) ? ' — Coming Soon' : ''}
+                          </option>
+                        ))}
                       </select>
                       {invites.length>1&&<button onClick={()=>removeRow(inv.id)} style={{ padding:'8px 12px', background:'transparent', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'8px', color:'#ef4444', cursor:'pointer', fontSize:'14px' }}>×</button>}
                     </div>
@@ -16425,12 +16429,19 @@ function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdate
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
               {FRANCHISE_ROLES.filter(r=>r.key!=='owner').map(r=>{
                 const isSelected = user.role===r.key
+                const deferred = isDeferredTier(r.key)
                 return (
-                  <button key={r.key} onClick={()=>onUpdateRole(r.key)}
-                    style={{ padding:'10px 12px', background:isSelected?'rgba(26,46,43,0.06)':'white', border:`2px solid ${isSelected?'#1a2e2b':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left', display:'flex', alignItems:'center', gap:'8px' }}>
+                  <button key={r.key} onClick={()=>{ if (!deferred) onUpdateRole(r.key) }}
+                    disabled={deferred}
+                    aria-disabled={deferred}
+                    style={{ padding:'10px 12px', background:isSelected?'rgba(26,46,43,0.06)':'white', border:`2px solid ${isSelected?'#1a2e2b':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:deferred?'not-allowed':'pointer', fontFamily:'inherit', textAlign:'left', display:'flex', alignItems:'center', gap:'8px', opacity: deferred ? 0.55 : 1 }}>
                     <span style={{ fontSize:'16px' }}>{r.icon}</span>
                     <p style={{ fontSize:'12px', fontWeight:600, color:isSelected?'#1a2e2b':'#4a5e5a' }}>{r.label}</p>
-                    {isSelected&&<span style={{ marginLeft:'auto', color:'#1a2e2b', fontSize:'14px' }}>✓</span>}
+                    {deferred ? (
+                      <span style={{ marginLeft:'auto', fontSize:'8px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.12)', border:'1px solid rgba(212,160,70,0.3)', padding:'1px 6px', borderRadius:'10px', textTransform:'uppercase', letterSpacing:'0.4px' }}>Soon</span>
+                    ) : (
+                      isSelected && <span style={{ marginLeft:'auto', color:'#1a2e2b', fontSize:'14px' }}>✓</span>
+                    )}
                   </button>
                 )
               })}
@@ -18723,6 +18734,15 @@ const SUBSCRIPTION_TIER_META = [
   { key:'readonly', name:'Honey Watcher', icon:'👁',  color:'#8a9e9a', detail:'Read-only · Add as many as needed' },
 ]
 
+// Worker Bee + Honey Watcher tiers ship later — for now their pricing,
+// quantity selectors, and purchase flows are disabled everywhere the 4-tier
+// matrix appears. Zee Bee + Hive Manager remain fully interactive. Backend
+// (/api/seats/buy-and-invite and /api/hub_users/invite) mirrors this by
+// returning 503 for tier in {light, readonly}. Re-enable by clearing this
+// set + the matching backend check.
+const DEFERRED_TIER_KEYS = new Set(['light', 'readonly'])
+function isDeferredTier(key) { return DEFERRED_TIER_KEYS.has(key) }
+
 function SubscriptionCalculator({
   initialSeats = [{ tier:'owner', count:1 }],
   paymentSource = 'direct',
@@ -18767,6 +18787,9 @@ function SubscriptionCalculator({
     : 0
 
   function adjustSeat(tier, delta) {
+    // Deferred tiers (Worker Bee, Honey Watcher) are locked at 0 — buttons are
+    // already disabled in the UI, this is a defense-in-depth backstop.
+    if (isDeferredTier(tier)) return
     setSeats(prev => {
       const idx = prev.findIndex(s => s.tier === tier)
       const current = idx >= 0 ? prev[idx].count : 0
@@ -18924,19 +18947,22 @@ function SubscriptionCalculator({
       </div>
       <div style={{ display:'grid' }}>
         {SUBSCRIPTION_TIER_META.map(t => {
+          const deferred = isDeferredTier(t.key)
           const count = getCount(t.key)
           const price = getTierPrice(t.key)
           // Co-owner rule reflected in row subtotal: 1st at owner rate, 2nd at manager rate.
           const subtotal = (t.key === 'owner' && count >= 2)
             ? price + (count - 1) * managerPrice
             : price * count
-          const minusDisabled = t.key === 'owner' ? count <= 1 : count <= 0
-          const plusDisabled = count >= SEAT_MAX(t.key)
-          const detailText = t.key === 'owner'
-            ? `${formatCurrency(price, { showCents:'never' })}/yr · 2nd seat ${formatCurrency(managerPrice, { showCents:'never' })}/yr · Max 2`
-            : `${formatCurrency(price, { showCents:'never' })}/yr · ${t.detail}`
+          const minusDisabled = deferred || (t.key === 'owner' ? count <= 1 : count <= 0)
+          const plusDisabled  = deferred || count >= SEAT_MAX(t.key)
+          const detailText = deferred
+            ? `TBD · ${t.detail}`
+            : t.key === 'owner'
+              ? `${formatCurrency(price, { showCents:'never' })}/yr · 2nd seat ${formatCurrency(managerPrice, { showCents:'never' })}/yr · Max 2`
+              : `${formatCurrency(price, { showCents:'never' })}/yr · ${t.detail}`
           return (
-            <div key={t.key} style={{ padding:'12px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)', borderLeft:`4px solid ${t.color}`, display:'flex', alignItems:'center', gap:'10px' }}>
+            <div key={t.key} style={{ padding:'12px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)', borderLeft:`4px solid ${t.color}`, display:'flex', alignItems:'center', gap:'10px', opacity: deferred ? 0.55 : 1 }}>
               <span style={{ fontSize:'20px', lineHeight:1, flexShrink:0 }}>{t.icon}</span>
               <div style={{ flex:1, minWidth:0 }}>
                 <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{t.name}</p>
@@ -18966,10 +18992,16 @@ function SubscriptionCalculator({
                 </button>
               </div>
               <div style={{ minWidth:'62px', textAlign:'right', flexShrink:0 }}>
-                <p style={{ fontSize:'12.5px', fontWeight:700, color:count>0?'#1a2e2b':'#c8d8d4', fontFamily:'Georgia,serif' }}>
-                  {formatCurrency(subtotal, { showCents:'never' })}
-                </p>
-                <p style={{ fontSize:'9.5px', color:'#b0c0bc' }}>subtotal</p>
+                {deferred ? (
+                  <span style={{ display:'inline-block', fontSize:'8px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.12)', border:'1px solid rgba(212,160,70,0.3)', padding:'2px 7px', borderRadius:'10px', letterSpacing:'0.4px', textTransform:'uppercase' }}>Coming Soon</span>
+                ) : (
+                  <>
+                    <p style={{ fontSize:'12.5px', fontWeight:700, color:count>0?'#1a2e2b':'#c8d8d4', fontFamily:'Georgia,serif' }}>
+                      {formatCurrency(subtotal, { showCents:'never' })}
+                    </p>
+                    <p style={{ fontSize:'9.5px', color:'#b0c0bc' }}>subtotal</p>
+                  </>
+                )}
               </div>
             </div>
           )
@@ -19059,14 +19091,21 @@ function TierPlansInline() {
         {/* Sticky header — tier name + level + price stacked vertically */}
         <div style={{ display:'grid', gridTemplateColumns:gridCols, gap:'4px', background:'rgba(26,46,43,0.04)', borderBottom:'2px solid rgba(0,0,0,0.12)', position:'sticky', top:0, zIndex:5, paddingLeft:'12px', paddingRight:'10px' }}>
           <div style={{ display:'flex', alignItems:'flex-end', padding:'10px 0', fontSize:'9px', letterSpacing:'1px', textTransform:'uppercase', color:'#8a9e9a', fontWeight:700 }}>Capability</div>
-          {tiers.map(t => (
-            <div key={t.key} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'3px', textAlign:'center', borderTop:`3px solid ${t.color}`, padding:'8px 2px 10px' }}>
-              <span style={{ fontSize:'15px', lineHeight:1 }}>{t.icon}</span>
-              <p style={{ fontSize:'9.5px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', lineHeight:1.15 }}>{t.name}</p>
-              <span style={{ fontSize:'7.5px', color:'#8a9e9a', letterSpacing:'0.5px', textTransform:'uppercase', fontWeight:700, padding:'1px 4px', background:'rgba(26,46,43,0.06)', borderRadius:'3px', lineHeight:1.2 }}>{t.level}</span>
-              <p style={{ fontSize:'10px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginTop:'1px' }}>${t.price}<span style={{ fontSize:'8px', color:'#8a9e9a', fontWeight:500 }}>/yr</span></p>
-            </div>
-          ))}
+          {tiers.map(t => {
+            const deferred = isDeferredTier(t.key)
+            return (
+              <div key={t.key} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'3px', textAlign:'center', borderTop:`3px solid ${t.color}`, padding:'8px 2px 10px', opacity: deferred ? 0.55 : 1 }}>
+                <span style={{ fontSize:'15px', lineHeight:1 }}>{t.icon}</span>
+                <p style={{ fontSize:'9.5px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', lineHeight:1.15 }}>{t.name}</p>
+                <span style={{ fontSize:'7.5px', color:'#8a9e9a', letterSpacing:'0.5px', textTransform:'uppercase', fontWeight:700, padding:'1px 4px', background:'rgba(26,46,43,0.06)', borderRadius:'3px', lineHeight:1.2 }}>{t.level}</span>
+                {deferred ? (
+                  <span style={{ fontSize:'7.5px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.12)', border:'1px solid rgba(212,160,70,0.3)', padding:'1px 5px', borderRadius:'10px', letterSpacing:'0.4px', textTransform:'uppercase', marginTop:'2px' }}>Coming Soon</span>
+                ) : (
+                  <p style={{ fontSize:'10px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginTop:'1px' }}>${t.price}<span style={{ fontSize:'8px', color:'#8a9e9a', fontWeight:500 }}>/yr</span></p>
+                )}
+              </div>
+            )
+          })}
         </div>
 
         {/* Feature rows, grouped by section */}
@@ -19082,7 +19121,7 @@ function TierPlansInline() {
                   <p style={{ fontSize:'9.5px', color:'#8a9e9a', marginTop:'2px', lineHeight:1.3 }}>{r[1]}</p>
                 </div>
                 {r[2].map((v, ci) => (
-                  <div key={ci} style={{ textAlign:'center' }}>{renderAccess(v)}</div>
+                  <div key={ci} style={{ textAlign:'center', opacity: isDeferredTier(tiers[ci]?.key) ? 0.55 : 1 }}>{renderAccess(v)}</div>
                 ))}
               </div>
             ))}
@@ -20268,7 +20307,7 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
                       <div style={{ width:'28px', height:'28px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'10px', fontWeight:700, color:'white', flexShrink:0 }}>{u.initials}</div>
                       <p style={{ flex:1, fontSize:'12px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.name}</p>
                       <span style={{ fontSize:'10px', color:rc?.color, background:rc?.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:600, flexShrink:0 }}>{rc?.label}</span>
-                      <span style={{ fontSize:'10px', color:'#8a9e9a', flexShrink:0 }}>${getTierPrice(u.role).toLocaleString()}/yr</span>
+                      <span style={{ fontSize:'10px', color:'#8a9e9a', flexShrink:0 }}>{isDeferredTier(u.role) ? 'TBD' : `$${getTierPrice(u.role).toLocaleString()}/yr`}</span>
                     </div>
                   )
                 })}
@@ -22082,14 +22121,17 @@ function PricingManagementTab() {
         <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
           {FRANCHISE_ROLES.map((r, i) => {
             const isEditing = editingRole === r.key
+            const deferred = isDeferredTier(r.key)
             return (
-              <div key={r.key} style={{ background:'white', borderBottom:i<FRANCHISE_ROLES.length-1?'1px solid rgba(0,0,0,0.05)':'none', padding:'12px 16px', display:'flex', alignItems:'center', gap:'12px' }}>
+              <div key={r.key} style={{ background:'white', borderBottom:i<FRANCHISE_ROLES.length-1?'1px solid rgba(0,0,0,0.05)':'none', padding:'12px 16px', display:'flex', alignItems:'center', gap:'12px', opacity: deferred ? 0.55 : 1 }}>
                 <div style={{ width:'36px', height:'36px', borderRadius:'9px', background:r.bg, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px', flexShrink:0 }}>{r.icon}</div>
                 <div style={{ flex:1 }}>
                   <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>{r.label}</p>
                   <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{r.desc}</p>
                 </div>
-                {isEditing ? (
+                {deferred ? (
+                  <span style={{ fontSize:'9px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.12)', border:'1px solid rgba(212,160,70,0.3)', padding:'3px 10px', borderRadius:'20px', textTransform:'uppercase', letterSpacing:'0.4px' }}>Coming Soon</span>
+                ) : isEditing ? (
                   <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
                     <span style={{ fontSize:'14px', color:'#8a9e9a' }}>$</span>
                     <input
@@ -25092,20 +25134,29 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated }) {
               <div style={{ display:'grid', gap:'8px', marginBottom:'10px' }}>
                 {TIER_OPTIONS.map(t => {
                   const isSelected = tier === t.key
+                  const deferred = isDeferredTier(t.key)
                   const availAtT = seatsCtx?.availableSeatsByTierWithPending?.(t.key) ?? 0
                   return (
-                    <button key={t.key} onClick={()=>setTier(t.key)}
-                      style={{ padding:'11px 12px', background:isSelected?'rgba(26,46,43,0.04)':'white', border:`2px solid ${isSelected?'#1a2e2b':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left', display:'flex', alignItems:'center', gap:'10px' }}>
+                    <button key={t.key} onClick={()=>{ if (!deferred) setTier(t.key) }}
+                      disabled={deferred}
+                      aria-disabled={deferred}
+                      style={{ padding:'11px 12px', background:isSelected?'rgba(26,46,43,0.04)':'white', border:`2px solid ${isSelected?'#1a2e2b':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:deferred?'not-allowed':'pointer', fontFamily:'inherit', textAlign:'left', display:'flex', alignItems:'center', gap:'10px', opacity: deferred ? 0.55 : 1 }}>
                       <span style={{ fontSize:'18px' }}>{t.icon}</span>
                       <div style={{ flex:1, minWidth:0 }}>
                         <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{t.name}</p>
                         <p style={{ fontSize:'10.5px', color:'#8a9e9a' }}>
-                          {availAtT > 0
-                            ? `${availAtT} available`
-                            : `none available — +${formatCurrency(prorateToNextRenewal(getTierPrice(t.key)), { showCents:'auto' })} prorated`}
+                          {deferred
+                            ? 'Coming soon'
+                            : availAtT > 0
+                              ? `${availAtT} available`
+                              : `none available — +${formatCurrency(prorateToNextRenewal(getTierPrice(t.key)), { showCents:'auto' })} prorated`}
                         </p>
                       </div>
-                      {isSelected && <span style={{ color:'#1a2e2b', fontSize:'15px' }}>✓</span>}
+                      {deferred ? (
+                        <span style={{ fontSize:'9px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.12)', border:'1px solid rgba(212,160,70,0.3)', padding:'2px 8px', borderRadius:'10px', textTransform:'uppercase', letterSpacing:'0.4px', flexShrink:0 }}>Coming Soon</span>
+                      ) : (
+                        isSelected && <span style={{ color:'#1a2e2b', fontSize:'15px' }}>✓</span>
+                      )}
                     </button>
                   )
                 })}

@@ -23,6 +23,11 @@ export const runtime = 'nodejs'
 const VALID_TIERS = ['manager', 'light', 'readonly'] as const
 type Tier = (typeof VALID_TIERS)[number]
 
+// Worker Bee (light) and Honey Watcher (readonly) tiers ship later. Until
+// then, the UI grays them out and this endpoint refuses purchases for them
+// even if a client somehow forges a request. Manager seats still work.
+const DEFERRED_TIERS: ReadonlySet<string> = new Set(['light', 'readonly'])
+
 const INVITE_TTL_DAYS = 7
 
 const SEAT_COLS =
@@ -68,6 +73,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: `invalid tier — must be one of: ${VALID_TIERS.join(', ')}` },
       { status: 400 }
+    )
+  }
+  if (DEFERRED_TIERS.has(tier)) {
+    return NextResponse.json(
+      {
+        error: 'Tier not yet available. Worker Bee and Honey Watcher seats ship in a later release.',
+        code: 'tier_deferred',
+      },
+      { status: 503 }
     )
   }
   if (!isValidEmail(email)) {
