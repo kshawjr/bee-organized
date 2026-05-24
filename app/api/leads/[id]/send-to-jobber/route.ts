@@ -251,7 +251,18 @@ export async function POST(
     if (Number.isNaN(Date.parse(scheduled_assessment_at))) {
       return fail('validation', 'scheduled_assessment_at_invalid', 400)
     }
+    if (assessment_type && assessment_type !== 'in-person' && assessment_type !== 'virtual') {
+      return fail('validation', 'invalid_assessment_type', 400)
+    }
   }
+
+  // Address is only mandatory for paths Jobber can't fulfill without a
+  // property: job creation, and in-person assessments. request_only and
+  // virtual assessments proceed without a property — mirrors the Deluge
+  // reference, which skipped property creation when street1 was empty.
+  const addressRequired =
+    creation_type === 'job_direct' ||
+    (creation_type === 'request_with_assessment' && assessment_type === 'in-person')
 
   // ── Load lead + location + assigned user ────────────────────────
   const { data: lead, error: leadErr } = await supabaseService
@@ -298,7 +309,9 @@ export async function POST(
 
   // ── Address ─────────────────────────────────────────────────────
   const address = pickPrimaryAddress(lead)
-  if (!address) return fail('validation', 'lead_has_no_address', 400)
+  if (!address && addressRequired) {
+    return fail('validation', 'lead_has_no_address', 400)
+  }
 
   const firstName = (lead.first_name || lead.name?.split(' ')[0] || '').trim()
   const lastName  = (lead.last_name  || lead.name?.split(' ').slice(1).join(' ') || '').trim()
@@ -370,50 +383,54 @@ export async function POST(
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // 3. PROPERTY: reuse if street matches, else create new
+  // 3. PROPERTY: reuse if street matches, else create new.
+  // Skipped entirely when no address is present (request_only / virtual
+  // assessment) — Deluge reference did the same.
   // ─────────────────────────────────────────────────────────────────
   let jobberPropertyGlobalId: string | null = null
 
-  if (matchStatus === 'matched_existing') {
-    const propsRes = await jobberGraphQL(
-      locationSlug,
-      GET_CLIENT_PROPERTIES_QUERY,
-      { clientId: jobberClientGlobalId },
-    )
-    if (propsRes.errors?.length) {
-      return fail('property_lookup', propsRes.errors[0]?.message || 'property_lookup_failed')
+  if (address) {
+    if (matchStatus === 'matched_existing') {
+      const propsRes = await jobberGraphQL(
+        locationSlug,
+        GET_CLIENT_PROPERTIES_QUERY,
+        { clientId: jobberClientGlobalId },
+      )
+      if (propsRes.errors?.length) {
+        return fail('property_lookup', propsRes.errors[0]?.message || 'property_lookup_failed')
+      }
+      const existing: any[] = propsRes.data?.client?.properties?.nodes || []
+      const wantedStreet = address.street.toLowerCase()
+      const matchedProp = existing.find((p: any) =>
+        (p.address?.street1 || '').trim().toLowerCase() === wantedStreet
+      )
+      if (matchedProp) jobberPropertyGlobalId = matchedProp.id
     }
-    const existing: any[] = propsRes.data?.client?.properties?.nodes || []
-    const wantedStreet = address.street.toLowerCase()
-    const matchedProp = existing.find((p: any) =>
-      (p.address?.street1 || '').trim().toLowerCase() === wantedStreet
-    )
-    if (matchedProp) jobberPropertyGlobalId = matchedProp.id
-  }
 
-  if (!jobberPropertyGlobalId) {
-    const propCreate = await jobberMutation(
-      locationSlug,
-      CLIENT_CREATE_PROPERTY_MUTATION,
-      {
-        clientId: jobberClientGlobalId,
-        input: {
-          address: {
-            street1:    address.street,
-            city:       address.city || null,
-            province:   address.state || null,
-            postalCode: address.zip || null,
-            country:    'US',
+    if (!jobberPropertyGlobalId) {
+      const propCreate = await jobberMutation(
+        locationSlug,
+        CLIENT_CREATE_PROPERTY_MUTATION,
+        {
+          clientId: jobberClientGlobalId,
+          input: {
+            address: {
+              street1:    address.street,
+              city:       address.city || null,
+              province:   address.state || null,
+              postalCode: address.zip || null,
+              country:    'US',
+            },
           },
         },
-      },
-    )
-    if (propCreate.userErrors?.length) {
-      return fail('property_create', propCreate.userErrors[0].message)
-    }
-    jobberPropertyGlobalId = propCreate.data?.clientCreateProperty?.property?.id || null
-    if (!jobberPropertyGlobalId) {
-      return fail('property_create', 'property_create_returned_no_id')
+      )
+      if (propCreate.userErrors?.length) {
+        return fail('property_create', propCreate.userErrors[0].message)
+      }
+      jobberPropertyGlobalId = propCreate.data?.clientCreateProperty?.property?.id || null
+      if (!jobberPropertyGlobalId) {
+        return fail('property_create', 'property_create_returned_no_id')
+      }
     }
   }
 
@@ -428,17 +445,19 @@ export async function POST(
     (lead.name || `${firstName} ${lastName}`.trim() || 'Service Request').slice(0, 200)
 
   if (creation_type === 'request_only' || creation_type === 'request_with_assessment') {
+    const requestInput: Record<string, any> = {
+      clientId:       jobberClientGlobalId,
+      title:          requestTitle,
+      requestDetails: lead.request_details || null,
+    }
+    // Only include propertyId when we actually have one — Deluge mirrored
+    // this with two requestCreate variants. Omitting the key lets Jobber
+    // accept the request without a property attached.
+    if (jobberPropertyGlobalId) requestInput.propertyId = jobberPropertyGlobalId
     const reqCreate = await jobberMutation(
       locationSlug,
       REQUEST_CREATE_MUTATION,
-      {
-        input: {
-          clientId:   jobberClientGlobalId,
-          propertyId: jobberPropertyGlobalId,
-          title:      requestTitle,
-          requestDetails: lead.request_details || null,
-        },
-      },
+      { input: requestInput },
     )
     if (reqCreate.userErrors?.length) {
       return fail('request_create', reqCreate.userErrors[0].message)

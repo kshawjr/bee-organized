@@ -200,6 +200,11 @@ export async function resumePausedDripsForLead(leadId: string): Promise<void> {
 // Routing helper — given a patch and the lead's prior + new state, do
 // the right thing. Caller awaits a Promise<void[]> but each branch
 // already swallows its own errors, so this never throws.
+//
+// prevStage semantics:
+//   - null/undefined → no prior state (fresh lead create). 'New' should
+//     start the drip; other stages no-op (no active drips to stop).
+//   - string         → existing lead transitioning. Compare to patch.stage.
 export async function applyDripSideEffects(args: {
   leadId: string
   locationUuid: string
@@ -211,11 +216,16 @@ export async function applyDripSideEffects(args: {
 
   if ('stage' in patch && typeof patch.stage === 'string' && patch.stage !== prevStage) {
     const newStage = patch.stage
+    const isFreshCreate = prevStage === null || prevStage === undefined
     if (newStage === 'New') {
+      // Fires for both create-into-New and transition-into-New. startDrip
+      // is idempotent (unique on lead_id + drip_path_id) so re-entry is safe.
       tasks.push(startDripForLead(leadId, locationUuid))
     } else if (newStage === 'Attempting') {
       // leave active drips alone — drip continues through Attempting
-    } else if (DRIP_STOP_STAGES.has(newStage)) {
+    } else if (DRIP_STOP_STAGES.has(newStage) && !isFreshCreate) {
+      // Only stop drips on a real transition. A fresh lead can't have
+      // active drips to stop, and the lookup just wastes a round trip.
       tasks.push(stopActiveDripsForLead(leadId, 'stage_changed'))
     }
   }

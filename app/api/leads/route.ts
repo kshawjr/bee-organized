@@ -182,16 +182,23 @@ export async function POST(req: NextRequest) {
   }
 
   // ─── Drip side-effects ───────────────────────────────────────
-  // Mirrors the PATCH path: when stage='New' lands on a lead, start the
-  // drip. prevStage=null so the routing helper treats it as a fresh entry
-  // into 'New'. Fire-and-forget; failure is logged but doesn't block.
+  // When stage='New' lands on a fresh lead, start the drip. prevStage=null
+  // signals "no prior state" to applyDripSideEffects, which treats it as a
+  // valid start trigger. Awaited (not fire-and-forget) because Vercel
+  // serverless terminates background work once the response is sent —
+  // without the await the row never gets inserted. Errors are swallowed so
+  // a drip-bookkeeping failure doesn't fail the lead create itself.
   if (stage === 'New' && body.skip_drip !== true) {
-    void applyDripSideEffects({
-      leadId:        lead.id,
-      locationUuid:  location.id,
-      prevStage:     null,
-      patch:         { stage: 'New' },
-    }).catch((err) => console.error('[drip] applyDripSideEffects on create threw', err))
+    try {
+      await applyDripSideEffects({
+        leadId:        lead.id,
+        locationUuid:  location.id,
+        prevStage:     null,
+        patch:         { stage: 'New' },
+      })
+    } catch (err) {
+      console.error('[drip] applyDripSideEffects on create threw', err)
+    }
   }
 
   return NextResponse.json({ lead }, { status: 201 })

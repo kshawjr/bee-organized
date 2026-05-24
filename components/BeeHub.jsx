@@ -2049,6 +2049,24 @@ function SendToJobberPopup({ person, onDone, onClose }) {
   const [submitting, setSubmitting] = useState(false)
   const [errorMsg, setErrorMsg]     = useState(null)
 
+  // Address is required server-side for job_direct and in-person assessments
+  // (matches the validation in /api/leads/:id/send-to-jobber). For request_only
+  // and virtual assessments, no address is fine — property creation is skipped.
+  function leadHasUsableAddress(p) {
+    const arr = Array.isArray(p?.addresses) ? p.addresses : []
+    for (const a of arr) {
+      if (a && (a.street || a.value)) return true
+    }
+    if (p?.address && String(p.address).trim()) return true
+    return false
+  }
+  const hasAddress = leadHasUsableAddress(person)
+  const wantsAssessment = action === 'request' && includeAssessment && !!date
+  const addressRequired =
+    action === 'job' ||
+    (wantsAssessment && assessmentType === 'in-person')
+  const blockSendForAddress = addressRequired && !hasAddress
+
   // 15-min increments 7am–7pm
   const times = []
   for (let h = 7; h <= 19; h++) {
@@ -2254,6 +2272,12 @@ function SendToJobberPopup({ person, onDone, onClose }) {
               </div>
             ))}
           </div>
+          {blockSendForAddress&&(
+            <div style={{ padding:'10px 14px', background:'rgba(245,158,11,0.08)', border:'1px solid rgba(245,158,11,0.3)', borderRadius:'10px', marginBottom:'10px' }}>
+              <p style={{ fontSize:'12px', fontWeight:600, color:'#b45309', marginBottom:'2px' }}>Address required</p>
+              <p style={{ fontSize:'12px', color:'#78350f', wordBreak:'break-word' }}>This action requires a lead address. Add one before sending.</p>
+            </div>
+          )}
           {errorMsg&&(
             <div style={{ padding:'10px 14px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'10px', marginBottom:'10px' }}>
               <p style={{ fontSize:'12px', fontWeight:600, color:'#dc2626', marginBottom:'2px' }}>Couldn't send to Jobber</p>
@@ -2262,7 +2286,7 @@ function SendToJobberPopup({ person, onDone, onClose }) {
           )}
           <div style={{ display:'flex', gap:'10px' }}>
             <button onClick={()=>{ if(!submitting){ setErrorMsg(null); setStep(action==='request'?'request-details':'action') } }} disabled={submitting} style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:submitting?'#9ca3af':'#4a5e5a', cursor:submitting?'not-allowed':'pointer' }}>Back</button>
-            <button onClick={confirm} disabled={submitting} style={{ flex:2, padding:'12px', background:submitting?'#6ee7b7':'#10b981', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:submitting?'wait':'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
+            <button onClick={confirm} disabled={submitting||blockSendForAddress} style={{ flex:2, padding:'12px', background:blockSendForAddress?'#e5e7eb':(submitting?'#6ee7b7':'#10b981'), border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:blockSendForAddress?'#9ca3af':'white', cursor:blockSendForAddress?'not-allowed':(submitting?'wait':'pointer'), display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
               {submitting
                 ? <>⏳ Sending…</>
                 : <><JobberIcon size={20} style={{marginRight:'7px'}} />{errorMsg ? 'Retry' : 'Send to Jobber'}</>
