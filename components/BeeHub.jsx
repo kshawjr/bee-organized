@@ -10539,7 +10539,20 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                   </button>
                 </div>
               )}
-              {payStep==='pricing'&&<button onClick={()=>setPayStep(paymentSourceForPay === 'direct' ? 'pay_confirm' : 'method')} style={{ width:'100%', padding:'15px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', marginBottom:'10px' }}>{paymentSourceForPay === 'direct' ? `Activate for ${formatCurrency(proration.prorated)} →` : 'Continue →'}</button>}
+              {payStep==='pricing'&&<button onClick={()=>{
+                // Zero prorated total → no payment screen needed. Corp-sponsored
+                // locations (subscription_status='deferred', prorated computed as
+                // 0 by SubscriptionCalculator's normalizedSource branch) and any
+                // future zero-cost configuration jump straight to the next
+                // onboarding step. The owner seat is already pre-allocated via
+                // /api/hub_users/accept, so no /api/seats POST is needed here.
+                if (effectiveProratedForPay === 0) {
+                  markDone('pay')
+                  setActiveStepOpen(null)
+                  return
+                }
+                setPayStep(paymentSourceForPay === 'direct' ? 'pay_confirm' : 'method')
+              }} style={{ width:'100%', padding:'15px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', marginBottom:'10px' }}>{effectiveProratedForPay === 0 ? 'Continue →' : paymentSourceForPay === 'direct' ? `Activate for ${formatCurrency(proration.prorated)} →` : 'Continue →'}</button>}
               {showSmsModal&&<SmsVoiceInfoModal onClose={()=>setShowSmsModal(false)} />}
               {payStep==='method'&&(
                 <>
@@ -18961,6 +18974,31 @@ function SubscriptionCalculator({
             : t.key === 'owner'
               ? `${formatCurrency(price, { showCents:'never' })}/yr · 2nd seat ${formatCurrency(managerPrice, { showCents:'never' })}/yr · Max 2`
               : `${formatCurrency(price, { showCents:'never' })}/yr · ${t.detail}`
+          // Stepper renders identically in both branches — extracted so the
+          // order swap below doesn't duplicate the button markup.
+          const stepper = (
+            <div style={{ display:'flex', alignItems:'center', gap:'6px', flexShrink:0 }}>
+              <button
+                type="button"
+                onClick={() => adjustSeat(t.key, -1)}
+                disabled={minusDisabled}
+                aria-label={`Decrease ${t.name}`}
+                style={{ width:'28px', height:'28px', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.12)', background:minusDisabled?'#f3f4f6':'white', color:minusDisabled?'#c8d8d4':'#1a2e2b', fontSize:'15px', fontWeight:700, cursor:minusDisabled?'not-allowed':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', padding:0 }}>
+                −
+              </button>
+              <span style={{ minWidth:'24px', textAlign:'center', fontSize:'14px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
+                {count}
+              </span>
+              <button
+                type="button"
+                onClick={() => adjustSeat(t.key, 1)}
+                disabled={plusDisabled}
+                aria-label={`Increase ${t.name}`}
+                style={{ width:'28px', height:'28px', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.12)', background:plusDisabled?'#f3f4f6':'white', color:plusDisabled?'#c8d8d4':'#1a2e2b', fontSize:'15px', fontWeight:700, cursor:plusDisabled?'not-allowed':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', padding:0 }}>
+                +
+              </button>
+            </div>
+          )
           return (
             <div key={t.key} style={{ padding:'12px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)', borderLeft:`4px solid ${t.color}`, display:'flex', alignItems:'center', gap:'10px', opacity: deferred ? 0.55 : 1 }}>
               <span style={{ fontSize:'20px', lineHeight:1, flexShrink:0 }}>{t.icon}</span>
@@ -18970,42 +19008,26 @@ function SubscriptionCalculator({
                   {detailText}
                 </p>
               </div>
-              <div style={{ display:'flex', alignItems:'center', gap:'6px', flexShrink:0 }}>
-                <button
-                  type="button"
-                  onClick={() => adjustSeat(t.key, -1)}
-                  disabled={minusDisabled}
-                  aria-label={`Decrease ${t.name}`}
-                  style={{ width:'28px', height:'28px', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.12)', background:minusDisabled?'#f3f4f6':'white', color:minusDisabled?'#c8d8d4':'#1a2e2b', fontSize:'15px', fontWeight:700, cursor:minusDisabled?'not-allowed':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', padding:0 }}>
-                  −
-                </button>
-                <span style={{ minWidth:'24px', textAlign:'center', fontSize:'14px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
-                  {count}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => adjustSeat(t.key, 1)}
-                  disabled={plusDisabled}
-                  aria-label={`Increase ${t.name}`}
-                  style={{ width:'28px', height:'28px', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.12)', background:plusDisabled?'#f3f4f6':'white', color:plusDisabled?'#c8d8d4':'#1a2e2b', fontSize:'15px', fontWeight:700, cursor:plusDisabled?'not-allowed':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', padding:0 }}>
-                  +
-                </button>
-              </div>
-              <div style={{ minWidth:'62px', textAlign:'right', flexShrink:0 }}>
-                {deferred ? (
-                  <div style={{ display:'flex', alignItems:'center', justifyContent:'flex-end', gap:'5px', flexWrap:'wrap' }}>
-                    <span style={{ display:'inline-block', fontSize:'8px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.12)', border:'1px solid rgba(212,160,70,0.3)', padding:'2px 7px', borderRadius:'10px', letterSpacing:'0.4px', textTransform:'uppercase' }}>Coming Soon</span>
-                    <p style={{ fontSize:'12.5px', fontWeight:700, color:'#c8d8d4', fontFamily:'Georgia,serif' }}>$0</p>
-                  </div>
-                ) : (
-                  <>
+              {/* Deferred rows put pill + $0 BEFORE the (disabled) stepper so
+                  the price sits next to the name; non-deferred keep the
+                  classic [stepper][subtotal] arrangement at the right edge. */}
+              {deferred ? (
+                <>
+                  <span style={{ display:'inline-block', fontSize:'8px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.12)', border:'1px solid rgba(212,160,70,0.3)', padding:'2px 7px', borderRadius:'10px', letterSpacing:'0.4px', textTransform:'uppercase', flexShrink:0 }}>Coming Soon</span>
+                  <p style={{ fontSize:'12.5px', fontWeight:700, color:'#c8d8d4', fontFamily:'Georgia,serif', flexShrink:0 }}>$0</p>
+                  {stepper}
+                </>
+              ) : (
+                <>
+                  {stepper}
+                  <div style={{ minWidth:'62px', textAlign:'right', flexShrink:0 }}>
                     <p style={{ fontSize:'12.5px', fontWeight:700, color:count>0?'#1a2e2b':'#c8d8d4', fontFamily:'Georgia,serif' }}>
                       {formatCurrency(subtotal, { showCents:'never' })}
                     </p>
                     <p style={{ fontSize:'9.5px', color:'#b0c0bc' }}>subtotal</p>
-                  </>
-                )}
-              </div>
+                  </div>
+                </>
+              )}
             </div>
           )
         })}
