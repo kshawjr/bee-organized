@@ -79,8 +79,15 @@ export type HandlerResult = {
 
 // ── encoding helpers ──────────────────────────────────────────
 
-function encodeJobberId(type: JobberType, numericId: string): string {
-  return Buffer.from(`gid://Jobber/${type}/${numericId}`, 'utf8').toString('base64')
+// Webhook payloads ship itemId in either form: bare numeric ("136289662")
+// or the full base64-encoded GraphQL global id
+// ("Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYyODk2NjI="). Normalize to numeric via
+// extractJobberId, then build the canonical global id ourselves. Without
+// this, base64-input gets double-wrapped → Jobber resolves to null →
+// "<entity>_not_found_in_jobber" even though the record exists.
+function encodeJobberId(type: JobberType, rawItemId: string): string {
+  const numeric = extractJobberId(rawItemId) || rawItemId
+  return Buffer.from(`gid://Jobber/${type}/${numeric}`, 'utf8').toString('base64')
 }
 
 // ── lead resolution ───────────────────────────────────────────
@@ -496,10 +503,22 @@ export async function handleClientUpdate(ctx: HandlerCtx): Promise<HandlerResult
     id: globalId,
   })
   if (res.errors?.length) {
+    console.error('[jobber-webhook] client_fetch errors', {
+      itemId: ctx.itemId,
+      globalId,
+      errors: res.errors,
+    })
     return { processed: false, error: `client_fetch: ${res.errors[0]?.message || 'unknown'}` }
   }
   const clientRec = res.data?.client
-  if (!clientRec) return { processed: false, error: 'client_not_found_in_jobber' }
+  if (!clientRec) {
+    console.error('[jobber-webhook] client_not_found_in_jobber', {
+      itemId: ctx.itemId,
+      globalId,
+      data: res.data,
+    })
+    return { processed: false, error: 'client_not_found_in_jobber' }
+  }
 
   const lead = await upsertLead(
     clientRec,
