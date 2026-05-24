@@ -139,10 +139,22 @@ async function fetchAndUpsertRequest(
     id: requestGlobalId,
   })
   if (res.errors?.length) {
+    console.error('[jobber-webhook] request_fetch errors', {
+      itemId: ctx.itemId,
+      globalId: requestGlobalId,
+      errors: res.errors,
+    })
     return { error: `request_fetch: ${res.errors[0]?.message || 'unknown'}` }
   }
   const reqRec = res.data?.request
-  if (!reqRec) return { error: 'request_not_found_in_jobber' }
+  if (!reqRec) {
+    console.error('[jobber-webhook] request_not_found_in_jobber', {
+      itemId: ctx.itemId,
+      globalId: requestGlobalId,
+      data: res.data,
+    })
+    return { error: 'request_not_found_in_jobber' }
+  }
   if (!reqRec.client?.id) return { error: 'request_missing_client' }
 
   // Hydrate the _has* flags so determineStage produces the right SR
@@ -262,10 +274,22 @@ async function handleQuoteCore(
     id: globalId,
   })
   if (res.errors?.length) {
+    console.error('[jobber-webhook] quote_fetch errors', {
+      itemId: ctx.itemId,
+      globalId,
+      errors: res.errors,
+    })
     return { processed: false, error: `quote_fetch: ${res.errors[0]?.message || 'unknown'}` }
   }
   const quoteRec = res.data?.quote
-  if (!quoteRec) return { processed: false, error: 'quote_not_found_in_jobber' }
+  if (!quoteRec) {
+    console.error('[jobber-webhook] quote_not_found_in_jobber', {
+      itemId: ctx.itemId,
+      globalId,
+      data: res.data,
+    })
+    return { processed: false, error: 'quote_not_found_in_jobber' }
+  }
   const requestGlobalId = quoteRec.request?.id
   if (!requestGlobalId) return { processed: false, error: 'quote_missing_request' }
 
@@ -338,10 +362,22 @@ async function handleJobCore(
     id: globalId,
   })
   if (res.errors?.length) {
+    console.error('[jobber-webhook] job_fetch errors', {
+      itemId: ctx.itemId,
+      globalId,
+      errors: res.errors,
+    })
     return { processed: false, error: `job_fetch: ${res.errors[0]?.message || 'unknown'}` }
   }
   const jobRec = res.data?.job
-  if (!jobRec) return { processed: false, error: 'job_not_found_in_jobber' }
+  if (!jobRec) {
+    console.error('[jobber-webhook] job_not_found_in_jobber', {
+      itemId: ctx.itemId,
+      globalId,
+      data: res.data,
+    })
+    return { processed: false, error: 'job_not_found_in_jobber' }
+  }
 
   let sr: { id: string; lead_id: string } | null = null
   let leadId: string | null = null
@@ -417,10 +453,22 @@ async function handleInvoiceCore(
     id: globalId,
   })
   if (res.errors?.length) {
+    console.error('[jobber-webhook] invoice_fetch errors', {
+      itemId: ctx.itemId,
+      globalId,
+      errors: res.errors,
+    })
     return { processed: false, error: `invoice_fetch: ${res.errors[0]?.message || 'unknown'}` }
   }
   const invRec = res.data?.invoice
-  if (!invRec) return { processed: false, error: 'invoice_not_found_in_jobber' }
+  if (!invRec) {
+    console.error('[jobber-webhook] invoice_not_found_in_jobber', {
+      itemId: ctx.itemId,
+      globalId,
+      data: res.data,
+    })
+    return { processed: false, error: 'invoice_not_found_in_jobber' }
+  }
 
   const firstJob = invRec.jobs?.nodes?.[0]
   let sr: { id: string; lead_id: string } | null = null
