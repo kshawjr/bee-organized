@@ -3,8 +3,10 @@
 // Inbound-side helpers for /api/webhooks/jobber.
 //
 // - verifyWebhookSignature: HMAC-SHA256 over the raw request body
-//   using JOBBER_WEBHOOK_SECRET. Timing-safe compare. The Jobber
-//   webhook signature ships in the X-Jobber-Hmac-Sha256 header.
+//   using JOBBER_CLIENT_SECRET (the OAuth client secret — per Jobber
+//   docs, webhook signatures are derived from the app's OAuth client
+//   secret, not a separate webhook secret). Timing-safe compare. The
+//   Jobber webhook signature ships in the X-Jobber-Hmac-Sha256 header.
 //
 // - lookupLocationByJobberAccountId: maps the webhook payload's
 //   accountId (numeric) to the Bee Hub location whose
@@ -28,9 +30,9 @@ export function verifyWebhookSignature(
   rawBody: string,
   signature: string | null | undefined,
 ): boolean {
-  const secret = process.env.JOBBER_WEBHOOK_SECRET
+  const secret = process.env.JOBBER_CLIENT_SECRET
   if (!secret) {
-    console.error('[jobber-webhook] JOBBER_WEBHOOK_SECRET not set — refusing all webhooks')
+    console.error('[jobber-webhook] JOBBER_CLIENT_SECRET not set — refusing all webhooks')
     return false
   }
   if (!signature) return false

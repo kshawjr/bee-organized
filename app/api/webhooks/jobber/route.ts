@@ -4,7 +4,9 @@
 //
 // Flow:
 //   1. Read RAW body (signature verification needs exact bytes).
-//   2. Verify HMAC-SHA256 using JOBBER_WEBHOOK_SECRET.
+//   2. Verify HMAC-SHA256 using JOBBER_CLIENT_SECRET (Jobber signs
+//      webhooks with the OAuth client secret — no separate webhook
+//      secret exists in their model).
 //   3. Parse + extract { topic, account_id, item_id, occurred_at }.
 //   4. Look up the Bee Hub location via jobber_account_id.
 //   5. Dispatch to per-topic handler (lib/jobber-webhook-handlers.ts).
@@ -16,8 +18,9 @@
 // Replay protection: occurred_at older than 5 minutes is logged but
 // still processed (Jobber occasionally re-sends).
 //
-// Set JOBBER_WEBHOOK_SECRET in Vercel env vars before testing; without
-// it, verifyWebhookSignature returns false and every webhook is 401'd.
+// JOBBER_CLIENT_SECRET must be set in Vercel env vars (already used by
+// the OAuth flow). Without it, verifyWebhookSignature returns false and
+// every webhook is 401'd.
 
 import { NextRequest, NextResponse } from 'next/server'
 import {

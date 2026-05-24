@@ -27,24 +27,16 @@ signature in the `X-Jobber-Hmac-Sha256` header. Anything else returns
 
 ---
 
-## 2. Environment variable
+## 2. Signature verification
 
-Set this in **Vercel project settings → Environment Variables** for
-both Production and Preview:
+Per Jobber's docs, webhook signatures are HMAC-SHA256 of the raw
+request body, **keyed with the app's OAuth client secret** — there is
+no separate "webhook secret" in Jobber's model. Bee Hub reuses the
+existing `JOBBER_CLIENT_SECRET` env var (already configured in Vercel
+for the OAuth flow) to verify the `X-Jobber-Hmac-Sha256` header.
 
-```
-JOBBER_WEBHOOK_SECRET=<32+ character hex string>
-```
-
-Suggested value (generated with `openssl rand -hex 32`):
-
-```
-4936d66b20225ea658399e4ebc5284d83c38b32395d7cbcd3a742eb74daa7047
-```
-
-You can rotate later, but the same value must be configured in every
-Jobber account's webhook subscription. Without `JOBBER_WEBHOOK_SECRET`
-set the route fail-closes — every webhook returns 401.
+No additional env var is needed. If `JOBBER_CLIENT_SECRET` is unset
+the route fail-closes — every webhook returns 401.
 
 ---
 
@@ -79,26 +71,34 @@ events don't map to a lead-level state in Bee Hub.
 
 ---
 
-## 4. Register a webhook (per Jobber account)
+## 4. Register the webhook (once, at the app level)
 
-Each Jobber account whose data should sync to Bee Hub needs its own
-webhook subscription. Repeat the steps below for every connected
-account.
+Webhook configuration in Jobber lives at the **app** level in the
+Developer Center, **not** per Jobber account. A single config covers
+every customer that has connected to the Bee Hub app — there is no
+per-account registration to repeat.
 
-1. Sign into Jobber as the account owner.
-2. **Settings → Apps & Integrations → Webhooks** (under the developer
-   section; if you don't see it, you may need to enable developer mode
-   on the account).
-3. Click **Add webhook** (or **Subscribe to events**).
-4. **URL**: paste
+1. Sign into the **Jobber Developer Center** with the account that owns
+   the Bee Hub app.
+2. Open the **Bee Hub** app → **Webhooks**.
+3. **URL**: set to
    `https://bee-hub-kappa.vercel.app/api/webhooks/jobber`
-5. **Secret**: paste the value from `JOBBER_WEBHOOK_SECRET` above.
-   It MUST match exactly; otherwise every event will be rejected.
-6. **Topics**: select all 12 listed in section 3.
-7. Save.
+   (no trailing slash, must be HTTPS).
+4. **Topics**: select all 12 listed in section 3.
+5. Save.
 
-Jobber will typically fire a confirmation POST against the URL. Watch
-the Vercel logs (`vercel logs --follow`) — you should see a
+Signature verification uses the app's OAuth client secret automatically
+— there is no separate secret to paste into the Developer Center.
+
+> **Heads-up**: there is currently an older webhook config in the
+> Developer Center pointing at `/api/jobber/webhook` (singular, under
+> `/api/jobber/...`). That path does **not** exist in this codebase, so
+> those webhooks have been silently 404'ing. Update the URL in the
+> Developer Center to `/api/webhooks/jobber` (this route) to start
+> receiving events.
+
+Jobber typically fires a confirmation POST against the URL on save.
+Watch the Vercel logs (`vercel logs --follow`) — you should see a
 `[jobber-webhook]` line with `topic=...` and `processed=true` (or a
 clear error message).
 
@@ -125,10 +125,11 @@ To verify a stage-driving topic instead, complete a job in Jobber
 `Closed Won`) — both stop the drip via `applyDripSideEffects`.
 
 ### b) Manual curl (no real Jobber)
-You can synthesize a signed payload for local testing:
+You can synthesize a signed payload for local testing. The signing key
+is the OAuth client secret (`JOBBER_CLIENT_SECRET`):
 
 ```bash
-SECRET="$JOBBER_WEBHOOK_SECRET"
+SECRET="$JOBBER_CLIENT_SECRET"
 BODY='{"topic":"CLIENT_UPDATE","accountId":"123","itemId":"456","occurredAt":"'"$(date -u +%FT%TZ)"'"}'
 SIG=$(printf "%s" "$BODY" | openssl dgst -sha256 -binary -hmac "$SECRET" | base64)
 
@@ -175,8 +176,10 @@ real Jobber records, but the signature check passed.)
 
 ## 7. Troubleshooting
 
-- **Every webhook returns 401** → `JOBBER_WEBHOOK_SECRET` is unset in
-  Vercel, or doesn't match the value configured in Jobber.
+- **Every webhook returns 401** → `JOBBER_CLIENT_SECRET` is unset in
+  Vercel, or its value drifted from what the Jobber app is actually
+  using (e.g. the OAuth client secret was rotated in Developer Center
+  without updating Vercel). Both must match exactly.
 - **Webhooks return 200 with `skipped: 'unknown_account'`** → the
   account isn't linked to any Bee Hub location. Either re-run
   `/api/jobber/connect` for that location or remove the webhook from
