@@ -14,7 +14,7 @@ import {
 
 // Reviews-link URL validation. Used by onboarding location step + Settings
 // "Google Reviews" row. Required field — owners must enter a real review URL
-// so the New Lead Drip "request a review" template renders correctly.
+// so the New Client Drip "request a review" template renders correctly.
 // Returns null when valid, otherwise an error message ready to render inline.
 // Uses the URL constructor (try-catch) instead of regex: it catches edge
 // cases like "https:google.com" (missing //) or "https://" (no host) that
@@ -121,9 +121,9 @@ const TOUCH_CONFIG = {
 }
 
 const PATHS = [
-  { id:'email-nurture',  name:'New Lead Path · Email Nurture',  icon:'📧', firstTouch:'email' },
-  { id:'quick-connect',  name:'New Lead Path · Quick Connect',  icon:'⚡', firstTouch:'sms' },
-  { id:'personal-touch', name:'New Lead Path · Personal Touch', icon:'🤝', firstTouch:'call_prompt' },
+  { id:'email-nurture',  name:'New Client Path · Email Nurture',  icon:'📧', firstTouch:'email' },
+  { id:'quick-connect',  name:'New Client Path · Quick Connect',  icon:'⚡', firstTouch:'sms' },
+  { id:'personal-touch', name:'New Client Path · Personal Touch', icon:'🤝', firstTouch:'call_prompt' },
 ]
 
 const ADDRESS_TYPES = ['Service','Billing','Moving From','Moving To','Storage Unit','Mailing','Other']
@@ -159,7 +159,7 @@ const LIMITED_LAUNCH_LOCATION_IDS = new Set([
 const LIMITED_LAUNCH_TOOLTIP = 'Coming Soon'
 
 const ALL_TAGS = [
-  { id:'hot',       label:'🔥 Hot Lead',     color:'#ef4444', bg:'rgba(239,68,68,0.1)'   },
+  { id:'hot',       label:'🔥 Hot Client',   color:'#ef4444', bg:'rgba(239,68,68,0.1)'   },
   { id:'vip',       label:'⭐ VIP',           color:'#f59e0b', bg:'rgba(245,158,11,0.1)'  },
   { id:'referral',  label:'🤝 Referral',      color:'#10b981', bg:'rgba(16,185,129,0.1)'  },
   { id:'returning', label:'🔄 Returning',     color:'#6366f1', bg:'rgba(99,102,241,0.1)'  },
@@ -419,7 +419,7 @@ const PEOPLE = [
       { id:'o1', type:'drip',   method:'email',  label:'Welcome Email sent', ts:'Apr 30', status:'sent' },
       { id:'o2', type:'manual', method:'email',  label:'Sent personal note', ts:'May 1',  status:'done', user:'You' },
     ],
-    activity:[{ type:'system', text:'Lead from Facebook ad', ts:'Apr 30' }],
+    activity:[{ type:'system', text:'Client from Facebook ad', ts:'Apr 30' }],
   },
   {
     id:'13', assignedTo:'u7', locationId:'loc_sanantonio', name:'Sandra Brooks', phone:'(719) 555-0729', email:'sbrooks@gmail.com',
@@ -539,13 +539,13 @@ const PEOPLE = [
     buzzNotes:[{ id:'bn1', text:'Full home - 4 bed, 3 bath. Very motivated, just had twins.', ts:'Apr 10', user:'You' }],
     jobNotes:[], jobs:[], invoices:[], finalProcessed:false,
     outreachTimeline:[
-      { id:'o1', type:'system', method:'system', label:'Lead created - referred by Karen M.', ts:'Apr 10', status:'done' },
+      { id:'o1', type:'system', method:'system', label:'Client created - referred by Karen M.', ts:'Apr 10', status:'done' },
       { id:'o2', type:'manual', method:'call',   label:'Called - scheduled assessment Apr 14', ts:'Apr 11', status:'done', user:'You' },
       { id:'o3', type:'system', method:'system', label:'Assessment completed', ts:'Apr 14', status:'done' },
       { id:'o4', type:'manual', method:'email',  label:'Estimate sent - $2,400', ts:'Apr 16', status:'done', user:'You' },
     ],
     activity:[
-      { type:'stage', text:'Lead created via referral', ts:'Apr 10', user:'System' },
+      { type:'stage', text:'Client created via referral', ts:'Apr 10', user:'System' },
       { type:'call',  text:'Spoke with Nicole - scheduling assessment for Apr 14', ts:'Apr 11', user:'You' },
       { type:'stage', text:'Assessment completed - sent estimate $2,400', ts:'Apr 16', user:'You' },
     ],
@@ -563,14 +563,14 @@ const PEOPLE = [
     buzzNotes:[{ id:'bn1', text:'Approved same day - ready to book ASAP', ts:'Apr 29', user:'You' }],
     jobNotes:[], jobs:[], invoices:[], finalProcessed:false,
     outreachTimeline:[
-      { id:'o1', type:'system', method:'system', label:'Lead created from Google', ts:'Apr 22', status:'done' },
+      { id:'o1', type:'system', method:'system', label:'Client created from Google', ts:'Apr 22', status:'done' },
       { id:'o2', type:'manual', method:'email',  label:'Follow-up email sent', ts:'Apr 23', status:'done', user:'You' },
       { id:'o3', type:'system', method:'system', label:'Assessment completed', ts:'Apr 26', status:'done' },
       { id:'o4', type:'manual', method:'email',  label:'Estimate sent - $875', ts:'Apr 28', status:'done', user:'You' },
       { id:'o5', type:'system', method:'system', label:'Estimate approved ✅', ts:'Apr 29', status:'done' },
     ],
     activity:[
-      { type:'stage', text:'Lead created from Google search', ts:'Apr 22', user:'System' },
+      { type:'stage', text:'Client created from Google search', ts:'Apr 22', user:'System' },
       { type:'email', text:'Follow-up email sent', ts:'Apr 23', user:'You' },
       { type:'stage', text:'Estimate sent $875 - approved next day', ts:'Apr 29', user:'You' },
     ],
@@ -587,13 +587,13 @@ const PEOPLE = [
     buzzNotes:[{ id:'bn1', text:'Has large closet + 2-car garage. Estimate sent 3 days ago - following up.', ts:'May 5', user:'You' }],
     jobNotes:[], jobs:[], invoices:[], finalProcessed:false,
     outreachTimeline:[
-      { id:'o1', type:'system', method:'system', label:'Lead created from Instagram DM', ts:'Apr 30', status:'done' },
+      { id:'o1', type:'system', method:'system', label:'Client created from Instagram DM', ts:'Apr 30', status:'done' },
       { id:'o2', type:'manual', method:'sms',    label:'Text sent - assessment confirmed', ts:'May 1', status:'done', user:'You' },
       { id:'o3', type:'system', method:'system', label:'Assessment completed May 3', ts:'May 3', status:'done' },
       { id:'o4', type:'manual', method:'email',  label:'Estimate sent - $1,150', ts:'May 5', status:'done', user:'You' },
     ],
     activity:[
-      { type:'stage', text:'Lead created via Instagram DM', ts:'Apr 30', user:'System' },
+      { type:'stage', text:'Client created via Instagram DM', ts:'Apr 30', user:'System' },
       { type:'sms',   text:'Texted - assessment scheduled for May 3', ts:'May 1', user:'You' },
       { type:'stage', text:'Estimate sent $1,150 - awaiting approval', ts:'May 5', user:'You' },
     ],
@@ -609,7 +609,7 @@ const PEOPLE = [
     buzzNotes:[{ id:'bn1', text:'Referred by Mark Johnson - neighbor', ts:'May 7', user:'System' }],
     jobNotes:[], jobs:[], invoices:[], finalProcessed:false,
     outreachTimeline:[
-      { id:'o1', type:'system', method:'system', label:'Lead created - referred by Mark Johnson', ts:'May 7', status:'done' },
+      { id:'o1', type:'system', method:'system', label:'Client created - referred by Mark Johnson', ts:'May 7', status:'done' },
     ],
     activity:[{ type:'system', text:'Referred by Mark Johnson', ts:'May 7' }],
   },
@@ -842,7 +842,7 @@ const handle = <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,
 const SAD_FACES = ['😢','😔','💔','😞','🥺','😿']
 
 const MOTIVATIONAL = [
-  "Not every lead is the right fit - the right ones are coming 🐝",
+  "Not every client is the right fit - the right ones are coming 🐝",
   "Every no gets you closer to the next yes ✨",
   "Keep going - your next great client is out there 💪",
   "Shake it off. The hive keeps buzzing 🍯",
@@ -1306,14 +1306,14 @@ function ProcessLeadSheet({ person, onSave, onClose }) {
         {cur?.key==='path'&&(
           <div style={{ display:'grid', gap:'10px' }}>
             <div>
-              <h3 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'2px' }}>Which New Lead Drip?</h3>
+              <h3 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'2px' }}>Which New Client Drip?</h3>
               <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{project?`${project} → ${defCat==='move'?'Move':'Organizing'} paths`:'Organizing paths'}</p>
             </div>
             {/* No drip option */}
             <div onClick={()=>setPathId('none')} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'11px 12px', background:pathId==='none'?'rgba(239,68,68,0.05)':'white', border:`1.5px solid ${pathId==='none'?'rgba(239,68,68,0.3)':'rgba(0,0,0,0.08)'}`, borderRadius:'9px', cursor:'pointer' }}>
               <span style={{ fontSize:'18px' }}>🚫</span>
               <div style={{ flex:1 }}>
-                <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>No New Lead Drip</p>
+                <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>No New Client Drip</p>
                 <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Create without automated outreach</p>
               </div>
               {pathId==='none'&&<span style={{ color:'#ef4444' }}>✓</span>}
@@ -1357,7 +1357,7 @@ function ProcessLeadSheet({ person, onSave, onClose }) {
             <h3 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>{isWakeUp?'Ready to re-engage?':'Process this client?'}</h3>
             <div style={{ background:'rgba(168,201,196,0.06)', border:'1px solid rgba(168,201,196,0.2)', borderRadius:'10px', padding:'12px 14px', display:'grid', gap:'8px' }}>
               {[
-                { label:'Lead', val:person.name },
+                { label:'Client', val:person.name },
                 { label:'Project', val:project||person.project||'—' },
                 { label:'Drip path', val:(pathId==='none'?'No drip emails':(()=>{ const id=pathId||defPathId; return DRIP_PATHS_CONFIG.find(p=>p.id===id)?.name||id })()) },
                 { label:'New stage', val:'Attempting to Contact' },
@@ -1450,7 +1450,7 @@ function SnoozePopup({ person, onSave, onClose }) {
       <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
       <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'440px', borderRadius:'20px', padding:'1.5rem', zIndex:1, boxShadow:'0 20px 60px rgba(26,46,43,0.25)' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'4px' }}>
-          <h3 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>💤 Snooze Lead</h3>
+          <h3 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>💤 Snooze Client</h3>
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
         </div>
         <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'14px' }}>Move to Nurturing and wake up in Needs Attention on the date you pick.</p>
@@ -2293,7 +2293,7 @@ function SendToJobberPopup({ person, onDone, onClose }) {
           {blockSendForAddress&&(
             <div style={{ padding:'10px 14px', background:'rgba(245,158,11,0.08)', border:'1px solid rgba(245,158,11,0.3)', borderRadius:'10px', marginBottom:'10px' }}>
               <p style={{ fontSize:'12px', fontWeight:600, color:'#b45309', marginBottom:'2px' }}>Address required</p>
-              <p style={{ fontSize:'12px', color:'#78350f', wordBreak:'break-word' }}>This action requires a lead address. Add one before sending.</p>
+              <p style={{ fontSize:'12px', color:'#78350f', wordBreak:'break-word' }}>This action requires a client address. Add one before sending.</p>
             </div>
           )}
           {errorMsg&&(
@@ -6240,7 +6240,7 @@ function PersonPanel({
                         },
                       },
                       person.snoozeUntil
-                        ? "This lead woke up — ready to re-engage?"
+                        ? "This client woke up — ready to re-engage?"
                         : "Quick capture — needs to be processed",
                     ),
                     React.createElement(
@@ -6250,7 +6250,7 @@ function PersonPanel({
                         ? `Snoozed note: ${person.snoozeNote || "none"}`
                         : person.quickNote
                           ? `Note: ${person.quickNote}`
-                          : "Missing project type and New Lead Drip",
+                          : "Missing project type and New Client Drip",
                     ),
                   ),
                   React.createElement(
@@ -6297,7 +6297,7 @@ function PersonPanel({
                     : null;
                   const milestones = [
                     {
-                      label: "Lead Created",
+                      label: "Client Created",
                       done: true,
                       icon: "\u2728",
                       date: person.created,
@@ -7021,7 +7021,7 @@ function PersonPanel({
                             cursor: "pointer",
                           },
                         },
-                        "\uD83C\uDF31 Resurrect Lead",
+                        "\uD83C\uDF31 Resurrect Client",
                       ),
                     !person.isJunk &&
                       person.stage !== "Closed Lost" &&
@@ -7678,7 +7678,7 @@ function PersonPanel({
                             marginBottom: "2px",
                           },
                         },
-                        "New Lead Drip",
+                        "New Client Drip",
                       ),
                       React.createElement(
                         "div",
@@ -7697,13 +7697,13 @@ function PersonPanel({
                             const p = DRIP_PATHS_CONFIG.find((d) => d.id === person.path);
                             if (p) return p.name;
                             const m = {
-                              "email-nurture": "General · New Lead Path A",
-                              "quick-connect": "General · New Lead Path C",
-                              "personal-touch": "General · New Lead Path D",
-                              "general-a": "General · New Lead Path A",
-                              "general-b": "General · New Lead Path B",
-                              "move-a": "Move · New Lead Path A",
-                              "move-b": "Move · New Lead Path B",
+                              "email-nurture": "General · New Client Path A",
+                              "quick-connect": "General · New Client Path C",
+                              "personal-touch": "General · New Client Path D",
+                              "general-a": "General · New Client Path A",
+                              "general-b": "General · New Client Path B",
+                              "move-a": "Move · New Client Path A",
+                              "move-b": "Move · New Client Path B",
                             };
                             return m[person.path] || person.path || "No path assigned";
                           })(),
@@ -9006,7 +9006,7 @@ async function patchLeadAPI(leadId, patch) {
   }
 }
 
-function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='all', isElevated=false, initialSelected=null, onInitialSelectedConsumed=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{} }) {
+function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='all', isElevated=false, initialSelected=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{} }) {
   if (!people) return null
   const allPeople = locFilter==='all' ? people : people.filter(p=>p.locationId===locFilter)
   // Default 'list' on both SSR and client. Hydrate from localStorage after
@@ -9018,9 +9018,31 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
   const [selected, setSelected] = useState(initialSelected)
   const [viewingCard, setViewingCard] = useState(null)
 
+  // One-way sync from URL/dashboard-driven globalSelectedPerson (via
+  // initialSelected) into local state. Always sync — including when
+  // initialSelected becomes null, so browser back from /clients/[id] to
+  // /clients actually closes the panel. The internal selected → URL push
+  // is in the next effect and guards against double-pushing.
+  // (We no longer call onInitialSelectedConsumed; globalSelectedPerson is
+  // now URL-mirrored at App level and clearing it would desync popstate.)
   React.useEffect(()=>{
-    if (initialSelected) { setSelected(initialSelected); onInitialSelectedConsumed() }
+    setSelected(initialSelected || null)
   }, [initialSelected])
+  // Push URL + notify App-level globalSelectedPerson when the user opens
+  // or closes a lead via the list / panel close / prev-next. Guarded to
+  // skip the popstate / dashboard-click flows that already set the URL
+  // before this effect runs (no double-push, no history bloat).
+  React.useEffect(()=>{
+    if (typeof window === 'undefined') return
+    const current = window.location.pathname
+    const want = selected
+      ? `/clients/${selected.id}`
+      : (current.startsWith('/clients/') ? '/clients' : null)
+    if (want && current !== want) {
+      window.history.pushState({}, '', want)
+      onSelectedChange(selected)
+    }
+  }, [selected])
   const [search, setSearch] = useState('')
   const [stageFilters, setStageFilters] = useState([])   // multi-select array
   const [sourceFilters, setSourceFilters] = useState([]) // multi-select array
@@ -9090,7 +9112,16 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
       setToast({ kind: 'error', msg: 'Failed to save — please try again' })
     })
   }
-  function markJunk(id, reason, note) { setPeople(p=>p.map(x=>x.id===id?{...x,isJunk:true,junkReason:reason,junkNote:note}:x)); setSelected(null) }
+  function markJunk(id, reason, note) {
+    const prev = people.find(x => x.id === id)
+    setPeople(p=>p.map(x=>x.id===id?{...x,isJunk:true,junkReason:reason,junkNote:note}:x))
+    setSelected(null)
+    patchLeadAPI(id, { isJunk: true }).then(r => {
+      if (r.ok || !prev) return
+      setPeople(p => p.map(x => x.id === prev.id ? prev : x))
+      setToast({ kind: 'error', msg: 'Failed to delete — please try again' })
+    })
+  }
   function resurrectPerson(id) {
     const prev = people.find(x => x.id === id)
     if (!prev) return
@@ -9566,8 +9597,8 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
                 { icon:'⚠️', label:'Unpaid Invoice', desc:'One or more invoices are awaiting payment' },
                 { icon:'💬', label:'Description', desc:'Client left a description - tap to read it' },
                 { icon:'📅', label:'Assessment Scheduled', desc:'An assessment is booked for this client' },
-                { icon:'⏸', label:'Drip Paused', desc:'New Lead Drip emails are paused for this client' },
-                { icon:'▶', label:'Drip Active', desc:'New Lead Drip emails are running normally' },
+                { icon:'⏸', label:'Drip Paused', desc:'New Client Drip emails are paused for this client' },
+                { icon:'▶', label:'Drip Active', desc:'New Client Drip emails are running normally' },
               ].map(({icon,label,desc})=>(
                 <div key={label} style={{ display:'flex', alignItems:'center', gap:'12px' }}>
                   <span style={{ width:'32px', height:'32px', borderRadius:'8px', background:'rgba(0,0,0,0.04)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'16px', flexShrink:0 }}>{icon}</span>
@@ -10742,7 +10773,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
             <div style={{ background:'rgba(168,201,196,0.08)', borderRadius:'10px', padding:'12px', marginBottom:'20px', textAlign:'left' }}>
               <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>
                 ✅ Your subscription is active<br/>
-                ✅ Your New Lead Drip is set<br/>
+                ✅ Your New Client Drip is set<br/>
                 ✅ Clients can start coming in<br/>
                 👥 Team invites whenever you're ready
               </p>
@@ -11173,7 +11204,7 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
             <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>📧 Send-From Email</p>
             {locationForm.sendFromEmail && locationForm.sendFromEmail===profileForm.email && <span style={{ fontSize:'10px', color:'#a8c9c4', fontStyle:'italic' }}>Prefilled from your profile</span>}
           </div>
-          <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'6px' }}>The "from" address your clients see on all New Lead Drip emails and welcome messages. Change it to a business address if you prefer. Editable anytime in Settings.</p>
+          <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'6px' }}>The "from" address your clients see on all New Client Drip emails and welcome messages. Change it to a business address if you prefer. Editable anytime in Settings.</p>
           <input type="email" value={locationForm.sendFromEmail}
             onChange={e=>setLocationForm(f=>({...f,sendFromEmail:e.target.value}))}
             placeholder="you@yourbusiness.com"
@@ -11203,7 +11234,7 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
         {/* Timezone */}
         <div>
           <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'4px' }}>🕐 Timezone</p>
-          <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'6px' }}>Used for scheduling your New Lead Drip emails at the right local time.</p>
+          <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'6px' }}>Used for scheduling your New Client Drip emails at the right local time.</p>
           <select value={locationForm.timezone} onChange={e=>setLocationForm(f=>({...f,timezone:e.target.value}))}
             style={{ ...inp, background:'white', cursor:'pointer', color:locationForm.timezone?'#1a2e2b':'#8a9e9a' }}>
             <option value="">Select your timezone…</option>
@@ -11216,7 +11247,7 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
           </select>
         </div>
 
-        {/* Google Review link — required, validated. Surfaces in New Lead Drip
+        {/* Google Review link — required, validated. Surfaces in New Client Drip
            "request a review" template; bad/missing URL = broken email. */}
         <div>
           <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:'4px' }}>
@@ -11471,7 +11502,7 @@ function OnboardingPathsEditor({ onComplete }) {
     'path-b': { emoji:'🔗', tagline:'Send a calendar link + share your rates', explain:"You'll send a welcome email, then share a booking link so they can pick a time themselves, plus your rates. Great if you prefer self-scheduling." },
     'path-c': { emoji:'📲', tagline:"Just ask if they're free - keep it casual", explain:"You'll send a welcome email, then a casual \"hey, are you free this week?\" No rates, no links. Friendly and low pressure." },
     'path-d': { emoji:'🤝', tagline:'Ask + calendar link + phone number', explain:"You'll send a welcome email, then give them three ways to connect - reply, book online, or call. Best for people who like options." },
-    'path-e': { emoji:'💛', tagline:'Availability check + warm referral follow-up', explain:"Similar to Path A but with a warmer, referral-focused tone. Great for word-of-mouth leads who already trust you." },
+    'path-e': { emoji:'💛', tagline:'Availability check + warm referral follow-up', explain:"Similar to Path A but with a warmer, referral-focused tone. Great for word-of-mouth clients who already trust you." },
   }
 
 
@@ -11479,9 +11510,9 @@ function OnboardingPathsEditor({ onComplete }) {
   if (wizardStep==='intro') return (
     <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
       <div style={{ background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'12px', padding:'16px' }}>
-        <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'8px' }}>📬 What is a New Lead Drip?</p>
+        <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'8px' }}>📬 What is a New Client Drip?</p>
         <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'10px' }}>
-          When someone fills out your form, Bee Hub automatically sends them emails to follow up. A <strong>New Lead Drip</strong> is just the plan - which emails go out, and when.
+          When someone fills out your form, Bee Hub automatically sends them emails to follow up. A <strong>New Client Drip</strong> is just the plan - which emails go out, and when.
         </p>
         <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'10px' }}>
           Think of it like a friendly robot that follows up for you while you're busy with a job. 🐝
@@ -11572,7 +11603,7 @@ function OnboardingPathsEditor({ onComplete }) {
               <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Your selected path sends a booking link to clients.</p>
             </div>
           </div>
-          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5, marginBottom:'10px' }}>Add your Calendly, Acuity, or other booking page URL. Leads will use this to schedule directly from your follow-up email.</p>
+          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5, marginBottom:'10px' }}>Add your Calendly, Acuity, or other booking page URL. Clients will use this to schedule directly from your follow-up email.</p>
           <input type="url" value={calendarLink} onChange={e=>setCalendarLink(e.target.value)}
             placeholder="https://calendly.com/your-name"
             style={{ width:'100%', padding:'10px 12px', border:`1.5px solid ${calendarLink&&!calendarLink.startsWith('http')?'rgba(239,68,68,0.4)':'rgba(99,102,241,0.3)'}`, borderRadius:'9px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', background:'white' }} />
@@ -12068,7 +12099,7 @@ const PARTNER_TAGS = [
   { id:'vip',            label:'⭐ VIP',             color:'#f59e0b', bg:'rgba(245,158,11,0.1)'  },
   { id:'top-referrer',   label:'🏆 Top Referrer',   color:'#d4a046', bg:'rgba(212,160,70,0.1)'  },
   { id:'follow-up',      label:'📌 Follow Up',      color:'#0ea5e9', bg:'rgba(14,165,233,0.1)'  },
-  { id:'warm',           label:'☀️ Warm Lead',       color:'#f97316', bg:'rgba(249,115,22,0.1)'  },
+  { id:'warm',           label:'☀️ Warm Client',     color:'#f97316', bg:'rgba(249,115,22,0.1)'  },
   { id:'bad-contact',    label:'📵 Bad Contact',     color:'#8a9e9a', bg:'rgba(138,158,154,0.1)' },
   { id:'co-market',      label:'📣 Co-Market',       color:'#8b5cf6', bg:'rgba(139,92,246,0.1)'  },
 ]
@@ -12141,7 +12172,7 @@ const TOUCHPOINT_TYPES = [
   { key:'email',   icon:'📧', label:'Email'            },
   { key:'event',   icon:'🎪', label:'Event / Show'     },
   { key:'text',    icon:'💬', label:'Text'             },
-  { key:'referral',icon:'🤝', label:'They Sent a Lead' },
+  { key:'referral',icon:'🤝', label:'They Sent a Client' },
   { key:'thankyou',icon:'🙏', label:'Thank You Sent'   },
 ]
 
@@ -15028,14 +15059,14 @@ const PATH_STYLES = [
 ]
 
 const DRIP_PATHS_CONFIG = [
-  { id:'move-a',    name:'Move · New Lead Path A',    icon:'📦', projectType:'move',    styleId:'path-a', desc:'Move clients - availability check + rates' },
-  { id:'move-b',    name:'Move · New Lead Path B',    icon:'📦', projectType:'move',    styleId:'path-b', desc:'Move clients - calendar link + rates' },
+  { id:'move-a',    name:'Move · New Client Path A',    icon:'📦', projectType:'move',    styleId:'path-a', desc:'Move clients - availability check + rates' },
+  { id:'move-b',    name:'Move · New Client Path B',    icon:'📦', projectType:'move',    styleId:'path-b', desc:'Move clients - calendar link + rates' },
   { id:'move-c',    name:'Move · Path C',    icon:'📦', projectType:'move',    styleId:'path-c', desc:'Move clients - availability check only' },
   { id:'move-d',    name:'Move · Path D',    icon:'📦', projectType:'move',    styleId:'path-d', desc:'Move clients - availability + calendar + phone' },
-  { id:'general-a', name:'Organizing · New Lead Path A', icon:'🏠', projectType:'general', styleId:'path-a', desc:'All other projects - availability check + rates' },
-  { id:'general-b', name:'Organizing · New Lead Path B', icon:'🏠', projectType:'general', styleId:'path-b', desc:'All other projects - calendar link + rates' },
-  { id:'general-c', name:'Organizing · New Lead Path C', icon:'🏠', projectType:'general', styleId:'path-c', desc:'All other projects - availability check only' },
-  { id:'general-d', name:'Organizing · New Lead Path D', icon:'🏠', projectType:'general', styleId:'path-d', desc:'All other projects - availability + calendar + phone' },
+  { id:'general-a', name:'Organizing · New Client Path A', icon:'🏠', projectType:'general', styleId:'path-a', desc:'All other projects - availability check + rates' },
+  { id:'general-b', name:'Organizing · New Client Path B', icon:'🏠', projectType:'general', styleId:'path-b', desc:'All other projects - calendar link + rates' },
+  { id:'general-c', name:'Organizing · New Client Path C', icon:'🏠', projectType:'general', styleId:'path-c', desc:'All other projects - availability check only' },
+  { id:'general-d', name:'Organizing · New Client Path D', icon:'🏠', projectType:'general', styleId:'path-d', desc:'All other projects - availability + calendar + phone' },
   { id:'custom',    name:'Custom',           icon:'✏️', projectType:'any',     styleId:'custom', desc:'Build your own sequence' },
 ]
 
@@ -16061,8 +16092,8 @@ function SmsVoiceInfoModal({ onClose }) {
     },
     {
       icon:'🤖', name:'SMS AI', pop:false,
-      tag:'Smart lead intelligence',
-      desc:'Bee Hub reads your SMS conversations and automatically scores lead intent, summarizes the thread, and optimizes send times based on what actually gets responses.',
+      tag:'Smart client intelligence',
+      desc:'Bee Hub reads your SMS conversations and automatically scores client intent, summarizes the thread, and optimizes send times based on what actually gets responses.',
       features:['Lead scoring from SMS engagement','Conversation summaries on client card','Smart send-time optimization','Flag high-intent replies for immediate action'],
     },
     {
@@ -17277,7 +17308,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
 
             <SectionHeader title="Online Presence" />
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-              <SettingsEditRow label="Booking Link"     value={settings.location.bookingLink}  onSave={v=>updateLocation('bookingLink',v)}  hint="Shared in New Lead Drip emails" />
+              <SettingsEditRow label="Booking Link"     value={settings.location.bookingLink}  onSave={v=>updateLocation('bookingLink',v)}  hint="Shared in New Client Drip emails" />
               <SettingsEditRow label="Google Reviews"   value={settings.location.reviewsLink}  onSave={v=>updateLocation('reviewsLink',v)}  hint="Sent to completed clients" required validate={validateReviewsLink} />
             </div>
 
@@ -17296,7 +17327,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
               </div>
             </div>
 
-            <SectionHeader title="Outreach Email" desc="Used as the From address for all New Lead Drip emails" />
+            <SectionHeader title="Outreach Email" desc="Used as the From address for all New Client Drip emails" />
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
               <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>updateLocation('sendFromName',v)}  hint="e.g. Bee Organized Kansas City" />
               <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>updateLocation('sendFromEmail',v)} hint="Must be a verified sender in your email provider" type="email" />
@@ -17432,7 +17463,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
           )
         })()}
 
-        {/* ── New Lead Drip ── */}
+        {/* ── New Client Drip ── */}
         {activeSection==='paths'&&(
           <>
             <div style={{ padding:'12px 12px 0' }}>
@@ -18991,7 +19022,7 @@ function TierPlansInline() {
     { title:'🐝 Clients & Pipeline', rows:[
       ['View all clients in the location','Full Hive access',['y','y','y','y']],
       ['Edit client records','Update contact info, stage, tags',['y','y','y','n']],
-      ['Add new leads / clients','Capture incoming calls and inquiries',['y','y','y','n']],
+      ['Add new clients','Capture incoming calls and inquiries',['y','y','y','n']],
       ['Schedule assessments & follow-ups','Set appointment times',['y','y','y','n']],
       ['Log Buzz Notes & Job Notes','Private + Jobber-synced notes',['y','y','y','n']],
       ['Complete jobs & mark stages done','Field-completion work',['y','y','n','n']],
@@ -20774,7 +20805,7 @@ function ProjectTypeEditModal({ items, onClose, onSave }) {
         <div style={{ padding:'18px 20px 14px', borderBottom:'1px solid rgba(0,0,0,0.07)', display:'flex', alignItems:'flex-start', justifyContent:'space-between', flexShrink:0 }}>
           <div>
             <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'2px' }}>Project Types</p>
-            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Set each type as Move or Organizing - determines the New Lead Drip used</p>
+            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Set each type as Move or Organizing - determines the New Client Drip used</p>
           </div>
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
         </div>
@@ -21014,7 +21045,7 @@ function hexToRgba(hex, alpha = 0.1) {
 const LOOKUP_CATEGORIES_CONFIG = {
   closed_lost_reasons: {
     label: 'Closed Lost Reasons',
-    desc: 'Shown when closing a lead as lost',
+    desc: 'Shown when closing a client as lost',
     section: 'CLIENTS',
     fields: ['label'],
     defaultColor: '#8a9e9a',
@@ -21030,7 +21061,7 @@ const LOOKUP_CATEGORIES_CONFIG = {
   },
   project_types: {
     label: 'Project Types',
-    desc: 'Each tagged Move or Organizing — determines New Lead Drip used',
+    desc: 'Each tagged Move or Organizing — determines New Client Drip used',
     section: 'CLIENTS',
     fields: ['label', 'drip_category'],
     defaultColor: '#8a9e9a',
@@ -21045,8 +21076,8 @@ const LOOKUP_CATEGORIES_CONFIG = {
     syncGetter: 'client_stages',
   },
   lead_sources: {
-    label: 'Lead Sources',
-    desc: 'Where new leads come from (Website, Referral, etc.)',
+    label: 'Client Sources',
+    desc: 'Where new clients come from (Website, Referral, etc.)',
     section: 'CLIENTS',
     fields: ['label'],
     defaultColor: '#8a9e9a',
@@ -23914,7 +23945,7 @@ function CorporateReports({ range, locId, source, project }) {
         ))}
       </ReportCard>
 
-      <ReportCard title="Lead Sources" subtitle="Where client comes from">
+      <ReportCard title="Client Sources" subtitle="Where client comes from">
         <BarChart data={srcData.map(x=>x.v)} labels={srcData.map(x=>x.s.split(' ')[0])} color='#a8c9c4' height={100} formatVal={v=>`${v}%`} />
       </ReportCard>
 
@@ -24015,7 +24046,7 @@ function FranchiseReports({ range, locId, source, project, people, locFilter }) 
 
       {/* Lead sources */}
       {srcCounts.length > 0 && (
-        <ReportCard title="Lead Sources" subtitle="Where your client comes from">
+        <ReportCard title="Client Sources" subtitle="Where your client comes from">
           {srcCounts.map(({s,v})=>(
             <div key={s} style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'8px' }}>
               <span style={{ fontSize:'11px', color:'#8a9e9a', flex:1 }}>{s}</span>
@@ -24840,8 +24871,43 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated }) {
   )
 }
 
+// URL slug → internal activeNav key. The Clients tab is internally 'hive'
+// but exposed as /clients in the URL; /contacts maps to the 'partners'
+// screen (label "Contacts", internal key "partners").
+const ROUTE_TO_NAV = {
+  clients: 'hive',
+  hive:    'hive',
+  contacts:'partners',
+  partners:'partners',
+  reports: 'reports',
+  settings:'settings',
+  admin:   'admin',
+  home:    'home',
+}
+const NAV_TO_URL = {
+  home:    '/',
+  hive:    '/clients',
+  partners:'/contacts',
+  reports: '/reports',
+  settings:'/settings',
+  admin:   '/admin',
+}
+// Parse the current pathname into the activeNav key + (optional) selected
+// lead id. Drives initial state on mount and the popstate handler so
+// browser back/forward stay in sync with internal nav state.
+function parseHubUrl(pathname) {
+  if (!pathname || pathname === '/') return { nav: 'home', leadId: null }
+  const m = pathname.match(/^\/clients(?:\/([^/]+))?$/)
+  if (m) return { nav: 'hive', leadId: m[1] || null }
+  const seg = pathname.split('/').filter(Boolean)[0]
+  return { nav: ROUTE_TO_NAV[seg] || 'home', leadId: null }
+}
+
 export default function App({
   currentUser,
+  initialRoute,              // URL-derived route slug ('clients', 'reports', etc.) — maps to activeNav via ROUTE_TO_NAV
+  initialSelectedLeadId,     // /clients/[id] deep link — opens PersonPanel on mount
+  notFoundToast,             // /clients?notfound=1 — fired by HubPage when /clients/[bad-id] redirects here
   initialRole,
   initialFranchiseRole,
   initialLocFilter,
@@ -25022,14 +25088,17 @@ export default function App({
     availableSeatsByTierWithPending,
   }
   const [franchiseRole, setFranchiseRole]   = useState(initialFranchiseRole ?? 'owner') // owner|manager|light|readonly
-  const [activeNav, setActiveNav]           = useState('home')
+  const [activeNav, setActiveNav]           = useState(ROUTE_TO_NAV[initialRoute] || 'home')
   const [viewAsTarget, setViewAsTarget]     = useState(null)
   const [viewAsUser, setViewAsUser]         = useState(null) // full user object when viewing as specific user
   const [locFilter, setLocFilter]           = useState(initialLocFilter ?? 'all')
   const [showLocPicker, setShowLocPicker]   = useState(false)
   const [showRolePicker, setShowRolePicker] = useState(false)
   const [showGlobalSearch, setShowGlobalSearch] = useState(false)
-  const [globalSelectedPerson, setGlobalSelectedPerson]   = useState(null)
+  const [globalSelectedPerson, setGlobalSelectedPerson]   = useState(() => {
+    if (!initialSelectedLeadId || !Array.isArray(initialPeople)) return null
+    return initialPeople.find(p => p.id === initialSelectedLeadId) || null
+  })
   const [globalSelectedPartner, setGlobalSelectedPartner] = useState(null)
 const [people, setPeople]                 = useState(Array.isArray(initialPeople) ? initialPeople : ALL_PEOPLE)
  // Extend with randomized mock data post-mount. Module-level Math.random
@@ -25092,7 +25161,47 @@ if (Array.isArray(initialPeople)) return
     return 'active'
   })()
 
-  function nav(key) { setActiveNav(key); window.scrollTo(0,0) }
+  function nav(key) {
+    setActiveNav(key)
+    window.scrollTo(0,0)
+    // Leaving the Clients tab — drop the open lead so a later nav('hive')
+    // opens to the list, not back into a stale detail panel.
+    if (key !== 'hive') setGlobalSelectedPerson(null)
+    // Sync URL with the tab the user picked. Use window.history.pushState
+    // (not Next.js router.push) so BeeHub stays mounted — a real route
+    // navigation would unmount and reset all in-app state (filters,
+    // scroll position, edit drafts). Refreshing still works because
+    // each route's page.tsx → HubPage SSR matches the URL.
+    const url = NAV_TO_URL[key]
+    if (!url || typeof window === 'undefined') return
+    const current = window.location.pathname
+    // For the Clients tab, /clients and /clients/[id] are both "on Clients" —
+    // don't disturb an open detail panel just because the user re-clicked the tab.
+    const alreadyOn = key === 'hive' ? current.startsWith('/clients') : current === url
+    if (!alreadyOn) window.history.pushState({}, '', url)
+  }
+  // Toast for /clients/[bad-uuid] → /clients?notfound=1 redirect.
+  useEffect(() => {
+    if (notFoundToast) setToast({ kind: 'error', msg: 'Client not found' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  // Browser back/forward — re-derive activeNav + selected lead from the URL.
+  // Click-driven URL updates go through pushState (above) and lead-panel
+  // open/close (HiveScreen below); popstate handles the user-driven case.
+  useEffect(() => {
+    function onPop() {
+      const { nav: navKey, leadId } = parseHubUrl(window.location.pathname)
+      setActiveNav(navKey)
+      if (leadId) {
+        const lead = people.find(p => p.id === leadId)
+        if (lead) setGlobalSelectedPerson(lead)
+      } else if (navKey === 'hive') {
+        setGlobalSelectedPerson(null)
+      }
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [people])
   function addPersonFromPartner(p) {
     setPeople(prev=>[{...p,id:`n${Date.now()}`,stage:'New',tags:['returning'],buzzNotes:[{id:`bn${Date.now()}`,text:'Was a partner',ts:'Just now',user:'System'}],jobNotes:[],invoices:[],jobs:[],finalProcessed:false,isJunk:false,activity:[],outreachTimeline:[]},...prev])
   }
@@ -25322,7 +25431,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     )
     if (activeNav==='hive') return (
       <div style={pageStyle}>
-        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} locFilter={locFilter} isElevated={isElevated} initialSelected={globalSelectedPerson} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} />
+        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} locFilter={locFilter} isElevated={isElevated} initialSelected={globalSelectedPerson} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} />
         {toast && <InlineToast {...toast} />}
       </div>
     )
@@ -25354,7 +25463,14 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           setPeople={setPeople}
           activeNav={activeNav}
           nav={nav}
-          onOpenRecord={(person)=>{ setGlobalSelectedPerson(person); nav('hive') }}
+          onOpenRecord={(person)=>{
+            setGlobalSelectedPerson(person)
+            setActiveNav('hive')
+            if (typeof window !== 'undefined') {
+              window.history.pushState({}, '', '/clients/' + person.id)
+              window.scrollTo(0, 0)
+            }
+          }}
           followUps={followUps}
           onCompleteOnboarding={()=>{
             // Real franchise owners have franchiseLoc=null (no selectedLoc,
@@ -25539,7 +25655,14 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         <GlobalSearch
           people={people}
           partners={partners}
-          onSelectPerson={(p)=>{ setActiveNav('hive'); setGlobalSelectedPerson(p); setShowGlobalSearch(false) }}
+          onSelectPerson={(p)=>{
+            setActiveNav('hive')
+            setGlobalSelectedPerson(p)
+            setShowGlobalSearch(false)
+            if (typeof window !== 'undefined') {
+              window.history.pushState({}, '', '/clients/' + p.id)
+            }
+          }}
           onSelectPartner={(p)=>{ setActiveNav('partners'); setGlobalSelectedPartner(p); setShowGlobalSearch(false) }}
           onClose={()=>setShowGlobalSearch(false)}
         />

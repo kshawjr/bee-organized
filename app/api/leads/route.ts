@@ -190,7 +190,7 @@ export async function POST(req: NextRequest) {
     location_uuid: location.id,
     kind:          'system',
     method:        'system',
-    label:         'Lead created',
+    label:         'Client created',
     status:        'done',
     occurred_at:   now,
     user_id:       null,

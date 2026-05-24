@@ -163,6 +163,12 @@ interface BeeHubProps {
   }
   initialLookups?: LookupsByCategory
   initialPeople?: any[]
+  // URL routing: server-passed route slug ('clients' / 'reports' / etc.)
+  // and optional deep-linked lead id from /clients/[id]; notFoundToast
+  // fires the "Lead not found" toast after /clients/[bad-id] redirect.
+  initialRoute?: string
+  initialSelectedLeadId?: string
+  notFoundToast?: boolean
 }
 
 declare const BeeHub: React.FC<BeeHubProps>

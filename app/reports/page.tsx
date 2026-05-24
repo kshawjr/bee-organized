@@ -1,4 +1,5 @@
-import BeeHubApp from '@/components/BeeHubApp'
+import HubPage from '../_hub-page'
+
 export default function Page() {
-  return <BeeHubApp initialRoute="reports" />
+  return <HubPage initialRoute="reports" />
 }
