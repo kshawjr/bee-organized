@@ -2925,12 +2925,15 @@ function EditableField({ icon, value, onSave }) {
 
 // ─── New Client Modal ────────────────────────────────────────────────────────────
 function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], currentUserId='u11', locationId=null, startPhase='lookup' }) {
+  // Real auth + location context — what we'll default location_uuid and
+  // assigned_to to when the caller doesn't override. The `locationId` prop
+  // is the Hive kanban filter; falls back to the user's own location.
   const currentUserCtx     = useContext(CurrentUserContext)
   const currentLocationCtx = useContext(CurrentLocationContext)
-  // Effective IDs: real context wins over mock prop defaults. Falls back to
-  // the props for view-as / demo paths that don't provide context.
-  const effectiveUserId     = currentUserCtx?.id || (currentUserId && currentUserId !== 'u11' ? currentUserId : null)
-  const effectiveLocationId = locationId || currentLocationCtx?.id || null
+  const locationUsersCtx   = useContext(LocationUsersContext)
+  const resolvedLocationUuid =
+    locationId || currentLocationCtx?.id || currentUserCtx?.locationId || null
+  const resolvedUserId = currentUserCtx?.id || currentUserId
 
   const [phase, setPhase] = useState(startPhase)
   const [query, setQuery] = useState('')
@@ -2939,29 +2942,51 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
   const [editMode, setEditMode] = useState(false)
   const [matches, setMatches] = useState([])
   const [clientSelected, setClientSelected] = useState(false)
-  const [assignedTo, setAssignedTo] = useState(effectiveUserId)
+  const [assignedTo, setAssignedTo] = useState(resolvedUserId)
+  const [startDrip, setStartDrip] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
+  const [errorMsg, setErrorMsg]     = useState(null)
   const [form, setForm] = useState({ firstName:'', lastName:'', phone:'', email:'', source:'', project:'Home Organization', desc:'', street:'', apt:'', city:'', state:'', zip:'', addrType:'Service', referredBy:null, marketingOptOut:false })
   const [showPartnerPicker, setShowPartnerPicker] = useState(false)
   const [partnerSearch, setPartnerSearch] = useState('')
   const [showAddrEntry, setShowAddrEntry] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState(null)
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
 
-  // POST to /api/leads, return the persisted row's UUID (or null + error string).
-  async function createLeadAPI(payload) {
-    const res = await fetch('/api/leads', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-    if (!res.ok) {
-      let err = `HTTP ${res.status}`
-      try { const j = await res.json(); if (j?.error) err = j.error } catch {}
-      return { ok: false, error: err }
+  // Hub_users in the target location — drives the assignee dropdown.
+  // Falls back to the full roster if no location context (e.g. super_admin
+  // creating from "all locations" view).
+  const assigneeOptions = (locationUsersCtx || []).filter(u =>
+    !resolvedLocationUuid || u.locationId === resolvedLocationUuid
+  )
+
+  // POST helper — builds the create body and returns { ok, lead, error }.
+  // Each create path (new client, quick capture, returning client) shares
+  // this so they all hit /api/leads consistently.
+  async function postLead(extraBody) {
+    if (!resolvedLocationUuid) {
+      return { ok: false, error: 'No location context — refresh and try again' }
     }
-    const j = await res.json()
-    return { ok: true, lead: j.lead }
+    const body = {
+      location_uuid: resolvedLocationUuid,
+      assigned_to:   assignedTo || resolvedUserId,
+      stage:         'New',
+      skip_drip:     !startDrip,
+      ...extraBody,
+    }
+    try {
+      const res = await fetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || !json?.lead) {
+        return { ok: false, error: json?.error || `HTTP ${res.status}` }
+      }
+      return { ok: true, lead: json.lead }
+    } catch (e) {
+      return { ok: false, error: 'Network error — try again' }
+    }
   }
 
   const inp = { width:'100%', padding:'9px 11px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none', boxSizing:'border-box' }
@@ -2998,126 +3023,147 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
     }, 600)
   }
 
+  // Build the full-detail address record. Mirrors the import shape so
+  // lib/people-mapper can read either jsonb or the legacy single-string.
+  function buildAddressFields() {
+    const street = (form.street || '').trim()
+    if (!street) return { address: null, addresses: [], city: null, state: null, zip: null }
+    const full = [street, form.city, form.state, form.zip].filter(Boolean).join(', ')
+    return {
+      address: full || null,
+      city:    form.city  || null,
+      state:   form.state || null,
+      zip:     form.zip   || null,
+      addresses: [{
+        type:   form.addrType || 'Service',
+        value:  full,
+        street,
+        city:   form.city  || '',
+        state:  form.state || '',
+        zip:    form.zip   || '',
+      }],
+    }
+  }
+
   async function createNew() {
     if (submitting) return
-    if (!effectiveLocationId) { setSubmitError('No location selected — please pick a location first.'); return }
-    const name = `${form.firstName} ${form.lastName}`.trim()
-    if (!name && !(form.firstName.trim() && form.lastName.trim())) { setSubmitError('Name required'); return }
+    setErrorMsg(null)
+    setSubmitting(true)
     const chosenPath = getDefaultPathForProject(form.project)
-    const addresses = form.street
-      ? [{ type:form.addrType||'Service', value:[form.street,form.city,form.state,form.zip].filter(Boolean).join(', '), street:form.street, city:form.city, state:form.state, zip:form.zip }]
-      : []
-    setSubmitting(true); setSubmitError(null)
-    const r = await createLeadAPI({
-      location_uuid: effectiveLocationId,
-      name,
-      first_name: form.firstName || null,
-      last_name:  form.lastName  || null,
-      email:  form.email || null,
-      phone:  form.phone || null,
-      address: [form.street, form.city, form.state].filter(Boolean).join(', ') || null,
-      city:  form.city  || null,
-      state: form.state || null,
-      zip:   form.zip   || null,
-      addresses,
-      source: form.source || null,
+    const dripPathId = chosenPath?.id === 'none' ? null : chosenPath?.id || null
+    const firstName = form.firstName.trim()
+    const lastName  = form.lastName.trim()
+    const composedName = [firstName, lastName].filter(Boolean).join(' ') || (form.email || form.phone || 'Unknown')
+
+    const r = await postLead({
+      name:       composedName,
+      first_name: firstName || null,
+      last_name:  lastName  || null,
+      email:      form.email || null,
+      phone:      form.phone || null,
+      source:     form.source || null,
       project_type: form.project || null,
-      assigned_to: assignedTo || effectiveUserId || null,
-      stage: 'New',
-      drip_path: chosenPath?.id==='none' ? null : (chosenPath?.id || null),
-      referred_by_kind: form.source==='Referral' && form.referredBy ? 'partner' : null,
-      referred_by_id:   form.source==='Referral' ? (form.referredBy || null) : null,
-      request_details: form.desc || null,
+      drip_path:  dripPathId,
+      referred_by_kind: form.source === 'Referral' && form.referredBy ? 'partner' : null,
+      referred_by_id:   form.source === 'Referral' ? (form.referredBy || null) : null,
+      marketing_opt_out: !!form.marketingOptOut,
+      request_details:   form.desc || null,
+      ...buildAddressFields(),
+    })
+    if (!r.ok) { setErrorMsg(r.error); setSubmitting(false); return }
+
+    const dripLabel = (startDrip && dripPathId) ? (chosenPath?.name || 'Drip started') : 'No drip'
+    onCreate({
+      id: r.lead.id, name: composedName,
+      phone: form.phone, email: form.email,
+      stage: 'New', source: form.source, project: form.project, created: 'Just now',
+      referredBy: form.source === 'Referral' ? form.referredBy : null,
+      path: startDrip ? dripPathId : null,
+      assignedTo: assignedTo || resolvedUserId,
+      locationId: resolvedLocationUuid,
+      marketingOptOut: !!form.marketingOptOut, paused: false,
+      assessment: null, assessmentType: null, jobberRef: null, reachOutMethod: null,
+      jobberSearchStatus: 'pending', jobberClient: null, desc: form.desc,
+      address: [form.street, form.city, form.state].filter(Boolean).join(', ') || null,
+      addresses: buildAddressFields().addresses,
+      tags: [], isJunk: false, buzzNotes: [], jobNotes: [], jobs: [], invoices: [],
+      finalProcessed: false, jobContacts: [],
+      outreachTimeline: [{
+        id: `o${Date.now()}`, type: 'system', method: 'system',
+        label: `Client created · ${dripLabel}`, ts: 'Just now', status: 'done',
+      }],
+      activity: [],
     })
     setSubmitting(false)
-    if (!r.ok) { setSubmitError(`Couldn't save lead — ${r.error}`); return }
-    const lead = r.lead
-    onCreate({
-      id: lead.id, name: lead.name || name, phone:form.phone, email:form.email,
-      stage:'New', source:form.source, project:form.project, created:'Just now',
-      locationId: effectiveLocationId,
-      referredBy: form.source==='Referral' ? form.referredBy : null,
-      path: chosenPath?.id==='none' ? null : chosenPath?.id,
-      assignedTo: assignedTo || effectiveUserId || null, marketingOptOut:false, paused:false,
-      assessment:null, assessmentType:null, jobberRef:null, reachOutMethod:null,
-      jobberSearchStatus:'pending', jobberClient:null, desc:form.desc,
-      address: [form.street, form.city, form.state].filter(Boolean).join(', ') || null,
-      addresses,
-      tags:[], isJunk:false, buzzNotes:[], jobNotes:[], jobs:[], invoices:[],
-      finalProcessed:false, jobContacts:[],
-      outreachTimeline:[{ id:`o${Date.now()}`, type:'system', method:'system',
-        label:`Client created · ${chosenPath?.name||'No drip'}`, ts:'Just now', status:'done' }],
-      activity:[],
-    })
     onClose()
   }
 
   async function createQuick() {
     if (submitting) return
-    if (!effectiveLocationId) { setSubmitError('No location selected — please pick a location first.'); return }
-    const name = [form.firstName, form.lastName].filter(Boolean).join(' ') || form.phone || 'Unknown'
-    if (!form.firstName.trim() && !form.phone.trim()) { setSubmitError('Name or phone required'); return }
-    setSubmitting(true); setSubmitError(null)
-    const r = await createLeadAPI({
-      location_uuid: effectiveLocationId,
-      name,
-      first_name: form.firstName || null,
-      last_name:  form.lastName  || null,
-      phone: form.phone || null,
+    setErrorMsg(null)
+    setSubmitting(true)
+    const firstName = form.firstName.trim()
+    const lastName  = form.lastName.trim()
+    const composedName = [firstName, lastName].filter(Boolean).join(' ') || form.phone || 'Unknown'
+
+    const r = await postLead({
+      name:       composedName,
+      first_name: firstName || null,
+      last_name:  lastName  || null,
+      phone:      form.phone || null,
       project_type: form.project || null,
-      assigned_to: assignedTo || effectiveUserId || null,
-      stage: 'New',
       request_details: form.desc || null,
     })
-    setSubmitting(false)
-    if (!r.ok) { setSubmitError(`Couldn't save lead — ${r.error}`); return }
-    const lead = r.lead
+    if (!r.ok) { setErrorMsg(r.error); setSubmitting(false); return }
+
     onCreate({
-      id: lead.id, name: lead.name || name, phone:form.phone, email:'', source:'', project:'', created:'Just now',
-      stage:'New', path:null, paused:false, assessment:null, assessmentType:null,
-      locationId: effectiveLocationId,
-      assignedTo: assignedTo || effectiveUserId || null, marketingOptOut:false, quickCapture:true,
-      buzzNotes: form.desc ? [{ id:`bn${Date.now()}`, text:form.desc, ts:'Just now', user:'You' }] : [],
-      jobberRef:null, reachOutMethod:null, jobberSearchStatus:'pending', jobberClient:null,
-      desc:form.desc, address:null, addresses:[], referredBy:null,
-      tags:[], isJunk:false, jobNotes:[], jobs:[], invoices:[], finalProcessed:false, jobContacts:[],
-      outreachTimeline:[{ id:`o${Date.now()}`, type:'system', method:'system', label:'Quick capture - needs follow-up', ts:'Just now', status:'done' }],
-      activity:[],
+      id: r.lead.id, name: composedName,
+      phone: form.phone, email: '', source: '', project: '', created: 'Just now',
+      stage: 'New', path: null, paused: false, assessment: null, assessmentType: null,
+      assignedTo: assignedTo || resolvedUserId,
+      locationId: resolvedLocationUuid,
+      marketingOptOut: false, quickCapture: true,
+      buzzNotes: form.desc ? [{ id:`bn${Date.now()}`, text: form.desc, ts: 'Just now', user: 'You' }] : [],
+      jobberRef: null, reachOutMethod: null, jobberSearchStatus: 'pending', jobberClient: null,
+      desc: form.desc, address: null, addresses: [], referredBy: null,
+      tags: [], isJunk: false, jobNotes: [], jobs: [], invoices: [], finalProcessed: false, jobContacts: [],
+      outreachTimeline: [{ id:`o${Date.now()}`, type: 'system', method: 'system', label: 'Quick capture - needs follow-up', ts: 'Just now', status: 'done' }],
+      activity: [],
     })
+    setSubmitting(false)
     onClose()
   }
 
   async function addExistingToHive() {
     if (submitting) return
-    if (!effectiveLocationId) { setSubmitError('No location selected — please pick a location first.'); return }
+    setErrorMsg(null)
+    setSubmitting(true)
     const chosenPath = getDefaultPathForProject(form.project || match.project)
-    setSubmitting(true); setSubmitError(null)
-    const r = await createLeadAPI({
-      location_uuid: effectiveLocationId,
-      name: match.name,
-      first_name: match.firstName || null,
-      last_name:  match.lastName  || null,
-      email: match.email || null,
-      phone: match.phone || null,
+    const dripPathId = chosenPath?.id === 'none' ? null : chosenPath?.id || null
+
+    const r = await postLead({
+      name:       match.name,
+      first_name: match.firstName || (match.name || '').split(' ')[0] || null,
+      last_name:  match.lastName  || (match.name || '').split(' ').slice(1).join(' ') || null,
+      email:      match.email || null,
+      phone:      match.phone || null,
       project_type: form.project || match.project || null,
-      assigned_to: assignedTo || effectiveUserId || null,
-      stage: 'New',
-      drip_path: chosenPath?.id==='none' ? null : (chosenPath?.id || null),
+      drip_path:  dripPathId,
+    })
+    if (!r.ok) { setErrorMsg(r.error); setSubmitting(false); return }
+
+    onCreate({
+      ...match, id: r.lead.id,
+      stage: 'New', jobberRef: null, reachOutMethod: null, assessment: null,
+      invoices: [], jobs: [], finalProcessed: false, isJunk: false, created: 'Just now',
+      project: form.project || match.project || '',
+      path: startDrip ? dripPathId : null,
+      assignedTo: assignedTo || resolvedUserId,
+      locationId: resolvedLocationUuid,
+      outreachTimeline: [{ id:`o${Date.now()}`, type: 'system', method: 'system', label: 'Returning client - new request started', ts: 'Just now', status: 'done' }],
+      activity: [],
     })
     setSubmitting(false)
-    if (!r.ok) { setSubmitError(`Couldn't save lead — ${r.error}`); return }
-    const lead = r.lead
-    onCreate({
-      ...match, id: lead.id,
-      stage:'New', jobberRef:null, reachOutMethod:null, assessment:null,
-      invoices:[], jobs:[], finalProcessed:false, isJunk:false, created:'Just now',
-      locationId: effectiveLocationId,
-      assignedTo: assignedTo || effectiveUserId || null,
-      project:form.project||match.project||'',
-      path: chosenPath?.id==='none' ? null : chosenPath?.id,
-      outreachTimeline:[{ id:`o${Date.now()}`, type:'system', method:'system', label:'Returning client - new request started', ts:'Just now', status:'done' }],
-      activity:[],
-    })
     onClose()
   }
 
@@ -3127,12 +3173,6 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
   return (
     <Popup title={titles[phase]} onClose={onClose}>
       <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'-10px', marginBottom:'1rem' }}>{subs[phase]}</p>
-
-      {submitError&&(
-        <div style={{ marginBottom:'10px', padding:'9px 12px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'9px' }}>
-          <p style={{ fontSize:'12px', color:'#b91c1c' }}>{submitError}</p>
-        </div>
-      )}
 
       {/* Lookup */}
       {phase==='lookup'&&(
@@ -3174,10 +3214,19 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
           </div>
           <div><label style={lbl}>Note <span style={{ fontSize:'10px', color:'#8a9e9a', textTransform:'none', letterSpacing:0, fontWeight:400 }}>optional</span></label>
             <textarea style={{...inp, height:'52px', resize:'none', width:'100%'}} placeholder='Met at home show, interested in kitchen…' value={form.desc} onChange={e=>set('desc',e.target.value)} /></div>
+          <label style={{ display:'flex', alignItems:'center', gap:'8px', padding:'9px 12px', background:'rgba(168,201,196,0.07)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'9px', cursor:'pointer', fontSize:'13px', color:'#1a2e2b' }}>
+            <input type='checkbox' checked={startDrip} onChange={e=>setStartDrip(e.target.checked)} style={{ width:'16px', height:'16px', accentColor:'#1a2e2b' }} />
+            <span>Start drip path automatically</span>
+          </label>
+          {errorMsg&&(
+            <div style={{ padding:'8px 11px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'9px' }}>
+              <p style={{ fontSize:'12px', color:'#dc2626', wordBreak:'break-word' }}>⚠ {errorMsg}</p>
+            </div>
+          )}
           <div style={{ display:'flex', gap:'8px' }}>
-            <button onClick={()=>setPhase('lookup')} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>← Back</button>
-            <button onClick={createQuick} disabled={submitting||(!form.phone.trim()&&!form.firstName.trim())} style={{ flex:2, padding:'11px', background:(!submitting&&(form.phone.trim()||form.firstName.trim()))?'#d4a046':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:(!submitting&&(form.phone.trim()||form.firstName.trim()))?'white':'#9ca3af', cursor:submitting?'wait':((form.phone.trim()||form.firstName.trim())?'pointer':'not-allowed') }}>
-              {submitting?'Saving…':'⚡ Save for later'}
+            <button onClick={()=>setPhase('lookup')} disabled={submitting} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:submitting?'#9ca3af':'#4a5e5a', cursor:submitting?'not-allowed':'pointer' }}>← Back</button>
+            <button onClick={createQuick} disabled={submitting||(!form.phone.trim()&&!form.firstName.trim())} style={{ flex:2, padding:'11px', background:submitting?'#f0c87e':((form.phone.trim()||form.firstName.trim())?'#d4a046':'#e5e7eb'), border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:(form.phone.trim()||form.firstName.trim())?'white':'#9ca3af', cursor:submitting?'wait':((form.phone.trim()||form.firstName.trim())?'pointer':'not-allowed') }}>
+              {submitting ? '⏳ Saving…' : '⚡ Save for later'}
             </button>
           </div>
         </div>
@@ -3331,11 +3380,20 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
               {PROJECT_TYPES.map(s=><option key={s}>{s}</option>)}
             </select>
           </div>
+          <label style={{ display:'flex', alignItems:'center', gap:'8px', padding:'9px 12px', background:'rgba(168,201,196,0.07)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'9px', cursor:'pointer', fontSize:'13px', color:'#1a2e2b' }}>
+            <input type='checkbox' checked={startDrip} onChange={e=>setStartDrip(e.target.checked)} style={{ width:'16px', height:'16px', accentColor:'#1a2e2b' }} />
+            <span>Start drip path automatically</span>
+          </label>
+          {errorMsg&&(
+            <div style={{ padding:'8px 11px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'9px' }}>
+              <p style={{ fontSize:'12px', color:'#dc2626', wordBreak:'break-word' }}>⚠ {errorMsg}</p>
+            </div>
+          )}
           <div style={{ display:'flex', gap:'8px' }}>
-            <button onClick={()=>setPhase('found')} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>← Back</button>
+            <button onClick={()=>setPhase('found')} disabled={submitting} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:submitting?'#9ca3af':'#4a5e5a', cursor:submitting?'not-allowed':'pointer' }}>← Back</button>
             <button onClick={addExistingToHive} disabled={submitting||!form.project}
-              style={{ flex:2, padding:'11px', background:(!submitting&&form.project)?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:(!submitting&&form.project)?'white':'#9ca3af', cursor:submitting?'wait':(form.project?'pointer':'not-allowed') }}>
-              {submitting?'Saving…':'+ Create Job'}
+              style={{ flex:2, padding:'11px', background:submitting?'#4a5e5a':(form.project?'#1a2e2b':'#e5e7eb'), border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:form.project?'white':'#9ca3af', cursor:submitting?'wait':(form.project?'pointer':'not-allowed') }}>
+              {submitting ? '⏳ Creating…' : '+ Create Job'}
             </button>
           </div>
         </div>
@@ -3418,10 +3476,34 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
               />
             </div>
           )}
+          {/* Assignee — defaults to the current user. Owners typically take
+              their own leads but they can hand off to a teammate here. */}
+          {assigneeOptions.length > 1 && (
+            <div>
+              <label style={lbl}>Assigned To</label>
+              <select style={{...inp,appearance:'none'}} value={assignedTo||''} onChange={e=>setAssignedTo(e.target.value||null)}>
+                {assigneeOptions.map(u => (
+                  <option key={u.id} value={u.id}>{u.name || u.email || u.id}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {/* Start drip path toggle — default on. When off, the lead is
+              created at stage='New' but applyDripSideEffects is suppressed
+              server-side so no drip auto-fires. */}
+          <label style={{ display:'flex', alignItems:'center', gap:'8px', padding:'9px 12px', background:'rgba(168,201,196,0.07)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'9px', cursor:'pointer', fontSize:'13px', color:'#1a2e2b' }}>
+            <input type='checkbox' checked={startDrip} onChange={e=>setStartDrip(e.target.checked)} style={{ width:'16px', height:'16px', accentColor:'#1a2e2b' }} />
+            <span>Start drip path automatically</span>
+          </label>
+          {errorMsg&&(
+            <div style={{ padding:'8px 11px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'9px' }}>
+              <p style={{ fontSize:'12px', color:'#dc2626', wordBreak:'break-word' }}>⚠ {errorMsg}</p>
+            </div>
+          )}
           <div style={{ display:'flex', gap:'8px', marginTop:'4px' }}>
-            <button onClick={()=>setPhase('lookup')} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>← Back</button>
-            <button onClick={createNew} disabled={submitting||!form.firstName.trim()||(!(form.phone.trim()||form.email.trim()))} style={{ flex:2, padding:'11px', background:(!submitting&&form.firstName.trim()&&(form.phone.trim()||form.email.trim()))?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:(!submitting&&form.firstName.trim()&&(form.phone.trim()||form.email.trim()))?'white':'#9ca3af', cursor:submitting?'wait':((form.firstName.trim()&&(form.phone.trim()||form.email.trim()))?'pointer':'not-allowed') }}>
-              {submitting?'Saving…':'+ Create Client'}
+            <button onClick={()=>setPhase('lookup')} disabled={submitting} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:submitting?'#9ca3af':'#4a5e5a', cursor:submitting?'not-allowed':'pointer' }}>← Back</button>
+            <button onClick={createNew} disabled={submitting||!form.firstName.trim()||(!(form.phone.trim()||form.email.trim()))} style={{ flex:2, padding:'11px', background:submitting?'#4a5e5a':((form.firstName.trim()&&(form.phone.trim()||form.email.trim()))?'#1a2e2b':'#e5e7eb'), border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:(form.firstName.trim()&&(form.phone.trim()||form.email.trim()))?'white':'#9ca3af', cursor:submitting?'wait':((form.firstName.trim()&&(form.phone.trim()||form.email.trim()))?'pointer':'not-allowed') }}>
+              {submitting ? '⏳ Creating…' : '+ Create Client'}
             </button>
           </div>
         </div>
@@ -18527,8 +18609,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         onClose={()=>setShowNewLead(false)}
         onCreate={p=>{ setPeople(prev=>[p,...prev]); setShowNewLead(false) }}
         existingPeople={people}
-        currentUserId={currentUserId}
-        locationId={effectiveLocId}
+        currentUserId={null}
       />}
       <BottomNav />
     </div>
