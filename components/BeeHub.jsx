@@ -10450,194 +10450,28 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     />
   )
 
-  // ── Owner: payment flow ─────────────────────────────────────────────────────
+  // ── Owner: subscription activation (deferred) ───────────────────────────────
+  // The full pay flow (TierPlansInline + SubscriptionCalculator + ACH/CC forms +
+  // /api/seats POST + /api/locations/[id]/complete-onboarding) is paused until
+  // we ship the subscription system. Until then, every new location is
+  // corp-sponsored — owners just acknowledge and continue. markDone('pay')
+  // advances the checklist without any backend write; the pre-allocated owner
+  // seat (claimed via /api/hub_users/accept) is already in place.
   if (!isDone('pay')) {
-    if (payStep==='processing') return (
-      <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingTop:`${topOffset}px` }}>
-        <div style={{ position:'fixed', inset:0, zIndex:100, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(26,46,43,0.6)' }}>
-          <div style={{ background:'white', borderRadius:'20px', padding:'40px 32px', textAlign:'center', maxWidth:'320px', width:'90%', boxShadow:'0 20px 60px rgba(26,46,43,0.3)' }}>
-            <div style={{ fontSize:'48px', marginBottom:'16px' }}>🐝</div>
-            <h2 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'8px' }}>Processing payment…</h2>
-            <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Please don't close this page</p>
-          </div>
-        </div>
-      </div>
-    )
-    if (payStep==='done') return (
-      <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingTop:`${topOffset}px` }}>
-        <div style={{ position:'fixed', inset:0, zIndex:100, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(26,46,43,0.55)', padding:'12px' }}>
-          <div style={{ background:'white', borderRadius:'20px', padding:'28px 24px', maxWidth:'360px', width:'100%', boxShadow:'0 20px 60px rgba(26,46,43,0.3)' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'20px' }}>
-              <span style={{ fontSize:'36px' }}>🎉</span>
-              <div>
-                <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'2px' }}>Welcome to Bee Hub!</h2>
-                <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Payment confirmed · renews {proration.renewDate}</p>
-              </div>
-            </div>
-            <div style={{ background:'#f7f5f0', borderRadius:'12px', padding:'12px 14px', marginBottom:'16px' }}>
-              {[['Plan','Owner · Annual'],['Paid',`$${finalAmt} via ${method==='cc'?'Credit Card':'ACH'}`],['Active','Immediately'],['Renews',proration.renewDate]].map(([l,v])=>(
-                <div key={l} style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
-                  <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{l}</span>
-                  <span style={{ fontSize:'12px', color:'#1a2e2b', fontWeight:500 }}>{v}</span>
-                </div>
-              ))}
-            </div>
-            {activateError && (
-              <div style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.3)', borderRadius:'10px', padding:'9px 12px', marginBottom:'12px', fontSize:'12px', color:'#b91c1c' }}>
-                {activateError}
-              </div>
-            )}
-            <button onClick={completePay} disabled={activating} style={{ width:'100%', padding:'13px', background:activating?'#4a5e5a':'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:activating?'wait':'pointer', opacity:activating?0.85:1 }}>{activating ? 'Activating…' : 'Continue Setup →'}</button>
-          </div>
-        </div>
-      </div>
-    )
-    // Payment form
     return (
-      <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#1a2e2b' }}>
-        <div style={{ height:`${topOffset}px` }} />
-        <div style={{ padding:'1.25rem 1.5rem 1rem', display:'flex', alignItems:'center', gap:'10px' }}>
-          <span style={{ fontSize:'28px' }}>🐝</span>
-          <div>
-            <h1 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'white', marginBottom:'2px' }}>Welcome to Bee Hub!</h1>
-            <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.65)' }}>Activate your subscription to get started.</p>
+      <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', padding:'1.25rem', paddingTop:`${topOffset + 24}px` }}>
+        <div style={{ maxWidth:'480px', margin:'0 auto', display:'grid', gap:'18px' }}>
+          <div style={{ textAlign:'center' }}>
+            <div style={{ fontSize:'48px', marginBottom:'10px' }}>💳</div>
+            <h2 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'6px' }}>Activate your subscription</h2>
+            <p style={{ fontSize:'13px', color:'#8a9e9a', lineHeight:1.5 }}>One small step — then on to setting up your location.</p>
           </div>
-        </div>
-        <div style={{ background:BRAND.cream, borderRadius:'20px 20px 0 0', padding:'1.25rem 1.25rem 6rem', minHeight:'calc(100vh - 80px)' }}>
-          {(payStep==='pricing'||payStep==='method')&&(
-            <>
-              {/* Tier reference — rendered at the top of the pay step for both
-                 pricing and method sub-steps across all three payment_source
-                 variants (direct / prepaid / sponsored, which all render through
-                 SubscriptionCalculator below). */}
-              <div style={{ borderBottom:'1px solid #e5e7eb', marginBottom:'24px', paddingBottom:'24px' }}>
-                <h2 style={{ fontSize:'16px', fontWeight:600, color:'#1a2e2b', marginBottom:'12px' }}>What's included at each tier</h2>
-                <TierPlansInline />
-              </div>
-              <div style={{ marginBottom:'16px' }}>
-                <SubscriptionCalculator
-                  initialSeats={selectedSeats}
-                  paymentSource={paymentSourceForPay}
-                  showSeatControls={payStep==='pricing'}
-                  onSeatsChange={setSelectedSeats}
-                />
-              </div>
-              {/* SMS & Voice add-on - coming soon */}
-              {payStep==='pricing'&&(
-                <div style={{ background:'white', borderRadius:'12px', border:'1px solid rgba(0,0,0,0.08)', padding:'14px 16px', marginBottom:'12px', display:'flex', alignItems:'center', gap:'12px' }}>
-                  <span style={{ fontSize:'22px', flexShrink:0 }}>📱</span>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'2px' }}>
-                      <span style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>SMS & Voice</span>
-                      <span style={{ fontSize:'9px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.1)', border:'1px solid rgba(212,160,70,0.25)', padding:'1px 7px', borderRadius:'20px', textTransform:'uppercase', letterSpacing:'0.4px' }}>Coming Soon</span>
-                    </div>
-                    <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Automated texts, call routing & AI summaries</p>
-                  </div>
-                  <button onClick={()=>setShowSmsModal(true)}
-                    style={{ fontSize:'10px', fontWeight:600, color:'#4a5e5a', background:'rgba(0,0,0,0.04)', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'20px', padding:'4px 11px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>
-                    Learn More →
-                  </button>
-                </div>
-              )}
-              {payStep==='pricing'&&<button onClick={()=>setPayStep(paymentSourceForPay === 'direct' ? 'pay_confirm' : 'method')} style={{ width:'100%', padding:'15px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', marginBottom:'10px' }}>{paymentSourceForPay === 'direct' ? `Activate for ${formatCurrency(proration.prorated)} →` : 'Continue →'}</button>}
-              {showSmsModal&&<SmsVoiceInfoModal onClose={()=>setShowSmsModal(false)} />}
-              {payStep==='method'&&(
-                <>
-                  <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'10px' }}>Choose payment method</p>
-                  <div style={{ display:'grid', gap:'10px', marginBottom:'10px' }}>
-                    {[{key:'ach',icon:'🏦',label:'ACH / Bank Transfer',sub:'Free - no processing fee'},{key:'cc',icon:'💳',label:'Credit Card',sub:`+3% fee - pay $${ccAmount}`}].map(m=>(
-                      <button key={m.key} onClick={()=>{ setMethod(m.key); setPayStep(m.key) }} style={{ width:'100%', padding:'16px', background:'white', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'12px', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'14px', textAlign:'left' }}>
-                        <span style={{ fontSize:'24px' }}>{m.icon}</span>
-                        <div style={{ flex:1 }}><p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>{m.label}</p><p style={{ fontSize:'12px', color:m.key==='ach'?'#22c55e':'#f59e0b' }}>{m.sub}</p></div>
-                        <span style={{ fontSize:'16px', color:'#c8d8d4' }}>→</span>
-                      </button>
-                    ))}
-                  </div>
-                  <button onClick={()=>setPayStep('pricing')} style={{ width:'100%', padding:'10px', background:'transparent', border:'none', fontSize:'13px', color:'#8a9e9a', cursor:'pointer', fontFamily:'inherit' }}>← Back</button>
-                </>
-              )}
-            </>
-          )}
-          {payStep==='ach'&&(
-            <>
-              <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'20px' }}>
-                <button onClick={()=>setPayStep('method')} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>←</button>
-                <div><p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>ACH / Bank Transfer</p><p style={{ fontSize:'12px', color:'#22c55e' }}>No processing fee</p></div>
-              </div>
-              <div style={{ marginBottom:'14px' }}><p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Routing Number</p><input value={routing} onChange={e=>setRouting(e.target.value.replace(/\D/g,'').slice(0,9))} placeholder="123456789" inputMode="numeric" style={{ width:'100%', padding:'13px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} /></div>
-              <div style={{ marginBottom:'20px' }}><p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Account Number</p><input value={bankAcct} onChange={e=>setBankAcct(e.target.value.replace(/\D/g,'').slice(0,17))} placeholder="00000000000" inputMode="numeric" style={{ width:'100%', padding:'13px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} /></div>
-              <button onClick={processPayment} disabled={routing.length<9||bankAcct.length<6} style={{ width:'100%', padding:'15px', background:routing.length>=9&&bankAcct.length>=6?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:routing.length>=9&&bankAcct.length>=6?'white':'#9ca3af', cursor:'pointer', marginBottom:'12px' }}>Pay ${proration.prorated} via ACH</button>
-              <p style={{ fontSize:'11px', color:'#b0c0bc', textAlign:'center' }}>🔒 Secured by Stripe</p>
-            </>
-          )}
-          {payStep==='cc'&&(
-            <>
-              <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'20px' }}>
-                <button onClick={()=>setPayStep('method')} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>←</button>
-                <div><p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Credit Card</p><p style={{ fontSize:'12px', color:'#f59e0b' }}>3% processing fee</p></div>
-              </div>
-              <div style={{ background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.2)', borderRadius:'10px', padding:'12px 14px', marginBottom:'20px' }}>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'4px' }}><span style={{ fontSize:'13px', color:'#4a5e5a' }}>Subtotal</span><span style={{ fontSize:'13px' }}>${proration.prorated}</span></div>
-                <div style={{ display:'flex', justifyContent:'space-between', paddingBottom:'6px', borderBottom:'1px solid rgba(245,158,11,0.15)' }}><span style={{ fontSize:'13px', color:'#4a5e5a' }}>Fee (3%)</span><span style={{ fontSize:'13px', color:'#f59e0b' }}>+${(ccAmount-proration.prorated).toFixed(2)}</span></div>
-                <div style={{ display:'flex', justifyContent:'space-between', marginTop:'6px' }}><span style={{ fontSize:'14px', fontWeight:600 }}>Total</span><span style={{ fontSize:'20px', fontWeight:700, fontFamily:'Georgia,serif' }}>${ccAmount}</span></div>
-              </div>
-              <div style={{ marginBottom:'14px' }}><p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Name on Card</p><input value={cardName} onChange={e=>setCardName(e.target.value)} placeholder="Full name" style={{ width:'100%', padding:'13px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'15px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} /></div>
-              <div style={{ marginBottom:'14px' }}><p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Card Number</p><input value={formatCardNum(cardNum)} onChange={e=>setCardNum(e.target.value.replace(/\D/g,'').slice(0,maxCardLen(e.target.value.replace(/\D/g,''))))} placeholder={cardPlaceholder(cardNum)} placeholder="0000 0000 0000 0000" inputMode="numeric" style={{ width:'100%', padding:'13px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', letterSpacing:'1px' }} /></div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'20px' }}>
-                <div><p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Expiry</p><input value={expiry} onChange={e=>{ const v=e.target.value.replace(/\D/g,'').slice(0,4); setExpiry(v.length>2?v.slice(0,2)+'/'+v.slice(2):v) }} placeholder="MM/YY" style={{ width:'100%', padding:'13px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} /></div>
-                <div><p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>CVV</p><input value={cvv} onChange={e=>setCvv(e.target.value.replace(/\D/g,'').slice(0,cvvLen(cardNum)))} placeholder={cvvLen(cardNum)===4?"••••":"•••"} inputMode="numeric" style={{ width:'100%', padding:'13px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} /></div>
-              </div>
-              <button onClick={processPayment} disabled={!cardReady(cardNum,expiry,cvv,cardName)} style={{ width:'100%', padding:'15px', background:cardReady(cardNum,expiry,cvv,cardName)?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:cardReady(cardNum,expiry,cvv,cardName)?'white':'#9ca3af', cursor:'pointer', marginBottom:'12px' }}>Pay ${ccAmount} via Credit Card</button>
-              <p style={{ fontSize:'11px', color:'#b0c0bc', textAlign:'center' }}>🔒 Secured by Stripe</p>
-            </>
-          )}
-          {payStep==='pay_confirm'&&(() => {
-            // Line-item breakdown: replicate the SubscriptionCalculator "Breakdown"
-            // shape so the user sees the same per-tier amounts they just configured,
-            // prorated. Co-owner discount (count ≥ 2 Zee Bees) is folded in here so
-            // the line items add up to the total.
-            const livePricesForConfirm = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
-            const confirmManagerProrated = prorateToNextRenewal(livePricesForConfirm.manager || 0)
-            const confirmLineItems = selectedSeats
-              .filter(s => s.count > 0)
-              .flatMap(s => {
-                const meta = SUBSCRIPTION_TIER_META.find(t => t.key === s.tier)
-                const name = meta?.name || s.tier
-                const annualEach = livePricesForConfirm[s.tier] || 0
-                const proratedEach = prorateToNextRenewal(annualEach)
-                if (s.tier === 'owner' && s.count >= 2) {
-                  // Primary owner at full rate, extras at Hive Manager rate.
-                  return [
-                    { label: `1 ${name} (prorated)`, amount: proratedEach },
-                    {
-                      label: `${s.count - 1} co-owner ${name}${s.count - 1 !== 1 ? 's' : ''} (prorated, billed at Hive Manager rate)`,
-                      amount: (s.count - 1) * confirmManagerProrated,
-                    },
-                  ]
-                }
-                return [{
-                  label: `${s.count} ${name}${s.count !== 1 ? 's' : ''} (prorated)`,
-                  amount: s.count * proratedEach,
-                }]
-              })
-            const confirmTotal = confirmLineItems.reduce((sum, li) => sum + li.amount, 0)
-            return (
-              <div style={{ maxWidth:'520px', margin:'0 auto' }}>
-                <div style={{ background:'white', borderRadius:'14px', padding:'18px 18px 16px', border:'1px solid rgba(0,0,0,0.06)', boxShadow:'0 2px 10px rgba(26,46,43,0.05)' }}>
-                  <PaymentConfirmStep
-                    title="Confirm payment"
-                    lineItems={confirmLineItems}
-                    total={confirmTotal}
-                    confirmLabel="Pay & Activate"
-                    onConfirm={() => { setActivateError(''); processPayment() }}
-                    onCancel={() => setPayStep('pricing')}
-                    isProcessing={false}
-                    error={activateError || null}
-                  />
-                </div>
-              </div>
-            )
-          })()}
+          <SubscriptionDeferredBanner />
+          <button
+            onClick={() => { markDone('pay'); setActiveStepOpen(null) }}
+            style={{ width:'100%', padding:'14px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+            Continue Setup →
+          </button>
         </div>
       </div>
     )
@@ -11824,16 +11658,7 @@ function OnboardingInviteSheet({ onClose, onDone, locationId }) {
                 )
               })}
             </div>
-            <div style={{ padding:'12px 14px', background:'rgba(26,46,43,0.04)', borderRadius:'10px', marginBottom:'16px' }}>
-              <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.5 }}>
-                This will add <strong>${annualAdd.toLocaleString()}</strong> to your annual subscription
-                <span style={{ color:'#8a9e9a' }}> · </span>
-                <strong>${proratedAdd.toLocaleString()}</strong> prorated today.
-              </p>
-              <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'6px', lineHeight:1.5 }}>
-                Charged on your next renewal · manage in Settings → Billing.
-              </p>
-            </div>
+            <SubscriptionDeferredBanner compact style={{ marginBottom:'16px' }} />
             <button onClick={submitInvites} style={{ width:'100%', padding:'14px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
               Send {validInvites.length>1?`${validInvites.length} Invites`:'Invite'}
             </button>
@@ -11852,8 +11677,10 @@ function OnboardingInviteSheet({ onClose, onDone, locationId }) {
               <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
             </div>
 
-            {/* Pricing comparison matrix */}
-            <TierPlansInline />
+            {/* Pricing comparison matrix — disabled while subscription is deferred. */}
+            <div style={{ opacity:0.55, pointerEvents:'none', marginBottom:'12px' }} aria-disabled="true">
+              <TierPlansInline />
+            </div>
 
             <div style={{ display:'grid', gap:'8px', marginBottom:'12px' }}>
               {invites.map((inv)=>{
@@ -17387,27 +17214,13 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             <>
               <SectionHeader title="Subscription" desc="Your plan and seats" />
               <div style={{ padding:'0 12px' }}>
-                {/* Payment status summary */}
-                <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', borderLeft:`4px solid ${summaryAccent}`, padding:'14px 16px', marginBottom:'12px' }}>
-                  <p style={{ fontSize:'10px', fontWeight:700, color:summaryAccent, textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'6px' }}>
-                    {summaryTitle}
-                  </p>
-                  <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.5 }}>
-                    {summaryBody}
-                  </p>
-                  {summaryIsSponsored && (
-                    <div style={{ background:'#fef3c7', border:'1px solid #f59e0b', borderRadius:'8px', padding:'12px 14px', marginTop:'12px', fontSize:'13px', color:'#78350f', lineHeight:1.5 }}>
-                      <strong>⚠️ Important:</strong> When testing concludes, you'll be responsible for a prorated subscription fee from that date through March 1, {billingRenewalYear}. Your normal annual renewal continues March 1 thereafter.
-                    </div>
-                  )}
-                </div>
+                <SubscriptionDeferredBanner style={{ marginBottom:'12px' }} />
 
-                {/* Seat breakdown — one row per tier with at least 1 seat,
-                   ordered by SUBSCRIPTION_TIER_META (owner→manager→light→
-                   readonly). Each row shows total / assigned / available so
-                   owners can see at a glance who's seated vs. what's still
-                   open for invite. "+ Add seats" remains an inline list-bottom
-                   affordance (Stripe wiring is Dispatch 3). */}
+                {/* Seat breakdown — read-only while subscription is deferred.
+                   Pre-allocated seats remain visible so owners see what's
+                   already covered by corporate sponsorship; the "+ Pre-buy
+                   seats" affordance is replaced by a Coming Soon notice
+                   below. */}
                 <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', overflow:'hidden', marginBottom:'18px' }}>
                   <div style={{ padding:'10px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)', background:'rgba(26,46,43,0.03)' }}>
                     <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px' }}>
@@ -17440,25 +17253,19 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                         </p>
                       </div>
                     )}
-                    <button
-                      type="button"
-                      onClick={()=>setShowAddSeatsModal(true)}
-                      disabled={!currentLocationCtx?.id}
-                      style={{ display:'block', width:'100%', padding:'12px 14px', background:'transparent', border:'none', borderTop:'1px dashed rgba(0,0,0,0.08)', fontFamily:'inherit', textAlign:'left', cursor:currentLocationCtx?.id?'pointer':'not-allowed', opacity:currentLocationCtx?.id?1:0.5 }}
-                      onMouseEnter={e=>{ if(currentLocationCtx?.id){ e.currentTarget.style.background='rgba(26,46,43,0.03)' } }}
-                      onMouseLeave={e=>{ if(currentLocationCtx?.id){ e.currentTarget.style.background='transparent' } }}>
-                      <p style={{ fontSize:'12.5px', fontWeight:600, color:'#4a5e5a', marginBottom:'2px' }}>
-                        + Pre-buy seats
+                    <div style={{ padding:'12px 14px', borderTop:'1px dashed rgba(0,0,0,0.08)', display:'flex', alignItems:'center', gap:'10px' }}>
+                      <p style={{ flex:1, fontSize:'11.5px', color:'#8a9e9a', lineHeight:1.45 }}>
+                        Adding more seats will be available once the subscription system ships.
                       </p>
-                      <p style={{ fontSize:'10.5px', color:'#8a9e9a', lineHeight:1.45 }}>
-                        Already know how many seats you need? Buy them now and invite people anytime. Or use Team → Invite to buy + invite in one step.
-                      </p>
-                    </button>
+                      <span style={{ fontSize:'9px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.12)', border:'1px solid rgba(212,160,70,0.3)', padding:'3px 10px', borderRadius:'20px', textTransform:'uppercase', letterSpacing:'0.4px', flexShrink:0 }}>Coming Soon</span>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <TierPlansInline />
+              <div style={{ opacity:0.55, pointerEvents:'none', padding:'0 12px' }} aria-disabled="true">
+                <TierPlansInline />
+              </div>
             </>
           )
         })()}
@@ -18722,6 +18529,31 @@ const SUBSCRIPTION_TIER_META = [
   { key:'light',    name:'Worker Bee',    icon:'🐝', color:'#10b981', detail:'Schedulers, customer service' },
   { key:'readonly', name:'Honey Watcher', icon:'👁',  color:'#8a9e9a', detail:'Read-only · Add as many as needed' },
 ]
+
+// Subscription tier system (owner/manager/light/readonly seats with annual
+// pricing) is a future feature — pricing and parameters aren't yet decided.
+// Until launch, every location is corp-sponsored by Bee Organized through
+// March 2027. Surfaces that previously bought / configured seats render this
+// banner (and a disabled UI underneath) so users see what's coming without
+// being able to interact. Flip the surfaces back on by removing the banner
+// + restoring click handlers; the data model (tier_prices, subscription_seats)
+// is intentionally preserved.
+function SubscriptionDeferredBanner({ style = {}, compact = false } = {}) {
+  return (
+    <div style={{ display:'flex', alignItems:'flex-start', gap:'12px', padding: compact ? '10px 12px' : '14px 16px', background:'rgba(212,160,70,0.06)', border:'1px solid rgba(212,160,70,0.25)', borderRadius:'12px', ...style }}>
+      <span style={{ fontSize: compact ? '18px' : '22px', flexShrink:0, lineHeight:1 }}>🐝</span>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'4px', flexWrap:'wrap' }}>
+          <p style={{ fontSize: compact ? '12px' : '13px', fontWeight:700, color:'#1a2e2b' }}>Subscription management is coming soon</p>
+          <span style={{ fontSize:'9px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.12)', border:'1px solid rgba(212,160,70,0.3)', padding:'2px 9px', borderRadius:'20px', textTransform:'uppercase', letterSpacing:'0.4px' }}>Coming Soon</span>
+        </div>
+        <p style={{ fontSize: compact ? '11px' : '12px', color:'#4a5e5a', lineHeight:1.5 }}>
+          For now, all locations are covered by Bee Organized through March 2027.
+        </p>
+      </div>
+    </div>
+  )
+}
 
 function SubscriptionCalculator({
   initialSeats = [{ tier:'owner', count:1 }],
@@ -20256,10 +20088,11 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
             </div>
           )}
 
-          {/* Team */}
+          {/* Team — per-seat pricing annotations are hidden while subscription
+              is deferred (all locations are corp-sponsored through March 2027). */}
           {locUsers.length>0&&(
             <div>
-              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Team · ${calcRenewalTotal(currentLoc.id, false, livePrices).total.toLocaleString()}/yr</p>
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Team</p>
               <div style={{ background:'#f7f5f0', borderRadius:'10px', overflow:'hidden' }}>
                 {locUsers.map((u,i,arr)=>{
                   const rc = FRANCHISE_ROLES.find(r=>r.key===u.role)
@@ -20268,7 +20101,6 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
                       <div style={{ width:'28px', height:'28px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'10px', fontWeight:700, color:'white', flexShrink:0 }}>{u.initials}</div>
                       <p style={{ flex:1, fontSize:'12px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.name}</p>
                       <span style={{ fontSize:'10px', color:rc?.color, background:rc?.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:600, flexShrink:0 }}>{rc?.label}</span>
-                      <span style={{ fontSize:'10px', color:'#8a9e9a', flexShrink:0 }}>${getTierPrice(u.role).toLocaleString()}/yr</span>
                     </div>
                   )
                 })}
@@ -22068,8 +21900,17 @@ function PricingManagementTab() {
 
   const ICONS = ['💬','📊','📧','🗓','📍','🔗','📸','🤖','📞','🧾','🔔','🌐','🎯','💡','⚡']
 
+  // Pricing edits are paused while the subscription system is deferred.
+  // Inputs/icons render disabled so super_admins can see the eventual
+  // structure; Save fires nothing. Re-enable by deleting PRICING_DEFERRED
+  // and the disabled overlay + restoring the live Save button label.
+  const PRICING_DEFERRED = true
+
   return (
     <div style={{ padding:'0 1.25rem 2rem', display:'grid', gap:'20px' }}>
+      <SubscriptionDeferredBanner style={{ marginTop:'12px' }} />
+
+      <div style={{ opacity: PRICING_DEFERRED ? 0.55 : 1, pointerEvents: PRICING_DEFERRED ? 'none' : 'auto' }} aria-disabled={PRICING_DEFERRED}>
 
       {/* Subscription seat pricing */}
       <div>
@@ -22229,15 +22070,17 @@ function PricingManagementTab() {
         )}
       </div>
 
-      {/* Save banner */}
+      </div>
+
+      {/* Save banner — disabled while subscription pricing is deferred. */}
       <div style={{ position:'sticky', bottom:'5rem', left:0, right:0 }}>
-        {saveError && (
+        {saveError && !PRICING_DEFERRED && (
           <div style={{ marginBottom:'8px', padding:'10px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'10px', fontSize:'12px', color:'#991b1b' }}>
             {saveError}
           </div>
         )}
-        <button onClick={saveAll} disabled={saving} style={{ width:'100%', padding:'13px', background:saved?'#22c55e':saving?'#4a5e5a':'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:saving?'wait':'pointer', transition:'background 0.3s', boxShadow:'0 4px 16px rgba(26,46,43,0.2)' }}>
-          {saving ? 'Saving…' : saved ? '✅ Saved - pricing updated' : 'Save Pricing Changes'}
+        <button onClick={PRICING_DEFERRED ? undefined : saveAll} disabled={PRICING_DEFERRED || saving} style={{ width:'100%', padding:'13px', background:PRICING_DEFERRED?'#9ca3af':saved?'#22c55e':saving?'#4a5e5a':'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:PRICING_DEFERRED?'not-allowed':saving?'wait':'pointer', transition:'background 0.3s', boxShadow:PRICING_DEFERRED?'none':'0 4px 16px rgba(26,46,43,0.2)', opacity:PRICING_DEFERRED?0.7:1 }}>
+          {PRICING_DEFERRED ? 'Pricing management coming soon' : saving ? 'Saving…' : saved ? '✅ Saved - pricing updated' : 'Save Pricing Changes'}
         </button>
       </div>
     </div>
