@@ -10957,7 +10957,12 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
 
 function PathChooser({ title, emoji, current, onSelect, previewPath, setPreviewPath, PLAIN, pathOptions, getSteps, getTemplate }) {
   const sectionKey = title.includes('Move') ? 'move' : 'general'
-  const allOptions = [...pathOptions, { id:'custom', label:'Custom path', icon:'✏️', cta:'Build your own sequence in Settings after setup' }]
+  // Only render path styles that are backed by a real DB drip_paths row for
+  // this location (caller-filtered). The previous "Custom path" auto-append
+  // is gone — it wrote 'general-custom'/'move-custom' to the DB which never
+  // resolved, silently breaking new-lead drips. Owners can build custom
+  // paths post-onboarding in Settings → Paths.
+  const allOptions = pathOptions
 
   return (
     <div style={{ display:'grid', gap:'8px' }}>
@@ -11056,13 +11061,75 @@ function PathChooser({ title, emoji, current, onSelect, previewPath, setPreviewP
 }
 
 function OnboardingPathsEditor({ onComplete }) {
+  // Pull current location from context so we can fetch its real seeded
+  // drip_paths instead of presenting hardcoded options the DB doesn't have.
+  // Demo / view-as flows have no currentLocationCtx → fall back to the full
+  // hardcoded list (no DB writes happen on that path anyway).
+  const currentLocationCtx = useContext(CurrentLocationContext)
+  const locationId = currentLocationCtx?.id || null
+
   const [wizardStep, setWizardStep] = useState('intro')
   const [selectedMove, setSelectedMove]       = useState(null)
   const [selectedGeneral, setSelectedGeneral] = useState(null)
   const [previewPath, setPreviewPath]         = useState(null)
   const [calendarLink, setCalendarLink]       = useState('')
 
-  const pathOptions   = PATH_STYLES.filter(s=>s.id!=='custom')
+  // Which PATH_STYLES are backed by a real DB drip_paths row for this
+  // location. `null` while loading. Keyed by PATH_STYLES.id (e.g. 'path-a').
+  // Seeded launch locations have ['path-a'] for both lists.
+  const [availableMoveStyleIds,    setAvailableMoveStyleIds]    = useState(null)
+  const [availableGeneralStyleIds, setAvailableGeneralStyleIds] = useState(null)
+  const [pathsLoadError, setPathsLoadError] = useState(null)
+
+  React.useEffect(() => {
+    // Demo / view-as: no real location → keep prior behavior (show all hardcoded).
+    if (!locationId) {
+      const all = PATH_STYLES.filter(s => s.id !== 'custom').map(s => s.id)
+      setAvailableMoveStyleIds(all)
+      setAvailableGeneralStyleIds(all)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/locations/${locationId}/drip-paths`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const json = await res.json()
+        if (cancelled) return
+        const paths = Array.isArray(json?.paths) ? json.paths : []
+        const move = new Set()
+        const gen  = new Set()
+        for (const p of paths) {
+          if (!p?.path_key || p?.is_active === false) continue
+          if (p.path_key.startsWith('move-')) {
+            move.add('path-' + p.path_key.slice('move-'.length))
+          } else if (p.path_key.startsWith('general-')) {
+            gen.add('path-' + p.path_key.slice('general-'.length))
+          }
+        }
+        setAvailableMoveStyleIds(Array.from(move))
+        setAvailableGeneralStyleIds(Array.from(gen))
+      } catch (err) {
+        if (cancelled) return
+        console.error('[OnboardingPathsEditor] paths fetch failed:', err)
+        setPathsLoadError(err?.message || 'Failed to load paths')
+        // Defensive fallback: keep the user unblocked. They can still finish
+        // onboarding and adjust in Settings → Paths if anything looks off.
+        const all = PATH_STYLES.filter(s => s.id !== 'custom').map(s => s.id)
+        setAvailableMoveStyleIds(all)
+        setAvailableGeneralStyleIds(all)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [locationId])
+
+  // Per-section options: only show styles that have a matching DB drip_paths
+  // row, so any selection translates to a real path_key the drip lookup can
+  // find. With current launch seed this resolves to just Path A per section.
+  const movePathOptions    = PATH_STYLES.filter(s => s.id !== 'custom' && (availableMoveStyleIds    || []).includes(s.id))
+  const generalPathOptions = PATH_STYLES.filter(s => s.id !== 'custom' && (availableGeneralStyleIds || []).includes(s.id))
+  const pathsLoading = availableMoveStyleIds === null || availableGeneralStyleIds === null
+
   const needsCalendar = PATH_STYLES.find(p=>p.id===selectedMove)?.tags?.includes('calendar')
                      || PATH_STYLES.find(p=>p.id===selectedGeneral)?.tags?.includes('calendar')
   const confirmReady  = !needsCalendar || calendarLink.trim().startsWith('http')
@@ -11107,7 +11174,15 @@ function OnboardingPathsEditor({ onComplete }) {
 
   if (wizardStep==='move') return (
     <div style={{ paddingTop:'12px', display:'grid', gap:'12px' }}>
-      <PathChooser title="Move-In & Move-Out Jobs" emoji="📦" current={selectedMove} onSelect={setSelectedMove} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={pathOptions} getSteps={getSteps} getTemplate={getTemplate} />
+      {pathsLoading ? (
+        <div style={{ padding:'24px', textAlign:'center', color:'#8a9e9a', fontSize:'13px' }}>Loading your location's paths…</div>
+      ) : movePathOptions.length === 0 ? (
+        <div style={{ padding:'14px', background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'10px', fontSize:'12px', color:'#7f1d1d', lineHeight:1.5 }}>
+          No move-job paths are set up for this location yet. Contact support — your location needs at least one <code>move-*</code> drip path seeded before onboarding can finish.
+        </div>
+      ) : (
+        <PathChooser title="Move-In & Move-Out Jobs" emoji="📦" current={selectedMove} onSelect={setSelectedMove} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={movePathOptions} getSteps={getSteps} getTemplate={getTemplate} />
+      )}
       <div style={{ display:'flex', gap:'8px' }}>
         <button onClick={()=>setWizardStep('intro')} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>← Back</button>
         <button onClick={()=>{ if(selectedMove){ setPreviewPath(null); setWizardStep('general') } }} disabled={!selectedMove}
@@ -11120,7 +11195,15 @@ function OnboardingPathsEditor({ onComplete }) {
 
   if (wizardStep==='general') return (
     <div style={{ paddingTop:'12px', display:'grid', gap:'12px' }}>
-      <PathChooser title="Organizing Projects (Kitchens, Closets, etc.)" emoji="🏠" current={selectedGeneral} onSelect={setSelectedGeneral} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={pathOptions} getSteps={getSteps} getTemplate={getTemplate} />
+      {pathsLoading ? (
+        <div style={{ padding:'24px', textAlign:'center', color:'#8a9e9a', fontSize:'13px' }}>Loading your location's paths…</div>
+      ) : generalPathOptions.length === 0 ? (
+        <div style={{ padding:'14px', background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'10px', fontSize:'12px', color:'#7f1d1d', lineHeight:1.5 }}>
+          No organizing-job paths are set up for this location yet. Contact support — your location needs at least one <code>general-*</code> drip path seeded before onboarding can finish.
+        </div>
+      ) : (
+        <PathChooser title="Organizing Projects (Kitchens, Closets, etc.)" emoji="🏠" current={selectedGeneral} onSelect={setSelectedGeneral} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={generalPathOptions} getSteps={getSteps} getTemplate={getTemplate} />
+      )}
       <div style={{ display:'flex', gap:'8px' }}>
         <button onClick={()=>{ setPreviewPath(null); setWizardStep('move') }} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>← Back</button>
         <button onClick={()=>selectedGeneral&&setWizardStep('confirm')} disabled={!selectedGeneral}
