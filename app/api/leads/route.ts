@@ -16,6 +16,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { applyDripSideEffects } from '@/lib/drip-lifecycle'
+import { sendDripStep } from '@/lib/drip-send'
 
 export const runtime = 'nodejs'
 
@@ -213,6 +214,18 @@ export async function POST(req: NextRequest) {
       })
     } catch (err) {
       console.error('[drip] applyDripSideEffects on create threw', err)
+    }
+
+    // ─── Inline step-1 send ──────────────────────────────────────
+    // applyDripSideEffects scheduled the row with next_send_at=now();
+    // firing here means the welcome email lands in seconds rather than
+    // waiting up to ~60 minutes for the next hourly cron tick. The
+    // cron remains as the backstop — any failure here just gets
+    // retried then.
+    try {
+      await sendDripStep(lead.id)
+    } catch (err) {
+      console.error('[drip] inline sendDripStep on create threw', err)
     }
   }
 

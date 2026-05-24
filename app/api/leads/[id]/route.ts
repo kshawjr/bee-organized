@@ -21,6 +21,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { updateLead } from '@/lib/dual-write'
 import { isAdmin } from '@/lib/auth'
 import { applyDripSideEffects } from '@/lib/drip-lifecycle'
+import { sendDripStep } from '@/lib/drip-send'
 
 const VALID_STAGES = [
   'New',
@@ -203,16 +204,42 @@ export async function PATCH(
   }
 
   // ─── Drip lifecycle side-effects ─────────────────────────────
-  // Fire-and-forget: start on stage→'New', stop on exit, pause/resume on
-  // paused toggle, stop on junk. Each branch swallows its own errors so
-  // PATCH responses are never blocked by drip bookkeeping.
+  // Fire-and-forget by default: start on stage→'New', stop on exit,
+  // pause/resume on paused toggle, stop on junk. Each branch swallows
+  // its own errors so PATCH responses are never blocked by drip
+  // bookkeeping.
+  //
+  // Exception: a stage→'New' transition starts a new drip whose step 1
+  // is scheduled for now(). We await side-effects so the row exists,
+  // then call sendDripStep inline so the welcome email fires in seconds
+  // rather than waiting for the next hourly cron tick. Mirrors the
+  // POST /api/leads inline-send path.
   if (existing.location_uuid) {
-    void applyDripSideEffects({
-      leadId: id,
-      locationUuid: existing.location_uuid,
-      prevStage: existing.stage ?? null,
-      patch,
-    }).catch((err) => console.error('[drip] applyDripSideEffects threw', err))
+    const triggersDripStart =
+      'stage' in patch &&
+      patch.stage === 'New' &&
+      existing.stage !== 'New'
+
+    if (triggersDripStart) {
+      try {
+        await applyDripSideEffects({
+          leadId: id,
+          locationUuid: existing.location_uuid,
+          prevStage: existing.stage ?? null,
+          patch,
+        })
+        await sendDripStep(id)
+      } catch (err) {
+        console.error('[drip] PATCH inline drip-start threw', err)
+      }
+    } else {
+      void applyDripSideEffects({
+        leadId: id,
+        locationUuid: existing.location_uuid,
+        prevStage: existing.stage ?? null,
+        patch,
+      }).catch((err) => console.error('[drip] applyDripSideEffects threw', err))
+    }
   }
 
   // ─── Return fresh row ─────────────────────────────────────────
