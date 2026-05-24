@@ -3,14 +3,19 @@
 // Jobber GraphQL client + token management.
 // Reads/writes tokens from Supabase locations table.
 // Fully independent of Zoho.
+//
+// Two access patterns:
+//   - jobberQuery(token, q, vars) / getValidJobberToken(location)
+//     Low-level. Caller already has the location row + a hot token.
+//     Used by the import route to avoid one DB roundtrip per page.
+//   - jobberGraphQL(locationId, q, vars) / jobberMutation(...)
+//     High-level. Auto-refresh, surfaces userErrors. Used by
+//     Send-to-Jobber + webhook handlers where each call is isolated.
 // ─────────────────────────────────────────────────────────────
 
-import { createClient } from '@supabase/supabase-js'
+import { supabaseService } from './supabase-service'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+const supabase = supabaseService
 
 export const JOBBER_GRAPHQL_URL = 'https://api.getjobber.com/api/graphql'
 export const JOBBER_API_VERSION = '2025-04-16'
@@ -103,4 +108,93 @@ export async function getValidJobberToken(location: any): Promise<string> {
   }
 
   return doRefresh(location)
+}
+
+// ─────────────────────────────────────────────────────────────
+// High-level helpers for Send-to-Jobber + webhook flows.
+// Accept a location slug (locations.location_id), handle the
+// fetch + refresh internally, and never throw on auth failure —
+// returns null / an errors array so callers can branch cleanly.
+// ─────────────────────────────────────────────────────────────
+
+export async function refreshJobberToken(locationId: string): Promise<string | null> {
+  try {
+    const location = await getLocation(locationId)
+    if (!location.jobber_access_token) {
+      console.error('[jobber-token] location has no access token:', locationId)
+      return null
+    }
+    return await getValidJobberToken(location)
+  } catch (err: any) {
+    console.error('[jobber-token] refresh failed for', locationId, '—', err?.message || err)
+    return null
+  }
+}
+
+export async function jobberGraphQL(
+  locationId: string,
+  query: string,
+  variables?: Record<string, any>,
+): Promise<{ data?: any; errors?: any[]; rawResponse?: Response }> {
+  const token = await refreshJobberToken(locationId)
+  if (!token) {
+    return { errors: [{ message: 'no_valid_jobber_token', extensions: { locationId } }] }
+  }
+
+  const res = await fetch(JOBBER_GRAPHQL_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'X-JOBBER-GRAPHQL-VERSION': JOBBER_API_VERSION,
+    },
+    body: JSON.stringify({ query, variables }),
+    cache: 'no-store',
+  })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`Jobber GraphQL HTTP ${res.status}: ${text.slice(0, 500)}`)
+  }
+
+  const json = await res.json()
+  return { data: json.data, errors: json.errors, rawResponse: res }
+}
+
+export async function jobberMutation(
+  locationId: string,
+  mutation: string,
+  variables: Record<string, any>,
+): Promise<{ data?: any; userErrors?: Array<{ message: string; path?: string[] }> }> {
+  const { data, errors } = await jobberGraphQL(locationId, mutation, variables)
+
+  // Top-level GraphQL errors (syntax, auth, complexity) — surface as userErrors
+  // so callers have a single field to check.
+  if (errors?.length) {
+    console.error('[jobber-graphql] top-level errors for', locationId, '—', JSON.stringify(errors))
+    return {
+      data,
+      userErrors: errors.map((e: any) => ({ message: e.message, path: e.path })),
+    }
+  }
+
+  // Mutation field-level userErrors are nested inside each mutation's payload
+  // (Jobber convention: clientCreate.userErrors, requestCreate.userErrors, etc).
+  const userErrors: Array<{ message: string; path?: string[] }> = []
+  if (data && typeof data === 'object') {
+    for (const key of Object.keys(data)) {
+      const val = (data as any)[key]
+      if (val && typeof val === 'object' && Array.isArray(val.userErrors)) {
+        for (const ue of val.userErrors) {
+          userErrors.push({ message: ue.message, path: ue.path })
+        }
+      }
+    }
+  }
+
+  if (userErrors.length) {
+    console.error('[jobber-graphql] userErrors for', locationId, '—', JSON.stringify(userErrors))
+  }
+
+  return { data, userErrors: userErrors.length ? userErrors : undefined }
 }
