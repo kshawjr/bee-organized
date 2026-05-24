@@ -79,11 +79,21 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
       return
     }
 
-    const next = nextSendAt({
-      from: new Date(),
-      tz: loc.timezone ?? 'UTC',
-      delayDays: step1.delay_days ?? 0,
-    })
+    // Step 1 with delay_days=0 should feel "immediate" to the user who
+    // just created the lead — schedule it for now() so the next hourly
+    // cron tick (up to ~1 hour) picks it up. Falling through to
+    // nextSendAt() would push the welcome email to 9am the following
+    // day (a 23-hour delay for leads created after 9am local).
+    // Subsequent steps still flow through nextSendAt() in the cron.
+    const delayDays = step1.delay_days ?? 0
+    const next =
+      delayDays === 0
+        ? new Date()
+        : nextSendAt({
+            from: new Date(),
+            tz: loc.timezone ?? 'UTC',
+            delayDays,
+          })
 
     const { error: insertErr } = await supabaseService
       .from('lead_drip_progress')
