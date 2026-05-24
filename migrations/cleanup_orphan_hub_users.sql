@@ -25,7 +25,7 @@ SELECT
   l.name AS location_name,
   hu.created_at
 FROM hub_users hu
-LEFT JOIN locations l ON l.id = hu.location_id
+LEFT JOIN locations l ON l.location_id = hu.location_id
 WHERE hu.email = 'admin@beeorganized.com';
 
 -- 2. Confirm orphan — no subscription_seats row should reference this user.
