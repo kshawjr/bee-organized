@@ -6,9 +6,10 @@
 // previously-leaked link stops working: the user is asking for a fresh
 // invitation, and that should be exactly what they get.
 //
-// Corporate (tier='admin') invites don't re-send email — same reason as
-// the invite route — but they DO get a fresh token + expiry so the
-// super_admin can copy the new link.
+// Uses the system sender (see app/api/hub_users/invite/route.ts and
+// docs/invite-emails.md) — owner invites go out before the owner has
+// onboarded, so the location's send_from_email/sender_name/reply_to_email
+// aren't usable. Corporate (admin-tier) invites have no location at all.
 //
 // Auth: super_admin/admin OR the owner of the invite's location.
 // Corporate (location-less) invites: super_admin only.
@@ -17,11 +18,19 @@ import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'node:crypto'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
-import { sendEmail } from '@/lib/resend'
+import { sendEmailDirect } from '@/lib/resend'
 
 export const runtime = 'nodejs'
 
 const INVITE_TTL_DAYS = 7
+
+// Mirror of the constants in app/api/hub_users/invite/route.ts so both
+// routes stay aligned. Override via env if the sender ever changes.
+const INVITE_FROM_EMAIL =
+  process.env.INVITE_FROM_EMAIL || 'admin@beeorganized.com'
+const INVITE_FROM_NAME = process.env.INVITE_FROM_NAME || 'Kevin Shaw'
+const INVITE_REPLY_TO_EMAIL =
+  process.env.INVITE_REPLY_TO_EMAIL || 'admin@beeorganized.com'
 
 function isElevated(role: string) {
   return role === 'super_admin' || role === 'admin'
@@ -182,50 +191,54 @@ export async function POST(
 
   let email_sent = false
   let email_error: string | undefined
-  if (isCorporateInvite) {
-    email_error = 'corporate invites do not send email — copy invite_url from response'
-  } else if (invite.location_id) {
-    try {
-      const [{ data: location }, { data: inviter }] = await Promise.all([
-        supabaseService
+  try {
+    const inviterPromise = supabaseService
+      .from('hub_users')
+      .select('full_name, first_name, email')
+      .eq('id', caller.id)
+      .single()
+    const locationPromise = invite.location_id
+      ? supabaseService
           .from('locations')
           .select('name')
           .eq('id', invite.location_id)
-          .single(),
-        supabaseService
-          .from('hub_users')
-          .select('full_name, first_name, email')
-          .eq('id', caller.id)
-          .single(),
-      ])
-      const locationName = location?.name || 'Bee Hub'
-      const inviterName =
-        inviter?.full_name?.trim() ||
-        inviter?.first_name?.trim() ||
-        inviter?.email ||
-        'Your team'
-      const { html, text } = buildResendEmail({
-        inviteUrl: invite_url,
-        locationName,
-        inviterName,
-        expiresAt: newExpiresAt,
-      })
-      const result = await sendEmail({
-        locationId: invite.location_id,
-        to: invite.email,
-        subject: `Fresh invitation to ${locationName} on Bee Hub`,
-        html,
-        text,
-      })
-      if (result.success) {
-        email_sent = true
-      } else {
-        email_error = result.error
-      }
-    } catch (err) {
-      email_error = err instanceof Error ? err.message : String(err)
-      console.error('[pending_invites resend email]', err)
+          .single()
+      : Promise.resolve({ data: null as { name: string | null } | null })
+
+    const [{ data: location }, { data: inviter }] = await Promise.all([
+      locationPromise,
+      inviterPromise,
+    ])
+
+    const locationName = location?.name || 'Bee Organized'
+    const inviterName =
+      inviter?.full_name?.trim() ||
+      inviter?.first_name?.trim() ||
+      inviter?.email ||
+      'Your team'
+    const { html, text } = buildResendEmail({
+      inviteUrl: invite_url,
+      locationName,
+      inviterName,
+      expiresAt: newExpiresAt,
+    })
+    const result = await sendEmailDirect({
+      from: INVITE_FROM_EMAIL,
+      fromName: INVITE_FROM_NAME,
+      replyTo: INVITE_REPLY_TO_EMAIL,
+      to: invite.email,
+      subject: `Fresh invitation to ${locationName} on Bee Hub`,
+      html,
+      text,
+    })
+    if (result.success) {
+      email_sent = true
+    } else {
+      email_error = result.error
     }
+  } catch (err) {
+    email_error = err instanceof Error ? err.message : String(err)
+    console.error('[pending_invites resend email]', err)
   }
 
   return NextResponse.json({

@@ -13,9 +13,20 @@ import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'node:crypto'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
-import { sendEmail } from '@/lib/resend'
+import { sendEmailDirect } from '@/lib/resend'
 
 export const runtime = 'nodejs'
+
+// System sender for invite emails. Owner invites (and corporate admin invites)
+// can't use the per-location sender — a fresh location has no owner yet, so
+// send_from_email/sender_name/reply_to_email are NULL until onboarding.
+// Defaults point at admin@beeorganized.com, the verified Resend sender used
+// by drip emails. Override via env if the sender ever changes.
+const INVITE_FROM_EMAIL =
+  process.env.INVITE_FROM_EMAIL || 'admin@beeorganized.com'
+const INVITE_FROM_NAME = process.env.INVITE_FROM_NAME || 'Kevin Shaw'
+const INVITE_REPLY_TO_EMAIL =
+  process.env.INVITE_REPLY_TO_EMAIL || 'admin@beeorganized.com'
 
 // 'admin' is the corporate-invite tier — no location, no subscription_seat
 // claim, role becomes 'admin' in hub_users. Franchise tiers (owner/manager/
@@ -293,72 +304,72 @@ export async function POST(request: NextRequest) {
     request.nextUrl.origin
   const invite_url = `${origin}/auth/invite/${inviteToken}`
 
-  // Send invite email. Failure here doesn't roll back the invite row — the
-  // inviter can still copy the link from the UI as a fallback. We surface
-  // the outcome via email_sent / email_error so the client can adjust
-  // messaging.
-  //
-  // Corporate (admin-tier) invites skip the email send: sendEmail() resolves
-  // sender config from a location row, and corporate invites have no
-  // location. Super_admin copies the invite_url from the success modal and
-  // hands it off out-of-band. (Pre-launch the volume is single digits;
-  // adding a system-sender wiring path is post-launch tech debt.)
+  // Send invite email via the system sender. We can't use the per-location
+  // sender here because owner invites go out *before* the owner has
+  // onboarded, so the location's send_from_email/sender_name/reply_to_email
+  // are still NULL. Corporate (admin-tier) invites have no location at all.
+  // Failure here doesn't roll back the invite row — the inviter can still
+  // copy the link from the UI as a fallback. email_sent / email_error
+  // surface the outcome so the client can adjust messaging.
   let email_sent = false
   let email_error: string | undefined
-  if (isCorporateTier) {
-    email_error = 'corporate invites do not send email — copy invite_url from response'
-  } else if (location_id) {
-    try {
-      const [{ data: location }, { data: inviter }] = await Promise.all([
-        supabaseService
+  try {
+    const inviterPromise = supabaseService
+      .from('hub_users')
+      .select('full_name, first_name, email')
+      .eq('id', caller.id)
+      .single()
+    const locationPromise = location_id
+      ? supabaseService
           .from('locations')
           .select('name')
           .eq('id', location_id)
-          .single(),
-        supabaseService
-          .from('hub_users')
-          .select('full_name, first_name, email')
-          .eq('id', caller.id)
-          .single(),
-      ])
+          .single()
+      : Promise.resolve({ data: null as { name: string | null } | null })
 
-      const locationName = location?.name || 'Bee Hub'
-      const inviterName =
-        inviter?.full_name?.trim() ||
-        inviter?.first_name?.trim() ||
-        inviter?.email ||
-        'Your team'
-      const inviteeName =
-        typeof full_name === 'string' && full_name.trim()
-          ? full_name.trim().split(/\s+/)[0]
-          : null
+    const [{ data: location }, { data: inviter }] = await Promise.all([
+      locationPromise,
+      inviterPromise,
+    ])
 
-      const { html, text } = buildInviteEmail({
-        inviteUrl: invite_url,
-        locationName,
-        inviterName,
-        expiresAt: expiresAt,
-        inviteeName,
-      })
+    const locationName = location?.name || 'Bee Organized'
+    const inviterName =
+      inviter?.full_name?.trim() ||
+      inviter?.first_name?.trim() ||
+      inviter?.email ||
+      'Your team'
+    const inviteeName =
+      typeof full_name === 'string' && full_name.trim()
+        ? full_name.trim().split(/\s+/)[0]
+        : null
 
-      const result = await sendEmail({
-        locationId: location_id,
-        to: normalizedEmail,
-        subject: `You've been invited to join ${locationName} on Bee Hub`,
-        html,
-        text,
-      })
+    const { html, text } = buildInviteEmail({
+      inviteUrl: invite_url,
+      locationName,
+      inviterName,
+      expiresAt: expiresAt,
+      inviteeName,
+    })
 
-      if (result.success) {
-        email_sent = true
-      } else {
-        email_error = result.error
-        console.error('[invite email send]', email_error)
-      }
-    } catch (err) {
-      email_error = err instanceof Error ? err.message : String(err)
-      console.error('[invite email send] unexpected error', err)
+    const result = await sendEmailDirect({
+      from: INVITE_FROM_EMAIL,
+      fromName: INVITE_FROM_NAME,
+      replyTo: INVITE_REPLY_TO_EMAIL,
+      to: normalizedEmail,
+      subject: `You've been invited to join ${locationName} on Bee Hub`,
+      html,
+      text,
+    })
+
+    if (result.success) {
+      email_sent = true
+    } else {
+      email_error = result.error
+      console.error('[invite email send]', email_error)
     }
+  } catch (err) {
+    email_error = err instanceof Error ? err.message : String(err)
+    console.error('[invite email send] unexpected error', err)
   }
 
   return NextResponse.json(

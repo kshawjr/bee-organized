@@ -1,8 +1,14 @@
 // lib/resend.ts
-// Email sending via Resend, with per-location sender resolution.
+// Email sending via Resend.
+//
 // sendEmail() looks up the location's send_from_email/sender_name/reply_to_email
-// from the DB. sendEmailDirect() is for callers that already have sender details
-// (system emails, password resets, etc.).
+// from the DB and sends as that location. Used by drip emails — anything that
+// represents the franchise corresponding with their own customers.
+//
+// sendEmailDirect() is for callers that already have sender details and don't
+// want a DB lookup: system emails (invitations, password resets), and any
+// case where the location's sender config isn't yet populated (e.g., owner
+// invites going out before the owner has onboarded).
 
 import { Resend } from 'resend'
 import { supabaseService } from './supabase-service'

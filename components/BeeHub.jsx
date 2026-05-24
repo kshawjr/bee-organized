@@ -20597,11 +20597,9 @@ function InviteModal({
             ) : (
               <div style={{ padding:'10px 12px', background:'rgba(245,158,11,0.07)', border:'1px solid rgba(245,158,11,0.22)', borderRadius:'9px', marginBottom:'14px' }}>
                 <p style={{ fontSize:'12px', color:'#92400e', fontWeight:500 }}>
-                  {isCorporate
-                    ? 'Corporate invites do not send email automatically — share the link below.'
-                    : 'Email could not be sent. Share the link below as a fallback.'}
+                  Email could not be sent. Share the link below as a fallback.
                 </p>
-                {result.email_error && !isCorporate && (
+                {result.email_error && (
                   <p style={{ fontSize:'11px', color:'#92400e', marginTop:'4px', wordBreak:'break-all' }}>{result.email_error}</p>
                 )}
               </div>
