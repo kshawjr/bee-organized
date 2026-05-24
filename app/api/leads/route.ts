@@ -181,6 +181,21 @@ export async function POST(req: NextRequest) {
     )
   }
 
+  // ─── Seed creation touchpoint ────────────────────────────────
+  // Without this, post-reload `outreachTimeline` is empty and the
+  // PersonPanel "Last Activity" field collapses to em-dash. Mirrors
+  // the optimistic in-memory entry that BeeHub adds on create.
+  await supabaseService.from('touchpoints').insert({
+    lead_id:       lead.id,
+    location_uuid: location.id,
+    kind:          'system',
+    method:        'system',
+    label:         'Lead created',
+    status:        'done',
+    occurred_at:   now,
+    user_id:       null,
+  })
+
   // ─── Drip side-effects ───────────────────────────────────────
   // When stage='New' lands on a fresh lead, start the drip. prevStage=null
   // signals "no prior state" to applyDripSideEffects, which treats it as a

@@ -225,7 +225,10 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     stage: row.stage || 'New',
     source: row.source || '',
     project: row.project_type || '',
-    created: fmtCreatedShort(row.created_at),
+    // Raw ISO — components/BeeHub.jsx `fmtCreated` formats this in the
+    // browser's local TZ. Earlier we passed `fmtCreatedShort` output
+    // ("May 24") which lost the time and forced a hash-derived fake.
+    created: row.created_at || '',
     tags,
     isJunk: row.is_junk || false,
     finalProcessed: row.final_processed || false,

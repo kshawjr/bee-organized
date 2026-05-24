@@ -798,13 +798,31 @@ function tsToEpoch(ts) {
   const fallback = new Date(s).getTime()
   return Number.isFinite(fallback) ? fallback : null
 }
-// Format created date with a plausible time based on seed id
+// Format a created timestamp for display.
+// Three input shapes, in order of priority:
+//   1. ISO from the DB/API — canonical; formatted in the browser's local TZ.
+//   2. "Just now" — optimistic state right after create; render bare (no
+//      fake-time tail).
+//   3. Bare seed strings like "May 2" with no time — legacy demo data;
+//      append a deterministic hash-derived time so the UI doesn't look
+//      half-empty.
+const _MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 function fmtCreated(ts, id='') {
   if (!ts) return '—'
-  // If already has time, return as-is
-  if (ts.includes(':')) return ts
-  const base = expandTs(ts)
-  // Generate a deterministic but plausible time from the id string
+  const s = String(ts)
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const d = new Date(s)
+    if (!isNaN(d.getTime())) {
+      let hr = d.getHours()
+      const mn = String(d.getMinutes()).padStart(2,'0')
+      const ap = hr >= 12 ? 'PM' : 'AM'
+      hr = hr % 12 || 12
+      return `${_MONTHS_SHORT[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()} · ${hr}:${mn} ${ap}`
+    }
+  }
+  if (s.toLowerCase() === 'just now') return 'Just now'
+  if (s.includes(':')) return s
+  const base = expandTs(s)
   const hash = id.split('').reduce((h,c)=>h+c.charCodeAt(0),0)
   const hour = 8 + (hash % 10)
   const min  = (hash * 7) % 60
@@ -3100,7 +3118,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
     onCreate({
       id: r.lead.id, name: composedName,
       phone: form.phone, email: form.email,
-      stage: 'New', source: form.source, project: form.project, created: 'Just now',
+      stage: 'New', source: form.source, project: form.project, created: new Date().toISOString(),
       referredBy: form.source === 'Referral' ? form.referredBy : null,
       path: startDrip ? dripPathId : null,
       assignedTo: assignedTo || resolvedUserId,
@@ -3142,7 +3160,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
 
     onCreate({
       id: r.lead.id, name: composedName,
-      phone: form.phone, email: '', source: '', project: '', created: 'Just now',
+      phone: form.phone, email: '', source: '', project: '', created: new Date().toISOString(),
       stage: 'New', path: null, paused: false, assessment: null, assessmentType: null,
       assignedTo: assignedTo || resolvedUserId,
       locationId: resolvedLocationUuid,
@@ -3179,7 +3197,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
     onCreate({
       ...match, id: r.lead.id,
       stage: 'New', jobberRef: null, reachOutMethod: null, assessment: null,
-      invoices: [], jobs: [], finalProcessed: false, isJunk: false, created: 'Just now',
+      invoices: [], jobs: [], finalProcessed: false, isJunk: false, created: new Date().toISOString(),
       project: form.project || match.project || '',
       path: startDrip ? dripPathId : null,
       assignedTo: assignedTo || resolvedUserId,
@@ -18098,7 +18116,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   function addPersonFromPartner(partner) {
     const newPerson = {
       id:`n${Date.now()}`, name:partner.name, phone:partner.phone, email:partner.email,
-      stage:'New', source:'Partner', project:'', created:'Just now',
+      stage:'New', source:'Partner', project:'', created:new Date().toISOString(),
       path:'general-a', paused:false, assessment:null, assessmentType:null,
       jobberRef:null, reachOutMethod:null, jobberSearchStatus:'pending', jobberClient:null,
       desc:`Partner converted to client - ${partner.company||partner.title||''}`,
@@ -18170,10 +18188,17 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
 
   // Initialize to null so SSR doesn't pick a server-side time that
   // mismatches client time on hydration (caused React errors #418,
-  // #423, #425). Effect sets it to client time after mount.
+  // #423, #425). Effect sets it to client time after mount, then
+  // ticks every 60s so the header clock stays current without a
+  // reload — surfaces timezone bugs faster too.
   const [now, setNow] = useState(null)
-  useEffect(() => { setNow(new Date()) }, [])
+  useEffect(() => {
+    setNow(new Date())
+    const id = setInterval(() => setNow(new Date()), 60_000)
+    return () => clearInterval(id)
+  }, [])
   const dateStr = now ? now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}) : ''
+  const timeStr = now ? now.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZoneName:'short'}) : ''
 
 
   const navItems = isOnboarding
@@ -18311,7 +18336,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         </div>
 
         <p style={{ fontSize:'11px', color:BRAND.teal, fontWeight:600, marginBottom:'2px', opacity:0.7, textTransform:'uppercase', letterSpacing:'1.5px' }}>The Hive Hub</p>
-        <p style={{ fontSize:'12px', color:BRAND.teal, fontWeight:500, marginBottom:'4px', opacity:0.7 }}>{dateStr}</p>
+        <p style={{ fontSize:'12px', color:BRAND.teal, fontWeight:500, marginBottom:'4px', opacity:0.7 }}>{dateStr}{timeStr && ` · ${timeStr}`}</p>
         <h1 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'white', marginBottom:'4px' }}>
           {!now?'Hello':now.getHours()<12?'Good morning':now.getHours()<17?'Good afternoon':'Good evening'}{ownerName&&ownerName!=='there'&&ownerName.trim().length>1?`, ${ownerName.trim().split(' ')[0]}`:''} 👋
         </h1>
