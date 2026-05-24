@@ -18993,7 +18993,10 @@ function SubscriptionCalculator({
               </div>
               <div style={{ minWidth:'62px', textAlign:'right', flexShrink:0 }}>
                 {deferred ? (
-                  <span style={{ display:'inline-block', fontSize:'8px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.12)', border:'1px solid rgba(212,160,70,0.3)', padding:'2px 7px', borderRadius:'10px', letterSpacing:'0.4px', textTransform:'uppercase' }}>Coming Soon</span>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'flex-end', gap:'5px', flexWrap:'wrap' }}>
+                    <span style={{ display:'inline-block', fontSize:'8px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.12)', border:'1px solid rgba(212,160,70,0.3)', padding:'2px 7px', borderRadius:'10px', letterSpacing:'0.4px', textTransform:'uppercase' }}>Coming Soon</span>
+                    <p style={{ fontSize:'12.5px', fontWeight:700, color:'#c8d8d4', fontFamily:'Georgia,serif' }}>$0</p>
+                  </div>
                 ) : (
                   <>
                     <p style={{ fontSize:'12.5px', fontWeight:700, color:count>0?'#1a2e2b':'#c8d8d4', fontFamily:'Georgia,serif' }}>
@@ -19099,7 +19102,10 @@ function TierPlansInline() {
                 <p style={{ fontSize:'9.5px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', lineHeight:1.15 }}>{t.name}</p>
                 <span style={{ fontSize:'7.5px', color:'#8a9e9a', letterSpacing:'0.5px', textTransform:'uppercase', fontWeight:700, padding:'1px 4px', background:'rgba(26,46,43,0.06)', borderRadius:'3px', lineHeight:1.2 }}>{t.level}</span>
                 {deferred ? (
-                  <span style={{ fontSize:'7.5px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.12)', border:'1px solid rgba(212,160,70,0.3)', padding:'1px 5px', borderRadius:'10px', letterSpacing:'0.4px', textTransform:'uppercase', marginTop:'2px' }}>Coming Soon</span>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:'4px', marginTop:'2px', flexWrap:'wrap' }}>
+                    <span style={{ fontSize:'7.5px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.12)', border:'1px solid rgba(212,160,70,0.3)', padding:'1px 5px', borderRadius:'10px', letterSpacing:'0.4px', textTransform:'uppercase' }}>Coming Soon</span>
+                    <p style={{ fontSize:'10px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>$0<span style={{ fontSize:'8px', color:'#8a9e9a', fontWeight:500 }}>/yr</span></p>
+                  </div>
                 ) : (
                   <p style={{ fontSize:'10px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginTop:'1px' }}>${t.price}<span style={{ fontSize:'8px', color:'#8a9e9a', fontWeight:500 }}>/yr</span></p>
                 )}
@@ -19120,9 +19126,15 @@ function TierPlansInline() {
                   <p style={{ fontSize:'10.5px', fontWeight:500, color:'#1a2e2b', lineHeight:1.3 }}>{r[0]}</p>
                   <p style={{ fontSize:'9.5px', color:'#8a9e9a', marginTop:'2px', lineHeight:1.3 }}>{r[1]}</p>
                 </div>
-                {r[2].map((v, ci) => (
-                  <div key={ci} style={{ textAlign:'center', opacity: isDeferredTier(tiers[ci]?.key) ? 0.55 : 1 }}>{renderAccess(v)}</div>
-                ))}
+                {r[2].map((v, ci) => {
+                  // Worker Bee / Honey Watcher feature set isn't decided yet —
+                  // force every cell to render as unchecked rather than imply
+                  // a feature commitment we haven't made.
+                  const deferred = isDeferredTier(tiers[ci]?.key)
+                  return (
+                    <div key={ci} style={{ textAlign:'center', opacity: deferred ? 0.55 : 1 }}>{renderAccess(deferred ? 'n' : v)}</div>
+                  )
+                })}
               </div>
             ))}
           </React.Fragment>
@@ -22130,7 +22142,10 @@ function PricingManagementTab() {
                   <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{r.desc}</p>
                 </div>
                 {deferred ? (
-                  <span style={{ fontSize:'9px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.12)', border:'1px solid rgba(212,160,70,0.3)', padding:'3px 10px', borderRadius:'20px', textTransform:'uppercase', letterSpacing:'0.4px' }}>Coming Soon</span>
+                  <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+                    <span style={{ fontSize:'9px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.12)', border:'1px solid rgba(212,160,70,0.3)', padding:'3px 10px', borderRadius:'20px', textTransform:'uppercase', letterSpacing:'0.4px' }}>Coming Soon</span>
+                    <span style={{ fontSize:'14px', fontWeight:700, color:'#c8d8d4' }}>$0<span style={{ fontSize:'10px', color:'#b0c0bc', fontWeight:500 }}>/yr</span></span>
+                  </div>
                 ) : isEditing ? (
                   <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
                     <span style={{ fontSize:'14px', color:'#8a9e9a' }}>$</span>
