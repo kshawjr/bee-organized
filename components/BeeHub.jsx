@@ -731,6 +731,73 @@ function expandTs(ts) {
   if (match) return `${match[1]} ${match[2]}, 2026`
   return ts
 }
+
+// Normalize any timestamp shape we encounter (ISO from API; seed strings
+// like "May 2, 9:00am" / "May 23 at 7:22 PM" / "Just now"; Date objects)
+// into a sortable epoch ms, or null if unparseable. Module-scope so the
+// Overview "Last Activity" finder and the OutreachTab timeline merge use
+// the exact same parser — order divergence between the two has bitten us
+// before.
+function tsToEpoch(ts) {
+  if (!ts) return null
+  if (ts instanceof Date) return ts.getTime()
+  const s = String(ts).trim()
+  if (s.toLowerCase() === 'just now') return Date.now()
+  // ISO-ish — Date constructor handles these.
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const t = new Date(s).getTime()
+    return Number.isFinite(t) ? t : null
+  }
+  // "May 23 at 7:22 PM" — the fmtDateTime format from people-mapper.
+  // Match this BEFORE the looser "Month Day" pattern below, which would
+  // otherwise greedily consume just "May 23" and lose the time.
+  const at = s.match(/^([A-Za-z]+)\s+(\d+)(?:,\s+(\d{4}))?\s+at\s+(\d+):(\d+)\s*(AM|PM)/i)
+  if (at) {
+    const monIdx = MONTH_MAP[at[1].slice(0,3)]
+    if (monIdx != null) {
+      const day = parseInt(at[2], 10)
+      const yr  = at[3] ? parseInt(at[3], 10) : new Date().getFullYear()
+      let hr = parseInt(at[4], 10)
+      const mn = parseInt(at[5], 10)
+      const ap = at[6].toUpperCase()
+      if (ap === 'PM' && hr < 12) hr += 12
+      if (ap === 'AM' && hr === 12) hr = 0
+      return new Date(yr, monIdx, day, hr, mn).getTime()
+    }
+  }
+  // "May 2", "May 2, 9:00am", "May 2, 2026", etc. Try expandTs's output
+  // first since the seed data is in that format.
+  const expanded = expandTs(s)
+  const m = expanded.match(/^([A-Za-z]+)\s+(\d+)(?:,\s+(\d{4}))?(?:\s+·\s+(\d+):(\d+)\s*(AM|PM))?/i)
+  if (m) {
+    const monIdx = MONTH_MAP[m[1].slice(0,3)]
+    if (monIdx != null) {
+      const day = parseInt(m[2], 10)
+      const yr  = m[3] ? parseInt(m[3], 10) : new Date().getFullYear()
+      let hr = m[4] ? parseInt(m[4], 10) : 9
+      const mn = m[5] ? parseInt(m[5], 10) : 0
+      const ap = (m[6] || '').toUpperCase()
+      if (ap === 'PM' && hr < 12) hr += 12
+      if (ap === 'AM' && hr === 12) hr = 0
+      return new Date(yr, monIdx, day, hr, mn).getTime()
+    }
+  }
+  // "May 2, 9:00am" without expandTs preserving it — handle directly
+  const tm = s.match(/^([A-Za-z]+)\s+(\d+),\s+(\d+):(\d+)\s*(am|pm)/i)
+  if (tm) {
+    const monIdx = MONTH_MAP[tm[1].slice(0,3)]
+    if (monIdx != null) {
+      const day = parseInt(tm[2], 10)
+      let hr = parseInt(tm[3], 10)
+      const mn = parseInt(tm[4], 10)
+      if (tm[5].toLowerCase() === 'pm' && hr < 12) hr += 12
+      if (tm[5].toLowerCase() === 'am' && hr === 12) hr = 0
+      return new Date(new Date().getFullYear(), monIdx, day, hr, mn).getTime()
+    }
+  }
+  const fallback = new Date(s).getTime()
+  return Number.isFinite(fallback) ? fallback : null
+}
 // Format created date with a plausible time based on seed id
 function fmtCreated(ts, id='') {
   if (!ts) return '—'
@@ -4308,70 +4375,8 @@ function OutreachTab({ person, setPopup }) {
     }
   }
 
-  // Format any timestamp shape we encounter (ISO from API; seed strings
-  // like "May 2, 9:00am", "May 23 at 7:22 PM", or "Just now" from in-memory
-  // entries) into a sortable epoch ms. Falls back to insertion order via
-  // index when unparseable.
-  function tsToEpoch(ts) {
-    if (!ts) return null
-    if (ts instanceof Date) return ts.getTime()
-    const s = String(ts).trim()
-    if (s.toLowerCase() === 'just now') return Date.now()
-    // ISO-ish — Date constructor handles these.
-    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-      const t = new Date(s).getTime()
-      return Number.isFinite(t) ? t : null
-    }
-    // "May 23 at 7:22 PM" — the fmtDateTime format from people-mapper.
-    // Match this BEFORE the looser "Month Day" pattern below, which would
-    // otherwise greedily consume just "May 23" and lose the time.
-    const at = s.match(/^([A-Za-z]+)\s+(\d+)(?:,\s+(\d{4}))?\s+at\s+(\d+):(\d+)\s*(AM|PM)/i)
-    if (at) {
-      const monIdx = MONTH_MAP[at[1].slice(0,3)]
-      if (monIdx != null) {
-        const day = parseInt(at[2], 10)
-        const yr  = at[3] ? parseInt(at[3], 10) : new Date().getFullYear()
-        let hr = parseInt(at[4], 10)
-        const mn = parseInt(at[5], 10)
-        const ap = at[6].toUpperCase()
-        if (ap === 'PM' && hr < 12) hr += 12
-        if (ap === 'AM' && hr === 12) hr = 0
-        return new Date(yr, monIdx, day, hr, mn).getTime()
-      }
-    }
-    // "May 2", "May 2, 9:00am", "May 2, 2026", etc. Try expandTs's output
-    // first since the seed data is in that format.
-    const expanded = expandTs(s)
-    const m = expanded.match(/^([A-Za-z]+)\s+(\d+)(?:,\s+(\d{4}))?(?:\s+·\s+(\d+):(\d+)\s*(AM|PM))?/i)
-    if (m) {
-      const monIdx = MONTH_MAP[m[1].slice(0,3)]
-      if (monIdx != null) {
-        const day = parseInt(m[2], 10)
-        const yr  = m[3] ? parseInt(m[3], 10) : new Date().getFullYear()
-        let hr = m[4] ? parseInt(m[4], 10) : 9
-        const mn = m[5] ? parseInt(m[5], 10) : 0
-        const ap = (m[6] || '').toUpperCase()
-        if (ap === 'PM' && hr < 12) hr += 12
-        if (ap === 'AM' && hr === 12) hr = 0
-        return new Date(yr, monIdx, day, hr, mn).getTime()
-      }
-    }
-    // "May 2, 9:00am" without expandTs preserving it — handle directly
-    const tm = s.match(/^([A-Za-z]+)\s+(\d+),\s+(\d+):(\d+)\s*(am|pm)/i)
-    if (tm) {
-      const monIdx = MONTH_MAP[tm[1].slice(0,3)]
-      if (monIdx != null) {
-        const day = parseInt(tm[2], 10)
-        let hr = parseInt(tm[3], 10)
-        const mn = parseInt(tm[4], 10)
-        if (tm[5].toLowerCase() === 'pm' && hr < 12) hr += 12
-        if (tm[5].toLowerCase() === 'am' && hr === 12) hr = 0
-        return new Date(new Date().getFullYear(), monIdx, day, hr, mn).getTime()
-      }
-    }
-    const fallback = new Date(s).getTime()
-    return Number.isFinite(fallback) ? fallback : null
-  }
+  // tsToEpoch is hoisted to module scope (next to expandTs) — PersonPanel's
+  // Overview "Last Activity" finder uses the same helper. See top of file.
 
   function fmtSent(iso) {
     if (!iso) return '—'
@@ -5887,7 +5892,10 @@ function PersonPanel({
             React.createElement(
               "div",
               { style: { display: "grid", gap: "12px" } },
-              React.createElement(DripSection, { leadId: person.id, isSuperAdminUser }),
+              // Drip section intentionally not rendered here — the canonical
+              // home for drip + manual touch timeline is the Outreach tab
+              // (OutreachTab). Keeping it here too made the Overview noisy
+              // and double-counted activity.
               (person.quickCapture || person.snoozeUntil) &&
                 React.createElement(
                   "button",
@@ -7212,9 +7220,26 @@ function PersonPanel({
                         React.createElement(
                           "p",
                           { style: { fontSize: "13px", color: "#1a2e2b" } },
-                          person.outreachTimeline && person.outreachTimeline.length > 0
-                            ? person.outreachTimeline[person.outreachTimeline.length - 1].ts
-                            : "\u2014",
+                          (() => {
+                            // Find the truly most-recent entry by epoch rather
+                            // than trusting array order \u2014 server-side timeline
+                            // assembly used to be insertion-ordered, but drip
+                            // events and manual touches now interleave with no
+                            // guaranteed sort. Falls back to the last array
+                            // entry if no timestamps parse.
+                            const items = person.outreachTimeline || [];
+                            if (items.length === 0) return "\u2014";
+                            let bestTs = items[items.length - 1]?.ts || "\u2014";
+                            let bestEpoch = -Infinity;
+                            for (const it of items) {
+                              const e = tsToEpoch(it?.ts);
+                              if (e != null && e > bestEpoch) {
+                                bestEpoch = e;
+                                bestTs = it.ts;
+                              }
+                            }
+                            return bestTs;
+                          })(),
                         ),
                       ),
                     ),
