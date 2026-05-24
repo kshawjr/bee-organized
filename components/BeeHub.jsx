@@ -2045,6 +2045,9 @@ function SendToJobberPopup({ person, onDone, onClose }) {
     }
     return '10:00 AM'
   })
+  // Loading + error state for the real Jobber send.
+  const [submitting, setSubmitting] = useState(false)
+  const [errorMsg, setErrorMsg]     = useState(null)
 
   // 15-min increments 7am–7pm
   const times = []
@@ -2056,30 +2059,94 @@ function SendToJobberPopup({ person, onDone, onClose }) {
     }
   }
 
-  function confirm() {
+  // Combine the popup's YYYY-MM-DD `date` + "h:mm AM/PM" `time` into an ISO
+  // string. Interpreted in the browser's local timezone, then converted to
+  // UTC for Jobber (which stores in UTC and renders per-account TZ).
+  function buildScheduledIso() {
+    if (!date) return null
+    const [hm, ampm] = (time || '10:00 AM').split(' ')
+    const [hh, mm] = hm.split(':').map(Number)
+    let h24 = hh % 12
+    if (ampm === 'PM') h24 += 12
+    const d = new Date(`${date}T00:00:00`)
+    d.setHours(h24, mm, 0, 0)
+    return d.toISOString()
+  }
+
+  async function confirm() {
+    if (submitting) return
+    setErrorMsg(null)
+
     const isReq = action === 'request'
-    const newStage = isReq ? 'Request' : 'Job in Progress'
-
-    const ref = isReq
-      ? `REQ-${Math.floor(Math.random()*9000+1000)}`
-      : `JOB-${Math.floor(Math.random()*9000+1000)}`
-
-    const newEntries = [
-      { id:`o${Date.now()}`,   type:'system', method:'system', label:person.jobberClient?`Matched existing client - ${person.jobberClient.clientId}`:'New client created in Jobber', ts:'Just now', status:'done' },
-      { id:`o${Date.now()+1}`, type:'system', method:'system', label:`${isReq?'Request':'Job'} created in Jobber - ${ref}`, ts:'Just now', status:'done' },
-    ]
-
     const hasAssessment = isReq && includeAssessment && date
+    const creationType = hasAssessment
+      ? 'request_with_assessment'
+      : isReq
+        ? 'request_only'
+        : 'job_direct'
+
+    const body = { creation_type: creationType }
     if (hasAssessment) {
-      newEntries.push({ id:`o${Date.now()+2}`, type:'system', method:'system', label:`${assessmentType==='virtual'?'Virtual':'In-person'} assessment - ${date} at ${time}`, ts:'Just now', status:'done' })
+      const iso = buildScheduledIso()
+      if (!iso) { setErrorMsg('Pick a date for the assessment'); return }
+      body.scheduled_assessment_at = iso
+      body.assessment_type = assessmentType
     }
 
+    setSubmitting(true)
+    let json
+    try {
+      const res = await fetch(`/api/leads/${person.id}/send-to-jobber`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      json = await res.json().catch(() => ({}))
+      if (!res.ok || !json || json.success !== true) {
+        const msg = json && json.error
+          ? `${json.error}${json.stage ? ` (${json.stage})` : ''}`
+          : `Send failed (HTTP ${res.status})`
+        setErrorMsg(msg)
+        setSubmitting(false)
+        return
+      }
+    } catch (e) {
+      setErrorMsg('Network error — please try again')
+      setSubmitting(false)
+      return
+    }
+
+    // Success — build human-readable timeline entries from the returned IDs.
+    const newStage = isReq ? 'Request' : 'Job in Progress'
+    const matchLabel = json.match_status === 'matched_existing'
+      ? `Matched existing client — JC-${json.jobber_client_id}`
+      : `New client created in Jobber — JC-${json.jobber_client_id}`
+    const entries = [
+      { id:`o${Date.now()}`, type:'system', method:'system', label: matchLabel, ts:'Just now', status:'done' },
+    ]
+    if (json.jobber_request_id) {
+      entries.push({ id:`o${Date.now()+1}`, type:'system', method:'system', label:`Request created in Jobber — REQ-${json.jobber_request_id}`, ts:'Just now', status:'done' })
+    }
+    if (json.jobber_job_id) {
+      entries.push({ id:`o${Date.now()+1}`, type:'system', method:'system', label:`Job created in Jobber — JOB-${json.jobber_job_id}`, ts:'Just now', status:'done' })
+    }
+    if (json.jobber_assessment_id && hasAssessment) {
+      entries.push({ id:`o${Date.now()+2}`, type:'system', method:'system', label:`${assessmentType==='virtual'?'Virtual':'In-person'} assessment — ${date} at ${time}`, ts:'Just now', status:'done' })
+    }
+
+    const ref = json.jobber_request_id
+      ? `REQ-${json.jobber_request_id}`
+      : json.jobber_job_id
+        ? `JOB-${json.jobber_job_id}`
+        : null
+
+    setSubmitting(false)
     onDone({
       stage: newStage,
       jobberRef: ref,
       assessment: hasAssessment ? `${date} at ${time}` : person.assessment,
       assessmentType: isReq ? assessmentType : person.assessmentType,
-      outreachTimeline: [...person.outreachTimeline, ...newEntries]
+      outreachTimeline: [...person.outreachTimeline, ...entries]
     })
   }
 
@@ -2187,9 +2254,20 @@ function SendToJobberPopup({ person, onDone, onClose }) {
               </div>
             ))}
           </div>
+          {errorMsg&&(
+            <div style={{ padding:'10px 14px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'10px', marginBottom:'10px' }}>
+              <p style={{ fontSize:'12px', fontWeight:600, color:'#dc2626', marginBottom:'2px' }}>Couldn't send to Jobber</p>
+              <p style={{ fontSize:'12px', color:'#7f1d1d', wordBreak:'break-word' }}>{errorMsg}</p>
+            </div>
+          )}
           <div style={{ display:'flex', gap:'10px' }}>
-            <button onClick={()=>setStep(action==='request'?'request-details':'action')} style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Back</button>
-            <button onClick={confirm} style={{ flex:2, padding:'12px', background:'#10b981', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:'pointer' }}><JobberIcon size={20} style={{marginRight:'7px'}} />Send to Jobber</button>
+            <button onClick={()=>{ if(!submitting){ setErrorMsg(null); setStep(action==='request'?'request-details':'action') } }} disabled={submitting} style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:submitting?'#9ca3af':'#4a5e5a', cursor:submitting?'not-allowed':'pointer' }}>Back</button>
+            <button onClick={confirm} disabled={submitting} style={{ flex:2, padding:'12px', background:submitting?'#6ee7b7':'#10b981', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:submitting?'wait':'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
+              {submitting
+                ? <>⏳ Sending…</>
+                : <><JobberIcon size={20} style={{marginRight:'7px'}} />{errorMsg ? 'Retry' : 'Send to Jobber'}</>
+              }
+            </button>
           </div>
         </>
       )}
