@@ -26,6 +26,7 @@
 // on failure so the popup can surface where things broke.
 
 import { NextRequest, NextResponse } from 'next/server'
+import { formatInTimeZone } from 'date-fns-tz'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { jobberGraphQL, jobberMutation } from '@/lib/jobber'
@@ -47,7 +48,6 @@ type Stage =
   | 'request_create'
   | 'assessment_create'
   | 'assignment'
-  | 'job_create'
   | 'writeback'
 
 type CreationType =
@@ -82,6 +82,19 @@ function fail(stage: Stage, error: string, status = 500, extra: object = {}) {
     { success: false, error, stage, ...extra },
     { status },
   )
+}
+
+// Jobber's ScheduledItemAttributes uses LocalDateTimeAttributes { date,
+// time, timezone } for startAt/endAt — not an ISO 8601 string. Convert the
+// stored UTC ISO timestamp into the location's local wall-clock pieces so
+// Jobber renders the appointment in the right zone.
+function toLocalDateTime(iso: string, timezone: string) {
+  const ms = new Date(iso).getTime()
+  return {
+    date:     formatInTimeZone(ms, timezone, 'yyyy-MM-dd'),
+    time:     formatInTimeZone(ms, timezone, 'HH:mm:ss'),
+    timezone,
+  }
 }
 
 function pickPrimaryAddress(lead: any): {
@@ -174,10 +187,15 @@ const CLIENT_EDIT_MUTATION = /* GraphQL */ `
   }
 `
 
-const CLIENT_CREATE_PROPERTY_MUTATION = /* GraphQL */ `
-  mutation ClientCreateProperty($clientId: EncodedId!, $input: PropertyCreateInput!) {
-    clientCreateProperty(clientId: $clientId, input: $input) {
-      property { id address { street1 city province postalCode country } }
+// Jobber removed `clientCreateProperty` — the current entry point is the
+// top-level `propertyCreate(clientId, input)` mutation, where input wraps
+// a LIST of PropertyAttributes (you can create several in one call). Even
+// for a single property we send `properties: [{ … }]`. The payload returns
+// `properties` (also a list), not `property`.
+const PROPERTY_CREATE_MUTATION = /* GraphQL */ `
+  mutation PropertyCreate($clientId: EncodedId!, $input: PropertyCreateInput!) {
+    propertyCreate(clientId: $clientId, input: $input) {
+      properties { id address { street1 city province postalCode country } }
       userErrors { message path }
     }
   }
@@ -192,10 +210,17 @@ const REQUEST_CREATE_MUTATION = /* GraphQL */ `
   }
 `
 
+// Jobber moved `requestId` out of AssessmentCreateInput and onto the
+// mutation as a top-level arg; the input now only carries `instructions`
+// and `schedule: ScheduledItemAttributes`. Inside schedule, startAt/endAt
+// are LocalDateTimeAttributes objects, not ISO strings.
 const ASSESSMENT_CREATE_MUTATION = /* GraphQL */ `
-  mutation AssessmentCreate($input: AssessmentCreateInput!) {
-    assessmentCreate(input: $input) {
-      assessment { id startAt endAt }
+  mutation AssessmentCreate(
+    $requestId: EncodedId!,
+    $input: AssessmentCreateInput!
+  ) {
+    assessmentCreate(requestId: $requestId, input: $input) {
+      assessment { id }
       userErrors { message path }
     }
   }
@@ -208,15 +233,6 @@ const APPOINTMENT_EDIT_ASSIGNMENT_MUTATION = /* GraphQL */ `
   ) {
     appointmentEditAssignment(appointmentId: $appointmentId, input: $input) {
       appointment { id }
-      userErrors { message path }
-    }
-  }
-`
-
-const JOB_CREATE_MUTATION = /* GraphQL */ `
-  mutation JobCreate($input: JobCreateInput!) {
-    jobCreate(input: $input) {
-      job { id title client { id } property { id } }
       userErrors { message path }
     }
   }
@@ -252,6 +268,16 @@ export async function POST(
       allowed: ALLOWED_CREATION_TYPES,
     })
   }
+  // job_direct is gated off until JobCreateAttributes' newly-required fields
+  // (jobFormIds, notes, invoicing, lineItems, customFields) have product-
+  // defined defaults. See JOB_CREATE_MUTATION below for the schema context.
+  if (creation_type === 'job_direct') {
+    return fail(
+      'validation',
+      "Direct job creation isn't supported yet. Use Request (with or without Assessment) instead.",
+      400,
+    )
+  }
   const scheduled_assessment_at: string | undefined = body.scheduled_assessment_at
   const assessment_type: 'in-person' | 'virtual' | undefined = body.assessment_type
   if (creation_type === 'request_with_assessment') {
@@ -266,13 +292,12 @@ export async function POST(
     }
   }
 
-  // Address is only mandatory for paths Jobber can't fulfill without a
-  // property: job creation, and in-person assessments. request_only and
+  // Address is only mandatory for in-person assessments. request_only and
   // virtual assessments proceed without a property — mirrors the Deluge
   // reference, which skipped property creation when street1 was empty.
+  // (job_direct also needs an address but is gated above.)
   const addressRequired =
-    creation_type === 'job_direct' ||
-    (creation_type === 'request_with_assessment' && assessment_type === 'in-person')
+    creation_type === 'request_with_assessment' && assessment_type === 'in-person'
 
   // ── Load lead + location + assigned user ────────────────────────
   const { data: lead, error: leadErr } = await supabaseService
@@ -357,12 +382,15 @@ export async function POST(
   // 2. CREATE or UPDATE the client
   // ─────────────────────────────────────────────────────────────────
   if (jobberClientGlobalId) {
-    // Matched: refresh name + phone in case they changed locally
+    // Matched: refresh name in case it changed locally. ClientEditInput no
+    // longer accepts a bare `phones` field — it expects phonesToAdd /
+    // phonesToEdit / phonesToDelete keyed by EncodedId. Without the existing
+    // phone IDs to target, we'd just duplicate phones every save, so phone
+    // updates on existing clients are skipped here.
     const editInput: Record<string, any> = {
       firstName: firstName || null,
       lastName:  lastName  || null,
     }
-    if (phone) editInput.phones = [{ number: phone, primary: true }]
     const edit = await jobberMutation(locationSlug, CLIENT_EDIT_MUTATION, {
       clientId: jobberClientGlobalId,
       input: editInput,
@@ -420,24 +448,27 @@ export async function POST(
     if (!jobberPropertyGlobalId) {
       const propCreate = await jobberMutation(
         locationSlug,
-        CLIENT_CREATE_PROPERTY_MUTATION,
+        PROPERTY_CREATE_MUTATION,
         {
           clientId: jobberClientGlobalId,
           input: {
-            address: {
-              street1:    address.street,
-              city:       address.city || null,
-              province:   address.state || null,
-              postalCode: address.zip || null,
-              country:    'US',
-            },
+            properties: [{
+              address: {
+                street1:    address.street,
+                city:       address.city || null,
+                province:   address.state || null,
+                postalCode: address.zip || null,
+                country:    'US',
+              },
+            }],
           },
         },
       )
       if (propCreate.userErrors?.length) {
         return fail('property_create', propCreate.userErrors[0].message)
       }
-      jobberPropertyGlobalId = propCreate.data?.clientCreateProperty?.property?.id || null
+      jobberPropertyGlobalId =
+        propCreate.data?.propertyCreate?.properties?.[0]?.id || null
       if (!jobberPropertyGlobalId) {
         return fail('property_create', 'property_create_returned_no_id')
       }
@@ -449,16 +480,18 @@ export async function POST(
   // ─────────────────────────────────────────────────────────────────
   let jobberRequestGlobalId:    string | null = null
   let jobberAssessmentGlobalId: string | null = null
-  let jobberJobGlobalId:        string | null = null
 
   const requestTitle =
     (lead.name || `${firstName} ${lastName}`.trim() || 'Service Request').slice(0, 200)
 
   if (creation_type === 'request_only' || creation_type === 'request_with_assessment') {
     const requestInput: Record<string, any> = {
-      clientId:       jobberClientGlobalId,
-      title:          requestTitle,
-      requestDetails: lead.request_details || null,
+      clientId: jobberClientGlobalId,
+      title:    requestTitle,
+      // `requestDetails` on RequestCreateInput is now a RequestDetailsInput
+      // object wrapping a FormInput, not a free-form string. We don't have a
+      // form mapping today, so the field is omitted; lead.request_details
+      // continues to live on the Bee Hub side until we wire form sync.
     }
     // Only include propertyId when we actually have one — Deluge mirrored
     // this with two requestCreate variants. Omitting the key lets Jobber
@@ -478,19 +511,22 @@ export async function POST(
     }
 
     if (creation_type === 'request_with_assessment') {
+      // Assessments are time-boxed; Jobber's UI defaults to 1hr if endAt
+      // is omitted. We mirror that by sending a 1hr endAt explicitly so
+      // calendar views render with a sensible block.
+      const startMs = new Date(scheduled_assessment_at!).getTime()
+      const endMs   = startMs + 60 * 60 * 1000
+      const tz      = (location as any).timezone || 'America/New_York'
       const assessCreate = await jobberMutation(
         locationSlug,
         ASSESSMENT_CREATE_MUTATION,
         {
+          requestId: jobberRequestGlobalId,
           input: {
-            requestId: jobberRequestGlobalId,
-            startAt:   scheduled_assessment_at,
-            // Assessments are time-boxed; Jobber's UI defaults to 1hr if endAt
-            // is omitted. We mirror that by sending a 1hr endAt explicitly so
-            // calendar views render with a sensible block.
-            endAt:     new Date(
-              new Date(scheduled_assessment_at!).getTime() + 60 * 60 * 1000,
-            ).toISOString(),
+            schedule: {
+              startAt: toLocalDateTime(new Date(startMs).toISOString(), tz),
+              endAt:   toLocalDateTime(new Date(endMs).toISOString(),   tz),
+            },
           },
         },
       )
@@ -507,7 +543,9 @@ export async function POST(
           APPOINTMENT_EDIT_ASSIGNMENT_MUTATION,
           {
             appointmentId: jobberAssessmentGlobalId,
-            input: { assignedUsers: [assignedJobberUserId] },
+            // AppointmentEditAssignmentInput.assignedUserIds (was `assignedUsers` in
+            // older schema versions — Jobber renamed to clarify the value is IDs).
+            input: { assignedUserIds: [assignedJobberUserId] },
           },
         )
         if (assign.userErrors?.length) {
@@ -516,22 +554,10 @@ export async function POST(
         }
       }
     }
-  } else if (creation_type === 'job_direct') {
-    const jobCreate = await jobberMutation(locationSlug, JOB_CREATE_MUTATION, {
-      input: {
-        clientId:   jobberClientGlobalId,
-        propertyId: jobberPropertyGlobalId,
-        title:      requestTitle,
-      },
-    })
-    if (jobCreate.userErrors?.length) {
-      return fail('job_create', jobCreate.userErrors[0].message)
-    }
-    jobberJobGlobalId = jobCreate.data?.jobCreate?.job?.id || null
-    if (!jobberJobGlobalId) {
-      return fail('job_create', 'job_create_returned_no_id')
-    }
   }
+  // job_direct branch removed: gated at validation. Restore the mutation
+  // when JobCreateAttributes' required fields are wired up — schema
+  // confirmed via introspection, see commit history for the prior shape.
 
   // ─────────────────────────────────────────────────────────────────
   // 5. Writeback to lead
@@ -540,13 +566,10 @@ export async function POST(
   const jobberPropertyId   = extractJobberId(jobberPropertyGlobalId)
   const jobberRequestId    = extractJobberId(jobberRequestGlobalId)
   const jobberAssessmentId = extractJobberId(jobberAssessmentGlobalId)
-  const jobberJobId        = extractJobberId(jobberJobGlobalId)
 
   const typeLabel = creation_type === 'request_only'
     ? 'Request'
-    : creation_type === 'request_with_assessment'
-      ? 'Request + Assessment'
-      : 'Job'
+    : 'Request + Assessment'
   const syncedAtIso = new Date().toISOString()
 
   const writeback: Record<string, any> = {
@@ -554,7 +577,6 @@ export async function POST(
     jobber_property_id:   jobberPropertyId,
     jobber_request_id:    jobberRequestId    ?? lead.jobber_request_id ?? null,
     jobber_assessment_id: jobberAssessmentId ?? lead.jobber_assessment_id ?? null,
-    jobber_job_id:        jobberJobId        ?? lead.jobber_job_id ?? null,
     jobber_match_status:  matchStatus,
     jobber_sync_status:   `Success: ${typeLabel} — ${syncedAtIso.slice(0, 19)}`,
     jobber_synced_at:     syncedAtIso,
@@ -572,7 +594,6 @@ export async function POST(
       jobber_client_id:     jobberClientId,
       jobber_request_id:    jobberRequestId,
       jobber_assessment_id: jobberAssessmentId,
-      jobber_job_id:        jobberJobId,
     })
   }
 
@@ -580,16 +601,15 @@ export async function POST(
   await writeSyncLog({
     location_id:      locationSlug,
     entity_id:        leadId,
-    entity_type:      creation_type === 'job_direct' ? 'job' : 'request',
+    entity_type:      'request',
     direction:        'outbound',
-    jobber_record_id: jobberRequestId || jobberJobId || jobberClientId || '',
+    jobber_record_id: jobberRequestId || jobberClientId || '',
     status:           'success',
     message:
       `Send-to-Jobber (${typeLabel}); match=${matchStatus}; ` +
       `client=${jobberClientId}` +
       (jobberRequestId    ? `; request=${jobberRequestId}`    : '') +
-      (jobberAssessmentId ? `; assessment=${jobberAssessmentId}` : '') +
-      (jobberJobId        ? `; job=${jobberJobId}`            : ''),
+      (jobberAssessmentId ? `; assessment=${jobberAssessmentId}` : ''),
   })
 
   return NextResponse.json({
@@ -599,6 +619,5 @@ export async function POST(
     jobber_property_id:   jobberPropertyId,
     jobber_request_id:    jobberRequestId,
     jobber_assessment_id: jobberAssessmentId,
-    jobber_job_id:        jobberJobId,
   })
 }
