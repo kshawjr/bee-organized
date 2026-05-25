@@ -282,7 +282,9 @@ export async function POST(req: NextRequest) {
         let processed = 0
         for (const client of clients) {
           try {
-            const { id: leadId, created } = await upsertLead(client, locSlug, locUuid)
+            const { id: leadId, created } = await upsertLead(client, locSlug, locUuid, {
+              importSource: 'jobber_initial',
+            })
             created ? stats.leads_created++ : stats.leads_updated++
 
             for (const request of (reqByClient[client.id] || [])) {

@@ -7746,7 +7746,7 @@ function PersonPanel({
                           flexShrink: 0,
                         },
                       },
-                      person.paused ? "Resume" : "Pause",
+                      person.paused ? "Activate drips" : "Pause",
                     ),
                   ),
                   React.createElement(
@@ -8867,6 +8867,7 @@ function StageGroup({ stage, stageConf: s, records, selectedIds, setSelectedIds,
             {showLocation&&person.locationId&&(()=>{ const loc=locations.find(l=>l.id===person.locationId); return <span style={{ fontSize:'10px', color:'#4a5e5a', background:'rgba(0,0,0,0.05)', padding:'2px 7px', borderRadius:'20px', fontWeight:500 }}>📍 {loc?loc.name:'Unknown'}</span> })()}
             {isReturning&&<span style={{ fontSize:'10px', color:'#10b981', background:'rgba(16,185,129,0.08)', padding:'2px 7px', borderRadius:'20px', fontWeight:600, border:'1px solid rgba(16,185,129,0.2)' }}>↩ Client · {pastJobs.length} job{pastJobs.length!==1?'s':''}</span>}
             {person.jobberRef&&<span style={{ fontSize:'10px', color:'#10b981', background:'rgba(16,185,129,0.1)', padding:'2px 6px', borderRadius:'20px' }}>⚡</span>}
+            {person.paused&&<span style={{ fontSize:'10px', color:'#f59e0b', background:'rgba(245,158,11,0.1)', padding:'2px 7px', borderRadius:'20px', fontWeight:600 }} title="Drip paused — click Activate Drips in the detail panel to start sends">⏸ Paused</span>}
             {person.buzzNotes?.length>0&&<span style={{ fontSize:'10px', color:'#b07a20', background:'rgba(212,160,70,0.1)', padding:'2px 6px', borderRadius:'20px' }}>🐝 {person.buzzNotes.length}</span>}
             {person.tags.slice(0,1).map(tid=>{ const t=tagConf(tid); return <span key={tid} style={{ fontSize:'10px', color:t.color, background:t.bg, padding:'2px 6px', borderRadius:'20px' }}>{t.label}</span> })}
             {unpaid>0&&<span style={{ fontSize:'10px', color:'#f59e0b', background:'rgba(245,158,11,0.1)', padding:'2px 6px', borderRadius:'20px', fontWeight:600 }}>⚠️ Invoice</span>}
@@ -9481,6 +9482,53 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
           <button onClick={()=>setShowMassUpdate(true)} style={{ padding:'7px 14px', background:'rgba(168,201,196,0.2)', border:'1px solid rgba(168,201,196,0.35)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'white', cursor:'pointer', fontWeight:600, whiteSpace:'nowrap' }}>
             Change Owner
           </button>
+          {/*
+            Activate Drips bulk action — only shown when at least one
+            selected lead is currently paused. Imported leads (Jobber
+            initial / webhooks) land paused = true so the day-0 drip
+            doesn't fire; this lets the owner opt a batch back in.
+          */}
+          {selectedIds.some(id => people.find(p => p.id === id)?.paused) && (
+            <button
+              onClick={async () => {
+                const pausedIds = selectedIds.filter(id =>
+                  people.find(p => p.id === id)?.paused
+                )
+                if (pausedIds.length === 0) return
+                const ok = window.confirm(
+                  `Activate drips for ${pausedIds.length} selected client${pausedIds.length === 1 ? '' : 's'}? They'll start receiving the New Client Drip emails.`
+                )
+                if (!ok) return
+                let activated = 0
+                let failed = 0
+                for (const id of pausedIds) {
+                  try {
+                    const r = await fetch(`/api/leads/${id}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ paused: false }),
+                    })
+                    if (r.ok) activated++
+                    else failed++
+                  } catch {
+                    failed++
+                  }
+                }
+                if (activated > 0) {
+                  setPeople(prev => prev.map(p =>
+                    pausedIds.includes(p.id) ? { ...p, paused: false } : p
+                  ))
+                }
+                setSelectedIds([])
+                if (failed > 0) {
+                  window.alert(`Activated ${activated}; ${failed} failed. Refresh and try again on the failures.`)
+                }
+              }}
+              style={{ padding:'7px 14px', background:'rgba(212,160,70,0.25)', border:'1px solid rgba(212,160,70,0.4)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'white', cursor:'pointer', fontWeight:600, whiteSpace:'nowrap' }}
+            >
+              Activate Drips
+            </button>
+          )}
         </div>
       )}
 

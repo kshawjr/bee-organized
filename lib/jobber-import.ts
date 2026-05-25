@@ -210,7 +210,21 @@ export function determineStage(request: any): string {
 
 // ── upserts ───────────────────────────────────────────────────────
 
-export async function upsertLead(client: any, location_id: string, location_uuid: string) {
+// importSource tags the origin of records this function creates. It's
+// only written on insert — updates to an already-existing lead never
+// reclassify its source or flip the paused flag, so an owner-paused
+// lead doesn't accidentally get un-paused by a routine webhook refresh.
+//
+// Defaulting to 'jobber_webhook' keeps the older two-arg call sites
+// safe (the realtime webhook path); the bulk import route passes
+// 'jobber_initial' explicitly.
+export async function upsertLead(
+  client: any,
+  location_id: string,
+  location_uuid: string,
+  opts: { importSource?: string } = {},
+) {
+  const importSource = opts.importSource || 'jobber_webhook'
   const email = client.emails?.find((e: any) => e.primary)?.address ?? client.emails?.[0]?.address ?? null
   const phone = client.phones?.find((p: any) => p.primary)?.number  ?? client.phones?.[0]?.number  ?? null
   const addr  = client.billingAddress
@@ -253,7 +267,12 @@ export async function upsertLead(client: any, location_id: string, location_uuid
   }
   const { data, error } = await supabaseService
     .from('leads')
-    .insert({ ...payload, created_at: client.createdAt || new Date().toISOString() })
+    .insert({
+      ...payload,
+      created_at: client.createdAt || new Date().toISOString(),
+      import_source: importSource,
+      paused: true,
+    })
     .select('id, stage')
     .single()
   if (error) throw new Error(error.message)

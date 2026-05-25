@@ -215,10 +215,16 @@ export async function PATCH(
   // rather than waiting for the next hourly cron tick. Mirrors the
   // POST /api/leads inline-send path.
   if (existing.location_uuid) {
+    // Inline drip-start cases:
+    //   1. stage transitions into 'New' (welcome email next minute, not next hour)
+    //   2. an imported/paused lead gets activated via paused → false; the resume
+    //      path in applyDripSideEffects will seed step 1, and we want it to fire
+    //      inline so the owner sees the activation actually do something
     const triggersDripStart =
-      'stage' in patch &&
-      patch.stage === 'New' &&
-      existing.stage !== 'New'
+      ('stage' in patch &&
+        patch.stage === 'New' &&
+        existing.stage !== 'New') ||
+      ('paused' in patch && patch.paused === false)
 
     if (triggersDripStart) {
       try {

@@ -37,8 +37,28 @@ interface LocationCtx {
 // Start a drip when a lead enters 'New'. Looks up the location's default
 // drip path, finds step 1, computes next_send_at in the location's tz,
 // and inserts a lead_drip_progress row idempotently.
+//
+// Skips entirely when leads.paused = true. Imported leads (Jobber
+// initial / webhooks / CSV) land with paused = true so the day-0 New
+// Lead email doesn't get sent to historical clients — the owner has to
+// flip paused = false (via the Activate Drips button) to opt them in,
+// which routes back through here via resumePausedDripsForLead.
 export async function startDripForLead(leadId: string, locationUuid: string): Promise<void> {
   try {
+    const { data: leadRow, error: leadErr } = await supabaseService
+      .from('leads')
+      .select('paused')
+      .eq('id', leadId)
+      .maybeSingle()
+    if (leadErr) {
+      console.error('[drip] startDrip: lead lookup failed', { leadId, leadErr })
+      return
+    }
+    if (leadRow?.paused) {
+      // Imported lead — owner must explicitly activate drips first.
+      return
+    }
+
     const { data: loc, error: locErr } = await supabaseService
       .from('locations')
       .select('id, timezone, default_drip_path')
@@ -187,6 +207,12 @@ export async function pauseActiveDripsForLead(leadId: string): Promise<void> {
 // Catch-up logic when resuming: if next_send_at was already due before
 // the pause, push it to the next 9am rather than blasting immediately
 // (we don't want a paused-3-days lead to fire all missed steps at once).
+//
+// Imported-lead case: a lead that landed paused = true never had
+// startDripForLead run (it was skipped by the paused guard), so there
+// are no progress rows to resume. When the owner clicks Activate Drips
+// we need to seed step 1 instead — detect "no progress rows + lead in a
+// drip-eligible stage" and delegate to startDripForLead.
 export async function resumePausedDripsForLead(leadId: string): Promise<void> {
   try {
     const { data: rows, error: loadErr } = await supabaseService
@@ -201,7 +227,35 @@ export async function resumePausedDripsForLead(leadId: string): Promise<void> {
       console.error('[drip] resumePausedDrips: load failed', { leadId, loadErr })
       return
     }
-    if (!rows || rows.length === 0) return
+
+    if (!rows || rows.length === 0) {
+      // No paused rows to revive. Could be an imported lead being
+      // activated for the first time, or a lead whose drip already
+      // completed/stopped — only the former should start a fresh drip.
+      const { data: lead } = await supabaseService
+        .from('leads')
+        .select('location_uuid, stage')
+        .eq('id', leadId)
+        .maybeSingle()
+      if (!lead?.location_uuid) return
+
+      // Don't re-seed if there's any non-paused progress row (i.e. an
+      // active or already-stopped/completed drip). The owner can use
+      // the super_admin drip-restart endpoint for that.
+      const { data: anyProgress } = await supabaseService
+        .from('lead_drip_progress')
+        .select('id')
+        .eq('lead_id', leadId)
+        .limit(1)
+        .maybeSingle()
+      if (anyProgress) return
+
+      // Drip-eligible stages mirror the start-trigger in applyDripSideEffects.
+      if (lead.stage === 'New' || lead.stage === 'Attempting') {
+        await startDripForLead(leadId, lead.location_uuid)
+      }
+      return
+    }
 
     // Pull the lead's location tz once (all rows here share the lead).
     const { data: lead } = await supabaseService

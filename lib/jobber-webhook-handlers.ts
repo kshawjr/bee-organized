@@ -171,6 +171,7 @@ async function fetchAndUpsertRequest(
     reqRec.client,
     ctx.location.location_id,
     ctx.location.id,
+    { importSource: 'jobber_webhook' },
   )
 
   const sr = await upsertServiceRequest(
@@ -572,6 +573,7 @@ export async function handleClientUpdate(ctx: HandlerCtx): Promise<HandlerResult
     clientRec,
     ctx.location.location_id,
     ctx.location.id,
+    { importSource: 'jobber_webhook' },
   )
 
   return {
