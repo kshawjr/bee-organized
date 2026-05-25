@@ -246,8 +246,8 @@ export default async function HubPage({
         paid_through_date: locRow.paid_through_date || null,
         lifecycle_status: locRow.lifecycle_status || 'onboarding',
         onboarding_state: locRow.onboarding_state || {},
-        default_drip_path: locRow.default_drip_path || 'general-a',
-        default_move_drip_path: locRow.default_move_drip_path || 'move-a',
+        default_drip_path: locRow.default_drip_path || null,
+        default_move_drip_path: locRow.default_move_drip_path || null,
         address: locRow.address || '',
         city: locRow.city || '',
         state: locRow.state || '',
@@ -373,8 +373,8 @@ export default async function HubPage({
         userCount: userCountByLoc[row.id] || 0,
         joinedDate: fmtJoined(row.created_at),
         onboarding_state: row.onboarding_state || {},
-        default_drip_path: row.default_drip_path || 'general-a',
-        default_move_drip_path: row.default_move_drip_path || 'move-a',
+        default_drip_path: row.default_drip_path || null,
+        default_move_drip_path: row.default_move_drip_path || null,
         activated_at: row.activated_at || null,
       }
     })

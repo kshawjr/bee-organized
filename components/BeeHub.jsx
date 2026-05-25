@@ -1039,9 +1039,11 @@ let _partnerTiers = null
 function getPartnerTiers() { return _partnerTiers || PARTNER_TIERS }
 function setAdminPartnerTiers(list) { _partnerTiers = list }
 
-// Location default drip path - set by Settings Paths tab
-let _defaultPathId = 'general-a'
-let _defaultMovePathId = 'move-a'
+// Location default drip path - set by Settings → Paths tab.
+// Defaults are null until the owner picks during onboarding (the
+// 8 master paths are the choices); see migrations/cleanup_legacy_drip_paths.sql.
+let _defaultPathId = null
+let _defaultMovePathId = null
 function getDefaultPathId() { return _defaultPathId }
 function getDefaultMovePathId() { return _defaultMovePathId }
 function setDefaultPathId(id) { if(id) _defaultPathId = id }
@@ -10052,9 +10054,14 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     try {
       // Map onboarding wizard's path-X selections to our DB convention.
       // wizard returns { moveDefault: 'path-a', generalDefault: 'path-c', calendarLink: '...' }
-      // DB stores      { default_drip_path: 'general-c', default_move_drip_path: 'move-a', calendar_link: '...' }
-      const dripGeneral = prefs?.generalDefault ? 'general-' + prefs.generalDefault.replace('path-','') : null
-      const dripMove    = prefs?.moveDefault    ? 'move-'    + prefs.moveDefault.replace('path-','')    : null
+      // DB stores      { default_drip_path: 'organizing-c', default_move_drip_path: 'moving-a', calendar_link: '...' }
+      // 'custom' is a wizard-only marker meaning "build later" — DB stays null.
+      const dripGeneral = (prefs?.generalDefault && prefs.generalDefault !== 'custom')
+        ? 'organizing-' + prefs.generalDefault.replace('path-','')
+        : null
+      const dripMove = (prefs?.moveDefault && prefs.moveDefault !== 'custom')
+        ? 'moving-' + prefs.moveDefault.replace('path-','')
+        : null
       if (locId) {
         const res = await fetch(`/api/locations/${locId}/paths`, {
           method: 'POST',
@@ -10072,6 +10079,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
       // Module-level state for in-session client creation flows. DB read on
       // next page load supersedes this.
       if (dripGeneral) setDefaultPathId(dripGeneral)
+      if (dripMove)    setDefaultMovePathId(dripMove)
       markDone('paths')
       setActiveStepOpen(null)
     } catch (err) {
@@ -11301,7 +11309,7 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
   if (step.id==='paths') {
     return (
       <div style={{ paddingTop:'12px' }}>
-        <OnboardingPathsEditor onComplete={(prefs)=>{ savePaths ? savePaths(prefs) : (setSavedPaths(prefs), markDone('paths'), setActiveStepOpen(null), prefs?.generalDefault && setDefaultPathId('general-'+prefs.generalDefault.replace('path-',''))) }} />
+        <OnboardingPathsEditor onComplete={(prefs)=>{ savePaths ? savePaths(prefs) : (setSavedPaths(prefs), markDone('paths'), setActiveStepOpen(null), prefs?.generalDefault && prefs.generalDefault !== 'custom' && setDefaultPathId('organizing-'+prefs.generalDefault.replace('path-','')), prefs?.moveDefault && prefs.moveDefault !== 'custom' && setDefaultMovePathId('moving-'+prefs.moveDefault.replace('path-',''))) }} />
         {stepError && stepError.paths && (
           <div style={{ marginTop:'8px', padding:'9px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'9px', fontSize:'12px', color:'#b91c1c' }}>
             {stepError.paths}
@@ -11329,12 +11337,10 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
 }
 
 function PathChooser({ title, emoji, current, onSelect, previewPath, setPreviewPath, PLAIN, pathOptions, getSteps, getTemplate }) {
-  const sectionKey = title.includes('Move') ? 'move' : 'general'
-  // Only render path styles that are backed by a real DB drip_paths row for
-  // this location (caller-filtered). The previous "Custom path" auto-append
-  // is gone — it wrote 'general-custom'/'move-custom' to the DB which never
-  // resolved, silently breaking new-lead drips. Owners can build custom
-  // paths post-onboarding in Settings → Paths.
+  // sectionKey is the path_key prefix matching the master drip_paths
+  // ('moving-a' / 'organizing-a' / ...). title carries enough signal to
+  // disambiguate without threading another prop through.
+  const sectionKey = title.toLowerCase().includes('mov') ? 'moving' : 'organizing'
   const allOptions = pathOptions
 
   return (
@@ -11434,12 +11440,12 @@ function PathChooser({ title, emoji, current, onSelect, previewPath, setPreviewP
 }
 
 function OnboardingPathsEditor({ onComplete }) {
-  // Pull current location from context so we can fetch its real seeded
-  // drip_paths instead of presenting hardcoded options the DB doesn't have.
-  // Demo / view-as flows have no currentLocationCtx → fall back to the full
-  // hardcoded list (no DB writes happen on that path anyway).
+  // Onboarding picker reads from the corp master drip_paths
+  // (/api/drip-paths/masters) rather than per-location rows: with the
+  // master/copy model introduced by seed_master_drip_paths.sql, new
+  // locations don't have their own drip_paths until an owner clicks
+  // "Customize" in Settings → Paths.
   const currentLocationCtx = useContext(CurrentLocationContext)
-  const locationId = currentLocationCtx?.id || null
 
   const [wizardStep, setWizardStep] = useState('intro')
   const [selectedMove, setSelectedMove]       = useState(null)
@@ -11447,60 +11453,60 @@ function OnboardingPathsEditor({ onComplete }) {
   const [previewPath, setPreviewPath]         = useState(null)
   const [calendarLink, setCalendarLink]       = useState('')
 
-  // Which PATH_STYLES are backed by a real DB drip_paths row for this
-  // location. `null` while loading. Keyed by PATH_STYLES.id (e.g. 'path-a').
-  // Seeded launch locations have ['path-a'] for both lists.
+  // Which PATH_STYLES are backed by a master drip_paths row. `null` while
+  // loading. Keyed by PATH_STYLES.id (e.g. 'path-a'). With the 8 seeded
+  // masters this resolves to ['path-a','path-b','path-c','path-d'] for
+  // both categories.
   const [availableMoveStyleIds,    setAvailableMoveStyleIds]    = useState(null)
   const [availableGeneralStyleIds, setAvailableGeneralStyleIds] = useState(null)
   const [pathsLoadError, setPathsLoadError] = useState(null)
 
   React.useEffect(() => {
-    // Demo / view-as: no real location → keep prior behavior (show all hardcoded).
-    if (!locationId) {
-      const all = PATH_STYLES.filter(s => s.id !== 'custom').map(s => s.id)
-      setAvailableMoveStyleIds(all)
-      setAvailableGeneralStyleIds(all)
-      return
-    }
     let cancelled = false
     ;(async () => {
       try {
-        const res = await fetch(`/api/locations/${locationId}/drip-paths`)
+        const res = await fetch('/api/drip-paths/masters')
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const json = await res.json()
         if (cancelled) return
-        const paths = Array.isArray(json?.paths) ? json.paths : []
+        const masters = Array.isArray(json?.masters) ? json.masters : []
         const move = new Set()
         const gen  = new Set()
-        for (const p of paths) {
+        for (const p of masters) {
           if (!p?.path_key || p?.is_active === false) continue
-          if (p.path_key.startsWith('move-')) {
-            move.add('path-' + p.path_key.slice('move-'.length))
-          } else if (p.path_key.startsWith('general-')) {
-            gen.add('path-' + p.path_key.slice('general-'.length))
+          if (p.path_key.startsWith('moving-')) {
+            move.add('path-' + p.path_key.slice('moving-'.length))
+          } else if (p.path_key.startsWith('organizing-')) {
+            gen.add('path-' + p.path_key.slice('organizing-'.length))
           }
         }
         setAvailableMoveStyleIds(Array.from(move))
         setAvailableGeneralStyleIds(Array.from(gen))
       } catch (err) {
         if (cancelled) return
-        console.error('[OnboardingPathsEditor] paths fetch failed:', err)
+        console.error('[OnboardingPathsEditor] masters fetch failed:', err)
         setPathsLoadError(err?.message || 'Failed to load paths')
-        // Defensive fallback: keep the user unblocked. They can still finish
-        // onboarding and adjust in Settings → Paths if anything looks off.
+        // Defensive fallback: assume all four styles are available — the
+        // user can still finish onboarding and adjust in Settings → Paths.
         const all = PATH_STYLES.filter(s => s.id !== 'custom').map(s => s.id)
         setAvailableMoveStyleIds(all)
         setAvailableGeneralStyleIds(all)
       }
     })()
     return () => { cancelled = true }
-  }, [locationId])
+  }, [])
 
-  // Per-section options: only show styles that have a matching DB drip_paths
-  // row, so any selection translates to a real path_key the drip lookup can
-  // find. With current launch seed this resolves to just Path A per section.
-  const movePathOptions    = PATH_STYLES.filter(s => s.id !== 'custom' && (availableMoveStyleIds    || []).includes(s.id))
-  const generalPathOptions = PATH_STYLES.filter(s => s.id !== 'custom' && (availableGeneralStyleIds || []).includes(s.id))
+  // Per-section options: show every master style + always include 'custom'
+  // so owners can defer the choice ("Configure in Settings → Paths later").
+  const customStyle = PATH_STYLES.find(s => s.id === 'custom')
+  const movePathOptions = [
+    ...PATH_STYLES.filter(s => s.id !== 'custom' && (availableMoveStyleIds || []).includes(s.id)),
+    ...(customStyle ? [customStyle] : []),
+  ]
+  const generalPathOptions = [
+    ...PATH_STYLES.filter(s => s.id !== 'custom' && (availableGeneralStyleIds || []).includes(s.id)),
+    ...(customStyle ? [customStyle] : []),
+  ]
   const pathsLoading = availableMoveStyleIds === null || availableGeneralStyleIds === null
 
   const needsCalendar = PATH_STYLES.find(p=>p.id===selectedMove)?.tags?.includes('calendar')
@@ -11548,14 +11554,15 @@ function OnboardingPathsEditor({ onComplete }) {
   if (wizardStep==='move') return (
     <div style={{ paddingTop:'12px', display:'grid', gap:'12px' }}>
       {pathsLoading ? (
-        <div style={{ padding:'24px', textAlign:'center', color:'#8a9e9a', fontSize:'13px' }}>Loading your location's paths…</div>
+        <div style={{ padding:'24px', textAlign:'center', color:'#8a9e9a', fontSize:'13px' }}>Loading paths…</div>
       ) : movePathOptions.length === 0 ? (
         <div style={{ padding:'14px', background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'10px', fontSize:'12px', color:'#7f1d1d', lineHeight:1.5 }}>
-          No move-job paths are set up for this location yet. Contact support — your location needs at least one <code>move-*</code> drip path seeded before onboarding can finish.
+          No master Moving paths found. Contact support — at least one <code>moving-*</code> master drip path must be seeded (see migrations/seed_master_drip_paths.sql).
         </div>
       ) : (
-        <PathChooser title="Move-In & Move-Out Jobs" emoji="📦" current={selectedMove} onSelect={setSelectedMove} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={movePathOptions} getSteps={getSteps} getTemplate={getTemplate} />
+        <PathChooser title="For Moving projects, use this path" emoji="📦" current={selectedMove} onSelect={setSelectedMove} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={movePathOptions} getSteps={getSteps} getTemplate={getTemplate} />
       )}
+      <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center' }}>Templates and timing can be customized anytime in Settings → Templates</p>
       <div style={{ display:'flex', gap:'8px' }}>
         <button onClick={()=>setWizardStep('intro')} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>← Back</button>
         <button onClick={()=>{ if(selectedMove){ setPreviewPath(null); setWizardStep('general') } }} disabled={!selectedMove}
@@ -11569,14 +11576,15 @@ function OnboardingPathsEditor({ onComplete }) {
   if (wizardStep==='general') return (
     <div style={{ paddingTop:'12px', display:'grid', gap:'12px' }}>
       {pathsLoading ? (
-        <div style={{ padding:'24px', textAlign:'center', color:'#8a9e9a', fontSize:'13px' }}>Loading your location's paths…</div>
+        <div style={{ padding:'24px', textAlign:'center', color:'#8a9e9a', fontSize:'13px' }}>Loading paths…</div>
       ) : generalPathOptions.length === 0 ? (
         <div style={{ padding:'14px', background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'10px', fontSize:'12px', color:'#7f1d1d', lineHeight:1.5 }}>
-          No organizing-job paths are set up for this location yet. Contact support — your location needs at least one <code>general-*</code> drip path seeded before onboarding can finish.
+          No master Organizing paths found. Contact support — at least one <code>organizing-*</code> master drip path must be seeded (see migrations/seed_master_drip_paths.sql).
         </div>
       ) : (
-        <PathChooser title="Organizing Projects (Kitchens, Closets, etc.)" emoji="🏠" current={selectedGeneral} onSelect={setSelectedGeneral} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={generalPathOptions} getSteps={getSteps} getTemplate={getTemplate} />
+        <PathChooser title="For Organizing projects, use this path" emoji="🏠" current={selectedGeneral} onSelect={setSelectedGeneral} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={generalPathOptions} getSteps={getSteps} getTemplate={getTemplate} />
       )}
+      <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center' }}>Templates and timing can be customized anytime in Settings → Templates</p>
       <div style={{ display:'flex', gap:'8px' }}>
         <button onClick={()=>{ setPreviewPath(null); setWizardStep('move') }} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>← Back</button>
         <button onClick={()=>selectedGeneral&&setWizardStep('confirm')} disabled={!selectedGeneral}
@@ -14484,52 +14492,55 @@ Bee Organized {{location_name}}`,
   },
 ]
 
+// Generic 3-step summary used by the onboarding picker and Settings → Paths
+// preview. Real per-master content lives in drip_path_steps.subject/body for
+// the 8 seeded masters (see migrations/seed_master_drip_paths.sql) and is
+// shown via Admin → Content + Settings → Templates editors. The keys here
+// match the new master path_keys; the templateIds remain pointing at the
+// legacy t1/t2/… template rows so the preview cards keep rendering until
+// the picker preview is migrated to fetch from /api/drip-paths/masters.
 const DEFAULT_PATH_STEPS = {
-  // Move paths
-  'move-a': [
-    { id:'ma1', order:1, name:'Welcome',           type:'email', delay:'Immediately',  templateId:'t1'  },
-    { id:'ma2', order:2, name:'Availability + Rates', type:'email', delay:'1 day later',  templateId:'ta1' },
-    { id:'ma3', order:3, name:'Follow-up Text',    type:'sms',   delay:'3 days later', templateId:'t6'  },
+  // Moving paths
+  'moving-a': [
+    { id:'ma1', order:1, name:'Thank you for reaching out', type:'email', delay:'Immediately',  templateId:'t1'  },
+    { id:'ma2', order:2, name:'Following up',               type:'email', delay:'5 days later', templateId:'ta1' },
+    { id:'ma3', order:3, name:'Still interested?',          type:'email', delay:'30 days later', templateId:'t9' },
   ],
-  'move-b': [
-    { id:'mb1', order:1, name:'Welcome',           type:'email', delay:'Immediately',  templateId:'t1'  },
-    { id:'mb2', order:2, name:'Calendar + Rates',  type:'email', delay:'1 day later',  templateId:'tb1' },
-    { id:'mb3', order:3, name:'Reminder Text',     type:'sms',   delay:'3 days later', templateId:'t5'  },
+  'moving-b': [
+    { id:'mb1', order:1, name:'Thank you for reaching out', type:'email', delay:'Immediately',  templateId:'t1'  },
+    { id:'mb2', order:2, name:'Following up',               type:'email', delay:'5 days later', templateId:'tb1' },
+    { id:'mb3', order:3, name:'Still interested?',          type:'email', delay:'30 days later', templateId:'t9' },
   ],
-  'move-c': [
-    { id:'mc1', order:1, name:'Welcome',           type:'email', delay:'Immediately',  templateId:'t1'  },
-    { id:'mc2', order:2, name:'Availability Check',type:'email', delay:'1 day later',  templateId:'tc1' },
-    { id:'mc3', order:3, name:'Follow-up Text',    type:'sms',   delay:'3 days later', templateId:'t6'  },
+  'moving-c': [
+    { id:'mc1', order:1, name:'Thank you for reaching out', type:'email', delay:'Immediately',  templateId:'t1'  },
+    { id:'mc2', order:2, name:'Following up',               type:'email', delay:'5 days later', templateId:'tc1' },
+    { id:'mc3', order:3, name:'Still interested?',          type:'email', delay:'30 days later', templateId:'t9' },
   ],
-  'move-d': [
-    { id:'md1', order:1, name:'Welcome',           type:'email', delay:'Immediately',  templateId:'t1'  },
-    { id:'md2', order:2, name:'Avail + Calendar + Phone', type:'email', delay:'1 day later', templateId:'td1' },
-    { id:'md3', order:3, name:'Follow-up Text',    type:'sms',   delay:'3 days later', templateId:'t6'  },
+  'moving-d': [
+    { id:'md1', order:1, name:'Thank you for reaching out', type:'email', delay:'Immediately',  templateId:'t1'  },
+    { id:'md2', order:2, name:'Following up',               type:'email', delay:'5 days later', templateId:'td1' },
+    { id:'md3', order:3, name:'Still interested?',          type:'email', delay:'30 days later', templateId:'t9' },
   ],
-  // General paths
-  'general-a': [
-    { id:'ga1', order:1, name:'Welcome',           type:'email', delay:'Immediately',  templateId:'t1'  },
-    { id:'ga2', order:2, name:'How We Help',       type:'email', delay:'2 days later', templateId:'t2'  },
-    { id:'ga3', order:3, name:'Availability + Rates', type:'email', delay:'4 days later', templateId:'ta2' },
-    { id:'ga4', order:4, name:'Final Follow-up',   type:'email', delay:'7 days later', templateId:'t4'  },
+  // Organizing paths
+  'organizing-a': [
+    { id:'oa1', order:1, name:'Thank you for reaching out', type:'email', delay:'Immediately',  templateId:'t1'  },
+    { id:'oa2', order:2, name:'Following up',               type:'email', delay:'5 days later', templateId:'ta2' },
+    { id:'oa3', order:3, name:'Still interested?',          type:'email', delay:'30 days later', templateId:'t9' },
   ],
-  'general-b': [
-    { id:'gb1', order:1, name:'Welcome',           type:'email', delay:'Immediately',  templateId:'t1'  },
-    { id:'gb2', order:2, name:'How We Help',       type:'email', delay:'2 days later', templateId:'t2'  },
-    { id:'gb3', order:3, name:'Calendar + Rates',  type:'email', delay:'4 days later', templateId:'tb2' },
-    { id:'gb4', order:4, name:'Final Follow-up',   type:'email', delay:'7 days later', templateId:'t4'  },
+  'organizing-b': [
+    { id:'ob1', order:1, name:'Thank you for reaching out', type:'email', delay:'Immediately',  templateId:'t1'  },
+    { id:'ob2', order:2, name:'Following up',               type:'email', delay:'5 days later', templateId:'tb2' },
+    { id:'ob3', order:3, name:'Still interested?',          type:'email', delay:'30 days later', templateId:'t9' },
   ],
-  'general-c': [
-    { id:'gc1', order:1, name:'Welcome',           type:'email', delay:'Immediately',  templateId:'t1'  },
-    { id:'gc2', order:2, name:'How We Help',       type:'email', delay:'2 days later', templateId:'t2'  },
-    { id:'gc3', order:3, name:'Availability Check',type:'email', delay:'4 days later', templateId:'tc2' },
-    { id:'gc4', order:4, name:'Final Follow-up',   type:'email', delay:'7 days later', templateId:'t4'  },
+  'organizing-c': [
+    { id:'oc1', order:1, name:'Thank you for reaching out', type:'email', delay:'Immediately',  templateId:'t1'  },
+    { id:'oc2', order:2, name:'Following up',               type:'email', delay:'5 days later', templateId:'tc2' },
+    { id:'oc3', order:3, name:'Still interested?',          type:'email', delay:'30 days later', templateId:'t9' },
   ],
-  'general-d': [
-    { id:'gd1', order:1, name:'Welcome',           type:'email', delay:'Immediately',  templateId:'t1'  },
-    { id:'gd2', order:2, name:'How We Help',       type:'email', delay:'2 days later', templateId:'t2'  },
-    { id:'gd3', order:3, name:'Avail + Calendar + Phone', type:'email', delay:'4 days later', templateId:'td2' },
-    { id:'gd4', order:4, name:'Final Follow-up',   type:'email', delay:'7 days later', templateId:'t4'  },
+  'organizing-d': [
+    { id:'od1', order:1, name:'Thank you for reaching out', type:'email', delay:'Immediately',  templateId:'t1'  },
+    { id:'od2', order:2, name:'Following up',               type:'email', delay:'5 days later', templateId:'td2' },
+    { id:'od3', order:3, name:'Still interested?',          type:'email', delay:'30 days later', templateId:'t9' },
   ],
   'custom': [],
 }
@@ -15023,9 +15034,9 @@ const DEFAULT_SETTINGS = {
     notifEmails:    [],
   },
   paths: {
-    moveDefault:    'move-a',
-    generalDefault: 'general-a',
-    active: ['move-a','move-b','move-c','move-d','general-a','general-b','general-c','general-d','custom'],
+    moveDefault:    'moving-a',
+    generalDefault: 'organizing-a',
+    active: ['moving-a','moving-b','moving-c','moving-d','organizing-a','organizing-b','organizing-c','organizing-d','custom'],
   },
   notifications: {
     newLead:true,          newLeadChannels:['email','sms'],
@@ -15075,16 +15086,21 @@ const PATH_STYLES = [
   },
 ]
 
+// IDs map 1:1 to the master drip_paths.path_key values seeded by
+// migrations/seed_master_drip_paths.sql. projectType 'general' is the
+// internal drip_category key (kept for backward compatibility with
+// existing project_types.attrs.drip_category lookups) and surfaces as
+// "Organizing" in all UI labels.
 const DRIP_PATHS_CONFIG = [
-  { id:'move-a',    name:'Move · New Client Path A',    icon:'📦', projectType:'move',    styleId:'path-a', desc:'Move clients - availability check + rates' },
-  { id:'move-b',    name:'Move · New Client Path B',    icon:'📦', projectType:'move',    styleId:'path-b', desc:'Move clients - calendar link + rates' },
-  { id:'move-c',    name:'Move · Path C',    icon:'📦', projectType:'move',    styleId:'path-c', desc:'Move clients - availability check only' },
-  { id:'move-d',    name:'Move · Path D',    icon:'📦', projectType:'move',    styleId:'path-d', desc:'Move clients - availability + calendar + phone' },
-  { id:'general-a', name:'Organizing · New Client Path A', icon:'🏠', projectType:'general', styleId:'path-a', desc:'All other projects - availability check + rates' },
-  { id:'general-b', name:'Organizing · New Client Path B', icon:'🏠', projectType:'general', styleId:'path-b', desc:'All other projects - calendar link + rates' },
-  { id:'general-c', name:'Organizing · New Client Path C', icon:'🏠', projectType:'general', styleId:'path-c', desc:'All other projects - availability check only' },
-  { id:'general-d', name:'Organizing · New Client Path D', icon:'🏠', projectType:'general', styleId:'path-d', desc:'All other projects - availability + calendar + phone' },
-  { id:'custom',    name:'Custom',           icon:'✏️', projectType:'any',     styleId:'custom', desc:'Build your own sequence' },
+  { id:'moving-a',     name:'Moving — Path A',     icon:'📦', projectType:'move',    styleId:'path-a', desc:'Moving clients — availability check + rates' },
+  { id:'moving-b',     name:'Moving — Path B',     icon:'📦', projectType:'move',    styleId:'path-b', desc:'Moving clients — calendar link + rates' },
+  { id:'moving-c',     name:'Moving — Path C',     icon:'📦', projectType:'move',    styleId:'path-c', desc:'Moving clients — availability check only' },
+  { id:'moving-d',     name:'Moving — Path D',     icon:'📦', projectType:'move',    styleId:'path-d', desc:'Moving clients — availability + calendar + phone' },
+  { id:'organizing-a', name:'Organizing — Path A', icon:'🏠', projectType:'general', styleId:'path-a', desc:'Organizing clients — availability check + rates' },
+  { id:'organizing-b', name:'Organizing — Path B', icon:'🏠', projectType:'general', styleId:'path-b', desc:'Organizing clients — calendar link + rates' },
+  { id:'organizing-c', name:'Organizing — Path C', icon:'🏠', projectType:'general', styleId:'path-c', desc:'Organizing clients — availability check only' },
+  { id:'organizing-d', name:'Organizing — Path D', icon:'🏠', projectType:'general', styleId:'path-d', desc:'Organizing clients — availability + calendar + phone' },
+  { id:'custom',       name:'Custom',              icon:'✏️', projectType:'any',     styleId:'custom', desc:'Configure in Settings → Paths later' },
 ]
 
 // ─── Add Step Inline ──────────────────────────────────────────────────────────
@@ -16949,7 +16965,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     return () => { cancelled = true }
   }, [])
   const [pathSteps, setPathSteps]   = useState(DEFAULT_PATH_STEPS)
-  // dbPaths is keyed by path_key (e.g. 'general-a') so the UI's existing
+  // dbPaths is keyed by path_key (e.g. 'organizing-a') so the UI's existing
   // pathId mental model maps 1:1. Each entry holds the DB row's id so
   // saves know whether to insert or update. Populated by the load effect
   // below for real franchise locations only.
@@ -17497,8 +17513,8 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             </div>
 
             {[
-              { key:'moveDefault',    label:'📦 Move Projects',   desc:'Move-In and Move-Out',    filter:'move'    },
-              { key:'generalDefault', label:'🏠 Organizing Projects', desc:'Closet, Kitchen, Full Home, etc.', filter:'general' },
+              { key:'moveDefault',    label:'📦 Moving Projects',     desc:'Move-In and Move-Out',                 filter:'moving',     projectType:'move' },
+              { key:'generalDefault', label:'🏠 Organizing Projects', desc:'Closet, Kitchen, Full Home, etc.',     filter:'organizing', projectType:'general' },
             ].map(section=>(
               <div key={section.key}>
                 <SectionHeader title={section.label} desc={section.desc} />
