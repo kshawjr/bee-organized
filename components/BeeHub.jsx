@@ -5253,6 +5253,38 @@ function PersonPanel({
             willChange: "transform",
           },
         },
+        // Sticky close X pinned absolute to top-right of the sheet so it's
+        // never subject to header flex sizing / overflow. Lives in front of
+        // all content via z-index. 44×44 tap target, mobile + desktop.
+        React.createElement(
+          "button",
+          {
+            onClick: onClose,
+            "aria-label": "Close",
+            style: {
+              position: "absolute",
+              top: "8px",
+              right: "8px",
+              zIndex: 20,
+              width: "44px",
+              height: "44px",
+              borderRadius: "50%",
+              background: "rgba(255,255,255,0.92)",
+              border: "1px solid rgba(0,0,0,0.08)",
+              boxShadow: "0 2px 8px rgba(26,46,43,0.12)",
+              color: "#1a2e2b",
+              fontSize: "24px",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 0,
+              lineHeight: 1,
+              fontFamily: "inherit",
+            },
+          },
+          "\xD7",
+        ),
         React.createElement(
           "div",
           {
@@ -6095,6 +6127,10 @@ function PersonPanel({
                 ),
               ),
             ),
+            // Close X moved to absolute-positioned button on the sheet
+            // (top of PersonPanel) \u2014 it kept getting pushed off-screen
+            // here on narrow viewports. Prev/Next nav stays inline; right-
+            // side reserved space (44px) keeps it clear of the absolute X.
             React.createElement(
               "div",
               {
@@ -6104,6 +6140,7 @@ function PersonPanel({
                   gap: "4px",
                   alignSelf: "flex-start",
                   flexShrink: 0,
+                  paddingRight: "44px",
                 },
               },
               (onPrev || onNext) &&
@@ -6114,7 +6151,6 @@ function PersonPanel({
                       display: "flex",
                       alignItems: "center",
                       gap: "2px",
-                      marginRight: "4px",
                     },
                   },
                   React.createElement(
@@ -6179,30 +6215,6 @@ function PersonPanel({
                     "\u203A",
                   ),
                 ),
-              React.createElement(
-                "button",
-                {
-                  onClick: onClose,
-                  "aria-label": "Close",
-                  style: {
-                    background: "none",
-                    border: "none",
-                    fontSize: "26px",
-                    color: "#4a5e5a",
-                    cursor: "pointer",
-                    width: "44px",
-                    height: "44px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: 0,
-                    flexShrink: 0,
-                    marginRight: "-8px",
-                    lineHeight: 1,
-                  },
-                },
-                "\xD7",
-              ),
             ),
           ),
           (() => {
