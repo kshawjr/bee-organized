@@ -41,6 +41,26 @@ interface SendEmailDirectArgs {
 // Replaces {{variable}} placeholders in a subject + body. Missing or
 // null/undefined values substitute as empty string so unrendered
 // "{{first_name}}" never reaches the recipient.
+//
+// Variable inventory lives in docs/bee_organized_email_content.md. The
+// canonical Bee Hub variable names mirror what the master drip templates
+// (seed_master_drip_paths.sql) and standalone master templates (Welcome,
+// Opportunity Stages) reference verbatim. Sources:
+//
+//   first_name           lead.first_name (or first word of lead.name)
+//   organizer_name       location.sender_name        (legacy — kept for old templates)
+//   location_name        location.name
+//   phone                location.phone, fallback owner.phone (legacy)
+//   booking_link         location.calendar_link      (legacy alias of book_assessment_link)
+//   service_area         "City, State" from location  (legacy)
+//   owner_name           lead.assigned_to hub_user.full_name
+//   owner_first_name     first word of owner_name
+//   location_owner_name  location's owner-role hub_user.full_name
+//   rate_per_hour        location.rate_per_hour
+//   location_phone       location.phone (no fallback — alias used by new templates)
+//   book_assessment_link location.calendar_link (alias used by new templates)
+//   reviews_link         location.reviews_link
+//   partner_name         (Partner Drip — Phase 2, currently no-op)
 export interface RenderContext {
   first_name?: string | null
   organizer_name?: string | null
@@ -48,6 +68,14 @@ export interface RenderContext {
   phone?: string | null
   booking_link?: string | null
   service_area?: string | null
+  owner_name?: string | null
+  owner_first_name?: string | null
+  location_owner_name?: string | null
+  rate_per_hour?: string | null
+  location_phone?: string | null
+  book_assessment_link?: string | null
+  reviews_link?: string | null
+  partner_name?: string | null
 }
 
 const VAR_RE = /\{\{(\w+)\}\}/g

@@ -2,13 +2,20 @@
 //
 // GET /api/cron/send-drips — Vercel cron entrypoint, fires every hour.
 //
-// Pulls every lead_drip_progress row whose next_send_at <= now() (and is
-// not paused/stopped/completed), then delegates each row to
-// lib/drip-send sendDripStepForRow which renders + sends + advances.
+// Three queues processed per run:
 //
-// The same per-step logic is reused inline by /api/leads on lead create
-// so step 1 fires within seconds; this cron is the hourly catch-up for
-// paused/resumed leads, future scheduled steps, and any inline failures.
+//   1. lead_drip_progress     — normal multi-step drip path emails
+//      (sendDripStepForRow advances current_step and schedules next)
+//
+//   2. leads.welcome_email_*  — single Welcome Email fired 24h after Email 1
+//      of any new lead drip (sendWelcomeEmail sets welcome_email_sent_at)
+//
+//   3. scheduled_stage_emails — Opportunity Stages drip emails fired on
+//      lead stage transitions (sendStageEmail sets sent_at)
+//
+// The same per-drip-step logic is reused inline by /api/leads on lead
+// create so step 1 fires within seconds; this cron is the hourly catch-up
+// for paused/resumed leads, future scheduled steps, and any inline failures.
 //
 // Auth: Vercel cron sends `Authorization: Bearer <CRON_SECRET>`. For
 // manual testing in dev, also accepts `?secret=<value>`.
@@ -19,6 +26,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseService } from '@/lib/supabase-service'
 import { sendDripStepForRow } from '@/lib/drip-send'
+import { sendWelcomeEmail } from '@/lib/welcome-email'
+import { sendStageEmail } from '@/lib/stage-emails'
 
 // Prevent Next.js from trying to prerender this route at build time.
 export const dynamic = 'force-dynamic'
@@ -66,7 +75,7 @@ export async function GET(req: NextRequest) {
   let sent = 0
   let skipped = 0
   let failed = 0
-  const errors: Array<{ progressId: string; reason: string }> = []
+  const errors: Array<{ kind: string; id: string; reason: string }> = []
 
   for (const row of dueRows ?? []) {
     const result = await sendDripStepForRow(row as any)
@@ -78,18 +87,82 @@ export async function GET(req: NextRequest) {
       skipped++
     } else if (result.error) {
       failed++
-      errors.push({ progressId: row.id, reason: result.error })
+      errors.push({ kind: 'drip', id: row.id, reason: result.error })
     } else {
       // No-op (state changed between the batch query and the per-row call).
       skipped++
     }
   }
 
+  // ─── Queue 2: Welcome emails ─────────────────────────────────────
+  let welcomeSent = 0
+  let welcomeSkipped = 0
+  let welcomeFailed = 0
+
+  const { data: welcomeDue, error: welcomeErr } = await supabaseService
+    .from('leads')
+    .select('id')
+    .lte('welcome_email_scheduled_at', nowIso)
+    .is('welcome_email_sent_at', null)
+    .limit(BATCH_LIMIT)
+
+  if (welcomeErr) {
+    console.error('[cron] welcome-due query failed', welcomeErr)
+  } else {
+    for (const lead of welcomeDue ?? []) {
+      const result = await sendWelcomeEmail(lead.id)
+      if (result.sent) {
+        welcomeSent++
+      } else if (result.error === 'no_email' || result.error === 'already_sent') {
+        welcomeSkipped++
+      } else if (result.error) {
+        welcomeFailed++
+        errors.push({ kind: 'welcome', id: lead.id, reason: result.error })
+      } else {
+        welcomeSkipped++
+      }
+    }
+  }
+
+  // ─── Queue 3: Stage emails (opportunity stage scheduled queue) ────
+  let stageSent = 0
+  let stageSkipped = 0
+  let stageFailed = 0
+
+  const { data: stageDue, error: stageErr } = await supabaseService
+    .from('scheduled_stage_emails')
+    .select('id')
+    .lte('send_at', nowIso)
+    .is('sent_at', null)
+    .is('cancelled_at', null)
+    .limit(BATCH_LIMIT)
+
+  if (stageErr) {
+    console.error('[cron] stage-due query failed', stageErr)
+  } else {
+    for (const row of stageDue ?? []) {
+      const result = await sendStageEmail(row.id)
+      if (result.sent) {
+        stageSent++
+      } else if (
+        result.error === 'no_email' ||
+        result.error === 'already_sent' ||
+        result.error === 'cancelled'
+      ) {
+        stageSkipped++
+      } else if (result.error) {
+        stageFailed++
+        errors.push({ kind: 'stage', id: row.id, reason: result.error })
+      } else {
+        stageSkipped++
+      }
+    }
+  }
+
   return NextResponse.json({
-    sent,
-    skipped,
-    failed,
-    considered: dueRows?.length ?? 0,
-    errors: errors.slice(0, 20),
+    drips:   { sent, skipped, failed, considered: dueRows?.length ?? 0 },
+    welcome: { sent: welcomeSent, skipped: welcomeSkipped, failed: welcomeFailed, considered: welcomeDue?.length ?? 0 },
+    stage:   { sent: stageSent,   skipped: stageSkipped,   failed: stageFailed,   considered: stageDue?.length ?? 0 },
+    errors:  errors.slice(0, 20),
   })
 }

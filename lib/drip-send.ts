@@ -13,6 +13,7 @@
 import { supabaseService } from './supabase-service'
 import { sendEmail, renderTemplate, type RenderContext } from './resend'
 import { nextSendAt } from './drip-time'
+import { scheduleWelcomeEmail } from './welcome-email'
 
 export type SendDripResult = {
   sent: boolean
@@ -92,7 +93,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // Lead
   const { data: lead, error: leadErr } = await supabaseService
     .from('leads')
-    .select('id, name, first_name, email, location_uuid')
+    .select('id, name, first_name, email, location_uuid, assigned_to')
     .eq('id', row.lead_id)
     .maybeSingle()
 
@@ -115,10 +116,12 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     return { sent: false, error: 'non_email_channel', advanced_to_step: advancedTo }
   }
 
-  // Location (sender context + tz for scheduling next step)
+  // Location (sender context + tz for scheduling next step). rate_per_hour
+  // and reviews_link are new variables exposed to render context for the
+  // 8 master path templates + opp-stage emails.
   const { data: loc, error: locErr } = await supabaseService
     .from('locations')
-    .select('id, name, sender_name, phone, calendar_link, city, state, timezone')
+    .select('id, name, sender_name, phone, calendar_link, reviews_link, rate_per_hour, city, state, timezone')
     .eq('id', path.location_uuid)
     .maybeSingle()
 
@@ -126,18 +129,33 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     return { sent: false, error: `loc_lookup: ${locErr?.message ?? 'missing'}` }
   }
 
-  // Phone fallback: location.phone, else owner's hub_users.phone.
-  let phone: string | null = loc.phone ?? null
-  if (!phone) {
-    const { data: owner } = await supabaseService
+  // Location owner (one query, two uses: phone fallback + location_owner_name).
+  const { data: locOwner } = await supabaseService
+    .from('hub_users')
+    .select('full_name, phone')
+    .eq('location_id', loc.id)
+    .eq('role', 'owner')
+    .limit(1)
+    .maybeSingle()
+
+  const phone: string | null = loc.phone ?? locOwner?.phone ?? null
+  const locationOwnerName = locOwner?.full_name ?? null
+
+  // Assigned-to user (drives {{owner_name}} / {{owner_first_name}} for the
+  // *request owner* — that's what Zoho's "Request Owner" mapped to and what
+  // the email content references when it talks about the person reaching
+  // out to the lead). Falls back to the location owner if unassigned, so
+  // {{owner_name}} is never blank.
+  let ownerName: string | null = locationOwnerName
+  if (lead.assigned_to) {
+    const { data: assignee } = await supabaseService
       .from('hub_users')
-      .select('phone')
-      .eq('location_id', loc.id)
-      .eq('role', 'owner')
-      .limit(1)
+      .select('full_name')
+      .eq('id', lead.assigned_to)
       .maybeSingle()
-    phone = owner?.phone ?? null
+    if (assignee?.full_name) ownerName = assignee.full_name
   }
+  const ownerFirstName = ownerName ? ownerName.trim().split(/\s+/)[0] || null : null
 
   // Subject/body: step override > linked template
   const linkedTpl = (Array.isArray((step as any).templates)
@@ -169,6 +187,13 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     phone,
     booking_link: loc.calendar_link,
     service_area: serviceArea,
+    owner_name: ownerName,
+    owner_first_name: ownerFirstName,
+    location_owner_name: locationOwnerName,
+    rate_per_hour: loc.rate_per_hour,
+    location_phone: loc.phone,
+    book_assessment_link: loc.calendar_link,
+    reviews_link: loc.reviews_link,
   }
 
   const rendered = renderTemplate({ subject: subjectSource, body: bodySource }, ctx)
@@ -187,6 +212,13 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   if (!result.success) {
     // Leave row unchanged so the next cron tick retries.
     return { sent: false, error: `send: ${result.error}` }
+  }
+
+  // Step 1 of any new-lead drip triggers the 24h Welcome Email. Fire and
+  // forget — a failed schedule is logged inside scheduleWelcomeEmail and
+  // doesn't block drip progression.
+  if (row.current_step === 1) {
+    await scheduleWelcomeEmail(row.lead_id)
   }
 
   const advancedTo = await advanceOrComplete(row.id, path.id, row.current_step, loc.timezone)

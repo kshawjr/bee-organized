@@ -1,0 +1,193 @@
+// lib/welcome-email.ts
+//
+// Auto Welcome Email — single corp master template that fires 24 hours
+// after Email 1 of any new-lead drip path. Scheduled by drip-send when
+// step 1 of a drip fires successfully; sent by the cron when due.
+//
+// Schema (drip_followup_infrastructure.sql):
+//   leads.welcome_email_scheduled_at — when to fire (set by scheduleWelcomeEmail)
+//   leads.welcome_email_sent_at      — when it actually sent (set by sendWelcomeEmail)
+//
+// Both NULL = no welcome pending or sent (steady state for leads that
+// never went into a drip, e.g. junk-on-create).
+
+import { supabaseService } from './supabase-service'
+import { sendEmail, renderTemplate, type RenderContext } from './resend'
+import { bodyToHtml } from './drip-send'
+
+const WELCOME_LEGACY_ID = 'welcome'
+const WELCOME_DELAY_MS = 24 * 60 * 60 * 1000  // 24 hours
+
+// ──────────────────────────────────────────────────────────────────────
+// Schedule
+// ──────────────────────────────────────────────────────────────────────
+// Idempotent: skips leads that already have welcome_email_sent_at set
+// (already sent — don't reschedule) or welcome_email_scheduled_at set
+// (already pending — don't push it out). Caller is fire-and-forget.
+
+export async function scheduleWelcomeEmail(leadId: string): Promise<void> {
+  try {
+    const scheduledAt = new Date(Date.now() + WELCOME_DELAY_MS).toISOString()
+
+    const { error } = await supabaseService
+      .from('leads')
+      .update({ welcome_email_scheduled_at: scheduledAt })
+      .eq('id', leadId)
+      .is('welcome_email_sent_at', null)
+      .is('welcome_email_scheduled_at', null)
+
+    if (error) {
+      console.error('[welcome] scheduleWelcomeEmail: update failed', { leadId, error })
+    }
+  } catch (err) {
+    console.error('[welcome] scheduleWelcomeEmail: unexpected error', { leadId, err })
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Send
+// ──────────────────────────────────────────────────────────────────────
+// Render the Welcome master template against the lead's context and
+// send. Sets welcome_email_sent_at on success (idempotent: stops the
+// row from being picked up again by the cron). Records a 'drip'
+// touchpoint so it shows up in the Outreach timeline.
+
+export type SendWelcomeResult = {
+  sent: boolean
+  error?: string
+}
+
+export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResult> {
+  // Lead
+  const { data: lead, error: leadErr } = await supabaseService
+    .from('leads')
+    .select('id, name, first_name, email, location_uuid, assigned_to, welcome_email_sent_at')
+    .eq('id', leadId)
+    .maybeSingle()
+
+  if (leadErr || !lead) {
+    return { sent: false, error: `lead_lookup: ${leadErr?.message ?? 'missing'}` }
+  }
+
+  // Already sent (cron raced itself, or this was called twice). No-op.
+  if (lead.welcome_email_sent_at) return { sent: false, error: 'already_sent' }
+
+  // No email → mark sent so it never gets retried, log skip.
+  if (!lead.email || typeof lead.email !== 'string' || !lead.email.trim()) {
+    await supabaseService
+      .from('leads')
+      .update({ welcome_email_sent_at: new Date().toISOString() })
+      .eq('id', leadId)
+    return { sent: false, error: 'no_email' }
+  }
+
+  // Location
+  if (!lead.location_uuid) return { sent: false, error: 'no_location' }
+  const { data: loc, error: locErr } = await supabaseService
+    .from('locations')
+    .select('id, name, sender_name, phone, calendar_link, reviews_link, rate_per_hour, city, state')
+    .eq('id', lead.location_uuid)
+    .maybeSingle()
+
+  if (locErr || !loc) {
+    return { sent: false, error: `loc_lookup: ${locErr?.message ?? 'missing'}` }
+  }
+
+  // Welcome template (master, location_uuid IS NULL)
+  const { data: tpl, error: tplErr } = await supabaseService
+    .from('templates')
+    .select('subject, body')
+    .eq('legacy_id', WELCOME_LEGACY_ID)
+    .is('location_uuid', null)
+    .maybeSingle()
+
+  if (tplErr || !tpl) {
+    return { sent: false, error: `template_lookup: ${tplErr?.message ?? 'missing'}` }
+  }
+
+  // Owners (location owner + assigned-to user)
+  const { data: locOwner } = await supabaseService
+    .from('hub_users')
+    .select('full_name')
+    .eq('location_id', loc.id)
+    .eq('role', 'owner')
+    .limit(1)
+    .maybeSingle()
+  const locationOwnerName = locOwner?.full_name ?? null
+
+  let ownerName: string | null = locationOwnerName
+  if (lead.assigned_to) {
+    const { data: assignee } = await supabaseService
+      .from('hub_users')
+      .select('full_name')
+      .eq('id', lead.assigned_to)
+      .maybeSingle()
+    if (assignee?.full_name) ownerName = assignee.full_name
+  }
+  const ownerFirstName = ownerName ? ownerName.trim().split(/\s+/)[0] || null : null
+
+  const firstName =
+    lead.first_name && lead.first_name.trim()
+      ? lead.first_name.trim()
+      : (lead.name ?? '').trim().split(/\s+/)[0] || null
+
+  const serviceArea =
+    loc.city && loc.state ? `${loc.city}, ${loc.state}` : loc.city || loc.state || null
+
+  const ctx: RenderContext = {
+    first_name: firstName,
+    organizer_name: loc.sender_name,
+    location_name: loc.name,
+    phone: loc.phone,
+    booking_link: loc.calendar_link,
+    service_area: serviceArea,
+    owner_name: ownerName,
+    owner_first_name: ownerFirstName,
+    location_owner_name: locationOwnerName,
+    rate_per_hour: loc.rate_per_hour,
+    location_phone: loc.phone,
+    book_assessment_link: loc.calendar_link,
+    reviews_link: loc.reviews_link,
+  }
+
+  const rendered = renderTemplate({ subject: tpl.subject, body: tpl.body }, ctx)
+  const html = bodyToHtml(rendered.body)
+
+  const result = await sendEmail({
+    locationId: loc.id,
+    to: lead.email.trim(),
+    subject: rendered.subject || `(no subject)`,
+    html,
+    text: rendered.body,
+  })
+
+  if (!result.success) {
+    // Leave scheduled_at intact so cron retries next tick.
+    return { sent: false, error: `send: ${result.error}` }
+  }
+
+  // Mark sent + record a touchpoint.
+  const nowIso = new Date().toISOString()
+  const { error: updErr } = await supabaseService
+    .from('leads')
+    .update({ welcome_email_sent_at: nowIso })
+    .eq('id', leadId)
+  if (updErr) {
+    console.error('[welcome] sendWelcomeEmail: mark-sent failed', { leadId, updErr })
+  }
+
+  const { error: tpErr } = await supabaseService.from('touchpoints').insert({
+    lead_id: leadId,
+    location_uuid: loc.id,
+    kind: 'drip',
+    method: 'email',
+    label: 'Welcome Email',
+    status: 'sent',
+    occurred_at: nowIso,
+  })
+  if (tpErr) {
+    console.error('[welcome] sendWelcomeEmail: touchpoint insert failed', { leadId, tpErr })
+  }
+
+  return { sent: true }
+}
