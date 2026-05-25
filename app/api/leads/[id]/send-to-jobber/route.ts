@@ -117,9 +117,14 @@ function pickPrimaryAddress(lead: any): {
 // ── Jobber GraphQL operations ────────────────────────────────────────────────
 // Pinned to API version 2025-04-16 (X-JOBBER-GRAPHQL-VERSION) via lib/jobber.ts.
 
+// Jobber's `clients` connection takes `searchTerm` as a top-level argument,
+// not as a field inside `ClientFilterAttributes`. Earlier API versions tucked
+// it under `filter:` — that no longer validates against the current schema
+// and returns: InputObject 'ClientFilterAttributes' doesn't accept argument
+// 'searchTerm'.
 const FIND_CLIENT_QUERY = /* GraphQL */ `
   query FindClient($searchTerm: String!) {
-    clients(filter: { searchTerm: $searchTerm }, first: 10) {
+    clients(searchTerm: $searchTerm, first: 10) {
       nodes {
         id
         firstName
