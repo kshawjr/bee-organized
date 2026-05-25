@@ -27,6 +27,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
+import { matchHubUserFromCachedRoster } from '@/lib/jobber-team-roster'
 
 export const runtime = 'nodejs'
 
@@ -96,6 +97,18 @@ export async function POST(request: NextRequest) {
     if (hubInsertErr) {
       console.error('[accept hub_users insert]', hubInsertErr)
       return NextResponse.json({ error: hubInsertErr.message }, { status: 500 })
+    }
+
+    // Auto-link jobber_user_id from the location's cached roster, if any.
+    // Franchise tier only — corporate invites have no location and no
+    // Jobber identity. Non-fatal: if the cache is empty or the email
+    // doesn't match, the owner can manually link in Settings → Team.
+    if (invite.tier !== 'admin' && invite.location_id) {
+      try {
+        await matchHubUserFromCachedRoster(user.id, invite.location_id, authEmail)
+      } catch (matchErr) {
+        console.warn('[accept jobber match]', matchErr)
+      }
     }
   }
 

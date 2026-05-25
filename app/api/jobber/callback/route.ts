@@ -6,6 +6,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getZohoLocation, zohoUpdate } from '@/lib/zoho'
 import { supabaseService } from '@/lib/supabase-service'
+import {
+  fetchRosterWithToken,
+  persistRosterAndMatch,
+  clearStaleJobberUserIds,
+} from '@/lib/jobber-team-roster'
 
 const JOBBER_TOKEN_URL   = 'https://api.getjobber.com/api/oauth/token'
 const JOBBER_GRAPHQL_URL = 'https://api.getjobber.com/api/graphql'
@@ -35,10 +40,14 @@ export async function GET(request: NextRequest) {
   const lookupField = isUuid ? 'id' : 'location_id'
 
   try {
-    // 1. Verify location exists in Supabase (source of truth)
+    // 1. Verify location exists in Supabase (source of truth). Also
+    //    grabs the prior jobber_account_id so we can detect a reconnect
+    //    to a *different* Jobber account — stale jobber_user_id values
+    //    on hub_users belong to the previous account's ID namespace and
+    //    must be cleared before the fresh roster auto-match.
     const { data: supaLoc, error: supaErr } = await supabaseService
       .from('locations')
-      .select('id, location_id, name')
+      .select('id, location_id, name, jobber_account_id')
       .eq(lookupField, locationId)
       .single()
 
@@ -110,6 +119,33 @@ export async function GET(request: NextRequest) {
       return redirectHome(request, { jobber: 'error', reason: 'supabase_write_failed', loc: locationId })
     }
     console.log('✓ Tokens written to Supabase for', supaLoc.location_id || supaLoc.id)
+
+    // 4b. Reconnect detection + Jobber team roster sync. Non-fatal —
+    //     the user IS connected at this point; the worst case from a
+    //     roster failure is owner has to click "Refresh roster" in
+    //     Settings → Team to populate jobber_user_id values manually.
+    try {
+      const reconnectedToDifferentAccount =
+        !!supaLoc.jobber_account_id &&
+        !!accountId &&
+        supaLoc.jobber_account_id !== accountId
+      if (reconnectedToDifferentAccount) {
+        const cleared = await clearStaleJobberUserIds(supaLoc.id)
+        console.log(
+          `↺ Jobber account changed (${supaLoc.jobber_account_id} → ${accountId}) — nulled ${cleared} stale jobber_user_id values`
+        )
+      }
+
+      const roster = await fetchRosterWithToken(tokens.access_token)
+      if (roster) {
+        const { matched, rosterSize } = await persistRosterAndMatch(supaLoc.id, roster)
+        console.log(`✓ Jobber roster synced (${rosterSize} members, ${matched} hub_users auto-linked)`)
+      } else {
+        console.warn('⚠ Jobber roster fetch returned null — Settings → Team will show empty until refresh')
+      }
+    } catch (rosterErr) {
+      console.warn('⚠ Jobber roster sync skipped (non-fatal):', rosterErr)
+    }
 
     // 5. Zoho dual-write — OPTIONAL (legacy support, non-fatal)
     try {

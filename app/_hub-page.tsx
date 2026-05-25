@@ -83,6 +83,10 @@ function buildLocationUser(row: any) {
       'corporate',
     status: 'active',
     joined: fmtJoined(row.created_at),
+    // jobber_user_id gates assignment to Jobber jobs/assessments. Null
+    // means the user is hidden from the assignment multi-select; the
+    // owner can manually link from Settings → Team.
+    jobberUserId: row.jobber_user_id || null,
   }
 }
 
@@ -217,7 +221,7 @@ export default async function HubPage({
     const { data: locRow, error: subErr } = await supabase
       .from('locations')
       .select(
-        'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes, jobber_account_id, jobber_initial_import_completed_at, last_sync_status, token_expiry, onboarding_state, default_drip_path, default_move_drip_path, address, city, state, zip, phone, email, timezone, sender_name, send_from_email, reply_to_email, reviews_link, calendar_link, activated_at, lifecycle_status'
+        'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes, jobber_account_id, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, token_expiry, onboarding_state, default_drip_path, default_move_drip_path, address, city, state, zip, phone, email, timezone, sender_name, send_from_email, reply_to_email, reviews_link, calendar_link, activated_at, lifecycle_status'
       )
       .eq('id', hubUser.location_id)
       .single()
@@ -239,6 +243,8 @@ export default async function HubPage({
         jobber_connected: !!locRow.jobber_account_id,
         jobber_account_id: locRow.jobber_account_id || null,
         jobber_initial_import_completed_at: locRow.jobber_initial_import_completed_at || null,
+        jobber_team_roster: Array.isArray(locRow.jobber_team_roster) ? locRow.jobber_team_roster : [],
+        jobber_team_roster_synced_at: locRow.jobber_team_roster_synced_at || null,
         last_sync_status: locRow.last_sync_status || null,
         token_expiry: locRow.token_expiry || null,
         payment_source: locRow.payment_source || 'none',
@@ -310,7 +316,7 @@ export default async function HubPage({
 
     const { data: allUsers, error: usersErr } = await supabaseService
       .from('hub_users')
-      .select('id, full_name, email, location_id, role, created_at')
+      .select('id, full_name, email, location_id, role, created_at, jobber_user_id')
       .order('full_name', { ascending: true })
       .limit(500)
 
@@ -382,7 +388,7 @@ export default async function HubPage({
   } else if (hubUser.location_id) {
     const { data: locUsers, error: locUsersErr } = await supabase
       .from('hub_users')
-      .select('id, full_name, email, location_id, role, created_at')
+      .select('id, full_name, email, location_id, role, created_at, jobber_user_id')
       .eq('location_id', hubUser.location_id)
       .order('full_name', { ascending: true })
 

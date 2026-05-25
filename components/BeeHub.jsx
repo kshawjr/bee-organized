@@ -16410,6 +16410,69 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
   })
   const [showInvite, setShowInvite]         = useState(false)
   const [selectedMember, setSelectedMember] = useState(null)
+  // Jobber roster cache from locations.jobber_team_roster. Used to power
+  // the "linked status" badges + the manual override dropdown in
+  // MemberDetailPopup. Refreshed on demand via the button below.
+  const [jobberRoster, setJobberRoster] = useState(() =>
+    Array.isArray(currentLocationCtx?.jobber_team_roster)
+      ? currentLocationCtx.jobber_team_roster
+      : []
+  )
+  const [rosterSyncedAt, setRosterSyncedAt] = useState(
+    currentLocationCtx?.jobber_team_roster_synced_at || null
+  )
+  const [refreshingRoster, setRefreshingRoster] = useState(false)
+  const jobberConnected = !!currentLocationCtx?.jobber_connected
+
+  async function refreshJobberRoster() {
+    if (!dbLocationId || refreshingRoster) return
+    setRefreshingRoster(true)
+    try {
+      const r = await fetch(
+        `/api/locations/${encodeURIComponent(dbLocationId)}/jobber/refresh-roster`,
+        { method: 'POST' }
+      )
+      const j = await r.json().catch(()=>({}))
+      if (!r.ok) throw new Error(j?.error || 'Refresh failed')
+      const fresh = Array.isArray(j.roster) ? j.roster : []
+      setJobberRoster(fresh)
+      setRosterSyncedAt(j.synced_at || new Date().toISOString())
+      // If the server auto-linked any unlinked hub_users, mirror that in
+      // local state so badges flip from ⚠ to ✓ without a page reload.
+      if (j.newly_linked > 0) {
+        const byEmail = new Map()
+        for (const e of fresh) {
+          if (e?.email) byEmail.set(String(e.email).toLowerCase().trim(), e.id)
+        }
+        setUsers(prev => prev.map(u => {
+          if (u.jobberUserId) return u
+          const m = byEmail.get(String(u.email || '').toLowerCase().trim())
+          return m ? { ...u, jobberUserId: m } : u
+        }))
+      }
+    } catch (err) {
+      alert(err?.message || 'Could not refresh Jobber roster')
+    } finally {
+      setRefreshingRoster(false)
+    }
+  }
+
+  // Manual override: owner picks a Jobber user from the dropdown (or
+  // unlinks). PATCH /api/hub_users/[id]/jobber-link enforces auth and
+  // verifies the picked id is in the cached roster.
+  async function updateJobberLink(memberId, jobberUserId) {
+    const r = await fetch(`/api/hub_users/${encodeURIComponent(memberId)}/jobber-link`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jobber_user_id: jobberUserId }),
+    })
+    const j = await r.json().catch(()=>({}))
+    if (!r.ok) throw new Error(j?.error || 'Could not update Jobber link')
+    setUsers(prev => prev.map(u => u.id === memberId ? { ...u, jobberUserId: jobberUserId } : u))
+    if (selectedMember?.id === memberId) {
+      setSelectedMember(prev => prev ? { ...prev, jobberUserId } : prev)
+    }
+  }
 
   // subData remains \u2014 MemberDetailPopup still consumes it (per-user
   // subscription detail in the row-tap sheet). The composite billing
@@ -16478,10 +16541,19 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
           <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>Team Members</p>
           <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Tap to manage role</p>
         </div>
-        <button onClick={()=>setShowInvite(true)}
-          style={{ padding:'6px 12px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
-          + Invite
-        </button>
+        <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+          {jobberConnected && dbLocationId && (
+            <button onClick={refreshJobberRoster} disabled={refreshingRoster}
+              title={rosterSyncedAt ? `Last synced ${new Date(rosterSyncedAt).toLocaleString()}` : 'Fetch latest Jobber team'}
+              style={{ padding:'6px 10px', background:'white', border:'1px solid rgba(26,46,43,0.15)', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#1a2e2b', cursor:refreshingRoster?'wait':'pointer', opacity:refreshingRoster?0.6:1 }}>
+              {refreshingRoster ? '…' : '↺ Jobber'}
+            </button>
+          )}
+          <button onClick={()=>setShowInvite(true)}
+            style={{ padding:'6px 12px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+            + Invite
+          </button>
+        </div>
       </div>
 
       {/* Members list */}
@@ -16491,6 +16563,11 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
           const rc2 = FRANCHISE_ROLES.find(r=>r.key===u.role)||{ icon:'👑', label:'Owner', bg:'rgba(212,160,70,0.1)', color:'#d4a046' }
           const sub = subData[u.id]||{ status:'active', method:'ach', last4:'????', note:'' }
           const sc  = subConf[sub.status]||subConf.active
+          const jLinked = !!u.jobberUserId
+          // Only surface a "not linked" warning when the location is
+          // connected to Jobber — otherwise the badge would nag for an
+          // identity that doesn't exist yet.
+          const showJobberBadge = jobberConnected
           return (
             <div key={u.id} onClick={()=>setSelectedMember(u)}
               style={{ background:'white', borderRadius:'10px', marginBottom:'6px', border:'1px solid rgba(0,0,0,0.07)', cursor:'pointer', display:'flex', alignItems:'center', gap:'12px', padding:'11px 14px' }}>
@@ -16500,6 +16577,11 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
                 <div style={{ display:'flex', alignItems:'center', gap:'4px', flexWrap:'wrap' }}>
                   <span style={{ fontSize:'10px', color:rc2.color, background:rc2.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>{rc2.icon} {rc2.label}</span>
                   <span style={{ fontSize:'10px', color:sc.color, background:sc.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>{sc.icon} {sc.label}</span>
+                  {showJobberBadge && (
+                    jLinked
+                      ? <span title="Linked to Jobber — can be assigned to Jobber jobs" style={{ fontSize:'10px', color:'#22c55e', background:'rgba(34,197,94,0.08)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>✓ Jobber</span>
+                      : <span title="No Jobber identity yet — hidden from assignment pickers" style={{ fontSize:'10px', color:'#d4a046', background:'rgba(212,160,70,0.1)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>⚠ No Jobber</span>
+                  )}
                 </div>
               </div>
               <span style={{ fontSize:'16px', color:'#c8d8d4' }}>›</span>
@@ -16528,9 +16610,19 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
           subConf={subConf}
           canRemove={!!dbLocationId && currentUserCtx?.id !== selectedMember.id}
           removing={removing === selectedMember.id}
+          jobberConnected={jobberConnected}
+          jobberRoster={jobberRoster}
+          canEditJobberLink={!!dbLocationId && jobberConnected}
           onClose={()=>setSelectedMember(null)}
           onUpdateRole={role=>{ updateRole(selectedMember.id,role); setSelectedMember(prev=>({...prev,role})) }}
           onUpdateSub={patch=>updateSub(selectedMember.id,patch)}
+          onUpdateJobberLink={async (jobberUserId)=>{
+            try {
+              await updateJobberLink(selectedMember.id, jobberUserId)
+            } catch (err) {
+              alert(err?.message || 'Could not update Jobber link')
+            }
+          }}
           onRemove={async ()=>{
             if (dbLocationId) {
               await removeMember(selectedMember)
@@ -16546,11 +16638,20 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
 }
 
 
-function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdateSub, onRemove, canRemove=true, removing=false }) {
+function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdateSub, onRemove, onUpdateJobberLink, canRemove=true, removing=false, jobberConnected=false, jobberRoster=[], canEditJobberLink=false }) {
   const [note, setNote]       = useState(sub.note||'')
   const [editingNote, setEditingNote] = useState(false)
   const rc = FRANCHISE_ROLES.find(r=>r.key===user.role)||FRANCHISE_ROLES[0]
   const sc = subConf[sub.status]||subConf.active
+  // Jobber identity controls. Roster is the cached locations.jobber_team_roster.
+  // We let the owner pick an alternative entry when auto-match missed,
+  // or unlink to push the member out of assignment pickers entirely.
+  const [pendingJobberId, setPendingJobberId] = useState(user.jobberUserId || '')
+  const [savingJobberLink, setSavingJobberLink] = useState(false)
+  React.useEffect(()=>{ setPendingJobberId(user.jobberUserId || '') }, [user.id, user.jobberUserId])
+  const linkedRosterEntry = user.jobberUserId
+    ? jobberRoster.find(r => r?.id === user.jobberUserId)
+    : null
 
   React.useEffect(()=>{ const p=document.body.style.overflow; document.body.style.overflow='hidden'; return()=>{ document.body.style.overflow=p } },[])
 
@@ -16607,6 +16708,63 @@ function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdate
               })}
             </div>
           </div>
+
+          {/* Jobber identity */}
+          {jobberConnected && (
+            <div style={{ padding:'14px 20px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'8px' }}>Jobber identity</p>
+              {user.jobberUserId ? (
+                <p style={{ fontSize:'13px', color:'#1a2e2b', marginBottom: canEditJobberLink ? '10px' : 0 }}>
+                  <span style={{ color:'#22c55e', fontWeight:700, marginRight:'4px' }}>✓</span>
+                  Linked to <strong>{linkedRosterEntry?.name || 'Jobber user'}</strong>
+                  {linkedRosterEntry?.email && <span style={{ color:'#8a9e9a' }}> · {linkedRosterEntry.email}</span>}
+                </p>
+              ) : (
+                <p style={{ fontSize:'13px', color:'#1a2e2b', marginBottom: canEditJobberLink ? '10px' : 0 }}>
+                  <span style={{ color:'#d4a046', fontWeight:700, marginRight:'4px' }}>⚠</span>
+                  Not linked — can't be assigned to Jobber jobs.
+                </p>
+              )}
+              {canEditJobberLink && (
+                <>
+                  {jobberRoster.length === 0 ? (
+                    <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic' }}>
+                      Roster is empty. Tap ↺ Jobber in the Team header to refresh.
+                    </p>
+                  ) : (
+                    <div style={{ display:'flex', gap:'6px', alignItems:'center' }}>
+                      <select
+                        value={pendingJobberId}
+                        onChange={e=>setPendingJobberId(e.target.value)}
+                        style={{ flex:1, padding:'7px 8px', border:'1.5px solid rgba(168,201,196,0.5)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none' }}
+                      >
+                        <option value="">— Not linked —</option>
+                        {jobberRoster.map(r => (
+                          <option key={r.id} value={r.id}>
+                            {r.name || r.email}{r.email ? ` · ${r.email}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        disabled={savingJobberLink || pendingJobberId === (user.jobberUserId || '')}
+                        onClick={async ()=>{
+                          setSavingJobberLink(true)
+                          try {
+                            await onUpdateJobberLink(pendingJobberId ? pendingJobberId : null)
+                          } finally {
+                            setSavingJobberLink(false)
+                          }
+                        }}
+                        style={{ padding:'7px 12px', background: (savingJobberLink || pendingJobberId === (user.jobberUserId || '')) ? '#e5e7eb' : '#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color: (savingJobberLink || pendingJobberId === (user.jobberUserId || '')) ? '#9ca3af' : 'white', cursor: (savingJobberLink || pendingJobberId === (user.jobberUserId || '')) ? 'not-allowed' : 'pointer' }}
+                      >
+                        {savingJobberLink ? '…' : 'Save'}
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           {/* Notes */}
           <div style={{ padding:'14px 20px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
@@ -21158,6 +21316,12 @@ function MassUpdateModal({ count, locationId, onApply, onClose }) {
 // USERS_DATA fallback for view-as / demo paths where the context is null.
 // Multi-select to match the call site's plural shape: receives currentUserIds
 // (array) and emits onSelect(updatedIdsArray) on Apply.
+//
+// Jobber assignment gating: hides users with jobber_user_id == null,
+// because Jobber's assessment / job APIs reject assignment to a user we
+// can't identify. Demo path (USERS_DATA fallback) is exempt — those
+// mock users don't go to Jobber. Empty-state hint guides the owner to
+// Settings → Team to link unlinked teammates.
 function AssignUserPicker({ locationId, currentUserIds=[], onSelect, onClose }) {
   React.useEffect(() => {
     const prev = document.body.style.overflow
@@ -21165,8 +21329,15 @@ function AssignUserPicker({ locationId, currentUserIds=[], onSelect, onClose }) 
     return () => { document.body.style.overflow = prev }
   }, [])
   const usersCtx = useContext(LocationUsersContext)
+  const usingRealUsers = !!usersCtx
   const usersSource = usersCtx || USERS_DATA
-  const locUsers = usersSource.filter(u=>u.locationId===locationId&&u.status==='active')
+  const activeAtLocation = usersSource.filter(u=>u.locationId===locationId&&u.status==='active')
+  const locUsers = usingRealUsers
+    ? activeAtLocation.filter(u => u.jobberUserId)
+    : activeAtLocation
+  const hiddenForNoJobberLink = usingRealUsers
+    ? activeAtLocation.length - locUsers.length
+    : 0
   const [selectedIds, setSelectedIds] = useState(currentUserIds)
   function toggle(id) {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id])
@@ -21186,8 +21357,10 @@ function AssignUserPicker({ locationId, currentUserIds=[], onSelect, onClose }) 
         </div>
         <div style={{ overflowY:'auto', flex:1 }}>
           {locUsers.length === 0 && (
-            <div style={{ padding:'24px 16px', textAlign:'center', color:'#8a9e9a', fontSize:'13px' }}>
-              No active team members for this location.
+            <div style={{ padding:'24px 16px', textAlign:'center', color:'#8a9e9a', fontSize:'13px', lineHeight:1.5 }}>
+              {hiddenForNoJobberLink > 0
+                ? <>No team members linked to Jobber yet.<br/>Go to <strong style={{ color:'#1a2e2b' }}>Settings → Team</strong> to link users.</>
+                : 'No active team members for this location.'}
             </div>
           )}
           {locUsers.map((u,i)=>{
