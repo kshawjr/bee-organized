@@ -8826,7 +8826,7 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson, onError }) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 // ─── Stage Group (Hive list view) ────────────────────────────────────────────
-function StageGroup({ stage, stageConf: s, records, selectedIds, setSelectedIds, setSelected, showLocation=false }) {
+function StageGroup({ stage, stageConf: s, records, selectedIds, setSelectedIds, setSelected, showLocation=false, locations=[] }) {
   const SHOW = 5
   const allUsers = useContext(LocationUsersContext) || USERS_DATA
   const [expanded, setExpanded] = useState(false)
@@ -8862,7 +8862,7 @@ function StageGroup({ stage, stageConf: s, records, selectedIds, setSelectedIds,
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ display:'flex', alignItems:'center', gap:'5px', marginBottom:'3px', flexWrap:'wrap' }}>
             <span style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b' }}>{person.name}</span>
-            {showLocation&&person.locationId&&(()=>{ const loc=ALL_LOCATIONS.find(l=>l.id===person.locationId); return loc?<span style={{ fontSize:'10px', color:'#4a5e5a', background:'rgba(0,0,0,0.05)', padding:'2px 7px', borderRadius:'20px', fontWeight:500 }}>📍 {loc.name}</span>:null })()}
+            {showLocation&&person.locationId&&(()=>{ const loc=locations.find(l=>l.id===person.locationId); return <span style={{ fontSize:'10px', color:'#4a5e5a', background:'rgba(0,0,0,0.05)', padding:'2px 7px', borderRadius:'20px', fontWeight:500 }}>📍 {loc?loc.name:'Unknown'}</span> })()}
             {isReturning&&<span style={{ fontSize:'10px', color:'#10b981', background:'rgba(16,185,129,0.08)', padding:'2px 7px', borderRadius:'20px', fontWeight:600, border:'1px solid rgba(16,185,129,0.2)' }}>↩ Client · {pastJobs.length} job{pastJobs.length!==1?'s':''}</span>}
             {person.jobberRef&&<span style={{ fontSize:'10px', color:'#10b981', background:'rgba(16,185,129,0.1)', padding:'2px 6px', borderRadius:'20px' }}>⚡</span>}
             {person.buzzNotes?.length>0&&<span style={{ fontSize:'10px', color:'#b07a20', background:'rgba(212,160,70,0.1)', padding:'2px 6px', borderRadius:'20px' }}>🐝 {person.buzzNotes.length}</span>}
@@ -9009,11 +9009,12 @@ async function patchLeadAPI(leadId, patch) {
   }
 }
 
-function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='all', isElevated=false, initialSelected=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{} }) {
+function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{} }) {
   if (!people) return null
   const allPeople = locFilter==='all' ? people : people.filter(p=>p.locationId===locFilter)
-  // Only meaningful when leads can come from multiple locations.
-  const showLocation = isElevated && locFilter==='all'
+  // Render the location pill on every card for elevated users — they want to
+  // see where each lead came from even when filtered to a single location.
+  const showLocation = isElevated
   // Default 'list' on both SSR and client. Hydrate from localStorage after
   // mount to avoid React hydration mismatch on the initial render.
   const [view, setView] = useState('list')
@@ -9505,7 +9506,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
             return activeStages.map(stageDef => {
               const records = recordsByStage[stageDef.key] || []
               if (stageFilter && stageFilter !== stageDef.key) return null
-              return <StageGroup key={stageDef.key} stage={stageDef.key} stageConf={stageDef} records={records} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setSelected={setSelected} showLocation={showLocation} />
+              return <StageGroup key={stageDef.key} stage={stageDef.key} stageConf={stageDef} records={records} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setSelected={setSelected} showLocation={showLocation} locations={locations} />
             })
           })()}
           {/* Total count */}
@@ -9563,7 +9564,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
                             )}
                           </div>
                           <div style={{ display:'flex', gap:'4px', flexWrap:'wrap' }}>
-                            {showLocation&&person.locationId&&(()=>{ const loc=ALL_LOCATIONS.find(l=>l.id===person.locationId); return loc?<span style={{ fontSize:'10px', color:'#4a5e5a', background:'rgba(0,0,0,0.05)', padding:'2px 6px', borderRadius:'20px', fontWeight:500 }}>📍 {loc.name}</span>:null })()}
+                            {showLocation&&person.locationId&&(()=>{ const loc=locations.find(l=>l.id===person.locationId); return <span style={{ fontSize:'10px', color:'#4a5e5a', background:'rgba(0,0,0,0.05)', padding:'2px 6px', borderRadius:'20px', fontWeight:500 }}>📍 {loc?loc.name:'Unknown'}</span> })()}
                             {person.jobberRef&&<KanbanIconTooltip label="Synced to Jobber"><span style={{ fontSize:'10px', color:'#10b981', background:'rgba(16,185,129,0.08)', padding:'2px 6px', borderRadius:'20px' }}>⚡</span></KanbanIconTooltip>}
                             {person.buzzNotes?.length>0&&<KanbanIconTooltip label="Buzz Notes"><span style={{ fontSize:'10px', color:'#b07a20', background:'rgba(212,160,70,0.1)', padding:'2px 6px', borderRadius:'20px' }}>🐝</span></KanbanIconTooltip>}
                             {unpaid>0&&<KanbanIconTooltip label="Unpaid Invoice"><span style={{ fontSize:'10px', color:'#f59e0b', background:'rgba(245,158,11,0.08)', padding:'2px 6px', borderRadius:'20px' }}>⚠️</span></KanbanIconTooltip>}
@@ -18295,7 +18296,7 @@ function FollowUpReminders({ followUps, setFollowUps, locFilter }) {
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=PARTNERS_DATA, setPartners=()=>{}, companies=COMPANIES_DATA, setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null }) {
+function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=PARTNERS_DATA, setPartners=()=>{}, companies=COMPANIES_DATA, setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
@@ -18482,7 +18483,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     // allow browsing but read-only during grace
   }
 
-  if (activeNav==='hive') return <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} setToast={setToast} />{toast && <InlineToast {...toast} />}</>
+  if (activeNav==='hive') return <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} locations={locations} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} setToast={setToast} />{toast && <InlineToast {...toast} />}</>
 
   if (activeNav==='schedule') return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'5rem' }}>
@@ -26295,7 +26296,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     )
     if (activeNav==='hive') return (
       <div style={pageStyle}>
-        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} locFilter={locFilter} isElevated={isElevated} initialSelected={globalSelectedPerson} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} />
+        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} />
         {toast && <InlineToast {...toast} />}
       </div>
     )
@@ -26325,6 +26326,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           setCompanies={setCompanies}
           people={people}
           setPeople={setPeople}
+          locations={initialLocations || ALL_LOCATIONS}
           activeNav={activeNav}
           nav={nav}
           onOpenRecord={(person)=>{
