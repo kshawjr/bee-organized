@@ -5298,10 +5298,10 @@ function PersonPanel({
             },
             React.createElement(
               "div",
-              { style: { display: "flex", alignItems: "center", gap: "10px" } },
+              { style: { display: "flex", alignItems: "center", gap: "10px", flex: 1, minWidth: 0 } },
               React.createElement(
                 "div",
-                { style: { flex: 1 } },
+                { style: { flex: 1, minWidth: 0 } },
                 React.createElement(
                   "div",
                   {
@@ -6103,6 +6103,7 @@ function PersonPanel({
                   alignItems: "center",
                   gap: "4px",
                   alignSelf: "flex-start",
+                  flexShrink: 0,
                 },
               },
               (onPrev || onNext) &&
@@ -17716,11 +17717,22 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
       {/* Header */}
       <div style={{ background:'#1a2e2b', padding:'1.25rem 1.25rem 0' }}>
         <h1 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'white', marginBottom:'1rem' }}>Settings ⚙️</h1>
-        {/* Section tabs - short labels fit portrait mobile without overflow */}
+        {/* Section tabs — native <select> on mobile (<768px) so labels never
+            truncate mid-word; equal-width pill row at ≥768px. */}
         <div style={{ position:'relative', width:'100%', overflowX:'hidden' }}>
-          <div style={{ display:'flex', gap:'2px', width:'100%' }}>
+          <select
+            className="bee-tab-select"
+            aria-label="Settings section"
+            value={activeSection}
+            onChange={e=>{ setActiveSection(e.target.value); window.scrollTo(0,0) }}
+            style={{ width:'100%', padding:'12px 38px 12px 14px', marginBottom:'12px', borderRadius:'10px', border:'1px solid rgba(168,201,196,0.4)', background:'#f7f5f0', color:'#1a2e2b', fontFamily:'inherit', fontWeight:600, cursor:'pointer', appearance:'none', backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%231a2e2b' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat:'no-repeat', backgroundPosition:'right 14px center' }}>
+            {sections.map(sec=>(
+              <option key={sec.key} value={sec.key}>{sec.icon} {sec.label}</option>
+            ))}
+          </select>
+          <div className="bee-tab-pills" style={{ display:'flex', gap:'2px', width:'100%' }}>
             {sections.map(sec=>{
-              const SHORT = { profile:'Profile', location:'Location', team:'Team', billing:'Billing', paths:'Paths', templates:'Templates', notifs:'Alerts', manual:'Manual' }
+              const SHORT = { profile:'Profile', location:'Location', team:'Team', billing:'Billing', paths:'Paths', templates:'Templates', automation:'Automation', notifs:'Alerts', manual:'Manual' }
               const isActive = activeSection===sec.key
               return (
                 <button key={sec.key}
@@ -24666,14 +24678,31 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
             <button onClick={()=>setShowInvite(true)} style={{ padding:'8px 14px', background:'rgba(168,201,196,0.15)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:'pointer' }}>+ Invite</button>
           </div>
 
-          {/* Sub-tabs */}
-          <div style={{ display:'flex', gap:'4px', background:'rgba(0,0,0,0.15)', borderRadius:'10px', padding:'3px', marginTop:'4px' }}>
-            {[{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'content',label:'✏️ Content'}]:[]),...(role==='super_admin'?[{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])].map(t=>(
-              <button key={t.key} onClick={()=>{ setAdminTab(t.key); setSearch('') }} style={{ flex:1, padding:'7px', borderRadius:'8px', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', fontWeight:adminTab===t.key?600:400, background:adminTab===t.key?'white':'transparent', color:adminTab===t.key?'#1a2e2b':'rgba(168,201,196,0.7)' }}>
-                {t.label}
-              </button>
-            ))}
-          </div>
+          {/* Sub-tabs — native <select> on mobile (<768px), pill row at ≥768px. */}
+          {(()=>{
+            const adminTabs = [{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'content',label:'✏️ Content'}]:[]),...(role==='super_admin'?[{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])]
+            return (
+              <>
+                <select
+                  className="bee-tab-select"
+                  aria-label="Admin section"
+                  value={adminTab}
+                  onChange={e=>{ setAdminTab(e.target.value); setSearch('') }}
+                  style={{ width:'100%', padding:'12px 38px 12px 14px', marginTop:'4px', borderRadius:'10px', border:'none', background:'white', color:'#1a2e2b', fontFamily:'inherit', fontWeight:600, cursor:'pointer', appearance:'none', backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%231a2e2b' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat:'no-repeat', backgroundPosition:'right 14px center' }}>
+                  {adminTabs.map(t=>(
+                    <option key={t.key} value={t.key}>{t.label}</option>
+                  ))}
+                </select>
+                <div className="bee-tab-pills" style={{ display:'flex', gap:'4px', background:'rgba(0,0,0,0.15)', borderRadius:'10px', padding:'3px', marginTop:'4px' }}>
+                  {adminTabs.map(t=>(
+                    <button key={t.key} onClick={()=>{ setAdminTab(t.key); setSearch('') }} style={{ flex:1, padding:'7px', borderRadius:'8px', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', fontWeight:adminTab===t.key?600:400, background:adminTab===t.key?'white':'transparent', color:adminTab===t.key?'#1a2e2b':'rgba(168,201,196,0.7)' }}>
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )
+          })()}
 
           {/* Summary stats */}
           {adminTab==='locations' && (
