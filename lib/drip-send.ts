@@ -32,7 +32,7 @@ export async function sendDripStep(leadId: string): Promise<SendDripResult> {
     .select(
       `
       id, lead_id, drip_path_id, current_step, next_send_at,
-      drip_paths!inner ( id, path_key, location_uuid )
+      drip_paths!inner ( id, path_key )
       `,
     )
     .eq('lead_id', leadId)
@@ -69,7 +69,7 @@ type DripProgressRow = {
 export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDripResult> {
   const path = (Array.isArray(row.drip_paths)
     ? (row.drip_paths as any[])[0]
-    : row.drip_paths) as { id: string; location_uuid: string } | null
+    : row.drip_paths) as { id: string } | null
 
   if (!path) return { sent: false, error: 'no_path_join' }
 
@@ -116,13 +116,19 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     return { sent: false, error: 'non_email_channel', advanced_to_step: advancedTo }
   }
 
+  // Lead is the source of truth for location. drip_paths.location_uuid is
+  // NULL on master paths by design (clone-on-customize), so reading the
+  // location off the path crashes the uuid cast for any lead still on a
+  // master.
+  if (!lead.location_uuid) return { sent: false, error: 'no_location' }
+
   // Location (sender context + tz for scheduling next step). rate_per_hour
   // and reviews_link are new variables exposed to render context for the
   // 8 master path templates + opp-stage emails.
   const { data: loc, error: locErr } = await supabaseService
     .from('locations')
     .select('id, name, sender_name, phone, calendar_link, reviews_link, rate_per_hour, city, state, timezone')
-    .eq('id', path.location_uuid)
+    .eq('id', lead.location_uuid)
     .maybeSingle()
 
   if (locErr || !loc) {

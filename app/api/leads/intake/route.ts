@@ -91,11 +91,13 @@ export async function POST(req: NextRequest) {
   const now = new Date().toISOString()
 
   // leads.location_id stores the slug string (matches lib/dual-write.ts and
-  // app/api/import/jobber-clients/route.ts), not the UUID.
+  // app/api/import/jobber-clients/route.ts). location_uuid is the canonical
+  // FK used by drip/welcome/stage-email reads — write both.
   const { data: lead, error: insertErr } = await supabaseService
     .from('leads')
     .insert({
       location_id: location.location_id,
+      location_uuid: location.id,
       name: full_name.trim(),
       first_name: first,
       last_name: last,
