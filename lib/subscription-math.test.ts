@@ -6,6 +6,7 @@ import {
   nextRenewalDate,
   daysUntilNextRenewal,
   prorateToNextRenewal,
+  calculateOwnerSubtotal,
   calculateSeatTotal,
   calculateProratedSeatTotal,
   getSubscriptionDisplay,
@@ -73,9 +74,31 @@ describe('prorateToNextRenewal', () => {
   })
 })
 
+describe('calculateOwnerSubtotal', () => {
+  it('0 owners → 0', () => {
+    expect(calculateOwnerSubtotal(0)).toBe(0)
+  })
+
+  it('1 owner → owner price', () => {
+    expect(calculateOwnerSubtotal(1)).toBe(550)
+  })
+
+  it('2 owners → owner price + manager price (co-owner discount)', () => {
+    expect(calculateOwnerSubtotal(2)).toBe(950)
+  })
+
+  it('honors live prices override', () => {
+    expect(calculateOwnerSubtotal(2, { owner: 550, manager: 450, light: 200, readonly: 50 })).toBe(1000)
+  })
+})
+
 describe('calculateSeatTotal', () => {
   it('owner alone', () => {
     expect(calculateSeatTotal([{ tier: 'owner', count: 1 }])).toBe(550)
+  })
+
+  it('two owners apply co-owner discount (550 + 400 = 950, not 1100)', () => {
+    expect(calculateSeatTotal([{ tier: 'owner', count: 2 }])).toBe(950)
   })
 
   it('manager alone', () => {

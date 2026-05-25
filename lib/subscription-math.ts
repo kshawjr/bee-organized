@@ -39,11 +39,29 @@ export function prorateToNextRenewal(annualPrice: number, from: Date = new Date(
   return Math.round(annualPrice * (days / DAYS_PER_YEAR) * 100) / 100
 }
 
+// Co-owner pricing rule: a location is capped at 2 Zee Bee (owner) seats. The
+// 2nd seat represents an elevated manager with owner permissions rather than
+// a second franchise owner, so it bills at the Hive Manager rate. Centralized
+// here so every cost surface (onboarding, renewal card, admin panel) agrees.
+export function calculateOwnerSubtotal(
+  ownerCount: number,
+  prices: TierPrices = DEFAULT_TIER_PRICES,
+): number {
+  if (ownerCount <= 0) return 0
+  const ownerPrice = prices.owner ?? 0
+  const managerPrice = prices.manager ?? 0
+  if (ownerCount <= 1) return ownerPrice
+  return ownerPrice + (ownerCount - 1) * managerPrice
+}
+
 export function calculateSeatTotal(
   seats: SeatLine[],
   prices: TierPrices = DEFAULT_TIER_PRICES,
 ): number {
-  return seats.reduce((sum, line) => sum + (prices[line.tier] ?? 0) * line.count, 0)
+  return seats.reduce((sum, line) => {
+    if (line.tier === 'owner') return sum + calculateOwnerSubtotal(line.count, prices)
+    return sum + (prices[line.tier] ?? 0) * line.count
+  }, 0)
 }
 
 export function calculateProratedSeatTotal(

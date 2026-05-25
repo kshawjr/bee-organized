@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation"
 import {
   DEFAULT_TIER_PRICES,
   getSubscriptionDisplay,
+  calculateOwnerSubtotal,
+  calculateSeatTotal,
   formatCurrency,
   formatRenewalDate,
   nextRenewalDate,
@@ -9887,12 +9889,8 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     currentLocationCtx?.payment_source === 'prepaid_corporate' || currentLocationCtx?.payment_source === 'corporate_sponsored'
       ? currentLocationCtx.payment_source
       : 'direct'
-  // Use the same price source + co-owner discount logic as the inner
-  // SubscriptionCalculator (which renders the "Due Today" card). Previously
-  // the outer paySubDisplay used DEFAULT_TIER_PRICES and skipped the
-  // co-owner discount, so the "Activate for" button label (and the actual
-  // /api/seats prorated_cost we send) disagreed with the displayed
-  // "Due Today" total — under-charging the customer.
+  // Co-owner pricing rule (2nd Zee Bee at Hive Manager rate) is applied inside
+  // calculateSeatTotal, so paySubDisplay.annual / .prorated already reflect it.
   const livePricesForPay = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
   const paySubDisplay = getSubscriptionDisplay(
     paymentSourceForPay,
@@ -9900,21 +9898,13 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     new Date(),
     livePricesForPay,
   )
-  const ownerCountForPay = (selectedSeats.find(s => s.tier === 'owner')?.count) || 0
-  const ownerPriceForPay = livePricesForPay.owner || 0
-  const managerPriceForPay = livePricesForPay.manager || 0
-  const coOwnerDiscountForPay =
-    ownerCountForPay >= 2 ? (ownerCountForPay - 1) * (ownerPriceForPay - managerPriceForPay) : 0
-  const effectiveAnnualForPay = paySubDisplay.annual - coOwnerDiscountForPay
-  const effectiveProratedForPay =
-    paymentSourceForPay === 'direct' ? prorateToNextRenewal(effectiveAnnualForPay) : 0
+  const effectiveProratedForPay = paySubDisplay.prorated
   const ccAmount = Math.round(effectiveProratedForPay * 1.03 * 100) / 100
   // Back-compat shim — the legacy payment screens (method picker, ACH form,
-  // CC form, post-pay confirm) read `proration.*`. Map to the new display
-  // so we don't have to touch every downstream string.
+  // CC form, post-pay confirm) read `proration.*`.
   const proration = {
     prorated: effectiveProratedForPay,
-    annual:   effectiveAnnualForPay,
+    annual:   paySubDisplay.annual,
     days:     paySubDisplay.daysUntilRenewal,
     renewDate: formatRenewalDate(paySubDisplay.renewalDate),
   }
@@ -11930,11 +11920,14 @@ function OnboardingInviteSheet({ onClose, onDone, locationId }) {
 function calcRenewalTotal(locationId, smsEnabled=false, prices=DEFAULT_TIER_PRICES) {
   const locUsers = USERS_DATA.filter(u => u.locationId === locationId)
   const smsPrice = APP_ADDONS.find(a=>a.id==='sms')?.price || 0
-  // If no users found (e.g. owner not in USERS_DATA), default to owner plan pricing
-  const seats    = locUsers.length > 0
-    ? locUsers.reduce((s, u) => s + (prices[u.role] || 0), 0)
+  // Group users by role into SeatLine shape so calculateSeatTotal can apply the
+  // co-owner rule (2nd Zee Bee bills at Hive Manager rate).
+  const counts = locUsers.reduce((m, u) => { m[u.role] = (m[u.role] || 0) + 1; return m }, {})
+  const seatLines = Object.entries(counts).map(([tier, count]) => ({ tier, count }))
+  const seats = locUsers.length > 0
+    ? calculateSeatTotal(seatLines, prices)
     : (prices.owner || 0)
-  const sms      = smsEnabled ? smsPrice : 0
+  const sms = smsEnabled ? smsPrice : 0
   return { seats, sms, total: seats + sms, users: locUsers, smsPrice }
 }
 
@@ -18957,20 +18950,13 @@ function SubscriptionCalculator({
 
   const display = getSubscriptionDisplay(normalizedSource, seats, new Date(), livePrices)
 
-  // Co-owner rule: the 2nd Zee Bee seat bills at the Hive Manager rate, not
-  // the full owner rate. Owner seats are capped at 2 — a location has at most
-  // one primary owner + one co-owner. Math lib stays naive (count × price);
-  // we apply the discount here so the Breakdown / Annual / Prorated all
-  // reflect the same effective total.
+  // Co-owner rule (2nd Zee Bee at Hive Manager rate) lives in calculateSeatTotal,
+  // so display.annual / .prorated already reflect it. Owner seats capped at 2 —
+  // one primary owner + one co-owner.
   const SEAT_MAX = (tier) => tier === 'owner' ? 2 : 99
-  const ownerCount = (seats.find(s => s.tier === 'owner')?.count) || 0
-  const ownerPrice = getTierPrice('owner')
   const managerPrice = getTierPrice('manager')
-  const coOwnerDiscount = ownerCount >= 2 ? (ownerCount - 1) * (ownerPrice - managerPrice) : 0
-  const effectiveAnnual = display.annual - coOwnerDiscount
-  const effectiveProrated = display.mode === 'direct'
-    ? prorateToNextRenewal(effectiveAnnual)
-    : 0
+  const effectiveAnnual = display.annual
+  const effectiveProrated = display.prorated
 
   function adjustSeat(tier, delta) {
     // Deferred tiers (Worker Bee, Honey Watcher) are locked at 0 — buttons are
@@ -19137,8 +19123,8 @@ function SubscriptionCalculator({
           const count = getCount(t.key)
           const price = getTierPrice(t.key)
           // Co-owner rule reflected in row subtotal: 1st at owner rate, 2nd at manager rate.
-          const subtotal = (t.key === 'owner' && count >= 2)
-            ? price + (count - 1) * managerPrice
+          const subtotal = t.key === 'owner'
+            ? calculateOwnerSubtotal(count, livePrices)
             : price * count
           const minusDisabled = deferred || (t.key === 'owner' ? count <= 1 : count <= 0)
           const plusDisabled  = deferred || count >= SEAT_MAX(t.key)
