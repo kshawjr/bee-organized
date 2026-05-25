@@ -7,12 +7,15 @@
 import { fromZonedTime, toZonedTime, format } from 'date-fns-tz'
 
 const TZ_ALIASES: Record<string, string> = {
-  'eastern time (et)': 'America/New_York',
-  'central time (ct)': 'America/Chicago',
+  'eastern time (et)':  'America/New_York',
+  'central time (ct)':  'America/Chicago',
   'mountain time (mt)': 'America/Denver',
-  'pacific time (pt)': 'America/Los_Angeles',
-  'alaska time (akt)': 'America/Anchorage',
-  'hawaii time (hst)': 'Pacific/Honolulu',
+  'pacific time (pt)':  'America/Los_Angeles',
+  'alaska time (akt)':  'America/Anchorage',
+  'hawaii time (ht)':   'Pacific/Honolulu',
+  // Older variant that previously appeared in seed/docs. Kept so any rows
+  // still holding the (HST) label keep resolving correctly.
+  'hawaii time (hst)':  'Pacific/Honolulu',
   et: 'America/New_York',
   ct: 'America/Chicago',
   mt: 'America/Denver',
@@ -29,6 +32,26 @@ export function resolveTimezone(input: string | null | undefined): string {
   // is already a valid IANA name. date-fns-tz will throw downstream if not.
   if (trimmed.includes('/')) return trimmed
   return 'UTC'
+}
+
+// Strict variant for callers that cannot tolerate a silent UTC fallback —
+// notably Jobber's LocalDateTimeAttributes, where the wrong zone shows up
+// on the wrong day in the customer's calendar. Throws with an actionable
+// message instead of returning 'UTC'.
+export function requireIanaTimezone(input: string | null | undefined): string {
+  if (!input || !input.trim()) {
+    throw new Error('location timezone is not set')
+  }
+  const trimmed = input.trim()
+  const lower = trimmed.toLowerCase()
+  if (TZ_ALIASES[lower]) return TZ_ALIASES[lower]
+  // Already IANA-shaped (contains a slash) — trust it; date-fns-tz will
+  // surface its own error on use if the name is bogus.
+  if (trimmed.includes('/')) return trimmed
+  throw new Error(
+    `unrecognized timezone "${trimmed}" — expected an IANA name like ` +
+    `"America/New_York" or one of the standard US labels`,
+  )
 }
 
 // Returns the UTC instant corresponding to 9am on the given calendar day

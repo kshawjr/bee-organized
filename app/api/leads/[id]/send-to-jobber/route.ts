@@ -31,6 +31,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { jobberGraphQL, jobberMutation } from '@/lib/jobber'
 import { writeSyncLog } from '@/lib/sync-log'
+import { requireIanaTimezone } from '@/lib/drip-time'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -282,10 +283,18 @@ export async function POST(
   const assessment_type: 'in-person' | 'virtual' | undefined = body.assessment_type
   if (creation_type === 'request_with_assessment') {
     if (!scheduled_assessment_at) {
-      return fail('validation', 'scheduled_assessment_at_required', 400)
+      return fail(
+        'validation',
+        'Cannot send to Jobber: assessment time required.',
+        400,
+      )
     }
     if (Number.isNaN(Date.parse(scheduled_assessment_at))) {
-      return fail('validation', 'scheduled_assessment_at_invalid', 400)
+      return fail(
+        'validation',
+        `Cannot send to Jobber: assessment time is not a valid date ("${scheduled_assessment_at}").`,
+        400,
+      )
     }
     if (assessment_type && assessment_type !== 'in-person' && assessment_type !== 'virtual') {
       return fail('validation', 'invalid_assessment_type', 400)
@@ -516,7 +525,22 @@ export async function POST(
       // calendar views render with a sensible block.
       const startMs = new Date(scheduled_assessment_at!).getTime()
       const endMs   = startMs + 60 * 60 * 1000
-      const tz      = (location as any).timezone || 'America/New_York'
+      // Jobber's LocalDateTimeAttributes requires an IANA timezone. The
+      // locations.timezone column historically stores friendly labels like
+      // "Eastern Time (ET)"; requireIanaTimezone translates known labels and
+      // throws on anything it can't confidently resolve. No silent fallback —
+      // a wrong zone misplaces appointments on the customer's calendar.
+      let tz: string
+      try {
+        tz = requireIanaTimezone((location as any).timezone)
+      } catch (err: any) {
+        return fail(
+          'validation',
+          `Cannot send to Jobber: ${err?.message || 'invalid location timezone'}. ` +
+          `Update Settings → Location → Timezone.`,
+          400,
+        )
+      }
       const assessCreate = await jobberMutation(
         locationSlug,
         ASSESSMENT_CREATE_MUTATION,
