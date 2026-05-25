@@ -137,11 +137,16 @@ const FIND_CLIENT_QUERY = /* GraphQL */ `
   }
 `
 
+// Jobber's Client type has two property-bearing fields: a legacy `properties`
+// list (no pagination args accepted) and the current `clientProperties`
+// connection. Sending `(first: N)` to `properties` fails with: Field
+// 'properties' doesn't accept argument 'first'. The connection at
+// `clientProperties` is the supported shape today.
 const GET_CLIENT_PROPERTIES_QUERY = /* GraphQL */ `
   query GetClientProperties($clientId: EncodedId!) {
     client(id: $clientId) {
       id
-      properties(first: 50) {
+      clientProperties(first: 50) {
         nodes {
           id
           address { street1 street2 city province postalCode country }
@@ -404,7 +409,7 @@ export async function POST(
       if (propsRes.errors?.length) {
         return fail('property_lookup', propsRes.errors[0]?.message || 'property_lookup_failed')
       }
-      const existing: any[] = propsRes.data?.client?.properties?.nodes || []
+      const existing: any[] = propsRes.data?.client?.clientProperties?.nodes || []
       const wantedStreet = address.street.toLowerCase()
       const matchedProp = existing.find((p: any) =>
         (p.address?.street1 || '').trim().toLowerCase() === wantedStreet
