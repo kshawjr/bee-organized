@@ -612,6 +612,48 @@ export async function POST(
     .update(writeback)
     .eq('id', leadId)
   if (writeErr) {
+    // Special case: leads_jobber_client_id_location_idx is a unique index on
+    // (location_id, jobber_client_id). It trips when the Jobber client we just
+    // matched/created is already linked to a DIFFERENT Bee Hub lead in the
+    // same location (e.g. two intake records for the same person, or one
+    // intake plus a previously-imported lead). The Jobber side has already
+    // succeeded by this point — the request/property/assessment are real and
+    // orphaned from a Bee Hub lead. Surface as 400 with the owner lead so
+    // the user can navigate there instead of seeing a raw Postgres error.
+    // Long-term fix: drop the unique constraint (a returning customer with a
+    // new inquiry is a legitimate second lead).
+    const isClientIdDup =
+      writeErr.code === '23505' &&
+      (writeErr.message?.includes('leads_jobber_client_id_location_idx') ||
+       writeErr.details?.includes('jobber_client_id'))
+    if (isClientIdDup && jobberClientId) {
+      const { data: owner } = await supabaseService
+        .from('leads')
+        .select('id, name, email')
+        .eq('jobber_client_id', jobberClientId)
+        .eq('location_id', locationSlug)
+        .neq('id', leadId)
+        .maybeSingle()
+      const ownerLabel = owner
+        ? `lead "${owner.name || owner.email || owner.id.slice(0, 8)}"`
+        : 'another lead'
+      return fail(
+        'writeback',
+        `This Jobber client (JC-${jobberClientId}) is already linked to ${ownerLabel} ` +
+        `in this location. The Jobber request was created — open that lead to ` +
+        `view its history, or unlink it before resending.`,
+        400,
+        {
+          jobber_client_id:     jobberClientId,
+          jobber_property_id:   jobberPropertyId,
+          jobber_request_id:    jobberRequestId,
+          jobber_assessment_id: jobberAssessmentId,
+          owner_lead_id:        owner?.id || null,
+          owner_lead_name:      owner?.name || null,
+          owner_lead_email:     owner?.email || null,
+        },
+      )
+    }
     return fail('writeback', writeErr.message, 500, {
       // Surface the IDs anyway — the Jobber side succeeded, only the local
       // mirror failed. The caller can retry the writeback or sync later.
