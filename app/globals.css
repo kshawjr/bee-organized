@@ -5,8 +5,8 @@ input,select,button,textarea{font-family:inherit;box-sizing:border-box;max-width
 select{-webkit-appearance:none}
 ::-webkit-scrollbar{width:4px}
 ::-webkit-scrollbar-thumb{background:rgba(168,201,196,0.3);border-radius:2px}
-@media(min-width:768px){.bee-bottom-nav{display:none!important}.bee-sidebar{display:flex!important}.bee-main{margin-left:220px!important}.bee-loc-banner{left:220px!important}.mobile-fab{display:none!important}.desktop-only{display:inline-flex!important}}
-@media(max-width:767px){.bee-sidebar{display:none!important}.bee-bottom-nav{display:flex!important}.bee-main{margin-left:0!important}.bee-loc-banner{left:0!important}.desktop-only{display:none!important}.mobile-fab{display:flex!important}}
+@media(min-width:768px){.bee-mobile-topbar{display:none!important}.bee-sidebar{display:flex!important}.bee-main{margin-left:220px!important}.bee-loc-banner{left:220px!important}.mobile-fab{display:none!important}.desktop-only{display:inline-flex!important}}
+@media(max-width:767px){.bee-sidebar{display:none!important}.bee-mobile-topbar{display:flex!important}.bee-main{margin-left:0!important}.bee-loc-banner{left:0!important}.desktop-only{display:none!important}.mobile-fab{display:flex!important}}
 /* bee-tip — hover/tap tooltip system
  * Used by PersonPanel icon row + scattered chip tooltips throughout the app.
  * Was lost in the .js → .jsx migration; restored 5/19.

@@ -4928,6 +4928,26 @@ function PersonPanel({
   const [jobNoteDraft, setJobNoteDraft] = useState("");
   const [fieldVal, setFieldVal] = useState("");
   const [toast, setToast] = useState(null);
+  // Swipe-down to dismiss: only triggered from the drag handle to avoid
+  // conflicting with content scroll. State is the in-progress translateY.
+  const [sheetDragY, setSheetDragY] = useState(0);
+  const dragStartYRef = React.useRef(null);
+  const onHandleTouchStart = (e) => {
+    if (!e.touches || !e.touches[0]) return;
+    dragStartYRef.current = e.touches[0].clientY;
+  };
+  const onHandleTouchMove = (e) => {
+    if (dragStartYRef.current == null || !e.touches || !e.touches[0]) return;
+    const dy = e.touches[0].clientY - dragStartYRef.current;
+    if (dy > 0) setSheetDragY(dy);
+  };
+  const onHandleTouchEnd = () => {
+    if (dragStartYRef.current == null) return;
+    const dy = sheetDragY;
+    dragStartYRef.current = null;
+    if (dy > 100) { setSheetDragY(0); onClose(); }
+    else setSheetDragY(0);
+  };
   React.useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 3000);
@@ -5228,17 +5248,35 @@ function PersonPanel({
             flexDirection: "column",
             boxShadow: "0 -8px 40px rgba(26,46,43,0.15)",
             overscrollBehavior: "contain",
+            transform: sheetDragY ? `translateY(${sheetDragY}px)` : undefined,
+            transition: dragStartYRef.current == null ? "transform 0.2s ease" : "none",
+            willChange: "transform",
           },
         },
-        React.createElement("div", {
-          style: {
-            width: "36px",
-            height: "4px",
-            background: "rgba(0,0,0,0.12)",
-            borderRadius: "2px",
-            margin: "12px auto 0",
+        React.createElement(
+          "div",
+          {
+            onTouchStart: onHandleTouchStart,
+            onTouchMove: onHandleTouchMove,
+            onTouchEnd: onHandleTouchEnd,
+            onTouchCancel: onHandleTouchEnd,
+            style: {
+              padding: "10px 0 4px",
+              display: "flex",
+              justifyContent: "center",
+              touchAction: "none",
+              cursor: "grab",
+            },
           },
-        }),
+          React.createElement("div", {
+            style: {
+              width: "44px",
+              height: "5px",
+              background: "rgba(0,0,0,0.18)",
+              borderRadius: "3px",
+            },
+          }),
+        ),
         React.createElement(
           "div",
           {
@@ -6083,15 +6121,21 @@ function PersonPanel({
                     {
                       onClick: onPrev,
                       disabled: !onPrev,
+                      "aria-label": "Previous",
                       style: {
                         background: "none",
                         border: "1px solid rgba(0,0,0,0.1)",
-                        borderRadius: "6px",
-                        fontSize: "16px",
+                        borderRadius: "8px",
+                        fontSize: "18px",
                         color: onPrev ? "#4a5e5a" : "#d0d8d5",
                         cursor: onPrev ? "pointer" : "default",
-                        padding: "1px 7px",
-                        lineHeight: 1.4,
+                        minWidth: "36px",
+                        minHeight: "36px",
+                        padding: "4px 10px",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        lineHeight: 1,
                       },
                     },
                     "\u2039",
@@ -6114,15 +6158,21 @@ function PersonPanel({
                     {
                       onClick: onNext,
                       disabled: !onNext,
+                      "aria-label": "Next",
                       style: {
                         background: "none",
                         border: "1px solid rgba(0,0,0,0.1)",
-                        borderRadius: "6px",
-                        fontSize: "16px",
+                        borderRadius: "8px",
+                        fontSize: "18px",
                         color: onNext ? "#4a5e5a" : "#d0d8d5",
                         cursor: onNext ? "pointer" : "default",
-                        padding: "1px 7px",
-                        lineHeight: 1.4,
+                        minWidth: "36px",
+                        minHeight: "36px",
+                        padding: "4px 10px",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        lineHeight: 1,
                       },
                     },
                     "\u203A",
@@ -6132,12 +6182,22 @@ function PersonPanel({
                 "button",
                 {
                   onClick: onClose,
+                  "aria-label": "Close",
                   style: {
                     background: "none",
                     border: "none",
-                    fontSize: "22px",
-                    color: "#8a9e9a",
+                    fontSize: "26px",
+                    color: "#4a5e5a",
                     cursor: "pointer",
+                    width: "44px",
+                    height: "44px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: 0,
+                    flexShrink: 0,
+                    marginRight: "-8px",
+                    lineHeight: 1,
                   },
                 },
                 "\xD7",
@@ -9235,7 +9295,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
       </div>
       {/* FAB - New Client */}
       <button onClick={()=>setShowNewLead(true)}
-        style={{ position:'fixed', bottom:'80px', right:'16px', zIndex:500, width:'52px', height:'52px', borderRadius:'50%', background:'#1a2e2b', color:'white', border:'none', fontSize:'28px', lineHeight:1, cursor:'pointer', boxShadow:'0 4px 20px rgba(26,46,43,0.4)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+        style={{ position:'fixed', bottom:'max(24px, calc(env(safe-area-inset-bottom) + 16px))', right:'16px', zIndex:500, width:'52px', height:'52px', borderRadius:'50%', background:'#1a2e2b', color:'white', border:'none', fontSize:'28px', lineHeight:1, cursor:'pointer', boxShadow:'0 4px 20px rgba(26,46,43,0.4)', display:'flex', alignItems:'center', justifyContent:'center' }}>
         +
       </button>
 
@@ -9674,7 +9734,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
       {/* Description popup */}
       {descPopup&&(
         <div style={{ position:'fixed', inset:0, zIndex:8000 }} onClick={()=>setDescPopup(null)}>
-          <div style={{ position:'fixed', bottom:'90px', left:'16px', right:'16px', background:'#1a2e2b', borderRadius:'14px', padding:'14px 16px', boxShadow:'0 8px 32px rgba(26,46,43,0.4)', zIndex:8001 }}
+          <div style={{ position:'fixed', bottom:'max(24px, calc(env(safe-area-inset-bottom) + 16px))', left:'16px', right:'16px', background:'#1a2e2b', borderRadius:'14px', padding:'14px 16px', boxShadow:'0 8px 32px rgba(26,46,43,0.4)', zIndex:8001 }}
             onClick={e=>e.stopPropagation()}>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px' }}>
               <p style={{ fontSize:'13px', fontWeight:700, color:'white' }}>💬 {descPopup.name}</p>
@@ -13276,6 +13336,25 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
   const [showDoneSteps, setShowDoneSteps]   = useState(false)
   const [newStepText, setNewStepText]       = useState('')
   const [newStepDate, setNewStepDate]       = useState('')
+  // Swipe-down dismiss (matches PersonPanel pattern)
+  const [sheetDragY, setSheetDragY] = useState(0)
+  const dragStartYRef = React.useRef(null)
+  const onHandleTouchStart = (e) => {
+    if (!e.touches || !e.touches[0]) return
+    dragStartYRef.current = e.touches[0].clientY
+  }
+  const onHandleTouchMove = (e) => {
+    if (dragStartYRef.current == null || !e.touches || !e.touches[0]) return
+    const dy = e.touches[0].clientY - dragStartYRef.current
+    if (dy > 0) setSheetDragY(dy)
+  }
+  const onHandleTouchEnd = () => {
+    if (dragStartYRef.current == null) return
+    const dy = sheetDragY
+    dragStartYRef.current = null
+    if (dy > 100) { setSheetDragY(0); onClose() }
+    else setSheetDragY(0)
+  }
   const s = partnerStageConf(partner.stage)
   const totalReferrals = (partner.referrals||[]).length
   const converted = (partner.referrals||[]).filter(r=>r.converted).length
@@ -13313,8 +13392,10 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
     <>
       <div style={{ position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'flex-end' }}>
         <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.25)' }} onClick={onClose} />
-        <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, height:'88vh', display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.15)' }}>
-          <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'12px auto 0' }} />
+        <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, height:'88vh', display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.15)', transform: sheetDragY ? `translateY(${sheetDragY}px)` : undefined, transition: dragStartYRef.current == null ? 'transform 0.2s ease' : 'none', willChange:'transform' }}>
+          <div onTouchStart={onHandleTouchStart} onTouchMove={onHandleTouchMove} onTouchEnd={onHandleTouchEnd} onTouchCancel={onHandleTouchEnd} style={{ padding:'10px 0 4px', display:'flex', justifyContent:'center', touchAction:'none', cursor:'grab' }}>
+            <div style={{ width:'44px', height:'5px', background:'rgba(0,0,0,0.18)', borderRadius:'3px' }} />
+          </div>
 
           {/* Header - clean: identity + tier + stage only */}
           <div style={{ padding:'0.75rem 1.25rem 0.75rem', borderBottom:'1px solid rgba(0,0,0,0.06)', flexShrink:0 }}>
@@ -13361,7 +13442,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
                   </div>
                 </div>
               </div>
-              <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer', flexShrink:0, marginTop:'2px' }}>×</button>
+              <button onClick={onClose} aria-label="Close" style={{ background:'none', border:'none', fontSize:'26px', color:'#4a5e5a', cursor:'pointer', flexShrink:0, width:'44px', height:'44px', display:'flex', alignItems:'center', justifyContent:'center', padding:0, marginRight:'-8px', lineHeight:1 }}>×</button>
             </div>
           </div>
 
@@ -13901,7 +13982,7 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
               {/* Desktop add button */}
               <button onClick={()=>{ setAddType(null); setShowAdd(true) }} style={{ padding:'8px 14px', background:'rgba(168,201,196,0.15)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:'pointer' }} className="desktop-only">+ Add</button>
               {/* Mobile FAB */}
-              <button onClick={()=>{ setAddType(null); setShowAdd(true) }} style={{ position:'fixed', bottom:'80px', right:'16px', zIndex:500, width:'52px', height:'52px', borderRadius:'50%', background:'#1a2e2b', color:'white', border:'none', fontSize:'28px', lineHeight:1, cursor:'pointer', boxShadow:'0 4px 20px rgba(26,46,43,0.4)', display:'flex', alignItems:'center', justifyContent:'center' }} className="mobile-fab">+</button>
+              <button onClick={()=>{ setAddType(null); setShowAdd(true) }} style={{ position:'fixed', bottom:'max(24px, calc(env(safe-area-inset-bottom) + 16px))', right:'16px', zIndex:500, width:'52px', height:'52px', borderRadius:'50%', background:'#1a2e2b', color:'white', border:'none', fontSize:'28px', lineHeight:1, cursor:'pointer', boxShadow:'0 4px 20px rgba(26,46,43,0.4)', display:'flex', alignItems:'center', justifyContent:'center' }} className="mobile-fab">+</button>
             </>
           </div>
 
@@ -18891,7 +18972,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         {/* Quick Capture FAB */}
         {!isReadOnly&&(
           <button onClick={()=>setShowNewLead(true)}
-            style={{ position:'fixed', bottom:'80px', right:'16px', zIndex:500, width:'52px', height:'52px', borderRadius:'50%', background:'#1a2e2b', color:'white', border:'none', fontSize:'28px', lineHeight:1, cursor:'pointer', boxShadow:'0 4px 20px rgba(26,46,43,0.4)', display:'flex', alignItems:'center', justifyContent:'center' }} className="mobile-fab">
+            style={{ position:'fixed', bottom:'max(24px, calc(env(safe-area-inset-bottom) + 16px))', right:'16px', zIndex:500, width:'52px', height:'52px', borderRadius:'50%', background:'#1a2e2b', color:'white', border:'none', fontSize:'28px', lineHeight:1, cursor:'pointer', boxShadow:'0 4px 20px rgba(26,46,43,0.4)', display:'flex', alignItems:'center', justifyContent:'center' }} className="mobile-fab">
             +
           </button>
         )}
@@ -22776,7 +22857,7 @@ function PricingManagementTab() {
       </div>
 
       {/* Save banner */}
-      <div style={{ position:'sticky', bottom:'5rem', left:0, right:0 }}>
+      <div style={{ position:'sticky', bottom:'max(16px, calc(env(safe-area-inset-bottom) + 8px))', left:0, right:0 }}>
         {saveError && (
           <div style={{ marginBottom:'8px', padding:'10px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'10px', fontSize:'12px', color:'#991b1b' }}>
             {saveError}
@@ -26285,6 +26366,24 @@ if (Array.isArray(initialPeople)) return
   const [users, setUsers]                   = useState(initialUsers ?? USERS_DATA)
   // Track CRM status overrides from admin panel
   const [locStatuses, setLocStatuses]       = useState({})
+  // Mobile nav (hamburger drawer + profile menu). isMobile drives the responsive
+  // TOTAL_TOP offset — server render assumes desktop, then we flip on mount.
+  const [isMobile, setIsMobile]             = useState(false)
+  const [showMobileNav, setShowMobileNav]   = useState(false)
+  const [showMobileProfile, setShowMobileProfile] = useState(false)
+  useEffect(() => {
+    function check() { setIsMobile(window.innerWidth < 768) }
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+  // Lock body scroll behind the drawer so the page underneath doesn't slide too.
+  useEffect(() => {
+    if (!showMobileNav) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [showMobileNav])
 
   const roleConf    = ROLES.find(r=>r.key===role)
   const isElevated  = role==='corporate' || role==='super_admin'
@@ -26383,17 +26482,22 @@ if (Array.isArray(initialPeople)) return
     ...(isElevated ? [{ key:'admin', icon:'🏢', label:role==='super_admin'?'Admin':'Corp' }] : []),
   ]
 
-  // Heights — demo bar only renders for super_admin (see DemoBar gate below),
-  // so its height must zero out for other roles or content gets a phantom gap.
-  const DEMO_BAR_H  = role === 'super_admin' ? 32 : 0
+  // Heights — demo bar only renders for super_admin AND only on desktop. On
+  // mobile the super_admin "View as / Exit" controls live inside
+  // MobileProfileMenu instead, freeing 32px of vertical real estate.
+  const DEMO_BAR_H  = (role === 'super_admin' && !isMobile) ? 32 : 0
   const LOC_BAR_H   = isElevated ? 36 : 0
-  const TOTAL_TOP   = DEMO_BAR_H + LOC_BAR_H
+  // MobileTopBar (hamburger + profile) only shows on mobile and pushes everything
+  // below it down by 48px. TOTAL_TOP threads through every sticky/padding calc.
+  const MOBILE_NAV_H = isMobile ? 48 : 0
+  const TOTAL_TOP   = DEMO_BAR_H + LOC_BAR_H + MOBILE_NAV_H
 
   // ── Demo role switcher bar (top) ───────────────────────────────────────────
   // Only renders for super_admin — real franchise owners and corporate users
   // should never see "Kevin Shaw / View as" controls.
   const DemoBar = () => {
     if (role !== 'super_admin') return null
+    if (isMobile) return null
     return (
     <div style={{ position:'fixed', top:0, left:0, right:0, background:'#0a0a0a', borderBottom:'1px solid rgba(255,255,255,0.08)', zIndex:10001, display:'flex', flexDirection:'column' }}>
       <div style={{ height:'32px', display:'flex', alignItems:'center', padding:'0 10px', gap:'6px' }}>
@@ -26443,6 +26547,180 @@ if (Array.isArray(initialPeople)) return
           <button onClick={()=>setLocFilter('all')} style={{ fontSize:'10px', color:'rgba(168,201,196,0.6)', background:'rgba(168,201,196,0.08)', border:'none', borderRadius:'6px', padding:'2px 7px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>All ×</button>
         )}
       </div>
+    )
+  }
+
+  // ── Mobile top bar (hamburger + brand + profile) ───────────────────────────
+  // Renders only below 768px (via .bee-mobile-topbar CSS class). Sits directly
+  // below the DemoBar + LocBanner stack. Provides the entry points to the
+  // hamburger drawer (left) and the profile menu (right).
+  const MobileTopBar = () => {
+    const tbTop = DEMO_BAR_H + LOC_BAR_H
+    const profileName = viewAsUser?.name || currentUser?.name || 'Kevin Shaw'
+    const profileInitials = viewAsUser?.initials || (profileName ? getInitials(profileName) : 'KS')
+    const screenTitle = (() => {
+      if (activeNav === 'home') return 'Home'
+      if (activeNav === 'hive') return 'Clients'
+      if (activeNav === 'partners') return 'Contacts'
+      if (activeNav === 'reports') return 'Reports'
+      if (activeNav === 'settings') return 'Settings'
+      if (activeNav === 'admin') return role === 'super_admin' ? 'Admin' : 'Corp'
+      return 'Bee Hub'
+    })()
+    return (
+      <div className="bee-mobile-topbar" style={{ position:'fixed', top:`${tbTop}px`, left:0, right:0, height:'48px', background:'#1a2e2b', borderBottom:'1px solid rgba(168,201,196,0.12)', zIndex:9000, display:'none', alignItems:'center', padding:'0 4px', gap:'4px' }}>
+        <button
+          onClick={()=>setShowMobileNav(true)}
+          aria-label="Open menu"
+          style={{ width:'44px', height:'44px', display:'flex', alignItems:'center', justifyContent:'center', background:'none', border:'none', cursor:'pointer', flexShrink:0 }}>
+          <span style={{ display:'inline-flex', flexDirection:'column', gap:'4px' }}>
+            <span style={{ width:'20px', height:'2px', background:'rgba(168,201,196,0.95)', borderRadius:'1px', display:'block' }} />
+            <span style={{ width:'20px', height:'2px', background:'rgba(168,201,196,0.95)', borderRadius:'1px', display:'block' }} />
+            <span style={{ width:'20px', height:'2px', background:'rgba(168,201,196,0.95)', borderRadius:'1px', display:'block' }} />
+          </span>
+        </button>
+        <div style={{ flex:1, display:'flex', alignItems:'center', gap:'8px', minWidth:0 }}>
+          <span style={{ fontSize:'18px', lineHeight:1, flexShrink:0 }}>🐝</span>
+          <span style={{ fontSize:'15px', fontWeight:600, color:'white', fontFamily:'Georgia,serif', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{screenTitle}</span>
+        </div>
+        <button
+          onClick={()=>setShowGlobalSearch(true)}
+          aria-label="Search"
+          style={{ width:'44px', height:'44px', display:'flex', alignItems:'center', justifyContent:'center', background:'none', border:'none', cursor:'pointer', flexShrink:0, color:'rgba(168,201,196,0.85)', fontSize:'18px' }}>
+          🔍
+        </button>
+        <button
+          onClick={()=>setShowMobileProfile(v=>!v)}
+          aria-label="Profile menu"
+          style={{ width:'44px', height:'44px', display:'flex', alignItems:'center', justifyContent:'center', background:'none', border:'none', cursor:'pointer', flexShrink:0, padding:0 }}>
+          <span style={{ width:'32px', height:'32px', borderRadius:'50%', background:'linear-gradient(135deg,#d4a046,#b07a20)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'11px', fontWeight:700, color:'white' }}>
+            {profileInitials}
+          </span>
+        </button>
+      </div>
+    )
+  }
+
+  // ── Hamburger drawer (mobile only) ─────────────────────────────────────────
+  // Slide-in from left, ~280px wide, full-height. Backdrop tap closes.
+  // Reuses the same navItems gating logic as the desktop sidebar.
+  const MobileNavDrawer = () => {
+    if (!showMobileNav) return null
+    const isOnboardingState = effectiveCrmStatus === 'onboarding'
+    const sidebarName = viewAsUser?.name || currentUser?.name || 'Kevin Shaw'
+    const sidebarInitials = viewAsUser?.initials || (sidebarName ? getInitials(sidebarName) : 'KS')
+    const sidebarRoleLabel = viewAsUser
+      ? (FRANCHISE_ROLES.find(r => r.key === viewAsUser.role)?.label || 'Corporate')
+      : role === 'super_admin' ? 'Super Admin'
+      : role === 'corporate'   ? 'Corporate'
+      : role === 'franchise' && franchiseRole === 'owner'  ? 'Zee Bee'
+      : role === 'franchise' && franchiseRole === 'viewer' ? 'Honey Watcher'
+      : ''
+    return (
+      <div style={{ position:'fixed', inset:0, zIndex:10003, display:'flex' }}>
+        <div onClick={()=>setShowMobileNav(false)} style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.45)' }} />
+        <div style={{ position:'relative', width:'280px', maxWidth:'85vw', background:'#1a2e2b', height:'100%', display:'flex', flexDirection:'column', boxShadow:'4px 0 24px rgba(0,0,0,0.3)', overflowY:'auto', borderRight:'1px solid rgba(168,201,196,0.1)' }}>
+          {/* Header */}
+          <div style={{ padding:'18px 18px 14px', borderBottom:'1px solid rgba(168,201,196,0.08)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+              <span style={{ fontSize:'22px' }}>🐝</span>
+              <div>
+                <p style={{ fontSize:'14px', fontWeight:700, color:'white', fontFamily:'Georgia,serif', lineHeight:1 }}>Bee Hub</p>
+                <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.5)', marginTop:'2px' }}>Bee Organized</p>
+              </div>
+            </div>
+            <button onClick={()=>setShowMobileNav(false)} aria-label="Close menu" style={{ width:'44px', height:'44px', background:'none', border:'none', color:'rgba(168,201,196,0.85)', fontSize:'22px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>×</button>
+          </div>
+          {/* Nav items */}
+          <div style={{ flex:1, padding:'10px 10px 16px', display:'flex', flexDirection:'column', gap:'4px' }}>
+            {navItems.map(item=>{
+              const fr = franchiseRole
+              const isReports  = item.key==='reports'  && !['super_admin','corporate'].includes(role) && !['owner','manager'].includes(fr)
+              const isSettings = item.key==='settings' && ['readonly'].includes(fr)
+              const isPartners = item.key==='partners' && ['readonly'].includes(fr)
+              const isLimitedLaunchGated = isLimitedLaunch && (item.key==='partners' || item.key==='reports')
+              const isLocked = (isOnboardingState && !isElevated && item.key!=='home') || isReports || isSettings || isPartners || isLimitedLaunchGated
+              const isActive = activeNav===item.key
+              return (
+                <button
+                  key={item.key}
+                  title={isLimitedLaunchGated ? LIMITED_LAUNCH_TOOLTIP : undefined}
+                  onClick={()=>{
+                    if (isLocked) return
+                    if (item.action==='openManual') { setShowManual(true); setShowMobileNav(false); return }
+                    nav(item.key)
+                    setShowMobileNav(false)
+                  }}
+                  style={{ width:'100%', minHeight:'48px', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'14px', textAlign:'left', background:isActive?'rgba(168,201,196,0.14)':'transparent', opacity:isLocked?0.3:1 }}>
+                  <span style={{ fontSize:'20px', lineHeight:1, flexShrink:0 }}>{item.icon}</span>
+                  <span style={{ fontSize:'14px', fontWeight:isActive?600:500, color:isActive?'#a8c9c4':'rgba(168,201,196,0.75)' }}>{item.label}</span>
+                  {isActive&&<div style={{ marginLeft:'auto', width:'5px', height:'5px', borderRadius:'50%', background:'#a8c9c4' }} />}
+                </button>
+              )
+            })}
+          </div>
+          {/* User card */}
+          <div style={{ padding:'14px 16px', borderTop:'1px solid rgba(168,201,196,0.08)' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+              <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:'linear-gradient(135deg,#d4a046,#b07a20)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'12px', fontWeight:700, color:'white', flexShrink:0 }}>
+                {sidebarInitials}
+              </div>
+              <div style={{ minWidth:0, flex:1 }}>
+                <p style={{ fontSize:'13px', fontWeight:600, color:'white', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sidebarName}</p>
+                {sidebarRoleLabel && (
+                  <p style={{ fontSize:'11px', color:'rgba(168,201,196,0.55)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sidebarRoleLabel}</p>
+                )}
+              </div>
+            </div>
+            <a href="/api/auth/signout"
+              style={{ display:'block', marginTop:'12px', minHeight:'44px', padding:'11px 12px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.18)', borderRadius:'10px', textAlign:'center', fontSize:'13px', fontWeight:600, color:'rgba(168,201,196,0.9)', textDecoration:'none', fontFamily:'inherit' }}>
+              Sign Out
+            </a>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Mobile profile menu (top-right popover) ────────────────────────────────
+  const MobileProfileMenu = () => {
+    if (!showMobileProfile) return null
+    const profileName = viewAsUser?.name || currentUser?.name || 'Kevin Shaw'
+    const profileEmail = viewAsUser?.email || currentUser?.email || ''
+    const profileRole = viewAsUser
+      ? (FRANCHISE_ROLES.find(r => r.key === viewAsUser.role)?.label || 'Corporate')
+      : role === 'super_admin' ? 'Super Admin'
+      : role === 'corporate'   ? 'Corporate'
+      : role === 'franchise' && franchiseRole === 'owner'  ? 'Zee Bee'
+      : ''
+    const menuTop = DEMO_BAR_H + LOC_BAR_H + 48 + 4
+    return (
+      <>
+        <div onClick={()=>setShowMobileProfile(false)} style={{ position:'fixed', inset:0, zIndex:9001, background:'transparent' }} />
+        <div style={{ position:'fixed', top:`${menuTop}px`, right:'8px', zIndex:9002, width:'240px', background:'white', borderRadius:'12px', boxShadow:'0 10px 30px rgba(0,0,0,0.2)', border:'1px solid rgba(0,0,0,0.08)', overflow:'hidden' }}>
+          <div style={{ padding:'14px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
+            <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{profileName}</p>
+            {profileEmail && <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{profileEmail}</p>}
+            {profileRole && <p style={{ fontSize:'10px', color:'#a8c9c4', marginTop:'4px', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px' }}>{profileRole}</p>}
+          </div>
+          {role === 'super_admin' && !viewAsUser && (
+            <button onClick={()=>{ setShowMobileProfile(false); setRole('franchise'); setViewAsTarget(true) }}
+              style={{ width:'100%', minHeight:'44px', padding:'12px 14px', background:'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', fontSize:'13px', color:'#1a2e2b', fontFamily:'inherit', cursor:'pointer', textAlign:'left' }}>
+              👁 View as user…
+            </button>
+          )}
+          {role === 'super_admin' && viewAsUser && (
+            <button onClick={()=>{ setShowMobileProfile(false); setViewAsUser(null); setRole('super_admin'); setLocFilter('all') }}
+              style={{ width:'100%', minHeight:'44px', padding:'12px 14px', background:'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', fontSize:'13px', color:'#ef4444', fontFamily:'inherit', cursor:'pointer', textAlign:'left' }}>
+              Exit view-as
+            </button>
+          )}
+          <a href="/api/auth/signout"
+            style={{ display:'flex', alignItems:'center', minHeight:'44px', padding:'12px 14px', fontSize:'13px', color:'#1a2e2b', fontFamily:'inherit', textDecoration:'none' }}>
+            Sign Out
+          </a>
+        </div>
+      </>
     )
   }
 
@@ -26512,30 +26790,6 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           </div>
         </div>
       </>
-    )
-  }
-
-  // ── Bottom nav ─────────────────────────────────────────────────────────────
-  const BottomNav = () => {
-    const isOnboardingState = effectiveCrmStatus === 'onboarding'
-    return (
-      <div className="bee-bottom-nav" style={{ position:'fixed', bottom:0, left:0, right:0, background:'#1a2e2b', borderTop:'1px solid rgba(168,201,196,0.15)', zIndex:200 }}>
-        {isOnboardingState&&(
-          <div style={{ position:'absolute', top:0, left:0, right:0, textAlign:'center', padding:'2px', background:'rgba(245,158,11,0.15)', fontSize:'9px', color:'rgba(245,158,11,0.7)', fontWeight:600, letterSpacing:'0.5px' }}>SETUP IN PROGRESS</div>
-        )}
-        <div style={{ display:'flex', justifyContent:'space-around', width:'100%', paddingBottom:'max(20px, env(safe-area-inset-bottom))', paddingTop:'8px' }}>
-          {navItems.map(item=>{
-            const isLimitedLaunchGated = isLimitedLaunch && (item.key==='partners' || item.key==='reports')
-            const isLocked = (isOnboardingState && !isElevated && item.key!=='home') || (item.key==='reports' && !['super_admin','corporate','franchise'].includes(role)) || isLimitedLaunchGated
-            return (
-              <button key={item.key} title={isLimitedLaunchGated ? LIMITED_LAUNCH_TOOLTIP : undefined} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'3px', padding:'4px 8px', background:'none', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', opacity:isLocked?0.25:1 }}>
-                <span style={{ fontSize:'20px', lineHeight:1 }}>{item.icon}</span>
-                <span style={{ fontSize:'9px', color:activeNav===item.key?'#a8c9c4':'rgba(168,201,196,0.45)', fontWeight:activeNav===item.key?600:400 }}>{item.label}</span>
-              </button>
-            )
-          })}
-        </div>
-      </div>
     )
   }
 
@@ -26655,44 +26909,22 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     )
   }
 
-  // Fix bottom nav height dynamically for any iPhone
-  React.useEffect(()=>{
-    function fixNav() {
-      const navs = document.querySelectorAll('.bee-bottom-nav')
-      const isDesktop = window.innerWidth >= 768
-      if (isDesktop) {
-        navs.forEach(n => { n.style.display = 'none'; n.style.paddingBottom = ''; n.style.paddingTop = '' })
-        return
-      }
-      const isStandalone = window.navigator.standalone
-      const vvh = window.visualViewport ? window.visualViewport.height : window.innerHeight
-      const wh  = window.innerHeight
-      const toolbarH = Math.max(0, wh - vvh)
-      const pad = isStandalone ? 24 : Math.max(24, toolbarH + 8)
-      navs.forEach(n => { n.style.display = ''; n.style.paddingBottom = pad + 'px'; n.style.paddingTop = '8px' })
-    }
-    fixNav()
-    window.addEventListener('resize', fixNav)
-    if (window.visualViewport) window.visualViewport.addEventListener('resize', fixNav)
-    return () => {
-      window.removeEventListener('resize', fixNav)
-      if (window.visualViewport) window.visualViewport.removeEventListener('resize', fixNav)
-    }
-  }, [])
-
-  // Inject responsive CSS
+  // Inject responsive CSS — globals.css already has the bee-sidebar/bee-main
+  // /bee-loc-banner rules; the runtime inject below adds the mobile topbar
+  // toggle and reasserts the others so the runtime layout matches even if
+  // globals.css is stripped by an extension.
   React.useEffect(()=>{
     const style = document.createElement('style')
     style.textContent = `
       @media (min-width: 768px) {
         .bee-sidebar { display: flex !important; }
-        .bee-bottom-nav { display: none !important; }
+        .bee-mobile-topbar { display: none !important; }
         .bee-main { margin-left: 220px !important; }
         .bee-loc-banner { left: 220px !important; }
       }
       @media (max-width: 767px) {
         .bee-sidebar { display: none !important; }
-        .bee-bottom-nav { display: flex !important; }
+        .bee-mobile-topbar { display: flex !important; }
         .bee-main { margin-left: 0 !important; }
         .bee-loc-banner { left: 0 !important; }
       }
@@ -26710,6 +26942,9 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     <div>
       <DemoBar />
       <LocBanner />
+      <MobileTopBar />
+      <MobileNavDrawer />
+      <MobileProfileMenu />
       {showGuide && (
         <HowToGuideModal
           onClose={() => setShowGuide(false)}
@@ -26810,7 +27045,6 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         {screen()}
       </div>
 
-      <BottomNav />
       {showGlobalSearch&&(
         <GlobalSearch
           people={people}
