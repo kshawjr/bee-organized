@@ -104,16 +104,22 @@ function pickPrimaryAddress(lead: any): {
   state: string
   zip: string
 } | null {
+  // Prefer the jsonb array (current write path for new manual leads). Fall
+  // through to the legacy single-column form when the jsonb entry is missing
+  // or malformed — Jobber-imported leads only populate the legacy columns,
+  // and stub jsonb entries (e.g. `{ type: 'Service' }` with no value) would
+  // otherwise mask a perfectly valid legacy address.
   const addrs = Array.isArray(lead.addresses) ? lead.addresses : []
   if (addrs.length > 0) {
     const a = addrs[0]
     const street = (a.street || a.value || '').trim()
-    if (!street) return null
-    return {
-      street,
-      city:  (a.city  || '').trim(),
-      state: (a.state || '').trim(),
-      zip:   (a.zip   || '').trim(),
+    if (street) {
+      return {
+        street,
+        city:  (a.city  || '').trim(),
+        state: (a.state || '').trim(),
+        zip:   (a.zip   || '').trim(),
+      }
     }
   }
   // Legacy single-column fallback
@@ -354,7 +360,12 @@ export async function POST(
   // ── Address ─────────────────────────────────────────────────────
   const address = pickPrimaryAddress(lead)
   if (!address && addressRequired) {
-    return fail('validation', 'lead_has_no_address', 400)
+    return fail(
+      'validation',
+      'Cannot send to Jobber: lead has no street address. ' +
+      'Add an address to the lead before sending.',
+      400,
+    )
   }
 
   const firstName = (lead.first_name || lead.name?.split(' ')[0] || '').trim()
