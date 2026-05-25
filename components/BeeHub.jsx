@@ -16970,6 +16970,10 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   // saves know whether to insert or update. Populated by the load effect
   // below for real franchise locations only.
   const [dbPaths, setDbPaths] = useState({})
+  // Masters keyed by path_key → { id, path_key, name } for the 8 corp masters.
+  // Fed by /api/drip-paths/masters. Used by the "Customize" button to know
+  // which master to clone for a given path slot.
+  const [dbMasters, setDbMasters] = useState({})
   const [pathsSaving, setPathsSaving] = useState(null) // pathId currently being saved
   const [pathsErr, setPathsErr] = useState(null)
   const [editingTemplate, setEditingTemplate] = useState(null) // template obj or 'new'
@@ -17003,45 +17007,132 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
 
   // Load DB drip paths + their steps. Merges into pathSteps using path_key
   // as the UI's pathId. Leaves DEFAULT_PATH_STEPS untouched for path_keys
-  // that aren't in the DB yet (general-b/c/d, move-b/c/d, custom) so the
-  // user can still preview them.
+  // that aren't in the DB yet so the user can still preview the master.
+  // Loads corp masters in parallel so the "Customize" button knows which
+  // master_id to clone from.
+  async function loadLocationPaths() {
+    if (!realLocId) return
+    try {
+      const r = await fetch(`/api/locations/${realLocId}/drip-paths`, { credentials: 'include' })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const j = await r.json()
+      const paths = Array.isArray(j?.paths) ? j.paths : []
+      const newDbPaths = {}
+      const newSteps = {}
+      for (const p of paths) {
+        newDbPaths[p.path_key] = { id: p.id, name: p.name, is_default: p.is_default, location_uuid: p.location_uuid }
+        newSteps[p.path_key] = (p.steps || []).map((s) => ({
+          id: `db_${s.id}`,
+          dbId: s.id,
+          order: s.step_order,
+          name: s.template_name || `Step ${s.step_order}`,
+          type: s.channel,
+          delay: daysToDelayLabel(s.delay_days),
+          subject: s.subject,
+          body: s.body,
+          delay_days: s.delay_days,
+          templateId: s.template_legacy_id || s.master_template_id,
+          masterTemplateId: s.master_template_id,
+        }))
+      }
+      setDbPaths(newDbPaths)
+      setPathSteps(prev => ({ ...prev, ...newSteps }))
+      if (j.default_drip_path) {
+        setSettings(s => ({ ...s, paths: { ...s.paths, generalDefault: j.default_drip_path } }))
+      }
+      if (j.default_move_drip_path) {
+        setSettings(s => ({ ...s, paths: { ...s.paths, moveDefault: j.default_move_drip_path } }))
+      }
+      setPathsErr(null)
+    } catch (e) {
+      setPathsErr(String(e?.message || e))
+    }
+  }
+
   useEffect(() => {
     if (!realLocId) return
     let cancelled = false
-    fetch(`/api/locations/${realLocId}/drip-paths`, { credentials: 'include' })
+    loadLocationPaths()
+    fetch('/api/drip-paths/masters', { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(j => {
         if (cancelled) return
-        const paths = Array.isArray(j?.paths) ? j.paths : []
-        const newDbPaths = {}
-        const newSteps = {}
-        for (const p of paths) {
-          newDbPaths[p.path_key] = { id: p.id, name: p.name, is_default: p.is_default, location_uuid: p.location_uuid }
-          newSteps[p.path_key] = (p.steps || []).map((s, i) => ({
-            id: `db_${s.id}`,
-            dbId: s.id,
-            order: s.step_order,
-            name: s.template_name || `Step ${s.step_order}`,
-            type: s.channel,
-            delay: daysToDelayLabel(s.delay_days),
-            templateId: s.template_legacy_id || s.master_template_id,
-            masterTemplateId: s.master_template_id,
-          }))
-        }
-        setDbPaths(newDbPaths)
-        setPathSteps(prev => ({ ...prev, ...newSteps }))
-        // Hydrate defaults from DB location row.
-        if (j.default_drip_path) {
-          setSettings(s => ({ ...s, paths: { ...s.paths, generalDefault: j.default_drip_path } }))
-        }
-        if (j.default_move_drip_path) {
-          setSettings(s => ({ ...s, paths: { ...s.paths, moveDefault: j.default_move_drip_path } }))
-        }
-        setPathsErr(null)
+        const list = Array.isArray(j?.masters) ? j.masters : []
+        const map = {}
+        for (const m of list) map[m.path_key] = m
+        setDbMasters(map)
       })
-      .catch(e => { if (!cancelled) setPathsErr(String(e?.message || e)) })
+      .catch(e => { if (!cancelled) console.error('[Settings/Paths] masters fetch failed', e) })
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realLocId])
+
+  // Clone a corp master into a location-owned copy. After success refreshes
+  // the per-location paths so the new copy + its steps populate dbPaths /
+  // pathSteps and the row UI flips into "Customized" mode.
+  async function customizeFromMaster(pathId) {
+    if (!realLocId) return
+    const master = dbMasters[pathId]
+    if (!master) {
+      alert(`No master found for ${pathId}.`)
+      return
+    }
+    setPathsSaving(pathId)
+    try {
+      const res = await fetch(`/api/locations/${realLocId}/drip-paths/clone`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ master_id: master.id }),
+      })
+      const j = await res.json().catch(()=>({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      await loadLocationPaths()
+    } catch (e) {
+      alert('Could not customize path: ' + (e?.message || e))
+    } finally {
+      setPathsSaving(null)
+    }
+  }
+
+  // Delete the location-owned copy → location falls back to rendering the
+  // corp master. Asks for confirmation since customizations are lost.
+  async function resetPathToMaster(pathId) {
+    if (!realLocId) return
+    const copy = dbPaths[pathId]
+    if (!copy) return
+    if (!confirm('Reset this path to the master template? Any customizations made here will be lost.')) return
+    setPathsSaving(pathId)
+    try {
+      const res = await fetch(`/api/locations/${realLocId}/drip-paths/${copy.id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      const j = await res.json().catch(()=>({}))
+      if (!res.ok) {
+        // 409 means active progress — surface the detail message.
+        throw new Error(j?.detail || j?.error || `HTTP ${res.status}`)
+      }
+      // Drop from local state; pathSteps for this id will be re-derived from
+      // DEFAULT_PATH_STEPS preview (or refetched on next reload).
+      setDbPaths(prev => {
+        const next = { ...prev }
+        delete next[pathId]
+        return next
+      })
+      setPathSteps(prev => {
+        const next = { ...prev }
+        // Restore preview from the static preview map, if available.
+        if (DEFAULT_PATH_STEPS[pathId]) next[pathId] = DEFAULT_PATH_STEPS[pathId]
+        else delete next[pathId]
+        return next
+      })
+    } catch (e) {
+      alert('Could not reset path: ' + (e?.message || e))
+    } finally {
+      setPathsSaving(null)
+    }
+  }
 
   // Save a path's current steps to DB. Creates the drip_paths row first if
   // it doesn't exist yet (e.g. user is editing general-b for a location
@@ -17534,9 +17625,13 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                           </div>
                           <span style={{ fontSize:'20px' }}>{style.icon}</span>
                           <div style={{ flex:1, minWidth:0 }}>
-                            <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'2px' }}>
+                            <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'2px', flexWrap:'wrap' }}>
                               <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{style.label}</p>
                               {isDefault&&<span style={{ fontSize:'10px', color:'#a8c9c4', background:'rgba(168,201,196,0.15)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>Default</span>}
+                              {style.id!=='custom' && (dbPaths[pathId]
+                                ? <span style={{ fontSize:'10px', color:'#d4a046', background:'rgba(212,160,70,0.12)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>Customized</span>
+                                : dbMasters[pathId] && <span style={{ fontSize:'10px', color:'#6b7c79', background:'rgba(0,0,0,0.04)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>Master template</span>
+                              )}
                             </div>
                             <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{style.cta}</p>
                           </div>
@@ -17546,6 +17641,26 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                         {/* Steps preview */}
                         {expandedPath===pathId&&(
                           <div style={{ background:'rgba(0,0,0,0.02)', borderTop:'1px solid rgba(0,0,0,0.05)', padding:'8px 12px' }}>
+                            {/* Customize / Reset banner — only for master-backed paths (i.e. not 'custom') when a real location is loaded */}
+                            {realLocId && style.id!=='custom' && dbMasters[pathId] && (
+                              dbPaths[pathId] ? (
+                                <div style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 10px', background:'rgba(212,160,70,0.08)', border:'1px solid rgba(212,160,70,0.22)', borderRadius:'8px', marginBottom:'8px' }}>
+                                  <span style={{ fontSize:'12px', color:'#7a5d24', flex:1 }}>This path is <strong>customized</strong> for your location. Resetting will restore the corp master content.</span>
+                                  <button onClick={()=>resetPathToMaster(pathId)} disabled={pathsSaving===pathId}
+                                    style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(212,160,70,0.5)', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#7a5d24', cursor: pathsSaving===pathId ? 'wait' : 'pointer', flexShrink:0 }}>
+                                    {pathsSaving===pathId ? 'Resetting…' : 'Reset to master'}
+                                  </button>
+                                </div>
+                              ) : (
+                                <div style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 10px', background:'rgba(168,201,196,0.12)', border:'1px solid rgba(168,201,196,0.28)', borderRadius:'8px', marginBottom:'8px' }}>
+                                  <span style={{ fontSize:'12px', color:'#4a5e5a', flex:1 }}>Using the corp <strong>master template</strong>. Click Customize to fork a copy you can edit for this location only.</span>
+                                  <button onClick={()=>customizeFromMaster(pathId)} disabled={pathsSaving===pathId}
+                                    style={{ padding:'5px 10px', background:'#1a2e2b', border:'none', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor: pathsSaving===pathId ? 'wait' : 'pointer', flexShrink:0 }}>
+                                    {pathsSaving===pathId ? 'Customizing…' : 'Customize'}
+                                  </button>
+                                </div>
+                              )
+                            )}
                             {style.id==='custom' ? (
                               <div style={{ padding:'10px', textAlign:'center' }}>
                                 <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'8px' }}>Build a fully custom sequence</p>
@@ -17688,6 +17803,21 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             })
           }
 
+          // Tag-based grouping for the masters list: surface Welcome and the 6
+          // Opportunity Stage masters as their own labeled sections so owners
+          // can find them quickly (the generic "Other Templates" bucket holds
+          // legacy t1–t9 / ta-td masters).
+          const welcomeMasters = masters.filter(t => t.legacy_id === 'welcome')
+          const oppStageMasters = masters.filter(t => (t.legacy_id || '').startsWith('opp_'))
+          const otherMasters = masters.filter(t =>
+            t.legacy_id !== 'welcome' && !(t.legacy_id || '').startsWith('opp_'))
+          const masterActions = (tpl) => (
+            <>
+              <button onClick={()=>setPreviewTemplate(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
+              <button onClick={()=>duplicateMasterTemplate(tpl)} style={{ padding:'5px 10px', background:'#1a2e2b', border:'1px solid #1a2e2b', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'white', cursor:'pointer' }}>Duplicate</button>
+            </>
+          )
+
           return (
             <div style={{ padding:'0 12px 32px' }}>
               {/* ── Section 1: Master Templates (read-only for owners) ── */}
@@ -17695,14 +17825,36 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                 <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>📚 Master Templates</p>
                 <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>Provided by Bee Organized HQ. To customize, duplicate one to your own library.</p>
               </div>
-              {renderTypedGroup(masters, {
-                actions: (tpl) => (
-                  <>
-                    <button onClick={()=>setPreviewTemplate(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
-                    <button onClick={()=>duplicateMasterTemplate(tpl)} style={{ padding:'5px 10px', background:'#1a2e2b', border:'1px solid #1a2e2b', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'white', cursor:'pointer' }}>Duplicate</button>
-                  </>
-                ),
-              })}
+
+              {welcomeMasters.length > 0 && (
+                <>
+                  <div style={{ padding:'10px 4px 4px' }}>
+                    <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>💛 Welcome Email</p>
+                    <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>Auto-fires 24h after Email 1 of any new lead drip path.</p>
+                  </div>
+                  {renderTypedGroup(welcomeMasters, { actions: masterActions })}
+                </>
+              )}
+
+              {oppStageMasters.length > 0 && (
+                <>
+                  <div style={{ padding:'14px 4px 4px' }}>
+                    <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>📈 Opportunity Stages</p>
+                    <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>Fired by lead stage transitions (Closed Won 3mo + 12mo; Estimate Sent 3d + 30d for both project types).</p>
+                  </div>
+                  {renderTypedGroup(oppStageMasters, { actions: masterActions })}
+                </>
+              )}
+
+              {otherMasters.length > 0 && (
+                <>
+                  <div style={{ padding:'14px 4px 4px' }}>
+                    <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>📨 Other Templates</p>
+                    <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>General-purpose templates referenced by custom drip paths.</p>
+                  </div>
+                  {renderTypedGroup(otherMasters, { actions: masterActions })}
+                </>
+              )}
 
               {/* ── Section 2: My Templates ── */}
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'18px 0 6px' }}>
@@ -23657,7 +23809,9 @@ function ContentEditor({ guideSlides, guidePersist, manualSlides, manualPersist 
         >
           <option value="guide">📖 Quick Start Guide</option>
           <option value="manual">📚 Manual</option>
+          <option value="drips">📨 New Lead Drips (Master)</option>
           <option value="templates">📧 Email Templates (Master)</option>
+          <option value="variables">🧩 Variable Reference</option>
         </select>
       </div>
 
@@ -23667,8 +23821,14 @@ function ContentEditor({ guideSlides, guidePersist, manualSlides, manualPersist 
       {activeContent === 'manual' && (
         <ManualEditor slides={manualSlides} onPersist={manualPersist} />
       )}
+      {activeContent === 'drips' && (
+        <MasterDripPathsEditor />
+      )}
       {activeContent === 'templates' && (
         <MasterTemplatesEditor />
+      )}
+      {activeContent === 'variables' && (
+        <VariableReference />
       )}
     </div>
   )
@@ -23822,6 +23982,246 @@ function MasterTemplatesEditor() {
           onClose={()=>setEditing(null)}
         />
       )}
+    </div>
+  )
+}
+
+// MasterDripPathsEditor — admin-only surface for editing the 8 corp-owned
+// master drip paths (organizing-a..d / moving-a..d). Each path has 3 steps
+// (delay 0/5/30d) stored on drip_path_steps with subject + body inline.
+// Edits propagate live: locations using a master (no per-location copy)
+// render the new content on the next cron tick. Locations that have
+// already customized (cloned to their own copy) are unaffected.
+function MasterDripPathsEditor() {
+  const [masters, setMasters] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState(null)
+  const [expanded, setExpanded] = useState(null) // path id
+  const [editing, setEditing] = useState(null)   // { step }
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    fetch('/api/drip-paths/masters', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(j => {
+        if (cancelled) return
+        const list = Array.isArray(j?.masters) ? j.masters : []
+        // Sort: Organizing A→D, then Moving A→D
+        const order = ['organizing-a','organizing-b','organizing-c','organizing-d','moving-a','moving-b','moving-c','moving-d']
+        list.sort((a,b) => order.indexOf(a.path_key) - order.indexOf(b.path_key))
+        setMasters(list)
+        setErr(null)
+      })
+      .catch(e => { if (!cancelled) setErr(String(e?.message || e)) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+
+  async function saveStep(step, patch) {
+    try {
+      const res = await fetch(`/api/drip-path-steps/${encodeURIComponent(step.id)}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+      const j = await res.json().catch(()=>({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      // Merge updated step back into masters
+      setMasters(prev => prev.map(p => ({
+        ...p,
+        steps: (p.steps || []).map(s => s.id === step.id ? { ...s, ...j.step } : s),
+      })))
+      setEditing(null)
+    } catch (e) {
+      alert('Could not save: ' + (e?.message || e))
+    }
+  }
+
+  return (
+    <div style={{ padding:'14px 1.25rem 32px' }}>
+      <div style={{ marginBottom:'10px' }}>
+        <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>📨 New Lead Drip Paths (Master)</p>
+        <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px', lineHeight:1.5 }}>
+          Eight master paths × 3 emails = 24 templates total. Edits propagate live to every location using a master (no per-location copy). Locations that have already customized are unaffected. Use the <strong>🧩 Variable Reference</strong> tab to see what <code>{'{{first_name}}'}</code>, <code>{'{{owner_name}}'}</code>, etc. render to.
+        </p>
+      </div>
+
+      {loading && <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Loading master paths…</p>}
+      {err && <p style={{ fontSize:'12px', color:'#ef4444' }}>Could not load masters: {err}</p>}
+
+      {!loading && !err && masters.length === 0 && (
+        <div style={{ background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'10px', padding:'14px', fontSize:'12px', color:'#7f1d1d' }}>
+          No master drip paths found. Run <code>migrations/seed_master_drip_paths.sql</code> in Supabase.
+        </div>
+      )}
+
+      {!loading && !err && (
+        <div style={{ display:'grid', gap:'8px' }}>
+          {masters.map(path => {
+            const isOpen = expanded === path.id
+            const stepsSorted = [...(path.steps || [])].sort((a,b) => a.step_order - b.step_order)
+            return (
+              <div key={path.id} style={{ background:'white', borderRadius:'12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', overflow:'hidden' }}>
+                <div onClick={()=>setExpanded(isOpen ? null : path.id)}
+                     style={{ padding:'12px 14px', display:'flex', alignItems:'center', gap:'10px', cursor:'pointer' }}>
+                  <span style={{ fontSize:'18px' }}>{path.path_key.startsWith('moving') ? '📦' : '🏠'}</span>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{path.name}</p>
+                    <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{path.path_key} · {stepsSorted.length} email{stepsSorted.length===1?'':'s'}</p>
+                  </div>
+                  <span style={{ fontSize:'12px', color:'#c8d8d4' }}>{isOpen ? '▲' : '▼'}</span>
+                </div>
+                {isOpen && (
+                  <div style={{ borderTop:'1px solid rgba(0,0,0,0.06)', background:'#f7f5f0', padding:'10px 14px', display:'grid', gap:'8px' }}>
+                    {stepsSorted.map(step => (
+                      <div key={step.id} style={{ background:'white', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'9px', padding:'10px 12px' }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}>
+                          <span style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b', background:'rgba(168,201,196,0.15)', padding:'2px 8px', borderRadius:'20px' }}>Step {step.step_order}</span>
+                          <span style={{ fontSize:'11px', color:'#8a9e9a' }}>delay: {step.delay_days} day{step.delay_days===1?'':'s'}</span>
+                          <button onClick={()=>setEditing({ step })} style={{ marginLeft:'auto', padding:'4px 10px', background:'#1a2e2b', border:'none', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'white', cursor:'pointer' }}>Edit</button>
+                        </div>
+                        {step.subject && <p style={{ fontSize:'12px', fontWeight:600, color:'#6366f1', marginBottom:'4px' }}>Subject: {step.subject}</p>}
+                        <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.5, whiteSpace:'pre-wrap', maxHeight:'80px', overflow:'hidden' }}>
+                          {(step.body || '').slice(0, 240)}{(step.body || '').length > 240 ? '…' : ''}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {editing && (
+        <DripPathStepEditor
+          step={editing.step}
+          onSave={(patch) => saveStep(editing.step, patch)}
+          onClose={() => setEditing(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// Edit modal for a single drip_path_steps row. Subject / body / delay_days.
+// Used by both Admin → Content (master steps) and Settings → Paths (the
+// owner's customized copies). Server-side auth in /api/drip-path-steps/[id]
+// handles the master-vs-location-copy permission split.
+function DripPathStepEditor({ step, onSave, onClose }) {
+  const [subject, setSubject] = useState(step.subject || '')
+  const [body, setBody] = useState(step.body || '')
+  const [delayDays, setDelayDays] = useState(step.delay_days ?? 0)
+  const [saving, setSaving] = useState(false)
+  const [localErr, setLocalErr] = useState(null)
+
+  async function handleSave() {
+    setLocalErr(null)
+    if (delayDays < 0 || !Number.isFinite(Number(delayDays))) {
+      setLocalErr('Delay must be a non-negative number of days.')
+      return
+    }
+    setSaving(true)
+    try {
+      await onSave({
+        subject: subject.trim() || null,
+        body,
+        delay_days: Number(delayDays),
+      })
+    } catch (e) {
+      setLocalErr(String(e?.message || e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'12px' }}>
+      <div onClick={(e)=>e.stopPropagation()} style={{ background:'white', borderRadius:'12px', maxWidth:'640px', width:'100%', maxHeight:'90vh', overflow:'auto', boxShadow:'0 8px 32px rgba(0,0,0,0.2)' }}>
+        <div style={{ padding:'16px 18px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
+          <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Edit Step {step.step_order}</p>
+          <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>Variables: <code>{'{{first_name}}'}</code>, <code>{'{{owner_name}}'}</code>, <code>{'{{rate_per_hour}}'}</code>, <code>{'{{book_assessment_link}}'}</code>, <code>{'{{reviews_link}}'}</code>, <code>{'{{location_phone}}'}</code>, <code>{'{{location_owner_name}}'}</code>. See Variable Reference tab for the full list.</p>
+        </div>
+        <div style={{ padding:'14px 18px', display:'grid', gap:'12px' }}>
+          <label style={{ display:'block' }}>
+            <span style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', display:'block', marginBottom:'4px' }}>Subject</span>
+            <input type="text" value={subject} onChange={e=>setSubject(e.target.value)}
+              style={{ width:'100%', padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
+          </label>
+          <label style={{ display:'block' }}>
+            <span style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', display:'block', marginBottom:'4px' }}>Body</span>
+            <textarea value={body} onChange={e=>setBody(e.target.value)} rows={14}
+              style={{ width:'100%', padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', lineHeight:1.5, resize:'vertical' }} />
+          </label>
+          <label style={{ display:'block' }}>
+            <span style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', display:'block', marginBottom:'4px' }}>Delay (days after lead enters drip)</span>
+            <input type="number" min="0" value={delayDays} onChange={e=>setDelayDays(e.target.value)}
+              style={{ width:'120px', padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
+            <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'4px' }}>Step 1 is usually 0 (fires immediately on new lead). Master paths default to 0 / 5 / 30 days.</p>
+          </label>
+          {localErr && <p style={{ fontSize:'12px', color:'#ef4444' }}>{localErr}</p>}
+        </div>
+        <div style={{ padding:'12px 18px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px', justifyContent:'flex-end' }}>
+          <button onClick={onClose} disabled={saving} style={{ padding:'8px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>Cancel</button>
+          <button onClick={handleSave} disabled={saving} style={{ padding:'8px 16px', background:saving?'#8a9e9a':'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:saving?'wait':'pointer' }}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// VariableReference — read-only docs surface listing every template variable
+// available to the renderer (lib/resend.ts RenderContext + drip-send.ts /
+// welcome-email.ts / stage-emails.ts resolvers). Lives in Admin → Content.
+function VariableReference() {
+  const variables = [
+    { key:'first_name',          source:'lead.first_name (falls back to first word of lead.name)', notes:'Most personalization starts here.' },
+    { key:'owner_name',          source:'leads.assigned_to → hub_users.full_name (falls back to location owner)', notes:'The "Request Owner" — who reached out to the lead.' },
+    { key:'owner_first_name',    source:'First word of {{owner_name}}', notes:'Use when a first-name signature reads better.' },
+    { key:'location_owner_name', source:"location's owner-role hub_users.full_name", notes:'The franchise owner.' },
+    { key:'location_name',       source:'locations.name', notes:'e.g. "Palm Beach".' },
+    { key:'rate_per_hour',       source:'locations.rate_per_hour', notes:'Free-form text — store as "$95" or "$85/hr (3-hour minimum)".' },
+    { key:'location_phone',      source:'locations.phone', notes:'Same as {{phone}} (no fallback to owner phone).' },
+    { key:'phone',               source:'locations.phone, falls back to owner.phone', notes:'Legacy — kept for older templates.' },
+    { key:'book_assessment_link',source:'locations.calendar_link', notes:'Booking link in the new master content.' },
+    { key:'booking_link',        source:'locations.calendar_link', notes:'Legacy alias of {{book_assessment_link}}.' },
+    { key:'reviews_link',        source:'locations.reviews_link', notes:'Google reviews URL.' },
+    { key:'service_area',        source:'"City, State" from locations.city + .state', notes:'Legacy.' },
+    { key:'organizer_name',      source:'locations.sender_name', notes:'Legacy — used in t1–t9 templates.' },
+    { key:'partner_name',        source:'(Partner Drip — Phase 2)', notes:'Currently no-op; will resolve when partners are wired up.' },
+  ]
+
+  return (
+    <div style={{ padding:'14px 1.25rem 32px' }}>
+      <div style={{ marginBottom:'10px' }}>
+        <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>🧩 Variable Reference</p>
+        <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px', lineHeight:1.5 }}>
+          Anything in <code>{'{{double-braces}}'}</code> inside a master subject or body is substituted at send time from the lead + location + owner context. Unknown variables render as empty string (so an unrendered <code>{'{{whatever}}'}</code> never reaches a recipient).
+        </p>
+      </div>
+
+      <div style={{ background:'white', borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
+        {variables.map((v, i) => (
+          <div key={v.key} style={{ padding:'10px 14px', borderBottom: i < variables.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'2px' }}>
+              <code style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', background:'rgba(168,201,196,0.15)', padding:'2px 7px', borderRadius:'6px' }}>{'{{' + v.key + '}}'}</code>
+              <span style={{ fontSize:'11px', color:'#8a9e9a' }}>{v.source}</span>
+            </div>
+            <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.5 }}>{v.notes}</p>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop:'14px', padding:'12px 14px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'10px' }}>
+        <p style={{ fontSize:'12px', color:'#1a2e2b', lineHeight:1.5 }}>
+          <strong>Master vs. location copy.</strong> Edits to a master here propagate live to every location that hasn&rsquo;t customized that template. Locations that have clicked <strong>&ldquo;Customize&rdquo;</strong> in Settings &rarr; Paths or Templates have an independent copy — they keep their own version until they hit <strong>&ldquo;Reset to master.&rdquo;</strong>
+        </p>
+      </div>
     </div>
   )
 }
