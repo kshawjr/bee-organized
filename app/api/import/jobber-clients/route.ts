@@ -5,6 +5,18 @@
 // in-memory, then upserted via service-role writes.
 // Order: clients → requests → assessments → quotes → jobs → invoices
 //
+// Response shape: NDJSON stream so the client can see the job_id within
+// milliseconds of clicking Import (and start polling /api/import/status/[id]
+// to drive the live "Importing X of Y" UI + bee animation), even though the
+// actual upsert phase can take minutes. The stream emits exactly two lines:
+//   1. {"job_id":"<uuid>","started":true}
+//   2. {"done":true, ...summary}   OR   {"error":"...", "job_id":"<uuid>"}
+// import_jobs is still written progressively, so the polling endpoint sees
+// processed/total updates throughout. Each request continues to be served
+// by a single serverless function — the stream just defers the response so
+// the function stays alive for the full import without blocking the client
+// on the job_id.
+//
 // Accepts location_id via query string or JSON body (query wins).
 // Flex lookup: UUID → locations.id; otherwise → locations.location_id (slug).
 // All child writes use the slug for consistency with hub_users.location_id
@@ -26,6 +38,10 @@
 // Promotion: after upsertServiceRequest, leads.stage is bumped to match the
 // SR's classification — but only if it represents forward progress. Prevents
 // older SRs processed later from demoting a lead from Final Processing → New.
+//
+// On successful completion, sets locations.jobber_initial_import_completed_at
+// (even when some rows error — Jobber webhooks heal missed records later).
+// Settings → Locations uses this flag to hide the manual import button.
 //
 // KNOWN: leads/assessments/payments/notes lack UNIQUE on jobber_*_id.
 // Re-running this import concurrently could create dup rows in those tables.
@@ -179,160 +195,199 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  try {
-    const jobberToken = await getValidJobberToken(location)
-    const devMode = mode === 'dev'
+  const jobId = importJob.id
 
-    // ─── fetch all entities (flat queries with pacing) ──
-    await updateProgress(importJob.id, { phase: 'clients' })
-    const clients = await fetchAll(jobberToken, CLIENTS_QUERY, 'clients', devMode, true)
-    await new Promise(r => setTimeout(r, 800))
+  // ─── stream the response so the client gets job_id immediately ──
+  // The heavy import work runs inside the stream's start() callback. The
+  // first chunk hands the job_id to the client (which kicks off polling for
+  // the live "Importing X of Y" UI). The final chunk carries the summary
+  // (or an error) so the client doesn't need a second round-trip.
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream({
+    async start(controller) {
+      const emit = (obj: any) => controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n'))
 
-    await updateProgress(importJob.id, {
-      phase: 'requests',
-      total_records: clients.length,
-    })
-    const requests = await fetchAll(jobberToken, REQUESTS_QUERY, 'requests', false)
-    await new Promise(r => setTimeout(r, 800))
+      // 1️⃣ first chunk: job_id (lets the client start polling within ms)
+      emit({ job_id: jobId, started: true })
 
-    await updateProgress(importJob.id, { phase: 'quotes' })
-    const quotes = await fetchAll(jobberToken, QUOTES_QUERY, 'quotes', false)
-    await new Promise(r => setTimeout(r, 800))
-
-    await updateProgress(importJob.id, { phase: 'jobs' })
-    const jobs = await fetchAll(jobberToken, JOBS_QUERY, 'jobs', false)
-
-    // ─── build lookup maps ──
-    const clientIds = new Set(clients.map((c: any) => c.id))
-    const reqByClient: Record<string, any[]> = {}
-    const quotesByReq: Record<string, any[]> = {}
-    const jobsByReq:   Record<string, any[]> = {}
-
-    for (const r of requests) {
-      const cid = r.client?.id
-      if (cid && clientIds.has(cid)) (reqByClient[cid] ||= []).push(r)
-    }
-    const reqIds = new Set(requests.map((r: any) => r.id))
-    for (const q of quotes) {
-      const rid = q.request?.id
-      if (rid && reqIds.has(rid)) (quotesByReq[rid] ||= []).push(q)
-    }
-    for (const j of jobs) {
-      const rid = j.request?.id
-      if (rid && reqIds.has(rid)) (jobsByReq[rid] ||= []).push(j)
-    }
-
-    // ─── set _has* flags so determineStage works on flat queries ──
-    for (const r of requests) {
-      const reqJobs = jobsByReq[r.id] || []
-      r._hasQuote      = (quotesByReq[r.id] || []).length > 0
-      r._hasJob        = reqJobs.length > 0
-      r._hasInvoice    = reqJobs.some((j: any) => (j.invoices?.nodes || []).length > 0)
-      r._hasAssessment = !!r.assessment
-    }
-
-    // ─── upsert phase ──
-    await updateProgress(importJob.id, {
-      phase: 'writing',
-      total_records: clients.length,
-    })
-
-    const stats = {
-      leads_created: 0, leads_updated: 0,
-      requests_created: 0, requests_updated: 0,
-      requests_by_stage: {} as Record<string, number>,
-      assessments_created: 0, assessments_updated: 0,
-      quotes_created: 0, quotes_updated: 0,
-      jobs_created: 0, jobs_updated: 0,
-      invoices_created: 0, invoices_updated: 0,
-      errors: [] as string[],
-    }
-
-    let processed = 0
-    for (const client of clients) {
       try {
-        const { id: leadId, created } = await upsertLead(client, locSlug, locUuid)
-        created ? stats.leads_created++ : stats.leads_updated++
+        const jobberToken = await getValidJobberToken(location)
+        const devMode = mode === 'dev'
 
-        for (const request of (reqByClient[client.id] || [])) {
-          const reqResult = await upsertServiceRequest(request, leadId, locSlug)
-          reqResult.created ? stats.requests_created++ : stats.requests_updated++
-          stats.requests_by_stage[reqResult.stage] = (stats.requests_by_stage[reqResult.stage] || 0) + 1
-          const reqDbId = reqResult.id
+        // ─── fetch all entities (flat queries with pacing) ──
+        await updateProgress(jobId, { phase: 'clients' })
+        const clients = await fetchAll(jobberToken, CLIENTS_QUERY, 'clients', devMode, true)
+        await new Promise(r => setTimeout(r, 800))
 
-          if (request.assessment?.startAt) {
-            const aRes = await upsertAssessment(request, reqDbId, leadId, locSlug)
-            aRes.created ? stats.assessments_created++ : stats.assessments_updated++
-          }
+        await updateProgress(jobId, {
+          phase: 'requests',
+          total_records: clients.length,
+        })
+        const requests = await fetchAll(jobberToken, REQUESTS_QUERY, 'requests', false)
+        await new Promise(r => setTimeout(r, 800))
 
-          for (const quote of (quotesByReq[request.id] || [])) {
-            const qRes = await upsertQuote(quote, reqDbId, leadId, locSlug)
-            qRes.created ? stats.quotes_created++ : stats.quotes_updated++
-          }
+        await updateProgress(jobId, { phase: 'quotes' })
+        const quotes = await fetchAll(jobberToken, QUOTES_QUERY, 'quotes', false)
+        await new Promise(r => setTimeout(r, 800))
 
-          for (const job of (jobsByReq[request.id] || [])) {
-            const jRes = await upsertJob(job, reqDbId, leadId, locSlug)
-            jRes.created ? stats.jobs_created++ : stats.jobs_updated++
+        await updateProgress(jobId, { phase: 'jobs' })
+        const jobs = await fetchAll(jobberToken, JOBS_QUERY, 'jobs', false)
 
-            for (const inv of (job.invoices?.nodes || [])) {
-              const iRes = await upsertInvoice(inv, jRes.id, reqDbId, leadId, locSlug)
-              iRes.created ? stats.invoices_created++ : stats.invoices_updated++
+        // ─── build lookup maps ──
+        const clientIds = new Set(clients.map((c: any) => c.id))
+        const reqByClient: Record<string, any[]> = {}
+        const quotesByReq: Record<string, any[]> = {}
+        const jobsByReq:   Record<string, any[]> = {}
+
+        for (const r of requests) {
+          const cid = r.client?.id
+          if (cid && clientIds.has(cid)) (reqByClient[cid] ||= []).push(r)
+        }
+        const reqIds = new Set(requests.map((r: any) => r.id))
+        for (const q of quotes) {
+          const rid = q.request?.id
+          if (rid && reqIds.has(rid)) (quotesByReq[rid] ||= []).push(q)
+        }
+        for (const j of jobs) {
+          const rid = j.request?.id
+          if (rid && reqIds.has(rid)) (jobsByReq[rid] ||= []).push(j)
+        }
+
+        // ─── set _has* flags so determineStage works on flat queries ──
+        for (const r of requests) {
+          const reqJobs = jobsByReq[r.id] || []
+          r._hasQuote      = (quotesByReq[r.id] || []).length > 0
+          r._hasJob        = reqJobs.length > 0
+          r._hasInvoice    = reqJobs.some((j: any) => (j.invoices?.nodes || []).length > 0)
+          r._hasAssessment = !!r.assessment
+        }
+
+        // ─── upsert phase ──
+        await updateProgress(jobId, {
+          phase: 'writing',
+          total_records: clients.length,
+        })
+
+        const stats = {
+          leads_created: 0, leads_updated: 0,
+          requests_created: 0, requests_updated: 0,
+          requests_by_stage: {} as Record<string, number>,
+          assessments_created: 0, assessments_updated: 0,
+          quotes_created: 0, quotes_updated: 0,
+          jobs_created: 0, jobs_updated: 0,
+          invoices_created: 0, invoices_updated: 0,
+          errors: [] as string[],
+        }
+
+        let processed = 0
+        for (const client of clients) {
+          try {
+            const { id: leadId, created } = await upsertLead(client, locSlug, locUuid)
+            created ? stats.leads_created++ : stats.leads_updated++
+
+            for (const request of (reqByClient[client.id] || [])) {
+              const reqResult = await upsertServiceRequest(request, leadId, locSlug)
+              reqResult.created ? stats.requests_created++ : stats.requests_updated++
+              stats.requests_by_stage[reqResult.stage] = (stats.requests_by_stage[reqResult.stage] || 0) + 1
+              const reqDbId = reqResult.id
+
+              if (request.assessment?.startAt) {
+                const aRes = await upsertAssessment(request, reqDbId, leadId, locSlug)
+                aRes.created ? stats.assessments_created++ : stats.assessments_updated++
+              }
+
+              for (const quote of (quotesByReq[request.id] || [])) {
+                const qRes = await upsertQuote(quote, reqDbId, leadId, locSlug)
+                qRes.created ? stats.quotes_created++ : stats.quotes_updated++
+              }
+
+              for (const job of (jobsByReq[request.id] || [])) {
+                const jRes = await upsertJob(job, reqDbId, leadId, locSlug)
+                jRes.created ? stats.jobs_created++ : stats.jobs_updated++
+
+                for (const inv of (job.invoices?.nodes || [])) {
+                  const iRes = await upsertInvoice(inv, jRes.id, reqDbId, leadId, locSlug)
+                  iRes.created ? stats.invoices_created++ : stats.invoices_updated++
+                }
+              }
             }
+          } catch (err: any) {
+            stats.errors.push(`${client.firstName} ${client.lastName}: ${err.message}`)
+          }
+          processed++
+          if (processed % 5 === 0 || processed === clients.length) {
+            await updateProgress(jobId, { processed_records: processed })
           }
         }
+
+        await writeSyncLog({
+          location_id: locSlug,
+          entity_id: locSlug,
+          status: stats.errors.length > 0 ? 'error' : 'success',
+          message:
+            `Leads: ${stats.leads_created} created, ${stats.leads_updated} updated; ` +
+            `Requests: ${stats.requests_created} created, ${stats.requests_updated} updated; ` +
+            `Jobs: ${stats.jobs_created} created, ${stats.jobs_updated} updated; ` +
+            `Invoices: ${stats.invoices_created} created, ${stats.invoices_updated} updated; ` +
+            `Errors: ${stats.errors.length}`,
+        })
+
+        await updateProgress(jobId, {
+          status: 'completed',
+          phase: 'done',
+          processed_records: clients.length,
+          completed_at: new Date().toISOString(),
+          ...(stats.errors.length > 0
+            ? { error_message: stats.errors.slice(0, 5).join(' | ') }
+            : {}),
+        })
+
+        // One-time gate: mark initial import done. Set even when some rows
+        // errored — webhook sync handles missed records going forward, and
+        // re-running the bulk import would create duplicates in tables that
+        // don't yet have UNIQUE constraints on jobber_*_id.
+        try {
+          await supabaseService
+            .from('locations')
+            .update({ jobber_initial_import_completed_at: new Date().toISOString() })
+            .eq('id', locUuid)
+        } catch (err) {
+          console.error('[jobber-initial-import flag write failed]', err)
+        }
+
+        // 2️⃣ final chunk: summary
+        emit({
+          done: true,
+          success: true,
+          job_id: jobId,
+          location: location.name,
+          location_slug: locSlug,
+          mode,
+          total_clients: clients.length,
+          total_requests: requests.length,
+          total_quotes: quotes.length,
+          total_jobs: jobs.length,
+          ...stats,
+        })
       } catch (err: any) {
-        stats.errors.push(`${client.firstName} ${client.lastName}: ${err.message}`)
+        console.error('[jobber-clients-import]', err)
+        await updateProgress(jobId, {
+          status: 'failed',
+          error_message: String(err?.message || err),
+          completed_at: new Date().toISOString(),
+        })
+        emit({ error: String(err?.message || err), job_id: jobId })
+      } finally {
+        controller.close()
       }
-      processed++
-      if (processed % 5 === 0 || processed === clients.length) {
-        await updateProgress(importJob.id, { processed_records: processed })
-      }
-    }
+    },
+  })
 
-    await writeSyncLog({
-      location_id: locSlug,
-      entity_id: locSlug,
-      status: stats.errors.length > 0 ? 'error' : 'success',
-      message:
-        `Leads: ${stats.leads_created} created, ${stats.leads_updated} updated; ` +
-        `Requests: ${stats.requests_created} created, ${stats.requests_updated} updated; ` +
-        `Jobs: ${stats.jobs_created} created, ${stats.jobs_updated} updated; ` +
-        `Invoices: ${stats.invoices_created} created, ${stats.invoices_updated} updated; ` +
-        `Errors: ${stats.errors.length}`,
-    })
-
-    await updateProgress(importJob.id, {
-      status: 'completed',
-      phase: 'done',
-      processed_records: clients.length,
-      completed_at: new Date().toISOString(),
-      ...(stats.errors.length > 0
-        ? { error_message: stats.errors.slice(0, 5).join(' | ') }
-        : {}),
-    })
-
-    return NextResponse.json({
-      success: true,
-      job_id: importJob.id,
-      location: location.name,
-      location_slug: locSlug,
-      mode,
-      total_clients: clients.length,
-      total_requests: requests.length,
-      total_quotes: quotes.length,
-      total_jobs: jobs.length,
-      ...stats,
-    })
-  } catch (err: any) {
-    console.error('[jobber-clients-import]', err)
-    await updateProgress(importJob.id, {
-      status: 'failed',
-      error_message: String(err?.message || err),
-      completed_at: new Date().toISOString(),
-    })
-    return NextResponse.json(
-      { error: err.message, job_id: importJob.id },
-      { status: 500 },
-    )
-  }
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'application/x-ndjson; charset=utf-8',
+      'Cache-Control': 'no-store, no-transform',
+      'X-Accel-Buffering': 'no',
+    },
+  })
 }

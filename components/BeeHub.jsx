@@ -10951,10 +10951,41 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
         '/api/import/jobber-clients?location_id=' + encodeURIComponent(locationId),
         { method:'POST' },
       )
-      const d = await r.json()
-      if (!r.ok || !d.success) { setError(d.error || 'import_failed'); return }
-      setSummary(d)
-      setJobId(d.job_id)
+      if (!r.ok || !r.body) {
+        let detail = 'import_failed'
+        try { const j = await r.json(); detail = j.error || detail } catch {}
+        setError(detail); return
+      }
+
+      // NDJSON stream — first chunk gives us a job_id so the polling
+      // useEffect can fire immediately and the bees + counter render
+      // during the import (not just after it finishes). Final chunk is
+      // the summary or an error.
+      const reader = r.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      let saw = null
+      let gotJob = false
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        let nl
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim()
+          buf = buf.slice(nl + 1)
+          if (!line) continue
+          let msg
+          try { msg = JSON.parse(line) } catch { continue }
+          if (msg.job_id && !gotJob) { gotJob = true; setJobId(msg.job_id) }
+          if (msg.done) saw = msg
+          if (msg.error) saw = msg
+        }
+      }
+
+      if (saw?.error) setError(saw.error)
+      else if (saw?.done) setSummary(saw)
+      else setError('stream_ended_unexpectedly')
     } catch (e) {
       setError(String(e?.message || e))
     }
@@ -15025,6 +15056,7 @@ const DEFAULT_SETTINGS = {
     smsEnabled:     false,
     jobberStatus:   'disconnected',
     jobberAccountId:'',
+    jobberInitialImportCompletedAt: null,
     crmStatus:      'active',
     sendFromName:   '',
     sendFromEmail:  '',
@@ -15228,9 +15260,16 @@ function JobberConnectionCard({ settings, updateLocation }) {
 
 // ─── Client Import Card ────────────────────────────────────────────────────────
 // Wired to the real import endpoint at /api/import/jobber-clients.
-// Polls /api/import/status/[jobId] every 1.5s for real progress.
-// No localStorage cache — server is source of truth.
-function ClientImportCard({ isJobberConnected, locationId }) {
+// The POST returns an NDJSON stream: first chunk = { job_id }, final chunk =
+// summary (or error). The job_id starts the polling useEffect on
+// /api/import/status/[jobId] every 1.5s — that's what drives the live
+// "Importing X of Y" UI + buzzing-bee animation during the import.
+//
+// Once initialImportCompletedAt is set on the location, the card switches to
+// a read-only "Initial import completed [date]" label and the manual button
+// is hidden. Ongoing data flows via Jobber webhooks (re-running the bulk
+// import would create duplicates in tables without UNIQUE on jobber_*_id).
+function ClientImportCard({ isJobberConnected, locationId, initialImportCompletedAt }) {
   const router = useRouter()
   const [importState, setImportState] = useState('idle') // idle | running | complete | error
   const [jobId, setJobId]             = useState(null)
@@ -15284,6 +15323,37 @@ function ClientImportCard({ isJobberConnected, locationId }) {
   }, [importState, jobId])
 
   if (!isJobberConnected) return null
+
+  // One-time gate: after the first successful initial import, hide the
+  // button entirely and surface a small read-only "completed" label. Ongoing
+  // data flows through Jobber webhooks from here on — re-running the bulk
+  // import would create duplicates in tables that don't yet have UNIQUE
+  // constraints on jobber_*_id.
+  if (initialImportCompletedAt && importState !== 'running' && importState !== 'complete') {
+    const completedDate = (() => {
+      try {
+        const d = new Date(initialImportCompletedAt)
+        return d.toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' })
+      } catch { return null }
+    })()
+    return (
+      <div style={{ margin:'0 12px', borderRadius:'12px', background:'white', border:'1px solid rgba(0,0,0,0.07)', padding:'12px 14px', display:'flex', alignItems:'center', gap:'12px' }}>
+        <div style={{ width:'34px', height:'34px', borderRadius:'8px', background:'rgba(34,197,94,0.12)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+          <span style={{ fontSize:'16px' }}>✓</span>
+        </div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>
+            Jobber Client Import
+          </p>
+          <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.45 }}>
+            {completedDate ? `Initial import completed ${completedDate}.` : 'Initial import completed.'}
+            {' '}Ongoing data syncs automatically via Jobber webhooks.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   if (skipped) return (
     <div style={{ margin:'0 12px', borderRadius:'12px', background:'white', border:'1px solid rgba(0,0,0,0.07)', padding:'12px 14px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
       <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
@@ -15309,27 +15379,42 @@ function ClientImportCard({ isJobberConnected, locationId }) {
         '/api/import/jobber-clients?location_id=' + encodeURIComponent(locationId),
         { method: 'POST', headers: { 'Content-Type': 'application/json' } }
       )
-      const d = await r.json()
-      if (!r.ok || d.success === false) {
-        setError(d.error || `import_failed_${r.status}`)
-        setImportState('error')
-        return
+      if (!r.ok || !r.body) {
+        let detail = `import_failed_${r.status}`
+        try { const j = await r.json(); detail = j.error || detail } catch {}
+        setError(detail); setImportState('error'); return
       }
-      // The POST currently returns the full summary synchronously alongside
-      // job_id. Prefer that — polling status only returns progress fields.
-      // Fall back to polling only if no summary fields are present.
-      const hasFullSummary = d.leads_created != null || d.total_clients != null
-      if (hasFullSummary) {
-        setSummary(d)
-        if (d.job_id) setJobId(d.job_id)
-        setImportState('complete')
-        router.refresh()
-      } else if (d.job_id) {
-        setJobId(d.job_id)
-        // polling useEffect picks this up
+
+      // Stream is NDJSON: first chunk carries the job_id (so polling starts
+      // immediately and drives the bees + counter UI during the import); the
+      // final chunk carries the summary or error once the import finishes.
+      const reader = r.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      let saw = null
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        let nl
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim()
+          buf = buf.slice(nl + 1)
+          if (!line) continue
+          let msg
+          try { msg = JSON.parse(line) } catch { continue }
+          if (msg.job_id && !jobId) setJobId(msg.job_id)
+          if (msg.done) saw = msg
+          if (msg.error) saw = msg
+        }
+      }
+
+      if (saw?.error) {
+        setError(saw.error); setImportState('error')
+      } else if (saw?.done) {
+        setSummary(saw); setImportState('complete'); router.refresh()
       } else {
-        setError('unexpected_response')
-        setImportState('error')
+        setError('stream_ended_unexpectedly'); setImportState('error')
       }
     } catch (e) {
       setError(String(e?.message || e))
@@ -16853,6 +16938,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
       bookingLink:     currentLocationCtx.calendar_link || '',
       jobberStatus:    currentLocationCtx.jobber_connected ? 'connected' : 'disconnected',
       jobberAccountId: currentLocationCtx.jobber_account_id || '',
+      jobberInitialImportCompletedAt: currentLocationCtx.jobber_initial_import_completed_at || null,
       sendFromName:    currentLocationCtx.sender_name || '',
       sendFromEmail:   currentLocationCtx.send_from_email || '',
       replyToEmail:    currentLocationCtx.reply_to_email || '',
@@ -17472,6 +17558,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             <ClientImportCard
               isJobberConnected={settings.location.jobberStatus==='connected'||!settings.location.jobberStatus}
               locationId={settings.location.locId||'loc1'}
+              initialImportCompletedAt={settings.location.jobberInitialImportCompletedAt}
             />
 
           </>

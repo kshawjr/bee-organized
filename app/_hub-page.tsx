@@ -217,7 +217,7 @@ export default async function HubPage({
     const { data: locRow, error: subErr } = await supabase
       .from('locations')
       .select(
-        'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes, jobber_account_id, last_sync_status, token_expiry, onboarding_state, default_drip_path, default_move_drip_path, address, city, state, zip, phone, email, timezone, sender_name, send_from_email, reply_to_email, reviews_link, calendar_link, activated_at, lifecycle_status'
+        'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes, jobber_account_id, jobber_initial_import_completed_at, last_sync_status, token_expiry, onboarding_state, default_drip_path, default_move_drip_path, address, city, state, zip, phone, email, timezone, sender_name, send_from_email, reply_to_email, reviews_link, calendar_link, activated_at, lifecycle_status'
       )
       .eq('id', hubUser.location_id)
       .single()
@@ -238,6 +238,7 @@ export default async function HubPage({
         name: locRow.name,
         jobber_connected: !!locRow.jobber_account_id,
         jobber_account_id: locRow.jobber_account_id || null,
+        jobber_initial_import_completed_at: locRow.jobber_initial_import_completed_at || null,
         last_sync_status: locRow.last_sync_status || null,
         token_expiry: locRow.token_expiry || null,
         payment_source: locRow.payment_source || 'none',
