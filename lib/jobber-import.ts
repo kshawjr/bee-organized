@@ -148,6 +148,16 @@ export const SINGLE_INVOICE_QUERY = `
   }
 `
 
+export const SINGLE_PROPERTY_QUERY = `
+  query GetProperty($id: EncodedId!) {
+    property(id: $id) {
+      id
+      address { street city province postalCode }
+      client { id }
+    }
+  }
+`
+
 // ── constants ─────────────────────────────────────────────────────
 
 export const JOB_STATUS: Record<string, string> = {

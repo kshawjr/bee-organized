@@ -18,21 +18,47 @@
 //      transition (see TOPIC → STAGE MAP below).
 //
 // TOPIC → STAGE MAP (matches Kevin's spec):
-//   REQUEST_CREATE  → 'Request'        forward-only
-//   REQUEST_UPDATE  → (no change)
-//   QUOTE_CREATE    → 'Estimate Sent'  forward-only
-//   QUOTE_UPDATE    → (no change)
-//   QUOTE_SENT      → 'Estimate Sent'  forward-only (idempotent)
-//   QUOTE_APPROVED  → (no change)      stamp quote_approved_at
-//   JOB_CREATE      → (no change)      stamp job_created_at +
-//                                      scheduled_at (Job in Progress
-//                                      is owner-driven only)
-//   JOB_UPDATE      → (no change)
-//   JOB_COMPLETE    → 'Closed Won'     forward-only + stop drip
-//   INVOICE_CREATE  → (no change)      stamp invoice_created_at +
-//                                      balance_owing
-//   INVOICE_PAID    → 'Closed Won'     forward-only + stop drip
-//   CLIENT_UPDATE   → (no change)      refresh name/email/phone
+//   REQUEST_CREATE   → 'Request'        forward-only
+//   REQUEST_UPDATE   → (no change)      soft-destroys if Jobber returns
+//                                       not-found (race: DESTROY may
+//                                       arrive before UPDATE in a batch)
+//   REQUEST_DESTROY  → (no change)      null jobber_request_id +
+//                                       jobber_assessment_id on lead
+//   QUOTE_CREATE     → 'Estimate Sent'  forward-only
+//   QUOTE_UPDATE     → (no change)
+//   QUOTE_SENT       → 'Estimate Sent'  forward-only (idempotent)
+//   QUOTE_APPROVED   → (no change)      stamp quote_approved_at
+//   QUOTE_DESTROY    → (no change)      null jobber_quote_id on lead
+//   JOB_CREATE       → (no change)      stamp job_created_at +
+//                                       scheduled_at (Job in Progress
+//                                       is owner-driven only)
+//   JOB_UPDATE       → (no change)
+//   JOB_COMPLETE     → 'Closed Won'     forward-only + stop drip
+//   JOB_DESTROY      → (no change)      null jobber_job_id on lead
+//   INVOICE_CREATE   → (no change)      stamp invoice_created_at +
+//                                       balance_owing
+//   INVOICE_PAID     → 'Closed Won'     forward-only + stop drip
+//   INVOICE_DESTROY  → (no change)      null jobber_invoice_id on lead
+//   CLIENT_UPDATE    → (no change)      refresh name/email/phone
+//   CLIENT_DESTROY   → (no change)      null ALL jobber_*_id columns on
+//                                       lead (full Jobber link break)
+//   PROPERTY_CREATE  → (no change)      sync property → lead address;
+//                                       set jobber_property_id
+//   PROPERTY_UPDATE  → (no change)      same as PROPERTY_CREATE
+//   PROPERTY_DESTROY → (no change)      null jobber_property_id on lead
+//                                       (address fields preserved —
+//                                       Bee Hub's record)
+//   ASSESSMENT_DESTROY → (no change)    null jobber_assessment_id on
+//                                       lead (keep jobber_request_id)
+//   APP_DISCONNECT   → (no change)      null tokens +
+//                                       jobber_connected=false on
+//                                       location. Preserves
+//                                       jobber_account_id + hub_users
+//                                       .jobber_user_id for reconnect.
+//
+// In every destroy case the Bee Hub lead row PERSISTS — only the
+// Jobber linkage is nulled. Bee Hub's source-of-truth for the
+// customer relationship survives Jobber-side deletes.
 //
 // Handlers never throw out — failures bubble back as a string
 // `error` field, so the dispatcher can still 200 to Jobber and
@@ -48,6 +74,7 @@ import {
   SINGLE_QUOTE_QUERY,
   SINGLE_JOB_QUERY,
   SINGLE_INVOICE_QUERY,
+  SINGLE_PROPERTY_QUERY,
   upsertLead,
   upsertServiceRequest,
   upsertAssessment,
@@ -59,7 +86,7 @@ import {
 } from './jobber-import'
 import type { LocationRow } from './jobber-webhook'
 
-type JobberType = 'Client' | 'Request' | 'Quote' | 'Job' | 'Invoice'
+type JobberType = 'Client' | 'Request' | 'Quote' | 'Job' | 'Invoice' | 'Property'
 
 export type HandlerCtx = {
   topic: string
@@ -73,6 +100,9 @@ export type HandlerResult = {
   lead_id?: string | null
   lead_stage?: string | null
   prev_stage?: string | null
+  // `note` is rendered into the sync_log message verbatim (see route.ts).
+  // Use it to surface destroy-style "what happened" detail that wouldn't
+  // otherwise be visible from the bare topic + itemId.
   note?: string
   error?: string
 }
@@ -249,10 +279,26 @@ export async function handleRequestCreate(ctx: HandlerCtx): Promise<HandlerResul
 }
 
 // REQUEST_UPDATE → refresh fields, no stage change.
+//
+// Race-condition fallback: if Jobber returns request_not_found_in_jobber,
+// the request was destroyed between the UPDATE event being queued and
+// us fetching it (Jobber sometimes ships DESTROY before UPDATE in the
+// same batch). Treat as a soft destroy — same cleanup as REQUEST_DESTROY.
 export async function handleRequestUpdate(ctx: HandlerCtx): Promise<HandlerResult> {
   const globalId = encodeJobberId('Request', ctx.itemId)
   const res = await fetchAndUpsertRequest(globalId, ctx)
-  if ('error' in res) return { processed: false, error: res.error }
+  if ('error' in res) {
+    if (res.error === 'request_not_found_in_jobber') {
+      const destroyed = await nullifyLeadJobberColumns(
+        ctx,
+        'jobber_request_id',
+        ['jobber_request_id', 'jobber_assessment_id'],
+        'REQUEST_UPDATE→soft-destroy',
+      )
+      return destroyed
+    }
+    return { processed: false, error: res.error }
+  }
   const stage = await readLeadStage(res.lead_id)
   return {
     processed: true,
@@ -584,21 +630,311 @@ export async function handleClientUpdate(ctx: HandlerCtx): Promise<HandlerResult
   }
 }
 
+// ── destroy + disconnect handlers ─────────────────────────────
+//
+// Destroy webhooks ship only { topic, accountId, itemId, occurredAt } —
+// the resource is already gone in Jobber, so there's nothing to fetch.
+// The handler just finds the matching Bee Hub lead by the column that
+// stores this Jobber ID and nulls the relevant linkage column(s).
+//
+// The lead row itself is never deleted: Bee Hub is the source of truth
+// for the customer relationship, and the owner may still want to work
+// the lead even after the Jobber-side artifact has been removed.
+
+type JobberMatchColumn =
+  | 'jobber_client_id'
+  | 'jobber_property_id'
+  | 'jobber_request_id'
+  | 'jobber_quote_id'
+  | 'jobber_job_id'
+  | 'jobber_invoice_id'
+  | 'jobber_assessment_id'
+
+// Shared "find lead by jobber_<x>_id, null these columns" helper used
+// by every destroy handler and the REQUEST_UPDATE soft-destroy fallback.
+async function nullifyLeadJobberColumns(
+  ctx: HandlerCtx,
+  matchColumn: JobberMatchColumn,
+  nullColumns: string[],
+  noun: string,
+): Promise<HandlerResult> {
+  const numeric = extractJobberId(ctx.itemId) || ctx.itemId
+  const { data: lead } = await supabaseService
+    .from('leads')
+    .select('id, name, stage')
+    .eq(matchColumn, numeric)
+    .eq('location_id', ctx.location.location_id)
+    .maybeSingle()
+
+  if (!lead) {
+    // No-op: the Jobber record was never imported into this location.
+    // Common when a record is created + deleted faster than the import
+    // catches it, or when destroy webhooks fire for old records that
+    // pre-date this location's Bee Hub connection.
+    return {
+      processed: true,
+      note: `${noun}: no matching lead for ${matchColumn}=${numeric} (no-op)`,
+    }
+  }
+
+  const patch: Record<string, any> = { updated_at: new Date().toISOString() }
+  for (const col of nullColumns) patch[col] = null
+  await supabaseService.from('leads').update(patch).eq('id', lead.id)
+
+  return {
+    processed: true,
+    lead_id: lead.id,
+    lead_stage: lead.stage || null,
+    prev_stage: lead.stage || null,
+    note: `${noun}: nulled ${nullColumns.join(', ')} on lead "${lead.name || lead.id}"`,
+  }
+}
+
+// REQUEST_DESTROY → null jobber_request_id + jobber_assessment_id (paired)
+export function handleRequestDestroy(ctx: HandlerCtx) {
+  return nullifyLeadJobberColumns(
+    ctx,
+    'jobber_request_id',
+    ['jobber_request_id', 'jobber_assessment_id'],
+    'REQUEST_DESTROY',
+  )
+}
+
+// QUOTE_DESTROY → null jobber_quote_id
+export function handleQuoteDestroy(ctx: HandlerCtx) {
+  return nullifyLeadJobberColumns(
+    ctx,
+    'jobber_quote_id',
+    ['jobber_quote_id'],
+    'QUOTE_DESTROY',
+  )
+}
+
+// JOB_DESTROY → null jobber_job_id
+export function handleJobDestroy(ctx: HandlerCtx) {
+  return nullifyLeadJobberColumns(
+    ctx,
+    'jobber_job_id',
+    ['jobber_job_id'],
+    'JOB_DESTROY',
+  )
+}
+
+// INVOICE_DESTROY → null jobber_invoice_id
+export function handleInvoiceDestroy(ctx: HandlerCtx) {
+  return nullifyLeadJobberColumns(
+    ctx,
+    'jobber_invoice_id',
+    ['jobber_invoice_id'],
+    'INVOICE_DESTROY',
+  )
+}
+
+// ASSESSMENT_DESTROY → null jobber_assessment_id (keep jobber_request_id)
+//
+// May not actually be emitted by Jobber — wired defensively so we don't
+// log "unknown topic" if it ever fires. Harmless no-op if Jobber doesn't
+// support the topic at the subscription level.
+export function handleAssessmentDestroy(ctx: HandlerCtx) {
+  return nullifyLeadJobberColumns(
+    ctx,
+    'jobber_assessment_id',
+    ['jobber_assessment_id'],
+    'ASSESSMENT_DESTROY',
+  )
+}
+
+// PROPERTY_DESTROY → null jobber_property_id; address fields stay.
+// Bee Hub's address is the local record — losing the Jobber link to a
+// property doesn't invalidate the owner's notes about where the
+// customer lives.
+export function handlePropertyDestroy(ctx: HandlerCtx) {
+  return nullifyLeadJobberColumns(
+    ctx,
+    'jobber_property_id',
+    ['jobber_property_id'],
+    'PROPERTY_DESTROY',
+  )
+}
+
+// CLIENT_DESTROY → null ALL jobber_*_id columns (full link break).
+// The lead row stays as a Bee Hub-only record.
+export function handleClientDestroy(ctx: HandlerCtx) {
+  return nullifyLeadJobberColumns(
+    ctx,
+    'jobber_client_id',
+    [
+      'jobber_client_id',
+      'jobber_property_id',
+      'jobber_request_id',
+      'jobber_assessment_id',
+      'jobber_job_id',
+      'jobber_quote_id',
+      'jobber_invoice_id',
+    ],
+    'CLIENT_DESTROY',
+  )
+}
+
+// PROPERTY_CREATE / PROPERTY_UPDATE — Jobber-side is authoritative for
+// the property's address fields. Sync onto the matching lead (by
+// jobber_property_id if already linked, else by jobber_client_id).
+// Set jobber_property_id when missing so subsequent destroy events
+// can find the lead.
+async function handlePropertyCore(
+  ctx: HandlerCtx,
+  noun: 'PROPERTY_CREATE' | 'PROPERTY_UPDATE',
+): Promise<HandlerResult> {
+  const globalId = encodeJobberId('Property', ctx.itemId)
+  const res = await jobberGraphQL(ctx.location.location_id, SINGLE_PROPERTY_QUERY, {
+    id: globalId,
+  })
+  if (res.errors?.length) {
+    console.error('[jobber-webhook] property_fetch errors', {
+      itemId: ctx.itemId,
+      globalId,
+      errors: res.errors,
+    })
+    return { processed: false, error: `property_fetch: ${res.errors[0]?.message || 'unknown'}` }
+  }
+  const propRec = res.data?.property
+  if (!propRec) {
+    // Race: property was deleted between event + fetch. Treat the same
+    // way as PROPERTY_DESTROY (best-effort cleanup by ID).
+    console.warn('[jobber-webhook] property_not_found_in_jobber — falling through to destroy', {
+      itemId: ctx.itemId,
+      globalId,
+    })
+    return nullifyLeadJobberColumns(
+      ctx,
+      'jobber_property_id',
+      ['jobber_property_id'],
+      `${noun}→soft-destroy`,
+    )
+  }
+
+  const propertyNumeric = extractJobberId(propRec.id)
+  const clientNumeric   = extractJobberId(propRec.client?.id)
+
+  // Find the matching lead — prefer existing property link, fall back to
+  // the client link (PROPERTY_CREATE typically arrives before we've
+  // backfilled jobber_property_id).
+  let lead: { id: string; name: string | null; stage: string | null } | null = null
+  if (propertyNumeric) {
+    const { data } = await supabaseService
+      .from('leads')
+      .select('id, name, stage')
+      .eq('jobber_property_id', propertyNumeric)
+      .eq('location_id', ctx.location.location_id)
+      .maybeSingle()
+    if (data) lead = data
+  }
+  if (!lead && clientNumeric) {
+    const { data } = await supabaseService
+      .from('leads')
+      .select('id, name, stage')
+      .eq('jobber_client_id', clientNumeric)
+      .eq('location_id', ctx.location.location_id)
+      .maybeSingle()
+    if (data) lead = data
+  }
+
+  if (!lead) {
+    return {
+      processed: true,
+      note: `${noun}: no matching lead for property=${propertyNumeric} client=${clientNumeric} (no-op)`,
+    }
+  }
+
+  const a = propRec.address || {}
+  const addrJoined = [a.street, a.city, a.province, a.postalCode]
+    .filter(Boolean)
+    .join(', ') || null
+
+  const patch: Record<string, any> = {
+    jobber_property_id: propertyNumeric,
+    address: addrJoined,
+    city:    a.city       || null,
+    state:   a.province   || null,
+    zip:     a.postalCode || null,
+    updated_at: new Date().toISOString(),
+  }
+  await supabaseService.from('leads').update(patch).eq('id', lead.id)
+
+  return {
+    processed: true,
+    lead_id: lead.id,
+    lead_stage: lead.stage || null,
+    prev_stage: lead.stage || null,
+    note: `${noun}: synced property address to lead "${lead.name || lead.id}"`,
+  }
+}
+
+export function handlePropertyCreate(ctx: HandlerCtx) {
+  return handlePropertyCore(ctx, 'PROPERTY_CREATE')
+}
+
+export function handlePropertyUpdate(ctx: HandlerCtx) {
+  return handlePropertyCore(ctx, 'PROPERTY_UPDATE')
+}
+
+// APP_DISCONNECT — a Jobber admin clicked "Disconnect" on the Bee Hub
+// app listing. The tokens we hold are now invalid. Mark the location as
+// disconnected and clear token columns, but preserve jobber_account_id
+// and hub_users.jobber_user_id so the account identity persists across
+// connect / disconnect cycles (cleaner reconnect, preserved analytics).
+//
+// itemId is unused — APP_DISCONNECT scopes by accountId only.
+export async function handleAppDisconnect(ctx: HandlerCtx): Promise<HandlerResult> {
+  const nowIso = new Date().toISOString()
+  const { error } = await supabaseService
+    .from('locations')
+    .update({
+      jobber_connected:     false,
+      jobber_access_token:  null,
+      jobber_refresh_token: null,
+      token_expiry:         null,
+      token_expiry_display: null,
+      last_sync_status:     `Disconnected from Jobber: ${new Date().toLocaleString()}`,
+      updated_at:           nowIso,
+    })
+    .eq('id', ctx.location.id)
+
+  if (error) {
+    return { processed: false, error: `app_disconnect_write: ${error.message}` }
+  }
+
+  return {
+    processed: true,
+    note: `APP_DISCONNECT: cleared tokens + jobber_connected=false for location "${ctx.location.name || ctx.location.location_id}" (jobber_account_id preserved)`,
+  }
+}
+
 // ── dispatch table ────────────────────────────────────────────
 
 export const TOPIC_HANDLERS: Record<string, (ctx: HandlerCtx) => Promise<HandlerResult>> = {
-  REQUEST_CREATE: handleRequestCreate,
-  REQUEST_UPDATE: handleRequestUpdate,
-  QUOTE_CREATE:   handleQuoteCreate,
-  QUOTE_UPDATE:   handleQuoteUpdate,
-  QUOTE_SENT:     handleQuoteSent,
-  QUOTE_APPROVED: handleQuoteApproved,
-  JOB_CREATE:     handleJobCreate,
-  JOB_UPDATE:     handleJobUpdate,
-  JOB_COMPLETE:   handleJobComplete,
-  INVOICE_CREATE: handleInvoiceCreate,
-  INVOICE_PAID:   handleInvoicePaid,
-  CLIENT_UPDATE:  handleClientUpdate,
+  REQUEST_CREATE:     handleRequestCreate,
+  REQUEST_UPDATE:     handleRequestUpdate,
+  REQUEST_DESTROY:    handleRequestDestroy,
+  QUOTE_CREATE:       handleQuoteCreate,
+  QUOTE_UPDATE:       handleQuoteUpdate,
+  QUOTE_SENT:         handleQuoteSent,
+  QUOTE_APPROVED:     handleQuoteApproved,
+  QUOTE_DESTROY:      handleQuoteDestroy,
+  JOB_CREATE:         handleJobCreate,
+  JOB_UPDATE:         handleJobUpdate,
+  JOB_COMPLETE:       handleJobComplete,
+  JOB_DESTROY:        handleJobDestroy,
+  INVOICE_CREATE:     handleInvoiceCreate,
+  INVOICE_PAID:       handleInvoicePaid,
+  INVOICE_DESTROY:    handleInvoiceDestroy,
+  CLIENT_UPDATE:      handleClientUpdate,
+  CLIENT_DESTROY:     handleClientDestroy,
+  PROPERTY_CREATE:    handlePropertyCreate,
+  PROPERTY_UPDATE:    handlePropertyUpdate,
+  PROPERTY_DESTROY:   handlePropertyDestroy,
+  ASSESSMENT_DESTROY: handleAssessmentDestroy,
+  APP_DISCONNECT:     handleAppDisconnect,
 }
 
 export const SUPPORTED_TOPICS = Object.keys(TOPIC_HANDLERS)

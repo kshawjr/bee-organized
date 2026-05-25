@@ -42,10 +42,15 @@ the route fail-closes — every webhook returns 401.
 
 ## 3. Topics to subscribe
 
-Bee Hub handles **12** Jobber webhook topics. Subscribe to all 12 in
-each account that should sync to Bee Hub. Only **4 topics drive a
-stage transition** — the others stamp timestamps so the Outreach
-timeline can render distinct entries.
+Bee Hub handles **22** Jobber webhook topics. Subscribe to all 22 in
+each account that should sync to Bee Hub (subject to per-topic
+availability in the Developer Center — see the note below). Only
+**4 topics drive a stage transition**; the others either stamp
+timestamps so the Outreach timeline can render distinct entries, or
+clean up the Jobber linkage on the lead when something is destroyed
+Jobber-side.
+
+### CREATE / UPDATE / state-change topics
 
 | Topic            | Stage change            | Lead columns stamped                                |
 |------------------|-------------------------|-----------------------------------------------------|
@@ -61,6 +66,30 @@ timeline can render distinct entries.
 | `INVOICE_CREATE` | _none_                  | `jobber_invoice_id`, `balance_owing`, `invoice_created_at` |
 | `INVOICE_PAID`   | → `Closed Won` (fwd) + stop drip | `paid_amount`, `invoice_paid_at`            |
 | `CLIENT_UPDATE`  | _none_                  | _refresh name/email/phone/address_                    |
+| `PROPERTY_CREATE` | _none_                 | `jobber_property_id`, `address`, `city`, `state`, `zip` (Jobber authoritative) |
+| `PROPERTY_UPDATE` | _none_                 | same as `PROPERTY_CREATE`                             |
+
+### Destroy / disconnect topics
+
+In every destroy case the Bee Hub lead row **persists** — only the
+Jobber linkage is nulled. Bee Hub is the source of truth for the
+customer relationship and survives Jobber-side deletes.
+
+| Topic                | Effect on lead                                                                                       |
+|----------------------|------------------------------------------------------------------------------------------------------|
+| `REQUEST_DESTROY`    | nulls `jobber_request_id` + `jobber_assessment_id` (paired)                                          |
+| `QUOTE_DESTROY`      | nulls `jobber_quote_id`                                                                              |
+| `JOB_DESTROY`        | nulls `jobber_job_id`                                                                                |
+| `INVOICE_DESTROY`    | nulls `jobber_invoice_id`                                                                            |
+| `PROPERTY_DESTROY`   | nulls `jobber_property_id` (address fields stay — Bee Hub's record)                                  |
+| `ASSESSMENT_DESTROY` | nulls `jobber_assessment_id` (keeps `jobber_request_id`)                                             |
+| `CLIENT_DESTROY`     | nulls **all** `jobber_*_id` columns (full link break)                                                |
+| `APP_DISCONNECT`     | on `locations`: `jobber_connected=false`, clears tokens. Preserves `jobber_account_id` + `hub_users.jobber_user_id` for reconnect. |
+
+`REQUEST_UPDATE` falls through to the same cleanup as `REQUEST_DESTROY`
+when Jobber returns "not found" for the request — this fixes a race
+where the DESTROY event arrives before the UPDATE event in the same
+batch.
 
 **Key point**: `Job in Progress` is **owner-driven only**. No webhook
 ever transitions a lead into `Job in Progress` — owners flip the stage
@@ -68,6 +97,13 @@ manually when real work begins on the ground.
 
 `VISIT_*` topics are deliberately **not** subscribed — visit-level
 events don't map to a lead-level state in Bee Hub.
+
+> **Topic availability**: `ASSESSMENT_DESTROY` and `PROPERTY_DESTROY`
+> are wired defensively. Confirm each is selectable in the Developer
+> Center before subscribing; if Jobber doesn't expose a topic, you
+> simply can't tick the box and the corresponding handler stays dormant
+> (harmless). The handlers exist so we never log "unknown topic" if a
+> future Jobber API release adds them.
 
 ---
 
@@ -84,7 +120,10 @@ per-account registration to repeat.
 3. **URL**: set to
    `https://bee-hub-kappa.vercel.app/api/webhooks/jobber`
    (no trailing slash, must be HTTPS).
-4. **Topics**: select all 12 listed in section 3.
+4. **Topics**: select every topic listed in section 3 that the
+   Developer Center exposes. (Some destroy variants may not be
+   available in the topic picker — that's fine, the handlers are
+   dormant if Jobber doesn't fire the event.)
 5. Save.
 
 Signature verification uses the app's OAuth client secret automatically

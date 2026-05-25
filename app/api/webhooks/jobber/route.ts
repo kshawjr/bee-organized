@@ -157,8 +157,9 @@ export async function POST(req: NextRequest) {
       : ''
   const errPart = result.error ? ` error=${result.error}` : ''
   const leadPart = result.lead_id ? ` lead=${result.lead_id}` : ''
+  const notePart = result.note ? ` — ${result.note}` : ''
   const message =
-    `topic=${topic} item=${itemId}${leadPart}${stagePart}${errPart}`.slice(0, 1000)
+    `topic=${topic} item=${itemId}${leadPart}${stagePart}${errPart}${notePart}`.slice(0, 1000)
 
   await writeSyncLog({
     location_id: location.location_id,
@@ -184,11 +185,22 @@ export async function POST(req: NextRequest) {
 
 function topicToEntityType(
   topic: string,
-): 'client' | 'request' | 'quote' | 'job' | 'invoice' {
-  if (topic.startsWith('CLIENT_'))  return 'client'
-  if (topic.startsWith('REQUEST_')) return 'request'
-  if (topic.startsWith('QUOTE_'))   return 'quote'
-  if (topic.startsWith('JOB_'))     return 'job'
-  if (topic.startsWith('INVOICE_')) return 'invoice'
+):
+  | 'client'
+  | 'request'
+  | 'quote'
+  | 'job'
+  | 'invoice'
+  | 'property'
+  | 'assessment'
+  | 'location' {
+  if (topic === 'APP_DISCONNECT')     return 'location'
+  if (topic.startsWith('CLIENT_'))    return 'client'
+  if (topic.startsWith('REQUEST_'))   return 'request'
+  if (topic.startsWith('QUOTE_'))     return 'quote'
+  if (topic.startsWith('JOB_'))       return 'job'
+  if (topic.startsWith('INVOICE_'))   return 'invoice'
+  if (topic.startsWith('PROPERTY_'))  return 'property'
+  if (topic.startsWith('ASSESSMENT_')) return 'assessment'
   return 'request'
 }

@@ -17,7 +17,7 @@ export async function writeSyncLog({
 }: {
   location_id:      string
   entity_id:        string
-  entity_type?:     'client' | 'request' | 'quote' | 'job' | 'invoice' | 'payment' | 'note' | 'location'
+  entity_type?:     'client' | 'request' | 'quote' | 'job' | 'invoice' | 'payment' | 'note' | 'location' | 'property' | 'assessment'
   direction?:       'inbound' | 'outbound'
   zoho_record_id?:  string
   jobber_record_id?: string
