@@ -4894,6 +4894,19 @@ function OutreachTab({ person, setPopup }) {
   )
 }
 
+// Module-scope coordination for body scroll-lock across PersonPanel mounts.
+// During Next.js client navigation (e.g. tapping a lead → /clients/[id])
+// PersonPanel can briefly mount a second instance before the previous one
+// unmounts. The previous save/restore-prev-styles pattern was capturing the
+// *already-locked* body styles as "prev" and restoring TO the locked state
+// on cleanup, leaving body permanently fixed at top:-269px — which painted
+// all panel content above the visible viewport on iOS Safari.
+// The counter ensures the body lock is applied once (on first mount) and
+// cleared once (when the last panel unmounts), regardless of how many
+// PersonPanel instances momentarily coexist.
+let _personPanelLockCount = 0;
+let _personPanelLockScrollY = 0;
+
 function PersonPanel({
   person,
   onClose,
@@ -4970,28 +4983,29 @@ function PersonPanel({
     setEditingField(null);
   }
   React.useEffect(() => {
-    const scrollY = window.scrollY || window.pageYOffset || 0;
     const b = document.body.style;
     const h = document.documentElement.style;
-    const prev = {
-      pos: b.position,
-      top: b.top,
-      width: b.width,
-      over: b.overflow,
-      hOver: h.overflow,
-    };
-    b.position = "fixed";
-    b.top = "-" + scrollY + "px";
-    b.width = "100%";
-    b.overflow = "hidden";
-    h.overflow = "hidden";
+    if (_personPanelLockCount === 0) {
+      _personPanelLockScrollY = window.scrollY || window.pageYOffset || 0;
+      b.position = "fixed";
+      b.top = "-" + _personPanelLockScrollY + "px";
+      b.width = "100%";
+      b.overflow = "hidden";
+      h.overflow = "hidden";
+    }
+    _personPanelLockCount++;
     return () => {
-      b.position = prev.pos;
-      b.top = prev.top;
-      b.width = prev.width;
-      b.overflow = prev.over;
-      h.overflow = prev.hOver;
-      window.scrollTo(0, scrollY);
+      _personPanelLockCount = Math.max(0, _personPanelLockCount - 1);
+      if (_personPanelLockCount === 0) {
+        // Explicit clear (not restore-to-prev) — prev was unreliable when
+        // a second PersonPanel mounted while we were already locked.
+        b.position = "";
+        b.top = "";
+        b.width = "";
+        b.overflow = "";
+        h.overflow = "";
+        window.scrollTo(0, _personPanelLockScrollY);
+      }
     };
   }, []);
   const s = stageConf(person.stage);
