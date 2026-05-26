@@ -5362,7 +5362,13 @@ function PersonPanel({
                     {
                       style: {
                         display: "flex",
-                        alignItems: "baseline",
+                        // alignItems was "baseline" — iOS Safari at 430px
+                        // was collapsing the entire row to zero height when
+                        // baseline alignment had to negotiate with mixed
+                        // flex children (cursor-pointer flex wrapper +
+                        // jobber chip span + buzz notes button). center is
+                        // bulletproof.
+                        alignItems: "center",
                         gap: "10px",
                         flexWrap: "wrap",
                       },
@@ -5371,18 +5377,24 @@ function PersonPanel({
                     // confirms the prior h2 with the name string IS in the
                     // DOM but doesn't render visually on iOS at 430px.
                     // Replaced h2 with a plain div + explicit minHeight,
-                    // width, visibility, opacity to force layout & paint.
-                    // Name wrapped in an inline-block span as a second layer
-                    // of defense against unknown inherited-CSS quirks.
+                    // visibility, opacity to force layout & paint. Name
+                    // wrapped in an inline-block span as a second layer of
+                    // defense against unknown inherited-CSS quirks. Outer
+                    // cursor:pointer wrapper has minWidth/minHeight to
+                    // prevent iOS from collapsing it to zero, and
+                    // flexShrink:0 so it can't be squeezed by sibling chips.
                     React.createElement(
                       "div",
                       {
                         onClick: () => setPopup("account"),
                         style: {
                           display: "flex",
-                          alignItems: "baseline",
+                          alignItems: "center",
                           gap: "4px",
                           cursor: "pointer",
+                          minWidth: "100px",
+                          minHeight: "28px",
+                          flexShrink: 0,
                         },
                       },
                       React.createElement(
@@ -5395,7 +5407,6 @@ function PersonPanel({
                             fontWeight: "600",
                             lineHeight: 1.2,
                             minHeight: "28px",
-                            width: "100%",
                             display: "block",
                             visibility: "visible",
                             opacity: 1,
