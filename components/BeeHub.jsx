@@ -5273,6 +5273,14 @@ function PersonPanel({
             borderRadius: "16px 16px 0 0",
             zIndex: 1,
             height: "93vh",
+            // CSS default min-height: auto on a flex column makes the
+            // container grow to its content size, overriding height: 93vh
+            // when the content is taller. On iPhone Pro Max portrait, lead
+            // detail content (~831px) exceeded the 93vh budget (~690px),
+            // pushing the sheet 89px ABOVE the viewport — the name h2 sat
+            // at y=-58 and was invisible. minHeight: 0 lets the declared
+            // height win; the scroll body inside handles overflow.
+            minHeight: 0,
             display: "flex",
             flexDirection: "column",
             boxShadow: "0 -8px 40px rgba(26,46,43,0.15)",
@@ -13520,7 +13528,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
     <>
       <div style={{ position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'flex-end' }}>
         <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.25)' }} onClick={onClose} />
-        <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, height:'88vh', display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.15)', transform: sheetDragY ? `translateY(${sheetDragY}px)` : undefined, transition: dragStartYRef.current == null ? 'transform 0.2s ease' : 'none', willChange:'transform' }}>
+        <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, height:'88vh', minHeight:0, display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.15)', transform: sheetDragY ? `translateY(${sheetDragY}px)` : undefined, transition: dragStartYRef.current == null ? 'transform 0.2s ease' : 'none', willChange:'transform' }}>
           <div onTouchStart={onHandleTouchStart} onTouchMove={onHandleTouchMove} onTouchEnd={onHandleTouchEnd} onTouchCancel={onHandleTouchEnd} style={{ padding:'10px 0 4px', display:'flex', justifyContent:'center', touchAction:'none', cursor:'grab' }}>
             <div style={{ width:'44px', height:'5px', background:'rgba(0,0,0,0.18)', borderRadius:'3px' }} />
           </div>
