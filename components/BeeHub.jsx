@@ -4928,6 +4928,13 @@ function PersonPanel({
   const [jobNoteDraft, setJobNoteDraft] = useState("");
   const [fieldVal, setFieldVal] = useState("");
   const [toast, setToast] = useState(null);
+  const [isMobile, setIsMobile] = useState(false);
+  React.useEffect(() => {
+    function check() { setIsMobile(typeof window !== 'undefined' && window.innerWidth < 768); }
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
   // Swipe-down to dismiss: only triggered from the drag handle to avoid
   // conflicting with content scroll. State is the in-progress translateY.
   const [sheetDragY, setSheetDragY] = useState(0);
@@ -5313,7 +5320,12 @@ function PersonPanel({
           "div",
           {
             style: {
-              padding: "0.75rem 1.25rem 0",
+              // 60px right padding reserves space for the absolute close X
+              // (44px wide + 8px right offset + ~8px breathing room) so the
+              // name h2 and contact icons never render under it on narrow
+              // viewports. Without this the lead name was hidden behind the
+              // close button on mobile (430px).
+              padding: "0.75rem 60px 0 1.25rem",
               borderBottom: "1px solid rgba(0,0,0,0.06)",
               flexShrink: 0,
             },
@@ -5497,6 +5509,80 @@ function PersonPanel({
                       }),
                       s.label,
                     ),
+                  ),
+                  // Mobile-only contact strip — the icon row below uses
+                  // hover tooltips that don't fire on touch, so on <768px
+                  // we surface phone/email/address values as plain text so
+                  // the lead is identifiable without a tooltip. Hidden on
+                  // desktop where the icon-row tooltips already work.
+                  isMobile && (person.phone || person.email || (person.addresses && person.addresses.some((a) => a.value)) || person.address) && React.createElement(
+                    "div",
+                    {
+                      style: {
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "3px",
+                        marginTop: "8px",
+                        fontSize: "13px",
+                        color: "#4a5e5a",
+                        lineHeight: 1.35,
+                      },
+                    },
+                    person.phone && React.createElement(
+                      "a",
+                      {
+                        href: `tel:${person.phone}`,
+                        style: {
+                          color: "#4a5e5a",
+                          textDecoration: "none",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                        },
+                      },
+                      React.createElement("span", { style: { fontSize: "13px", opacity: 0.6, width: "16px", textAlign: "center" } }, "📞"),
+                      React.createElement("span", null, person.phone),
+                    ),
+                    person.email && React.createElement(
+                      "a",
+                      {
+                        href: `mailto:${person.email}`,
+                        style: {
+                          color: "#4a5e5a",
+                          textDecoration: "none",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          wordBreak: "break-all",
+                        },
+                      },
+                      React.createElement("span", { style: { fontSize: "13px", opacity: 0.6, width: "16px", textAlign: "center", flexShrink: 0 } }, "✉️"),
+                      React.createElement("span", null, person.email),
+                    ),
+                    (() => {
+                      const addrList = person.addresses && person.addresses.length
+                        ? person.addresses.filter((a) => a.value)
+                        : person.address
+                          ? [{ type: "Service", value: person.address }]
+                          : [];
+                      if (addrList.length === 0) return null;
+                      return React.createElement(
+                        "div",
+                        {
+                          style: {
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: "8px",
+                          },
+                        },
+                        React.createElement("span", { style: { fontSize: "13px", opacity: 0.6, width: "16px", textAlign: "center", flexShrink: 0, marginTop: "1px" } }, "📍"),
+                        React.createElement(
+                          "span",
+                          null,
+                          addrList.map((a) => a.value).join(" · "),
+                        ),
+                      );
+                    })(),
                   ),
                 ),
                 React.createElement(
@@ -6129,8 +6215,8 @@ function PersonPanel({
             ),
             // Close X moved to absolute-positioned button on the sheet
             // (top of PersonPanel) \u2014 it kept getting pushed off-screen
-            // here on narrow viewports. Prev/Next nav stays inline; right-
-            // side reserved space (44px) keeps it clear of the absolute X.
+            // here on narrow viewports. Prev/Next nav stays inline; header
+            // padding-right reserves space for the absolute X.
             React.createElement(
               "div",
               {
@@ -6140,7 +6226,6 @@ function PersonPanel({
                   gap: "4px",
                   alignSelf: "flex-start",
                   flexShrink: 0,
-                  paddingRight: "44px",
                 },
               },
               (onPrev || onNext) &&
@@ -7901,6 +7986,38 @@ function PersonPanel({
             React.createElement(ContactsTab, { person: person, onUpdate: onUpdate, onError: showError }),
           activeTab === "outreach" &&
             React.createElement(OutreachTab, { person: person, setPopup: setPopup }),
+          // Mobile-only redundant Close button at the bottom of scroll
+          // content. The top-right absolute X is small and easy to miss;
+          // Kevin reported it not rendering on iPhone three times running.
+          // This button is full-width, high-contrast, and impossible to
+          // overlook after scrolling through lead detail. Desktop hides it.
+          isMobile && React.createElement(
+            "button",
+            {
+              onClick: onClose,
+              "aria-label": "Close lead",
+              style: {
+                marginTop: "24px",
+                width: "100%",
+                minHeight: "52px",
+                background: "#1a2e2b",
+                color: "white",
+                border: "none",
+                borderRadius: "12px",
+                fontSize: "15px",
+                fontWeight: 600,
+                fontFamily: "inherit",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                boxShadow: "0 2px 8px rgba(26,46,43,0.18)",
+              },
+            },
+            React.createElement("span", { style: { fontSize: "17px" } }, "←"),
+            "Close Lead",
+          ),
         ),
       ),
     ),
@@ -13349,6 +13466,13 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
   const [showDoneSteps, setShowDoneSteps]   = useState(false)
   const [newStepText, setNewStepText]       = useState('')
   const [newStepDate, setNewStepDate]       = useState('')
+  const [isMobile, setIsMobile] = useState(false)
+  React.useEffect(() => {
+    function check() { setIsMobile(typeof window !== 'undefined' && window.innerWidth < 768) }
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
   // Swipe-down dismiss (matches PersonPanel pattern)
   const [sheetDragY, setSheetDragY] = useState(0)
   const dragStartYRef = React.useRef(null)
@@ -13764,6 +13888,16 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
                 <button onClick={()=>setShowDeleteConfirm(true)} style={{ padding:'10px 14px', background:'rgba(239,68,68,0.06)', border:'1.5px solid rgba(239,68,68,0.2)', borderRadius:'10px', fontSize:'13px', color:'#ef4444', cursor:'pointer', flexShrink:0 }}>🗑</button>
               </div>
             </div>
+
+            {/* Mobile-only redundant Close button at the bottom of scroll
+                content. The top-right inline X is small and easy to miss on
+                a phone; this full-width button is impossible to overlook
+                after scrolling through partner detail. Desktop hides it. */}
+            {isMobile && (
+              <button onClick={onClose} aria-label="Close partner" style={{ marginTop:'8px', width:'100%', minHeight:'52px', background:'#1a2e2b', color:'white', border:'none', borderRadius:'12px', fontSize:'15px', fontWeight:600, fontFamily:'inherit', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px', boxShadow:'0 2px 8px rgba(26,46,43,0.18)' }}>
+                <span style={{ fontSize:'17px' }}>←</span>Close Partner
+              </button>
+            )}
 
           </div>
         </div>
