@@ -5291,9 +5291,9 @@ function PersonPanel({
           },
         },
         // Sticky close X pinned absolute to top-right of the sheet so it's
-        // never subject to header flex sizing / overflow. Lives in front of
-        // all content via z-index. 44×44 tap target, mobile + desktop.
-        React.createElement(
+        // never subject to header flex sizing / overflow. Desktop only;
+        // mobile renders its own inline close in the compact header Row 2.
+        !isMobile && React.createElement(
           "button",
           {
             onClick: onClose,
@@ -5346,7 +5346,538 @@ function PersonPanel({
             },
           }),
         ),
-        React.createElement(
+        // Mobile gets a redesigned compact header — predictable row-based
+        // layout (~160-180px total) instead of the wrap-prone flex tangle
+        // that kept pushing the name above the viewport on iPhone portrait.
+        // Desktop keeps the existing layout below.
+        isMobile
+          ? React.createElement(
+              "div",
+              {
+                style: {
+                  borderBottom: "1px solid rgba(0,0,0,0.06)",
+                  flexShrink: 0,
+                  background: "white",
+                  position: "relative",
+                },
+              },
+              // Row 2: name + close
+              React.createElement(
+                "div",
+                {
+                  style: {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    padding: "12px 20px 4px",
+                  },
+                },
+                React.createElement(
+                  "div",
+                  {
+                    onClick: () => setPopup("account"),
+                    style: {
+                      flex: 1,
+                      minWidth: 0,
+                      fontSize: "22px",
+                      fontFamily: "Georgia, serif",
+                      color: "#1a2e2b",
+                      fontWeight: 600,
+                      lineHeight: 1.2,
+                      cursor: "pointer",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      minHeight: "28px",
+                      // Defensive paint hints kept from the prior layout for
+                      // iOS Safari — the name was the original symptom.
+                      display: "block",
+                      visibility: "visible",
+                      opacity: 1,
+                    },
+                  },
+                  React.createElement(
+                    "span",
+                    {
+                      style: {
+                        display: "inline-block",
+                        color: "#1a2e2b",
+                        visibility: "visible",
+                      },
+                    },
+                    (person.name || "").trim() || "(unnamed)",
+                  ),
+                ),
+                React.createElement(
+                  "button",
+                  {
+                    onClick: onClose,
+                    "aria-label": "Close",
+                    style: {
+                      width: "44px",
+                      height: "44px",
+                      flexShrink: 0,
+                      background: "transparent",
+                      border: "none",
+                      color: "#1a2e2b",
+                      fontSize: "26px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 0,
+                      lineHeight: 1,
+                      fontFamily: "inherit",
+                    },
+                  },
+                  "\xD7",
+                ),
+              ),
+              // Row 3: status subtitle
+              React.createElement(
+                "div",
+                {
+                  style: {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "0 20px 8px",
+                    fontSize: "14px",
+                    color: "#6b7c79",
+                    flexWrap: "wrap",
+                  },
+                },
+                React.createElement(
+                  "button",
+                  {
+                    onClick: () => setPopup("stage"),
+                    "aria-label": "Edit stage",
+                    style: {
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: 0,
+                      fontFamily: "inherit",
+                      fontSize: "14px",
+                      color: "#1a2e2b",
+                      fontWeight: 600,
+                    },
+                  },
+                  React.createElement("span", {
+                    style: {
+                      width: "8px",
+                      height: "8px",
+                      borderRadius: "50%",
+                      background: s.dot || s.color,
+                      display: "inline-block",
+                      boxShadow: `0 0 0 2.5px ${s.dot || s.color}22`,
+                    },
+                  }),
+                  s.label,
+                ),
+                (() => {
+                  if (searching || person.jobberSearchStatus === "pending") {
+                    return React.createElement(
+                      React.Fragment,
+                      null,
+                      React.createElement("span", { style: { color: "#c8d8d4" } }, "·"),
+                      React.createElement(
+                        "span",
+                        { style: { color: "#6366f1", fontWeight: 600, fontSize: "13px" } },
+                        "🔍 Checking…",
+                      ),
+                    );
+                  }
+                  if (
+                    person.jobberRef ||
+                    (person.jobberSearchStatus === "found" && person.jobberClient)
+                  ) {
+                    return React.createElement(
+                      React.Fragment,
+                      null,
+                      React.createElement("span", { style: { color: "#c8d8d4" } }, "·"),
+                      React.createElement(
+                        "span",
+                        { style: { fontSize: "13px", color: "#10b981", fontWeight: 600 } },
+                        "✅ Existing Client",
+                      ),
+                    );
+                  }
+                  if (person.jobberSearchStatus === "not_found") {
+                    return React.createElement(
+                      React.Fragment,
+                      null,
+                      React.createElement("span", { style: { color: "#c8d8d4" } }, "·"),
+                      React.createElement(
+                        "span",
+                        { style: { fontSize: "13px", color: "#8a9e9a", fontWeight: 600 } },
+                        "🆕 New Client",
+                      ),
+                    );
+                  }
+                  return null;
+                })(),
+              ),
+              // Row 4: contact + meta icons (horizontally scrollable)
+              React.createElement(
+                "div",
+                {
+                  style: {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "14px",
+                    padding: "4px 20px 8px",
+                    overflowX: "auto",
+                    WebkitOverflowScrolling: "touch",
+                    scrollbarWidth: "none",
+                    msOverflowStyle: "none",
+                  },
+                },
+                React.createElement(
+                  "button",
+                  {
+                    key: "phone",
+                    onClick: () => {
+                      if (person.phone) window.location.href = `tel:${person.phone}`;
+                      else setShowLeadInfoEdit(true);
+                    },
+                    "aria-label": person.phone ? "Call phone" : "Edit phone",
+                    style: {
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: "18px",
+                      width: "32px",
+                      height: "32px",
+                      padding: 0,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      lineHeight: 1,
+                      fontFamily: "inherit",
+                      flexShrink: 0,
+                      opacity: person.phone ? 0.7 : 0.3,
+                    },
+                  },
+                  "📞",
+                ),
+                React.createElement(
+                  "button",
+                  {
+                    key: "email",
+                    onClick: () => {
+                      if (person.email) window.location.href = `mailto:${person.email}`;
+                      else setShowLeadInfoEdit(true);
+                    },
+                    "aria-label": person.email ? "Send email" : "Edit email",
+                    style: {
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: "18px",
+                      width: "32px",
+                      height: "32px",
+                      padding: 0,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      lineHeight: 1,
+                      fontFamily: "inherit",
+                      flexShrink: 0,
+                      opacity: person.email ? 0.7 : 0.3,
+                    },
+                  },
+                  "✉️",
+                ),
+                React.createElement(
+                  "button",
+                  {
+                    key: "address",
+                    onClick: () => setPopup("add-address"),
+                    "aria-label": "Edit address",
+                    style: {
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: "18px",
+                      width: "32px",
+                      height: "32px",
+                      padding: 0,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      lineHeight: 1,
+                      fontFamily: "inherit",
+                      flexShrink: 0,
+                      opacity:
+                        (person.addresses && person.addresses.some((a) => a.value)) ||
+                        person.address
+                          ? 0.7
+                          : 0.3,
+                    },
+                  },
+                  "📍",
+                ),
+                React.createElement(
+                  "button",
+                  {
+                    key: "jobdetail",
+                    onClick: () => setPopup("edit-job-detail"),
+                    "aria-label": "Edit project description",
+                    style: {
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: "18px",
+                      width: "32px",
+                      height: "32px",
+                      padding: 0,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      lineHeight: 1,
+                      fontFamily: "inherit",
+                      flexShrink: 0,
+                      opacity: person.jobDetail ? 0.7 : 0.3,
+                    },
+                  },
+                  "💬",
+                ),
+                React.createElement(
+                  "button",
+                  {
+                    key: "card",
+                    onClick: () => onViewCard(person),
+                    "aria-label": "View business card",
+                    style: {
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: "18px",
+                      width: "32px",
+                      height: "32px",
+                      padding: 0,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      lineHeight: 1,
+                      fontFamily: "inherit",
+                      flexShrink: 0,
+                      opacity: 0.7,
+                    },
+                  },
+                  "📇",
+                ),
+                React.createElement(
+                  "button",
+                  {
+                    key: "source",
+                    onClick: () => {
+                      setEditingSource((v) => !v);
+                      setPickingReferral(false);
+                    },
+                    "aria-label": "Edit source",
+                    style: {
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: "12px",
+                      padding: "4px 6px",
+                      lineHeight: 1.2,
+                      fontFamily: "inherit",
+                      color: "#4a5e5a",
+                      fontWeight: 500,
+                      flexShrink: 0,
+                    },
+                  },
+                  React.createElement("span", null, "📣"),
+                  React.createElement(
+                    "span",
+                    { style: { opacity: person.source ? 1 : 0.5 } },
+                    person.source || "Source",
+                  ),
+                ),
+                (() => {
+                  const reqCount =
+                    (person.jobs?.length || 0) +
+                    (person.jobberClient?.jobs?.length || 0) +
+                    (person.stage && person.stage !== "New" ? 1 : 0);
+                  return reqCount > 0
+                    ? React.createElement(
+                        "span",
+                        {
+                          key: "reqs",
+                          style: {
+                            fontSize: "11px",
+                            color: "#4a5e5a",
+                            background: "rgba(168,201,196,0.12)",
+                            border: "1px solid rgba(168,201,196,0.25)",
+                            padding: "3px 9px",
+                            borderRadius: "20px",
+                            fontWeight: 600,
+                            flexShrink: 0,
+                          },
+                        },
+                        reqCount + " req" + (reqCount > 1 ? "s" : ""),
+                      )
+                    : null;
+                })(),
+                ...person.tags.map((tid) => {
+                  const t = tagConf(tid);
+                  return React.createElement(
+                    "span",
+                    {
+                      key: `tag-${tid}`,
+                      style: {
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "3px",
+                        fontSize: "11px",
+                        color: t.color,
+                        background: t.bg,
+                        padding: "3px 8px",
+                        borderRadius: "20px",
+                        fontWeight: 500,
+                        flexShrink: 0,
+                      },
+                    },
+                    t.label,
+                    React.createElement(
+                      "button",
+                      {
+                        onClick: (e) => {
+                          e.stopPropagation();
+                          update({ tags: person.tags.filter((x) => x !== tid) });
+                        },
+                        style: {
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          color: t.color,
+                          fontSize: "11px",
+                          lineHeight: 1,
+                          padding: "0 1px",
+                          opacity: 0.6,
+                        },
+                      },
+                      "\xD7",
+                    ),
+                  );
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    key: "addtag",
+                    onClick: () => setPopup("tags"),
+                    style: {
+                      fontSize: "11px",
+                      color: "#a8c9c4",
+                      background: "rgba(168,201,196,0.1)",
+                      border: "1px dashed rgba(168,201,196,0.35)",
+                      padding: "3px 10px",
+                      borderRadius: "20px",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      fontWeight: 500,
+                      flexShrink: 0,
+                    },
+                  },
+                  "+ tag",
+                ),
+              ),
+              // Source dropdown — rendered as a sibling of the icons row so
+              // overflow-x: auto on the row can't clip it. Position is fixed
+              // beneath the header strip.
+              editingSource &&
+                React.createElement(
+                  React.Fragment,
+                  null,
+                  React.createElement("div", {
+                    style: { position: "fixed", inset: 0, zIndex: 49 },
+                    onClick: () => setEditingSource(false),
+                  }),
+                  React.createElement(
+                    "div",
+                    {
+                      style: {
+                        position: "absolute",
+                        top: "100%",
+                        left: "20px",
+                        right: "20px",
+                        zIndex: 50,
+                        background: "white",
+                        border: "1px solid rgba(0,0,0,0.1)",
+                        borderRadius: "10px",
+                        boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+                        padding: "6px",
+                        maxHeight: "60vh",
+                        overflowY: "auto",
+                      },
+                    },
+                    [
+                      "Website",
+                      "Referral",
+                      "Word of Mouth",
+                      "Instagram",
+                      "Facebook",
+                      "Google",
+                      "Yelp",
+                      "NextDoor",
+                      "Other",
+                    ].map((src) =>
+                      React.createElement(
+                        "button",
+                        {
+                          key: src,
+                          onClick: () => {
+                            update({
+                              ...person,
+                              source: src,
+                              referredBy: src === "Referral" ? person.referredBy : null,
+                            });
+                            setEditingSource(false);
+                            if (src === "Referral") setPickingReferral(true);
+                          },
+                          style: {
+                            display: "block",
+                            width: "100%",
+                            padding: "9px 12px",
+                            background:
+                              person.source === src ? "rgba(14,165,233,0.08)" : "transparent",
+                            border: "none",
+                            borderRadius: "8px",
+                            fontSize: "13px",
+                            fontFamily: "inherit",
+                            color: person.source === src ? "#0ea5e9" : "#1a2e2b",
+                            cursor: "pointer",
+                            textAlign: "left",
+                            fontWeight: person.source === src ? 600 : 400,
+                          },
+                        },
+                        src,
+                      ),
+                    ),
+                  ),
+                ),
+              // Row 5: tabs
+              React.createElement(
+                "div",
+                { style: { display: "flex" } },
+                Tab("overview", "Overview"),
+                Tab(
+                  "contacts",
+                  `Job Contacts${(person.jobContacts?.length || 0) > 0 ? " (" + person.jobContacts.length + ")" : ""}`,
+                ),
+                Tab("outreach", `Outreach (${person.outreachTimeline.length})`),
+              ),
+            )
+          : React.createElement(
           "div",
           {
             style: {
@@ -13533,7 +14064,57 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
             <div style={{ width:'44px', height:'5px', background:'rgba(0,0,0,0.18)', borderRadius:'3px' }} />
           </div>
 
-          {/* Header - clean: identity + tier + stage only */}
+          {/* Header — mobile: compact row-based layout (Row 2 name+close,
+              Row 3 subtitle, Row 4 stage+tier+icons). Desktop keeps the
+              original layout below. Matches the PersonPanel redesign. */}
+          {isMobile ? (
+            <div style={{ borderBottom:'1px solid rgba(0,0,0,0.06)', flexShrink:0, background:'white' }}>
+              {/* Row 2: avatar + name + close */}
+              <div style={{ display:'flex', alignItems:'center', gap:'10px', padding:'12px 20px 4px' }}>
+                <div style={{ position:'relative', flexShrink:0 }}>
+                  <Avatar name={partner.name} size={36} />
+                </div>
+                <div onClick={()=>setPopup('editName')} style={{ flex:1, minWidth:0, fontSize:'20px', fontFamily:'Georgia, serif', color:'#1a2e2b', fontWeight:600, lineHeight:1.2, cursor:'pointer', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'block', visibility:'visible', opacity:1, minHeight:'26px' }}>
+                  <span style={{ display:'inline-block', color:'#1a2e2b', visibility:'visible' }}>
+                    {(partner.name || '').trim() || '(unnamed)'}
+                  </span>
+                </div>
+                <button onClick={onClose} aria-label="Close" style={{ width:'44px', height:'44px', flexShrink:0, background:'transparent', border:'none', color:'#1a2e2b', fontSize:'26px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', padding:0, lineHeight:1, fontFamily:'inherit' }}>×</button>
+              </div>
+              {/* Row 3: subtitle — title · company */}
+              <div style={{ display:'flex', alignItems:'center', gap:'6px', padding:'0 20px 8px', fontSize:'13px', color:'#6b7c79', flexWrap:'wrap' }}>
+                {partner.title && <span>{partner.title}</span>}
+                {partner.title && partner.company && <span style={{ color:'#c8d8d4' }}>·</span>}
+                <button onClick={()=>onOpenCompanyModal(partner)} style={{ background:'none', border:'none', cursor:'pointer', padding:0, fontFamily:'inherit', fontSize:'13px', color:partner.company?'#a8c9c4':'#c8d8d4', textDecoration:'underline', textDecorationStyle:'dotted', textUnderlineOffset:'2px' }}>
+                  {partner.company || '+ link company'}
+                </button>
+              </div>
+              {/* Row 4: stage + tier + contact icons (horizontally scrollable) */}
+              <div style={{ display:'flex', alignItems:'center', gap:'10px', padding:'4px 20px 8px', overflowX:'auto', WebkitOverflowScrolling:'touch', scrollbarWidth:'none', msOverflowStyle:'none' }}>
+                {partner.type==='contact' ? (
+                  <>
+                    <span style={{ fontSize:'12px', padding:'3px 9px', borderRadius:'20px', background:'rgba(168,201,196,0.15)', color:'#4a7a74', fontWeight:600, flexShrink:0 }}>👤 Contact{partner.relationship?` · ${partner.relationship}`:''}</span>
+                    <button onClick={()=>update({ type:'partner', stage:'New Contact', activity:[...partner.activity,{ type:'event', label:'Converted to Partner', ts:'Just now', user:'You' }] })}
+                      style={{ fontSize:'12px', padding:'3px 9px', borderRadius:'20px', background:'rgba(26,46,43,0.06)', color:'#1a2e2b', fontWeight:600, border:'1px solid rgba(26,46,43,0.15)', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>
+                      🤝 Convert to Partner
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={()=>setPopup('stage')} style={{ fontSize:'12px', padding:'3px 9px', borderRadius:'20px', background:s.bg, color:s.color, fontWeight:600, border:`1px solid ${s.color}30`, cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>{s.icon} {s.label}</button>
+                    {(()=>{ const tier=getPartnerTiers().find(t=>t.id===partner.tier); return tier
+                      ? <button onClick={()=>setPopup('tier')} style={{ fontSize:'12px', padding:'3px 9px', borderRadius:'20px', background:tier.bg, color:tier.color, fontWeight:700, border:`1px solid ${tier.color}50`, cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>{tier.label}</button>
+                      : <button onClick={()=>setPopup('tier')} style={{ fontSize:'12px', color:'#8a9e9a', background:'rgba(0,0,0,0.03)', border:'1px dashed rgba(0,0,0,0.12)', borderRadius:'20px', padding:'3px 9px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>+ Set tier</button>
+                    })()}
+                    {partner.isCustomer&&<span style={{ fontSize:'11px', color:'#d4a046', background:'rgba(212,160,70,0.1)', padding:'2px 7px', borderRadius:'20px', flexShrink:0 }}>👤 Also a client</span>}
+                  </>
+                )}
+                {partner.phone && <a href={`tel:${partner.phone}`} aria-label="Call phone" style={{ fontSize:'18px', width:'32px', height:'32px', display:'inline-flex', alignItems:'center', justifyContent:'center', textDecoration:'none', flexShrink:0, opacity:0.7 }}>📞</a>}
+                {partner.email && <a href={`mailto:${partner.email}`} aria-label="Send email" style={{ fontSize:'18px', width:'32px', height:'32px', display:'inline-flex', alignItems:'center', justifyContent:'center', textDecoration:'none', flexShrink:0, opacity:0.7 }}>✉️</a>}
+                <button onClick={()=>onViewCard(partner)} aria-label="View business card" style={{ background:'none', border:'none', cursor:'pointer', fontSize:'18px', width:'32px', height:'32px', padding:0, display:'inline-flex', alignItems:'center', justifyContent:'center', lineHeight:1, fontFamily:'inherit', flexShrink:0, opacity:0.7 }}>📇</button>
+              </div>
+            </div>
+          ) : (
           <div style={{ padding:'0.75rem 1.25rem 0.75rem', borderBottom:'1px solid rgba(0,0,0,0.06)', flexShrink:0 }}>
             <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:'12px' }}>
               <div style={{ display:'flex', alignItems:'center', gap:'12px', flex:1, minWidth:0 }}>
@@ -13588,6 +14169,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
               <button onClick={onClose} aria-label="Close" style={{ background:'none', border:'none', fontSize:'26px', color:'#4a5e5a', cursor:'pointer', flexShrink:0, width:'44px', height:'44px', display:'flex', alignItems:'center', justifyContent:'center', padding:0, marginRight:'-8px', lineHeight:1 }}>×</button>
             </div>
           </div>
+          )}
 
           {/* Tab bar */}
           <div style={{ display:'flex', borderBottom:'1px solid rgba(0,0,0,0.07)', flexShrink:0, background:'white' }}>
