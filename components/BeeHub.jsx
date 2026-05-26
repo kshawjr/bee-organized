@@ -5367,22 +5367,36 @@ function PersonPanel({
                         flexWrap: "wrap",
                       },
                     },
+                    // Wrapper for name + open-account arrow. The h2 itself
+                    // is plain block text (no inline-flex children) \u2014 iOS
+                    // Safari at 430px was failing to render the h2 when it
+                    // had display:inline-flex with a baseline-aligned arrow
+                    // child. Arrow now lives as a sibling span in this flex
+                    // row instead.
                     React.createElement(
-                      "h2",
+                      "div",
                       {
                         onClick: () => setPopup("account"),
                         style: {
-                          fontSize: "22px",
-                          fontFamily: "Georgia,serif",
-                          color: "#1a2e2b",
-                          cursor: "pointer",
-                          display: "inline-flex",
+                          display: "flex",
                           alignItems: "baseline",
                           gap: "4px",
-                          lineHeight: 1.1,
+                          cursor: "pointer",
                         },
                       },
-                      person.name,
+                      React.createElement(
+                        "h2",
+                        {
+                          style: {
+                            fontSize: "22px",
+                            fontFamily: "Georgia,serif",
+                            color: "#1a2e2b",
+                            lineHeight: 1.1,
+                            display: "block",
+                          },
+                        },
+                        (person.name || "").trim() || "(unnamed)",
+                      ),
                       React.createElement(
                         "span",
                         { style: { fontSize: "14px", opacity: 0.35, fontFamily: "inherit" } },
@@ -5509,80 +5523,6 @@ function PersonPanel({
                       }),
                       s.label,
                     ),
-                  ),
-                  // Mobile-only contact strip — the icon row below uses
-                  // hover tooltips that don't fire on touch, so on <768px
-                  // we surface phone/email/address values as plain text so
-                  // the lead is identifiable without a tooltip. Hidden on
-                  // desktop where the icon-row tooltips already work.
-                  isMobile && (person.phone || person.email || (person.addresses && person.addresses.some((a) => a.value)) || person.address) && React.createElement(
-                    "div",
-                    {
-                      style: {
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "3px",
-                        marginTop: "8px",
-                        fontSize: "13px",
-                        color: "#4a5e5a",
-                        lineHeight: 1.35,
-                      },
-                    },
-                    person.phone && React.createElement(
-                      "a",
-                      {
-                        href: `tel:${person.phone}`,
-                        style: {
-                          color: "#4a5e5a",
-                          textDecoration: "none",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                        },
-                      },
-                      React.createElement("span", { style: { fontSize: "13px", opacity: 0.6, width: "16px", textAlign: "center" } }, "📞"),
-                      React.createElement("span", null, person.phone),
-                    ),
-                    person.email && React.createElement(
-                      "a",
-                      {
-                        href: `mailto:${person.email}`,
-                        style: {
-                          color: "#4a5e5a",
-                          textDecoration: "none",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          wordBreak: "break-all",
-                        },
-                      },
-                      React.createElement("span", { style: { fontSize: "13px", opacity: 0.6, width: "16px", textAlign: "center", flexShrink: 0 } }, "✉️"),
-                      React.createElement("span", null, person.email),
-                    ),
-                    (() => {
-                      const addrList = person.addresses && person.addresses.length
-                        ? person.addresses.filter((a) => a.value)
-                        : person.address
-                          ? [{ type: "Service", value: person.address }]
-                          : [];
-                      if (addrList.length === 0) return null;
-                      return React.createElement(
-                        "div",
-                        {
-                          style: {
-                            display: "flex",
-                            alignItems: "flex-start",
-                            gap: "8px",
-                          },
-                        },
-                        React.createElement("span", { style: { fontSize: "13px", opacity: 0.6, width: "16px", textAlign: "center", flexShrink: 0, marginTop: "1px" } }, "📍"),
-                        React.createElement(
-                          "span",
-                          null,
-                          addrList.map((a) => a.value).join(" · "),
-                        ),
-                      );
-                    })(),
                   ),
                 ),
                 React.createElement(
@@ -13546,7 +13486,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
                   </button>
                 </div>
                 <div style={{ flex:1, minWidth:0 }}>
-                  <h2 style={{ fontSize:'16px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{partner.name}</h2>
+                  <h2 style={{ fontSize:'16px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'block' }}>{(partner.name || '').trim() || '(unnamed)'}</h2>
                   <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'6px', flexWrap:'wrap' }}>
                     {partner.title&&<span style={{ fontSize:'12px', color:'#8a9e9a' }}>{partner.title}</span>}
                     {partner.title&&partner.company&&<span style={{ fontSize:'12px', color:'#c8d8d4' }}>·</span>}
