@@ -5367,12 +5367,13 @@ function PersonPanel({
                         flexWrap: "wrap",
                       },
                     },
-                    // Wrapper for name + open-account arrow. The h2 itself
-                    // is plain block text (no inline-flex children) \u2014 iOS
-                    // Safari at 430px was failing to render the h2 when it
-                    // had display:inline-flex with a baseline-aligned arrow
-                    // child. Arrow now lives as a sibling span in this flex
-                    // row instead.
+                    // Defensive name rendering for iOS Safari. Web Inspector
+                    // confirms the prior h2 with the name string IS in the
+                    // DOM but doesn't render visually on iOS at 430px.
+                    // Replaced h2 with a plain div + explicit minHeight,
+                    // width, visibility, opacity to force layout & paint.
+                    // Name wrapped in an inline-block span as a second layer
+                    // of defense against unknown inherited-CSS quirks.
                     React.createElement(
                       "div",
                       {
@@ -5385,17 +5386,32 @@ function PersonPanel({
                         },
                       },
                       React.createElement(
-                        "h2",
+                        "div",
                         {
                           style: {
                             fontSize: "22px",
-                            fontFamily: "Georgia,serif",
+                            fontFamily: "Georgia, serif",
                             color: "#1a2e2b",
-                            lineHeight: 1.1,
+                            fontWeight: "600",
+                            lineHeight: 1.2,
+                            minHeight: "28px",
+                            width: "100%",
                             display: "block",
+                            visibility: "visible",
+                            opacity: 1,
                           },
                         },
-                        (person.name || "").trim() || "(unnamed)",
+                        React.createElement(
+                          "span",
+                          {
+                            style: {
+                              display: "inline-block",
+                              color: "#1a2e2b",
+                              visibility: "visible",
+                            },
+                          },
+                          (person.name || "").trim() || "(unnamed)",
+                        ),
                       ),
                       React.createElement(
                         "span",
@@ -13486,7 +13502,14 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
                   </button>
                 </div>
                 <div style={{ flex:1, minWidth:0 }}>
-                  <h2 style={{ fontSize:'16px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'block' }}>{(partner.name || '').trim() || '(unnamed)'}</h2>
+                  {/* Defensive div instead of h2 — same iOS Safari quirk
+                      as PersonPanel. minHeight/visibility/opacity force
+                      layout; inner span guards against inherited CSS. */}
+                  <div style={{ fontSize:'16px', fontFamily:'Georgia, serif', color:'#1a2e2b', fontWeight:'600', lineHeight:1.2, minHeight:'20px', width:'100%', display:'block', visibility:'visible', opacity:1, marginBottom:'1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    <span style={{ display:'inline-block', color:'#1a2e2b', visibility:'visible' }}>
+                      {(partner.name || '').trim() || '(unnamed)'}
+                    </span>
+                  </div>
                   <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'6px', flexWrap:'wrap' }}>
                     {partner.title&&<span style={{ fontSize:'12px', color:'#8a9e9a' }}>{partner.title}</span>}
                     {partner.title&&partner.company&&<span style={{ fontSize:'12px', color:'#c8d8d4' }}>·</span>}
