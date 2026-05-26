@@ -26717,7 +26717,7 @@ if (Array.isArray(initialPeople)) return
       return 'Bee Hub'
     })()
     return (
-      <div className="bee-mobile-topbar" style={{ position:'fixed', top:`${tbTop}px`, left:0, right:0, height:'48px', background:'#1a2e2b', borderBottom:'1px solid rgba(168,201,196,0.12)', zIndex:9000, display:'none', alignItems:'center', padding:'0 4px', gap:'4px' }}>
+      <div className="bee-mobile-topbar" style={{ position:'fixed', top:`${tbTop}px`, left:0, right:0, height:'48px', background:'#1a2e2b', borderBottom:'1px solid rgba(168,201,196,0.12)', zIndex:9000, alignItems:'center', padding:'0 4px', gap:'4px' }}>
         <button
           onClick={()=>setShowMobileNav(true)}
           aria-label="Open menu"
@@ -27058,29 +27058,10 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     )
   }
 
-  // Inject responsive CSS — globals.css already has the bee-sidebar/bee-main
-  // /bee-loc-banner rules; the runtime inject below adds the mobile topbar
-  // toggle and reasserts the others so the runtime layout matches even if
-  // globals.css is stripped by an extension.
-  React.useEffect(()=>{
-    const style = document.createElement('style')
-    style.textContent = `
-      @media (min-width: 768px) {
-        .bee-sidebar { display: flex !important; }
-        .bee-mobile-topbar { display: none !important; }
-        .bee-main { margin-left: 220px !important; }
-        .bee-loc-banner { left: 220px !important; }
-      }
-      @media (max-width: 767px) {
-        .bee-sidebar { display: none !important; }
-        .bee-mobile-topbar { display: flex !important; }
-        .bee-main { margin-left: 0 !important; }
-        .bee-loc-banner { left: 0 !important; }
-      }
-    `
-    document.head.appendChild(style)
-    return () => document.head.removeChild(style)
-  }, [])
+  // Responsive sidebar / topbar / loc-banner visibility is owned by
+  // app/globals.css media queries (.bee-sidebar / .bee-mobile-topbar /
+  // .bee-main / .bee-loc-banner). The runtime <style> injection that
+  // duplicated those rules has been removed — one source of truth.
 
   return (
     <CurrentUserContext.Provider value={currentUser || null}>
@@ -27112,7 +27093,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
       <LocPickerDropdown />
 
       {/* Sidebar nav - desktop only */}
-      <div className="bee-sidebar" style={{ display:'none', position:'fixed', top:0, left:0, bottom:0, width:'220px', background:'#1a2e2b', flexDirection:'column', zIndex:99, borderRight:'1px solid rgba(168,201,196,0.1)', overflowY:'auto' }}>
+      <div className="bee-sidebar" style={{ position:'fixed', top:0, left:0, bottom:0, width:'220px', background:'#1a2e2b', flexDirection:'column', zIndex:99, borderRight:'1px solid rgba(168,201,196,0.1)', overflowY:'auto' }}>
         {/* Spacer to push below demo bar + loc banner */}
         <div style={{ height:`${TOTAL_TOP}px`, flexShrink:0 }} />
         {/* Logo */}
