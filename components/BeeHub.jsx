@@ -4941,13 +4941,21 @@ function PersonPanel({
   const [jobNoteDraft, setJobNoteDraft] = useState("");
   const [fieldVal, setFieldVal] = useState("");
   const [toast, setToast] = useState(null);
-  const [isMobile, setIsMobile] = useState(false);
+  // Hydration-safe viewport tracking. Initial state is windowWidth=0, which
+  // makes isMobile=false on both SSR and the first client render — matches
+  // server output exactly. useEffect runs post-hydration and measures the
+  // real viewport; setting state triggers a re-render with the accurate
+  // isMobile value. Without this gate, React hydration errors 425/418/423
+  // would strip the mobile-conditional subtree (including the bottom Close
+  // button) from the DOM entirely.
+  const [windowWidth, setWindowWidth] = useState(0);
   React.useEffect(() => {
-    function check() { setIsMobile(typeof window !== 'undefined' && window.innerWidth < 768); }
+    function check() { setWindowWidth(window.innerWidth); }
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
   }, []);
+  const isMobile = windowWidth > 0 && windowWidth < 768;
   // Swipe-down to dismiss: only triggered from the drag handle to avoid
   // conflicting with content scroll. State is the in-progress translateY.
   const [sheetDragY, setSheetDragY] = useState(0);
@@ -13447,13 +13455,15 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
   const [showDoneSteps, setShowDoneSteps]   = useState(false)
   const [newStepText, setNewStepText]       = useState('')
   const [newStepDate, setNewStepDate]       = useState('')
-  const [isMobile, setIsMobile] = useState(false)
+  // Hydration-safe — see PersonPanel comment for rationale.
+  const [windowWidth, setWindowWidth] = useState(0)
   React.useEffect(() => {
-    function check() { setIsMobile(typeof window !== 'undefined' && window.innerWidth < 768) }
+    function check() { setWindowWidth(window.innerWidth) }
     check()
     window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
   }, [])
+  const isMobile = windowWidth > 0 && windowWidth < 768
   // Swipe-down dismiss (matches PersonPanel pattern)
   const [sheetDragY, setSheetDragY] = useState(0)
   const dragStartYRef = React.useRef(null)
@@ -26529,17 +26539,24 @@ if (Array.isArray(initialPeople)) return
   const [users, setUsers]                   = useState(initialUsers ?? USERS_DATA)
   // Track CRM status overrides from admin panel
   const [locStatuses, setLocStatuses]       = useState({})
-  // Mobile nav (hamburger drawer + profile menu). isMobile drives the responsive
-  // TOTAL_TOP offset — server render assumes desktop, then we flip on mount.
-  const [isMobile, setIsMobile]             = useState(false)
+  // Mobile nav (hamburger drawer + profile menu). isMobile drives the
+  // responsive TOTAL_TOP offset. Hydration-safe: windowWidth=0 on SSR and
+  // first client render makes isMobile=false on both, matching the server
+  // output exactly. Post-hydration useEffect measures the real viewport and
+  // re-renders. Without this gate, a flipped isMobile during hydration
+  // triggers React errors 425/418/423 and strips mobile-conditional
+  // subtrees (including MobileTopBar, MobileNavDrawer, MobileProfileMenu)
+  // from the DOM entirely.
+  const [windowWidth, setWindowWidth]       = useState(0)
   const [showMobileNav, setShowMobileNav]   = useState(false)
   const [showMobileProfile, setShowMobileProfile] = useState(false)
   useEffect(() => {
-    function check() { setIsMobile(window.innerWidth < 768) }
+    function check() { setWindowWidth(window.innerWidth) }
     check()
     window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
   }, [])
+  const isMobile = windowWidth > 0 && windowWidth < 768
   // Lock body scroll behind the drawer so the page underneath doesn't slide too.
   useEffect(() => {
     if (!showMobileNav) return
