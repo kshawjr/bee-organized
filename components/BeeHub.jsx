@@ -14550,6 +14550,12 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
   const totalRevenue   = allPartners.reduce((s,p)=>s+(p.referrals||[]).reduce((r,ref)=>r+ref.revenue,0),0)
   const activeCount    = allPartners.filter(p=>p.stage==='Active Partner').length
 
+  // Tab-aware "+ Add" — infer entity type from the active tab, skip the type picker entirely.
+  const addCfg = partnerTab==='contacts'  ? { type:'contact', label:'+ Add Contact' }
+               : partnerTab==='companies' ? { type:'company', label:'+ Add Company' }
+               :                            { type:'partner', label:'+ Add Partner' }
+  const openAdd = () => { setAddType(addCfg.type); setShowAdd(true) }
+
   return (
     <>
       <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
@@ -14573,10 +14579,10 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
               </p>
             </div>
 <>
-              {/* Desktop add button */}
-              <button onClick={()=>{ setAddType(null); setShowAdd(true) }} style={{ padding:'8px 14px', background:'rgba(168,201,196,0.15)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:'pointer' }} className="desktop-only">+ Add</button>
+              {/* Desktop add button — tab-aware, opens the right modal directly */}
+              <button onClick={openAdd} style={{ padding:'8px 14px', background:'rgba(168,201,196,0.15)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:'pointer' }} className="desktop-only">{addCfg.label}</button>
               {/* Mobile FAB */}
-              <button onClick={()=>{ setAddType(null); setShowAdd(true) }} style={{ position:'fixed', bottom:'max(24px, calc(env(safe-area-inset-bottom) + 16px))', right:'16px', zIndex:500, width:'52px', height:'52px', borderRadius:'50%', background:'#1a2e2b', color:'white', border:'none', fontSize:'28px', lineHeight:1, cursor:'pointer', boxShadow:'0 4px 20px rgba(26,46,43,0.4)', display:'flex', alignItems:'center', justifyContent:'center' }} className="mobile-fab">+</button>
+              <button onClick={openAdd} aria-label={addCfg.label} style={{ position:'fixed', bottom:'max(24px, calc(env(safe-area-inset-bottom) + 16px))', right:'16px', zIndex:500, width:'52px', height:'52px', borderRadius:'50%', background:'#1a2e2b', color:'white', border:'none', fontSize:'28px', lineHeight:1, cursor:'pointer', boxShadow:'0 4px 20px rgba(26,46,43,0.4)', display:'flex', alignItems:'center', justifyContent:'center' }} className="mobile-fab">+</button>
             </>
           </div>
 
@@ -14927,36 +14933,10 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
           </div>
         </div>
       )}
-      {/* Add type picker */}
-      {showAdd&&!addType&&(
-        <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:10005, display:'flex', alignItems:'flex-end' }}>
-          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={()=>setShowAdd(false)} />
-          <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'20px 20px 0 0', padding:'1rem', zIndex:1, boxSizing:'border-box', overflowX:'hidden', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
-            <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'0 auto 1.25rem' }} />
-            <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'4px' }}>What are you adding?</p>
-            <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'16px' }}>Each lives in its own database and can be linked together.</p>
-            <div style={{ display:'grid', gap:'8px' }}>
-              {[
-                { type:'partner', icon:'🤝', label:'Partner', desc:'Actively refers business - realtor, stager, mover' },
-                { type:'contact', icon:'👤', label:'Contact', desc:'Someone in your network - neighbor, past client, vendor' },
-                { type:'company', icon:'🏢', label:'Company', desc:'Group partners and contacts under one organization' },
-              ].map(opt=>(
-                <button key={opt.type} onClick={()=>setAddType(opt.type)}
-                  style={{ display:'flex', alignItems:'center', gap:'14px', padding:'14px 16px', background:'rgba(0,0,0,0.02)', border:'1.5px solid rgba(0,0,0,0.08)', borderRadius:'12px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
-                  <span style={{ fontSize:'24px' }}>{opt.icon}</span>
-                  <div>
-                    <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'2px' }}>{opt.label}</p>
-                    <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{opt.desc}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Tab-aware add modals — type is inferred from the active tab; no picker step. */}
       {showAdd&&addType==='partner'&&<AddPartnerModal onAdd={addPartner} onClose={()=>{ setShowAdd(false); setAddType(null) }} defaultType='partner' companies={allCompanies} onCreateCompany={co=>companiesApi?.addCompany?.(co)} />}
       {showAdd&&addType==='contact'&&<AddPartnerModal onAdd={addPartner} onClose={()=>{ setShowAdd(false); setAddType(null) }} defaultType='contact' companies={allCompanies} onCreateCompany={co=>companiesApi?.addCompany?.(co)} />}
-      {showAdd&&addType==='company'&&<AddPartnerModal onAdd={addPartner} onClose={()=>{ setShowAdd(false); setAddType(null) }} defaultType='company' companies={allCompanies} onCreateCompany={co=>companiesApi?.addCompany?.(co)} />}
+      {showAdd&&addType==='company'&&<AddCompanyModal onAdd={co=>companiesApi?.addCompany?.(co)} onClose={()=>{ setShowAdd(false); setAddType(null) }} partners={allPartners} onUpdatePartner={updatePartner} />}
     </>
   )
 }
