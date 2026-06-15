@@ -13122,18 +13122,17 @@ function AddCompanyModal({ onAdd, onClose, partners=[], onUpdatePartner=()=>{} }
   }
 
   return (
-    <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:10005, display:'flex', alignItems:'flex-end' }}>
+    <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
       <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
-      <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'20px 20px 0 0', padding:'1rem', zIndex:1, maxHeight:'88vh', overflowY:'auto', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)', boxSizing:'border-box', overflowX:'hidden' }}>
-        <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'0 auto 1.25rem' }} />
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1.25rem' }}>
+      <div onClick={e=>e.stopPropagation()} style={{ position:'relative', background:'white', width:'100%', maxWidth:'520px', maxHeight:'85vh', borderRadius:'16px', zIndex:1, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', boxSizing:'border-box', overflow:'hidden' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px', borderBottom:'1px solid #eee', flexShrink:0 }}>
           <div>
             <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'2px' }}>🏢 New Company</h2>
             <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Group partners and contacts under one organization</p>
           </div>
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
         </div>
-        <div style={{ display:'grid', gap:'12px' }}>
+        <div style={{ display:'grid', gap:'12px', padding:'20px 24px', overflowY:'auto', flex:1 }}>
           <ScanCardButton />
           <div><label style={lbl}>Company Name <span style={{ color:'#ef4444' }}>*</span></label><input autoFocus style={inp} placeholder='ABC Moving & Storage' value={form.name} onChange={e=>set('name',e.target.value)} /></div>
           <div><label style={lbl}>Industry</label><input style={inp} placeholder='Moving Services, Real Estate…' value={form.industry} onChange={e=>set('industry',e.target.value)} /></div>
@@ -13173,10 +13172,10 @@ function AddCompanyModal({ onAdd, onClose, partners=[], onUpdatePartner=()=>{} }
             </div>
           )}
 
-          <div style={{ display:'flex', gap:'8px', paddingTop:'4px' }}>
-            <button onClick={onClose} style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
-            <button onClick={create} disabled={!canAdd} style={{ flex:2, padding:'12px', background:canAdd?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:canAdd?'white':'#9ca3af', cursor:canAdd?'pointer':'not-allowed' }}>🏢 Create Company</button>
-          </div>
+        </div>
+        <div style={{ display:'flex', gap:'8px', padding:'16px 24px', borderTop:'1px solid #eee', flexShrink:0 }}>
+          <button onClick={onClose} style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
+          <button onClick={create} disabled={!canAdd} style={{ flex:2, padding:'12px', background:canAdd?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:canAdd?'white':'#9ca3af', cursor:canAdd?'pointer':'not-allowed' }}>🏢 Create Company</button>
         </div>
       </div>
     </div>
@@ -13227,14 +13226,14 @@ function AddPartnerModal({ onAdd, onClose, defaultType='partner', companies=[], 
   }
 
   return (
-    <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, zIndex:10005, display:'flex', alignItems:'flex-end' }}>
+    <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
       <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
-      <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'20px 20px 0 0', padding:'1rem', zIndex:1, maxHeight:'85vh', overflowY:'auto', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)', boxSizing:'border-box', overflowX:'hidden' }}>
-        <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'0 auto 1.25rem' }} />
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1rem' }}>
+      <div onClick={e=>e.stopPropagation()} style={{ position:'relative', background:'white', width:'100%', maxWidth:'520px', maxHeight:'85vh', borderRadius:'16px', zIndex:1, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', boxSizing:'border-box', overflow:'hidden' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px', borderBottom:'1px solid #eee', flexShrink:0 }}>
           <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>Add to Network</h2>
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
         </div>
+        <div style={{ padding:'20px 24px', overflowY:'auto', flex:1 }}>
 
         {/* Partner / Contact / Company toggle */}
         <div style={{ display:'flex', background:'rgba(0,0,0,0.05)', borderRadius:'9px', padding:'3px', marginBottom:'16px' }}>
@@ -13385,10 +13384,11 @@ function AddPartnerModal({ onAdd, onClose, defaultType='partner', companies=[], 
               })}
             </div>
           </div>
-          <div style={{ display:'flex', gap:'10px', paddingTop:'4px' }}>
-            <button onClick={onClose} style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
-            <button onClick={create} disabled={!canAdd} style={{ flex:2, padding:'12px', background:canAdd?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:canAdd?'white':'#9ca3af', cursor:canAdd?'pointer':'not-allowed' }}>{type==='contact'?'👤 Add Contact':'🤝 Add Partner'}</button>
-          </div>
+        </div>
+        </div>
+        <div style={{ display:'flex', gap:'10px', padding:'16px 24px', borderTop:'1px solid #eee', flexShrink:0 }}>
+          <button onClick={onClose} style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
+          <button onClick={create} disabled={!canAdd} style={{ flex:2, padding:'12px', background:canAdd?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:canAdd?'white':'#9ca3af', cursor:canAdd?'pointer':'not-allowed' }}>{type==='contact'?'👤 Add Contact':'🤝 Add Partner'}</button>
         </div>
       </div>
     </div>
