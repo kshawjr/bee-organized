@@ -12,6 +12,7 @@ import { redirect } from 'next/navigation'
 import { requireAuth, getHubUser } from '@/lib/auth'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
+import { PARTNER_COLS, COMPANY_COLS, mapPartnerRow, mapCompanyRow } from '@/lib/crm'
 import BeeHub from '@/components/BeeHub'
 
 function mapRole(dbRole: string | null | undefined): {
@@ -531,6 +532,43 @@ export default async function HubPage({
     }
   }
 
+  // Partners + Contacts (one table, `type` discriminator) and Companies — the
+  // CRM module behind the "Contacts" tab. Location-scoped like leads; elevated
+  // users get every location's rows. Soft-deleted rows are excluded (the recycle
+  // bin re-fetches lazily / restores via the API response). Mapped to the same
+  // camelCase client shape the API returns so setPartners/setCompanies snapshots
+  // stay consistent across reloads and writes.
+  let initialPartners: any[] = []
+  let initialCompanies: any[] = []
+  {
+    let pq = supabaseService
+      .from('partners')
+      .select(PARTNER_COLS)
+      .is('deleted_at', null)
+      .order('name', { ascending: true })
+      .limit(2000)
+    let cq = supabaseService
+      .from('companies')
+      .select(COMPANY_COLS)
+      .is('deleted_at', null)
+      .order('name', { ascending: true })
+      .limit(2000)
+
+    if (!isElevated && hubUser.location_id) {
+      pq = pq.eq('location_id', hubUser.location_id)
+      cq = cq.eq('location_id', hubUser.location_id)
+    }
+
+    const [{ data: partnersRaw, error: partnersErr }, { data: companiesRaw, error: companiesErr }] =
+      await Promise.all([pq, cq])
+
+    if (partnersErr) console.error('[hub-page] partners fetch error:', partnersErr.message)
+    else initialPartners = (partnersRaw || []).map(mapPartnerRow)
+
+    if (companiesErr) console.error('[hub-page] companies fetch error:', companiesErr.message)
+    else initialCompanies = (companiesRaw || []).map(mapCompanyRow)
+  }
+
   const initialLookups: Record<string, any[]> = {}
   {
     const { data: lookups, error: lookupsError } = await supabaseService
@@ -569,6 +607,8 @@ export default async function HubPage({
       initialLookups={initialLookups}
       initialPeople={initialPeople}
       initialBinPeople={initialBinPeople}
+      initialPartners={initialPartners}
+      initialCompanies={initialCompanies}
       currentSubscription={currentSubscription}
       currentLocation={currentLocation}
       currentUser={{

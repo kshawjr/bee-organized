@@ -94,6 +94,23 @@ const TierPricesContext = createContext(null)
 // } or null.
 const SeatsContext = createContext(null)
 
+// Partners + Contacts CRM (Supabase partners table), populated by App from
+// initialPartners. State ownership stays in App's useState + prop threading to
+// the management surface (PartnersScreen / RecycleBinTab); this context only
+// distributes the live array + mutators to the scattered leaf readers (the lead
+// referral pickers, contact search, reports) that would otherwise need partners
+// threaded through many parents. Those leaf components already consume ambient
+// data this exact way (CurrentLocationContext, LocationUsersContext, etc.).
+// Value shape: { partners, addPartner, updatePartner, deletePartner } or null.
+const PartnersContext = createContext(null)
+// Companies CRM (Supabase companies table). { companies, addCompany, updateCompany } or null.
+const CompaniesContext = createContext(null)
+
+// uuid v4-ish matcher — distinguishes a persisted DB row id (uuid) from any
+// transient client-side id, so optimistic mutations only hit the API for rows
+// that actually exist server-side.
+const isUuidStr = (s) => typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
+
 const STAGES = [
   { key:'New',             label:'New',             color:'#6366f1', bg:'rgba(99,102,241,0.08)',  dot:'#6366f1', icon:'✨' },
   { key:'Attempting',      label:'Attempting to Contact', color:'#f97316', bg:'rgba(249,115,22,0.08)',  dot:'#f97316', icon:'📲' },
@@ -2977,6 +2994,8 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
   const currentUserCtx     = useContext(CurrentUserContext)
   const currentLocationCtx = useContext(CurrentLocationContext)
   const locationUsersCtx   = useContext(LocationUsersContext)
+  const partnersCtx        = useContext(PartnersContext)
+  const PARTNERS           = partnersCtx?.partners || []
   const resolvedLocationUuid =
     locationId || currentLocationCtx?.id || currentUserCtx?.locationId || null
   const resolvedUserId = currentUserCtx?.id || currentUserId
@@ -2995,6 +3014,8 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
   const [form, setForm] = useState({ firstName:'', lastName:'', phone:'', email:'', source:'', project:'Home Organization', desc:'', street:'', apt:'', city:'', state:'', zip:'', addrType:'Service', referredBy:null, marketingOptOut:false })
   const [showPartnerPicker, setShowPartnerPicker] = useState(false)
   const [partnerSearch, setPartnerSearch] = useState('')
+  const [showQuickAddPartner, setShowQuickAddPartner] = useState(false)
+  const companiesCtx = useContext(CompaniesContext)
   const [showAddrEntry, setShowAddrEntry] = useState(false)
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
 
@@ -3491,7 +3512,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
           {form.source==='Referral'&&(
             <div>
               <label style={lbl}>Referred By</label>
-              {form.referredBy ? (()=>{ const p=PARTNERS_DATA.find(p=>p.id===form.referredBy); return p ? (
+              {form.referredBy ? (()=>{ const p=PARTNERS.find(p=>p.id===form.referredBy); return p ? (
                 <button type="button" onClick={()=>setShowPartnerPicker(true)} style={{ width:'100%', padding:'9px 12px', border:'1.5px solid rgba(168,201,196,0.4)', borderRadius:'8px', background:'rgba(168,201,196,0.06)', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
                   <div style={{ width:'26px', height:'26px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'9px', fontWeight:700, color:'white', flexShrink:0 }}>
                     {p.name.split(' ').map(w=>w[0]).join('').slice(0,2)}
@@ -3569,7 +3590,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
                 style={{ width:'100%', padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
             </div>
             <div style={{ overflowY:'auto', flex:1, paddingBottom:'1rem' }}>
-              {PARTNERS_DATA.filter(p=>!partnerSearch||(p.name||'').toLowerCase().includes(partnerSearch.toLowerCase())||(p.company||'').toLowerCase().includes(partnerSearch.toLowerCase())).map(p=>(
+              {PARTNERS.filter(p=>!p.isDeleted).filter(p=>!partnerSearch||(p.name||'').toLowerCase().includes(partnerSearch.toLowerCase())||(p.company||'').toLowerCase().includes(partnerSearch.toLowerCase())).map(p=>(
                 <button key={p.id} type="button" onClick={()=>{ set('referredBy',p.id); setShowPartnerPicker(false); setPartnerSearch('') }}
                   style={{ width:'100%', padding:'11px 16px', background:form.referredBy===p.id?'rgba(168,201,196,0.08)':'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.04)', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left' }}>
                   <div style={{ width:'34px', height:'34px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'11px', fontWeight:700, color:'white', flexShrink:0 }}>
@@ -3582,9 +3603,31 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
                   {form.referredBy===p.id&&<span style={{ color:'#10b981' }}>✓</span>}
                 </button>
               ))}
+              {/* Quick-add a brand-new partner inline (POST → add to context → select). */}
+              <button type="button" onClick={()=>setShowQuickAddPartner(true)}
+                style={{ width:'100%', padding:'12px 16px', background:'white', border:'none', borderTop:'1px solid rgba(0,0,0,0.06)', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left', color:'#1a7a6e', fontWeight:600, fontSize:'13px' }}>
+                <span style={{ width:'34px', height:'34px', borderRadius:'50%', background:'rgba(168,201,196,0.18)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'16px', flexShrink:0 }}>＋</span>
+                Add New Partner
+              </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Inline quick-add partner — POSTs via PartnersContext.addPartner, then
+          selects the freshly-created partner as the referrer. */}
+      {showQuickAddPartner&&(
+        <AddPartnerModal
+          defaultType='partner'
+          companies={companiesCtx?.companies || []}
+          onCreateCompany={co=>companiesCtx?.addCompany?.(co)}
+          onClose={()=>setShowQuickAddPartner(false)}
+          onAdd={async(obj)=>{
+            const created = partnersCtx?.addPartner ? await partnersCtx.addPartner({ ...obj, locationId: resolvedLocationUuid }) : null
+            if (created?.id) { set('referredBy', created.id) }
+            setShowQuickAddPartner(false); setShowPartnerPicker(false); setPartnerSearch('')
+          }}
+        />
       )}
     </Popup>
   )
@@ -3692,11 +3735,12 @@ function AssessmentSchedulerSheet({ person, onSave, onRemove, onClose }) {
 
 // ─── Source Inline Field (PersonPanel) ───────────────────────────────────────
 function SourceInlineField({ person, onUpdate }) {
+  const PARTNERS = useContext(PartnersContext)?.partners || []
   const [showSourcePicker, setShowSourcePicker] = useState(false)
   const [showPartnerPicker, setShowPartnerPicker] = useState(false)
   const [partnerSearch, setPartnerSearch] = useState('')
   const SOURCES = ['Website','Referral','Word of Mouth','Instagram','Facebook','Google','Yelp','NextDoor','Other']
-  const referredPartner = person.referredBy ? PARTNERS_DATA.find(p=>p.id===person.referredBy) : null
+  const referredPartner = person.referredBy ? PARTNERS.find(p=>p.id===person.referredBy) : null
 
   function selectSource(src) {
     onUpdate({...person, source:src, referredBy: src==='Referral'?person.referredBy:null})
@@ -3782,7 +3826,7 @@ function SourceInlineField({ person, onUpdate }) {
                   × Remove referral link
                 </button>
               )}
-              {PARTNERS_DATA.filter(p=>!partnerSearch||p.name.toLowerCase().includes(partnerSearch.toLowerCase())||(p.company||'').toLowerCase().includes(partnerSearch.toLowerCase())).map(p=>(
+              {PARTNERS.filter(p=>!p.isDeleted).filter(p=>!partnerSearch||p.name.toLowerCase().includes(partnerSearch.toLowerCase())||(p.company||'').toLowerCase().includes(partnerSearch.toLowerCase())).map(p=>(
                 <button key={p.id} onClick={()=>selectPartner(p)} style={{ width:'100%', padding:'12px 16px', background:p.id===person.referredBy?'rgba(168,201,196,0.08)':'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.04)', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left' }}>
                   <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:'linear-gradient(135deg,#d4a046,#b07a20)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'12px', fontWeight:700, color:'white', flexShrink:0 }}>
                     {p.name.split(' ').map(w=>w[0]).join('').slice(0,2)}
@@ -4293,6 +4337,7 @@ function PartnerAddressSection({ partner, onUpdate }) {
 
 // ─── Contacts Tab ─────────────────────────────────────────────────────────────
 function ContactsTab({ person, onUpdate, onError }) {
+  const PARTNERS = useContext(PartnersContext)?.partners || []
   const [search, setSearch] = React.useState('')
   const [addingNew, setAddingNew] = React.useState(false)
   const [editingContact, setEditingContact] = React.useState(null)
@@ -4301,7 +4346,7 @@ function ContactsTab({ person, onUpdate, onError }) {
 
   const q = search.toLowerCase()
   const partnerResults = search.length > 1
-    ? PARTNERS_DATA.filter(p =>
+    ? PARTNERS.filter(p => !p.isDeleted).filter(p =>
         ((p.name||'').toLowerCase().includes(q) || (p.company||'').toLowerCase().includes(q) || (p.phone||'').includes(q))
       ).slice(0, 6)
     : []
@@ -4923,6 +4968,7 @@ function PersonPanel({
   const [activeTab, setActiveTab] = useState("overview");
   const currentUserPP = useContext(CurrentUserContext);
   const isSuperAdminUser = currentUserPP?.role === "super_admin";
+  const PARTNERS = useContext(PartnersContext)?.partners || [];
   const [popup, setPopup] = useState(null);
   const [showLeadInfoEdit, setShowLeadInfoEdit] = useState(false);
   const [showSadAnimation, setShowSadAnimation] = useState(false);
@@ -6426,7 +6472,7 @@ function PersonPanel({
                   ),
                   person.source === "Referral" &&
                     (() => {
-                      const referredPartner = PARTNERS_DATA.find((p) => p.id === person.referredBy);
+                      const referredPartner = PARTNERS.find((p) => p.id === person.referredBy);
                       const referredCustomer =
                         !referredPartner && person.referredBy
                           ? ALL_PEOPLE.find((p) => p.id === person.referredBy)
@@ -6437,7 +6483,7 @@ function PersonPanel({
                           ? referredCustomer.name
                           : null;
                       const q = referralSearch.toLowerCase();
-                      const filteredPartners = PARTNERS_DATA.filter(
+                      const filteredPartners = PARTNERS.filter((p) => !p.isDeleted).filter(
                         (p) =>
                           !q ||
                           (p.name || "").toLowerCase().includes(q) ||
@@ -9196,6 +9242,7 @@ function BuzzNotesSection({ person, onUpdatePerson, onError }) {
 }
 
 function AccountPanel({ person, allPeople, onClose, onUpdatePerson, onError }) {
+  const PARTNERS = useContext(PartnersContext)?.partners || []
   React.useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -9237,7 +9284,7 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson, onError }) {
   const [partnerSearch, setPartnerSearch] = useState('')
 
   const SOURCES = ['Website','Referral','Google','Instagram','Facebook','Word of Mouth','Yelp','NextDoor','Other']
-  const locPartners = PARTNERS_DATA.filter(p => p.locationId === person.locationId)
+  const locPartners = PARTNERS.filter(p => !p.isDeleted && p.locationId === person.locationId)
   const filteredPartners = partnerSearch
     ? locPartners.filter(p => p.name.toLowerCase().includes(partnerSearch.toLowerCase()) || (p.company||'').toLowerCase().includes(partnerSearch.toLowerCase()))
     : locPartners
@@ -9254,7 +9301,7 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson, onError }) {
     setPartnerSearch('')
   }
 
-  const referredPartner = person.referredBy ? PARTNERS_DATA.find(p => p.id === person.referredBy) : null
+  const referredPartner = person.referredBy ? PARTNERS.find(p => p.id === person.referredBy) : null
 
   const SourceField = () => (
     <div style={{ padding:'10px 0', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
@@ -12996,204 +13043,10 @@ const TOUCHPOINT_TYPES = [
   { key:'thankyou',icon:'🙏', label:'Thank You Sent'   },
 ]
 
-// ─── Companies - each scoped to one location ─────────────────────────────────
-// ─── Seed Data ────────────────────────────────────────────────────────────────
-// All entities share: id, locationId, name, phone, email, website, notes
-// Partners & Contacts also have: type, title, company, companyId, etc.
-
-const COMPANIES_DATA = [
-  // Kansas City
-  { id:'co1', locationId:'loc_kc', name:'Meridian Realty',       industry:'Real Estate',      phone:'(816) 555-0900', email:'info@meridianrealty.com',   website:'meridianrealty.com',  notes:[{ id:'n1', text:'Largest referral source - 3 active agents referring clients', ts:'Jan 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'Nov 2024' }] },
-  { id:'co2', locationId:'loc_kc', name:'ABC Moving & Storage',   industry:'Moving Services',  phone:'(816) 555-0441', email:'partners@abcmoving.com',      website:'abcmoving.com',       notes:[{ id:'n1', text:'Refer us to every move-in - great pipeline for organization jobs', ts:'Mar 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'Mar 2025' }] },
-  { id:'co3', locationId:'loc_kc', name:'Walsh Construction',     industry:'General Contractor',phone:'(816) 555-0830', email:'info@walshconstruction.com',  website:'walshconstruction.com',notes:[{ id:'n1', text:'High-end remodels - clients always need post-reno organizing', ts:'Apr 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'Apr 2025' }] },
-  // Scottsdale
-  { id:'co4', locationId:'loc_scottsdale', name:'Reyes Interior Design',  industry:'Interior Design',     phone:'(480) 555-0578', email:'sofia@reyesdesign.com',     website:'reyesdesign.com',     notes:[{ id:'n1', text:'Co-market opportunity - her clients love organized spaces', ts:'Mar 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'Mar 2025' }] },
-  { id:'co5', locationId:'loc_scottsdale', name:'Boulder Property Group', industry:'Property Management', phone:'(480) 555-0192', email:'info@boulderpg.com',          website:'boulderpg.com',       notes:[{ id:'n1', text:'Manages 40+ properties - huge opportunity', ts:'May 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'May 2025' }] },
-  // Omaha
-  { id:'co6', locationId:'loc_omaha',     name:'Heartland Staging Co.',   industry:'Home Staging',        phone:'(402) 555-0310', email:'hello@heartlandstaging.com', website:'heartlandstaging.com', notes:[{ id:'n1', text:'Stager + organizer combo - lots of shared clients', ts:'Apr 2025', user:'You' }], activity:[{ type:'event', label:'Added as Company', ts:'Apr 2025' }] },
-]
-
-const PARTNERS_DATA = [
-
-  // ── Kansas City - Partners ──────────────────────────────────────────────────
-  {
-    id:'p1', locationId:'loc_kc', type:'partner',
-    cardImage:'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iMzQwIiB2aWV3Qm94PSIwIDAgNjAwIDM0MCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImJnIiB4MT0iMCUiIHkxPSIwJSIgeDI9IjEwMCUiIHkyPSIxMDAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3R5bGU9InN0b3AtY29sb3I6IzFhM2EzNTtzdG9wLW9wYWNpdHk6MSIgLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxMDAlIiBzdHlsZT0ic3RvcC1jb2xvcjojMGYyNDIwO3N0b3Atb3BhY2l0eToxIiAvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iZ29sZCIgeDE9IjAlIiB5MT0iMCUiIHgyPSIxMDAlIiB5Mj0iMCUiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdHlsZT0ic3RvcC1jb2xvcjojZDRhMDQ2O3N0b3Atb3BhY2l0eToxIiAvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0eWxlPSJzdG9wLWNvbG9yOiNiMDdhMjA7c3RvcC1vcGFjaXR5OjEiIC8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogIDwvZGVmcz4KICAKICA8IS0tIENhcmQgYmFja2dyb3VuZCAtLT4KICA8cmVjdCB3aWR0aD0iNjAwIiBoZWlnaHQ9IjM0MCIgcng9IjE2IiBmaWxsPSJ1cmwoI2JnKSIgLz4KICAKICA8IS0tIEdvbGQgYWNjZW50IGJhciBsZWZ0IC0tPgogIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSI2IiBoZWlnaHQ9IjM0MCIgcng9IjMiIGZpbGw9InVybCgjZ29sZCkiIC8+CiAgCiAgPCEtLSBHb2xkIGFjY2VudCBsaW5lIHRvcCByaWdodCAtLT4KICA8cmVjdCB4PSI0NDAiIHk9IjAiIHdpZHRoPSIxNjAiIGhlaWdodD0iNCIgcng9IjAiIGZpbGw9InVybCgjZ29sZCkiIG9wYWNpdHk9IjAuNiIgLz4KICAKICA8IS0tIENvbXBhbnkgbmFtZSAtLT4KICA8dGV4dCB4PSI0MiIgeT0iNzIiIGZvbnQtZmFtaWx5PSJHZW9yZ2lhLCBzZXJpZiIgZm9udC1zaXplPSIyOCIgZm9udC13ZWlnaHQ9ImJvbGQiIGZpbGw9IiNmZmZmZmYiIGxldHRlci1zcGFjaW5nPSIxIj5NZXJpZGlhbiBSZWFsdHk8L3RleHQ+CiAgCiAgPCEtLSBUYWdsaW5lIC0tPgogIDx0ZXh0IHg9IjQ0IiB5PSI5OCIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYThjOWM0IiBsZXR0ZXItc3BhY2luZz0iMiI+S0FOU0FTIENJVFkgTUVUUk8gwrcgUkVTSURFTlRJQUwgJmFtcDsgQ09NTUVSQ0lBTDwvdGV4dD4KICAKICA8IS0tIERpdmlkZXIgLS0+CiAgPGxpbmUgeDE9IjQyIiB5MT0iMTE2IiB4Mj0iMzIwIiB5Mj0iMTE2IiBzdHJva2U9IiNkNGEwNDYiIHN0cm9rZS13aWR0aD0iMSIgb3BhY2l0eT0iMC40IiAvPgogIAogIDwhLS0gTmFtZSAtLT4KICA8dGV4dCB4PSI0MiIgeT0iMTU4IiBmb250LWZhbWlseT0iR2VvcmdpYSwgc2VyaWYiIGZvbnQtc2l6ZT0iMjYiIGZpbGw9IiNmZmZmZmYiIGZvbnQtd2VpZ2h0PSJib2xkIj5LYXJlbiBNYXJ0aW5lejwvdGV4dD4KICAKICA8IS0tIFRpdGxlIC0tPgogIDx0ZXh0IHg9IjQ0IiB5PSIxODIiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZmlsbD0iI2E4YzljNCIgbGV0dGVyLXNwYWNpbmc9IjEiPlJFQUxUT1LCriDCtyBMSVNUSU5HIFNQRUNJQUxJU1Q8L3RleHQ+CiAgCiAgPCEtLSBDb250YWN0IGluZm8gLS0+CiAgPHRleHQgeD0iNDQiIHk9IjIyNCIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIiBmaWxsPSIjZDRkNGQ0Ij7wn5OeICAoODE2KSA1NTUtMDkxNjwvdGV4dD4KICA8dGV4dCB4PSI0NCIgeT0iMjQ4IiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNkNGQ0ZDQiPuKcie+4jyAga21hcnRpbmV6QG1lcmlkaWFucmVhbHR5LmNvbTwvdGV4dD4KICA8dGV4dCB4PSI0NCIgeT0iMjcyIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNkNGQ0ZDQiPvCfjJAgIG1lcmlkaWFucmVhbHR5LmNvbTwvdGV4dD4KICAKICA8IS0tIEJvdHRvbSB0YWdsaW5lIC0tPgogIDx0ZXh0IHg9IjQ0IiB5PSIzMTQiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2E4YzljNCIgb3BhY2l0eT0iMC43IiBmb250LXN0eWxlPSJpdGFsaWMiPiJZb3VyIEhvbWUuIFlvdXIgU3RvcnkuIE91ciBDb21taXRtZW50LiI8L3RleHQ+CiAgCiAgPCEtLSBEZWNvcmF0aXZlIGhleGFnb24gdG9wIHJpZ2h0IChCZWUgT3JnYW5pemVkIG1vdGlmKSAtLT4KICA8cG9seWdvbiBwb2ludHM9IjU0MCwzMCA1NjUsNDQgNTY1LDcyIDU0MCw4NiA1MTUsNzIgNTE1LDQ0IiBmaWxsPSJub25lIiBzdHJva2U9IiNkNGEwNDYiIHN0cm9rZS13aWR0aD0iMS41IiBvcGFjaXR5PSIwLjMiIC8+CiAgPHBvbHlnb24gcG9pbnRzPSI1NDAsNDIgNTU2LDUxIDU1Niw2OSA1NDAsNzggNTI0LDY5IDUyNCw1MSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZDRhMDQ2IiBzdHJva2Utd2lkdGg9IjEiIG9wYWNpdHk9IjAuMiIgLz4KICAKICA8IS0tIE1MUyAvIExpY2Vuc2UgYmFkZ2UgLS0+CiAgPHJlY3QgeD0iNDkwIiB5PSIyODAiIHdpZHRoPSI5MiIgaGVpZ2h0PSIyOCIgcng9IjYiIGZpbGw9InJnYmEoMjEyLDE2MCw3MCwwLjE1KSIgLz4KICA8dGV4dCB4PSI1MzYiIHk9IjI5OSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjZDRhMDQ2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBsZXR0ZXItc3BhY2luZz0iMC41Ij5NTFPCriBDRVJUSUZJRUQ8L3RleHQ+Cjwvc3ZnPg==',
-    name:'Karen Martinez', title:'Real Estate Agent', company:'Meridian Realty', companyId:'co1',
-    phone:'(816) 555-0916', email:'kmartinez@meridianrealty.com', website:'meridianrealty.com',
-    stage:'Active Partner', specialties:['real-estate'], tier:null,
-    howWeMet:'Denver Business Expo', metDate:'Nov 2024', lastContact:'Apr 28',
-    isCustomer:false, customerLeadId:null, tags:['top-referrer','vip'],
-    nextSteps:[
-      { id:'ns1', text:'Send Q2 referral thank-you gift', date:'2026-05-15', done:false, createdAt:'May 7' },
-      { id:'ns2', text:'Schedule lunch to discuss summer listing pipeline', date:'2026-05-22', done:false, createdAt:'May 7' },
-      { id:'ns4', text:'Sent holiday gift basket', date:null, done:true, doneAt:'Dec 2024', createdAt:'Nov 2024' },
-    ],
-    notes:[
-      { id:'n1', text:'Met at her open house - very enthusiastic about home organization for listings', ts:'Nov 2024', user:'You' },
-      { id:'n2', text:'Prefers text over calls. Send holiday gift every year - loves Teak & Twine.', ts:'Jan 2025', user:'You' },
-    ],
-    referrals:[
-      { leadId:'3',  name:'Lisa Patel',      date:'Apr 20', converted:true,  revenue:0 },
-      { leadId:'r3', name:'Claire Davidson', date:'Mar 22', converted:false, revenue:0 },
-    ],
-    activity:[
-      { type:'event',    label:'Met at Denver Business Expo',              ts:'Nov 2024' },
-      { type:'coffee',   label:'Coffee at Snooze - discussed partnership', ts:'Dec 2024' },
-      { type:'referral', label:'Sent Lisa Patel our way',                  ts:'Apr 20', user:'Karen' },
-      { type:'thankyou', label:'Thank-you card + gift sent',               ts:'Apr 22', user:'You' },
-      { type:'call',     label:'Quarterly check-in call - great energy',   ts:'Apr 28', user:'You' },
-    ],
-  },
-  {
-    id:'p6', locationId:'loc_kc', type:'partner',
-    name:'Tony Reyes', title:'Operations Manager', company:'ABC Moving & Storage', companyId:'co2',
-    phone:'(816) 555-0551', email:'tony@abcmoving.com', website:'abcmoving.com',
-    stage:'Active Partner', specialties:['moving'], tier:null,
-    howWeMet:'Chamber of Commerce mixer', metDate:'Mar 2025', lastContact:'Apr 20',
-    isCustomer:false, customerLeadId:null, tags:['top-referrer'],
-    nextSteps:[
-      { id:'ns1', text:'Send referral thank-you cards for April leads', date:'2026-05-15', done:false, createdAt:'May 7' },
-    ],
-    notes:[{ id:'n1', text:'Primary contact at ABC - handles all partner referrals personally', ts:'Mar 2025', user:'You' }],
-    referrals:[
-      { leadId:'johnson1', name:'Mark Johnson', date:'Apr 5',  converted:false, revenue:0 },
-      { leadId:'qc1',      name:'David Park',   date:'Apr 18', converted:false, revenue:0 },
-    ],
-    activity:[
-      { type:'event',    label:'Met at Chamber of Commerce mixer', ts:'Mar 2025' },
-      { type:'referral', label:'Sent Mark Johnson - move-in job',  ts:'Apr 5',  user:'Tony' },
-      { type:'referral', label:'Sent David Park - new homeowner',  ts:'Apr 18', user:'Tony' },
-    ],
-  },
-  {
-    id:'p2', locationId:'loc_kc', type:'partner',
-    name:'James Whitfield', title:'Project Manager', company:'Walsh Construction', companyId:'co3',
-    phone:'(816) 555-0341', email:'james@walshconstruction.com', website:'walshconstruction.com',
-    stage:'Building', specialties:['contractor'], tier:null,
-    howWeMet:'Referral from Karen Martinez', metDate:'Feb 2025', lastContact:'Apr 15',
-    isCustomer:false, customerLeadId:null, tags:['high-potential'],
-    nextSteps:[
-      { id:'ns1', text:'Follow up on Diana Walsh project outcome', date:'2026-05-20', done:false, createdAt:'May 1' },
-    ],
-    notes:[
-      { id:'n1', text:'Manages high-end remodels - clients always need organizing after. Great fit.', ts:'Feb 2025', user:'You' },
-      { id:'n2', text:'Big golfer - good convo starter', ts:'Mar 2025', user:'You' },
-    ],
-    referrals:[
-      { leadId:'r4', name:'Diana Walsh', date:'Apr 15', converted:true, revenue:0 },
-    ],
-    activity:[
-      { type:'call',     label:'Intro call - Karen connected us',          ts:'Feb 2025' },
-      { type:'coffee',   label:'Met for coffee, discussed cross-referral', ts:'Mar 2025', user:'You' },
-      { type:'referral', label:'Sent Diana Walsh - garage after remodel',  ts:'Apr 15', user:'James' },
-    ],
-  },
-  {
-    id:'p7', locationId:'loc_kc', type:'partner',
-    name:'Sandra Park', title:'Residential Sales Rep', company:'ABC Moving & Storage', companyId:'co2',
-    phone:'(816) 555-0662', email:'spark@abcmoving.com', website:'abcmoving.com',
-    stage:'New Contact', specialties:['moving'], tier:null,
-    howWeMet:'Intro from Tony Reyes', metDate:'Apr 20', lastContact:'Apr 20',
-    isCustomer:false, customerLeadId:null, tags:[],
-    nextSteps:[],
-    notes:[{ id:'n1', text:'Handles residential moves - Tony connected us. Following up.', ts:'Apr 20', user:'You' }],
-    referrals:[],
-    activity:[{ type:'event', label:'Intro from Tony Reyes', ts:'Apr 20' }],
-  },
-
-  // ── Kansas City - Contacts ──────────────────────────────────────────────────
-  {
-    id:'c1', locationId:'loc_kc', type:'contact',
-    name:'Derek Walsh', title:'Site Manager', company:'Walsh Construction', companyId:'co3',
-    phone:'(816) 555-0823', email:'derek@walshconstruction.com', website:'walshconstruction.com',
-    relationship:'Vendor',
-    howWeMet:'Home show - chatted at the tradeshow booth', metDate:'Apr 10', lastContact:'Apr 10',
-    stage:'Contact', specialties:[], tier:null, isCustomer:false, customerLeadId:null, tags:[],
-    notes:[{ id:'n1', text:'Works the job sites - good ground-level relationship to maintain', ts:'Apr 10', user:'You' }],
-    referrals:[], nextSteps:[],
-    activity:[{ type:'event', label:'Added as Contact - Home show', ts:'Apr 10' }],
-  },
-  {
-    id:'c2', locationId:'loc_kc', type:'contact',
-    name:'Marco Diaz', title:'Crew Lead', company:'ABC Moving & Storage', companyId:'co2',
-    phone:'(816) 555-0773', email:'marco@abcmoving.com', website:'abcmoving.com',
-    relationship:'Vendor',
-    howWeMet:'Met on a move-in job at Birchwood Dr', metDate:'Apr 25', lastContact:'Apr 25',
-    stage:'Contact', specialties:[], tier:null, isCustomer:false, customerLeadId:null, tags:[],
-    notes:[{ id:'n1', text:'On the ground crew - friendly, talks to new homeowners. Good word of mouth.', ts:'Apr 25', user:'You' }],
-    referrals:[], nextSteps:[],
-    activity:[{ type:'event', label:'Added as Contact - met on job site', ts:'Apr 25' }],
-  },
-
-  // ── Scottsdale - Partners ───────────────────────────────────────────────────
-  {
-    id:'p3', locationId:'loc_scottsdale', type:'partner',
-    name:'Sofia Reyes', title:'Principal Designer', company:'Reyes Interior Design', companyId:'co4',
-    phone:'(480) 555-0578', email:'sofia@reyesdesign.com', website:'reyesdesign.com',
-    stage:'Reaching Out', specialties:['interior-designer'], tier:null,
-    howWeMet:'Cherry Creek Art Festival', metDate:'Mar 2025', lastContact:'Mar 30',
-    isCustomer:false, customerLeadId:null, tags:['co-market'],
-    nextSteps:[
-      { id:'ns1', text:'Send co-marketing proposal', date:'2026-05-20', done:false, createdAt:'May 1' },
-    ],
-    notes:[{ id:'n1', text:'Loves our concept - working on a formal referral agreement', ts:'Mar 2025', user:'You' }],
-    referrals:[],
-    activity:[
-      { type:'event', label:'Met at Cherry Creek Art Festival',         ts:'Mar 2025' },
-      { type:'email', label:'Sent intro email with services overview',  ts:'Mar 30', user:'You' },
-    ],
-  },
-  {
-    id:'p4', locationId:'loc_scottsdale', type:'partner',
-    name:'Tom Briggs', title:'Property Manager', company:'Boulder Property Group', companyId:'co5',
-    phone:'(480) 555-0192', email:'tom@boulderpg.com', website:'boulderpg.com',
-    stage:'New Contact', specialties:['property-manager'], tier:null,
-    howWeMet:'Chamber of Commerce mixer', metDate:'May 2025', lastContact:'May 2025',
-    isCustomer:false, customerLeadId:null, tags:[],
-    nextSteps:[
-      { id:'ns1', text:'Send info packet + pricing for multi-unit clients', date:'2026-05-12', done:false, createdAt:'May 1' },
-    ],
-    notes:[{ id:'n1', text:'Manages 40+ properties - massive opportunity if he refers even 10%', ts:'May 2025', user:'You' }],
-    referrals:[],
-    activity:[{ type:'event', label:'Met at Chamber of Commerce mixer', ts:'May 2025' }],
-  },
-
-  // ── Omaha - Partners ────────────────────────────────────────────────────────
-  {
-    id:'p8', locationId:'loc_kc', type:'partner',
-    name:'Maria Cruz', title:'Property Manager', company:'Denver Realty Group', companyId:null,
-    phone:'(720) 555-0109', email:'mcruz@propmanage.com', website:'denverrealtygroup.com',
-    stage:'Active Partner', specialties:['property-management','real-estate'], tier:null,
-    howWeMet:'Lisa Patel referral', metDate:'Feb 2025', lastContact:'Apr 20',
-    isCustomer:false, customerLeadId:null, tags:[],
-    nextSteps:[],
-    notes:[{ id:'n1', text:'Manages several properties in the Cherry Creek area - good source of move-in referrals', ts:'Feb 2025', user:'You' }],
-    referrals:[],
-    activity:[
-      { type:'intro', label:'Introduction via Lisa Patel', ts:'Feb 2025' },
-      { type:'meeting', label:'Coffee meeting - discussed referral arrangement', ts:'Mar 2025', user:'You' },
-    ],
-  },
-  {
-    id:'p5', locationId:'loc_omaha', type:'partner',
-    name:'Rachel Kim', title:'Lead Stager & Owner', company:'Heartland Staging Co.', companyId:'co6',
-    phone:'(402) 555-0498', email:'rkim@heartlandstaging.com', website:'heartlandstaging.com',
-    stage:'Active Partner', specialties:['stager'], tier:null,
-    howWeMet:'Omaha REALTOR Expo', metDate:'Apr 2025', lastContact:'Apr 28',
-    isCustomer:true, customerLeadId:'4', tags:['top-referrer'],
-    nextSteps:[],
-    notes:[{ id:'n1', text:'Was also a client - loved the closet work. Now refers every staging client.', ts:'Apr 28', user:'You' }],
-    referrals:[
-      { leadId:'r5', name:'Amanda Chen', date:'Apr 28', converted:false, revenue:0 },
-    ],
-    activity:[
-      { type:'event',    label:'Met at Omaha REALTOR Expo',                ts:'Apr 2025' },
-      { type:'referral', label:'Became a client - Closet + Pantry project', ts:'Apr 25' },
-      { type:'referral', label:'Referred Amanda Chen - new listing',        ts:'Apr 28', user:'Rachel' },
-    ],
-  },
-]
+// PARTNERS_DATA + COMPANIES_DATA mock arrays removed — the CRM is now backed by
+// the Supabase `partners` + `companies` tables (see migrations/partners.sql),
+// fetched in _hub-page.tsx and supplied via initialPartners/initialCompanies +
+// PartnersContext / CompaniesContext. See App() for the persistence helpers.
 
 
 function partnerStageConf(key) { return PARTNER_STAGES.find(s=>s.key===key)||PARTNER_STAGES[0] }
@@ -13446,10 +13299,10 @@ function AddPartnerModal({ onAdd, onClose, defaultType='partner', companies=[], 
                       ))}
                       {/* Create new company inline */}
                       {companySearch.trim()&&(
-                        <button onMouseDown={()=>{
-                          const newCo = { id:`co${Date.now()}`, name:companySearch.trim(), industry:'', phone:'', email:'', website:'', notes:[], activity:[{ type:'event', label:'Created inline', ts:'Just now' }] }
-                          onCreateCompany(newCo)
-                          setCompanyId(newCo.id); set('company',newCo.name); setShowCompanyPicker(false)
+                        <button onMouseDown={async()=>{
+                          const newCo = { name:companySearch.trim(), industry:'', phone:'', email:'', website:'', notes:[], activity:[{ type:'event', label:'Created inline', ts:'Just now' }] }
+                          const real = (await onCreateCompany(newCo)) || newCo
+                          setCompanyId(real.id); set('company',real.name); setShowCompanyPicker(false)
                         }} style={{ width:'100%', padding:'10px 14px', background:'rgba(168,201,196,0.06)', border:'none', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
                           <span style={{ fontSize:'16px' }}>➕</span>
                           <div>
@@ -13761,10 +13614,11 @@ function CompanyEditRow({ partner, companies, onSave, onCreateCompany, last }) {
   const linked = companies.find(c=>c.id===partner.companyId)
 
   function select(co) { onSave(co.name, co.id); setEditing(false); setShowDrop(false) }
-  function createInline() {
+  async function createInline() {
     if (!query.trim()) return
-    const co = { id:`co${Date.now()}`, name:query.trim(), industry:'', phone:'', email:'', website:'', notes:[], activity:[{ type:'event', label:'Created inline', ts:'Just now' }] }
-    onCreateCompany(co); select(co)
+    const co = { name:query.trim(), industry:'', phone:'', email:'', website:'', notes:[], activity:[{ type:'event', label:'Created inline', ts:'Just now' }] }
+    const real = (await onCreateCompany(co)) || co
+    select(real)
   }
   function clear() { onSave('', null); setEditing(false) }
 
@@ -14553,9 +14407,10 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
                 </button>
               ))}
               {coQ.trim()&&!companies.find(c=>c.name.toLowerCase()===coQ.trim().toLowerCase())&&(
-                <button onClick={()=>{
-                  const co = { id:`co${Date.now()}`, name:coQ.trim(), industry:'', phone:'', email:'', website:'', notes:[], activity:[{ type:'event', label:'Created inline', ts:'Just now' }] }
-                  onCreateCompany(co); update({ company:co.name, companyId:co.id }); setCoQ(''); setShowCompanyModal(false)
+                <button onClick={async()=>{
+                  const co = { name:coQ.trim(), industry:'', phone:'', email:'', website:'', notes:[], activity:[{ type:'event', label:'Created inline', ts:'Just now' }] }
+                  const real = (await onCreateCompany(co)) || co
+                  update({ company:real.name, companyId:real.id }); setCoQ(''); setShowCompanyModal(false)
                 }} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 12px', background:'rgba(168,201,196,0.06)', border:'1.5px dashed rgba(168,201,196,0.4)', borderRadius:'9px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
                   <span style={{ fontSize:'18px' }}>➕</span>
                   <div>
@@ -14648,6 +14503,10 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
 // ─── Partners Screen ──────────────────────────────────────────────────────────
 function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{} }) {
   if (!partners) return null
+  // Writes go through the App-level CRM helpers (POST/PATCH/DELETE + state);
+  // the partners/companies props are App state and stay the read source.
+  const partnersApi  = useContext(PartnersContext)
+  const companiesApi = useContext(CompaniesContext)
   const [selected, setSelected] = useState(initialSelected)
   React.useEffect(()=>{ if(initialSelected){ setSelected(initialSelected); onInitialSelectedConsumed() } },[initialSelected])
   const [showAdd, setShowAdd] = useState(false)  // shows type picker
@@ -14674,8 +14533,8 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
   const contactPool = allPartners.filter(p=>p.type==='contact')
   const activePool  = partnerTab==='contacts' ? contactPool : partnerPool
 
-  function updatePartner(updated) { setPartners(p=>p.map(x=>x.id===updated.id?updated:x)); setSelected(updated) }
-  function addPartner(p) { setPartners(prev=>[p,...prev]) }
+  function updatePartner(updated) { partnersApi?.updatePartner ? partnersApi.updatePartner(updated) : setPartners(p=>p.map(x=>x.id===updated.id?updated:x)); setSelected(updated) }
+  async function addPartner(p) { return partnersApi?.addPartner ? partnersApi.addPartner(p) : setPartners(prev=>[p,...prev]) }
 
   const filtered = activePool.filter(p => {
     const q = search.toLowerCase()
@@ -14850,7 +14709,7 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
                     {/* Address */}
                     <CompanyAddressSection
                       company={selectedCompany}
-                      onUpdate={addresses=>setCompanies(prev=>prev.map(c=>c.id===selectedCompany.id?{...c,addresses}:c))}
+                      onUpdate={addresses=>{ const next={...selectedCompany,addresses}; companiesApi?.updateCompany ? companiesApi.updateCompany(next) : setCompanies(prev=>prev.map(c=>c.id===selectedCompany.id?next:c)); setSelectedCompany(next) }}
                     />
                     {/* People at this company */}
                     {(()=>{
@@ -14977,7 +14836,7 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
         </div>
       </div>
 
-      {selected&&<PartnerPanel partner={selected} people={people} companies={allCompanies} onCreateCompany={co=>setCompanies(prev=>[...prev,co])} onClose={()=>setSelected(null)} onUpdate={updatePartner} onDelete={(id)=>{ setPartners(prev=>prev.map(p=>p.id===id?{...p,isDeleted:true,deletedAt:new Date().toISOString()}:p)); setSelected(null) }} onAddToHive={(p,mode)=>{ onAddToHive&&onAddToHive(p,mode); if(mode==='view'||!mode) setSelected(null) }} onOpenCompanyModal={(p)=>{ setCompanyModalPartner(p); setCompanyModalQ(p.company||'') }} onOpenInfoEdit={(p)=>setEditingPartnerInfo(p)} onViewCard={(p)=>setViewingCard(p)} />}
+      {selected&&<PartnerPanel partner={selected} people={people} companies={allCompanies} onCreateCompany={co=>companiesApi?.addCompany?.(co)} onClose={()=>setSelected(null)} onUpdate={updatePartner} onDelete={(id)=>{ partnersApi?.deletePartner ? partnersApi.deletePartner(id) : setPartners(prev=>prev.map(p=>p.id===id?{...p,isDeleted:true,deletedAt:new Date().toISOString()}:p)); setSelected(null) }} onAddToHive={(p,mode)=>{ onAddToHive&&onAddToHive(p,mode); if(mode==='view'||!mode) setSelected(null) }} onOpenCompanyModal={(p)=>{ setCompanyModalPartner(p); setCompanyModalQ(p.company||'') }} onOpenInfoEdit={(p)=>setEditingPartnerInfo(p)} onViewCard={(p)=>setViewingCard(p)} />}
 
       {viewingCard&&<CardViewerModal cardImage={viewingCard.cardImage||null} onClose={()=>setViewingCard(null)} />}
 
@@ -15021,7 +14880,7 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
           extraFields={(vals, setVals, inp, lbl)=>(
             <div><label style={lbl}>Industry</label><input style={inp} value={vals.industry||''} onChange={e=>setVals(p=>({...p,industry:e.target.value}))} placeholder='Real Estate, Moving Services, etc.' /></div>
           )}
-          onSave={vals=>{ setCompanies(prev=>prev.map(c=>c.id===editingCompanyInfo.id?{...c,...vals}:c)) }}
+          onSave={vals=>{ const next={...editingCompanyInfo,...vals}; companiesApi?.updateCompany ? companiesApi.updateCompany(next) : setCompanies(prev=>prev.map(c=>c.id===editingCompanyInfo.id?next:c)) }}
           onClose={()=>setEditingCompanyInfo(null)}
         />
       )}
@@ -15049,9 +14908,10 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
                 </button>
               ))}
               {companyModalQ.trim()&&!allCompanies.find(c=>c.name.toLowerCase()===companyModalQ.trim().toLowerCase())&&(
-                <button onClick={()=>{
-                  const co={id:`co${Date.now()}`,name:companyModalQ.trim(),industry:'',phone:'',email:'',website:'',notes:[],activity:[{type:'event',label:'Created inline',ts:'Just now'}]}
-                  setCompanies(prev=>[...prev,co]); updatePartner({...companyModalPartner,company:co.name,companyId:co.id}); setCompanyModalPartner(null)
+                <button onClick={async()=>{
+                  const co={name:companyModalQ.trim(),industry:'',phone:'',email:'',website:'',notes:[],activity:[{type:'event',label:'Created inline',ts:'Just now'}]}
+                  const real = companiesApi?.addCompany ? await companiesApi.addCompany(co) : co
+                  updatePartner({...companyModalPartner,company:real.name,companyId:real.id}); setCompanyModalPartner(null)
                 }} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 12px', background:'rgba(168,201,196,0.06)', border:'1.5px dashed rgba(168,201,196,0.4)', borderRadius:'9px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
                   <span style={{ fontSize:'18px' }}>➕</span>
                   <div><p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Create "{companyModalQ.trim()}"</p><p style={{ fontSize:'11px', color:'#8a9e9a' }}>Add as new company and link</p></div>
@@ -15094,9 +14954,9 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
           </div>
         </div>
       )}
-      {showAdd&&addType==='partner'&&<AddPartnerModal onAdd={addPartner} onClose={()=>{ setShowAdd(false); setAddType(null) }} defaultType='partner' companies={allCompanies} onCreateCompany={co=>{ setCompanies(prev=>[...prev,co]) }} />}
-      {showAdd&&addType==='contact'&&<AddPartnerModal onAdd={addPartner} onClose={()=>{ setShowAdd(false); setAddType(null) }} defaultType='contact' companies={allCompanies} onCreateCompany={co=>{ setCompanies(prev=>[...prev,co]) }} />}
-      {showAdd&&addType==='company'&&<AddPartnerModal onAdd={addPartner} onClose={()=>{ setShowAdd(false); setAddType(null) }} defaultType='company' companies={allCompanies} onCreateCompany={co=>{ setCompanies(prev=>[...prev,co]) }} />}
+      {showAdd&&addType==='partner'&&<AddPartnerModal onAdd={addPartner} onClose={()=>{ setShowAdd(false); setAddType(null) }} defaultType='partner' companies={allCompanies} onCreateCompany={co=>companiesApi?.addCompany?.(co)} />}
+      {showAdd&&addType==='contact'&&<AddPartnerModal onAdd={addPartner} onClose={()=>{ setShowAdd(false); setAddType(null) }} defaultType='contact' companies={allCompanies} onCreateCompany={co=>companiesApi?.addCompany?.(co)} />}
+      {showAdd&&addType==='company'&&<AddPartnerModal onAdd={addPartner} onClose={()=>{ setShowAdd(false); setAddType(null) }} defaultType='company' companies={allCompanies} onCreateCompany={co=>companiesApi?.addCompany?.(co)} />}
     </>
   )
 }
@@ -19409,7 +19269,7 @@ function FollowUpReminders({ followUps, setFollowUps, locFilter }) {
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=PARTNERS_DATA, setPartners=()=>{}, companies=COMPANIES_DATA, setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null }) {
+function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
@@ -23619,6 +23479,7 @@ function PricingManagementTab() {
 
 // ─── Recycle Bin Tab ──────────────────────────────────────────────────────────
 function RecycleBinTab({ binPeople=[], setBinPeople=()=>{}, setPeople=()=>{}, partners=[], setPartners=()=>{}, locations=null }) {
+  const partnersApi = useContext(PartnersContext)
   const RETENTION_DAYS = 90
   const now = Date.now()
   const locList = Array.isArray(locations) && locations.length > 0 ? locations : ALL_LOCATIONS
@@ -23644,7 +23505,8 @@ function RecycleBinTab({ binPeople=[], setBinPeople=()=>{}, setPeople=()=>{}, pa
 
   async function restore(item) {
     if (item.type === 'partner') {
-      setPartners(prev => prev.map(p => p.id === item.id ? {...p, isDeleted:false, deletedAt:null} : p))
+      if (partnersApi?.restorePartner) partnersApi.restorePartner(item.id)
+      else setPartners(prev => prev.map(p => p.id === item.id ? {...p, isDeleted:false, deletedAt:null} : p))
       return
     }
     if (pendingId) return
@@ -23673,7 +23535,8 @@ function RecycleBinTab({ binPeople=[], setBinPeople=()=>{}, setPeople=()=>{}, pa
 
   async function purge(item) {
     if (item.type === 'partner') {
-      setPartners(prev => prev.filter(p => p.id !== item.id))
+      if (partnersApi?.purgePartner) partnersApi.purgePartner(item.id)
+      else setPartners(prev => prev.filter(p => p.id !== item.id))
       return
     }
     if (pendingId) return
@@ -23694,7 +23557,9 @@ function RecycleBinTab({ binPeople=[], setBinPeople=()=>{}, setPeople=()=>{}, pa
 
   async function emptyBin() {
     if (!window.confirm(`Permanently delete all ${binPeople.length} bin item${binPeople.length!==1?'s':''}? This cannot be undone.`)) return
-    setPartners(prev => prev.filter(p => !p.isDeleted))
+    // Purge soft-deleted partners server-side too, then drop them locally.
+    if (partnersApi?.purgePartner) deletedPartners.forEach(p => partnersApi.purgePartner(p.id))
+    else setPartners(prev => prev.filter(p => !p.isDeleted))
     const ids = binPeople.map(p => p.id)
     const prevBin = binPeople
     setBinPeople([])
@@ -25947,6 +25812,7 @@ function CorporateReports({ range, locId, source, project }) {
 }
 
 function FranchiseReports({ range, locId, source, project, people, locFilter }) {
+  const PARTNERS = useContext(PartnersContext)?.partners || []
   const myLocId = locFilter!=='all' ? locFilter : locId
   const myPeople = people.filter(p=>!p.isJunk&&(myLocId==='all'||p.locationId===myLocId))
   const srcFiltered  = source==='all'  ? myPeople : myPeople.filter(p=>p.source===source)
@@ -26050,7 +25916,7 @@ function FranchiseReports({ range, locId, source, project, people, locFilter }) 
 
       {/* Partner referrals */}
       <ReportCard title="Partner Referrals" subtitle="Top referring partners">
-        {PARTNERS_DATA.slice(0,5).map((p,i)=>(
+        {PARTNERS.filter(p=>!p.isDeleted).slice(0,5).map((p,i)=>(
           <div key={p.id} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'7px 0', borderBottom:'1px solid rgba(0,0,0,0.04)' }}>
             <div style={{ width:'28px', height:'28px', borderRadius:'50%', background:'linear-gradient(135deg,#d4a046,#b07a20)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'10px', fontWeight:700, color:'white', flexShrink:0 }}>
               {p.name.split(' ').map(w=>w[0]).join('').slice(0,2)}
@@ -26912,6 +26778,8 @@ export default function App({
   initialLookups,            // server-rendered admin-managed lookups grouped by category (Sitting 1A)
   initialPeople,             // server-rendered Supabase leads → Person shape (Phase 3A); null/empty → fall back to ALL_PEOPLE mock
   initialBinPeople,          // server-rendered is_junk=true leads (Recycle Bin)
+  initialPartners,           // server-rendered partners+contacts (Supabase partners table); replaces PARTNERS_DATA mock
+  initialCompanies,          // server-rendered companies (Supabase companies table); replaces COMPANIES_DATA mock
   currentSubscription,
   currentLocation,           // real Supabase row for franchise owners; null for elevated users
 } = {}) {
@@ -27124,8 +26992,8 @@ if (Array.isArray(initialPeople)) return
     { id:'fu6', personId:null, personName:'Diana Walsh',     note:'Seasonal refresh - summer closet cleanout',  date:'2026-06-10', locationId:'loc_kc', createdAt:'Apr 30' },
     { id:'fu7', personId:null, personName:'Rachel Hall',     note:'Pantry project - revisit after school year',  date:'2026-06-18', locationId:'loc_kc', createdAt:'Apr 28' },
   ])
-  const [partners, setPartners]             = useState(PARTNERS_DATA)
-  const [companies, setCompanies]           = useState(COMPANIES_DATA)
+  const [partners, setPartners]             = useState(Array.isArray(initialPartners) ? initialPartners : [])
+  const [companies, setCompanies]           = useState(Array.isArray(initialCompanies) ? initialCompanies : [])
   const [users, setUsers]                   = useState(initialUsers ?? USERS_DATA)
   // Track CRM status overrides from admin panel
   const [locStatuses, setLocStatuses]       = useState({})
@@ -27158,6 +27026,71 @@ if (Array.isArray(initialPeople)) return
   const roleConf    = ROLES.find(r=>r.key===role)
   const isElevated  = role==='corporate' || role==='super_admin'
   const selectedLoc = locFilter==='all' ? null : (initialLocations || ALL_LOCATIONS).find(l=>l.id===locFilter)
+
+  // ─── CRM persistence (partners + companies) ─────────────────────────────────
+  // State lives in the useState above; these helpers wrap setPartners/setCompanies
+  // with API calls so writes reach Supabase. Creates are server-first (we need the
+  // real uuid for referral linkage); updates/deletes are optimistic + fire the API.
+  // On API failure we keep the optimistic local change so the UI stays responsive.
+  const crmLocationId = (obj) => {
+    if (isUuidStr(obj?.locationId)) return obj.locationId
+    if (isUuidStr(currentLocation?.id)) return currentLocation.id
+    if (isUuidStr(locFilter)) return locFilter
+    if (isUuidStr(currentUser?.locationId)) return currentUser.locationId
+    return obj?.locationId || currentLocation?.id || (locFilter !== 'all' ? locFilter : null) || currentUser?.locationId || null
+  }
+  async function addPartner(obj) {
+    const location_id = crmLocationId(obj)
+    try {
+      const res = await fetch('/api/partners', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ...obj, location_id }) })
+      const json = await res.json().catch(() => ({}))
+      if (res.ok && json?.id) { setPartners(prev => [json, ...prev]); return json }
+      console.error('[partners] create failed:', json?.error || res.status)
+    } catch (e) { console.error('[partners] create error:', e) }
+    const local = { ...obj, locationId: location_id || obj?.locationId }
+    setPartners(prev => [local, ...prev]); return local
+  }
+  function updatePartner(updated) {
+    setPartners(prev => prev.map(p => p.id === updated.id ? updated : p))
+    if (isUuidStr(updated?.id)) {
+      fetch(`/api/partners/${updated.id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(updated) })
+        .then(r => { if (!r.ok) console.error('[partners] update failed:', r.status) })
+        .catch(e => console.error('[partners] update error:', e))
+    }
+  }
+  function deletePartner(id) {
+    setPartners(prev => prev.map(p => p.id === id ? { ...p, isDeleted:true, deletedAt:new Date().toISOString() } : p))
+    if (isUuidStr(id)) fetch(`/api/partners/${id}`, { method:'DELETE' }).catch(e => console.error('[partners] delete error:', e))
+  }
+  function restorePartner(id) {
+    setPartners(prev => prev.map(p => p.id === id ? { ...p, isDeleted:false, deletedAt:null } : p))
+    if (isUuidStr(id)) fetch(`/api/partners/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ restore:true }) }).catch(e => console.error('[partners] restore error:', e))
+  }
+  function purgePartner(id) {
+    setPartners(prev => prev.filter(p => p.id !== id))
+    if (isUuidStr(id)) fetch(`/api/partners/${id}?purge=1`, { method:'DELETE' }).catch(e => console.error('[partners] purge error:', e))
+  }
+  async function addCompany(obj) {
+    const location_id = crmLocationId(obj)
+    try {
+      const res = await fetch('/api/companies', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ...obj, location_id }) })
+      const json = await res.json().catch(() => ({}))
+      if (res.ok && json?.id) { setCompanies(prev => [json, ...prev]); return json }
+      console.error('[companies] create failed:', json?.error || res.status)
+    } catch (e) { console.error('[companies] create error:', e) }
+    const local = { ...obj, locationId: location_id || obj?.locationId }
+    setCompanies(prev => [local, ...prev]); return local
+  }
+  function updateCompany(updated) {
+    setCompanies(prev => prev.map(c => c.id === updated.id ? updated : c))
+    if (isUuidStr(updated?.id)) {
+      fetch(`/api/companies/${updated.id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(updated) })
+        .then(r => { if (!r.ok) console.error('[companies] update failed:', r.status) })
+        .catch(e => console.error('[companies] update error:', e))
+    }
+  }
+  const partnersCtxValue = { partners, addPartner, updatePartner, deletePartner, restorePartner, purgePartner }
+  const companiesCtxValue = { companies, addCompany, updateCompany }
 
   // For franchise users, use their location's status
   const franchiseLoc = !isElevated && viewAsUser?.locationId
@@ -27690,6 +27623,8 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     <LocationUsersContext.Provider value={users}>
     <TierPricesContext.Provider value={tierPricesValue}>
     <SeatsContext.Provider value={seatsValue}>
+    <PartnersContext.Provider value={partnersCtxValue}>
+    <CompaniesContext.Provider value={companiesCtxValue}>
     <div>
       <DemoBar />
       <LocBanner />
@@ -27830,6 +27765,8 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         />
       )}
     </div>
+    </CompaniesContext.Provider>
+    </PartnersContext.Provider>
     </SeatsContext.Provider>
     </TierPricesContext.Provider>
     </LocationUsersContext.Provider>

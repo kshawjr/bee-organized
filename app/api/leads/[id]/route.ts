@@ -186,6 +186,7 @@ export async function PATCH(
   try {
     await updateLead(id, patch as any)
   } catch (e) {
+    console.error('PATCH /api/leads/[id] failed:', e)
     const message = e instanceof Error ? e.message : 'update_failed'
     return NextResponse.json({ error: message }, { status: 500 })
   }
@@ -256,6 +257,7 @@ export async function PATCH(
     .single()
 
   if (refetchError) {
+    console.error('PATCH /api/leads/[id] refetch failed:', refetchError)
     return NextResponse.json({ error: 'refetch_failed' }, { status: 500 })
   }
 
@@ -322,6 +324,7 @@ export async function DELETE(
   const { error: delError } = await supabaseService.from('leads').delete().eq('id', id)
 
   if (delError) {
+    console.error('DELETE /api/leads/[id] failed:', delError)
     return NextResponse.json({ error: 'delete_failed', detail: delError.message }, { status: 500 })
   }
 
