@@ -6517,6 +6517,18 @@ function PersonPanel({
                           !p.isJunk,
                       )
                         .filter((p) => nameMatch(p.name) || nameMatch(p.email));
+                      if (pickingReferral) {
+                        const _loc = person.locationId;
+                        const _all = allPeople || [];
+                        console.log('[CLIENTS_COUNT]', {
+                          allPeopleLen: _all.length,
+                          personLocationId: _loc,
+                          sameLocation: _all.filter((p) => p.locationId === _loc).length,
+                          sameLocationNonJunk: _all.filter((p) => p.locationId === _loc && !p.isJunk).length,
+                          matchedClients: matchedClients.length,
+                          distinctLocationIds: Array.from(new Set(_all.map((p) => p.locationId))),
+                        });
+                      }
                       const hasAnyMatch =
                         matchedPartners.length > 0 ||
                         matchedContacts.length > 0 ||
