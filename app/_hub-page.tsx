@@ -403,8 +403,13 @@ export default async function HubPage({
   {
     let q = supabaseService
       .from('leads')
+      // "not junk" = false OR NULL. Jobber-imported leads leave is_junk
+      // unset (NULL), and `.eq('is_junk', false)` does NOT match NULL in
+      // Postgres — those leads loaded nowhere (not here, not the bin which
+      // is is_junk=true) and were invisible app-wide. `is_junk IS NOT TRUE`
+      // matches false and NULL, still excluding genuinely junked leads.
       .select('*')
-      .eq('is_junk', false)
+      .not('is_junk', 'is', true)
       .order('created_at', { ascending: false })
       .limit(1000)
 
