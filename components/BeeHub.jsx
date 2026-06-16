@@ -6714,7 +6714,11 @@ function PersonPanel({
                                 "lead",
                                 "rgba(212,160,70,0.08)",
                               ),
+                              // Hide "No matches" once create rows show — the
+                              // typed value always yields actionable create rows,
+                              // so an empty-handed message would be misleading.
                               !hasAnyMatch &&
+                                !referralSearch.trim() &&
                                 React.createElement(
                                   "p",
                                   {
@@ -6727,60 +6731,73 @@ function PersonPanel({
                                   },
                                   "No matches",
                                 ),
-                            ),
-                            // Sticky footer — inline quick-adds mirroring
-                            // AddPartnerModal's inline "+ Create company"
-                            // affordance: list-row treatment, subtle teal tint,
-                            // small text, not a chunky boxed CTA. Side-by-side.
-                            // Clients have no quick-add (they come from the lead
-                            // creation flow).
-                            React.createElement(
-                              "div",
-                              {
-                                style: {
-                                  flexShrink: 0,
-                                  display: "flex",
-                                  borderTop: "1px solid rgba(0,0,0,0.06)",
-                                },
-                              },
-                              [
-                                { t: "partner", label: "Add Partner" },
-                                { t: "contact", label: "Add Contact" },
-                              ].map((opt, i) =>
+                              // Inline create rows — mirror AddPartnerModal's
+                              // "+ Create company" affordance: list-row treatment,
+                              // subtle teal tint, ➕ icon + two-line label. Only
+                              // shown when the user has typed something; clicking
+                              // opens AddPartnerModal with defaultType set and the
+                              // typed text pre-filled into the name field.
+                              referralSearch.trim() &&
                                 React.createElement(
-                                  "button",
-                                  {
-                                    key: opt.t,
-                                    type: "button",
-                                    onClick: () => setShowQuickAddReferrer(opt.t),
-                                    style: {
-                                      flex: 1,
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      gap: "6px",
-                                      padding: "10px 12px",
-                                      background: "rgba(168,201,196,0.06)",
-                                      border: "none",
-                                      borderLeft:
-                                        i === 1
-                                          ? "1px solid rgba(0,0,0,0.06)"
-                                          : "none",
-                                      cursor: "pointer",
-                                      fontFamily: "inherit",
-                                      fontSize: "13px",
-                                      fontWeight: 600,
-                                      color: "#1a7a6e",
-                                    },
-                                  },
-                                  React.createElement(
-                                    "span",
-                                    { style: { fontSize: "14px" } },
-                                    "＋",
+                                  React.Fragment,
+                                  { key: "create-rows" },
+                                  [
+                                    { t: "partner", noun: "partner" },
+                                    { t: "contact", noun: "contact" },
+                                  ].map((opt) =>
+                                    React.createElement(
+                                      "button",
+                                      {
+                                        key: opt.t,
+                                        type: "button",
+                                        onClick: () => setShowQuickAddReferrer(opt.t),
+                                        style: {
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: "8px",
+                                          width: "100%",
+                                          padding: "6px 10px",
+                                          background: "rgba(168,201,196,0.06)",
+                                          border: "none",
+                                          borderRadius: "8px",
+                                          cursor: "pointer",
+                                          fontFamily: "inherit",
+                                          textAlign: "left",
+                                        },
+                                      },
+                                      React.createElement(
+                                        "span",
+                                        { style: { fontSize: "14px" } },
+                                        "➕",
+                                      ),
+                                      React.createElement(
+                                        "div",
+                                        { style: { minWidth: 0 } },
+                                        React.createElement(
+                                          "p",
+                                          {
+                                            style: {
+                                              fontSize: "12px",
+                                              fontWeight: 600,
+                                              color: "#1a2e2b",
+                                            },
+                                          },
+                                          'Create "' + referralSearch.trim() + '"',
+                                        ),
+                                        React.createElement(
+                                          "p",
+                                          {
+                                            style: {
+                                              fontSize: "10px",
+                                              color: "#8a9e9a",
+                                            },
+                                          },
+                                          "Add as a new " + opt.noun,
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                  opt.label,
                                 ),
-                              ),
                             ),
                           ),
                       );
@@ -6793,6 +6810,7 @@ function PersonPanel({
                   showQuickAddReferrer &&
                     React.createElement(AddPartnerModal, {
                       defaultType: showQuickAddReferrer,
+                      defaultName: referralSearch.trim(),
                       companies: companiesCtx?.companies || [],
                       onCreateCompany: (co) => companiesCtx?.addCompany?.(co),
                       onClose: () => setShowQuickAddReferrer(null),
@@ -13290,9 +13308,12 @@ function AddCompanyModal({ onAdd, onClose, partners=[], onUpdatePartner=()=>{} }
   )
 }
 
-function AddPartnerModal({ onAdd, onClose, defaultType='partner', companies=[], onCreateCompany=()=>{} }) {
+function AddPartnerModal({ onAdd, onClose, defaultType='partner', defaultName='', companies=[], onCreateCompany=()=>{} }) {
   const [type, setType] = useState(defaultType)
-  const [form, setForm] = useState({ firstName:'', lastName:'', company:'', title:'', phone:'', email:'', website:'', howWeMet:'', relationship:'', specialties:[], tags:[], tier:null, street:'', city:'', state:'', zip:'' })
+  // Pre-fill name fields from defaultName (e.g. the referrer picker's typed
+  // search text). First token → first name, remainder → last name.
+  const _np = (defaultName||'').trim().split(/\s+/).filter(Boolean)
+  const [form, setForm] = useState({ firstName:_np[0]||'', lastName:_np.slice(1).join(' ')||'', company:'', title:'', phone:'', email:'', website:'', howWeMet:'', relationship:'', specialties:[], tags:[], tier:null, street:'', city:'', state:'', zip:'' })
   const [companyId, setCompanyId] = useState(null)
   const [companySearch, setCompanySearch] = useState('')
   const [showCompanyPicker, setShowCompanyPicker] = useState(false)
