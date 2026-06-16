@@ -158,10 +158,13 @@ export default async function HubPage({
     if (profileRow) profileFields = profileRow as any
   }
 
+  // Order by slot only. The editor writes `slot` as a single global sequence
+  // (array index across all chapters), so slot alone reflects the user's
+  // arranged order. Sorting by chapter first would force chapters into
+  // alphabetical order on reload and discard manual reordering.
   const { data: slidesData } = await supabase
     .from('guide_slides')
     .select('*')
-    .order('chapter', { ascending: true })
     .order('slot', { ascending: true })
 
   const initialGuideSlides = (slidesData || []).map((row: any) => {
@@ -190,10 +193,10 @@ export default async function HubPage({
 
   const initialTierPrices = tierPricesRaw || []
 
+  // Order by slot only — same global-sequence reasoning as guide_slides above.
   const { data: manualSlidesRaw } = await supabaseService
     .from('manual_slides')
     .select('*')
-    .order('chapter', { ascending: true })
     .order('slot', { ascending: true })
 
   const initialManualSlides = (manualSlidesRaw || []).map((row: any) => {
