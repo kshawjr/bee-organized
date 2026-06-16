@@ -4985,10 +4985,11 @@ function PersonPanel({
   const [editingSource, setEditingSource] = useState(false);
   const [pickingReferral, setPickingReferral] = useState(false);
   const [referralSearch, setReferralSearch] = useState("");
-  // Inline "+ Add Partner" quick-add from the referrer picker — mirrors
-  // NewLeadModal's pattern. Opens AddPartnerModal, then auto-selects the
-  // freshly-created partner as this lead's referrer.
-  const [showQuickAddReferrer, setShowQuickAddReferrer] = useState(false);
+  // Inline quick-add from the referrer picker — mirrors NewLeadModal's
+  // pattern. Holds the AddPartnerModal defaultType ('partner' | 'contact')
+  // while open, null when closed. On create the new record is auto-selected
+  // as this lead's referrer.
+  const [showQuickAddReferrer, setShowQuickAddReferrer] = useState(null);
   const [journeyExpanded, setJourneyExpanded] = useState(false);
   const [jobNoteDraft, setJobNoteDraft] = useState("");
   const [fieldVal, setFieldVal] = useState("");
@@ -5114,6 +5115,14 @@ function PersonPanel({
   }, []);
   function update(patch) {
     onUpdate({ ...person, ...patch }, patch);
+  }
+  // Persist a referrer selection from the picker. kind drives referred_by_kind:
+  // 'partner' for both Partners and Contacts (same partners table), 'lead' for
+  // Clients (existing leads). Closes the picker afterward.
+  function selectReferrer({ id, kind }) {
+    update({ referredBy: id, referredByKind: kind });
+    setPickingReferral(false);
+    setReferralSearch("");
   }
   function handleReachOut(patch) {
     // Local UI update is the source of truth for the reach-out action; the
@@ -6489,21 +6498,98 @@ function PersonPanel({
                           ? referredCustomer.name
                           : null;
                       const q = referralSearch.toLowerCase();
-                      const filteredPartners = PARTNERS.filter((p) => !p.isDeleted).filter(
-                        (p) =>
-                          !q ||
-                          (p.name || "").toLowerCase().includes(q) ||
-                          (p.company || "").toLowerCase().includes(q),
-                      ).slice(0, 5);
-                      const filteredCustomers = ALL_PEOPLE.filter(
+                      const nameMatch = (v) => !q || (v || "").toLowerCase().includes(q);
+                      // Partners and Contacts share the partners table; split on
+                      // type (legacy rows without a type fall under Partners, per
+                      // the PartnersScreen convention: type !== 'contact').
+                      const matchedPartners = PARTNERS.filter(
+                        (p) => !p.isDeleted && p.type !== "contact",
+                      )
+                        .filter((p) => nameMatch(p.name) || nameMatch(p.company))
+                        .slice(0, 6);
+                      const matchedContacts = PARTNERS.filter(
+                        (p) => !p.isDeleted && p.type === "contact",
+                      )
+                        .filter((p) => nameMatch(p.name) || nameMatch(p.company))
+                        .slice(0, 6);
+                      const matchedClients = ALL_PEOPLE.filter(
                         (p) =>
                           p.id !== person.id &&
                           p.locationId === person.locationId &&
-                          !p.isJunk &&
-                          (!q ||
-                            (p.name || "").toLowerCase().includes(q) ||
-                            (p.email || "").toLowerCase().includes(q)),
-                      ).slice(0, 6);
+                          !p.isJunk,
+                      )
+                        .filter((p) => nameMatch(p.name) || nameMatch(p.email))
+                        .slice(0, 6);
+                      const hasAnyMatch =
+                        matchedPartners.length > 0 ||
+                        matchedContacts.length > 0 ||
+                        matchedClients.length > 0;
+                      // Renders one headed section of picker rows. kind drives
+                      // referred_by_kind on select. Hidden entirely when empty.
+                      const renderSection = (sectionKey, label, items, kind, selBg) =>
+                        items.length > 0 &&
+                        React.createElement(
+                          React.Fragment,
+                          { key: sectionKey },
+                          React.createElement(
+                            "p",
+                            {
+                              style: {
+                                fontSize: "9px",
+                                fontWeight: 700,
+                                color: "#b0c0bc",
+                                textTransform: "uppercase",
+                                letterSpacing: "0.5px",
+                                padding: "6px 6px 4px",
+                              },
+                            },
+                            label,
+                          ),
+                          items.map((p) =>
+                            React.createElement(
+                              "button",
+                              {
+                                key: p.id,
+                                onClick: () => selectReferrer({ id: p.id, kind }),
+                                style: {
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                  width: "100%",
+                                  padding: "6px 10px",
+                                  background:
+                                    person.referredBy === p.id ? selBg : "transparent",
+                                  border: "none",
+                                  borderRadius: "8px",
+                                  cursor: "pointer",
+                                  fontFamily: "inherit",
+                                  textAlign: "left",
+                                },
+                              },
+                              React.createElement(
+                                "div",
+                                { style: { minWidth: 0 } },
+                                React.createElement(
+                                  "p",
+                                  {
+                                    style: {
+                                      fontSize: "12px",
+                                      fontWeight: 600,
+                                      color: "#1a2e2b",
+                                    },
+                                  },
+                                  p.name,
+                                ),
+                                p.company &&
+                                  React.createElement(
+                                    "p",
+                                    { style: { fontSize: "10px", color: "#8a9e9a" } },
+                                    p.company,
+                                  ),
+                              ),
+                            ),
+                          ),
+                        );
                       return React.createElement(
                         "div",
                         { style: { position: "relative" } },
@@ -6563,7 +6649,7 @@ function PersonPanel({
                               autoFocus: true,
                               value: referralSearch,
                               onChange: (e) => setReferralSearch(e.target.value),
-                              placeholder: "Search partners or clients…",
+                              placeholder: "Search partners, contacts, clients…",
                               style: {
                                 width: "100%",
                                 padding: "7px 10px",
@@ -6576,193 +6662,112 @@ function PersonPanel({
                                 marginBottom: "6px",
                               },
                             }),
-                            filteredPartners.length > 0 &&
+                            renderSection(
+                              "partners",
+                              "Partners",
+                              matchedPartners,
+                              "partner",
+                              "rgba(16,185,129,0.08)",
+                            ),
+                            renderSection(
+                              "contacts",
+                              "Contacts",
+                              matchedContacts,
+                              "partner",
+                              "rgba(14,165,233,0.08)",
+                            ),
+                            renderSection(
+                              "clients",
+                              "Clients",
+                              matchedClients,
+                              "lead",
+                              "rgba(212,160,70,0.08)",
+                            ),
+                            !hasAnyMatch &&
                               React.createElement(
-                                React.Fragment,
-                                null,
-                                React.createElement(
-                                  "p",
-                                  {
-                                    style: {
-                                      fontSize: "9px",
-                                      fontWeight: 700,
-                                      color: "#b0c0bc",
-                                      textTransform: "uppercase",
-                                      letterSpacing: "0.5px",
-                                      padding: "2px 6px 4px",
-                                    },
-                                  },
-                                  "Partners",
-                                ),
-                                filteredPartners.map((p) =>
-                                  React.createElement(
-                                    "button",
-                                    {
-                                      key: p.id,
-                                      onClick: () => {
-                                        update({ ...person, referredBy: p.id });
-                                        setPickingReferral(false);
-                                        setReferralSearch("");
-                                      },
-                                      style: {
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: "8px",
-                                        width: "100%",
-                                        padding: "6px 10px",
-                                        background:
-                                          person.referredBy === p.id
-                                            ? "rgba(16,185,129,0.08)"
-                                            : "transparent",
-                                        border: "none",
-                                        borderRadius: "8px",
-                                        cursor: "pointer",
-                                        fontFamily: "inherit",
-                                        textAlign: "left",
-                                      },
-                                    },
-                                    React.createElement(
-                                      "div",
-                                      { style: { minWidth: 0 } },
-                                      React.createElement(
-                                        "p",
-                                        {
-                                          style: {
-                                            fontSize: "12px",
-                                            fontWeight: 600,
-                                            color: "#1a2e2b",
-                                          },
-                                        },
-                                        p.name,
-                                      ),
-                                      p.company &&
-                                        React.createElement(
-                                          "p",
-                                          { style: { fontSize: "10px", color: "#8a9e9a" } },
-                                          p.company,
-                                        ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            filteredCustomers.length > 0 &&
-                              React.createElement(
-                                React.Fragment,
-                                null,
-                                React.createElement(
-                                  "p",
-                                  {
-                                    style: {
-                                      fontSize: "9px",
-                                      fontWeight: 700,
-                                      color: "#b0c0bc",
-                                      textTransform: "uppercase",
-                                      letterSpacing: "0.5px",
-                                      padding: "6px 6px 4px",
-                                    },
-                                  },
-                                  "Clients",
-                                ),
-                                filteredCustomers.map((p) =>
-                                  React.createElement(
-                                    "button",
-                                    {
-                                      key: p.id,
-                                      onClick: () => {
-                                        update({ ...person, referredBy: p.id });
-                                        setPickingReferral(false);
-                                        setReferralSearch("");
-                                      },
-                                      style: {
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: "8px",
-                                        width: "100%",
-                                        padding: "6px 10px",
-                                        background:
-                                          person.referredBy === p.id
-                                            ? "rgba(212,160,70,0.08)"
-                                            : "transparent",
-                                        border: "none",
-                                        borderRadius: "8px",
-                                        cursor: "pointer",
-                                        fontFamily: "inherit",
-                                        textAlign: "left",
-                                      },
-                                    },
-                                    React.createElement(
-                                      "p",
-                                      {
-                                        style: {
-                                          fontSize: "12px",
-                                          fontWeight: 600,
-                                          color: "#1a2e2b",
-                                        },
-                                      },
-                                      p.name,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            // Inline quick-add — always visible at the bottom
-                            // of the dropdown, regardless of search state.
-                            // Mirrors NewLeadModal's "Add New Partner" pattern.
-                            React.createElement(
-                              "button",
-                              {
-                                type: "button",
-                                onClick: () => setShowQuickAddReferrer(true),
-                                style: {
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "8px",
-                                  width: "100%",
-                                  padding: "8px 10px",
-                                  marginTop: "4px",
-                                  background: "transparent",
-                                  border: "none",
-                                  borderTop: "1px solid rgba(0,0,0,0.06)",
-                                  borderRadius: "0 0 8px 8px",
-                                  cursor: "pointer",
-                                  fontFamily: "inherit",
-                                  textAlign: "left",
-                                  color: "#1a7a6e",
-                                  fontWeight: 600,
-                                  fontSize: "12px",
-                                },
-                              },
-                              React.createElement(
-                                "span",
+                                "p",
                                 {
                                   style: {
-                                    width: "22px",
-                                    height: "22px",
-                                    borderRadius: "50%",
-                                    background: "rgba(168,201,196,0.18)",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    fontSize: "13px",
-                                    flexShrink: 0,
+                                    fontSize: "12px",
+                                    color: "#8a9e9a",
+                                    textAlign: "center",
+                                    padding: "8px 6px",
                                   },
                                 },
-                                "＋",
+                                "No matches",
                               ),
-                              "Add Partner",
+                            // Dual quick-add at the bottom of the dropdown.
+                            // Clients have no quick-add (they come from the lead
+                            // creation flow). Mirrors NewLeadModal's pattern.
+                            React.createElement(
+                              "div",
+                              {
+                                style: {
+                                  display: "flex",
+                                  gap: "4px",
+                                  marginTop: "4px",
+                                  paddingTop: "4px",
+                                  borderTop: "1px solid rgba(0,0,0,0.06)",
+                                },
+                              },
+                              ["partner", "contact"].map((t) =>
+                                React.createElement(
+                                  "button",
+                                  {
+                                    key: t,
+                                    type: "button",
+                                    onClick: () => setShowQuickAddReferrer(t),
+                                    style: {
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "6px",
+                                      flex: 1,
+                                      padding: "8px",
+                                      background: "transparent",
+                                      border: "none",
+                                      cursor: "pointer",
+                                      fontFamily: "inherit",
+                                      textAlign: "left",
+                                      color: "#1a7a6e",
+                                      fontWeight: 600,
+                                      fontSize: "12px",
+                                    },
+                                  },
+                                  React.createElement(
+                                    "span",
+                                    {
+                                      style: {
+                                        width: "20px",
+                                        height: "20px",
+                                        borderRadius: "50%",
+                                        background: "rgba(168,201,196,0.18)",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        fontSize: "12px",
+                                        flexShrink: 0,
+                                      },
+                                    },
+                                    "＋",
+                                  ),
+                                  t === "contact" ? "Add Contact" : "Add Partner",
+                                ),
+                              ),
                             ),
                           ),
                       );
                     })(),
-                  // Inline AddPartnerModal for the referrer quick-add. On
-                  // submit the new partner is created via PartnersContext and
-                  // auto-selected as this lead's referrer (update persists
-                  // referred_by_id). Mirrors NewLeadModal's quick-add flow.
+                  // Inline AddPartnerModal for the referrer quick-add. The new
+                  // partner OR contact is created via PartnersContext (both live
+                  // in the partners table) and auto-selected as this lead's
+                  // referrer with kind='partner'. defaultType is whichever
+                  // quick-add button was clicked. Mirrors NewLeadModal's flow.
                   showQuickAddReferrer &&
                     React.createElement(AddPartnerModal, {
-                      defaultType: "partner",
+                      defaultType: showQuickAddReferrer,
                       companies: companiesCtx?.companies || [],
                       onCreateCompany: (co) => companiesCtx?.addCompany?.(co),
-                      onClose: () => setShowQuickAddReferrer(false),
+                      onClose: () => setShowQuickAddReferrer(null),
                       onAdd: async (obj) => {
                         const created = partnersCtx?.addPartner
                           ? await partnersCtx.addPartner({
@@ -6771,11 +6776,9 @@ function PersonPanel({
                             })
                           : null;
                         if (created?.id) {
-                          update({ ...person, referredBy: created.id });
+                          selectReferrer({ id: created.id, kind: "partner" });
                         }
-                        setShowQuickAddReferrer(false);
-                        setPickingReferral(false);
-                        setReferralSearch("");
+                        setShowQuickAddReferrer(null);
                       },
                     }),
                   (editingSource || pickingReferral) &&
