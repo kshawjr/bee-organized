@@ -24955,6 +24955,26 @@ function SlideEditForm({ slide, isNew, onSave, onCancel, allChapters = [] }) {
   )
 }
 
+// Top-bar help affordance — a subtle circular "?" that opens the Hive Hub
+// Guide. Lives in the desktop sidebar header and the mobile top bar. Keeps its
+// own hover state so we get the bg-shift without a globals.css rule. The 44px
+// hit area satisfies tap targets while the visual glyph stays compact.
+function HelpIconButton({ onClick, size = 32, hitArea = 44, title = 'Hive Hub Guide' }) {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      aria-label={title}
+      title={title}
+      style={{ width:`${hitArea}px`, height:`${hitArea}px`, display:'flex', alignItems:'center', justifyContent:'center', background:'none', border:'none', cursor:'pointer', padding:0, flexShrink:0 }}>
+      <span style={{ width:`${size}px`, height:`${size}px`, borderRadius:'50%', background: hover ? 'rgba(168,201,196,0.22)' : 'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:`${Math.round(size*0.5)}px`, fontWeight:700, color:'rgba(168,201,196,0.95)', lineHeight:1, transition:'background 0.15s' }}>?</span>
+    </button>
+  )
+}
+
 // ═══════════════════════════════════════════════════════
 //  Hive Hub MANUAL — second guide system (expanded reference)
 //  - Wider modal (max 1200px) + taller content (70vh) for video iframes
@@ -27656,17 +27676,32 @@ export default function App({
   // No client-side defaults — empty array stays empty, modal stays hidden.
   const [guideSlides, setGuideSlides]       = useState(Array.isArray(initialGuideSlides) ? initialGuideSlides : [])
   const [showGuide, setShowGuide]           = useState(false) // SSR-safe: open only after client-side localStorage check
+  // First-time discovery hint pointing at the top-bar "?" icon. Replaces the
+  // old auto-open-the-Guide-on-first-visit behavior — instead of shoving the
+  // full modal in a new owner's face, we nudge them toward the help icon.
+  const [showGuideHint, setShowGuideHint]   = useState(false)
   useEffect(() => {
-    // Skip auto-open while the user is still in onboarding — the modal is a
-    // full-screen fixed overlay and covers OnboardingScreen, so a fresh owner
-    // sees the Guide instead of step 1 of the setup flow. They can still open
-    // it manually from the sidebar after launch.
+    // Skip while the user is still in onboarding — let them finish setup first.
+    // For Invite-Owner launches this naturally fires post-launch (lifecycle
+    // flips to 'active', the hint shows on the next mount).
     if (currentLocation?.lifecycle_status === 'onboarding') return
     try {
-      if (guideSlides.length > 0 && !localStorage.getItem('bee_guide_dismissed')) setShowGuide(true)
+      if (guideSlides.length > 0 && !localStorage.getItem('bee_guide_dismissed')) setShowGuideHint(true)
     } catch (e) { /* private mode / disabled storage */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  // Mark the guide intro as seen (reuses the same key the Guide modal sets on
+  // dismiss) so the first-time hint never shows again for this user.
+  function dismissGuideHint() {
+    setShowGuideHint(false)
+    try { localStorage.setItem('bee_guide_dismissed', '1') } catch (e) { /* private mode */ }
+  }
+  // Persistent entry point for the Hive Hub Guide (the top-bar "?" icon). Opening
+  // it also retires the first-time hint.
+  function openGuide() {
+    dismissGuideHint()
+    setShowGuide(true)
+  }
 
   // Hydrate admin-managed lookups from DB on mount (Sitting 1A).
   // initialLookups comes from page.tsx server-side fetch keyed by category.
@@ -28056,7 +28091,8 @@ if (Array.isArray(initialPeople)) return
     { key:'partners', icon:'👥', label:'Contacts'},
     { key:'reports',  icon:'📊', label:'Reports' },
     { key:'settings', icon:'⚙️', label:'Settings'},
-    { key:'manual',   icon:'📚', label:'Manual',  action:'openManual' },
+    // 'Manual' moved out of the nav — the Hive Hub Guide now opens from the
+    // top-bar "?" icon; the manual reference still lives in Settings.
     ...(isElevated ? [{ key:'admin', icon:'🏢', label:role==='super_admin'?'Admin':'Corp' }] : []),
   ]
 
@@ -28167,6 +28203,7 @@ if (Array.isArray(initialPeople)) return
           style={{ width:'44px', height:'44px', display:'flex', alignItems:'center', justifyContent:'center', background:'none', border:'none', cursor:'pointer', flexShrink:0, color:'rgba(168,201,196,0.85)', fontSize:'18px' }}>
           🔍
         </button>
+        <HelpIconButton onClick={openGuide} size={30} title="Hive Hub Guide" />
         <button
           onClick={()=>setShowMobileProfile(v=>!v)}
           aria-label="Profile menu"
@@ -28507,6 +28544,28 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
       <MobileTopBar />
       <MobileNavDrawer />
       <MobileProfileMenu />
+      {/* First-time discovery hint pointing at the "?" help icon. One fixed
+          popover, positioned under whichever top-bar icon is visible (mobile
+          top bar vs desktop sidebar header). Retires via bee_guide_dismissed. */}
+      {showGuideHint && (
+        <div style={{
+          position:'fixed', zIndex:10010,
+          background:'white', borderRadius:'12px', boxShadow:'0 12px 40px rgba(26,46,43,0.28)', padding:'14px',
+          ...(isMobile
+            ? { top:`${TOTAL_TOP + 48 + 6}px`, right:'10px', width:'min(260px, calc(100vw - 20px))' }
+            : { top:`${TOTAL_TOP + 62}px`, left:'12px', width:'196px' }),
+        }}>
+          {/* up-arrow toward the icon */}
+          <div style={{ position:'absolute', top:'-7px', ...(isMobile ? { right:'48px' } : { right:'14px' }), width:'14px', height:'14px', background:'white', transform:'rotate(45deg)', boxShadow:'-2px -2px 5px rgba(26,46,43,0.05)' }} />
+          <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.5, marginBottom:'12px', fontWeight:500 }}>
+            👋 New here? Check out the Hive Hub Guide
+          </p>
+          <div style={{ display:'flex', gap:'8px', justifyContent:'flex-end' }}>
+            <button onClick={dismissGuideHint} style={{ padding:'7px 12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:'pointer' }}>Got it</button>
+            <button onClick={openGuide} style={{ padding:'7px 12px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Show me</button>
+          </div>
+        </div>
+      )}
       {showGuide && (
         <HowToGuideModal
           onClose={() => setShowGuide(false)}
@@ -28545,10 +28604,11 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         <div style={{ padding:'20px 20px 16px', borderBottom:'1px solid rgba(168,201,196,0.08)' }}>
           <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
             <span style={{ fontSize:'22px' }}>🐝</span>
-            <div>
+            <div style={{ flex:1, minWidth:0 }}>
               <p style={{ fontSize:'14px', fontWeight:700, color:'white', fontFamily:'Georgia,serif', lineHeight:1 }}>Bee Hub</p>
               <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.5)', marginTop:'2px' }}>Bee Organized</p>
             </div>
+            <HelpIconButton onClick={openGuide} size={30} hitArea={36} title="Hive Hub Guide" />
           </div>
         </div>
         {/* Nav items */}
