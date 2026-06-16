@@ -28069,15 +28069,13 @@ if (Array.isArray(initialPeople)) return
   useEffect(() => {
     if (Array.isArray(initialBinPeople)) setBinPeople(initialBinPeople)
   }, [initialBinPeople])
-  const [followUps, setFollowUps]           = useState([
-    { id:'fu1', personId:'3',  personName:'Lisa Patel',      note:'Assessment follow-up - did she book?',       date:'2026-05-07', locationId:'loc_kc', createdAt:'May 5' },
-    { id:'fu2', personId:'2',  personName:'Jennifer Torres', note:'Re-engage - went quiet after first call',     date:'2026-05-09', locationId:'loc_kc', createdAt:'May 4' },
-    { id:'fu3', personId:'4',  personName:'Patricia Nguyen', note:'Invoice #2 unpaid - gentle nudge',            date:'2026-05-11', locationId:'loc_kc', createdAt:'May 3' },
-    { id:'fu4', personId:'5',  personName:'Karen Wallace',   note:'Final walkthrough check-in',                  date:'2026-05-22', locationId:'loc_kc', createdAt:'May 2' },
-    { id:'fu5', personId:null, personName:'Amy Brooks',      note:'Referral from Patricia - reach out',          date:'2026-05-28', locationId:'loc_kc', createdAt:'May 1' },
-    { id:'fu6', personId:null, personName:'Diana Walsh',     note:'Seasonal refresh - summer closet cleanout',  date:'2026-06-10', locationId:'loc_kc', createdAt:'Apr 30' },
-    { id:'fu7', personId:null, personName:'Rachel Hall',     note:'Pantry project - revisit after school year',  date:'2026-06-18', locationId:'loc_kc', createdAt:'Apr 28' },
-  ])
+  // Follow-up reminders are client-side ephemeral state (added via the
+  // "+ Reminder" button; not yet persisted server-side). Previously seeded
+  // with a mock loc_kc array, which surfaced fake clients (Lisa Patel, etc.)
+  // in the home-tab Needs Attention widget for any view without a real
+  // effectiveLocId — same bug class as the D_UPCOMING leak fixed in 176c909.
+  // Start empty so a fresh/cleared DB shows the real empty state.
+  const [followUps, setFollowUps]           = useState([])
   const [partners, setPartners]             = useState(Array.isArray(initialPartners) ? initialPartners : [])
   const [companies, setCompanies]           = useState(Array.isArray(initialCompanies) ? initialCompanies : [])
   const [users, setUsers]                   = useState(initialUsers ?? USERS_DATA)
