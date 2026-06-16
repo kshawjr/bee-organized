@@ -6490,7 +6490,7 @@ function PersonPanel({
                       const referredPartner = PARTNERS.find((p) => p.id === person.referredBy);
                       const referredCustomer =
                         !referredPartner && person.referredBy
-                          ? ALL_PEOPLE.find((p) => p.id === person.referredBy)
+                          ? allPeople.find((p) => p.id === person.referredBy)
                           : null;
                       const referredLabel = referredPartner
                         ? referredPartner.name
@@ -6512,7 +6512,7 @@ function PersonPanel({
                       )
                         .filter((p) => nameMatch(p.name) || nameMatch(p.company))
                         .slice(0, 6);
-                      const matchedClients = ALL_PEOPLE.filter(
+                      const matchedClients = allPeople.filter(
                         (p) =>
                           p.id !== person.id &&
                           p.locationId === person.locationId &&
