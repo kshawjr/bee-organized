@@ -26517,14 +26517,48 @@ function FranchiseReports({ range, locId, source, project, people, locFilter }) 
   const PARTNERS = useContext(PartnersContext)?.partners || []
   const myLocId = locFilter!=='all' ? locFilter : locId
   const myPeople = people.filter(p=>!p.isJunk&&(myLocId==='all'||p.locationId===myLocId))
-  const srcFiltered  = source==='all'  ? myPeople : myPeople.filter(p=>p.source===source)
+
+  // ─ Time-range filter (Bug 5) — applied upstream so every calc below reflects
+  // the selected range. Keys are lowercase to match ReportFilters
+  // ('7d'|'30d'|'90d'|'ytd'|'all'); same rolling-window pattern as the Home tab.
+  const rangeCutoff = (() => {
+    if (range === 'all') return 0
+    if (range === 'ytd') return new Date(new Date().getFullYear(), 0, 1).getTime()
+    const days = { '7d':7, '30d':30, '90d':90 }[range]
+    return days ? Date.now() - days*24*60*60*1000 : 0
+  })()
+  const rangeLeads = rangeCutoff === 0 ? myPeople : myPeople.filter(p => {
+    const c = new Date(p.created)
+    return !isNaN(c.getTime()) && c.getTime() >= rangeCutoff
+  })
+
+  const srcFiltered  = source==='all'  ? rangeLeads : rangeLeads.filter(p=>p.source===source)
   const projFiltered = project==='all' ? srcFiltered : srcFiltered.filter(p=>p.project===project)
 
   const active   = projFiltered.filter(p=>!['Closed Won','Closed Lost'].includes(p.stage))
   const closed   = projFiltered.filter(p=>p.stage==='Closed Won')
   const lost     = projFiltered.filter(p=>p.stage==='Closed Lost')
-  const revenue  = totalRevByLoc(myLocId)
-  const revData  = seedRevByLoc(myLocId)
+
+  // ─ Revenue (Bug 1) — real collected revenue from each client's paid invoices
+  // (mapLeadToPerson nests these on person.invoices[] with a paidAmount each).
+  const invoicePaid = p => (p.invoices || []).reduce((s, inv) => s + Number(inv.paidAmount || 0), 0)
+  const revenue = projFiltered.reduce((sum, p) => sum + invoicePaid(p), 0)
+
+  // ─ Revenue trend (Bug 2) — last 7 months generated dynamically from today,
+  // bucketing real paid invoices by the month they were paid (inv.paidAt).
+  const revNow = new Date()
+  const revMonths = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(revNow.getFullYear(), revNow.getMonth() - (6 - i), 1)
+    return { label: d.toLocaleString('en-US', { month: 'short' }), year: d.getFullYear(), month: d.getMonth() }
+  })
+  const revData = revMonths.map(m => projFiltered.reduce((sum, p) =>
+    sum + (p.invoices || []).reduce((s, inv) => {
+      if (!inv.paidAmount || !inv.paidAt) return s
+      const dt = new Date(inv.paidAt)
+      if (isNaN(dt.getTime()) || dt.getFullYear() !== m.year || dt.getMonth() !== m.month) return s
+      return s + Number(inv.paidAmount || 0)
+    }, 0), 0))
+  const revLabels = revMonths.map(m => m.label)
 
   const pipelineStages = STAGES.filter(s=>!['Closed Won','Closed Lost'].includes(s.key)).map(s=>({
     ...s, count: projFiltered.filter(p=>p.stage===s.key).length
@@ -26536,13 +26570,22 @@ function FranchiseReports({ range, locId, source, project, people, locFilter }) 
 
   const projCounts = REPORT_PROJECTS.map(p=>({ p, v:projFiltered.filter(x=>x.project===p).length })).filter(x=>x.v>0)
 
-  // Conversion funnel
+  // ─ Partner referrals (Bug 4) — real counts per partner from lead.referredBy
+  // (set by the referrer picker). Top 5 by count; partners with 0 are dropped.
+  const partnerReferrals = PARTNERS.filter(p=>!p.isDeleted)
+    .map(p => ({ ...p, refCount: projFiltered.filter(l => l.referredBy === p.id).length }))
+    .filter(p => p.refCount > 0)
+    .sort((a, b) => b.refCount - a.refCount)
+    .slice(0, 5)
+
+  // ─ Conversion funnel (Bug 3) — real stage progressions, not invented
+  // multipliers. Each step counts leads that reached that milestone.
   const funnelSteps = [
-    { label:'Total Client',      value:projFiltered.length },
-    { label:'Contacted',         value:Math.round(projFiltered.length*0.82) },
-    { label:'Assessment/Request',value:Math.round(projFiltered.length*0.55) },
-    { label:'Job Created',       value:Math.round(projFiltered.length*0.38) },
-    { label:'Closed Won',        value:closed.length||Math.round(projFiltered.length*0.22) },
+    { label:'Total Client',       value:projFiltered.length },
+    { label:'Contacted',          value:projFiltered.filter(p=>(p.outreachTimeline?.length||0)>0 || !!p.reachOutMethod).length },
+    { label:'Assessment/Request', value:projFiltered.filter(p=>!!p.assessment || !!p.requestRef).length },
+    { label:'Job Created',        value:projFiltered.filter(p=>(p.jobs?.length||0)>0).length },
+    { label:'Closed Won',         value:closed.length },
   ]
   const funnelMax = funnelSteps[0].value || 1
 
@@ -26564,7 +26607,7 @@ function FranchiseReports({ range, locId, source, project, people, locFilter }) 
 
       {/* Revenue trend */}
       <ReportCard title="Revenue Trend" subtitle="Monthly collected revenue">
-        <BarChart data={revData} labels={REPORT_MONTHS} color='#d4a046' formatVal={v=>`$${(v/1000).toFixed(0)}k`} />
+        <BarChart data={revData} labels={revLabels} color='#d4a046' formatVal={v=>`$${(v/1000).toFixed(0)}k`} />
         <div style={{ display:'flex', justifyContent:'space-between', marginTop:'8px', paddingTop:'8px', borderTop:'1px solid rgba(0,0,0,0.05)' }}>
           <span style={{ fontSize:'11px', color:'#8a9e9a' }}>Total collected</span>
           <span style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>${revenue.toLocaleString()}</span>
@@ -26618,13 +26661,15 @@ function FranchiseReports({ range, locId, source, project, people, locFilter }) 
 
       {/* Partner referrals */}
       <ReportCard title="Partner Referrals" subtitle="Top referring partners">
-        {PARTNERS.filter(p=>!p.isDeleted).slice(0,5).map((p,i)=>(
+        {partnerReferrals.length === 0 ? (
+          <p style={{ fontSize:'12px', color:'#8a9e9a', padding:'7px 0' }}>No partner referrals in this range yet.</p>
+        ) : partnerReferrals.map(p=>(
           <div key={p.id} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'7px 0', borderBottom:'1px solid rgba(0,0,0,0.04)' }}>
             <div style={{ width:'28px', height:'28px', borderRadius:'50%', background:'linear-gradient(135deg,#d4a046,#b07a20)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'10px', fontWeight:700, color:'white', flexShrink:0 }}>
               {p.name.split(' ').map(w=>w[0]).join('').slice(0,2)}
             </div>
             <span style={{ fontSize:'12px', color:'#1a2e2b', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name}</span>
-            <span style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>{[3,2,2,1,1][i]} referrals</span>
+            <span style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>{p.refCount} {p.refCount === 1 ? 'referral' : 'referrals'}</span>
           </div>
         ))}
       </ReportCard>
