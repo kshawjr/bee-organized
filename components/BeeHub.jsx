@@ -15582,9 +15582,12 @@ function CustomPathBuilder({ templates, onSave, onClose, smsEnabled=true }) {
 }
 
 // ─── Template Editor Popup ────────────────────────────────────────────────────
-function TemplateEditorPopup({ template, isNew=false, isMasterEdit=false, onSave, onClose }) {
-  const [name, setName]       = useState(template?.name||'')
-  const [type, setType]       = useState(template?.type||'email')
+function TemplateEditorPopup({ template, isNew=false, isMasterEdit=false, defaultName='', defaultType=null, onSave, onClose }) {
+  // defaultName/defaultType pre-fill a brand-new template (e.g. the step
+  // picker's inline "+ Create" affordance, which knows the typed name and the
+  // step's type). Existing callers pass neither, so behavior is unchanged.
+  const [name, setName]       = useState(template?.name || defaultName || '')
+  const [type, setType]       = useState(template?.type || defaultType || 'email')
   const [subject, setSubject] = useState(template?.subject||'')
   const [body, setBody]       = useState(template?.body||'')
   const [tab, setTab]         = useState('edit') // 'edit' | 'preview'
@@ -15799,15 +15802,24 @@ function TemplateQuickPeekModal({ template, showSelectButton=false, onSelect, on
   )
 }
 
-function StepTemplatePicker({ step, templates, onSelect, onClose, smsEnabled=true }) {
+function StepTemplatePicker({ step, templates, onSelect, onClose, smsEnabled=true, onCreateTemplate=null }) {
   const [search, setSearch] = useState('')
   // Template being peeked at in the preview modal (does NOT commit a selection).
   const [previewTmpl, setPreviewTmpl] = useState(null)
+  // When set, the inline "+ Create new template" editor is open. Holds the
+  // name to pre-fill. Only reachable when onCreateTemplate is provided.
+  const [creatingName, setCreatingName] = useState(null)
   const compatible = templates.filter(t =>
     t.type === step.type &&
     (smsEnabled || t.type !== 'sms') &&
     (!search || t.name.toLowerCase().includes(search.toLowerCase()))
   )
+  // Show the inline create affordance only when the user has typed a name that
+  // doesn't already exist (case-insensitive) among the step's compatible
+  // templates. Mirrors the referrer picker's inline "+ Create X" pattern.
+  const trimmedSearch = search.trim()
+  const exactMatch = trimmedSearch !== '' && compatible.some(t => t.name.toLowerCase() === trimmedSearch.toLowerCase())
+  const showCreateRow = !!onCreateTemplate && trimmedSearch !== '' && !exactMatch
   // Split into Master Templates vs My Templates so owners can clearly see
   // what's HQ-provided vs. their own customs. Falls back to a single group
   // when neither flag is present (legacy state from DEFAULT_TEMPLATES seed).
@@ -15871,6 +15883,23 @@ function StepTemplatePicker({ step, templates, onSelect, onClose, smsEnabled=tru
           {unflagged.length > 0 && masters.length === 0 && myTemplates.length === 0 && (
             <div style={{ display:'grid', gap:'6px' }}>{unflagged.map(renderRow)}</div>
           )}
+          {/* Inline create affordance — mirrors the referrer picker's "+ Create X"
+              row. Appears at the bottom of the results when the typed name isn't
+              already a compatible template. Opens the template editor pre-filled
+              with the typed name + the step's type; on save the new template is
+              auto-selected and the picker closes. */}
+          {showCreateRow && (
+            <button
+              type="button"
+              onClick={()=>setCreatingName(trimmedSearch)}
+              style={{ display:'flex', alignItems:'center', gap:'8px', width:'100%', marginTop:'8px', padding:'10px 14px', background:'rgba(168,201,196,0.08)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
+              <span style={{ fontSize:'14px', color:'#1a7a6e' }}>＋</span>
+              <div style={{ minWidth:0 }}>
+                <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>Create new template “{trimmedSearch}”</p>
+                <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Add as a new {step.type==='sms'?'text':step.type} template</p>
+              </div>
+            </button>
+          )}
         </div>
       </div>
 
@@ -15882,6 +15911,23 @@ function StepTemplatePicker({ step, templates, onSelect, onClose, smsEnabled=tru
         onSelect={(id)=>{ setPreviewTmpl(null); onSelect(id) }}
         onClose={()=>setPreviewTmpl(null)}
       />
+
+      {/* Inline new-template editor. onCreateTemplate persists the template and
+          returns its id; we then auto-select it (which closes the picker). */}
+      {creatingName!==null && onCreateTemplate && (
+        <TemplateEditorPopup
+          template={null}
+          isNew
+          defaultName={creatingName}
+          defaultType={step.type}
+          onSave={async(data)=>{
+            const newId = await onCreateTemplate(data)
+            setCreatingName(null)
+            if (newId) onSelect(newId)
+          }}
+          onClose={()=>setCreatingName(null)}
+        />
+      )}
     </div>
   )
 }
@@ -18407,6 +18453,39 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     setEditingTemplate(null)
   }
 
+  // Inline create from the step picker. Mirrors saveTemplate's POST branch but
+  // returns the new template's id so the picker can auto-select it, and leaves
+  // editingTemplate untouched (the picker hosts its own editor popup).
+  async function createTemplateFromPicker(data) {
+    try {
+      const payload = { name: data.name, type: data.type, subject: data.subject || null, body: data.body, tag: data.tag || 'custom' }
+      const res = await fetch('/api/templates', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const j = await res.json().catch(()=>({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      const r = j.template
+      const newId = r.legacy_id || r.id
+      setTemplates(prev => [...prev, {
+        id: newId, dbId: r.id, legacyId: r.legacy_id,
+        name: r.name, type: r.type, tag: r.tag || '', subject: r.subject || '', body: r.body || '',
+        isActive: r.is_active !== false,
+        locationUuid: r.location_uuid || null,
+        isMaster: r.is_master === true,
+        isOwnCustom: r.is_own_custom === true,
+        clonedFromId: r.cloned_from_id || null,
+        usedIn: [],
+      }])
+      return newId
+    } catch (e) {
+      alert('Could not create template: ' + (e?.message || e))
+      return null
+    }
+  }
+
   async function deleteTemplate(tpl) {
     if (!confirm(`Delete template "${tpl.name}"? This cannot be undone.`)) return
     const refId = tpl.dbId || tpl.legacyId || tpl.id
@@ -19306,6 +19385,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
           templates={templates}
           smsEnabled={settings.location.smsEnabled}
           onSelect={tid=>assignTemplate(editingStep.pathId, editingStep.step.id, tid)}
+          onCreateTemplate={createTemplateFromPicker}
           onClose={()=>setEditingStep(null)}
         />
       )}
