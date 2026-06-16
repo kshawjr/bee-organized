@@ -18555,7 +18555,6 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     { key:'templates', label:'Templates',  icon:'📝' },
     { key:'automation',label:'Automation', icon:'⚡' },
     { key:'notifs',    label:'Alerts',     icon:'🔔' },
-    { key:'manual',    label:'Manual',     icon:'📚' },
   ]
 
   return (
@@ -18577,19 +18576,19 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
               <option key={sec.key} value={sec.key}>{sec.icon} {sec.label}</option>
             ))}
           </select>
-          {/* Desktop pill row. Tabs visually group into 3 clusters —
-              Foundation (profile/location/team/billing), Customer Touch
-              (communication/templates/automation/alerts), Reference (manual) —
-              via thin dividers injected at cluster boundaries. */}
+          {/* Desktop pill row. Tabs visually group into 2 clusters —
+              Foundation (profile/location/team/billing) and Customer Touch
+              (communication/templates/automation/alerts) — separated by a wide
+              gap + a solid divider injected at the cluster boundary. */}
           <div className="bee-tab-pills" style={{ display:'flex', alignItems:'stretch', gap:'2px', width:'100%' }}>
             {sections.map((sec,i)=>{
-              const SHORT = { profile:'Profile', location:'Location', team:'Team', billing:'Billing', paths:'Communication', templates:'Templates', automation:'Automation', notifs:'Alerts', manual:'Manual' }
-              const clusterOf = k => ['paths','templates','automation','notifs'].includes(k) ? 'customer' : (k==='manual' ? 'reference' : 'foundation')
+              const SHORT = { profile:'Profile', location:'Location', team:'Team', billing:'Billing', paths:'Communication', templates:'Templates', automation:'Automation', notifs:'Alerts' }
+              const clusterOf = k => ['paths','templates','automation','notifs'].includes(k) ? 'customer' : 'foundation'
               const isActive = activeSection===sec.key
               const showDivider = i>0 && clusterOf(sec.key)!==clusterOf(sections[i-1].key)
               return (
                 <React.Fragment key={sec.key}>
-                  {showDivider && <div aria-hidden="true" style={{ alignSelf:'center', flex:'0 0 auto', width:'1px', height:'16px', background:'rgba(168,201,196,0.3)', margin:'0 5px' }} />}
+                  {showDivider && <div aria-hidden="true" style={{ alignSelf:'center', flex:'0 0 auto', width:'2px', height:'20px', background:'rgba(168,201,196,0.6)', borderRadius:'1px', margin:'0 13px' }} />}
                   <button
                     onClick={()=>{ setActiveSection(sec.key); window.scrollTo(0,0) }}
                     style={{ flex:1, padding:'7px 2px', borderRadius:'8px 8px 0 0', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'11px', fontWeight:isActive?600:400, background:isActive?'#f7f5f0':'transparent', color:isActive?'#1a2e2b':'rgba(168,201,196,0.7)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', WebkitTapHighlightColor:'transparent', minWidth:0 }}>
@@ -19359,26 +19358,6 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
 
             <div style={{ height:'1rem' }} />
           </>
-        )}
-
-        {activeSection==='manual'&&(
-          <div style={{ padding:'0 12px 24px' }}>
-            <SectionHeader title="Manual" desc="Open the Hive Hub Manual — your full reference, with videos, screenshots, and walkthroughs" />
-            <div style={{ background:'white', borderRadius:'12px', padding:'20px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', display:'flex', flexDirection:'column', alignItems:'flex-start', gap:'12px' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-                <div style={{ width:'40px', height:'40px', borderRadius:'10px', background:'rgba(26,46,43,0.08)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'22px' }}>📚</div>
-                <div>
-                  <p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Hive Hub Manual</p>
-                  <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'2px' }}>Reference articles you can flip through anytime</p>
-                </div>
-              </div>
-              <button
-                onClick={()=>onOpenManual&&onOpenManual()}
-                disabled={!onOpenManual}
-                style={{ padding:'10px 18px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontWeight:600, color:'white', cursor:onOpenManual?'pointer':'not-allowed', opacity:onOpenManual?1:0.5, fontFamily:'inherit' }}
-              >Open Manual</button>
-            </div>
-          </div>
         )}
 
       </div>
@@ -24126,10 +24105,29 @@ function LocationDrilldown({ loc, people, users, partners, onClose }) {
 //  - GuideEditor preserves local edits if the network POST fails
 // ═══════════════════════════════════════════════════════
 
-function HowToGuideModal({ onClose, onDismiss, slides }) {
+function HowToGuideModal({ onClose, onDismiss, slides, canEdit=false, onPersist=null }) {
   const activeSlides = Array.isArray(slides) ? slides : []
   const [idx, setIdx] = useState(0)
   const [dontShow, setDontShow] = useState(false)
+  const [editing, setEditing] = useState(false)
+  // Editor mode (super_admin / corporate only). Rendered before the empty-slide
+  // guards so the editor survives even if every slide is deleted mid-edit.
+  if (editing && canEdit) {
+    return (
+      <div style={{ position:'fixed', inset:0, zIndex:10100, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px', background:'rgba(26,46,43,0.55)' }}>
+        <div style={{ background:'#f7f5f0', borderRadius:'18px', width:'100%', maxWidth:'560px', maxHeight:'90vh', display:'flex', flexDirection:'column', boxShadow:'0 24px 80px rgba(0,0,0,0.25)', overflow:'hidden', fontFamily:'"DM Sans",system-ui,sans-serif' }}>
+          <div style={{ background:'#1a2e2b', padding:'14px 18px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px' }}>
+            <button onClick={() => setEditing(false)} style={{ background:'rgba(255,255,255,0.12)', border:'1px solid rgba(255,255,255,0.22)', color:'white', cursor:'pointer', fontSize:'12px', fontWeight:600, fontFamily:'inherit', borderRadius:'8px', padding:'6px 12px' }}>← Done editing</button>
+            <span style={{ fontSize:'12px', color:'rgba(255,255,255,0.85)', fontWeight:600 }}>Editing Hive Hub Guide</span>
+            <button onClick={onClose} style={{ background:'none', border:'none', color:'rgba(255,255,255,0.85)', cursor:'pointer', fontSize:'22px', padding:0, lineHeight:1, fontFamily:'inherit' }}>×</button>
+          </div>
+          <div style={{ flex:1, overflowY:'auto' }}>
+            <GuideEditor slides={activeSlides} onPersist={onPersist} />
+          </div>
+        </div>
+      </div>
+    )
+  }
   if (activeSlides.length === 0) return null
   const slide = activeSlides[Math.min(idx, activeSlides.length - 1)]
   if (!slide) return null
@@ -24156,7 +24154,12 @@ function HowToGuideModal({ onClose, onDismiss, slides }) {
               <option key={c} value={c} style={{ background:'white', color:'#1a2e2b' }}>{`${i+1} of ${chapters.length} — ${c}`}</option>
             ))}
           </select>
-          <button onClick={handleClose} style={{ background:'none', border:'none', color:'rgba(255,255,255,0.85)', cursor:'pointer', fontSize:'22px', padding:0, lineHeight:1, fontFamily:'inherit' }}>×</button>
+          <div style={{ display:'flex', alignItems:'center', gap:'8px', flexShrink:0 }}>
+            {canEdit && (
+              <button onClick={() => setEditing(true)} style={{ background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.18)', color:'white', cursor:'pointer', fontSize:'11px', fontWeight:600, fontFamily:'inherit', borderRadius:'6px', padding:'4px 9px', whiteSpace:'nowrap' }}>✏️ Manage slides</button>
+            )}
+            <button onClick={handleClose} style={{ background:'none', border:'none', color:'rgba(255,255,255,0.85)', cursor:'pointer', fontSize:'22px', padding:0, lineHeight:1, fontFamily:'inherit' }}>×</button>
+          </div>
         </div>
         <div style={{ padding:'24px 24px 16px', flex:1, overflowY:'auto', display:'flex', flexDirection:'column', alignItems:'center', textAlign:'center' }}>
           <div style={{ fontSize:'48px', marginBottom:'10px' }}>{slide.icon}</div>
@@ -28058,6 +28061,19 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             setShowGuide(false)
           }}
           slides={guideSlides}
+          canEdit={(role === 'super_admin' || role === 'corporate') && !viewAsUser}
+          onPersist={async newSlides => {
+            const res = await fetch('/api/guide-slides', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ slides: newSlides }),
+            })
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}))
+              throw new Error(err.error || `HTTP ${res.status}`)
+            }
+            setGuideSlides(newSlides)
+          }}
         />
       )}
       <ManualModal
