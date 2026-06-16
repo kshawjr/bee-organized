@@ -3238,19 +3238,22 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
   const subs   = { lookup:'Check if they already exist', found:'Select a job or add new', 'new-job':match?.name||'', notfound:'No match - create new record', 'new-details':'Fill in their details', quick:'Name + phone, done', multiple:'Select the right person' }
 
   return (
-    <Popup title={titles[phase]} onClose={onClose}>
-      <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'-10px', marginBottom:'1rem' }}>{subs[phase]}</p>
+    <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div onClick={e=>e.stopPropagation()} style={{ position:'relative', background:'white', width:'100%', maxWidth:'520px', maxHeight:'85vh', borderRadius:'16px', zIndex:1, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', boxSizing:'border-box', overflow:'hidden' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px', borderBottom:'1px solid #eee', flexShrink:0 }}>
+          <div>
+            <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'2px' }}>{titles[phase]}</h2>
+            <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{subs[phase]}</p>
+          </div>
+          <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
+        </div>
+        <div style={{ padding:'20px 24px', overflowY:'auto', flex:1 }}>
 
       {/* Lookup */}
       {phase==='lookup'&&(
         <div style={{ display:'grid', gap:'12px' }}>
           <input autoFocus style={inp} placeholder='Phone, email, or name...' value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>e.key==='Enter'&&doLookup()} />
-          <div style={{ display:'flex', gap:'8px' }}>
-            <button onClick={()=>setPhase('new-details')} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Skip</button>
-            <button onClick={doLookup} disabled={!query.trim()||searching} style={{ flex:2, padding:'11px', background:query.trim()?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:query.trim()?'white':'#9ca3af', cursor:query.trim()?'pointer':'not-allowed' }}>
-              {searching?'Searching...':'🔍 Check System'}
-            </button>
-          </div>
           <button onClick={()=>setPhase('quick')} style={{ padding:'10px', background:'rgba(212,160,70,0.06)', border:'1.5px dashed rgba(212,160,70,0.3)', borderRadius:'9px', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
             <span style={{ fontSize:'18px' }}>⚡</span>
             <div>
@@ -3290,12 +3293,6 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
               <p style={{ fontSize:'12px', color:'#dc2626', wordBreak:'break-word' }}>⚠ {errorMsg}</p>
             </div>
           )}
-          <div style={{ display:'flex', gap:'8px' }}>
-            <button onClick={()=>setPhase('lookup')} disabled={submitting} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:submitting?'#9ca3af':'#4a5e5a', cursor:submitting?'not-allowed':'pointer' }}>← Back</button>
-            <button onClick={createQuick} disabled={submitting||(!form.phone.trim()&&!form.firstName.trim())} style={{ flex:2, padding:'11px', background:submitting?'#f0c87e':((form.phone.trim()||form.firstName.trim())?'#d4a046':'#e5e7eb'), border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:(form.phone.trim()||form.firstName.trim())?'white':'#9ca3af', cursor:submitting?'wait':((form.phone.trim()||form.firstName.trim())?'pointer':'not-allowed') }}>
-              {submitting ? '⏳ Saving…' : '⚡ Save for later'}
-            </button>
-          </div>
         </div>
       )}
 
@@ -3329,10 +3326,6 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
                 </button>
               )
             })}
-          </div>
-          <div style={{ display:'flex', gap:'8px' }}>
-            <button onClick={()=>setPhase('lookup')} style={{ flex:1, padding:'10px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>← Search again</button>
-            <button onClick={()=>setPhase('new-details')} style={{ flex:1, padding:'10px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>None of these →</button>
           </div>
         </div>
       )}
@@ -3432,7 +3425,6 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
             )
           })()}
 
-          <button onClick={()=>{ setPhase('lookup'); setClientSelected(false) }} style={{ fontSize:'12px', color:'#b0c0bc', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', padding:'10px 0 0', textAlign:'center' }}>← Search again</button>
         </div>
       )}
 
@@ -3456,13 +3448,6 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
               <p style={{ fontSize:'12px', color:'#dc2626', wordBreak:'break-word' }}>⚠ {errorMsg}</p>
             </div>
           )}
-          <div style={{ display:'flex', gap:'8px' }}>
-            <button onClick={()=>setPhase('found')} disabled={submitting} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:submitting?'#9ca3af':'#4a5e5a', cursor:submitting?'not-allowed':'pointer' }}>← Back</button>
-            <button onClick={addExistingToHive} disabled={submitting||!form.project}
-              style={{ flex:2, padding:'11px', background:submitting?'#4a5e5a':(form.project?'#1a2e2b':'#e5e7eb'), border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:form.project?'white':'#9ca3af', cursor:submitting?'wait':(form.project?'pointer':'not-allowed') }}>
-              {submitting ? '⏳ Creating…' : '+ Create Job'}
-            </button>
-          </div>
         </div>
       )}
 
@@ -3475,10 +3460,6 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
               <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>No existing client found</p>
               <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{query?`"${query}" - `:''}Creating a new record.</p>
             </div>
-          </div>
-          <div style={{ display:'flex', gap:'8px' }}>
-            <button onClick={()=>setPhase('lookup')} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>← Back</button>
-            <button onClick={()=>setPhase('new-details')} style={{ flex:2, padding:'11px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:'pointer' }}>Fill in Details →</button>
           </div>
         </div>
       )}
@@ -3567,14 +3548,50 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
               <p style={{ fontSize:'12px', color:'#dc2626', wordBreak:'break-word' }}>⚠ {errorMsg}</p>
             </div>
           )}
-          <div style={{ display:'flex', gap:'8px', marginTop:'4px' }}>
+        </div>
+      )}
+
+        </div>{/* end scrollable body */}
+
+        {/* Sticky footer — phase-aware actions, always visible (matches AddCompanyModal). */}
+        <div style={{ display:'flex', gap:'8px', padding:'16px 24px', borderTop:'1px solid #eee', flexShrink:0 }}>
+          {phase==='lookup'&&(<>
+            <button onClick={()=>setPhase('new-details')} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Skip</button>
+            <button onClick={doLookup} disabled={!query.trim()||searching} style={{ flex:2, padding:'11px', background:query.trim()?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:query.trim()?'white':'#9ca3af', cursor:query.trim()?'pointer':'not-allowed' }}>
+              {searching?'Searching...':'🔍 Check System'}
+            </button>
+          </>)}
+          {phase==='quick'&&(<>
+            <button onClick={()=>setPhase('lookup')} disabled={submitting} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:submitting?'#9ca3af':'#4a5e5a', cursor:submitting?'not-allowed':'pointer' }}>← Back</button>
+            <button onClick={createQuick} disabled={submitting||(!form.phone.trim()&&!form.firstName.trim())} style={{ flex:2, padding:'11px', background:submitting?'#f0c87e':((form.phone.trim()||form.firstName.trim())?'#d4a046':'#e5e7eb'), border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:(form.phone.trim()||form.firstName.trim())?'white':'#9ca3af', cursor:submitting?'wait':((form.phone.trim()||form.firstName.trim())?'pointer':'not-allowed') }}>
+              {submitting ? '⏳ Saving…' : '⚡ Save for later'}
+            </button>
+          </>)}
+          {phase==='multiple'&&(<>
+            <button onClick={()=>setPhase('lookup')} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>← Search again</button>
+            <button onClick={()=>setPhase('new-details')} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>None of these →</button>
+          </>)}
+          {phase==='found'&&(
+            <button onClick={()=>{ setPhase('lookup'); setClientSelected(false) }} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>← Search again</button>
+          )}
+          {phase==='new-job'&&(<>
+            <button onClick={()=>setPhase('found')} disabled={submitting} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:submitting?'#9ca3af':'#4a5e5a', cursor:submitting?'not-allowed':'pointer' }}>← Back</button>
+            <button onClick={addExistingToHive} disabled={submitting||!form.project} style={{ flex:2, padding:'11px', background:submitting?'#4a5e5a':(form.project?'#1a2e2b':'#e5e7eb'), border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:form.project?'white':'#9ca3af', cursor:submitting?'wait':(form.project?'pointer':'not-allowed') }}>
+              {submitting ? '⏳ Creating…' : '+ Create Job'}
+            </button>
+          </>)}
+          {phase==='notfound'&&(<>
+            <button onClick={()=>setPhase('lookup')} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>← Back</button>
+            <button onClick={()=>setPhase('new-details')} style={{ flex:2, padding:'11px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:'pointer' }}>Fill in Details →</button>
+          </>)}
+          {phase==='new-details'&&(<>
             <button onClick={()=>setPhase('lookup')} disabled={submitting} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:submitting?'#9ca3af':'#4a5e5a', cursor:submitting?'not-allowed':'pointer' }}>← Back</button>
             <button onClick={createNew} disabled={submitting||!form.firstName.trim()||(!(form.phone.trim()||form.email.trim()))} style={{ flex:2, padding:'11px', background:submitting?'#4a5e5a':((form.firstName.trim()&&(form.phone.trim()||form.email.trim()))?'#1a2e2b':'#e5e7eb'), border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:(form.firstName.trim()&&(form.phone.trim()||form.email.trim()))?'white':'#9ca3af', cursor:submitting?'wait':((form.firstName.trim()&&(form.phone.trim()||form.email.trim()))?'pointer':'not-allowed') }}>
               {submitting ? '⏳ Creating…' : '+ Create Client'}
             </button>
-          </div>
+          </>)}
         </div>
-      )}
+      </div>{/* end card */}
 
       {/* Partner picker sheet */}
       {showPartnerPicker&&(
@@ -3629,7 +3646,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
           }}
         />
       )}
-    </Popup>
+    </div>
   )
 }
 
