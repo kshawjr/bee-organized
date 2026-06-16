@@ -15846,16 +15846,15 @@ function StepTemplatePicker({ step, templates, onSelect, onClose, smsEnabled=tru
   }
 
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:10004, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
+    <div style={{ position:'fixed', inset:0, zIndex:10004, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
       <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
-      <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'20px 20px 0 0', padding:'1rem', zIndex:1, maxHeight:'80vh', display:'flex', flexDirection:'column', boxSizing:'border-box', overflowX:'hidden', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
-        <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'0 auto 1rem', flexShrink:0 }} />
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px', flexShrink:0 }}>
-          <h3 style={{ fontSize:'16px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>Pick Template</h3>
-          <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
+      <div onClick={e=>e.stopPropagation()} style={{ position:'relative', background:'white', width:'100%', maxWidth:'520px', maxHeight:'85vh', borderRadius:'16px', zIndex:1, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', boxSizing:'border-box', overflow:'hidden' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px', borderBottom:'1px solid #eee', flexShrink:0 }}>
+          <h3 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>Pick Template</h3>
+          <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
         </div>
-        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder='Search templates...' style={{ width:'100%', padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', marginBottom:'10px', flexShrink:0 }} />
-        <div style={{ flex:1, overflowY:'auto', display:'flex', flexDirection:'column' }}>
+        <div style={{ flex:1, overflowY:'auto', padding:'16px 24px', display:'flex', flexDirection:'column' }}>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder='Search templates...' style={{ width:'100%', padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', marginBottom:'10px', flexShrink:0 }} />
           {compatible.length===0 && <p style={{ fontSize:'13px', color:'#8a9e9a', textAlign:'center', padding:'1rem' }}>No {step.type} templates found</p>}
           {masters.length > 0 && (
             <>
