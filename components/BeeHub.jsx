@@ -15758,6 +15758,47 @@ function TemplateEditorPopup({ template, isNew=false, isMasterEdit=false, onSave
 
 // ─── Template Editor Popup ────────────────────────────────────────────────────
 
+// Shared quick-peek preview — like a macOS file thumbnail. Shows a template's
+// subject + body without committing a selection. Merge fields stay as literal
+// {{placeholders}} since there's no lead context here. Used by both the
+// StepTemplatePicker (showSelectButton=true, so the peek can commit a choice)
+// and the Settings → Paths overview (showSelectButton=false, Close-only).
+// Pass template=null to keep it closed.
+function TemplateQuickPeekModal({ template, showSelectButton=false, onSelect, onClose }) {
+  if (!template) return null
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:10006, display:'flex', alignItems:'center', justifyContent:'center', padding:'14px' }}>
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'560px', maxHeight:'85vh', borderRadius:'14px', display:'flex', flexDirection:'column', zIndex:1, boxShadow:'0 8px 40px rgba(26,46,43,0.3)', overflow:'hidden' }}>
+        <div style={{ padding:'14px 16px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', alignItems:'center', gap:'8px', flexShrink:0 }}>
+          <span style={{ fontSize:'16px' }}>{template.type==='email'?'📧':template.type==='sms'?'💬':'📞'}</span>
+          <div style={{ flex:1, minWidth:0 }}>
+            <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{template.name}</p>
+            <p style={{ fontSize:'10px', color:'#8a9e9a' }}>Preview · merge fields show as {'{{placeholders}}'}</p>
+          </div>
+          <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>×</button>
+        </div>
+        <div style={{ padding:'16px', overflowY:'auto', flex:1 }}>
+          {template.type==='email' && (
+            <div style={{ marginBottom:'12px', paddingBottom:'10px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
+              <span style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>Subject</span>
+              <p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b', marginTop:'2px' }}>{template.subject || <span style={{ color:'#c8d8d4', fontWeight:400 }}>(no subject)</span>}</p>
+            </div>
+          )}
+          <span style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>{template.type==='email'?'Body':'Message'}</span>
+          <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.6, whiteSpace:'pre-wrap', marginTop:'4px' }}>{template.body || ''}</p>
+        </div>
+        <div style={{ padding:'12px 16px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px', justifyContent:'flex-end', flexShrink:0 }}>
+          <button onClick={onClose} style={{ padding:'8px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>Close</button>
+          {showSelectButton && (
+            <button onClick={()=>{ onSelect && onSelect(template.id) }} style={{ padding:'8px 16px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Select this {template.type==='email'?'email':template.type==='sms'?'text':'template'}</button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function StepTemplatePicker({ step, templates, onSelect, onClose, smsEnabled=true }) {
   const [search, setSearch] = useState('')
   // Template being peeked at in the preview modal (does NOT commit a selection).
@@ -15834,38 +15875,14 @@ function StepTemplatePicker({ step, templates, onSelect, onClose, smsEnabled=tru
         </div>
       </div>
 
-      {/* Quick-peek preview — like a macOS file thumbnail. Shows the rendered
-          subject + body without committing the selection. Merge fields stay as
-          literal {{placeholders}} since there's no lead context here. */}
-      {previewTmpl && (
-        <div style={{ position:'fixed', inset:0, zIndex:10006, display:'flex', alignItems:'center', justifyContent:'center', padding:'14px' }}>
-          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={()=>setPreviewTmpl(null)} />
-          <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'560px', maxHeight:'85vh', borderRadius:'14px', display:'flex', flexDirection:'column', zIndex:1, boxShadow:'0 8px 40px rgba(26,46,43,0.3)', overflow:'hidden' }}>
-            <div style={{ padding:'14px 16px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', alignItems:'center', gap:'8px', flexShrink:0 }}>
-              <span style={{ fontSize:'16px' }}>{previewTmpl.type==='email'?'📧':previewTmpl.type==='sms'?'💬':'📞'}</span>
-              <div style={{ flex:1, minWidth:0 }}>
-                <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{previewTmpl.name}</p>
-                <p style={{ fontSize:'10px', color:'#8a9e9a' }}>Preview · merge fields show as {'{{placeholders}}'}</p>
-              </div>
-              <button onClick={()=>setPreviewTmpl(null)} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>×</button>
-            </div>
-            <div style={{ padding:'16px', overflowY:'auto', flex:1 }}>
-              {previewTmpl.type==='email' && (
-                <div style={{ marginBottom:'12px', paddingBottom:'10px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
-                  <span style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>Subject</span>
-                  <p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b', marginTop:'2px' }}>{previewTmpl.subject || <span style={{ color:'#c8d8d4', fontWeight:400 }}>(no subject)</span>}</p>
-                </div>
-              )}
-              <span style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>{previewTmpl.type==='email'?'Body':'Message'}</span>
-              <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.6, whiteSpace:'pre-wrap', marginTop:'4px' }}>{previewTmpl.body || ''}</p>
-            </div>
-            <div style={{ padding:'12px 16px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px', justifyContent:'flex-end', flexShrink:0 }}>
-              <button onClick={()=>setPreviewTmpl(null)} style={{ padding:'8px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>Close</button>
-              <button onClick={()=>{ const id = previewTmpl.id; setPreviewTmpl(null); onSelect(id) }} style={{ padding:'8px 16px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Select this {previewTmpl.type==='email'?'email':previewTmpl.type==='sms'?'text':'template'}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Quick-peek preview (shared) — peeking does NOT commit a selection;
+          the modal's "Select this …" button does, via onSelect. */}
+      <TemplateQuickPeekModal
+        template={previewTmpl}
+        showSelectButton
+        onSelect={(id)=>{ setPreviewTmpl(null); onSelect(id) }}
+        onClose={()=>setPreviewTmpl(null)}
+      />
     </div>
   )
 }
@@ -18097,6 +18114,9 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   const [pathsErr, setPathsErr] = useState(null)
   const [editingTemplate, setEditingTemplate] = useState(null) // template obj or 'new'
   const [previewTemplate, setPreviewTemplate] = useState(null)
+  // Quick-peek for the Paths overview step rows — read-only subject+body peek
+  // (no selection) shared with StepTemplatePicker. null = closed.
+  const [peekTemplate, setPeekTemplate] = useState(null)
   const [editingStep, setEditingStep]         = useState(null) // { pathId, step }
   const [expandedPath, setExpandedPath]       = useState(null)
   const [addingStepToPath, setAddingStepToPath] = useState(null)
@@ -18819,6 +18839,9 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                                         )}
                                         {!tmpl&&<span style={{ fontSize:'10px', color:'#e5a0a0' }}>No template assigned</span>}
                                       </div>
+                                      {tmpl&&(
+                                        <button onClick={()=>setPeekTemplate(tmpl)} title="Preview this email" style={{ fontSize:'12px', color:'#6366f1', background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'5px', padding:'2px 7px', cursor:'pointer', fontFamily:'inherit', flexShrink:0, lineHeight:1.4 }}>👁</button>
+                                      )}
                                       <button onClick={()=>setEditingStep({pathId,step})} style={{ fontSize:'10px', color:'#a8c9c4', background:'none', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'5px', padding:'2px 7px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>Change</button>
                                     </div>
                                   )
@@ -19267,6 +19290,8 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
 
       {/* Template editor popup */}
       {previewTemplate&&<TemplatePreviewModal template={previewTemplate} settings={settings} onClose={()=>setPreviewTemplate(null)} />}
+      {/* Quick-peek from the Paths overview step rows — Close-only, no selection. */}
+      <TemplateQuickPeekModal template={peekTemplate} onClose={()=>setPeekTemplate(null)} />
       {editingTemplate&&(
         <TemplateEditorPopup
           template={editingTemplate==='new' ? null : editingTemplate.tpl}
