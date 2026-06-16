@@ -24945,7 +24945,7 @@ function SlideEditFormManual({ slide, isNew, onSave, onCancel, allChapters = [] 
   )
 }
 
-function ContentEditor({ guideSlides, guidePersist, manualSlides, manualPersist }) {
+function ContentEditor({ guideSlides, guidePersist, manualSlides, manualPersist, locations=[] }) {
   const [activeContent, setActiveContent] = useState(() => {
     if (typeof window === 'undefined') return 'guide'
     return localStorage.getItem('bee_content_editor_active') || 'guide'
@@ -24994,7 +24994,7 @@ function ContentEditor({ guideSlides, guidePersist, manualSlides, manualPersist 
         <MasterDripPathsEditor />
       )}
       {activeContent === 'templates' && (
-        <MasterTemplatesEditor />
+        <MasterTemplatesEditor locations={locations} />
       )}
       {activeContent === 'variables' && (
         <VariableReference />
@@ -25007,12 +25007,14 @@ function ContentEditor({ guideSlides, guidePersist, manualSlides, manualPersist 
 // master template library. Lives in Admin/Corp → Content tab. Edits here
 // propagate live to every drip path step that still references a master
 // (no copy semantics).
-function MasterTemplatesEditor() {
+function MasterTemplatesEditor({ locations = [] }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
   const [editing, setEditing] = useState(null) // 'new' | { tpl }
   const [previewing, setPreviewing] = useState(null)
+  const [scopeFilter, setScopeFilter] = useState('all') // 'all' | 'masters' | 'customs'
+  const [expandedUsage, setExpandedUsage] = useState(() => new Set())
 
   useEffect(() => {
     let cancelled = false
@@ -25021,8 +25023,11 @@ function MasterTemplatesEditor() {
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(j => {
         if (cancelled) return
+        // Admins see the whole library — masters (location_uuid IS NULL) plus
+        // every location's customs — so the scope badges below have something
+        // to sort. (Owners hit the SettingsScreen surface, not this one.)
         const all = Array.isArray(j?.templates) ? j.templates : []
-        setRows(all.filter(r => r.is_master))
+        setRows(all)
         setErr(null)
       })
       .catch(e => { if (!cancelled) setErr(String(e?.message || e)) })
@@ -25083,57 +25088,187 @@ function MasterTemplatesEditor() {
     call:  { icon:'📞', label:'Call Scripts',    color:'#f59e0b' },
   }
 
+  // Scope colours — masters in teal (corp/neutral), location customs in a
+  // distinct purple so the eye sorts the two at a glance.
+  const MASTER = { color:'#0f766e', bg:'rgba(15,118,110,0.1)' }
+  const CUSTOM = { color:'#9333ea', bg:'rgba(147,51,234,0.1)' }
+
+  const locName = id => (locations.find(l => l.id === id) || {}).name || null
+  const byId = new Map(rows.map(r => [r.id, r]))
+  const masterName = id => (byId.get(id) || {}).name || null
+
+  function toggleUsage(id) {
+    setExpandedUsage(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  const masters = rows.filter(r => r.is_master)
+  const customs = rows.filter(r => !r.is_master)
+
+  // Customs grouped by their owning location, ordered by location name.
+  const customsByLoc = new Map()
+  for (const r of customs) {
+    const list = customsByLoc.get(r.location_uuid) || []
+    list.push(r)
+    customsByLoc.set(r.location_uuid, list)
+  }
+  const locGroups = Array.from(customsByLoc.entries())
+    .map(([uuid, items]) => ({ uuid, name: locName(uuid) || 'Unknown location', items }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  const showMasters = scopeFilter === 'all' || scopeFilter === 'masters'
+  const showCustoms = scopeFilter === 'all' || scopeFilter === 'customs'
+
+  // One template row — scope badge, usage (masters) and forked-from (customs).
+  function renderRow(tpl, i, group) {
+    const tc = TYPE_META[tpl.type] || TYPE_META.email
+    const isMaster = tpl.is_master
+    const fromName = !isMaster && tpl.cloned_from_id ? masterName(tpl.cloned_from_id) : null
+    const usage = Array.isArray(tpl.usage) ? tpl.usage : []
+    const usageCount = typeof tpl.usage_count === 'number' ? tpl.usage_count : usage.length
+    const expanded = expandedUsage.has(tpl.id)
+    return (
+      <div key={tpl.id} style={{ background:'white', borderBottom: i < group.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
+        <div style={{ display:'flex', alignItems:'flex-start', gap:'12px', padding:'12px 14px' }}>
+          <div style={{ width:'36px', height:'36px', borderRadius:'9px', background:`${tc.color}12`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px', flexShrink:0, marginTop:'1px' }}>{tc.icon}</div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:'7px', marginBottom:'2px', flexWrap:'wrap' }}>
+              <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{tpl.name}</p>
+              {isMaster ? (
+                <span style={{ fontSize:'10px', color:MASTER.color, background:MASTER.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:700, letterSpacing:'0.3px' }}>🏢 MASTER</span>
+              ) : (
+                <span style={{ fontSize:'10px', color:CUSTOM.color, background:CUSTOM.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:700, letterSpacing:'0.3px' }}>📍 {(locName(tpl.location_uuid) || 'Unknown location').toUpperCase()}</span>
+              )}
+              {tpl.legacy_id && <span style={{ fontSize:'10px', color:'#8a9e9a' }}>· {tpl.legacy_id}</span>}
+            </div>
+            <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+              {tpl.type === 'email' && tpl.subject ? tpl.subject : (tpl.body || '').slice(0, 60) + '…'}
+            </p>
+            {fromName && (
+              <p style={{ fontSize:'10px', color:CUSTOM.color, marginTop:'3px' }}>↳ Forked from: {fromName}</p>
+            )}
+            {isMaster && (usageCount > 0 ? (
+              <button
+                onClick={()=>toggleUsage(tpl.id)}
+                style={{ marginTop:'5px', padding:'2px 9px', background:'rgba(15,118,110,0.07)', border:'1px solid rgba(15,118,110,0.2)', borderRadius:'20px', fontSize:'10px', fontFamily:'inherit', fontWeight:600, color:MASTER.color, cursor:'pointer' }}
+              >
+                {expanded ? '▾' : '▸'} Used in {usageCount} {usageCount === 1 ? 'path' : 'paths'}
+              </button>
+            ) : (
+              <p style={{ fontSize:'10px', color:'#b6c2bf', marginTop:'5px' }}>Not used in any path</p>
+            ))}
+            {isMaster && expanded && usage.length > 0 && (
+              <div style={{ marginTop:'6px', display:'flex', flexDirection:'column', gap:'2px', paddingLeft:'2px' }}>
+                {usage.map((u, ui) => (
+                  <p key={ui} style={{ fontSize:'10px', color:'#8a9e9a' }}>• {u.path} · Step {u.step}</p>
+                ))}
+              </div>
+            )}
+          </div>
+          <div style={{ display:'flex', gap:'6px', flexShrink:0 }}>
+            <button onClick={()=>setPreviewing(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
+            {isMaster && (
+              <button onClick={()=>setEditing({ tpl })} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Edit</button>
+            )}
+            {isMaster && !tpl.legacy_id && (
+              <button onClick={()=>deleteMaster(tpl)} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#ef4444', cursor:'pointer' }}>Delete</button>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Within a scope group, keep the email/sms/call sub-grouping.
+  function renderTypeGroups(items) {
+    return ['email','sms','call'].map(type => {
+      const group = items.filter(r => r.type === type)
+      if (!group.length) return null
+      const tc = TYPE_META[type]
+      return (
+        <div key={type} style={{ marginBottom:'14px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'8px' }}>
+            <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px' }}>{tc.icon} {tc.label}</p>
+          </div>
+          <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+            {group.map((tpl, i) => renderRow(tpl, i, group))}
+          </div>
+        </div>
+      )
+    })
+  }
+
+  // Scope section header — coloured accent bar + label + count.
+  function scopeHeader(label, scope, count) {
+    return (
+      <div style={{ display:'flex', alignItems:'center', gap:'9px', marginBottom:'12px', paddingBottom:'6px', borderBottom:`2px solid ${scope.bg}` }}>
+        <span style={{ width:'4px', height:'18px', borderRadius:'2px', background:scope.color }} />
+        <p style={{ fontSize:'14px', fontWeight:700, color:scope.color, fontFamily:'Georgia,serif' }}>{label}</p>
+        <span style={{ fontSize:'10px', color:scope.color, background:scope.bg, padding:'1px 8px', borderRadius:'20px', fontWeight:700 }}>{count}</span>
+      </div>
+    )
+  }
+
+  const filterPills = [
+    ['all', 'All', rows.length],
+    ['masters', '🏢 Masters', masters.length],
+    ['customs', '📍 Customs', customs.length],
+  ]
+
   return (
     <div style={{ padding:'14px 1.25rem 32px' }}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'10px' }}>
         <div>
-          <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>📧 Master Email Templates</p>
-          <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>Edits here propagate live to every drip step that references this master (no copy semantics).</p>
+          <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>📧 Templates · All Locations</p>
+          <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>Masters (corp-wide) propagate live to every drip step referencing them. Location customs are independent copies.</p>
         </div>
         <button onClick={()=>setEditing('new')} style={{ padding:'8px 14px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>+ New Master</button>
       </div>
 
-      {loading && <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Loading masters…</p>}
-      {err && <p style={{ fontSize:'12px', color:'#ef4444' }}>Could not load masters: {err}</p>}
+      {!loading && !err && (
+        <div style={{ display:'flex', gap:'6px', marginBottom:'16px' }}>
+          {filterPills.map(([key, label, count]) => {
+            const active = scopeFilter === key
+            return (
+              <button
+                key={key}
+                onClick={()=>setScopeFilter(key)}
+                style={{ padding:'5px 12px', background: active ? '#1a2e2b' : 'white', border:'1px solid ' + (active ? '#1a2e2b' : 'rgba(0,0,0,0.12)'), borderRadius:'20px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color: active ? 'white' : '#4a5e5a', cursor:'pointer' }}
+              >
+                {label} ({count})
+              </button>
+            )
+          })}
+        </div>
+      )}
 
-      {!loading && !err && ['email','sms','call'].map(type => {
-        const group = rows.filter(r => r.type === type)
-        if (!group.length) return null
-        const tc = TYPE_META[type]
-        return (
-          <div key={type} style={{ marginBottom:'18px' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'8px' }}>
-              <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px' }}>{tc.icon} {tc.label}</p>
+      {loading && <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Loading templates…</p>}
+      {err && <p style={{ fontSize:'12px', color:'#ef4444' }}>Could not load templates: {err}</p>}
+
+      {!loading && !err && (
+        <>
+          {showMasters && masters.length > 0 && (
+            <div style={{ marginBottom:'24px' }}>
+              {scopeHeader('🏢 Master Templates', MASTER, masters.length)}
+              {renderTypeGroups(masters)}
             </div>
-            <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
-              {group.map((tpl, i) => (
-                <div key={tpl.id} style={{ background:'white', borderBottom: i < group.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
-                  <div style={{ display:'flex', alignItems:'flex-start', gap:'12px', padding:'12px 14px' }}>
-                    <div style={{ width:'36px', height:'36px', borderRadius:'9px', background:`${tc.color}12`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px', flexShrink:0, marginTop:'1px' }}>{tc.icon}</div>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:'7px', marginBottom:'2px' }}>
-                        <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{tpl.name}</p>
-                        <span style={{ fontSize:'10px', color:'#8a9e9a', background:'rgba(0,0,0,0.05)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>Master</span>
-                        {tpl.legacy_id && <span style={{ fontSize:'10px', color:'#8a9e9a' }}>· {tpl.legacy_id}</span>}
-                      </div>
-                      <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                        {type === 'email' && tpl.subject ? tpl.subject : (tpl.body || '').slice(0, 60) + '…'}
-                      </p>
-                    </div>
-                    <div style={{ display:'flex', gap:'6px', flexShrink:0 }}>
-                      <button onClick={()=>setPreviewing(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
-                      <button onClick={()=>setEditing({ tpl })} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Edit</button>
-                      {!tpl.legacy_id && (
-                        <button onClick={()=>deleteMaster(tpl)} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#ef4444', cursor:'pointer' }}>Delete</button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
+          )}
+          {showCustoms && locGroups.map(g => (
+            <div key={g.uuid} style={{ marginBottom:'24px' }}>
+              {scopeHeader('📍 ' + g.name, CUSTOM, g.items.length)}
+              {renderTypeGroups(g.items)}
             </div>
-          </div>
-        )
-      })}
+          ))}
+          {((scopeFilter === 'masters' && !masters.length) ||
+            (scopeFilter === 'customs' && !locGroups.length) ||
+            (scopeFilter === 'all' && !rows.length)) && (
+            <p style={{ fontSize:'12px', color:'#8a9e9a' }}>No templates to show.</p>
+          )}
+        </>
+      )}
 
       {previewing && (
         <TemplatePreviewModal
@@ -25557,6 +25692,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
               }
               setManualSlides(newSlides)
             }}
+            locations={locations}
           />
         ) : adminTab==='pricing' ? (
           <PricingManagementTab />

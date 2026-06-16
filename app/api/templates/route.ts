@@ -31,6 +31,39 @@ function decorate(row: any, ownLocId: string | null) {
   }
 }
 
+// Admin-only: attach a `usage` list + `usage_count` to each template showing
+// which drip path steps reference it as a live master
+// (drip_path_steps.master_template_id). Mutates rows in place. Owners don't
+// see the admin templates surface, so we skip this for them and keep their
+// payload identical. Failures here are non-fatal — usage is a display aid, so
+// we leave usage empty rather than fail the whole list.
+async function attachUsage(rows: any[]) {
+  const [{ data: steps }, { data: paths }] = await Promise.all([
+    supabaseService
+      .from('drip_path_steps')
+      .select('master_template_id, step_order, drip_path_id')
+      .not('master_template_id', 'is', null),
+    supabaseService
+      .from('drip_paths')
+      .select('id, name'),
+  ])
+
+  const pathName = new Map((paths ?? []).map((p: any) => [p.id, p.name]))
+  const byTemplate = new Map<string, { path: string; step: number }[]>()
+  for (const s of steps ?? []) {
+    const list = byTemplate.get(s.master_template_id) ?? []
+    list.push({ path: pathName.get(s.drip_path_id) ?? 'Unknown path', step: s.step_order })
+    byTemplate.set(s.master_template_id, list)
+  }
+
+  for (const r of rows) {
+    const list = byTemplate.get(r.id) ?? []
+    list.sort((a, b) => a.path.localeCompare(b.path) || a.step - b.step)
+    r.usage = list
+    r.usage_count = list.length
+  }
+}
+
 export async function GET() {
   const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -67,9 +100,19 @@ export async function GET() {
     return NextResponse.json({ error: 'list_failed' }, { status: 500 })
   }
 
-  return NextResponse.json({
-    templates: (data ?? []).map(r => decorate(r, hubUser.location_id ?? null)),
-  })
+  const templates = (data ?? []).map(r => decorate(r, hubUser.location_id ?? null))
+
+  // Only admins see the all-templates surface that renders usage; computing it
+  // there avoids two extra queries on every owner page load.
+  if (isAdmin(hubUser.role)) {
+    try {
+      await attachUsage(templates)
+    } catch (e: any) {
+      console.error('[/api/templates GET] usage attach failed:', e?.message || e)
+    }
+  }
+
+  return NextResponse.json({ templates })
 }
 
 export async function POST(req: NextRequest) {
