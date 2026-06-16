@@ -14720,7 +14720,7 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
             {[['partners','Partners'],['contacts','Contacts'],['companies','Companies']].map(([v,label])=>(
               <button key={v} onClick={()=>{ setPartnerTab(v); setSelectedCompany(null) }}
                 style={{ flex:1, padding:'7px', borderRadius:'7px', border:'none', cursor:'pointer', fontSize:'12px', fontFamily:'inherit', fontWeight:500, background:partnerTab===v?'rgba(168,201,196,0.2)':'transparent', color:partnerTab===v?'white':'rgba(168,201,196,0.5)', transition:'all 0.15s', whiteSpace:'nowrap' }}>
-                {label}{v==='contacts'&&contactPool.length>0?` (${contactPool.length})`:v==='companies'&&allCompanies.length>0?` (${allCompanies.length})`:''}
+                {label}{v==='contacts'&&contactPool.length>0?` (${contactPool.length})`:v==='companies'&&allCompanies.length>0?` (${allCompanies.length})`:v==='partners'&&partnerPool.length>0?` (${partnerPool.length})`:''}
               </button>
             ))}
           </div>
