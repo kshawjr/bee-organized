@@ -14699,6 +14699,9 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
   const [companyWinW, setCompanyWinW] = useState(0)
   React.useEffect(()=>{ function check(){ setCompanyWinW(window.innerWidth) } check(); window.addEventListener('resize',check); return ()=>window.removeEventListener('resize',check) },[])
   const companyIsMobile = companyWinW > 0 && companyWinW < 768
+  const [companyDeleteConfirm, setCompanyDeleteConfirm] = useState(false) // company pending delete confirmation
+  const [companyDeleteError, setCompanyDeleteError]     = useState(null)  // inline error if DELETE fails
+  const [companyDeleting, setCompanyDeleting]           = useState(false) // delete request in flight
   const [showFilters, setShowFilters] = useState(false)
   const [stageFilter, setStageFilter] = useState('')
   const [specFilter, setSpecFilter]   = useState('')
@@ -15034,6 +15037,52 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
                   </div>
                 )
               })()}
+              {/* Delete Company — destructive action at the bottom of the body,
+                  mirroring PartnerPanel's delete affordance. */}
+              <div style={{ padding:'12px 16px 20px', borderTop:'1px solid rgba(0,0,0,0.06)' }}>
+                <button onClick={()=>{ setCompanyDeleteError(null); setCompanyDeleteConfirm(true) }}
+                  style={{ width:'100%', padding:'11px', background:'rgba(239,68,68,0.06)', border:'1.5px solid rgba(239,68,68,0.2)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#ef4444', cursor:'pointer' }}>
+                  🗑️ Delete Company
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete-company confirmation — linked count, inline error, stays open on failure */}
+      {selectedCompany&&companyDeleteConfirm&&(
+        <div style={companyIsMobile
+          ? { position:'fixed', inset:0, zIndex:10006, display:'flex', alignItems:'flex-end' }
+          : { position:'fixed', inset:0, zIndex:10006, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
+          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={()=>{ if(!companyDeleting){ setCompanyDeleteConfirm(false); setCompanyDeleteError(null) } }} />
+          <div style={companyIsMobile
+            ? { position:'relative', background:'white', width:'100%', borderRadius:'16px 16px 0 0', zIndex:1, padding:'1.5rem', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }
+            : { position:'relative', background:'white', width:'100%', maxWidth:'420px', borderRadius:'16px', zIndex:1, padding:'1.5rem', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', boxSizing:'border-box' }}>
+            <div style={{ textAlign:'center', marginBottom:'1.25rem' }}>
+              <div style={{ fontSize:'40px', marginBottom:'10px' }}>🗑️</div>
+              <p style={{ fontSize:'17px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'6px' }}>Delete this company?</p>
+              <p style={{ fontSize:'13px', color:'#8a9e9a', lineHeight:1.5 }}>
+                <strong>{selectedCompany.name}</strong>
+                {(()=>{ const n = allPartners.filter(p=>p.companyId===selectedCompany.id).length; return n>0
+                  ? <> will be deleted. This will also unlink it from <strong>{n}</strong> {n===1?'partner/contact':'partners/contacts'}.</>
+                  : <> will be deleted.</> })()}
+              </p>
+            </div>
+            {companyDeleteError&&<p style={{ fontSize:'12px', color:'#ef4444', textAlign:'center', marginBottom:'12px' }}>{companyDeleteError}</p>}
+            <div style={{ display:'flex', gap:'10px' }}>
+              <button disabled={companyDeleting} onClick={()=>{ setCompanyDeleteConfirm(false); setCompanyDeleteError(null) }} style={{ flex:1, padding:'13px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:companyDeleting?'not-allowed':'pointer', opacity:companyDeleting?0.6:1 }}>Cancel</button>
+              <button disabled={companyDeleting} onClick={async()=>{
+                const target = selectedCompany
+                setCompanyDeleting(true); setCompanyDeleteError(null)
+                try {
+                  if (companiesApi?.deleteCompany) await companiesApi.deleteCompany(target.id)
+                  else setCompanies(prev=>prev.filter(c=>c.id!==target.id))
+                  setCompanyDeleteConfirm(false); setSelectedCompany(null)
+                } catch(e) {
+                  setCompanyDeleteError('Could not delete company. Please try again.')
+                } finally { setCompanyDeleting(false) }
+              }} style={{ flex:1, padding:'13px', background:companyDeleting?'#f3a4a4':'#ef4444', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:companyDeleting?'not-allowed':'pointer' }}>{companyDeleting?'Deleting…':'Delete Company'}</button>
             </div>
           </div>
         </div>
@@ -27901,8 +27950,22 @@ if (Array.isArray(initialPeople)) return
         .catch(e => console.error('[companies] update error:', e))
     }
   }
+  // DELETE /api/companies/:id soft-deletes server-side (sets deleted_at).
+  // Non-optimistic on purpose: the API call must succeed before we mutate
+  // local state, so a failure can be surfaced inline without the row already
+  // having vanished from the list. On success we drop the company and unlink
+  // any partners/contacts that pointed at it (the confirmation copy promises
+  // this). UUID guard skips local-only (un-persisted) rows. Throws on failure.
+  async function deleteCompany(id) {
+    if (isUuidStr(id)) {
+      const r = await fetch(`/api/companies/${id}`, { method:'DELETE' })
+      if (!r.ok) { console.error('[companies] delete failed:', r.status); throw new Error('delete_failed') }
+    }
+    setCompanies(prev => prev.filter(c => c.id !== id))
+    setPartners(prev => prev.map(p => p.companyId === id ? { ...p, companyId:null, company:'' } : p))
+  }
   const partnersCtxValue = { partners, addPartner, updatePartner, deletePartner, restorePartner, purgePartner }
-  const companiesCtxValue = { companies, addCompany, updateCompany }
+  const companiesCtxValue = { companies, addCompany, updateCompany, deleteCompany }
 
   // For franchise users, use their location's status
   const franchiseLoc = !isElevated && viewAsUser?.locationId
