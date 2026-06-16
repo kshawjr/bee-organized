@@ -12307,6 +12307,10 @@ function PathChooser({ title, emoji, current, onSelect, previewPath, setPreviewP
   // disambiguate without threading another prop through.
   const sectionKey = title.toLowerCase().includes('mov') ? 'moving' : 'organizing'
   const allOptions = pathOptions
+  // Template being peeked at in the centered preview modal (full subject +
+  // body). Mirrors Settings → Paths: the inline expand lists the steps, and
+  // each step's 👁 Preview opens TemplateQuickPeekModal. Null = closed.
+  const [peekTemplate, setPeekTemplate] = useState(null)
 
   return (
     <div style={{ display:'grid', gap:'8px' }}>
@@ -12365,23 +12369,15 @@ function PathChooser({ title, emoji, current, onSelect, previewPath, setPreviewP
                     const tmpl = getTemplate(step.templateId)
                     const icon = {email:'📧',sms:'💬',call:'📞'}[step.type]||'📧'
                     return (
-                      <div key={step.id} style={{ background:'white', borderRadius:'9px', border:'1px solid rgba(0,0,0,0.07)', overflow:'hidden' }}>
-                        <div style={{ padding:'7px 12px', display:'flex', alignItems:'center', gap:'6px', background:'rgba(0,0,0,0.02)', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
-                          <span>{icon}</span>
-                          <span style={{ fontSize:'11px', fontWeight:600, color:'#1a2e2b' }}>Step {step.order}: {step.name}</span>
-                          <span style={{ fontSize:'11px', color:'#8a9e9a', marginLeft:'auto' }}>{step.delay}</span>
+                      <div key={step.id} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 12px', background:'white', borderRadius:'9px', border:'1px solid rgba(0,0,0,0.07)' }}>
+                        <span style={{ fontSize:'12px', flexShrink:0 }}>{icon}</span>
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <p style={{ fontSize:'11px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Step {step.order}: {step.name}</p>
+                          <p style={{ fontSize:'10px', color:'#8a9e9a' }}>{step.delay}</p>
                         </div>
-                        {tmpl&&step.type==='email'&&(
-                          <div style={{ padding:'8px 12px' }}>
-                            <p style={{ fontSize:'11px', fontWeight:600, color:'#6366f1', marginBottom:'4px' }}>Subject: {tmpl.subject}</p>
-                            <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.6, whiteSpace:'pre-wrap' }}>{tmpl.body.slice(0,200)}{tmpl.body.length>200?'…':''}</p>
-                          </div>
-                        )}
-                        {tmpl&&step.type==='sms'&&(
-                          <div style={{ padding:'8px 12px' }}>
-                            <p style={{ fontSize:'11px', color:'#10b981' }}>💬 {(tmpl.body||'').slice(0,120)}</p>
-                          </div>
-                        )}
+                        {tmpl
+                          ? <button onClick={()=>setPeekTemplate(tmpl)} title="Preview this email" style={{ display:'flex', alignItems:'center', gap:'4px', fontSize:'10px', fontWeight:600, color:'#6366f1', background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'5px', padding:'3px 8px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>👁 Preview</button>
+                          : <span style={{ fontSize:'10px', color:'#e5a0a0', flexShrink:0 }}>No template</span>}
                       </div>
                     )
                   })}
@@ -12400,6 +12396,11 @@ function PathChooser({ title, emoji, current, onSelect, previewPath, setPreviewP
           </div>
         )
       })}
+
+      {/* Full subject + body preview — matches Settings → Paths. No select
+          button here: onboarding just previews, the path is committed via the
+          radio selection above. */}
+      <TemplateQuickPeekModal template={peekTemplate} showSelectButton={false} onClose={()=>setPeekTemplate(null)} />
     </div>
   )
 }
