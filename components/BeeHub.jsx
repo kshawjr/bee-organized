@@ -6641,116 +6641,130 @@ function PersonPanel({
                                 border: "1px solid rgba(0,0,0,0.1)",
                                 borderRadius: "10px",
                                 boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
-                                padding: "8px",
                                 minWidth: "240px",
+                                maxHeight: "340px",
+                                display: "flex",
+                                flexDirection: "column",
+                                overflow: "hidden",
                               },
                             },
-                            React.createElement("input", {
-                              autoFocus: true,
-                              value: referralSearch,
-                              onChange: (e) => setReferralSearch(e.target.value),
-                              placeholder: "Search partners, contacts, clients…",
-                              style: {
-                                width: "100%",
-                                padding: "7px 10px",
-                                border: "1.5px solid rgba(168,201,196,0.4)",
-                                borderRadius: "8px",
-                                fontSize: "12px",
-                                fontFamily: "inherit",
-                                outline: "none",
-                                boxSizing: "border-box",
-                                marginBottom: "6px",
-                              },
-                            }),
-                            renderSection(
-                              "partners",
-                              "Partners",
-                              matchedPartners,
-                              "partner",
-                              "rgba(16,185,129,0.08)",
-                            ),
-                            renderSection(
-                              "contacts",
-                              "Contacts",
-                              matchedContacts,
-                              "partner",
-                              "rgba(14,165,233,0.08)",
-                            ),
-                            renderSection(
-                              "clients",
-                              "Clients",
-                              matchedClients,
-                              "lead",
-                              "rgba(212,160,70,0.08)",
-                            ),
-                            !hasAnyMatch &&
-                              React.createElement(
-                                "p",
-                                {
-                                  style: {
-                                    fontSize: "12px",
-                                    color: "#8a9e9a",
-                                    textAlign: "center",
-                                    padding: "8px 6px",
-                                  },
+                            // Sticky search at top of the dropdown.
+                            React.createElement(
+                              "div",
+                              { style: { padding: "8px 8px 6px", flexShrink: 0 } },
+                              React.createElement("input", {
+                                autoFocus: true,
+                                value: referralSearch,
+                                onChange: (e) => setReferralSearch(e.target.value),
+                                placeholder: "Search partners, contacts, clients…",
+                                style: {
+                                  width: "100%",
+                                  padding: "7px 10px",
+                                  border: "1.5px solid rgba(168,201,196,0.4)",
+                                  borderRadius: "8px",
+                                  fontSize: "12px",
+                                  fontFamily: "inherit",
+                                  outline: "none",
+                                  boxSizing: "border-box",
                                 },
-                                "No matches",
-                              ),
-                            // Dual quick-add at the bottom of the dropdown.
-                            // Clients have no quick-add (they come from the lead
-                            // creation flow). Mirrors NewLeadModal's pattern.
+                              }),
+                            ),
+                            // Scrollable list region — sections + no-matches.
                             React.createElement(
                               "div",
                               {
                                 style: {
+                                  flex: 1,
+                                  overflowY: "auto",
+                                  padding: "0 8px",
+                                },
+                              },
+                              renderSection(
+                                "partners",
+                                "Partners",
+                                matchedPartners,
+                                "partner",
+                                "rgba(16,185,129,0.08)",
+                              ),
+                              renderSection(
+                                "contacts",
+                                "Contacts",
+                                matchedContacts,
+                                "partner",
+                                "rgba(14,165,233,0.08)",
+                              ),
+                              renderSection(
+                                "clients",
+                                "Clients",
+                                matchedClients,
+                                "lead",
+                                "rgba(212,160,70,0.08)",
+                              ),
+                              !hasAnyMatch &&
+                                React.createElement(
+                                  "p",
+                                  {
+                                    style: {
+                                      fontSize: "12px",
+                                      color: "#8a9e9a",
+                                      textAlign: "center",
+                                      padding: "8px 6px",
+                                    },
+                                  },
+                                  "No matches",
+                                ),
+                            ),
+                            // Sticky footer — inline quick-adds mirroring
+                            // AddPartnerModal's inline "+ Create company"
+                            // affordance: list-row treatment, subtle teal tint,
+                            // small text, not a chunky boxed CTA. Side-by-side.
+                            // Clients have no quick-add (they come from the lead
+                            // creation flow).
+                            React.createElement(
+                              "div",
+                              {
+                                style: {
+                                  flexShrink: 0,
                                   display: "flex",
-                                  gap: "4px",
-                                  marginTop: "4px",
-                                  paddingTop: "4px",
                                   borderTop: "1px solid rgba(0,0,0,0.06)",
                                 },
                               },
-                              ["partner", "contact"].map((t) =>
+                              [
+                                { t: "partner", label: "Add Partner" },
+                                { t: "contact", label: "Add Contact" },
+                              ].map((opt, i) =>
                                 React.createElement(
                                   "button",
                                   {
-                                    key: t,
+                                    key: opt.t,
                                     type: "button",
-                                    onClick: () => setShowQuickAddReferrer(t),
+                                    onClick: () => setShowQuickAddReferrer(opt.t),
                                     style: {
+                                      flex: 1,
                                       display: "flex",
                                       alignItems: "center",
+                                      justifyContent: "center",
                                       gap: "6px",
-                                      flex: 1,
-                                      padding: "8px",
-                                      background: "transparent",
+                                      padding: "10px 12px",
+                                      background: "rgba(168,201,196,0.06)",
                                       border: "none",
+                                      borderLeft:
+                                        i === 1
+                                          ? "1px solid rgba(0,0,0,0.06)"
+                                          : "none",
                                       cursor: "pointer",
                                       fontFamily: "inherit",
-                                      textAlign: "left",
-                                      color: "#1a7a6e",
+                                      fontSize: "13px",
                                       fontWeight: 600,
-                                      fontSize: "12px",
+                                      color: "#1a7a6e",
                                     },
                                   },
                                   React.createElement(
                                     "span",
-                                    {
-                                      style: {
-                                        width: "20px",
-                                        height: "20px",
-                                        borderRadius: "50%",
-                                        background: "rgba(168,201,196,0.18)",
-                                        display: "flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        fontSize: "12px",
-                                        flexShrink: 0,
-                                      },
-                                    },
+                                    { style: { fontSize: "14px" } },
                                     "＋",
                                   ),
-                                  t === "contact" ? "Add Contact" : "Add Partner",
+                                  opt.label,
                                 ),
                               ),
                             ),
