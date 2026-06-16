@@ -19862,7 +19862,22 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
 
   // Filter leads by location
   const visibleLeads = (people||[]).filter(l=> !l.isJunk && (effectiveLocId ? l.locationId===effectiveLocId : true))
-  const visibleUpcoming = effectiveLocId ? D_UPCOMING.filter(u=>u.locationId===effectiveLocId) : D_UPCOMING
+  // Derive upcoming assessments from real lead data (mapLeadToPerson sets
+  // `assessment` to a formatted datetime string when a lead has a scheduled
+  // assessment, else null). Previously fell back to the D_UPCOMING mock when
+  // there was no effectiveLocId (e.g. super_admin viewing 'all'), which
+  // surfaced fake clients on an empty/cleared DB. visibleLeads is already
+  // location-scoped above.
+  const visibleUpcoming = visibleLeads
+    .filter(l => l.assessment)
+    .map(l => ({
+      id: l.id,
+      client: l.name,
+      type: l.assessmentType || 'Assessment',
+      time: l.assessment || '',
+      date: '',
+      ref: l.jobberRef || '',
+    }))
 
   // Computed stats
   const totalRevenue    = visibleLeads.flatMap(l=>l.invoices).reduce((s,i)=>s+i.amount, 0)
@@ -20089,7 +20104,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         </button>
         <p style={{ fontSize:'13px', color:'rgba(168,201,196,0.7)', marginBottom:'0' }}>
           {isElevated && locFilter==='all'
-  ? `${ALL_LOCATIONS.length} locations`
+  ? `${locations.length} locations`
   : `${newClients.length} new · ${inProgressClients.length} in progress`}
         </p>
 
@@ -20249,7 +20264,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
             sub={isElevated&&locFilter==='all'?'Across all locations':'Added this week'}
             bg="white" />
           {isElevated&&locFilter==='all'
-            ? <StatCard icon="🏢" label="Active Locations" value={ALL_LOCATIONS.filter(l=>l.crmStatus==='active').length} sub="Franchise locations" bg="white" color='#6366f1' />
+            ? <StatCard icon="🏢" label="Active Locations" value={locations.filter(l=>l.crmStatus==='active').length} sub="Franchise locations" bg="white" color='#6366f1' />
             : <StatCard icon="🔨" label="Jobs in progress" value={inProgress.length} sub="Active Jobber jobs" bg="white" color='#10b981' />
           }
           {canSeeFinancials&&!isElevated
