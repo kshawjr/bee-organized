@@ -4968,7 +4968,9 @@ function PersonPanel({
   const [activeTab, setActiveTab] = useState("overview");
   const currentUserPP = useContext(CurrentUserContext);
   const isSuperAdminUser = currentUserPP?.role === "super_admin";
-  const PARTNERS = useContext(PartnersContext)?.partners || [];
+  const partnersCtx = useContext(PartnersContext);
+  const PARTNERS = partnersCtx?.partners || [];
+  const companiesCtx = useContext(CompaniesContext);
   const [popup, setPopup] = useState(null);
   const [showLeadInfoEdit, setShowLeadInfoEdit] = useState(false);
   const [showSadAnimation, setShowSadAnimation] = useState(false);
@@ -4983,6 +4985,10 @@ function PersonPanel({
   const [editingSource, setEditingSource] = useState(false);
   const [pickingReferral, setPickingReferral] = useState(false);
   const [referralSearch, setReferralSearch] = useState("");
+  // Inline "+ Add Partner" quick-add from the referrer picker — mirrors
+  // NewLeadModal's pattern. Opens AddPartnerModal, then auto-selects the
+  // freshly-created partner as this lead's referrer.
+  const [showQuickAddReferrer, setShowQuickAddReferrer] = useState(false);
   const [journeyExpanded, setJourneyExpanded] = useState(false);
   const [jobNoteDraft, setJobNoteDraft] = useState("");
   const [fieldVal, setFieldVal] = useState("");
@@ -6698,9 +6704,80 @@ function PersonPanel({
                                   ),
                                 ),
                               ),
+                            // Inline quick-add — always visible at the bottom
+                            // of the dropdown, regardless of search state.
+                            // Mirrors NewLeadModal's "Add New Partner" pattern.
+                            React.createElement(
+                              "button",
+                              {
+                                type: "button",
+                                onClick: () => setShowQuickAddReferrer(true),
+                                style: {
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                  width: "100%",
+                                  padding: "8px 10px",
+                                  marginTop: "4px",
+                                  background: "transparent",
+                                  border: "none",
+                                  borderTop: "1px solid rgba(0,0,0,0.06)",
+                                  borderRadius: "0 0 8px 8px",
+                                  cursor: "pointer",
+                                  fontFamily: "inherit",
+                                  textAlign: "left",
+                                  color: "#1a7a6e",
+                                  fontWeight: 600,
+                                  fontSize: "12px",
+                                },
+                              },
+                              React.createElement(
+                                "span",
+                                {
+                                  style: {
+                                    width: "22px",
+                                    height: "22px",
+                                    borderRadius: "50%",
+                                    background: "rgba(168,201,196,0.18)",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    fontSize: "13px",
+                                    flexShrink: 0,
+                                  },
+                                },
+                                "＋",
+                              ),
+                              "Add Partner",
+                            ),
                           ),
                       );
                     })(),
+                  // Inline AddPartnerModal for the referrer quick-add. On
+                  // submit the new partner is created via PartnersContext and
+                  // auto-selected as this lead's referrer (update persists
+                  // referred_by_id). Mirrors NewLeadModal's quick-add flow.
+                  showQuickAddReferrer &&
+                    React.createElement(AddPartnerModal, {
+                      defaultType: "partner",
+                      companies: companiesCtx?.companies || [],
+                      onCreateCompany: (co) => companiesCtx?.addCompany?.(co),
+                      onClose: () => setShowQuickAddReferrer(false),
+                      onAdd: async (obj) => {
+                        const created = partnersCtx?.addPartner
+                          ? await partnersCtx.addPartner({
+                              ...obj,
+                              locationId: person.locationId,
+                            })
+                          : null;
+                        if (created?.id) {
+                          update({ ...person, referredBy: created.id });
+                        }
+                        setShowQuickAddReferrer(false);
+                        setPickingReferral(false);
+                        setReferralSearch("");
+                      },
+                    }),
                   (editingSource || pickingReferral) &&
                     React.createElement("div", {
                       style: { position: "fixed", inset: 0, zIndex: 99 },
