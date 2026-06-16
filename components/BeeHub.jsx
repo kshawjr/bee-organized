@@ -8645,6 +8645,85 @@ function PersonPanel({
                       person.paused ? "Activate drips" : "Pause",
                     ),
                   ),
+                  // Last drip-step send outcome. Renders only when a drip
+                  // send has actually been attempted (dripLastSendStatus set);
+                  // existing leads with no prior attempts show nothing. Makes
+                  // silent drip failures (missing sender config / Resend
+                  // errors) visible right on the lead record.
+                  (() => {
+                    const dsStatus = person.dripLastSendStatus;
+                    if (!dsStatus) return null;
+                    const dsStep = person.dripLastSendStep;
+                    const dsRel = (() => {
+                      const iso = person.dripLastSendAt;
+                      if (!iso) return "";
+                      const t = new Date(iso).getTime();
+                      if (isNaN(t)) return "";
+                      const mins = Math.floor((Date.now() - t) / 60000);
+                      if (mins < 1) return "just now";
+                      if (mins < 60) return mins + "m ago";
+                      const hrs = Math.floor(mins / 60);
+                      if (hrs < 24) return hrs + "h ago";
+                      return Math.floor(hrs / 24) + "d ago";
+                    })();
+                    let dsIcon, dsColor, dsBg, dsText;
+                    if (dsStatus === "sent") {
+                      dsIcon = "✓"; dsColor = "#10b981"; dsBg = "rgba(16,185,129,0.06)";
+                      dsText = "Email " + (dsStep || "?") + " sent " + dsRel;
+                    } else if (dsStatus === "failed") {
+                      dsIcon = "⚠"; dsColor = "#ef4444"; dsBg = "rgba(239,68,68,0.07)";
+                      dsText = "Email " + (dsStep || "?") + " failed: " + (person.dripLastSendError || "unknown error");
+                    } else if (dsStatus === "no_email") {
+                      dsIcon = "⚠"; dsColor = "#b45309"; dsBg = "rgba(245,158,11,0.1)";
+                      dsText = "Drip paused — configure sender email in Location settings";
+                    } else if (dsStatus === "paused") {
+                      dsIcon = "⏸"; dsColor = "#b45309"; dsBg = "rgba(245,158,11,0.1)";
+                      dsText = "Drip paused";
+                    } else {
+                      return null;
+                    }
+                    return React.createElement(
+                      "div",
+                      {
+                        style: {
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "10px",
+                          padding: "10px 14px",
+                          borderTop: "1px solid rgba(0,0,0,0.05)",
+                          background: dsBg,
+                        },
+                      },
+                      React.createElement(
+                        "span",
+                        { style: { fontSize: "14px", width: "20px", textAlign: "center", flexShrink: 0 } },
+                        dsIcon,
+                      ),
+                      React.createElement(
+                        "div",
+                        { style: { flex: 1, minWidth: 0 } },
+                        React.createElement(
+                          "p",
+                          {
+                            style: {
+                              fontSize: "10px",
+                              color: "#8a9e9a",
+                              fontWeight: 600,
+                              textTransform: "uppercase",
+                              letterSpacing: "0.4px",
+                              marginBottom: "1px",
+                            },
+                          },
+                          "Drip Status",
+                        ),
+                        React.createElement(
+                          "p",
+                          { style: { fontSize: "13px", color: dsColor, fontWeight: 600, lineHeight: 1.35 } },
+                          dsText,
+                        ),
+                      ),
+                    );
+                  })(),
                   React.createElement(
                     "div",
                     {

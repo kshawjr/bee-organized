@@ -40,6 +40,10 @@ type LeadRow = {
   snoozed_note: string | null
   marketing_opt_out: boolean | null
   paused: boolean | null
+  drip_last_send_status: string | null
+  drip_last_send_at: string | null
+  drip_last_send_step: number | null
+  drip_last_send_error: string | null
 }
 
 // Joined data — all optional. Anything passed populates richer Person fields.
@@ -262,5 +266,11 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     snoozeNote: row.snoozed_note || '',
     marketingOptOut: !!row.marketing_opt_out,
     paused: !!row.paused,
+    // Last drip-step send outcome — surfaced in PersonPanel so silent
+    // failures (missing sender config / Resend errors) are visible.
+    dripLastSendStatus: row.drip_last_send_status || null,
+    dripLastSendAt: row.drip_last_send_at || null,
+    dripLastSendStep: row.drip_last_send_step ?? null,
+    dripLastSendError: row.drip_last_send_error || null,
   }
 }

@@ -216,9 +216,27 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   })
 
   if (!result.success) {
+    // sendEmail returns this exact error string when the location's sender
+    // config (send_from_email/sender_name/reply_to_email) is NULL — that's a
+    // setup gap, not a transient send failure, so we record it as 'no_email'
+    // with owner-actionable copy. Anything else is a real Resend failure.
+    const senderConfigMissing = (result.error ?? '').includes('missing sender config')
+    await recordDripSendStatus(row.lead_id, {
+      status: senderConfigMissing ? 'no_email' : 'failed',
+      step: row.current_step,
+      error: senderConfigMissing
+        ? 'Location send_from_email/sender_name/reply_to_email not configured'
+        : result.error ?? 'unknown send error',
+    })
     // Leave row unchanged so the next cron tick retries.
     return { sent: false, error: `send: ${result.error}` }
   }
+
+  await recordDripSendStatus(row.lead_id, {
+    status: 'sent',
+    step: row.current_step,
+    error: null,
+  })
 
   // Step 1 of any new-lead drip triggers the 24h Welcome Email. Fire and
   // forget — a failed schedule is logged inside scheduleWelcomeEmail and
@@ -229,6 +247,31 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
 
   const advancedTo = await advanceOrComplete(row.id, path.id, row.current_step, loc.timezone)
   return { sent: true, advanced_to_step: advancedTo }
+}
+
+// Record the outcome of the most recent drip send attempt on the lead row
+// itself, so silent failures (missing sender config, Resend errors) surface
+// in PersonPanel. This is a pure observability mirror — the drip_path_steps /
+// lead_drip_progress retry state is untouched. Best-effort: a failed status
+// write is logged but never blocks drip progression. Errors truncate to 500
+// chars to stay well under any column/row bloat.
+async function recordDripSendStatus(
+  leadId: string,
+  fields: { status: 'sent' | 'failed' | 'no_email'; step: number; error: string | null },
+): Promise<void> {
+  const { error } = await supabaseService
+    .from('leads')
+    .update({
+      drip_last_send_status: fields.status,
+      drip_last_send_at: new Date().toISOString(),
+      drip_last_send_step: fields.step,
+      drip_last_send_error: fields.error ? fields.error.slice(0, 500) : null,
+    })
+    .eq('id', leadId)
+
+  if (error) {
+    console.error('[drip-send] failed to record drip send status', { leadId, status: fields.status, error: error.message })
+  }
 }
 
 // Look for the next step. If it exists, schedule its send. If not, mark
