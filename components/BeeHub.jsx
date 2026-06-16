@@ -21758,7 +21758,7 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
                     <button
                       onClick={()=>setShowInviteOwner(true)}
                       style={{ width:'100%', padding:'10px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}
-                    >👑 Invite Owner</button>
+                    >✉️ Invite Owner</button>
                   </div>
                 )}
               </div>
@@ -21889,11 +21889,18 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
         </div>
       </div>
       {showInviteOwner && (
-        <InviteModal
-          locations={locations}
-          lockedLocationId={currentLoc.id}
-          lockedTier="owner"
-          onSuccess={()=>{ fetchOwnerStatus() }}
+        <InviteOwnerModal
+          location={currentLoc}
+          onSuccess={()=>{
+            // The route flipped lifecycle_status→onboarding and
+            // subscription_status→deferred. Reflect that locally, repaint the
+            // owner panel (now shows a pending invite), and repull server data.
+            const nextFields = { lifecycle_status:'onboarding', subscription_status:'deferred' }
+            setCurrentLoc(prev=>({ ...prev, ...nextFields }))
+            onLocationUpdate && onLocationUpdate(currentLoc.id, nextFields)
+            fetchOwnerStatus()
+            router.refresh()
+          }}
           onClose={()=>setShowInviteOwner(false)}
         />
       )}
@@ -22236,6 +22243,239 @@ function InviteModal({
             <button onClick={send} disabled={!canSend} style={{ width:'100%', padding:'14px', background:canSend?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:canSend?'white':'#9ca3af', cursor:canSend?'pointer':'not-allowed' }}>
               {submitting ? 'Sending…' : 'Send Invite'}
             </button>
+            <div style={{ height:'1rem' }} />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Invite Owner Modal ─────────────────────────────────────────────────────────
+// One-click owner onboarding for corp-sponsored launches. Backed by the
+// atomic POST /api/admin/invite-owner, which does all three writes (location
+// config + owner seat preallocation + pending invite) and sends the Resend
+// email in a single request — replacing the 3-statement SQL ritual.
+//
+// Opened from LocationDetailSheet with a specific `location`, so the location
+// is locked context (no picker). Collects owner email/name + the billing
+// setup (payment source / paid-through date / notes), then surfaces the
+// invite link on success in case the email bounced.
+function InviteOwnerModal({ location, onSuccess, onClose }) {
+  React.useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+
+  const DEFAULT_PAID_THROUGH = '2027-03-01'
+  const DEFAULT_NOTES =
+    'Zee Bee Tester — corp-sponsored launch. 2027-03-01 conversion target.'
+
+  const [firstName, setFirstName]   = useState('')
+  const [lastName, setLastName]     = useState('')
+  const [email, setEmail]           = useState('')
+  const [paymentSource, setPaymentSource] = useState('prepaid_corporate')
+  const [paidThrough, setPaidThrough] = useState(DEFAULT_PAID_THROUGH)
+  const [billingNotes, setBillingNotes] = useState(DEFAULT_NOTES)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError]           = useState('')
+  const [warnings, setWarnings]     = useState(null) // [{code,message}] when confirmation required
+  const [step, setStep]             = useState('form') // form | sent
+  const [result, setResult]         = useState(null)
+  const [copied, setCopied]         = useState(false)
+
+  const PAYMENT_SOURCES = [
+    { key:'prepaid_corporate',   label:'Prepaid corporate', desc:'Corp pre-paid · keeps paid-through date (recommended)' },
+    { key:'corporate_sponsored', label:'Corporate sponsored', desc:'Corp covers cost · legacy toggle clears paid-through' },
+    { key:'direct',              label:'Direct',            desc:'Franchisee pays directly' },
+  ]
+
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+  const canSend = !submitting && firstName.trim() && lastName.trim() && emailValid
+
+  async function submit(force) {
+    if (submitting) return
+    if (!canSend) return
+    setSubmitting(true)
+    setError('')
+    setWarnings(null)
+
+    const payload = {
+      location_id: location.id,
+      email: email.trim().toLowerCase(),
+      full_name: `${firstName.trim()} ${lastName.trim()}`,
+      payment_source: paymentSource,
+      paid_through_date: paidThrough || null,
+      billing_notes: billingNotes.trim() || null,
+      ...(force ? { force: true } : {}),
+    }
+
+    try {
+      const res = await fetch('/api/admin/invite-owner', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (res.status === 409 && json.requires_confirmation) {
+        setWarnings(json.warnings || [{ code:'confirm', message:'Please confirm to continue.' }])
+        return
+      }
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`)
+      setResult(json)
+      setStep('sent')
+      if (onSuccess) onSuccess(json)
+    } catch (err) {
+      setError(err?.message || 'Could not send invitation')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function copyLink() {
+    if (!result?.invite_url) return
+    try {
+      await navigator.clipboard.writeText(result.invite_url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {}
+  }
+
+  const fieldStyle = { width:'100%', padding:'12px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'15px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', background:'white' }
+  const labelStyle = { fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }
+
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:10000, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
+      <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'480px', borderRadius:'16px', zIndex:1, maxHeight:'92vh', overflowY:'auto', boxShadow:'0 20px 60px rgba(26,46,43,0.25)' }}>
+        <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'12px auto 0' }} />
+
+        {step==='sent' && result ? (
+          <div style={{ padding:'1.5rem' }}>
+            <div style={{ textAlign:'center', marginBottom:'18px' }}>
+              <div style={{ fontSize:'48px', marginBottom:'10px' }}>👑</div>
+              <h2 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'6px' }}>Owner Invited</h2>
+              <p style={{ fontSize:'14px', color:'#1a2e2b', fontWeight:500, marginBottom:'2px', wordBreak:'break-all' }}>{email.trim().toLowerCase()}</p>
+              <p style={{ fontSize:'12px', color:'#8a9e9a' }}>as Owner at {location.name}{location.state?', '+location.state:''}</p>
+            </div>
+
+            {result.email_sent ? (
+              <div style={{ padding:'10px 12px', background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.18)', borderRadius:'9px', marginBottom:'14px' }}>
+                <p style={{ fontSize:'12px', color:'#15803d', fontWeight:500 }}>✓ Invitation email sent. They can also use the link below.</p>
+              </div>
+            ) : (
+              <div style={{ padding:'10px 12px', background:'rgba(245,158,11,0.07)', border:'1px solid rgba(245,158,11,0.22)', borderRadius:'9px', marginBottom:'14px' }}>
+                <p style={{ fontSize:'12px', color:'#92400e', fontWeight:600, marginBottom:'2px' }}>⚠ Email could not be sent — share the link below.</p>
+                {result.email_error && (
+                  <p style={{ fontSize:'11px', color:'#92400e', wordBreak:'break-all' }}>{result.email_error}</p>
+                )}
+              </div>
+            )}
+
+            <p style={{ ...labelStyle, marginBottom:'6px' }}>Invite Link</p>
+            <div style={{ display:'flex', gap:'6px', alignItems:'stretch', marginBottom:'14px' }}>
+              <input readOnly value={result.invite_url}
+                style={{ flex:1, padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.08)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', background:'rgba(26,46,43,0.02)', boxSizing:'border-box' }}
+                onClick={e=>e.currentTarget.select()}
+              />
+              <button onClick={copyLink}
+                style={{ padding:'10px 14px', background:copied?'#22c55e':'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', flexShrink:0 }}>
+                {copied ? 'Copied ✓' : 'Copy'}
+              </button>
+            </div>
+
+            <button onClick={onClose} style={{ width:'100%', padding:'14px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Done</button>
+          </div>
+        ) : (
+          <div style={{ padding:'1.25rem' }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'1.25rem' }}>
+              <h2 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>✉️ Invite Owner</h2>
+              <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
+            </div>
+
+            {/* Locked location context */}
+            <div style={{ marginBottom:'14px', padding:'10px 12px', background:'rgba(26,46,43,0.04)', border:'1px solid rgba(0,0,0,0.06)', borderRadius:'10px' }}>
+              <p style={{ fontSize:'11px', color:'#8a9e9a', marginBottom:'2px' }}>Onboarding owner for</p>
+              <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>📍 {location.name}{location.state?', '+location.state:''}</p>
+            </div>
+
+            {/* Name */}
+            <div style={{ display:'grid', gap:'10px', marginBottom:'14px' }}>
+              <div>
+                <p style={labelStyle}>First Name <span style={{ color:'#ef4444' }}>*</span></p>
+                <input autoFocus value={firstName} onChange={e=>{setFirstName(e.target.value); setWarnings(null)}} placeholder="First" style={{...fieldStyle, fontSize:'16px'}} />
+              </div>
+              <div>
+                <p style={labelStyle}>Last Name <span style={{ color:'#ef4444' }}>*</span></p>
+                <input value={lastName} onChange={e=>{setLastName(e.target.value); setWarnings(null)}} placeholder="Last" style={{...fieldStyle, fontSize:'16px'}} />
+              </div>
+            </div>
+
+            {/* Email */}
+            <div style={{ marginBottom:'16px' }}>
+              <p style={labelStyle}>Owner Email <span style={{ color:'#ef4444' }}>*</span></p>
+              <input
+                value={email}
+                onChange={e=>{setEmail(e.target.value); setWarnings(null)}}
+                placeholder="owner@example.com"
+                type="email"
+                style={{...fieldStyle, border:`1.5px solid ${email&&!emailValid?'rgba(239,68,68,0.4)':'rgba(0,0,0,0.1)'}`}}
+              />
+              {email&&!emailValid&&<p style={{ fontSize:'11px', color:'#ef4444', marginTop:'4px' }}>Enter a valid email address</p>}
+            </div>
+
+            {/* Payment source */}
+            <div style={{ marginBottom:'16px' }}>
+              <p style={labelStyle}>Payment Source</p>
+              <div style={{ display:'grid', gap:'6px' }}>
+                {PAYMENT_SOURCES.map(ps=>(
+                  <button key={ps.key} onClick={()=>{setPaymentSource(ps.key); setWarnings(null)}} style={{ padding:'10px 14px', background:paymentSource===ps.key?'rgba(26,46,43,0.06)':'white', border:`1.5px solid ${paymentSource===ps.key?'#1a2e2b':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', display:'flex', alignItems:'center', gap:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
+                    <div style={{ flex:1 }}>
+                      <p style={{ fontSize:'13px', fontWeight:600, color:paymentSource===ps.key?'#1a2e2b':'#4a5e5a', marginBottom:'1px' }}>{ps.label}</p>
+                      <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{ps.desc}</p>
+                    </div>
+                    {paymentSource===ps.key&&<span style={{ color:'#1a2e2b' }}>✓</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Paid through */}
+            <div style={{ marginBottom:'16px' }}>
+              <p style={labelStyle}>Paid Through Date</p>
+              <input type="date" value={paidThrough} onChange={e=>{setPaidThrough(e.target.value); setWarnings(null)}} style={fieldStyle} />
+            </div>
+
+            {/* Billing notes */}
+            <div style={{ marginBottom:'16px' }}>
+              <p style={labelStyle}>Billing Notes</p>
+              <textarea rows={3} value={billingNotes} onChange={e=>{setBillingNotes(e.target.value); setWarnings(null)}} placeholder="Internal notes (super_admins only)" style={{...fieldStyle, fontSize:'13px', resize:'vertical'}} />
+            </div>
+
+            {warnings && (
+              <div style={{ marginBottom:'12px', padding:'11px 13px', background:'rgba(245,158,11,0.08)', border:'1px solid rgba(245,158,11,0.3)', borderRadius:'10px' }}>
+                <p style={{ fontSize:'12px', color:'#92400e', fontWeight:700, marginBottom:'6px' }}>⚠ Please confirm</p>
+                {warnings.map((w,i)=>(
+                  <p key={w.code||i} style={{ fontSize:'12px', color:'#92400e', marginBottom:'4px', lineHeight:1.45 }}>{w.message}</p>
+                ))}
+                <button onClick={()=>submit(true)} disabled={submitting} style={{ width:'100%', marginTop:'6px', padding:'10px', background:'#b45309', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:submitting?'wait':'pointer', opacity:submitting?0.6:1 }}>
+                  {submitting ? 'Working…' : 'Confirm & continue anyway'}
+                </button>
+              </div>
+            )}
+
+            {error && (
+              <div style={{ marginBottom:'12px', padding:'9px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.18)', borderRadius:'9px' }}>
+                <p style={{ fontSize:'12px', color:'#b91c1c', fontWeight:500 }}>{error}</p>
+              </div>
+            )}
+
+            {!warnings && (
+              <button onClick={()=>submit(false)} disabled={!canSend} style={{ width:'100%', padding:'14px', background:canSend?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:canSend?'white':'#9ca3af', cursor:canSend?'pointer':'not-allowed' }}>
+                {submitting ? 'Sending…' : '👑 Create Owner & Send Invite'}
+              </button>
+            )}
             <div style={{ height:'1rem' }} />
           </div>
         )}
