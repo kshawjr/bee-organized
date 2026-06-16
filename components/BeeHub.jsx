@@ -5329,44 +5329,80 @@ function PersonPanel({
     React.createElement(
       "div",
       {
-        style: {
-          position: "fixed",
-          inset: 0,
-          zIndex: 9999,
-          display: "flex",
-          alignItems: "flex-end",
-        },
+        // Mobile keeps the bottom-sheet treatment (anchored to bottom edge).
+        // Desktop is a centered popup matching AddCompanyModal/NewLeadModal —
+        // backdrop-centered card with a 16px gutter.
+        style: isMobile
+          ? {
+              position: "fixed",
+              inset: 0,
+              zIndex: 9999,
+              display: "flex",
+              alignItems: "flex-end",
+            }
+          : {
+              position: "fixed",
+              inset: 0,
+              zIndex: 9999,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "16px",
+            },
       },
       React.createElement("div", {
-        style: { position: "absolute", inset: 0, background: "rgba(26,46,43,0.25)" },
+        // Desktop uses the darker AddCompanyModal backdrop; mobile keeps the
+        // lighter scrim that pairs with the bottom-sheet.
+        style: {
+          position: "absolute",
+          inset: 0,
+          background: isMobile ? "rgba(26,46,43,0.25)" : "rgba(26,46,43,0.45)",
+        },
         onClick: onClose,
       }),
       React.createElement(
         "div",
         {
-          style: {
-            position: "relative",
-            background: "white",
-            width: "100%",
-            borderRadius: "16px 16px 0 0",
-            zIndex: 1,
-            height: "93vh",
-            // CSS default min-height: auto on a flex column makes the
-            // container grow to its content size, overriding height: 93vh
-            // when the content is taller. On iPhone Pro Max portrait, lead
-            // detail content (~831px) exceeded the 93vh budget (~690px),
-            // pushing the sheet 89px ABOVE the viewport — the name h2 sat
-            // at y=-58 and was invisible. minHeight: 0 lets the declared
-            // height win; the scroll body inside handles overflow.
-            minHeight: 0,
-            display: "flex",
-            flexDirection: "column",
-            boxShadow: "0 -8px 40px rgba(26,46,43,0.15)",
-            overscrollBehavior: "contain",
-            transform: sheetDragY ? `translateY(${sheetDragY}px)` : undefined,
-            transition: dragStartYRef.current == null ? "transform 0.2s ease" : "none",
-            willChange: "transform",
-          },
+          onClick: (e) => e.stopPropagation(),
+          // minHeight: 0 lets the declared height/maxHeight win over CSS's
+          // default min-height:auto on a flex column (which would otherwise
+          // grow the container to its content and overflow the viewport — on
+          // iPhone Pro Max portrait this once pushed the name h2 off-screen).
+          // The scroll body inside handles overflow in both layouts.
+          style: isMobile
+            ? {
+                position: "relative",
+                background: "white",
+                width: "100%",
+                borderRadius: "16px 16px 0 0",
+                zIndex: 1,
+                height: "93vh",
+                minHeight: 0,
+                display: "flex",
+                flexDirection: "column",
+                boxShadow: "0 -8px 40px rgba(26,46,43,0.15)",
+                overscrollBehavior: "contain",
+                transform: sheetDragY ? `translateY(${sheetDragY}px)` : undefined,
+                transition: dragStartYRef.current == null ? "transform 0.2s ease" : "none",
+                willChange: "transform",
+              }
+            : {
+                position: "relative",
+                background: "white",
+                width: "100%",
+                // Larger than the 520px standard — PersonPanel packs a header,
+                // tabs, Journey, Notes, action buttons and an admin section.
+                maxWidth: "720px",
+                maxHeight: "90vh",
+                borderRadius: "16px",
+                zIndex: 1,
+                minHeight: 0,
+                display: "flex",
+                flexDirection: "column",
+                boxShadow: "0 20px 60px rgba(26,46,43,0.25)",
+                overflow: "hidden",
+                boxSizing: "border-box",
+              },
         },
         // Sticky close X pinned absolute to top-right of the sheet so it's
         // never subject to header flex sizing / overflow. Desktop only;
@@ -5400,7 +5436,9 @@ function PersonPanel({
           },
           "\xD7",
         ),
-        React.createElement(
+        // Swipe-down drag handle is a bottom-sheet affordance — mobile only.
+        // The desktop centered popup dismisses via the corner × / backdrop.
+        isMobile && React.createElement(
           "div",
           {
             onTouchStart: onHandleTouchStart,
