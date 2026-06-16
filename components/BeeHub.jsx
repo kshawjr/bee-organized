@@ -18164,6 +18164,8 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   const [peekTemplate, setPeekTemplate] = useState(null)
   const [editingStep, setEditingStep]         = useState(null) // { pathId, step }
   const [expandedPath, setExpandedPath]       = useState(null)
+  const [newLeadsExpanded, setNewLeadsExpanded] = useState(false)
+  const [newLeadsHover, setNewLeadsHover]     = useState(false)
   const [addingStepToPath, setAddingStepToPath] = useState(null)
 
   const [showCustomBuilder, setShowCustomBuilder] = useState(false)
@@ -18826,16 +18828,26 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
         {/* ── New Client Drip ── */}
         {activeSection==='paths'&&(
           <>
-            {/* Top-level drip category header. Future categories (e.g. Won Lead
-                Reactivation, Lost Lead Follow-up) will be added as sibling
-                sections at this level. */}
-            <div style={{ padding:'16px 16px 8px' }}>
-              <p style={{ fontSize:'15px', fontWeight:700, color:'#6b7c79', textTransform:'uppercase', letterSpacing:'0.8px', marginBottom:'4px' }}>📧 New Lead Emails</p>
-              <p style={{ fontSize:'12px', color:'#b0c0bc', lineHeight:1.5 }}>
+            {/* Top-level drip category — collapsible (defaults closed) so future
+                categories (e.g. Won Lead Reactivation, Lost Lead Follow-up) can
+                be added as sibling sections without overwhelming the page. */}
+            <div
+              onClick={()=>setNewLeadsExpanded(v=>!v)}
+              onMouseEnter={()=>setNewLeadsHover(true)}
+              onMouseLeave={()=>setNewLeadsHover(false)}
+              style={{ padding:'16px 16px 8px', margin:'0 4px', borderRadius:'10px', cursor:'pointer', background:newLeadsHover?'rgba(168,201,196,0.08)':'transparent', transition:'background 0.12s' }}
+            >
+              <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'4px' }}>
+                <span style={{ fontSize:'12px', color:'#6b7c79', flexShrink:0 }}>{newLeadsExpanded?'▼':'▶'}</span>
+                <p style={{ fontSize:'15px', fontWeight:700, color:'#6b7c79', textTransform:'uppercase', letterSpacing:'0.8px', margin:0 }}>📧 New Lead Emails</p>
+                {(()=>{ const n = ['moveDefault','generalDefault'].filter(k=>settings.paths[k]).length; return n>0 ? <span style={{ fontSize:'11px', fontWeight:600, color:'#4a7a74', background:'rgba(168,201,196,0.18)', padding:'1px 8px', borderRadius:'20px' }}>{n} active</span> : null })()}
+              </div>
+              <p style={{ fontSize:'12px', color:'#b0c0bc', lineHeight:1.5, paddingLeft:'20px' }}>
                 Drip sequences sent to new leads. Project type determines which path group is used; the marked Default plays unless overridden per client.
               </p>
             </div>
 
+            {newLeadsExpanded && (<>
             {[
               { key:'moveDefault',    label:'📦 Moving Projects',     desc:'Move-In and Move-Out',                 filter:'moving',     projectType:'move' },
               { key:'generalDefault', label:'🏠 Organizing Projects', desc:'Closet, Kitchen, Full Home, etc.',     filter:'organizing', projectType:'general' },
@@ -18974,6 +18986,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             <div style={{ padding:'12px 16px 0' }}>
               <p style={{ fontSize:'12px', color:'#b0c0bc' }}>Tap any path to preview its steps. Tap 🕐 on any step to set the delay (1 day, 3 days, 7 days…). Tap the radio to set as default.</p>
             </div>
+            </>)}
           </>
         )}
 
