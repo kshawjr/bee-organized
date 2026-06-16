@@ -24955,11 +24955,12 @@ function SlideEditForm({ slide, isNew, onSave, onCancel, allChapters = [] }) {
   )
 }
 
-// Top-bar help affordance — a subtle circular "?" that opens the Hive Hub
+// Top-bar help affordance — a subtle "? Help" pill that opens the Hive Hub
 // Guide. Lives in the desktop sidebar header and the mobile top bar. Keeps its
 // own hover state so we get the bg-shift without a globals.css rule. The 44px
-// hit area satisfies tap targets while the visual glyph stays compact.
-function HelpIconButton({ onClick, size = 32, hitArea = 44, title = 'Hive Hub Guide' }) {
+// min-height satisfies tap targets while the label stays compact. `compact`
+// trims the label a touch on mobile so it doesn't crowd the top bar.
+function HelpIconButton({ onClick, title = 'Hive Hub Guide', compact = false }) {
   const [hover, setHover] = useState(false)
   return (
     <button
@@ -24969,8 +24970,11 @@ function HelpIconButton({ onClick, size = 32, hitArea = 44, title = 'Hive Hub Gu
       onMouseLeave={() => setHover(false)}
       aria-label={title}
       title={title}
-      style={{ width:`${hitArea}px`, height:`${hitArea}px`, display:'flex', alignItems:'center', justifyContent:'center', background:'none', border:'none', cursor:'pointer', padding:0, flexShrink:0 }}>
-      <span style={{ width:`${size}px`, height:`${size}px`, borderRadius:'50%', background: hover ? 'rgba(168,201,196,0.22)' : 'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:`${Math.round(size*0.5)}px`, fontWeight:700, color:'rgba(168,201,196,0.95)', lineHeight:1, transition:'background 0.15s' }}>?</span>
+      style={{ minHeight:'44px', display:'inline-flex', alignItems:'center', justifyContent:'center', background:'none', border:'none', cursor:'pointer', padding:0, flexShrink:0 }}>
+      <span style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding: compact ? '5px 10px' : '6px 12px', borderRadius:'18px', background: hover ? 'rgba(168,201,196,0.22)' : 'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', color:'rgba(168,201,196,0.95)', fontWeight:600, fontSize: compact ? '12px' : '13px', lineHeight:1, fontFamily:'inherit', whiteSpace:'nowrap', transition:'background 0.15s' }}>
+        <span style={{ fontWeight:700 }}>?</span>
+        <span>Help</span>
+      </span>
     </button>
   )
 }
@@ -28203,7 +28207,7 @@ if (Array.isArray(initialPeople)) return
           style={{ width:'44px', height:'44px', display:'flex', alignItems:'center', justifyContent:'center', background:'none', border:'none', cursor:'pointer', flexShrink:0, color:'rgba(168,201,196,0.85)', fontSize:'18px' }}>
           🔍
         </button>
-        <HelpIconButton onClick={openGuide} size={30} title="Hive Hub Guide" />
+        <HelpIconButton onClick={openGuide} compact title="Hive Hub Guide" />
         <button
           onClick={()=>setShowMobileProfile(v=>!v)}
           aria-label="Profile menu"
@@ -28556,7 +28560,8 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             : { top:`${TOTAL_TOP + 62}px`, left:'12px', width:'196px' }),
         }}>
           {/* up-arrow toward the icon */}
-          <div style={{ position:'absolute', top:'-7px', ...(isMobile ? { right:'48px' } : { right:'14px' }), width:'14px', height:'14px', background:'white', transform:'rotate(45deg)', boxShadow:'-2px -2px 5px rgba(26,46,43,0.05)' }} />
+          {/* Arrow offsets account for the wider "? Help" pill (vs the old circle). */}
+          <div style={{ position:'absolute', top:'-7px', ...(isMobile ? { right:'56px' } : { right:'30px' }), width:'14px', height:'14px', background:'white', transform:'rotate(45deg)', boxShadow:'-2px -2px 5px rgba(26,46,43,0.05)' }} />
           <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.5, marginBottom:'12px', fontWeight:500 }}>
             👋 New here? Check out the Hive Hub Guide
           </p>
@@ -28608,7 +28613,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
               <p style={{ fontSize:'14px', fontWeight:700, color:'white', fontFamily:'Georgia,serif', lineHeight:1 }}>Bee Hub</p>
               <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.5)', marginTop:'2px' }}>Bee Organized</p>
             </div>
-            <HelpIconButton onClick={openGuide} size={30} hitArea={36} title="Hive Hub Guide" />
+            <HelpIconButton onClick={openGuide} title="Hive Hub Guide" />
           </div>
         </div>
         {/* Nav items */}
