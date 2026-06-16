@@ -19566,7 +19566,7 @@ function FollowUpReminders({ followUps, setFollowUps, locFilter }) {
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null }) {
+function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
@@ -19643,7 +19643,12 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   const newClients      = visibleLeads.filter(l=>l.stage==='New')
   const inProgressClients = visibleLeads.filter(l=>!['New','Nurturing','Closed Won','Closed Lost'].includes(l.stage) && !l.isJunk && !l.finalProcessed)
   const activeLeads     = visibleLeads.filter(l=>!['Final Processing','Closed Won','Closed Lost'].includes(l.stage))
-  const newThisWeek     = visibleLeads.filter(l=>['May 1','May 2','May 3','May 4'].includes(l.created))
+  const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const newThisWeek     = visibleLeads.filter(l => {
+    if (!l.created) return false;
+    const d = new Date(l.created);
+    return !isNaN(d.getTime()) && d >= oneWeekAgo;
+  })
   const inProgress      = visibleLeads.filter(l=>l.stage==='Job in Progress')
   const assessmentsToday= visibleUpcoming.filter(u=>u.date==='Today')
 
@@ -19851,7 +19856,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
             textDecoration: locIndicatorHover ? 'underline' : 'none',
           }}
         >
-          📍 {locFilter==='all' ? 'All Locations' : (selectedLoc?.name || locationName || '')}
+          📍 {locFilter==='all' ? 'All Locations' : (selectedLoc?.name || currentLocation?.name || locationName || '—')}
         </button>
         <p style={{ fontSize:'13px', color:'rgba(168,201,196,0.7)', marginBottom:'0' }}>
           {isElevated && locFilter==='all'
@@ -28304,6 +28309,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           }}
           setFollowUps={setFollowUps}
           currentUserId={viewAsUser?.id || currentUser?.id || 'u11'}
+          currentLocation={currentLocation}
         />
       </div>
     )
