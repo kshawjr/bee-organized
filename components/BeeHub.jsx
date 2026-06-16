@@ -18166,6 +18166,9 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   const [expandedPath, setExpandedPath]       = useState(null)
   const [newLeadsExpanded, setNewLeadsExpanded] = useState(false)
   const [newLeadsHover, setNewLeadsHover]     = useState(false)
+  // Templates tab: one collapse state per type section (email/sms/call), all closed by default.
+  const [tplTypeExpanded, setTplTypeExpanded] = useState({ email:false, sms:false, call:false })
+  const [tplTypeHover, setTplTypeHover]       = useState(null)
   const [addingStepToPath, setAddingStepToPath] = useState(null)
 
   const [showCustomBuilder, setShowCustomBuilder] = useState(false)
@@ -19033,31 +19036,19 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
               </div>
             )
           }
-          function renderTypedGroup(rows, opts) {
-            return ['email','sms','call'].map(type=>{
-              const group = rows.filter(t=>t.type===type)
-              if (!group.length) return null
-              const tc = TYPE_META[type]
-              const isLocked = type==='sms' && !settings.location.smsEnabled
-              return (
-                <div key={type} style={{ marginBottom:'16px', opacity:isLocked?0.5:1, pointerEvents:isLocked?'none':'auto' }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'8px' }}>
-                    <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px' }}>{tc.icon} {tc.label}</p>
-                    {isLocked&&<span style={{ fontSize:'10px', color:'#d4a046', background:'rgba(212,160,70,0.1)', padding:'2px 8px', borderRadius:'20px', fontWeight:600 }}>Add-on needed</span>}
+          // Renders a single rounded card of template rows (no type label — the
+          // parent collapsible section already conveys the type).
+          function renderRowsCard(rows, actionsFn) {
+            if (!rows.length) return null
+            return (
+              <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
+                {rows.map((tpl, i)=>(
+                  <div key={tpl.dbId || tpl.id}>
+                    {renderTplRow(tpl, { lastInGroup: i === rows.length - 1, actions: actionsFn(tpl) })}
                   </div>
-                  <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.07)' }}>
-                    {group.map((tpl, i)=>(
-                      <div key={tpl.dbId || tpl.id}>
-                        {renderTplRow(tpl, {
-                          lastInGroup: i === group.length - 1,
-                          actions: opts.actions(tpl),
-                        })}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )
-            })
+                ))}
+              </div>
+            )
           }
 
           // Tag-based grouping for the masters list: surface Welcome and the 6
@@ -19075,64 +19066,107 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             </>
           )
 
+          const customActions = (tpl) => (
+            <>
+              <button onClick={()=>setPreviewTemplate(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
+              <button onClick={()=>setEditingTemplate({ master: tpl, tpl })} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Edit</button>
+              <button onClick={()=>deleteTemplate(tpl)} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#ef4444', cursor:'pointer' }}>Delete</button>
+            </>
+          )
+
+          // Three top-level collapsible sections, one per template type. Each is
+          // closed by default and contains a Master sub-group (corp, read-only)
+          // and a My Templates sub-group (per-location, editable). Mirrors the
+          // Communication tab's "New Lead Emails" collapsible pattern (d3e5ce1).
+          const TYPE_SECTIONS = [
+            { type:'email', heading:'Email Templates', sub:'Subject lines and bodies for client emails' },
+            { type:'sms',   heading:'Text Templates',  sub:'SMS message templates' },
+            { type:'call',  heading:'Call Scripts',    sub:'Phone call talking points' },
+          ]
           return (
             <div style={{ padding:'0 12px 32px' }}>
-              {/* ── Section 1: Master Templates (read-only for owners) ── */}
-              <div style={{ padding:'16px 0 6px' }}>
-                <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>📚 Master Templates</p>
-                <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>Provided by Bee Organized HQ. To customize, duplicate one to your own library.</p>
+              <div style={{ padding:'16px 4px 8px' }}>
+                <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>📨 Templates</p>
+                <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>Master templates from Bee Organized HQ plus your own customs, grouped by type.</p>
               </div>
 
-              {welcomeMasters.length > 0 && (
-                <>
-                  <div style={{ padding:'10px 4px 4px' }}>
-                    <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>💛 Welcome Email</p>
-                    <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>Auto-fires 24h after Email 1 of any new lead drip path.</p>
-                  </div>
-                  {renderTypedGroup(welcomeMasters, { actions: masterActions })}
-                </>
-              )}
+              {TYPE_SECTIONS.map(({ type, heading, sub })=>{
+                const tc = TYPE_META[type]
+                const typeMasters = masters.filter(t=>t.type===type)
+                const typeCustoms = myCustoms.filter(t=>t.type===type)
+                const count = typeMasters.length + typeCustoms.length
+                const isLocked = type==='sms' && !settings.location.smsEnabled
+                const open = !!tplTypeExpanded[type]
+                const hovered = tplTypeHover===type
+                const wWelcome = welcomeMasters.filter(t=>t.type===type)
+                const wOpp = oppStageMasters.filter(t=>t.type===type)
+                const wOther = otherMasters.filter(t=>t.type===type)
+                return (
+                  <div key={type} style={{ marginBottom:'8px' }}>
+                    {/* Collapsible header (toggle) */}
+                    <div
+                      onClick={()=>setTplTypeExpanded(prev=>({ ...prev, [type]:!prev[type] }))}
+                      onMouseEnter={()=>setTplTypeHover(type)}
+                      onMouseLeave={()=>setTplTypeHover(null)}
+                      style={{ padding:'14px', margin:'0 -2px', borderRadius:'10px', cursor:'pointer', background:hovered?'rgba(168,201,196,0.08)':'transparent', transition:'background 0.12s' }}
+                    >
+                      <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'3px' }}>
+                        <span style={{ fontSize:'12px', color:'#6b7c79', flexShrink:0 }}>{open?'▼':'▶'}</span>
+                        <p style={{ fontSize:'13px', fontWeight:700, color:'#6b7c79', textTransform:'uppercase', letterSpacing:'0.6px', margin:0 }}>{tc.icon} {heading}</p>
+                        {count>0 && <span style={{ fontSize:'11px', fontWeight:600, color:'#4a7a74', background:'rgba(168,201,196,0.18)', padding:'1px 8px', borderRadius:'20px' }}>{count}</span>}
+                        {isLocked && <span style={{ fontSize:'10px', color:'#d4a046', background:'rgba(212,160,70,0.1)', padding:'2px 8px', borderRadius:'20px', fontWeight:600 }}>Add-on needed</span>}
+                      </div>
+                      <p style={{ fontSize:'12px', color:'#b0c0bc', lineHeight:1.5, paddingLeft:'20px' }}>{sub} ({count} template{count===1?'':'s'})</p>
+                    </div>
 
-              {oppStageMasters.length > 0 && (
-                <>
-                  <div style={{ padding:'14px 4px 4px' }}>
-                    <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>📈 Opportunity Stages</p>
-                    <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>Fired by lead stage transitions (Closed Won 3mo + 12mo; Estimate Sent 3d + 30d for both project types).</p>
-                  </div>
-                  {renderTypedGroup(oppStageMasters, { actions: masterActions })}
-                </>
-              )}
+                    {open && (
+                      <div style={{ padding:'4px 2px 10px', opacity:isLocked?0.5:1, pointerEvents:isLocked?'none':'auto' }}>
+                        {/* Master Templates sub-group (corp, read-only) */}
+                        {typeMasters.length>0 && (
+                          <>
+                            <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', padding:'8px 4px 6px' }}>📚 Master Templates <span style={{ fontWeight:400, color:'#8a9e9a' }}>· from Bee Organized HQ</span></p>
+                            {wWelcome.length>0 && (
+                              <>
+                                <div style={{ padding:'8px 4px 4px' }}>
+                                  <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b' }}>💛 Welcome Email</p>
+                                  <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>Auto-fires 24h after Email 1 of any new lead drip path.</p>
+                                </div>
+                                {renderRowsCard(wWelcome, masterActions)}
+                              </>
+                            )}
+                            {wOpp.length>0 && (
+                              <>
+                                <div style={{ padding:'10px 4px 4px' }}>
+                                  <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b' }}>📈 Opportunity Stages</p>
+                                  <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>Fired by lead stage transitions (Closed Won 3mo + 12mo; Estimate Sent 3d + 30d for both project types).</p>
+                                </div>
+                                {renderRowsCard(wOpp, masterActions)}
+                              </>
+                            )}
+                            {wOther.length>0 && (
+                              <>
+                                <div style={{ padding:'10px 4px 4px' }}>
+                                  <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b' }}>📨 Other Templates</p>
+                                  <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>General-purpose templates referenced by custom drip paths.</p>
+                                </div>
+                                {renderRowsCard(wOther, masterActions)}
+                              </>
+                            )}
+                          </>
+                        )}
 
-              {otherMasters.length > 0 && (
-                <>
-                  <div style={{ padding:'14px 4px 4px' }}>
-                    <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>📨 Other Templates</p>
-                    <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>General-purpose templates referenced by custom drip paths.</p>
+                        {/* My Templates sub-group (per-location, editable) */}
+                        <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', padding:'14px 4px 6px' }}>✏️ Your Custom Templates <span style={{ fontWeight:400, color:'#8a9e9a' }}>· only your location uses these</span></p>
+                        {typeCustoms.length===0 ? (
+                          <div style={{ background:'white', padding:'16px 14px', borderRadius:'12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', textAlign:'center' }}>
+                            <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>No custom {heading.toLowerCase()} yet. Duplicate a master above or create one from scratch.</p>
+                          </div>
+                        ) : renderRowsCard(typeCustoms, customActions)}
+                        <button onClick={()=>setEditingTemplate('new')} style={{ width:'100%', marginTop:'8px', padding:'10px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>+ Create Template</button>
+                      </div>
+                    )}
                   </div>
-                  {renderTypedGroup(otherMasters, { actions: masterActions })}
-                </>
-              )}
-
-              {/* ── Section 2: My Templates ── */}
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'18px 0 6px' }}>
-                <div>
-                  <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>✏️ Your Custom Templates</p>
-                  <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>Templates you&rsquo;ve created or customized &mdash; only your location uses these.</p>
-                </div>
-                <button onClick={()=>setEditingTemplate('new')} style={{ padding:'8px 14px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>+ Create Template</button>
-              </div>
-              {myCustoms.length === 0 ? (
-                <div style={{ background:'white', padding:'18px 14px', borderRadius:'12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', textAlign:'center' }}>
-                  <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>No custom templates yet. Duplicate a master template above or create one from scratch to get started.</p>
-                </div>
-              ) : renderTypedGroup(myCustoms, {
-                actions: (tpl) => (
-                  <>
-                    <button onClick={()=>setPreviewTemplate(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>
-                    <button onClick={()=>setEditingTemplate({ master: tpl, tpl })} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Edit</button>
-                    <button onClick={()=>deleteTemplate(tpl)} style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#ef4444', cursor:'pointer' }}>Delete</button>
-                  </>
-                ),
+                )
               })}
             </div>
           )
