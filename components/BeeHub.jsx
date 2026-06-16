@@ -14079,12 +14079,19 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
 
   return (
     <>
-      <div style={{ position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'flex-end' }}>
-        <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.25)' }} onClick={onClose} />
-        <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, height:'88vh', minHeight:0, display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.15)', transform: sheetDragY ? `translateY(${sheetDragY}px)` : undefined, transition: dragStartYRef.current == null ? 'transform 0.2s ease' : 'none', willChange:'transform' }}>
-          <div onTouchStart={onHandleTouchStart} onTouchMove={onHandleTouchMove} onTouchEnd={onHandleTouchEnd} onTouchCancel={onHandleTouchEnd} style={{ padding:'10px 0 4px', display:'flex', justifyContent:'center', touchAction:'none', cursor:'grab' }}>
+      {/* Mobile keeps the bottom-sheet anchor; desktop is a centered popup
+          matching PersonPanel/AddCompanyModal (backdrop-centered, 16px gutter). */}
+      <div style={isMobile
+        ? { position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'flex-end' }
+        : { position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
+        <div style={{ position:'absolute', inset:0, background: isMobile ? 'rgba(26,46,43,0.25)' : 'rgba(26,46,43,0.45)' }} onClick={onClose} />
+        <div onClick={e=>e.stopPropagation()} style={isMobile
+          ? { position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, height:'88vh', minHeight:0, display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.15)', transform: sheetDragY ? `translateY(${sheetDragY}px)` : undefined, transition: dragStartYRef.current == null ? 'transform 0.2s ease' : 'none', willChange:'transform' }
+          : { position:'relative', background:'white', width:'100%', maxWidth:'720px', maxHeight:'90vh', borderRadius:'16px', zIndex:1, minHeight:0, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', overflow:'hidden', boxSizing:'border-box' }}>
+          {/* Swipe-down drag handle is a bottom-sheet affordance — mobile only. */}
+          {isMobile && <div onTouchStart={onHandleTouchStart} onTouchMove={onHandleTouchMove} onTouchEnd={onHandleTouchEnd} onTouchCancel={onHandleTouchEnd} style={{ padding:'10px 0 4px', display:'flex', justifyContent:'center', touchAction:'none', cursor:'grab' }}>
             <div style={{ width:'44px', height:'5px', background:'rgba(0,0,0,0.18)', borderRadius:'3px' }} />
-          </div>
+          </div>}
 
           {/* Header — mobile: compact row-based layout (Row 2 name+close,
               Row 3 subtitle, Row 4 stage+tier+icons). Desktop keeps the
@@ -14686,6 +14693,12 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
   const [viewingCard, setViewingCard]               = useState(null) // partner/contact whose card to show
   const [partnerTab, setPartnerTab] = useState('partners') // 'partners' | 'contacts' | 'companies'
   const [selectedCompany, setSelectedCompany] = useState(null)
+  // Hydration-safe viewport tracking for the company detail popup — see
+  // PersonPanel comment for rationale. Drives the centered-popup (desktop)
+  // vs bottom-sheet (mobile) branch.
+  const [companyWinW, setCompanyWinW] = useState(0)
+  React.useEffect(()=>{ function check(){ setCompanyWinW(window.innerWidth) } check(); window.addEventListener('resize',check); return ()=>window.removeEventListener('resize',check) },[])
+  const companyIsMobile = companyWinW > 0 && companyWinW < 768
   const [showFilters, setShowFilters] = useState(false)
   const [stageFilter, setStageFilter] = useState('')
   const [specFilter, setSpecFilter]   = useState('')
@@ -14867,69 +14880,9 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
           {/* Companies view */}
           {partnerTab==='companies'&&(
             <div style={{ display:'grid', gap:'8px' }}>
-              {selectedCompany ? (
-                // Company detail
-                <div>
-                  <button onClick={()=>setSelectedCompany(null)} style={{ display:'flex', alignItems:'center', gap:'6px', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', color:'rgba(168,201,196,0.8)', marginBottom:'12px', padding:0 }}>← All companies</button>
-                  <div style={{ background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 1px 6px rgba(0,0,0,0.07)' }}>
-                    <div style={{ padding:'16px 16px 12px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
-                      <p style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'2px' }}>{selectedCompany.name}</p>
-                      <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{selectedCompany.industry||'No industry set'}</p>
-                    </div>
-                    <EntityInfoCard
-                      phone={selectedCompany.phone} email={selectedCompany.email} website={selectedCompany.website}
-                      onEdit={()=>setEditingCompanyInfo(selectedCompany)}
-                    />
-                    {/* Address */}
-                    <CompanyAddressSection
-                      company={selectedCompany}
-                      onUpdate={addresses=>{ const next={...selectedCompany,addresses}; companiesApi?.updateCompany ? companiesApi.updateCompany(next) : setCompanies(prev=>prev.map(c=>c.id===selectedCompany.id?next:c)); setSelectedCompany(next) }}
-                    />
-                    {/* People at this company */}
-                    {(()=>{
-                      const linked = allPartners.filter(p=>p.companyId===selectedCompany.id)
-                      const linkedPartners = linked.filter(p=>p.type!=='contact')
-                      const linkedContacts = linked.filter(p=>p.type==='contact')
-                      return (
-                        <div style={{ padding:'12px 16px' }}>
-                          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'10px' }}>
-                            {linked.length} {linked.length===1?'person':'people'} · {linkedPartners.length} partner{linkedPartners.length!==1?'s':''}, {linkedContacts.length} contact{linkedContacts.length!==1?'s':''}
-                          </p>
-                          <div style={{ display:'grid', gap:'8px' }}>
-                            {linked.map(p=>{
-                              const isC = p.type==='contact'
-                              return (
-                                <button key={p.id} onClick={()=>{ setSelected(p); setPartnerTab(isC?'contacts':'partners') }}
-                                  style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 12px', background:isC?'rgba(168,201,196,0.05)':'white', border:`1px solid ${isC?'rgba(168,201,196,0.2)':'rgba(0,0,0,0.07)'}`, borderLeft:isC?'3px solid #a8c9c4':undefined, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
-                                  <Avatar name={p.name} size={34} />
-                                  <div style={{ flex:1, minWidth:0 }}>
-                                    <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{p.name}</p>
-                                    <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{p.title}</p>
-                                  </div>
-                                  <span style={{ fontSize:'10px', color:isC?'#4a7a74':'#8a9e9a', background:isC?'rgba(168,201,196,0.12)':'rgba(0,0,0,0.04)', padding:'2px 7px', borderRadius:'20px', flexShrink:0 }}>{isC?'Contact':'Partner'}</span>
-                                </button>
-                              )
-                            })}
-                            {linked.length===0&&<p style={{ fontSize:'12px', color:'#8a9e9a', textAlign:'center', padding:'16px' }}>No partners or contacts linked yet</p>}
-                          </div>
-                          {selectedCompany.notes?.length>0&&(
-                            <div style={{ marginTop:'14px', borderTop:'1px solid rgba(0,0,0,0.06)', paddingTop:'12px' }}>
-                              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Notes</p>
-                              {selectedCompany.notes.map(n=>(
-                                <div key={n.id} style={{ padding:'8px 10px', background:'rgba(0,0,0,0.02)', borderRadius:'8px', marginBottom:'4px' }}>
-                                  <p style={{ fontSize:'12px', color:'#1a2e2b' }}>{n.text}</p>
-                                  <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'2px' }}>{n.ts} · {n.user}</p>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })()}
-                  </div>
-                </div>
-              ) : (
-                // Companies list
+              {/* Company detail now opens as a centered-popup overlay (desktop)
+                  / bottom-sheet (mobile) at screen root below. The list always
+                  renders here. */}
                 <>
                   {allCompanies.length===0 ? (
                     <div style={{ padding:'40px 20px', textAlign:'center', background:'white', borderRadius:'12px', border:'1px solid rgba(0,0,0,0.07)' }}>
@@ -14959,7 +14912,6 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
                     )
                   })}
                 </>
-              )}
             </div>
           )}
 
@@ -15011,6 +14963,81 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
       </div>
 
       {selected&&<PartnerPanel partner={selected} people={people} companies={allCompanies} onCreateCompany={co=>companiesApi?.addCompany?.(co)} onClose={()=>setSelected(null)} onUpdate={updatePartner} onDelete={(id)=>{ partnersApi?.deletePartner ? partnersApi.deletePartner(id) : setPartners(prev=>prev.map(p=>p.id===id?{...p,isDeleted:true,deletedAt:new Date().toISOString()}:p)); setSelected(null) }} onAddToHive={(p,mode)=>{ onAddToHive&&onAddToHive(p,mode); if(mode==='view'||!mode) setSelected(null) }} onOpenCompanyModal={(p)=>{ setCompanyModalPartner(p); setCompanyModalQ(p.company||'') }} onOpenInfoEdit={(p)=>setEditingPartnerInfo(p)} onViewCard={(p)=>setViewingCard(p)} />}
+
+      {/* Company detail — centered popup (desktop) / bottom-sheet (mobile),
+          matching the PersonPanel/PartnerPanel conversion. */}
+      {selectedCompany&&(
+        <div style={companyIsMobile
+          ? { position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'flex-end' }
+          : { position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
+          <div style={{ position:'absolute', inset:0, background: companyIsMobile ? 'rgba(26,46,43,0.25)' : 'rgba(26,46,43,0.45)' }} onClick={()=>setSelectedCompany(null)} />
+          <div onClick={e=>e.stopPropagation()} style={companyIsMobile
+            ? { position:'relative', background:'white', width:'100%', borderRadius:'16px 16px 0 0', zIndex:1, maxHeight:'88vh', minHeight:0, display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.15)' }
+            : { position:'relative', background:'white', width:'100%', maxWidth:'720px', maxHeight:'90vh', borderRadius:'16px', zIndex:1, minHeight:0, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', overflow:'hidden', boxSizing:'border-box' }}>
+            {/* Sticky header — name/industry + close × top-right */}
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'12px', padding:'16px 16px 12px', borderBottom:'1px solid rgba(0,0,0,0.06)', flexShrink:0 }}>
+              <div style={{ minWidth:0 }}>
+                <p style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'2px' }}>{selectedCompany.name}</p>
+                <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{selectedCompany.industry||'No industry set'}</p>
+              </div>
+              <button onClick={()=>setSelectedCompany(null)} aria-label="Close" style={{ background:'none', border:'none', fontSize:'26px', color:'#4a5e5a', cursor:'pointer', flexShrink:0, width:'44px', height:'44px', display:'flex', alignItems:'center', justifyContent:'center', padding:0, marginRight:'-8px', lineHeight:1, fontFamily:'inherit' }}>×</button>
+            </div>
+            {/* Scrollable body */}
+            <div style={{ flex:1, overflowY:'auto', minHeight:0 }}>
+              <EntityInfoCard
+                phone={selectedCompany.phone} email={selectedCompany.email} website={selectedCompany.website}
+                onEdit={()=>setEditingCompanyInfo(selectedCompany)}
+              />
+              {/* Address */}
+              <CompanyAddressSection
+                company={selectedCompany}
+                onUpdate={addresses=>{ const next={...selectedCompany,addresses}; companiesApi?.updateCompany ? companiesApi.updateCompany(next) : setCompanies(prev=>prev.map(c=>c.id===selectedCompany.id?next:c)); setSelectedCompany(next) }}
+              />
+              {/* People at this company */}
+              {(()=>{
+                const linked = allPartners.filter(p=>p.companyId===selectedCompany.id)
+                const linkedPartners = linked.filter(p=>p.type!=='contact')
+                const linkedContacts = linked.filter(p=>p.type==='contact')
+                return (
+                  <div style={{ padding:'12px 16px' }}>
+                    <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'10px' }}>
+                      {linked.length} {linked.length===1?'person':'people'} · {linkedPartners.length} partner{linkedPartners.length!==1?'s':''}, {linkedContacts.length} contact{linkedContacts.length!==1?'s':''}
+                    </p>
+                    <div style={{ display:'grid', gap:'8px' }}>
+                      {linked.map(p=>{
+                        const isC = p.type==='contact'
+                        return (
+                          <button key={p.id} onClick={()=>{ setSelectedCompany(null); setSelected(p); setPartnerTab(isC?'contacts':'partners') }}
+                            style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 12px', background:isC?'rgba(168,201,196,0.05)':'white', border:`1px solid ${isC?'rgba(168,201,196,0.2)':'rgba(0,0,0,0.07)'}`, borderLeft:isC?'3px solid #a8c9c4':undefined, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
+                            <Avatar name={p.name} size={34} />
+                            <div style={{ flex:1, minWidth:0 }}>
+                              <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{p.name}</p>
+                              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{p.title}</p>
+                            </div>
+                            <span style={{ fontSize:'10px', color:isC?'#4a7a74':'#8a9e9a', background:isC?'rgba(168,201,196,0.12)':'rgba(0,0,0,0.04)', padding:'2px 7px', borderRadius:'20px', flexShrink:0 }}>{isC?'Contact':'Partner'}</span>
+                          </button>
+                        )
+                      })}
+                      {linked.length===0&&<p style={{ fontSize:'12px', color:'#8a9e9a', textAlign:'center', padding:'16px' }}>No partners or contacts linked yet</p>}
+                    </div>
+                    {selectedCompany.notes?.length>0&&(
+                      <div style={{ marginTop:'14px', borderTop:'1px solid rgba(0,0,0,0.06)', paddingTop:'12px' }}>
+                        <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Notes</p>
+                        {selectedCompany.notes.map(n=>(
+                          <div key={n.id} style={{ padding:'8px 10px', background:'rgba(0,0,0,0.02)', borderRadius:'8px', marginBottom:'4px' }}>
+                            <p style={{ fontSize:'12px', color:'#1a2e2b' }}>{n.text}</p>
+                            <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'2px' }}>{n.ts} · {n.user}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
 
       {viewingCard&&<CardViewerModal cardImage={viewingCard.cardImage||null} onClose={()=>setViewingCard(null)} />}
 
