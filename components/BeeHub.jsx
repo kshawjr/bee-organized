@@ -10169,9 +10169,6 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
 
   const currentPool = viewMode === 'captures' ? captures : viewMode === 'open' ? active : closedFilter === 'won' ? closed.filter(p=>p.stage==='Closed Won'||p.finalProcessed) : closedFilter === 'lost' ? closed.filter(p=>p.stage==='Closed Lost'||p.isJunk) : closed
 
-  // Simulate time filter using created field text (in production would use real dates)
-  const timeMap = { today:['May 2','May 1'], week:['May 2','May 1','Apr 28','Apr 25'], month:['May 2','May 1','Apr 28','Apr 25','Apr 20','Apr 15','Apr 10','Apr 5'] }
-
   const filtered = currentPool.filter(p => {
     const q = search.toLowerCase()
     const matchSearch   = !search||p.name.toLowerCase().includes(q)||p.email.toLowerCase().includes(q)||p.phone.includes(search)
@@ -10179,7 +10176,33 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
     const matchSource   = sourceFilters.length===0||sourceFilters.includes(p.source)
     const matchAssignee = assigneeFilters.length===0||assigneeFilters.includes(p.assignedTo)
     const matchTag      = tagFilters.length===0||tagFilters.some(t=>p.tags?.includes(t))
-    const matchTime     = timeFilter==='all'||timeMap[timeFilter]?.includes(p.created)
+    // p.created is an ISO timestamp (set from created_at). Real date math —
+    // same bug class as the home tab newThisWeek fix (c137c96).
+    const matchTime = (() => {
+      if (timeFilter === 'all') return true
+      if (!p.created) return false
+      const created = new Date(p.created)
+      if (isNaN(created.getTime())) return false
+      const now = Date.now()
+      if (timeFilter === 'today') {
+        const startOfDay = new Date()
+        startOfDay.setHours(0, 0, 0, 0)
+        return created >= startOfDay
+      }
+      if (timeFilter === 'week') {
+        return created.getTime() >= now - 7 * 24 * 60 * 60 * 1000
+      }
+      if (timeFilter === 'month') {
+        return created.getTime() >= now - 30 * 24 * 60 * 60 * 1000
+      }
+      if (timeFilter === 'custom' && customDate?.from && customDate?.to) {
+        const from = new Date(customDate.from)
+        const to = new Date(customDate.to)
+        to.setHours(23, 59, 59, 999)  // include the end day
+        return created >= from && created <= to
+      }
+      return true
+    })()
     const matchReturning = !returningOnly||(p.jobberClient?.jobs?.filter(j=>j.status==='Completed').length||0)>0
     return matchSearch && matchStage && matchSource && matchAssignee && matchTag && matchTime && matchReturning
   })
@@ -10708,8 +10731,21 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
         <MassUpdateModal
           count={selectedIds.length}
           locationId={people.find(p=>p.id===selectedIds[0])?.locationId}
-          onApply={(userId)=>{
-            setPeople(prev=>prev.map(p=>selectedIds.includes(p.id)?{...p,assignedTo:userId}:p))
+          onApply={async (userId)=>{
+            // Persist each reassignment via the shared lead PATCH helper
+            // (maps assignedTo → assigned_to, returns { ok, error }). Only
+            // commit successful rows to local state so a failed PATCH doesn't
+            // show a change that won't survive refresh.
+            const ids = [...selectedIds]
+            const results = await Promise.all(
+              ids.map(id => patchLeadAPI(id, { assignedTo: userId }))
+            )
+            const okIds = new Set(ids.filter((id,i)=>results[i]?.ok))
+            const failed = ids.length - okIds.size
+            if (failed > 0) {
+              setToast({ kind:'error', msg:`${failed} of ${ids.length} reassignment${ids.length!==1?'s':''} failed — please try again` })
+            }
+            setPeople(prev=>prev.map(p=>okIds.has(p.id)?{...p,assignedTo:userId}:p))
             setSelectedIds([])
             setShowMassUpdate(false)
           }}
@@ -22690,7 +22726,21 @@ function MassUpdateModal({ count, locationId, onApply, onClose }) {
     return () => { document.body.style.overflow = prev }
   }, [])
   const [selectedUserId, setSelectedUserId] = useState(null)
-  const locUsers = USERS_DATA.filter(u=>u.locationId===locationId&&u.status==='active')
+  // Roster source mirrors AssignUserPicker: real hub_users from
+  // LocationUsersContext, with USERS_DATA fallback for view-as / demo
+  // paths where the context is null. Same Jobber gating — assigning a
+  // lead to a user we can't identify in Jobber breaks the downstream
+  // job / assessment APIs, so hide unlinked users on the real path.
+  const usersCtx = useContext(LocationUsersContext)
+  const usingRealUsers = !!usersCtx
+  const usersSource = usersCtx || USERS_DATA
+  const activeAtLocation = usersSource.filter(u=>u.locationId===locationId&&u.status==='active')
+  const locUsers = usingRealUsers
+    ? activeAtLocation.filter(u => u.jobberUserId)
+    : activeAtLocation
+  const hiddenForNoJobberLink = usingRealUsers
+    ? activeAtLocation.length - locUsers.length
+    : 0
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
@@ -22705,6 +22755,13 @@ function MassUpdateModal({ count, locationId, onApply, onClose }) {
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
         </div>
         <div style={{ maxHeight:'40vh', overflowY:'auto' }}>
+          {locUsers.length === 0 && (
+            <div style={{ padding:'24px 16px', textAlign:'center', color:'#8a9e9a', fontSize:'13px', lineHeight:1.5 }}>
+              {hiddenForNoJobberLink > 0
+                ? <>No team members linked to Jobber yet.<br/>Go to <strong style={{ color:'#1a2e2b' }}>Settings → Team</strong> to link users.</>
+                : 'No active team members for this location.'}
+            </div>
+          )}
           {locUsers.map((u,i)=>{
             const rc = FRANCHISE_ROLES.find(r=>r.key===u.role)
             const active = u.id===selectedUserId
