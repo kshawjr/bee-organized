@@ -15760,6 +15760,8 @@ function TemplateEditorPopup({ template, isNew=false, isMasterEdit=false, onSave
 
 function StepTemplatePicker({ step, templates, onSelect, onClose, smsEnabled=true }) {
   const [search, setSearch] = useState('')
+  // Template being peeked at in the preview modal (does NOT commit a selection).
+  const [previewTmpl, setPreviewTmpl] = useState(null)
   const compatible = templates.filter(t =>
     t.type === step.type &&
     (smsEnabled || t.type !== 'sms') &&
@@ -15772,18 +15774,27 @@ function StepTemplatePicker({ step, templates, onSelect, onClose, smsEnabled=tru
   const myTemplates = compatible.filter(t => t.isOwnCustom)
   const unflagged = compatible.filter(t => !t.isMaster && !t.isOwnCustom)
 
+  // Row is a div (not a button) so the inline Preview button can nest legally.
   function renderRow(t) {
     return (
-      <button key={t.dbId || t.id} onClick={()=>onSelect(t.id)} style={{ padding:'12px 14px', background:step.templateId===t.id?'rgba(168,201,196,0.12)':'white', border:`1.5px solid ${step.templateId===t.id?'#a8c9c4':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
+      <div key={t.dbId || t.id} onClick={()=>onSelect(t.id)} style={{ position:'relative', padding:'12px 14px', background:step.templateId===t.id?'rgba(168,201,196,0.12)':'white', border:`1.5px solid ${step.templateId===t.id?'#a8c9c4':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
         <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'3px' }}>
           <span style={{ fontSize:'14px' }}>{t.type==='email'?'📧':t.type==='sms'?'💬':'📞'}</span>
           <span style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{t.name}</span>
-          {step.templateId===t.id&&<span style={{ marginLeft:'auto', color:'#a8c9c4' }}>✓ Current</span>}
+          <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:'8px' }}>
+            {step.templateId===t.id&&<span style={{ color:'#a8c9c4' }}>✓ Current</span>}
+            <button
+              onClick={(e)=>{ e.stopPropagation(); setPreviewTmpl(t) }}
+              title="Preview this email"
+              style={{ display:'flex', alignItems:'center', gap:'3px', padding:'3px 8px', background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'6px', fontSize:'11px', fontWeight:600, fontFamily:'inherit', color:'#6366f1', cursor:'pointer' }}>
+              👁 Preview
+            </button>
+          </div>
         </div>
         <p style={{ fontSize:'12px', color:'#8a9e9a', marginLeft:'22px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
           {t.type==='email'&&t.subject?t.subject:(t.body||'').slice(0,60)+'...'}
         </p>
-      </button>
+      </div>
     )
   }
 
@@ -15822,6 +15833,39 @@ function StepTemplatePicker({ step, templates, onSelect, onClose, smsEnabled=tru
           )}
         </div>
       </div>
+
+      {/* Quick-peek preview — like a macOS file thumbnail. Shows the rendered
+          subject + body without committing the selection. Merge fields stay as
+          literal {{placeholders}} since there's no lead context here. */}
+      {previewTmpl && (
+        <div style={{ position:'fixed', inset:0, zIndex:10006, display:'flex', alignItems:'center', justifyContent:'center', padding:'14px' }}>
+          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={()=>setPreviewTmpl(null)} />
+          <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'560px', maxHeight:'85vh', borderRadius:'14px', display:'flex', flexDirection:'column', zIndex:1, boxShadow:'0 8px 40px rgba(26,46,43,0.3)', overflow:'hidden' }}>
+            <div style={{ padding:'14px 16px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', alignItems:'center', gap:'8px', flexShrink:0 }}>
+              <span style={{ fontSize:'16px' }}>{previewTmpl.type==='email'?'📧':previewTmpl.type==='sms'?'💬':'📞'}</span>
+              <div style={{ flex:1, minWidth:0 }}>
+                <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{previewTmpl.name}</p>
+                <p style={{ fontSize:'10px', color:'#8a9e9a' }}>Preview · merge fields show as {'{{placeholders}}'}</p>
+              </div>
+              <button onClick={()=>setPreviewTmpl(null)} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>×</button>
+            </div>
+            <div style={{ padding:'16px', overflowY:'auto', flex:1 }}>
+              {previewTmpl.type==='email' && (
+                <div style={{ marginBottom:'12px', paddingBottom:'10px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
+                  <span style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>Subject</span>
+                  <p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b', marginTop:'2px' }}>{previewTmpl.subject || <span style={{ color:'#c8d8d4', fontWeight:400 }}>(no subject)</span>}</p>
+                </div>
+              )}
+              <span style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>{previewTmpl.type==='email'?'Body':'Message'}</span>
+              <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.6, whiteSpace:'pre-wrap', marginTop:'4px' }}>{previewTmpl.body || ''}</p>
+            </div>
+            <div style={{ padding:'12px 16px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px', justifyContent:'flex-end', flexShrink:0 }}>
+              <button onClick={()=>setPreviewTmpl(null)} style={{ padding:'8px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>Close</button>
+              <button onClick={()=>{ const id = previewTmpl.id; setPreviewTmpl(null); onSelect(id) }} style={{ padding:'8px 16px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Select this {previewTmpl.type==='email'?'email':previewTmpl.type==='sms'?'text':'template'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
