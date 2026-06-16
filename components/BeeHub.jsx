@@ -24955,27 +24955,62 @@ function SlideEditForm({ slide, isNew, onSave, onCancel, allChapters = [] }) {
   )
 }
 
-// Top-bar help affordance — a subtle "? Help" pill that opens the Hive Hub
-// Guide. Lives in the desktop sidebar header and the mobile top bar. Keeps its
-// own hover state so we get the bg-shift without a globals.css rule. The 44px
-// min-height satisfies tap targets while the label stays compact. `compact`
-// trims the label a touch on mobile so it doesn't crowd the top bar.
-function HelpIconButton({ onClick, title = 'Hive Hub Guide', compact = false }) {
+// Top-bar help affordance — a subtle "? Help" pill that opens a small dropdown
+// offering both the Quick Start Guide (HowToGuideModal) and the Manual
+// (ManualModal). Lives in the desktop sidebar header and the mobile top bar.
+// Self-contained: owns its hover + open state, closes on outside click (a
+// document listener, so it's immune to the surrounding stacking contexts).
+// `compact` trims the label a touch on mobile so it doesn't crowd the top bar.
+function HelpIconButton({ onOpenGuide, onOpenManual, onOpen, title = 'Help', compact = false }) {
   const [hover, setHover] = useState(false)
+  const [open, setOpen] = useState(false)
+  const [hoverItem, setHoverItem] = useState(null)
+  const wrapRef = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    function onDoc(e) { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+  const items = [
+    { key:'guide',  icon:'🚀', label:'Quick Start Guide', run:onOpenGuide },
+    { key:'manual', icon:'📖', label:'Manual',            run:onOpenManual },
+  ]
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      aria-label={title}
-      title={title}
-      style={{ minHeight:'44px', display:'inline-flex', alignItems:'center', justifyContent:'center', background:'none', border:'none', cursor:'pointer', padding:0, flexShrink:0 }}>
-      <span style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding: compact ? '5px 10px' : '6px 12px', borderRadius:'18px', background: hover ? 'rgba(168,201,196,0.22)' : 'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', color:'rgba(168,201,196,0.95)', fontWeight:600, fontSize: compact ? '12px' : '13px', lineHeight:1, fontFamily:'inherit', whiteSpace:'nowrap', transition:'background 0.15s' }}>
-        <span style={{ fontWeight:700 }}>?</span>
-        <span>Help</span>
-      </span>
-    </button>
+    <div ref={wrapRef} style={{ position:'relative', display:'inline-flex', flexShrink:0 }}>
+      <button
+        type="button"
+        onClick={() => { if (!open && onOpen) onOpen(); setOpen(o => !o) }}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        aria-label={title}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={title}
+        style={{ minHeight:'44px', display:'inline-flex', alignItems:'center', justifyContent:'center', background:'none', border:'none', cursor:'pointer', padding:0, flexShrink:0 }}>
+        <span style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding: compact ? '5px 10px' : '6px 12px', borderRadius:'18px', background: (hover || open) ? 'rgba(168,201,196,0.22)' : 'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', color:'rgba(168,201,196,0.95)', fontWeight:600, fontSize: compact ? '12px' : '13px', lineHeight:1, fontFamily:'inherit', whiteSpace:'nowrap', transition:'background 0.15s' }}>
+          <span style={{ fontWeight:700 }}>?</span>
+          <span>Help</span>
+        </span>
+      </button>
+      {open && (
+        <div role="menu" style={{ position:'absolute', top:'calc(100% + 6px)', right:0, zIndex:10012, background:'white', borderRadius:'10px', boxShadow:'0 12px 40px rgba(26,46,43,0.22)', border:'1px solid rgba(0,0,0,0.06)', padding:'6px', minWidth:'196px' }}>
+          {items.map(it => (
+            <button
+              key={it.key}
+              type="button"
+              role="menuitem"
+              onClick={() => { setOpen(false); it.run && it.run() }}
+              onMouseEnter={() => setHoverItem(it.key)}
+              onMouseLeave={() => setHoverItem(null)}
+              style={{ width:'100%', display:'flex', alignItems:'center', gap:'10px', padding:'10px 14px', minHeight:'44px', background: hoverItem === it.key ? 'rgba(168,201,196,0.14)' : 'transparent', border:'none', borderRadius:'8px', cursor:'pointer', fontFamily:'inherit', fontSize:'13px', fontWeight:500, color:'#1a2e2b', textAlign:'left', transition:'background 0.12s' }}>
+              <span style={{ fontSize:'16px', flexShrink:0 }}>{it.icon}</span>
+              <span>{it.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -28207,7 +28242,7 @@ if (Array.isArray(initialPeople)) return
           style={{ width:'44px', height:'44px', display:'flex', alignItems:'center', justifyContent:'center', background:'none', border:'none', cursor:'pointer', flexShrink:0, color:'rgba(168,201,196,0.85)', fontSize:'18px' }}>
           🔍
         </button>
-        <HelpIconButton onClick={openGuide} compact title="Hive Hub Guide" />
+        <HelpIconButton onOpenGuide={openGuide} onOpenManual={()=>{ dismissGuideHint(); setShowManual(true) }} onOpen={dismissGuideHint} compact title="Help" />
         <button
           onClick={()=>setShowMobileProfile(v=>!v)}
           aria-label="Profile menu"
@@ -28563,11 +28598,10 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           {/* Arrow offsets account for the wider "? Help" pill (vs the old circle). */}
           <div style={{ position:'absolute', top:'-7px', ...(isMobile ? { right:'56px' } : { right:'30px' }), width:'14px', height:'14px', background:'white', transform:'rotate(45deg)', boxShadow:'-2px -2px 5px rgba(26,46,43,0.05)' }} />
           <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.5, marginBottom:'12px', fontWeight:500 }}>
-            👋 New here? Check out the Hive Hub Guide
+            👋 New here? The Quick Start Guide and Manual live in this menu.
           </p>
           <div style={{ display:'flex', gap:'8px', justifyContent:'flex-end' }}>
-            <button onClick={dismissGuideHint} style={{ padding:'7px 12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:'pointer' }}>Got it</button>
-            <button onClick={openGuide} style={{ padding:'7px 12px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Show me</button>
+            <button onClick={dismissGuideHint} style={{ padding:'7px 12px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Got it</button>
           </div>
         </div>
       )}
@@ -28613,7 +28647,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
               <p style={{ fontSize:'14px', fontWeight:700, color:'white', fontFamily:'Georgia,serif', lineHeight:1 }}>Bee Hub</p>
               <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.5)', marginTop:'2px' }}>Bee Organized</p>
             </div>
-            <HelpIconButton onClick={openGuide} title="Hive Hub Guide" />
+            <HelpIconButton onOpenGuide={openGuide} onOpenManual={()=>{ dismissGuideHint(); setShowManual(true) }} onOpen={dismissGuideHint} title="Help" />
           </div>
         </div>
         {/* Nav items */}
