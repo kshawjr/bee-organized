@@ -18826,9 +18826,13 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
         {/* ── New Client Drip ── */}
         {activeSection==='paths'&&(
           <>
-            <div style={{ padding:'12px 12px 0' }}>
-              <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
-                Project type auto-selects the path category. Set the default CTA style for each. Overridable per client.
+            {/* Top-level drip category header. Future categories (e.g. Won Lead
+                Reactivation, Lost Lead Follow-up) will be added as sibling
+                sections at this level. */}
+            <div style={{ padding:'16px 16px 8px' }}>
+              <p style={{ fontSize:'15px', fontWeight:700, color:'#6b7c79', textTransform:'uppercase', letterSpacing:'0.8px', marginBottom:'4px' }}>📧 New Lead Emails</p>
+              <p style={{ fontSize:'12px', color:'#b0c0bc', lineHeight:1.5 }}>
+                Drip sequences sent to new leads. Project type determines which path group is used; the marked Default plays unless overridden per client.
               </p>
             </div>
 
@@ -18844,7 +18848,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                     const isDefault = settings.paths[section.key]===pathId
                     const steps = pathSteps[pathId]||[]
                     return (
-                      <div key={style.id} style={{ background:'white', borderBottom:i<PATH_STYLES.length-1?'1px solid rgba(0,0,0,0.05)':'none' }}>
+                      <div key={style.id} style={{ background:isDefault?'rgba(168,201,196,0.15)':'white', boxShadow:isDefault?'inset 4px 0 0 #4a7a74':'none', borderBottom:i<PATH_STYLES.length-1?'1px solid rgba(0,0,0,0.05)':'none' }}>
                         <div style={{ padding:'12px 16px', display:'flex', alignItems:'center', gap:'12px', cursor:'pointer' }}
                           onClick={()=>setExpandedPath(expandedPath===pathId?null:pathId)}>
                           {/* Radio */}
@@ -18855,7 +18859,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                           <span style={{ fontSize:'20px' }}>{style.icon}</span>
                           <div style={{ flex:1, minWidth:0 }}>
                             <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'2px', flexWrap:'wrap' }}>
-                              <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{style.label}</p>
+                              <p style={{ fontSize:'13px', fontWeight:isDefault?700:600, color:'#1a2e2b' }}>{style.label}</p>
                               {isDefault&&<span style={{ fontSize:'10px', color:'#a8c9c4', background:'rgba(168,201,196,0.15)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>Default</span>}
                               {style.id!=='custom' && (dbPaths[pathId]
                                 ? <span style={{ fontSize:'10px', color:'#d4a046', background:'rgba(212,160,70,0.12)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>Customized</span>
