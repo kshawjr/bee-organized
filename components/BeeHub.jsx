@@ -4353,7 +4353,7 @@ function PartnerAddressSection({ partner, onUpdate }) {
 }
 
 // ─── Contacts Tab ─────────────────────────────────────────────────────────────
-function ContactsTab({ person, onUpdate, onError }) {
+function ContactsTab({ person, onUpdate, onError, allPeople = [] }) {
   const PARTNERS = useContext(PartnersContext)?.partners || []
   const [search, setSearch] = React.useState('')
   const [addingNew, setAddingNew] = React.useState(false)
@@ -4368,7 +4368,7 @@ function ContactsTab({ person, onUpdate, onError }) {
       ).slice(0, 6)
     : []
   const clientResults = search.length > 1
-    ? ALL_PEOPLE.filter(p =>
+    ? (allPeople || []).filter(p =>
         p.id !== person.id && p.locationId === person.locationId && !p.isJunk &&
         ((p.name||'').toLowerCase().includes(q) || (p.email||'').toLowerCase().includes(q))
       ).slice(0, 4)
@@ -8449,7 +8449,7 @@ function PersonPanel({
                     ),
                   ),
                   (() => {
-                    const refs = (ALL_PEOPLE || []).filter(
+                    const refs = (allPeople || []).filter(
                       (p) => p.referredBy === person.id && !p.isJunk,
                     );
                     if (refs.length === 0) return null;
@@ -8800,7 +8800,7 @@ function PersonPanel({
               ),
             ),
           activeTab === "contacts" &&
-            React.createElement(ContactsTab, { person: person, onUpdate: onUpdate, onError: showError }),
+            React.createElement(ContactsTab, { person: person, onUpdate: onUpdate, onError: showError, allPeople: allPeople }),
           activeTab === "outreach" &&
             React.createElement(OutreachTab, { person: person, setPopup: setPopup }),
           // Mobile-only redundant Close button at the bottom of scroll
@@ -10023,6 +10023,11 @@ async function patchLeadAPI(leadId, patch) {
 function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{} }) {
   if (!people) return null
   const allPeople = locFilter==='all' ? people : people.filter(p=>p.locationId===locFilter)
+  // Real hub_users roster (LocationUsersContext) drives the "Assigned To"
+  // filter + its pill labels, with USERS_DATA fallback for view-as / demo.
+  // For super_admin viewing 'all', the context holds every location's users,
+  // so the filter shows the union across locations.
+  const hiveUsers = useContext(LocationUsersContext) || USERS_DATA
   // Render the location pill on every card for elevated users — they want to
   // see where each lead came from even when filtered to a single location.
   const showLocation = isElevated
@@ -10406,7 +10411,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
 
             {/* Assigned To */}
             {(()=>{
-              const locUsers = USERS_DATA.filter(u=>locFilter==='all'||u.locationId===locFilter)
+              const locUsers = hiveUsers.filter(u=>locFilter==='all'||u.locationId===locFilter)
               return locUsers.length>0?(
                 <div>
                   <p style={{ fontSize:'10px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'5px' }}>Assigned To</p>
@@ -10492,7 +10497,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
           <div style={{ display:'flex', flexWrap:'wrap', gap:'4px', marginTop:'6px' }}>
             {stageFilters.map(k=>{ const s=STAGES.find(st=>st.key===k); return s?<span key={k} onClick={()=>setStageFilters(prev=>prev.filter(x=>x!==k))} style={{ padding:'2px 8px', borderRadius:'20px', background:s.bg, color:s.color, fontSize:'11px', fontWeight:600, cursor:'pointer' }}>{s.icon} {s.label} ×</span>:null })}
             {sourceFilters.map(src=><span key={src} onClick={()=>setSourceFilters(prev=>prev.filter(x=>x!==src))} style={{ padding:'2px 8px', borderRadius:'20px', background:'rgba(14,165,233,0.08)', color:'#0369a1', fontSize:'11px', fontWeight:600, cursor:'pointer' }}>{src} ×</span>)}
-            {assigneeFilters.map(id=>{ const u=USERS_DATA.find(u=>u.id===id); return u?<span key={id} onClick={()=>setAssigneeFilters(prev=>prev.filter(x=>x!==id))} style={{ padding:'2px 8px', borderRadius:'20px', background:'rgba(168,201,196,0.12)', color:'#1a2e2b', fontSize:'11px', fontWeight:600, cursor:'pointer' }}>{u.name.split(' ')[0]} ×</span>:null })}
+            {assigneeFilters.map(id=>{ const u=hiveUsers.find(u=>u.id===id); return u?<span key={id} onClick={()=>setAssigneeFilters(prev=>prev.filter(x=>x!==id))} style={{ padding:'2px 8px', borderRadius:'20px', background:'rgba(168,201,196,0.12)', color:'#1a2e2b', fontSize:'11px', fontWeight:600, cursor:'pointer' }}>{u.name.split(' ')[0]} ×</span>:null })}
             {tagFilters.map(tid=>{ const t=ALL_TAGS.find(x=>x.id===tid); return t?<span key={tid} onClick={()=>setTagFilters(prev=>prev.filter(x=>x!==tid))} style={{ padding:'2px 8px', borderRadius:'20px', background:t.bg, color:t.color, fontSize:'11px', fontWeight:600, cursor:'pointer' }}>{t.label} ×</span>:null })}
           </div>
         )}
@@ -13041,8 +13046,11 @@ function OnboardingInviteSheet({ onClose, onDone, locationId }) {
 // `prices` is an optional record { owner, manager, light, readonly } supplied
 // from TierPricesContext at the call site. Falls back to DEFAULT_TIER_PRICES
 // so module-level / pre-context callers continue to work.
-function calcRenewalTotal(locationId, smsEnabled=false, prices=DEFAULT_TIER_PRICES) {
-  const locUsers = USERS_DATA.filter(u => u.locationId === locationId)
+// `users` is the roster to seat-count against — callers thread the real
+// hub_users from LocationUsersContext; defaults to USERS_DATA mock for any
+// module-level / demo caller that has no context access.
+function calcRenewalTotal(locationId, smsEnabled=false, prices=DEFAULT_TIER_PRICES, users=USERS_DATA) {
+  const locUsers = users.filter(u => u.locationId === locationId)
   const smsPrice = APP_ADDONS.find(a=>a.id==='sms')?.price || 0
   // Group users by role into SeatLine shape so calculateSeatTotal can apply the
   // co-owner rule (2nd Zee Bee bills at Hive Manager rate).
@@ -13113,8 +13121,9 @@ function PastDuePaymentCard({ locationId, graceDaysLeft=14, onResolved }) {
   const tierPricesCtx = useContext(TierPricesContext)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
   const livePrices = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
+  const renewalUsers = useContext(LocationUsersContext) || USERS_DATA
   const [showModal, setShowModal] = useState(false)
-  const renewal = calcRenewalTotal(locationId, false, livePrices)
+  const renewal = calcRenewalTotal(locationId, false, livePrices, renewalUsers)
   const expired = graceDaysLeft <= 0
 
   const REMINDERS = [
@@ -16729,7 +16738,10 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
 
 // ─── Client Notifications Card ─────────────────────────────────────────────────
 function LeadNotificationsCard({ settings, updateLocation, locationId, ownerEmail }) {
-  const teamMembers = USERS_DATA.filter(u => u.locationId === locationId)
+  // Real hub_users roster (LocationUsersContext) with USERS_DATA fallback for
+  // view-as / demo paths where the context is null.
+  const notifUsers = useContext(LocationUsersContext) || USERS_DATA
+  const teamMembers = notifUsers.filter(u => u.locationId === locationId)
   const [checkedIds, setCheckedIds] = useState(() => {
     // Default: owner checked
     const owner = teamMembers.find(u => u.role === 'owner')
@@ -16914,33 +16926,18 @@ function BillingHistorySheet({ onClose }) {
         <div style={{ padding:'14px 16px 10px', borderBottom:'1px solid rgba(0,0,0,0.06)', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
           <div>
             <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Billing History</p>
-            <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{BILLING_HISTORY.length} transactions</p>
+            <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Invoices & receipts</p>
           </div>
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
         </div>
+        {/* Empty state until Stripe billing is wired — the old BILLING_HISTORY
+            mock array showed fake invoices to real users. Once real invoice
+            data exists, this gets replaced with the transaction list. */}
         <div style={{ overflowY:'auto', flex:1 }}>
-          {BILLING_HISTORY.map((inv, i) => (
-            <div key={inv.id} style={{ padding:'14px 16px', borderBottom:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:'12px' }}>
-              <div style={{ width:'36px', height:'36px', borderRadius:'10px', background:'rgba(34,197,94,0.08)', border:'1px solid rgba(34,197,94,0.2)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'16px', flexShrink:0 }}>
-                🧾
-              </div>
-              <div style={{ flex:1, minWidth:0 }}>
-                <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>{inv.desc}</p>
-                <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-                  <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{fmtDate(inv.date)}</p>
-                  <span style={{ fontSize:'10px', color:'#8a9e9a' }}>·</span>
-                  <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{inv.method}</p>
-                </div>
-              </div>
-              <div style={{ textAlign:'right', flexShrink:0 }}>
-                <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'2px' }}>${inv.amount}</p>
-                <span style={{ fontSize:'10px', color:'#22c55e', background:'rgba(34,197,94,0.08)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>Paid</span>
-              </div>
-            </div>
-          ))}
-          <div style={{ padding:'14px 16px', display:'flex', justifyContent:'space-between', alignItems:'center', borderTop:'1px solid rgba(0,0,0,0.06)', background:'#f7f5f0' }}>
-            <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Total paid</p>
-            <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>${BILLING_HISTORY.reduce((s,i)=>s+i.amount,0).toLocaleString()}</p>
+          <div style={{ padding:'48px 24px', textAlign:'center' }}>
+            <div style={{ width:'52px', height:'52px', borderRadius:'14px', background:'rgba(34,197,94,0.08)', border:'1px solid rgba(34,197,94,0.2)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'24px', margin:'0 auto 14px' }}>🧾</div>
+            <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'6px' }}>No billing history yet</p>
+            <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, maxWidth:'300px', margin:'0 auto' }}>Invoices and receipts will appear here once Stripe billing is connected.</p>
           </div>
           <div style={{ height:'1rem' }} />
         </div>
@@ -16959,7 +16956,8 @@ function SubscriptionCard({ profile, settings, locationId='loc1' }) {
   const rc    = FRANCHISE_ROLES.find(r=>r.key===profile.plan)||FRANCHISE_ROLES[0]
   const price = getTierPrice(profile.plan) || getTierPrice('owner')
   const smsEnabled = settings?.location?.smsEnabled || false
-  const renewal = calcRenewalTotal(locationId, smsEnabled, livePrices)
+  const renewalUsers = useContext(LocationUsersContext) || USERS_DATA
+  const renewal = calcRenewalTotal(locationId, smsEnabled, livePrices, renewalUsers)
   // Always include the owner seat if no users found (owner may not be in USERS_DATA)
   const smsPrice = APP_ADDONS.find(a=>a.id==='sms')?.price || 0
   const renewalTotal = renewal.total > 0 ? renewal.total : price + (smsEnabled ? smsPrice : 0)
@@ -21683,7 +21681,11 @@ function fmtMoney(n) { return '$'+n.toLocaleString() }
 function LocationCard({ loc, role, onSelect, onStatusChange, onViewLocation, onDrilldown }) {
   const sc = CRM_STATUS_CONF[loc.crmStatus]
   const showRevenue = role==='corporate' || role==='super_admin'
-  const locUsers = USERS_DATA.filter(u=>u.locationId===loc.id)
+  // Real per-location user count from the hub_users roster (LocationUsersContext
+  // holds every location's users for elevated viewers); USERS_DATA fallback for
+  // the demo path. Drives the "· N users" subtitle on each location row.
+  const cardUsers = useContext(LocationUsersContext) || USERS_DATA
+  const locUsers = cardUsers.filter(u=>u.locationId===loc.id)
 
   return (
     <div onClick={()=>onSelect(loc)}
@@ -27034,6 +27036,24 @@ function LightReports({ people, locFilter }) {
   )
 }
 
+// ─── Reports Coming Soon Placeholder ──────────────────────────────────────────
+// Elevated reporting (SuperAdminReports + SyncLogContent) has no real backend
+// yet — both rendered mock data. Until the reporting backends land, the whole
+// elevated Reports path shows this honest placeholder. Mirrors the brand-teal
+// centered-card treatment used elsewhere. The owner-facing FranchiseReports
+// path is real and unaffected.
+function ReportsComingSoonPlaceholder() {
+  return (
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', padding:'48px 24px', minHeight:'46vh' }}>
+      <div style={{ width:'100%', maxWidth:'380px', background:'white', borderRadius:'16px', border:'1px solid rgba(0,0,0,0.06)', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', padding:'32px 24px', textAlign:'center' }}>
+        <div style={{ width:'56px', height:'56px', borderRadius:'16px', background:'linear-gradient(135deg,#1a2e2b,#2d4f4a)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'26px', margin:'0 auto 16px' }}>📊</div>
+        <p style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'6px' }}>Reports coming soon</p>
+        <p style={{ fontSize:'13px', color:'#8a9e9a', lineHeight:1.5 }}>We're building out reporting backends — owner reports work today.</p>
+      </div>
+    </div>
+  )
+}
+
 // ─── Reports Screen ───────────────────────────────────────────────────────────
 function ReportsScreen({ role, people=[], locFilter='all' }) {
   const isElevated = role==='super_admin' || role==='corporate'
@@ -27044,11 +27064,8 @@ function ReportsScreen({ role, people=[], locFilter='all' }) {
   const [source,  setSource]  = useState('all')
   const [project, setProject] = useState('all')
 
-  const tabs = isElevated
-    ? [{k:'platform',l:'📊 Reports'},{k:'synclog',l:'🔄 Sync Log'}]
-    : null
-
-  const [activeTab, setActiveTab] = useState('platform')
+  // No tabs: the Reports / Sync Log tab bar only ever existed for the elevated
+  // views, which are now gated to ReportsComingSoonPlaceholder below.
 
   return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
@@ -27057,32 +27074,21 @@ function ReportsScreen({ role, people=[], locFilter='all' }) {
           {isElevated ? '📊 Reports' : '📊 My Reports'}
         </h1>
         <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.7)', marginBottom:'10px' }}>
-          {isElevated ? 'Platform-wide analytics & sync health' : 'Your location performance'}
+          {isElevated ? 'Platform reporting' : 'Your location performance'}
         </p>
-        {tabs&&(
-          <div style={{ display:'flex', gap:'4px', background:'rgba(0,0,0,0.15)', borderRadius:'10px', padding:'3px', marginBottom:'1px' }}>
-            {tabs.map(t=>(
-              <button key={t.k} onClick={()=>setActiveTab(t.k)} style={{ flex:1, padding:'7px', borderRadius:'8px', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', fontWeight:activeTab===t.k?600:400, background:activeTab===t.k?'white':'transparent', color:activeTab===t.k?'#1a2e2b':'rgba(168,201,196,0.7)' }}>
-                {t.l}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
       <div style={{ padding:'0 1.25rem 1rem' }}>
-        {activeTab!=='synclog'&&(
-          <ReportFilters range={range} setRange={setRange} locId={locId} setLocId={setLocId} source={source} setSource={setSource} project={project} setProject={setProject} showLoc={isElevated} />
+        {isElevated ? (
+          <ReportsComingSoonPlaceholder />
+        ) : (
+          <>
+            <ReportFilters range={range} setRange={setRange} locId={locId} setLocId={setLocId} source={source} setSource={setSource} project={project} setProject={setProject} showLoc={isElevated} />
+            <div style={{ marginTop:'8px' }}>
+              <FranchiseReports range={range} locId={locId} source={source} project={project} people={people} locFilter={locFilter} />
+            </div>
+          </>
         )}
-        <div style={{ marginTop:'8px' }}>
-          {activeTab==='synclog' ? (
-            <SyncLogContent />
-          ) : isElevated ? (
-            <SuperAdminReports range={range} locId={locId} source={source} project={project} />
-          ) : (
-            <FranchiseReports range={range} locId={locId} source={source} project={project} people={people} locFilter={locFilter} />
-          )}
-        </div>
       </div>
     </div>
   )
