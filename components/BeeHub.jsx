@@ -18551,7 +18551,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     { key:'location',  label:'My Location',icon:'📍' },
     ...(canManageTeam ? [{ key:'team', label:'Team', icon:'👥' }] : []),
     ...(canViewBilling ? [{ key:'billing', label:'Billing', icon:'💳' }] : []),
-    { key:'paths',     label:'Paths',      icon:'📧' },
+    { key:'paths',     label:'Communication', icon:'📧' },
     { key:'templates', label:'Templates',  icon:'📝' },
     { key:'automation',label:'Automation', icon:'⚡' },
     { key:'notifs',    label:'Alerts',     icon:'🔔' },
@@ -18577,16 +18577,25 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
               <option key={sec.key} value={sec.key}>{sec.icon} {sec.label}</option>
             ))}
           </select>
-          <div className="bee-tab-pills" style={{ display:'flex', gap:'2px', width:'100%' }}>
-            {sections.map(sec=>{
-              const SHORT = { profile:'Profile', location:'Location', team:'Team', billing:'Billing', paths:'Paths', templates:'Templates', automation:'Automation', notifs:'Alerts', manual:'Manual' }
+          {/* Desktop pill row. Tabs visually group into 3 clusters —
+              Foundation (profile/location/team/billing), Customer Touch
+              (communication/templates/automation/alerts), Reference (manual) —
+              via thin dividers injected at cluster boundaries. */}
+          <div className="bee-tab-pills" style={{ display:'flex', alignItems:'stretch', gap:'2px', width:'100%' }}>
+            {sections.map((sec,i)=>{
+              const SHORT = { profile:'Profile', location:'Location', team:'Team', billing:'Billing', paths:'Communication', templates:'Templates', automation:'Automation', notifs:'Alerts', manual:'Manual' }
+              const clusterOf = k => ['paths','templates','automation','notifs'].includes(k) ? 'customer' : (k==='manual' ? 'reference' : 'foundation')
               const isActive = activeSection===sec.key
+              const showDivider = i>0 && clusterOf(sec.key)!==clusterOf(sections[i-1].key)
               return (
-                <button key={sec.key}
-                  onClick={()=>{ setActiveSection(sec.key); window.scrollTo(0,0) }}
-                  style={{ flex:1, padding:'7px 2px', borderRadius:'8px 8px 0 0', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'11px', fontWeight:isActive?600:400, background:isActive?'#f7f5f0':'transparent', color:isActive?'#1a2e2b':'rgba(168,201,196,0.7)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', WebkitTapHighlightColor:'transparent', minWidth:0 }}>
-                  {sec.icon}<br/><span style={{ fontSize:'10px' }}>{SHORT[sec.key]||sec.label}</span>
-                </button>
+                <React.Fragment key={sec.key}>
+                  {showDivider && <div aria-hidden="true" style={{ alignSelf:'center', flex:'0 0 auto', width:'1px', height:'16px', background:'rgba(168,201,196,0.3)', margin:'0 5px' }} />}
+                  <button
+                    onClick={()=>{ setActiveSection(sec.key); window.scrollTo(0,0) }}
+                    style={{ flex:1, padding:'7px 2px', borderRadius:'8px 8px 0 0', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'11px', fontWeight:isActive?600:400, background:isActive?'#f7f5f0':'transparent', color:isActive?'#1a2e2b':'rgba(168,201,196,0.7)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', WebkitTapHighlightColor:'transparent', minWidth:0 }}>
+                    {sec.icon}<br/><span style={{ fontSize:'10px' }}>{SHORT[sec.key]||sec.label}</span>
+                  </button>
+                </React.Fragment>
               )
             })}
           </div>
