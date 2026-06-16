@@ -18840,7 +18840,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                                         {!tmpl&&<span style={{ fontSize:'10px', color:'#e5a0a0' }}>No template assigned</span>}
                                       </div>
                                       {tmpl&&(
-                                        <button onClick={()=>setPeekTemplate(tmpl)} title="Preview this email" style={{ fontSize:'12px', color:'#6366f1', background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'5px', padding:'2px 7px', cursor:'pointer', fontFamily:'inherit', flexShrink:0, lineHeight:1.4 }}>👁</button>
+                                        <button onClick={()=>setPeekTemplate(tmpl)} title="Preview this email" style={{ display:'flex', alignItems:'center', gap:'4px', fontSize:'10px', fontWeight:600, color:'#6366f1', background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'5px', padding:'2px 7px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>👁 Preview</button>
                                       )}
                                       <button onClick={()=>setEditingStep({pathId,step})} style={{ fontSize:'10px', color:'#a8c9c4', background:'none', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'5px', padding:'2px 7px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>Change</button>
                                     </div>
