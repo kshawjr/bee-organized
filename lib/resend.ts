@@ -13,7 +13,11 @@
 import { Resend } from 'resend'
 import { supabaseService } from './supabase-service'
 
-const resend = new Resend(process.env.RESEND_API_KEY)
+let _resend: import('resend').Resend | null = null
+function getResend() {
+  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY)
+  return _resend
+}
 
 type SendSuccess = { success: true; id: string }
 type SendFailure = { success: false; error: string }
@@ -155,7 +159,7 @@ export async function sendEmailDirect(args: SendEmailDirectArgs): Promise<SendRe
   }
 
   try {
-    const { data, error } = await resend.emails.send({
+    const { data, error } = await getResend().emails.send({
       from: `${fromName} <${from}>`,
       replyTo,
       to,

@@ -1,6 +1,8 @@
 // app/api/leads/[id]/route.ts
 //
-// PATCH /api/leads/:id — update a lead (Hive client record)
+// GET    /api/leads/:id — fetch a single lead with all joined tables (used by
+//   the Supabase Realtime handler in useLeadsRealtime to refetch after INSERT/UPDATE)
+// PATCH  /api/leads/:id — update a lead (Hive client record)
 // DELETE /api/leads/:id — permanently delete a soft-deleted (is_junk=true)
 //   lead. Only the Recycle Bin should call this; active leads must be
 //   soft-deleted via PATCH { is_junk: true } first.
@@ -22,6 +24,7 @@ import { updateLead } from '@/lib/dual-write'
 import { isAdmin } from '@/lib/auth'
 import { applyDripSideEffects } from '@/lib/drip-lifecycle'
 import { sendDripStep } from '@/lib/drip-send'
+import { mapLeadToPerson } from '@/lib/people-mapper'
 
 const VALID_STAGES = [
   'New',
@@ -69,6 +72,89 @@ const PATCHABLE_FIELDS = new Set([
   'request_details',
   'paused',
 ])
+
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+
+  const supabase = await createServerSupabaseClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+
+  const { data: hubUser, error: hubUserError } = await supabase
+    .from('hub_users')
+    .select('id, role, location_id')
+    .eq('id', user.id)
+    .single()
+  if (hubUserError || !hubUser) {
+    return NextResponse.json({ error: 'no_hub_user_profile' }, { status: 403 })
+  }
+
+  const { data: lead, error: leadError } = await supabaseService
+    .from('leads')
+    .select('*')
+    .eq('id', id)
+    .single()
+  if (leadError || !lead) {
+    return NextResponse.json({ error: 'lead_not_found' }, { status: 404 })
+  }
+
+  // Location scoping for non-admins
+  if (!isAdmin(hubUser.role) && hubUser.location_id !== lead.location_uuid) {
+    return NextResponse.json({ error: 'forbidden_wrong_location' }, { status: 403 })
+  }
+
+  // Fetch all joined tables in parallel (mirrors _hub-page.tsx initial load)
+  const [
+    { data: lead_notes },
+    { data: touchpoints },
+    { data: lead_contacts },
+    { data: lead_tags },
+    { data: assessments },
+    { data: service_requests },
+    { data: quotes },
+    { data: jobs },
+    { data: invoices },
+  ] = await Promise.all([
+    supabaseService.from('lead_notes').select('*').eq('lead_id', id).order('created_at', { ascending: false }),
+    supabaseService.from('touchpoints').select('*').eq('lead_id', id).order('occurred_at', { ascending: false }),
+    supabaseService.from('lead_contacts').select('*').eq('lead_id', id).order('created_at', { ascending: true }),
+    supabaseService.from('lead_tags').select('*').eq('lead_id', id),
+    supabaseService.from('assessments').select('*').eq('lead_id', id).order('scheduled_at', { ascending: false }),
+    supabaseService.from('service_requests').select('*').eq('lead_id', id).order('created_at', { ascending: false }),
+    supabaseService.from('quotes').select('*').eq('lead_id', id).order('sent_at', { ascending: false }),
+    supabaseService.from('jobs').select('*').eq('lead_id', id).order('scheduled_start', { ascending: false }),
+    supabaseService.from('invoices').select('*').eq('lead_id', id).order('issued_at', { ascending: false }),
+  ])
+
+  // Resolve tag lookups
+  const tagLookupIds = Array.from(new Set((lead_tags || []).map((lt: any) => lt.tag_lookup_id)))
+  let tag_lookups: Record<string, any> = {}
+  if (tagLookupIds.length > 0) {
+    const { data: tagLookupRows } = await supabaseService
+      .from('lookups')
+      .select('*')
+      .in('id', tagLookupIds)
+    ;(tagLookupRows || []).forEach((row: any) => { tag_lookups[row.id] = row })
+  }
+
+  const person = mapLeadToPerson(lead, {
+    lead_notes:       lead_notes       || [],
+    touchpoints:      touchpoints      || [],
+    lead_contacts:    lead_contacts    || [],
+    lead_tags:        lead_tags        || [],
+    assessments:      assessments      || [],
+    service_requests: service_requests || [],
+    quotes:           quotes           || [],
+    jobs:             jobs             || [],
+    invoices:         invoices         || [],
+    tag_lookups,
+  })
+
+  return NextResponse.json({ person }, { status: 200 })
+}
 
 export async function PATCH(
   req: Request,

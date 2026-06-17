@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, createContext, useContext } from "react"
 import { useRouter } from "next/navigation"
+import { useLeadsRealtime } from "@/lib/use-leads-realtime"
 import {
   DEFAULT_TIER_PRICES,
   getSubscriptionDisplay,
@@ -10605,6 +10606,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
       {/* Kanban */}
       {view==='kanban'&&viewMode!=='captures'&&(
         <div style={{ overflowX:'auto', overflowY:'visible', paddingBottom:'1rem', WebkitOverflowScrolling:'touch', overscrollBehaviorX:'contain' }}>
+          <style>{`@keyframes beehubRealtimePulse { 0%,100% { box-shadow:none } 30% { box-shadow:0 0 0 3px rgba(16,185,129,0.35) } }`}</style>
           <div style={{ display:'flex', gap:'12px', minWidth:'max-content', alignItems:'flex-start', paddingBottom:'4px' }}>
             {STAGES.filter(stage => viewMode === 'closed'
               ? (stage.key === 'Closed Won' || stage.key === 'Closed Lost')
@@ -10634,7 +10636,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
                     {sp.slice(0, expandedStages[stage.key] ? sp.length : KANBAN_LIMIT).map(person=>{
                       const unpaid = person.invoices?.filter(i=>i.status==='Awaiting Payment').length||0
                       return (
-                        <div key={person.id} onClick={()=>setSelected(person)} style={{ background:'white', border:`1px solid ${unpaid>0?'rgba(245,158,11,0.25)':'rgba(0,0,0,0.07)'}`, borderRadius:'10px', padding:'12px', cursor:'pointer' }}>
+                        <div key={person.id} onClick={()=>setSelected(person)} style={{ background:'white', border:`1px solid ${unpaid>0?'rgba(245,158,11,0.25)':'rgba(0,0,0,0.07)'}`, borderRadius:'10px', padding:'12px', cursor:'pointer', animation: person._realtimePulse ? 'beehubRealtimePulse 1.5s ease' : undefined }}>
                           <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'7px' }}>
                             <Avatar name={person.name} size={28} />
                             <div style={{ minWidth:0, flex:1 }}>
@@ -30726,6 +30728,37 @@ if (Array.isArray(initialPeople)) return
   useEffect(() => {
     if (Array.isArray(initialPeople)) setPeople(initialPeople)
   }, [initialPeople])
+
+  // Supabase Realtime: push lead changes from Jobber webhooks into the Hive
+  // without requiring a page refresh. Scoped to the current owner's location.
+  // For INSERT/UPDATE we refetch the full person (with all relations) via GET
+  // /api/leads/:id since the Realtime payload only carries the leads row.
+  const handleLeadsRealtime = React.useCallback(async ({ type, leadId }) => {
+    if (type === 'DELETE') {
+      setPeople(prev => prev.filter(p => p.id !== leadId))
+      return
+    }
+    try {
+      const res = await fetch(`/api/leads/${leadId}`, { credentials: 'include' })
+      if (!res.ok) return
+      const { person } = await res.json()
+      if (!person) return
+      // Briefly highlight the card so the user sees the realtime update land
+      setPeople(prev => {
+        const exists = prev.some(p => p.id === leadId)
+        const updated = { ...person, _realtimePulse: Date.now() }
+        if (exists) return prev.map(p => p.id === leadId ? updated : p)
+        return [updated, ...prev]
+      })
+    } catch (e) {
+      console.error('[realtime] lead refetch failed:', e)
+    }
+  }, [])
+
+  // Only subscribe when viewing a real owner location (not super_admin all-view)
+  const realtimeLocationUuid = currentLocation?.id || currentUser?.locationId || null
+  useLeadsRealtime(realtimeLocationUuid, handleLeadsRealtime)
+
   // Recycle Bin — is_junk=true leads loaded server-side. Kept in its own
   // state so the main `people` array stays bin-free for HiveScreen / Reports.
   const [binPeople, setBinPeople] = useState(Array.isArray(initialBinPeople) ? initialBinPeople : [])
