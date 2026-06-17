@@ -32,10 +32,12 @@ type SeatRow = {
   prorated_cost: number | null
   added_by: string | null
   notes: string | null
+  is_primary: boolean
+  scheduled_removal_at: string | null
 }
 
 const SEAT_COLS =
-  'id, location_id, tier, user_id, status, added_at, removed_at, prorated_cost, added_by, notes'
+  'id, location_id, tier, user_id, status, added_at, removed_at, prorated_cost, added_by, notes, is_primary, scheduled_removal_at'
 
 // Resolve the calling user's auth uid + hub_users row in one shot. Returns
 // null if unauthenticated or the hub_user is missing.

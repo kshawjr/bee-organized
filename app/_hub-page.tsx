@@ -294,7 +294,7 @@ export default async function HubPage({
     const { data: seatsRaw, error: seatsErr } = await supabaseService
       .from('subscription_seats')
       .select(
-        'id, location_id, tier, user_id, status, is_primary, added_at, removed_at, prorated_cost, added_by, notes'
+        'id, location_id, tier, user_id, status, is_primary, added_at, removed_at, prorated_cost, added_by, notes, scheduled_removal_at'
       )
       .eq('location_id', currentLocation.id)
       .eq('status', 'active')

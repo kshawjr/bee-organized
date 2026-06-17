@@ -18274,6 +18274,9 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   // an IIFE so it can't hold its own hooks).
   const [showAddSeatsModal, setShowAddSeatsModal] = useState(false)
   const [showBillingHistory, setShowBillingHistory] = useState(false)
+  // Schedule-removal modals — seat object drives both modals.
+  const [scheduleRemovalSeat, setScheduleRemovalSeat] = useState(null)
+  const [cancelScheduledSeat, setCancelScheduledSeat] = useState(null)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
   const livePrices = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
   // Build settings from selected location if provided. Reads only real saved
@@ -19149,6 +19152,54 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                   </div>
                 </div>
 
+                {/* Seat roster — individual seats with schedule-removal controls.
+                    Shows active seats only; owner/elevated only. */}
+                {(()=>{
+                  const activeSeats = (seatsCtx?.seats || []).filter(s => s.status === 'active')
+                  if (activeSeats.length === 0) return null
+                  return (
+                    <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', overflow:'hidden', marginBottom:'18px' }}>
+                      <div style={{ padding:'10px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)', background:'rgba(26,46,43,0.03)' }}>
+                        <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px' }}>Seat roster</p>
+                      </div>
+                      {activeSeats.map((seat, idx) => {
+                        const meta = SUBSCRIPTION_TIER_META.find(m=>m.key===seat.tier)
+                        const isScheduled = !!seat.scheduled_removal_at
+                        const formattedDate = isScheduled ? new Date(seat.scheduled_removal_at + 'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : null
+                        return (
+                          <div key={seat.id} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 14px', borderBottom: idx < activeSeats.length-1 ? '1px solid rgba(0,0,0,0.04)' : 'none', borderLeft:`4px solid ${isScheduled ? '#d97706' : (meta?.color || '#8a9e9a')}`, background: isScheduled ? 'rgba(217,119,6,0.04)' : 'transparent' }}>
+                            <span style={{ fontSize:'16px', flexShrink:0 }}>{isScheduled ? '🕐' : (meta?.icon || '🪑')}</span>
+                            <div style={{ flex:1, minWidth:0 }}>
+                              <p style={{ fontSize:'12.5px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>
+                                {meta?.name || seat.tier}{seat.user_id ? '' : ' (unassigned)'}
+                              </p>
+                              {isScheduled
+                                ? <p style={{ fontSize:'10.5px', color:'#d97706', fontWeight:600 }}>Scheduled for removal: {formattedDate}</p>
+                                : <p style={{ fontSize:'10.5px', color:'#8a9e9a' }}>{seat.user_id ? 'Assigned' : 'Available for invite'}</p>
+                              }
+                            </div>
+                            {isScheduled ? (
+                              <button
+                                type="button"
+                                onClick={()=>setCancelScheduledSeat(seat)}
+                                style={{ flexShrink:0, padding:'5px 10px', background:'rgba(217,119,6,0.10)', border:'1px solid rgba(217,119,6,0.30)', borderRadius:'7px', fontSize:'11px', fontWeight:700, color:'#d97706', cursor:'pointer', fontFamily:'inherit', whiteSpace:'nowrap' }}>
+                                Cancel
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={()=>setScheduleRemovalSeat(seat)}
+                                style={{ flexShrink:0, padding:'5px 10px', background:'rgba(0,0,0,0.04)', border:'1px solid rgba(0,0,0,0.10)', borderRadius:'7px', fontSize:'11px', fontWeight:600, color:'#4a5e5a', cursor:'pointer', fontFamily:'inherit', whiteSpace:'nowrap' }}>
+                                Schedule removal
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
+
                 {/* Billing history — recorded payments (manual conversions
                     today; Stripe-synced records once that integration lands). */}
                 <button
@@ -19779,6 +19830,22 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
         <BillingHistorySheet
           locationId={currentLocationCtx?.id || null}
           onClose={()=>setShowBillingHistory(false)}
+        />
+      )}
+      {scheduleRemovalSeat && (
+        <ScheduleRemovalModal
+          seat={scheduleRemovalSeat}
+          tierMeta={SUBSCRIPTION_TIER_META.find(m=>m.key===scheduleRemovalSeat.tier)}
+          onClose={()=>setScheduleRemovalSeat(null)}
+          onScheduled={(updated)=>{ seatsCtx?.setSeats?.(prev=>prev.map(s=>s.id===updated.id?updated:s)); setScheduleRemovalSeat(null) }}
+        />
+      )}
+      {cancelScheduledSeat && (
+        <CancelScheduledRemovalModal
+          seat={cancelScheduledSeat}
+          tierMeta={SUBSCRIPTION_TIER_META.find(m=>m.key===cancelScheduledSeat.tier)}
+          onClose={()=>setCancelScheduledSeat(null)}
+          onCanceled={(updated)=>{ seatsCtx?.setSeats?.(prev=>prev.map(s=>s.id===updated.id?updated:s)); setCancelScheduledSeat(null) }}
         />
       )}
     </div>
@@ -21984,6 +22051,8 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
   const [ownerStatus, setOwnerStatus]       = useState(null)
   const [ownerStatusError, setOwnerStatusError] = useState('')
   const [ownerStatusLoading, setOwnerStatusLoading] = useState(false)
+  // Seat roster for the location — used in Team tab to show scheduled removals.
+  const [locationSeats, setLocationSeats]   = useState([])
   const [showInviteOwner, setShowInviteOwner]   = useState(false)
   const [pendingActionId, setPendingActionId]   = useState('') // resend | revoke
   const [pendingActionError, setPendingActionError] = useState('')
@@ -22021,6 +22090,14 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
   }, [currentLoc?.id])
 
   React.useEffect(() => { fetchOwnerStatus() }, [fetchOwnerStatus])
+
+  React.useEffect(() => {
+    if (!currentLoc?.id) return
+    fetch(`/api/seats?location_id=${encodeURIComponent(currentLoc.id)}`)
+      .then(r => r.json().catch(() => []))
+      .then(data => { if (Array.isArray(data)) setLocationSeats(data) })
+      .catch(() => {})
+  }, [currentLoc?.id])
 
   async function revokeInvite(inviteId) {
     if (!inviteId) return
@@ -25393,6 +25470,27 @@ function LocationDrilldown({ loc, people, users, partners, onClose }) {
                 </div>
               )
             })}
+            {/* Seat roster — shows scheduled removals for super_admin/admin visibility */}
+            {locationSeats.filter(s=>s.status==='active'&&s.scheduled_removal_at).length > 0 && (
+              <div style={{ background:'white', borderRadius:'12px', border:'1px solid rgba(217,119,6,0.25)', overflow:'hidden' }}>
+                <div style={{ padding:'8px 14px', background:'rgba(217,119,6,0.07)', borderBottom:'1px solid rgba(217,119,6,0.15)' }}>
+                  <p style={{ fontSize:'10px', fontWeight:700, color:'#d97706', textTransform:'uppercase', letterSpacing:'0.5px' }}>🕐 Scheduled for removal at renewal</p>
+                </div>
+                {locationSeats.filter(s=>s.status==='active'&&s.scheduled_removal_at).map(seat=>{
+                  const meta = SUBSCRIPTION_TIER_META.find(m=>m.key===seat.tier)
+                  const dateLabel = new Date(seat.scheduled_removal_at + 'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})
+                  return (
+                    <div key={seat.id} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 14px', borderBottom:'1px solid rgba(0,0,0,0.04)', borderLeft:'4px solid #d97706' }}>
+                      <span style={{ fontSize:'16px' }}>{meta?.icon || '🪑'}</span>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <p style={{ fontSize:'12.5px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{meta?.name || seat.tier}{seat.user_id ? '' : ' (unassigned)'}</p>
+                        <p style={{ fontSize:'10.5px', color:'#d97706' }}>Removal scheduled: {dateLabel}</p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
 
@@ -28868,6 +28966,139 @@ function PaymentConfirmStep({
           style={{ flex:2, padding:'12px', background:isProcessing?'#8a9e9a':'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:isProcessing?'wait':'pointer' }}>
           {isProcessing ? 'Processing…' : `${confirmLabel} ${formatCurrency(total, { showCents:'auto' })} →`}
         </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── ScheduleRemovalModal ──────────────────────────────────────────────────
+// Owner schedules a seat for removal at renewal. No mid-cycle credits.
+// PATCH /api/seats/[id] with { scheduled_removal_at: 'YYYY-MM-DD' }.
+function ScheduleRemovalModal({ seat, tierMeta, onClose, onScheduled }) {
+  const nextMarchFirst = (() => {
+    const now = new Date()
+    const year = now.getUTCMonth() < 2 ? now.getUTCFullYear() : now.getUTCFullYear() + 1
+    return `${year}-03-01`
+  })()
+  const [date, setDate]       = useState(nextMarchFirst)
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState('')
+  const hasUser = !!seat.user_id
+
+  async function confirm() {
+    setSaving(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/seats/${encodeURIComponent(seat.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduled_removal_at: date }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`)
+      onScheduled({ ...seat, scheduled_removal_at: date })
+      onClose()
+    } catch (err) {
+      setError(err?.message || 'Could not schedule removal')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:9900, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px', background:'rgba(26,46,43,0.55)', fontFamily:'"DM Sans",system-ui,sans-serif' }}>
+      <div style={{ background:'white', borderRadius:'18px', width:'100%', maxWidth:'400px', boxShadow:'0 24px 80px rgba(0,0,0,0.25)', overflow:'hidden' }}>
+        <div style={{ background:'#1a2e2b', padding:'14px 18px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <span style={{ fontSize:'14px', fontWeight:700, color:'white' }}>🕐 Schedule seat removal</span>
+          <button onClick={onClose} style={{ background:'none', border:'none', color:'rgba(255,255,255,0.75)', cursor:'pointer', fontSize:'22px', padding:0, lineHeight:1, fontFamily:'inherit' }}>×</button>
+        </div>
+        <div style={{ padding:'20px 20px 8px' }}>
+          <p style={{ fontSize:'13px', color:'#1a2e2b', fontWeight:600, marginBottom:'6px' }}>
+            {tierMeta?.icon} {tierMeta?.name || seat.tier} seat
+          </p>
+          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.55, marginBottom:'16px' }}>
+            This seat will stay active and billable until the scheduled date. On that date, a super admin will process removals and the seat will be deactivated.
+            {hasUser && <span style={{ display:'block', marginTop:'6px', color:'#d97706', fontWeight:600 }}>⚠️ This seat is assigned — the user will lose access when the seat is removed.</span>}
+          </p>
+          <label style={{ display:'block', fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>
+            Removal date
+          </label>
+          <input
+            type="date"
+            value={date}
+            min={(() => { const d = new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10) })()}
+            onChange={e => { setDate(e.target.value); setError('') }}
+            style={{ width:'100%', padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', boxSizing:'border-box' }}
+          />
+          <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'6px' }}>Defaults to next March 1 (annual renewal date).</p>
+          {error && <p style={{ fontSize:'12px', color:'#ef4444', marginTop:'8px' }}>{error}</p>}
+        </div>
+        <div style={{ padding:'12px 20px 20px', display:'flex', gap:'10px', justifyContent:'flex-end' }}>
+          <button onClick={onClose} style={{ padding:'9px 16px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:'pointer' }}>
+            Cancel
+          </button>
+          <button
+            onClick={confirm}
+            disabled={saving || !date}
+            style={{ padding:'9px 18px', background: saving ? '#8a9e9a' : '#d97706', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', cursor: saving ? 'not-allowed' : 'pointer' }}>
+            {saving ? 'Scheduling…' : 'Schedule removal'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── CancelScheduledRemovalModal ───────────────────────────────────────────
+// Clears scheduled_removal_at on a seat (PATCH with null).
+function CancelScheduledRemovalModal({ seat, tierMeta, onClose, onCanceled }) {
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState('')
+
+  async function confirm() {
+    setSaving(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/seats/${encodeURIComponent(seat.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduled_removal_at: null }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`)
+      onCanceled({ ...seat, scheduled_removal_at: null })
+      onClose()
+    } catch (err) {
+      setError(err?.message || 'Could not cancel scheduled removal')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:9900, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px', background:'rgba(26,46,43,0.55)', fontFamily:'"DM Sans",system-ui,sans-serif' }}>
+      <div style={{ background:'white', borderRadius:'18px', width:'100%', maxWidth:'380px', boxShadow:'0 24px 80px rgba(0,0,0,0.25)', overflow:'hidden' }}>
+        <div style={{ background:'#1a2e2b', padding:'14px 18px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <span style={{ fontSize:'14px', fontWeight:700, color:'white' }}>Cancel scheduled removal</span>
+          <button onClick={onClose} style={{ background:'none', border:'none', color:'rgba(255,255,255,0.75)', cursor:'pointer', fontSize:'22px', padding:0, lineHeight:1, fontFamily:'inherit' }}>×</button>
+        </div>
+        <div style={{ padding:'20px' }}>
+          <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.55, marginBottom:'0' }}>
+            Cancel the scheduled removal for this <strong>{tierMeta?.name || seat.tier}</strong> seat? It will remain active and billable as normal.
+          </p>
+          {error && <p style={{ fontSize:'12px', color:'#ef4444', marginTop:'10px' }}>{error}</p>}
+        </div>
+        <div style={{ padding:'4px 20px 20px', display:'flex', gap:'10px', justifyContent:'flex-end' }}>
+          <button onClick={onClose} style={{ padding:'9px 16px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:'pointer' }}>
+            Dismiss
+          </button>
+          <button
+            onClick={confirm}
+            disabled={saving}
+            style={{ padding:'9px 18px', background: saving ? '#8a9e9a' : '#22c55e', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', cursor: saving ? 'not-allowed' : 'pointer' }}>
+            {saving ? 'Canceling…' : 'Keep seat active'}
+          </button>
+        </div>
       </div>
     </div>
   )
