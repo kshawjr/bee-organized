@@ -28248,6 +28248,705 @@ function AddLocationModal({ onClose, onCreated, onInviteOwner }) {
   )
 }
 
+// ─── Shared admin card / button styles ────────────────────────────────────────
+const ADMIN_CARD = { background:'white', borderRadius:'14px', boxShadow:'0 1px 4px rgba(0,0,0,0.07)', border:'1px solid rgba(0,0,0,0.06)', overflow:'hidden' }
+const ADMIN_BTN_PRIMARY = { padding:'8px 16px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:'pointer' }
+const ADMIN_BTN_SECONDARY = { padding:'8px 16px', background:'white', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:'#1a2e2b', cursor:'pointer' }
+
+// ─── AdminDashboard ────────────────────────────────────────────────────────────
+function AdminDashboard({ locations, users, role, onNavigate }) {
+  const [actionCounts, setActionCounts] = useState({ conversions: null, removals: null, feedback: null })
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/admin/feedback?status=submitted')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (!cancelled) setActionCounts(a => ({ ...a, feedback: d?.items?.length ?? 0 })) })
+      .catch(() => {})
+    fetch('/api/admin/scheduled-removals')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (!cancelled) setActionCounts(a => ({ ...a, removals: d?.count ?? 0 })) })
+      .catch(() => {})
+    if (role === 'super_admin') {
+      fetch('/api/admin/conversions-due?days=30')
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (!cancelled) setActionCounts(a => ({ ...a, conversions: d?.items?.length ?? 0 })) })
+        .catch(() => {})
+    }
+    return () => { cancelled = true }
+  }, [role])
+
+  const byStatus = { active: 0, onboarding: 0, pastdue: 0, inactive: 0 }
+  locations.forEach(l => {
+    const s = l.lifecycle_status || l.crmStatus || 'active'
+    if (s === 'active') byStatus.active++
+    else if (s === 'onboarding') byStatus.onboarding++
+    else if (s === 'pastdue' || s === 'past_due') byStatus.pastdue++
+    else if (s === 'inactive') byStatus.inactive++
+  })
+
+  const bySrc = { corporate: 0, direct: 0, sponsored: 0, none: 0 }
+  locations.forEach(l => {
+    const s = l.payment_source || 'none'
+    if (bySrc[s] !== undefined) bySrc[s]++
+    else bySrc.none++
+  })
+
+  const allCounted = actionCounts.feedback !== null
+  const totalActions = (actionCounts.conversions || 0) + (actionCounts.removals || 0) + (actionCounts.feedback || 0)
+
+  return (
+    <div style={{ padding:'28px 28px 48px' }}>
+      <h1 style={{ fontSize:'26px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>Dashboard</h1>
+      <p style={{ fontSize:'13px', color:'#8a9e9a', marginBottom:'28px' }}>{locations.length} location{locations.length !== 1 ? 's' : ''} · {users.length} user{users.length !== 1 ? 's' : ''}</p>
+
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(400px,1fr))', gap:'16px' }}>
+
+        {/* Locations Overview */}
+        <div style={ADMIN_CARD}>
+          <div style={{ padding:'18px 20px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:'8px' }}>
+            <span style={{ fontSize:'17px' }}>🏢</span>
+            <span style={{ fontSize:'16px', fontWeight:600, color:'#1a2e2b' }}>Locations Overview</span>
+          </div>
+          <div style={{ padding:'16px 20px' }}>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'8px', marginBottom:'14px' }}>
+              {[
+                { label:'Active',     value:byStatus.active,     color:'#22c55e', icon:'✅', filter:'active'     },
+                { label:'Onboarding', value:byStatus.onboarding, color:'#f59e0b', icon:'🐣', filter:'onboarding' },
+                { label:'Past Due',   value:byStatus.pastdue,    color:'#ef4444', icon:'⚠️', filter:'pastdue'    },
+                { label:'Inactive',   value:byStatus.inactive,   color:'#8a9e9a', icon:'⏸',  filter:'inactive'   },
+              ].map(s => (
+                <button key={s.label} onClick={() => onNavigate('locations', s.filter)} style={{ padding:'12px 8px', background:'#f7f5f0', borderRadius:'12px', border:'1px solid rgba(0,0,0,0.05)', cursor:'pointer', textAlign:'center' }}>
+                  <div style={{ fontSize:'18px', marginBottom:'3px' }}>{s.icon}</div>
+                  <div style={{ fontSize:'20px', fontWeight:700, color:s.color, fontFamily:'Georgia,serif', lineHeight:1 }}>{s.value}</div>
+                  <div style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'3px', fontWeight:500 }}>{s.label}</div>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => onNavigate('locations')} style={{ width:'100%', padding:'8px', background:'transparent', border:'1px solid rgba(0,0,0,0.08)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer', fontWeight:500 }}>
+              View all locations →
+            </button>
+          </div>
+        </div>
+
+        {/* Billing Snapshot */}
+        <div style={ADMIN_CARD}>
+          <div style={{ padding:'18px 20px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:'8px' }}>
+            <span style={{ fontSize:'17px' }}>💳</span>
+            <span style={{ fontSize:'16px', fontWeight:600, color:'#1a2e2b' }}>Billing Snapshot</span>
+          </div>
+          <div style={{ padding:'16px 20px' }}>
+            {[
+              { label:'Corporate-funded', value:bySrc.corporate, color:'#6366f1' },
+              { label:'Direct billing',   value:bySrc.direct,    color:'#10b981' },
+              { label:'Sponsored',        value:bySrc.sponsored, color:'#f59e0b' },
+              { label:'Not configured',   value:bySrc.none,      color:'#d1d5db' },
+            ].filter(r => r.value > 0).map(r => (
+              <div key={r.label} style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'10px' }}>
+                <div style={{ width:'10px', height:'10px', borderRadius:'50%', background:r.color, flexShrink:0 }} />
+                <span style={{ fontSize:'13px', color:'#4a5e5a', flex:1 }}>{r.label}</span>
+                <span style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b' }}>{r.value}</span>
+              </div>
+            ))}
+            {bySrc.corporate === 0 && bySrc.direct === 0 && bySrc.sponsored === 0 && bySrc.none === 0 && (
+              <p style={{ fontSize:'13px', color:'#b0c0bc', textAlign:'center', padding:'12px 0' }}>No billing data</p>
+            )}
+          </div>
+        </div>
+
+        {/* Action Required */}
+        <div style={ADMIN_CARD}>
+          <div style={{ padding:'18px 20px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:'8px' }}>
+            <span style={{ fontSize:'17px' }}>🔔</span>
+            <span style={{ fontSize:'16px', fontWeight:600, color:'#1a2e2b' }}>Action Required</span>
+            {allCounted && totalActions > 0 && (
+              <span style={{ marginLeft:'auto', minWidth:'20px', height:'20px', padding:'0 6px', borderRadius:'10px', background:'#ef4444', color:'white', fontSize:'11px', fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center' }}>{totalActions}</span>
+            )}
+          </div>
+          <div style={{ padding:'12px 16px' }}>
+            {allCounted && totalActions === 0 && (
+              <div style={{ padding:'20px', textAlign:'center', color:'#8a9e9a' }}>
+                <div style={{ fontSize:'28px', marginBottom:'8px' }}>✓</div>
+                <p style={{ fontSize:'13px' }}>All caught up — no pending actions</p>
+              </div>
+            )}
+            {!allCounted && (
+              <div style={{ padding:'20px', textAlign:'center', color:'#b0c0bc', fontSize:'13px' }}>Loading…</div>
+            )}
+            <div style={{ display:'grid', gap:'8px' }}>
+              {role === 'super_admin' && (actionCounts.conversions || 0) > 0 && (
+                <div style={{ display:'flex', alignItems:'center', gap:'12px', padding:'12px 14px', background:'#fef3c7', borderRadius:'10px', border:'1px solid #fde68a' }}>
+                  <span style={{ fontSize:'18px' }}>💳</span>
+                  <div style={{ flex:1 }}>
+                    <p style={{ fontSize:'13px', fontWeight:600, color:'#92400e', marginBottom:'2px' }}>{actionCounts.conversions} conversion{actionCounts.conversions !== 1 ? 's' : ''} due</p>
+                    <p style={{ fontSize:'11px', color:'#b45309' }}>Within next 30 days</p>
+                  </div>
+                  <button onClick={() => onNavigate('conversions')} style={{ padding:'5px 10px', background:'#f59e0b', border:'none', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Review</button>
+                </div>
+              )}
+              {(actionCounts.removals || 0) > 0 && (
+                <div style={{ display:'flex', alignItems:'center', gap:'12px', padding:'12px 14px', background:'#fef3c7', borderRadius:'10px', border:'1px solid #fde68a' }}>
+                  <span style={{ fontSize:'18px' }}>🕐</span>
+                  <div style={{ flex:1 }}>
+                    <p style={{ fontSize:'13px', fontWeight:600, color:'#92400e', marginBottom:'2px' }}>{actionCounts.removals} removal{actionCounts.removals !== 1 ? 's' : ''} to process</p>
+                    <p style={{ fontSize:'11px', color:'#b45309' }}>Scheduled for processing</p>
+                  </div>
+                  <button onClick={() => onNavigate('renewals')} style={{ padding:'5px 10px', background:'#f59e0b', border:'none', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Process</button>
+                </div>
+              )}
+              {(actionCounts.feedback || 0) > 0 && (
+                <div style={{ display:'flex', alignItems:'center', gap:'12px', padding:'12px 14px', background:'#fef2f2', borderRadius:'10px', border:'1px solid #fecaca' }}>
+                  <span style={{ fontSize:'18px' }}>🐛</span>
+                  <div style={{ flex:1 }}>
+                    <p style={{ fontSize:'13px', fontWeight:600, color:'#991b1b', marginBottom:'2px' }}>{actionCounts.feedback} open feedback item{actionCounts.feedback !== 1 ? 's' : ''}</p>
+                    <p style={{ fontSize:'11px', color:'#dc2626' }}>Awaiting review</p>
+                  </div>
+                  <button onClick={() => onNavigate('feedback')} style={{ padding:'5px 10px', background:'#ef4444', border:'none', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Review</button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Actions */}
+        <div style={ADMIN_CARD}>
+          <div style={{ padding:'18px 20px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:'8px' }}>
+            <span style={{ fontSize:'17px' }}>⚡</span>
+            <span style={{ fontSize:'16px', fontWeight:600, color:'#1a2e2b' }}>Quick Actions</span>
+          </div>
+          <div style={{ padding:'16px 20px', display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
+            {[
+              { label:'+ Add Location',  fn:()=>onNavigate('locations','add'),    icon:'🏢' },
+              { label:'+ Invite Owner',  fn:()=>onNavigate('locations','invite'),  icon:'✉️' },
+              { label:'Process Renewals',fn:()=>onNavigate('renewals'),            icon:'🕐' },
+              { label:'View Pricing',    fn:()=>onNavigate('pricing'),             icon:'🔧' },
+            ].map(a => (
+              <button key={a.label} onClick={a.fn} style={{ padding:'14px 12px', background:'#f7f5f0', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'12px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:'#1a2e2b', cursor:'pointer', textAlign:'left', display:'flex', alignItems:'center', gap:'8px' }}>
+                <span style={{ fontSize:'17px' }}>{a.icon}</span>
+                {a.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  )
+}
+
+// ─── SuperAdminProfile ─────────────────────────────────────────────────────────
+function SuperAdminProfile({ currentUser, role }) {
+  const nameParts = (currentUser?.name || '').split(' ')
+  const [firstName, setFirstName] = useState(nameParts[0] || '')
+  const [lastName, setLastName]   = useState(nameParts.slice(1).join(' '))
+  const [phone, setPhone]         = useState(currentUser?.phone || '')
+  const email = currentUser?.email || ''
+
+  return (
+    <div style={{ padding:'28px 28px 48px', maxWidth:'560px' }}>
+      <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>Profile</h1>
+      <p style={{ fontSize:'13px', color:'#8a9e9a', marginBottom:'24px' }}>Your personal account information</p>
+
+      <div style={{ ...ADMIN_CARD, marginBottom:'16px' }}>
+        <SettingsEditRow label="First Name" value={firstName} onSave={v=>setFirstName(v)} />
+        <SettingsEditRow label="Last Name"  value={lastName}  onSave={v=>setLastName(v)} />
+        <SettingsEditRow label="Email"      value={email}     readOnly hint="Contact support to change your email" />
+        <SettingsEditRow label="Phone"      value={phone}     onSave={v=>setPhone(v)} type="tel" />
+        <div style={{ padding:'12px 16px', background:'white', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <span style={{ fontSize:'13px', color:'#6b7b77' }}>Role</span>
+          <span style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{role === 'super_admin' ? 'Super Admin' : 'Corporate Admin'}</span>
+        </div>
+      </div>
+
+      <div style={ADMIN_CARD}>
+        {[
+          { label:'Change Password', icon:'🔑', color:'#1a2e2b' },
+          { label:'Sign Out',        icon:'🚪', color:'#ef4444' },
+        ].map((item, i, arr) => (
+          <button key={item.label} onClick={()=>alert(`${item.label} - coming soon`)} style={{ width:'100%', padding:'14px 16px', background:'white', border:'none', borderBottom: i < arr.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
+            <span style={{ fontSize:'18px' }}>{item.icon}</span>
+            <span style={{ fontSize:'14px', fontWeight:500, color:item.color }}>{item.label}</span>
+            <span style={{ marginLeft:'auto', color:'#c8d8d4' }}>›</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── SuperAdminLayout ──────────────────────────────────────────────────────────
+// Unified admin experience for super_admin and corporate roles.
+// Replaces the old AdminScreen tab-strip + separate Settings sidebar with a
+// persistent left sidebar, breadcrumbs, and card-based content area.
+function SuperAdminLayout({
+  role, locFilter='all', onViewLocation, locStatuses={}, onStatusChange,
+  users=USERS_DATA, setUsers=()=>{}, people=[], setPeople=()=>{},
+  binPeople=[], setBinPeople=()=>{}, partners=[], setPartners=()=>{},
+  guideSlides=[], setGuideSlides=()=>{}, manualSlides=[], setManualSlides=()=>{},
+  initialLocations=null, isMobile=false, topOffset=0, initialSection='dashboard',
+}) {
+  const currentUser = useContext(CurrentUserContext)
+
+  const [activeSection, setActiveSection] = useState(initialSection || 'dashboard')
+  // When parent changes initialSection (e.g. switching from admin→settings route),
+  // sync the active section without remounting.
+  const prevInitialSection = useRef(initialSection)
+  useEffect(() => {
+    if (initialSection && initialSection !== prevInitialSection.current) {
+      setActiveSection(initialSection)
+      prevInitialSection.current = initialSection
+    }
+  }, [initialSection])
+
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  // Feedback badge count (fetched on mount, kept fresh by AdminFeedbackScreen)
+  const [feedbackPending, setFeedbackPending] = useState(0)
+  const handleFeedbackPending = React.useCallback(n => setFeedbackPending(n), [])
+  const showFeedback = role === 'super_admin' || role === 'corporate' || role === 'admin'
+  useEffect(() => {
+    if (!showFeedback) return
+    let cancelled = false
+    fetch('/api/admin/feedback?status=submitted')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (!cancelled && d && Array.isArray(d.items)) setFeedbackPending(d.items.length) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [showFeedback])
+
+  // === Locations state ===
+  const [locations, setLocations] = useState(initialLocations || ALL_LOCATIONS)
+  const [selectedLoc, setSelectedLoc]     = useState(null)
+  const [drillLoc, setDrillLoc]           = useState(null)
+  const [search, setSearch]               = useState('')
+  const [statusFilter, setStatusFilter]   = useState('')
+  const [showInvite, setShowInvite]       = useState(false)
+  const [showAddLocation, setShowAddLocation] = useState(false)
+  const [inviteOwnerLoc, setInviteOwnerLoc]   = useState(null)
+  const [pendingAction, setPendingAction]     = useState(null)
+
+  const canAddLocation = role === 'super_admin' || role === 'corporate' || role === 'admin'
+
+  // Trigger modals from dashboard Quick Actions
+  useEffect(() => {
+    if (pendingAction === 'add')    { setShowAddLocation(true); setPendingAction(null) }
+    if (pendingAction === 'invite') { setShowInvite(true);      setPendingAction(null) }
+  }, [pendingAction])
+
+  function handleLocationCreated(row) {
+    if (!row || !row.id) return
+    setLocations(prev => {
+      if (prev.some(l => l.id === row.id)) return prev
+      return [{
+        id: row.id, name: row.name, state: row.state || '',
+        owner: null, crmStatus: 'onboarding',
+        lifecycle_status: row.lifecycle_status || 'onboarding',
+        subscription_status: row.subscription_status || 'deferred',
+        subscription_plan: null, payment_source: row.payment_source || 'none',
+        paid_through_date: null, billing_notes: null,
+        phone:'', website:'', reviewsLink:'', bookingLink:'', email:'',
+        timezone: row.timezone || '', path:'',
+        jobberConnected: false, jobberAccountId: null, last_sync_status: null,
+        leads:0, revenue:0, collected:0, userCount:0, joinedDate:'Just now',
+        onboarding_state:{}, default_drip_path:null, default_move_drip_path:null, activated_at:null,
+      }, ...prev]
+    })
+  }
+
+  function updateStatus(id, status) {
+    setLocations(prev => prev.map(l => l.id === id ? { ...l, crmStatus: status } : l))
+    if (onStatusChange) onStatusChange(id, status)
+  }
+
+  function updateLocationFields(id, fields) {
+    setLocations(prev => prev.map(l => l.id === id ? { ...l, ...fields } : l))
+    setSelectedLoc(prev => prev && prev.id === id ? { ...prev, ...fields } : prev)
+  }
+
+  const filtered = locations.filter(l => {
+    const q = search.toLowerCase()
+    const matchSearch = !search || l.name.toLowerCase().includes(q) || (l.owner || '').toLowerCase().includes(q)
+    const matchStatus = !statusFilter || l.crmStatus === statusFilter
+    return matchSearch && matchStatus
+  })
+
+  // Navigate to a section, optionally triggering a quick action
+  function navigateTo(section, action) {
+    setActiveSection(section)
+    setSidebarOpen(false)
+    if (action === 'add')    setShowAddLocation(true)
+    if (action === 'invite') setShowInvite(true)
+    if (action && action !== 'add' && action !== 'invite') {
+      setStatusFilter(action)
+    }
+  }
+
+  // === Sidebar config ===
+  const sidebarGroups = [
+    {
+      header: null,
+      items: [{ key:'dashboard', label:'Dashboard', icon:'📊' }],
+    },
+    {
+      header: 'Operations',
+      items: [
+        { key:'locations', label:'Locations', icon:'🏢' },
+        ...(showFeedback ? [{ key:'feedback', label:'Feedback', icon:'🐛', badge:feedbackPending }] : []),
+        { key:'users', label:'Users', icon:'👥' },
+      ],
+    },
+    ...(role === 'super_admin' || role === 'corporate' ? [{
+      header: 'Billing',
+      items: [
+        ...(role === 'super_admin' ? [{ key:'conversions', label:'Conversions Due', icon:'💳' }] : []),
+        { key:'renewals', label:'Renewals', icon:'🕐' },
+        ...(role === 'super_admin' ? [{ key:'pricing', label:'Pricing', icon:'🔧' }] : []),
+      ],
+    }] : []),
+    {
+      header: 'My Account',
+      items: [{ key:'profile', label:'Profile', icon:'👤' }],
+    },
+    ...(role === 'super_admin' ? [{
+      header: 'Advanced',
+      items: [
+        { key:'content',   label:'Content',     icon:'✏️' },
+        { key:'configure', label:'Configure',   icon:'⚙️' },
+        { key:'bin',       label:'Recycle Bin', icon:'🗑' },
+      ],
+    }] : []),
+  ]
+
+  const SECTION_META = {
+    dashboard:   { label:'Dashboard',      cluster:null           },
+    locations:   { label:'Locations',      cluster:'Operations'   },
+    users:       { label:'Users',          cluster:'Operations'   },
+    feedback:    { label:'Feedback',       cluster:'Operations'   },
+    conversions: { label:'Conversions Due',cluster:'Billing'      },
+    renewals:    { label:'Renewals',       cluster:'Billing'      },
+    pricing:     { label:'Pricing',        cluster:'Billing'      },
+    profile:     { label:'Profile',        cluster:'My Account'   },
+    content:     { label:'Content',        cluster:'Advanced'     },
+    configure:   { label:'Configure',      cluster:'Advanced'     },
+    bin:         { label:'Recycle Bin',    cluster:'Advanced'     },
+  }
+
+  const meta = SECTION_META[activeSection] || { label: activeSection, cluster: null }
+
+  const SidebarNav = () => (
+    <div style={{ padding:'12px 10px' }}>
+      {sidebarGroups.map((grp, gi) => (
+        <div key={gi} style={{ marginBottom:'2px' }}>
+          {grp.header && (
+            <div style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.8px', padding:'10px 10px 5px', marginTop: gi > 0 ? '6px' : 0 }}>
+              {grp.header}
+            </div>
+          )}
+          {grp.items.map(item => {
+            const isActive = activeSection === item.key
+            return (
+              <button
+                key={item.key}
+                onClick={() => { setActiveSection(item.key); setSidebarOpen(false) }}
+                style={{
+                  width:'100%', display:'flex', alignItems:'center', gap:'9px',
+                  padding:'8px 10px', borderRadius:'8px', border:'none', cursor:'pointer',
+                  fontFamily:'inherit', fontSize:'13px',
+                  fontWeight: isActive ? 600 : 400,
+                  background: isActive ? '#1a2e2b' : 'transparent',
+                  color: isActive ? 'white' : '#4a5e5a',
+                  marginBottom:'2px', transition:'background 0.1s',
+                }}
+              >
+                <span style={{ fontSize:'15px', lineHeight:1, opacity: isActive ? 1 : 0.75 }}>{item.icon}</span>
+                <span style={{ flex:1, textAlign:'left' }}>{item.label}</span>
+                {item.badge > 0 && (
+                  <span style={{ minWidth:'18px', height:'18px', padding:'0 5px', borderRadius:'9px', background: isActive ? 'rgba(255,255,255,0.3)' : '#ef4444', color:'white', fontSize:'10px', fontWeight:700, display:'inline-flex', alignItems:'center', justifyContent:'center' }}>
+                    {item.badge}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      ))}
+    </div>
+  )
+
+  function renderContent() {
+    switch (activeSection) {
+
+      case 'dashboard':
+        return <AdminDashboard locations={locations} users={users} role={role} onNavigate={navigateTo} />
+
+      case 'locations':
+        return (
+          <div style={{ padding:'28px 28px 48px' }}>
+            <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:'20px', gap:'12px' }}>
+              <div>
+                <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'3px' }}>Locations</h1>
+                <p style={{ fontSize:'13px', color:'#8a9e9a' }}>{filtered.length} of {locations.length} shown</p>
+              </div>
+              <div style={{ display:'flex', gap:'8px', flexShrink:0 }}>
+                {canAddLocation && <button onClick={()=>setShowAddLocation(true)} style={ADMIN_BTN_PRIMARY}>+ Add Location</button>}
+                <button onClick={()=>setShowInvite(true)} style={ADMIN_BTN_SECONDARY}>+ Invite Owner</button>
+              </div>
+            </div>
+
+            <div style={ADMIN_CARD}>
+              <div style={{ padding:'16px 20px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
+                <input value={search} onChange={e=>{ setSearch(e.target.value); setStatusFilter('') }} placeholder="Search locations or owners..." style={{ width:'100%', padding:'9px 14px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', background:'#f7f5f0', outline:'none', boxSizing:'border-box' }} />
+                <div style={{ display:'flex', gap:'6px', marginTop:'10px', flexWrap:'wrap' }}>
+                  {[{key:'',label:'All'},
+                    ...Object.entries(CRM_STATUS_CONF).map(([k,v])=>({key:k,label:`${v.icon} ${v.label}`}))
+                  ].map(f => (
+                    <button key={f.key} onClick={()=>setStatusFilter(f.key)} style={{ padding:'4px 12px', borderRadius:'20px', cursor:'pointer', border:'1.5px solid', borderColor:statusFilter===f.key?'#1a2e2b':'rgba(0,0,0,0.08)', background:statusFilter===f.key?'#1a2e2b':'white', fontSize:'12px', fontFamily:'inherit', fontWeight:statusFilter===f.key?600:400, color:statusFilter===f.key?'white':'#4a5e5a', flexShrink:0 }}>
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ padding:'8px' }}>
+                {filtered.length === 0 ? (
+                  <div style={{ padding:'40px', textAlign:'center', color:'#b0c0bc' }}>
+                    <div style={{ fontSize:'36px', marginBottom:'12px' }}>🏢</div>
+                    <p style={{ fontSize:'15px', fontWeight:500, marginBottom:'4px' }}>No locations found</p>
+                    <p style={{ fontSize:'13px' }}>Try adjusting your search or filters</p>
+                  </div>
+                ) : (
+                  <div style={{ display:'grid', gap:'4px' }}>
+                    {filtered.map(loc => (
+                      <LocationCard
+                        key={loc.id} loc={loc} role={role}
+                        onSelect={l=>setSelectedLoc(l)}
+                        onStatusChange={updateStatus}
+                        onViewLocation={onViewLocation}
+                        onDrilldown={()=>setDrillLoc(loc)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+
+      case 'users':
+        return (
+          <div style={{ padding:'28px 28px 48px' }}>
+            <div style={{ marginBottom:'20px' }}>
+              <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'3px' }}>Users</h1>
+              <p style={{ fontSize:'13px', color:'#8a9e9a' }}>{users.length} user{users.length !== 1 ? 's' : ''} across all locations</p>
+            </div>
+            <div style={ADMIN_CARD}>
+              <UsersTab users={users} setUsers={setUsers} locations={locations} locFilter={locFilter} onInvite={()=>setShowInvite(true)} />
+            </div>
+          </div>
+        )
+
+      case 'feedback':
+        return (
+          <div style={{ padding:'28px 28px 48px' }}>
+            <div style={{ marginBottom:'20px' }}>
+              <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'3px' }}>Feedback</h1>
+              <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Bugs, feature requests, and general feedback from franchise owners</p>
+            </div>
+            <AdminFeedbackScreen onPendingCountChange={handleFeedbackPending} />
+          </div>
+        )
+
+      case 'conversions':
+        return (
+          <div style={{ padding:'28px 28px 48px' }}>
+            <div style={{ marginBottom:'20px' }}>
+              <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'3px' }}>Conversions Due</h1>
+              <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Locations approaching the end of their corporate sponsorship period</p>
+            </div>
+            <ConversionsDueTab onOpenLocation={loc=>setSelectedLoc(loc)} />
+          </div>
+        )
+
+      case 'renewals':
+        return (
+          <div style={{ padding:'28px 28px 48px' }}>
+            <div style={{ marginBottom:'20px' }}>
+              <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'3px' }}>Renewals</h1>
+              <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Process scheduled seat removals at renewal</p>
+            </div>
+            <ProcessRemovalsCard />
+          </div>
+        )
+
+      case 'pricing':
+        return (
+          <div style={{ padding:'28px 28px 48px' }}>
+            <div style={{ marginBottom:'20px' }}>
+              <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'3px' }}>Pricing</h1>
+              <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Manage subscription seat prices across all tiers</p>
+            </div>
+            <PricingManagementTab />
+          </div>
+        )
+
+      case 'profile':
+        return <SuperAdminProfile currentUser={currentUser} role={role} />
+
+      case 'content':
+        return (
+          <div style={{ padding:'28px 28px 48px' }}>
+            <div style={{ marginBottom:'20px' }}>
+              <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'3px' }}>Content</h1>
+              <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Edit onboarding guide and manual slides</p>
+            </div>
+            <ContentEditor
+              guideSlides={guideSlides}
+              guidePersist={async newSlides => {
+                const res = await fetch('/api/guide-slides', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({slides:newSlides}) })
+                if (!res.ok) { const err = await res.json().catch(()=>({})); throw new Error(err.error||`HTTP ${res.status}`) }
+                setGuideSlides(newSlides)
+              }}
+              manualSlides={manualSlides}
+              manualPersist={async newSlides => {
+                const res = await fetch('/api/manual-slides', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({slides:newSlides}) })
+                if (!res.ok) { const err = await res.json().catch(()=>({})); throw new Error(err.error||`HTTP ${res.status}`) }
+                setManualSlides(newSlides)
+              }}
+              locations={locations}
+            />
+          </div>
+        )
+
+      case 'configure':
+        return (
+          <div style={{ padding:'28px 28px 48px' }}>
+            <div style={{ marginBottom:'20px' }}>
+              <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'3px' }}>Configure</h1>
+            </div>
+            <ConfigureTab />
+          </div>
+        )
+
+      case 'bin':
+        return (
+          <div style={{ padding:'28px 28px 48px' }}>
+            <div style={{ marginBottom:'20px' }}>
+              <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'3px' }}>Recycle Bin</h1>
+            </div>
+            <RecycleBinTab binPeople={binPeople} setBinPeople={setBinPeople} setPeople={setPeople} partners={partners} setPartners={setPartners} locations={initialLocations} />
+          </div>
+        )
+
+      default:
+        return null
+    }
+  }
+
+  const SIDEBAR_W = 240
+
+  return (
+    <>
+      <div style={{ display:'flex', background:'#f7f5f0', minHeight:'100vh' }}>
+
+        {/* Desktop sidebar — fixed left column */}
+        {!isMobile && (
+          <div style={{
+            width:`${SIDEBAR_W}px`, flexShrink:0,
+            position:'fixed', top:`${topOffset}px`, left:0, bottom:0,
+            background:'#f0ece4', borderRight:'1px solid rgba(0,0,0,0.09)',
+            overflowY:'auto', zIndex:100,
+          }}>
+            <div style={{ padding:'14px 16px 10px', borderBottom:'1px solid rgba(0,0,0,0.07)' }}>
+              <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.8px' }}>
+                {role === 'super_admin' ? '🏢 Admin' : '🏢 Corp'}
+              </p>
+            </div>
+            <SidebarNav />
+          </div>
+        )}
+
+        {/* Mobile sidebar overlay */}
+        {isMobile && sidebarOpen && (
+          <>
+            <div onClick={()=>setSidebarOpen(false)} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', zIndex:200 }} />
+            <div style={{ position:'fixed', top:`${topOffset}px`, left:0, bottom:0, width:'260px', background:'#f0ece4', zIndex:201, overflowY:'auto', boxShadow:'4px 0 24px rgba(0,0,0,0.18)' }}>
+              <div style={{ padding:'14px 16px 10px', borderBottom:'1px solid rgba(0,0,0,0.07)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.8px' }}>
+                  {role === 'super_admin' ? '🏢 Admin' : '🏢 Corp'}
+                </p>
+                <button onClick={()=>setSidebarOpen(false)} style={{ background:'none', border:'none', fontSize:'18px', cursor:'pointer', color:'#4a5e5a', padding:'2px 6px', lineHeight:1 }}>✕</button>
+              </div>
+              <SidebarNav />
+            </div>
+          </>
+        )}
+
+        {/* Content area */}
+        <div style={{ flex:1, marginLeft: isMobile ? 0 : `${SIDEBAR_W}px`, minWidth:0, display:'flex', flexDirection:'column' }}>
+
+          {/* Breadcrumb bar */}
+          <div style={{ background:'white', borderBottom:'1px solid rgba(0,0,0,0.07)', padding:'0 20px', height:'40px', display:'flex', alignItems:'center', gap:'6px', position:'sticky', top:`${topOffset}px`, zIndex:50, flexShrink:0 }}>
+            {isMobile && (
+              <button onClick={()=>setSidebarOpen(true)} style={{ background:'none', border:'none', cursor:'pointer', fontSize:'17px', padding:'0 8px 0 0', color:'#4a5e5a', lineHeight:1 }}>☰</button>
+            )}
+            <span style={{ fontSize:'12px', color:'#a0b0ac', fontWeight:500 }}>{role === 'super_admin' ? 'Admin' : 'Corp'}</span>
+            {meta.cluster && (
+              <>
+                <span style={{ fontSize:'12px', color:'#d0dcd8' }}>›</span>
+                <span style={{ fontSize:'12px', color:'#a0b0ac', fontWeight:500 }}>{meta.cluster}</span>
+              </>
+            )}
+            <span style={{ fontSize:'12px', color:'#d0dcd8' }}>›</span>
+            <span style={{ fontSize:'12px', color:'#1a2e2b', fontWeight:600 }}>{meta.label}</span>
+          </div>
+
+          {/* Page content */}
+          {renderContent()}
+        </div>
+      </div>
+
+      {/* Modals */}
+      {selectedLoc && (
+        <LocationDetailSheet
+          loc={selectedLoc} role={role} users={users} locations={locations}
+          onClose={()=>setSelectedLoc(null)}
+          onStatusChange={(id,status)=>{ updateStatus(id,status); setSelectedLoc(prev=>({...prev,crmStatus:status})) }}
+          onLocationUpdate={updateLocationFields}
+          onViewLocation={onViewLocation}
+        />
+      )}
+      {showInvite && (
+        <InviteModal
+          locations={locations}
+          preselectedLocId={locFilter !== 'all' ? locFilter : null}
+          onSuccess={()=>{}}
+          onClose={()=>setShowInvite(false)}
+        />
+      )}
+      {drillLoc && (
+        <LocationDrilldown
+          loc={drillLoc} people={people} users={users} partners={partners}
+          onClose={()=>setDrillLoc(null)}
+          onViewAs={onViewLocation}
+        />
+      )}
+      {showAddLocation && (
+        <AddLocationModal
+          onClose={()=>setShowAddLocation(false)}
+          onCreated={handleLocationCreated}
+          onInviteOwner={loc=>{ setShowAddLocation(false); setInviteOwnerLoc(loc) }}
+        />
+      )}
+      {inviteOwnerLoc && (
+        <InviteOwnerModal
+          location={inviteOwnerLoc}
+          onSuccess={()=>updateLocationFields(inviteOwnerLoc.id, { lifecycle_status:'onboarding', subscription_status:'deferred' })}
+          onClose={()=>setInviteOwnerLoc(null)}
+        />
+      )}
+    </>
+  )
+}
+
 function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, onStatusChange, users=USERS_DATA, setUsers=()=>{}, people=[], setPeople=()=>{}, binPeople=[], setBinPeople=()=>{}, partners=[], setPartners=()=>{}, guideSlides=[], setGuideSlides=()=>{}, manualSlides=[], setManualSlides=()=>{}, initialLocations=null }) {
   const [adminTab, setAdminTab]   = useState('locations')
   // Count of 'submitted' (unhandled) feedback items, reported up by
@@ -30584,6 +31283,37 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
   }, [])
 
   const screen = () => {
+    // Elevated users (super_admin / corporate) get the unified SuperAdminLayout
+    // for both the Admin and Settings nav destinations. Settings routes to Profile.
+    if (isElevated && (activeNav==='admin' || activeNav==='settings')) return (
+      <div style={{ paddingTop:`${TOTAL_TOP}px` }}>
+        <SuperAdminLayout
+          key="super-admin-layout"
+          role={role}
+          locFilter={locFilter}
+          locStatuses={locStatuses}
+          onStatusChange={updateLocStatus}
+          onViewLocation={(id)=>setViewAsTarget(id)}
+          users={users}
+          setUsers={setUsers}
+          people={people}
+          setPeople={setPeople}
+          binPeople={binPeople}
+          setBinPeople={setBinPeople}
+          partners={partners}
+          setPartners={setPartners}
+          guideSlides={guideSlides}
+          setGuideSlides={setGuideSlides}
+          manualSlides={manualSlides}
+          setManualSlides={setManualSlides}
+          initialLocations={initialLocations}
+          isMobile={isMobile}
+          topOffset={TOTAL_TOP}
+          initialSection={activeNav==='settings' ? 'profile' : 'dashboard'}
+        />
+      </div>
+    )
+    // Non-elevated users reaching /admin (shouldn't happen, but fallback)
     if (activeNav==='admin') return (
       <div style={pageStyle}>
         <AdminScreen
@@ -30611,15 +31341,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     if (activeNav==='reports') return <div style={pageStyle}><ReportsScreen role={role} people={people} locFilter={locFilter} /></div>
     if (activeNav==='settings') return (
       <div style={pageStyle}>
-        {isElevated&&(
-          <div style={{ background:'rgba(99,102,241,0.06)', borderBottom:'1px solid rgba(99,102,241,0.12)', padding:'10px 16px', display:'flex', alignItems:'center', gap:'10px' }}>
-            <span style={{ fontSize:'13px' }}>⚙️</span>
-            <p style={{ fontSize:'12px', color:'#6366f1', fontWeight:500, flex:1 }}>
-              {locFilter==='all' ? 'Select a location from the top bar to manage their settings' : `Managing settings for ${selectedLoc?.name} · ${selectedLoc?.owner}`}
-            </p>
-          </div>
-        )}
-        {(!isElevated||locFilter!=='all')&&<SettingsScreen onStatusChange={()=>{}} selectedLoc={selectedLoc} locationId={viewAsUser?.locationId || (locFilter==='all'?'loc_kc':locFilter)} franchiseRole={franchiseRole} isSuperAdmin={role==='super_admin'&&!viewAsUser} onOpenManual={()=>setShowManual(true)} />}
+        <SettingsScreen onStatusChange={()=>{}} selectedLoc={selectedLoc} locationId={viewAsUser?.locationId || (locFilter==='all'?'loc_kc':locFilter)} franchiseRole={franchiseRole} isSuperAdmin={role==='super_admin'&&!viewAsUser} onOpenManual={()=>setShowManual(true)} />
       </div>
     )
     if (activeNav==='hive') return (
