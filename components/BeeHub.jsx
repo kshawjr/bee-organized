@@ -20867,21 +20867,21 @@ function TierPlansInline() {
   const sections = [
     { title:'⚙ Account & Billing', rows:[
       ['Manage subscription & billing','Upgrade, payment methods, invoices',['y','n','n','n']],
-      ['View billing & invoices','See current plan and past charges',['y','v','n','v']],
+      ['View billing & invoices','See current plan and past charges',['y','n','n','v']],
       ['Connect / disconnect Jobber',"OAuth to franchise's Jobber account",['y','n','n','n']],
-      ['Edit location settings','Business hours, service area, branding',['y','y','n','n']],
+      ['Edit location settings','Business hours, service area, branding',['y','n','n','n']],
     ]},
     { title:'👥 Team Management', rows:[
       ['Invite / remove Hive Managers','Add or revoke operational seats',['y','n','n','n']],
-      ['Invite / remove Worker Bees & Honey Watchers','Add or revoke lower-access seats',['y','y','n','n']],
+      ['Invite / remove Worker Bees & Honey Watchers','Add or revoke lower-access seats',['y','n','n','n']],
       ['Assign clients to team members','Set who owns each client',['y','y','n','n']],
     ]},
     { title:'🐝 Clients & Pipeline', rows:[
       ['View all clients in the location','Full Hive access',['y','y','y','y']],
-      ['Edit client records','Update contact info, stage, tags',['y','y','y','n']],
-      ['Add new clients','Capture incoming calls and inquiries',['y','y','y','n']],
-      ['Schedule assessments & follow-ups','Set appointment times',['y','y','y','n']],
-      ['Log Buzz Notes & Job Notes','Private + Jobber-synced notes',['y','y','y','n']],
+      ['Edit client records','Update contact info, stage, tags',['y','y','n','n']],
+      ['Add new clients','Capture incoming calls and inquiries',['y','y','n','n']],
+      ['Schedule assessments & follow-ups','Set appointment times',['y','y','n','n']],
+      ['Log Buzz Notes & Job Notes','Private + Jobber-synced notes',['y','y','n','n']],
       ['Complete jobs & mark stages done','Field-completion work',['y','y','n','n']],
     ]},
     { title:'🤝 Contacts & Partners', rows:[
@@ -20889,8 +20889,8 @@ function TierPlansInline() {
       ['Add or edit partners & contacts','Build the relationship database',['y','y','n','n']],
     ]},
     { title:'📧 Drip Campaigns', rows:[
-      ['Edit drip paths & email templates','Strategic outreach configuration',['y','y','n','n']],
-      ['Pause / resume drips for a client','Per-client drip control',['y','y','y','n']],
+      ['Edit drip paths & email templates','Strategic outreach configuration',['y','n','n','n']],
+      ['Pause / resume drips for a client','Per-client drip control',['y','y','n','n']],
     ]},
     { title:'📊 Reports & Financials', rows:[
       ['View revenue, royalty, pipeline reports','Financial dashboards',['y','y','n','y']],
@@ -20916,24 +20916,14 @@ function TierPlansInline() {
         {/* Sticky header — tier name + level + price stacked vertically */}
         <div style={{ display:'grid', gridTemplateColumns:gridCols, gap:'4px', background:'rgba(26,46,43,0.04)', borderBottom:'2px solid rgba(0,0,0,0.12)', position:'sticky', top:0, zIndex:5, paddingLeft:'12px', paddingRight:'10px' }}>
           <div style={{ display:'flex', alignItems:'flex-end', padding:'10px 0', fontSize:'9px', letterSpacing:'1px', textTransform:'uppercase', color:'#8a9e9a', fontWeight:700 }}>Capability</div>
-          {tiers.map(t => {
-            const deferred = isDeferredTier(t.key)
-            return (
-              <div key={t.key} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'3px', textAlign:'center', borderTop:`3px solid ${t.color}`, padding:'8px 2px 10px', opacity: deferred ? 0.55 : 1 }}>
-                <span style={{ fontSize:'15px', lineHeight:1 }}>{t.icon}</span>
-                <p style={{ fontSize:'9.5px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', lineHeight:1.15 }}>{t.name}</p>
-                <span style={{ fontSize:'7.5px', color:'#8a9e9a', letterSpacing:'0.5px', textTransform:'uppercase', fontWeight:700, padding:'1px 4px', background:'rgba(26,46,43,0.06)', borderRadius:'3px', lineHeight:1.2 }}>{t.level}</span>
-                {deferred ? (
-                  <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:'4px', marginTop:'2px', flexWrap:'wrap' }}>
-                    <span style={{ fontSize:'7.5px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.12)', border:'1px solid rgba(212,160,70,0.3)', padding:'1px 5px', borderRadius:'10px', letterSpacing:'0.4px', textTransform:'uppercase' }}>Coming Soon</span>
-                    <p style={{ fontSize:'10px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>$0<span style={{ fontSize:'8px', color:'#8a9e9a', fontWeight:500 }}>/yr</span></p>
-                  </div>
-                ) : (
-                  <p style={{ fontSize:'10px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginTop:'1px' }}>${t.price}<span style={{ fontSize:'8px', color:'#8a9e9a', fontWeight:500 }}>/yr</span></p>
-                )}
-              </div>
-            )
-          })}
+          {tiers.map(t => (
+            <div key={t.key} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'3px', textAlign:'center', borderTop:`3px solid ${t.color}`, padding:'8px 2px 10px' }}>
+              <span style={{ fontSize:'15px', lineHeight:1 }}>{t.icon}</span>
+              <p style={{ fontSize:'9.5px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', lineHeight:1.15 }}>{t.name}</p>
+              <span style={{ fontSize:'7.5px', color:'#8a9e9a', letterSpacing:'0.5px', textTransform:'uppercase', fontWeight:700, padding:'1px 4px', background:'rgba(26,46,43,0.06)', borderRadius:'3px', lineHeight:1.2 }}>{t.level}</span>
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginTop:'1px' }}>${t.price}<span style={{ fontSize:'8px', color:'#8a9e9a', fontWeight:500 }}>/yr</span></p>
+            </div>
+          ))}
         </div>
 
         {/* Feature rows, grouped by section */}
@@ -20948,15 +20938,9 @@ function TierPlansInline() {
                   <p style={{ fontSize:'10.5px', fontWeight:500, color:'#1a2e2b', lineHeight:1.3 }}>{r[0]}</p>
                   <p style={{ fontSize:'9.5px', color:'#8a9e9a', marginTop:'2px', lineHeight:1.3 }}>{r[1]}</p>
                 </div>
-                {r[2].map((v, ci) => {
-                  // Worker Bee / Honey Watcher feature set isn't decided yet —
-                  // force every cell to render as unchecked rather than imply
-                  // a feature commitment we haven't made.
-                  const deferred = isDeferredTier(tiers[ci]?.key)
-                  return (
-                    <div key={ci} style={{ textAlign:'center', opacity: deferred ? 0.55 : 1 }}>{renderAccess(deferred ? 'n' : v)}</div>
-                  )
-                })}
+                {r[2].map((v, ci) => (
+                  <div key={ci} style={{ textAlign:'center' }}>{renderAccess(v)}</div>
+                ))}
               </div>
             ))}
           </React.Fragment>
