@@ -167,16 +167,6 @@ const FAKE_SUGGESTIONS = [
   '2001 Colorado Blvd, Denver CO 80205','10 Civic Center Plaza, Denver CO 80202',
 ]
 
-// ─── Limited launch feature gate (REMOVE after full rollout) ─────────────
-// Locations on the limited launch: Contacts and Reports tabs disabled.
-// Delete this constant + LIMITED_LAUNCH_TOOLTIP + all usages once these
-// locations get full access. Target removal: end of next week.
-const LIMITED_LAUNCH_LOCATION_IDS = new Set([
-  '1b62628f-e3be-4024-be2d-e8179f09f740', // Palm Beach
-  '132b42c2-9566-43cc-85dc-f90fae4ba1b1', // Scottsdale
-  'dca50888-949f-436d-b24e-b6c8a4984905', // Kansas City
-])
-const LIMITED_LAUNCH_TOOLTIP = 'Coming Soon'
 
 const ALL_TAGS = [
   { id:'hot',       label:'🔥 Hot Client',   color:'#ef4444', bg:'rgba(239,68,68,0.1)'   },
@@ -14795,7 +14785,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
 }
 
 // ─── Partners Screen ──────────────────────────────────────────────────────────
-function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{} }) {
+function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{}, readOnly=false }) {
   if (!partners) return null
   // Writes go through the App-level CRM helpers (POST/PATCH/DELETE + state);
   // the partners/companies props are App state and stay the read source.
@@ -14881,12 +14871,12 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
                 {partnerTab==='contacts' ? `${contactPool.length} contacts` : partnerTab==='companies' ? `${allCompanies.length} companies` : `${partnerPool.length} partners · ${activeCount} active`}
               </p>
             </div>
-<>
+{!readOnly&&<>
               {/* Desktop add button — tab-aware, opens the right modal directly */}
               <button onClick={openAdd} style={{ padding:'8px 14px', background:'rgba(168,201,196,0.15)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:'pointer' }} className="desktop-only">{addCfg.label}</button>
               {/* Mobile FAB */}
               <button onClick={openAdd} aria-label={addCfg.label} style={{ position:'fixed', bottom:'max(24px, calc(env(safe-area-inset-bottom) + 16px))', right:'16px', zIndex:500, width:'52px', height:'52px', borderRadius:'50%', background:'#1a2e2b', color:'white', border:'none', fontSize:'28px', lineHeight:1, cursor:'pointer', boxShadow:'0 4px 20px rgba(26,46,43,0.4)', display:'flex', alignItems:'center', justifyContent:'center' }} className="mobile-fab">+</button>
-            </>
+            </>}
           </div>
 
           {/* Partners / Contacts / Companies toggle */}
@@ -20359,7 +20349,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         companies={companies}
         setCompanies={setCompanies}
         people={people}
-        readOnly={isReadOnly}
+        readOnly={isReadOnly || isLiteUser}
         onAddToHive={(partner, mode)=>{
           if (mode==='view') {
             nav('hive')
@@ -30965,10 +30955,6 @@ if (Array.isArray(initialPeople)) return
   // ── Nav ────────────────────────────────────────────────────────────────────
   // `action:'openManual'` is a soft route — sidebar/bottom-nav buttons call
   // setShowManual(true) instead of nav(key). No activeNav highlight either.
-  // Limited-launch gate: when locFilter is exactly one of the three flagged
-  // locations, gray out Contacts + Reports tabs. 'all' (elevated default) and
-  // every other location retain full access.
-  const isLimitedLaunch = LIMITED_LAUNCH_LOCATION_IDS.has(locFilter)
   const navItems = [
     { key:'home',     icon:'🏠', label:'Home'    },
     { key:'hive',     icon:'🐝', label:'Clients'    },
@@ -31147,14 +31133,11 @@ if (Array.isArray(initialPeople)) return
               // (Location/Team/Billing/Communication/Templates/Jobber) owner-only,
               // so manager sees ONLY Profile. Readonly stays fully locked out.
               const isSettings = item.key==='settings' && ['readonly'].includes(fr)
-              const isPartners = item.key==='partners' && ['readonly'].includes(fr)
-              const isLimitedLaunchGated = isLimitedLaunch && (item.key==='partners' || item.key==='reports')
-              const isLocked = (isOnboardingState && !isElevated && item.key!=='home') || isReports || isSettings || isPartners || isLimitedLaunchGated
+              const isLocked = (isOnboardingState && !isElevated && item.key!=='home') || isReports || isSettings
               const isActive = activeNav===item.key
               return (
                 <button
                   key={item.key}
-                  title={isLimitedLaunchGated ? LIMITED_LAUNCH_TOOLTIP : undefined}
                   onClick={()=>{
                     if (isLocked) return
                     if (item.action==='openManual') { setShowManual(true); setShowMobileNav(false); return }
@@ -31385,7 +31368,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     )
     if (activeNav==='partners') return (
       <div style={pageStyle}>
-        <PartnersScreen onNavigate={nav} partners={partners} setPartners={setPartners} companies={companies} setCompanies={setCompanies} locFilter={locFilter} isElevated={isElevated} people={people} initialSelected={globalSelectedPartner} onInitialSelectedConsumed={()=>setGlobalSelectedPartner(null)} onAddToHive={(partner)=>{ addPersonFromPartner(partner); nav('hive') }} />
+        <PartnersScreen onNavigate={nav} partners={partners} setPartners={setPartners} companies={companies} setCompanies={setCompanies} locFilter={locFilter} isElevated={isElevated} people={people} initialSelected={globalSelectedPartner} onInitialSelectedConsumed={()=>setGlobalSelectedPartner(null)} onAddToHive={(partner)=>{ addPersonFromPartner(partner); nav('hive') }} readOnly={role==='franchise' && ['light','readonly'].includes(franchiseRole)} />
       </div>
     )
     // Franchise owner/manager feedback triage. AdminFeedbackScreen calls
@@ -31555,14 +31538,12 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             // (Location/Team/Billing/Communication/Templates/Jobber) owner-only,
             // so manager sees ONLY Profile. Readonly stays fully locked out.
             const isSettings = item.key==='settings' && ['readonly'].includes(fr)
-            const isPartners = item.key==='partners' && ['readonly'].includes(fr)
-            const isLimitedLaunchGated = isLimitedLaunch && (item.key==='partners' || item.key==='reports')
             // Onboarding lockdown only applies to franchise users mid-setup —
             // super_admin / corporate are always elevated and never "onboarding."
-            const isLocked = (isOnboardingState && !isElevated && item.key!=='home') || isReports || isSettings || isPartners || isLimitedLaunchGated
+            const isLocked = (isOnboardingState && !isElevated && item.key!=='home') || isReports || isSettings
             const isActive = activeNav===item.key
             return (
-              <button key={item.key} title={isLimitedLaunchGated ? LIMITED_LAUNCH_TOOLTIP : undefined} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ width:'100%', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left', background:isActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>
+              <button key={item.key} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ width:'100%', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left', background:isActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>
                 <span style={{ fontSize:'18px', lineHeight:1, flexShrink:0 }}>{item.icon}</span>
                 <span style={{ fontSize:'13px', fontWeight:isActive?600:400, color:isActive?'#a8c9c4':'rgba(168,201,196,0.6)' }}>{item.label}</span>
                 {isActive&&<div style={{ marginLeft:'auto', width:'4px', height:'4px', borderRadius:'50%', background:'#a8c9c4' }} />}
