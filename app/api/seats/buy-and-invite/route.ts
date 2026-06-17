@@ -72,6 +72,12 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     )
   }
+  if (tier === 'light') {
+    return NextResponse.json(
+      { error: 'tier_unavailable', message: 'Worker Bee tier is currently unavailable. Use Honey Watcher for read-only access.' },
+      { status: 503 }
+    )
+  }
   if (!isValidEmail(email)) {
     return NextResponse.json({ error: 'valid email required' }, { status: 400 })
   }

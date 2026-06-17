@@ -246,6 +246,12 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     )
   }
+  if (tier === 'light') {
+    return NextResponse.json(
+      { error: 'tier_unavailable', message: 'Worker Bee tier is currently unavailable. Use Honey Watcher for read-only access.' },
+      { status: 503 }
+    )
+  }
   if (!isCorporateTier && !location_id) {
     return NextResponse.json({ error: 'location_id required' }, { status: 400 })
   }

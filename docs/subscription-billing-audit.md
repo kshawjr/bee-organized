@@ -85,8 +85,8 @@ Pool model — each row = one seat, assigned (`user_id`) or unassigned.
 |---|---|---|---|
 | owner | Zee Bee | $550 | live |
 | manager | Hive Manager | $400 | live |
-| light | Worker Bee | $200 | **deferred — invites 503'd** (`invite/route.ts:40`, `buy-and-invite/route.ts:29`) |
-| readonly | Honey Watcher | $50 | **deferred — 503'd** |
+| light | Worker Bee | $200 | **deferred** — invites 503 `tier_unavailable`; hidden from UI tier pickers via `DEFERRED_TIER_KEYS`. Re-deferred (2026-06-17): identical `lite_user` permissions to Honey Watcher makes two read-only tiers at different prices confusing. |
+| readonly | Honey Watcher | $50 | **live** — canonical read-only tier |
 | admin | (corporate) | — | invite-only, no seat, location-less |
 
 `VALID_TIERS` differs per route: seats POST = owner/manager/light/readonly; buy-and-invite = manager/light/readonly (no owner); hub_users/invite = +admin.
@@ -259,7 +259,7 @@ Complexity is rough eng effort (S≈hours, M≈1–3 days, L≈1 sprint, XL≈mu
 3. **Which "owner" is authoritative** for emails/drips/notifications when there are 2? Need a "primary owner" concept or per-lead assignment.
 4. **Should onboarding re-run / branch for a co-owner** joining an active location, or should they skip straight in?
 5. **Multi-location:** is the target one *person* owning multiple locations, or a corporate user managing many? (Admins already see all — if the need is oversight, that may already be covered without the junction-table lift.)
-6. **Light/Readonly tiers** are coded but deferred (503'd). Re-enable, or remove?
+6. ~~**Light/Readonly tiers** are coded but deferred (503'd). Re-enable, or remove?~~ **RESOLVED (2026-06-17):** Honey Watcher (readonly, $50/yr) is live as the canonical read-only tier. Worker Bee (light, $200/yr) re-deferred indefinitely — both map to `lite_user` with identical permissions; two read-only tiers at different prices create confusion. `tier_prices` entry and DB CHECK value preserved for future re-enable.
 7. **Renewal anniversary** is hardcoded to March 1 for everyone. Correct, or do locations need individual anniversaries? (Affects proration + future Stripe subscription setup.)
 8. **Past-due policy:** the 14-day grace is fake and enforces nothing. What should actually happen when payment fails / lapses?
 9. **Corporate-sponsored end-of-life:** the tracking columns are dead and conversion is fully manual. How does HQ actually get reminded/billed, and should the app track sponsorship expiry?

@@ -20758,13 +20758,11 @@ const SUBSCRIPTION_TIER_META = [
   { key:'readonly', name:'Honey Watcher', icon:'👁',  color:'#8a9e9a', detail:'Read-only · Add as many as needed' },
 ]
 
-// All four tiers (Zee Bee, Hive Manager, Worker Bee, Honey Watcher) are now
-// live and fully interactive — pricing, quantity selectors, and purchase flows
-// are enabled everywhere the tier matrix appears. The backend 503 backstops in
-// /api/seats/buy-and-invite and /api/hub_users/invite have been removed to
-// match. Kept as an (empty) set + helper so the call sites don't need touching
-// and a future tier can be deferred again by adding its key here.
-const DEFERRED_TIER_KEYS = new Set()
+// Worker Bee (light, $200/yr) is deferred — identical lite_user permissions to
+// Honey Watcher ($50/yr) makes two read-only tiers at different prices confusing.
+// Watcher is the live read-only option. Add 'light' back here to re-enable.
+// The set + helper keeps all call sites untouched; 503 backstops in invite routes.
+const DEFERRED_TIER_KEYS = new Set(['light'])
 function isDeferredTier(key) { return DEFERRED_TIER_KEYS.has(key) }
 
 function SubscriptionCalculator({
@@ -21065,40 +21063,39 @@ function TierPlansInline() {
   const tiers = [
     { key:'owner',    name:'Zee Bee',       icon:'👑', color:'#d4a046', level:'L1', price:getTierPrice('owner') },
     { key:'manager',  name:'Hive Manager',  icon:'🍯', color:'#6366f1', level:'L2', price:getTierPrice('manager') },
-    { key:'light',    name:'Worker Bee',    icon:'🐝', color:'#10b981', level:'L3', price:getTierPrice('light') },
-    { key:'readonly', name:'Honey Watcher', icon:'👁',  color:'#8a9e9a', level:'L4', price:getTierPrice('readonly') },
+    { key:'readonly', name:'Honey Watcher', icon:'👁',  color:'#8a9e9a', level:'L3', price:getTierPrice('readonly') },
   ]
   const sections = [
     { title:'⚙ Account & Billing', rows:[
-      ['Manage subscription & billing','Upgrade, payment methods, invoices',['y','n','n','n']],
-      ['View billing & invoices','See current plan and past charges',['y','n','n','v']],
-      ['Connect / disconnect Jobber',"OAuth to franchise's Jobber account",['y','n','n','n']],
-      ['Edit location settings','Business hours, service area, branding',['y','n','n','n']],
+      ['Manage subscription & billing','Upgrade, payment methods, invoices',['y','n','n']],
+      ['View billing & invoices','See current plan and past charges',['y','n','v']],
+      ['Connect / disconnect Jobber',"OAuth to franchise's Jobber account",['y','n','n']],
+      ['Edit location settings','Business hours, service area, branding',['y','n','n']],
     ]},
     { title:'👥 Team Management', rows:[
-      ['Invite / remove Hive Managers','Add or revoke operational seats',['y','n','n','n']],
-      ['Invite / remove Worker Bees & Honey Watchers','Add or revoke lower-access seats',['y','n','n','n']],
-      ['Assign clients to team members','Set who owns each client',['y','y','n','n']],
+      ['Invite / remove Hive Managers','Add or revoke operational seats',['y','n','n']],
+      ['Invite / remove Honey Watchers','Add or revoke read-only seats',['y','n','n']],
+      ['Assign clients to team members','Set who owns each client',['y','y','n']],
     ]},
     { title:'🐝 Clients & Pipeline', rows:[
-      ['View all clients in the location','Full Hive access',['y','y','y','y']],
-      ['Edit client records','Update contact info, stage, tags',['y','y','n','n']],
-      ['Add new clients','Capture incoming calls and inquiries',['y','y','n','n']],
-      ['Schedule assessments & follow-ups','Set appointment times',['y','y','n','n']],
-      ['Log Buzz Notes & Job Notes','Private + Jobber-synced notes',['y','y','n','n']],
-      ['Complete jobs & mark stages done','Field-completion work',['y','y','n','n']],
+      ['View all clients in the location','Full Hive access',['y','y','y']],
+      ['Edit client records','Update contact info, stage, tags',['y','y','n']],
+      ['Add new clients','Capture incoming calls and inquiries',['y','y','n']],
+      ['Schedule assessments & follow-ups','Set appointment times',['y','y','n']],
+      ['Log Buzz Notes & Job Notes','Private + Jobber-synced notes',['y','y','n']],
+      ['Complete jobs & mark stages done','Field-completion work',['y','y','n']],
     ]},
     { title:'🤝 Contacts & Partners', rows:[
-      ['View partners, contacts, companies','Reference referral network',['y','y','y','y']],
-      ['Add or edit partners & contacts','Build the relationship database',['y','y','n','n']],
+      ['View partners, contacts, companies','Reference referral network',['y','y','y']],
+      ['Add or edit partners & contacts','Build the relationship database',['y','y','n']],
     ]},
     { title:'📧 Drip Campaigns', rows:[
-      ['Edit drip paths & email templates','Strategic outreach configuration',['y','n','n','n']],
-      ['Pause / resume drips for a client','Per-client drip control',['y','y','n','n']],
+      ['Edit drip paths & email templates','Strategic outreach configuration',['y','n','n']],
+      ['Pause / resume drips for a client','Per-client drip control',['y','y','n']],
     ]},
     { title:'📊 Reports & Financials', rows:[
-      ['View revenue, royalty, pipeline reports','Financial dashboards',['y','y','n','y']],
-      ['Export reports & client data','CSV downloads',['y','y','n','y']],
+      ['View revenue, royalty, pipeline reports','Financial dashboards',['y','y','y']],
+      ['Export reports & client data','CSV downloads',['y','y','y']],
     ]},
   ]
   const renderAccess = (v) =>
@@ -21107,7 +21104,7 @@ function TierPlansInline() {
   : v === 'v' ? <span style={{ display:'inline-block', background:'rgba(184,136,32,0.15)', color:'#b88820', fontSize:'8px', fontWeight:700, letterSpacing:'0.3px', padding:'2px 4px', borderRadius:'6px', textTransform:'uppercase' }}>View</span>
   : null
 
-  const gridCols = 'minmax(120px, 1.35fr) repeat(4, minmax(54px, 1fr))'
+  const gridCols = 'minmax(120px, 1.35fr) repeat(3, minmax(54px, 1fr))'
 
   return (
     <div style={{ margin:'24px 12px 16px' }}>
