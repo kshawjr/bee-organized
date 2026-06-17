@@ -21960,6 +21960,12 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
   // "Convert to Direct Billing" modal — opened from the Subscription section
   // when the location is still on a corporate-funded payment_source.
   const [showConvertBilling, setShowConvertBilling] = useState(false)
+  // Billing-history sheet + "Record Payment" modal — both opened from the
+  // Subscription section's billing row. Record Payment logs an off-cycle
+  // payment (extra seat, renewal, adjustment) WITHOUT changing the billing
+  // model; available for every location regardless of payment_source.
+  const [showBillingHistory, setShowBillingHistory] = useState(false)
+  const [showRecordPayment, setShowRecordPayment]   = useState(false)
 
   const fetchOwnerStatus = React.useCallback(async () => {
     if (!currentLoc?.id) return
@@ -22334,6 +22340,26 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
                     </p>
                   </div>
                 )}
+
+                {/* Billing history + Record Payment — available for ALL
+                    locations regardless of payment_source. Record Payment logs
+                    an off-cycle payment (extra seat, renewal, adjustment)
+                    without changing the billing model. */}
+                <div style={{ borderTop:'1px dashed rgba(0,0,0,0.1)', paddingTop:'10px', marginTop:'2px' }}>
+                  <div style={{ display:'flex', gap:'8px' }}>
+                    <button
+                      onClick={()=>setShowBillingHistory(true)}
+                      style={{ flex:1, padding:'10px', background:'white', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#1a2e2b', cursor:'pointer' }}
+                    >🧾 View billing history</button>
+                    <button
+                      onClick={()=>setShowRecordPayment(true)}
+                      style={{ flex:1, padding:'10px', background:'white', border:'1.5px solid #1a2e2b', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#1a2e2b', cursor:'pointer' }}
+                    >+ Record Payment</button>
+                  </div>
+                  <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'6px', lineHeight:1.45 }}>
+                    Record a payment outside of a billing conversion (extra seat, renewal, adjustment).
+                  </p>
+                </div>
               </div>
             </div>
           )}
@@ -22401,6 +22427,30 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
             }
             setCurrentLoc(prev=>({ ...prev, ...nextFields }))
             onLocationUpdate && onLocationUpdate(currentLoc.id, nextFields)
+            router.refresh()
+          }}
+        />
+      )}
+      {showBillingHistory && (
+        <BillingHistorySheet
+          locationId={currentLoc.id}
+          onClose={()=>setShowBillingHistory(false)}
+        />
+      )}
+      {showRecordPayment && (
+        <RecordPaymentModal
+          location={currentLoc}
+          onClose={()=>setShowRecordPayment(false)}
+          onRecorded={(updated)=>{
+            // Append the new payment's audit line to local billing_notes so the
+            // Subscription editor reflects it without a full reload. The route
+            // does NOT change payment_source / subscription_status, so nothing
+            // else to sync here. Billing history refetches when reopened.
+            if (updated?.billing_notes) {
+              const nextFields = { billing_notes: updated.billing_notes }
+              setCurrentLoc(prev=>({ ...prev, ...nextFields }))
+              onLocationUpdate && onLocationUpdate(currentLoc.id, nextFields)
+            }
             router.refresh()
           }}
         />
@@ -22570,6 +22620,194 @@ function ConvertBillingModal({ location, onClose, onConverted }) {
             <div style={{ display:'flex', gap:'8px', padding:'16px 24px', borderTop:'1px solid #eee', flexShrink:0 }}>
               <button onClick={onClose} style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
               <button onClick={submit} disabled={!canSubmit} style={{ flex:2, padding:'12px', background:canSubmit?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:canSubmit?'white':'#9ca3af', cursor:canSubmit?'pointer':'not-allowed' }}>{submitting?'Converting…':'Convert'}</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// RecordPaymentModal — logs an arbitrary, off-cycle payment against a location
+// (additional seat, late renewal, adjustment) WITHOUT changing the billing
+// model. POSTs /api/locations/[id]/record-payment, which writes a
+// billing_invoices row (source='manual_other') and appends an audit line to
+// billing_notes. super_admin / admin only (the route enforces it; the opening
+// CTA lives in the super_admin/corporate-gated Subscription section). Mirrors
+// the ConvertBillingModal shell.
+function RecordPaymentModal({ location, onClose, onRecorded }) {
+  React.useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+
+  const REASON_OPTIONS = [
+    { value:'additional_seat', label:'Additional seat' },
+    { value:'renewal',         label:'Renewal' },
+    { value:'adjustment',      label:'Adjustment' },
+    { value:'other',           label:'Other' },
+  ]
+
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const [payDate, setPayDate]     = useState(todayStr)
+  const [amount, setAmount]       = useState('')
+  const [reason, setReason]       = useState('')
+  const [memo, setMemo]           = useState('')
+  const [method, setMethod]       = useState('')
+  const [reference, setReference] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError]   = useState('')
+  const [step, setStep]     = useState('form') // form | success
+
+  const amountNum = Number((amount || '').replace(/[$,\s]/g, ''))
+  const amountValid = Number.isFinite(amountNum) && amountNum > 0
+  // Payment date must be a real date and not in the future.
+  const payDateValid = /^\d{4}-\d{2}-\d{2}$/.test(payDate) && payDate <= todayStr
+  const reasonValid = REASON_OPTIONS.some(o => o.value === reason)
+  const canSubmit = !submitting && amountValid && payDateValid && reasonValid
+
+  async function submit() {
+    if (!canSubmit) return
+    setSubmitting(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/locations/${location.id}/record-payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: amount.trim(),
+          payment_date: payDate,
+          reason,
+          memo: memo.trim() || undefined,
+          payment_method: method.trim() || undefined,
+          reference_number: reference.trim() || undefined,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || !json.success) throw new Error(json.error || `HTTP ${res.status}`)
+      setStep('success')
+      if (onRecorded) onRecorded(json.location)
+    } catch (err) {
+      setError(err?.message || 'Could not record payment')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none', boxSizing:'border-box' }
+  const lbl = { fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'5px', display:'block' }
+  const help = { fontSize:'11px', color:'#8a9e9a', marginTop:'5px', lineHeight:1.45 }
+
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div onClick={e=>e.stopPropagation()} style={{ position:'relative', background:'white', width:'100%', maxWidth:'480px', maxHeight:'85vh', borderRadius:'16px', zIndex:1, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', boxSizing:'border-box', overflow:'hidden' }}>
+
+        {step==='success' ? (
+          <>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px', borderBottom:'1px solid #eee', flexShrink:0 }}>
+              <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>Payment recorded</h2>
+              <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>×</button>
+            </div>
+            <div style={{ padding:'28px 24px', textAlign:'center', overflowY:'auto', flex:1 }}>
+              <div style={{ fontSize:'44px', marginBottom:'10px' }}>✓</div>
+              <p style={{ fontSize:'14px', color:'#4a5e5a', lineHeight:1.5 }}>
+                Payment recorded for {location.name}. It now appears in billing history.
+              </p>
+            </div>
+            <div style={{ display:'flex', gap:'8px', padding:'16px 24px', borderTop:'1px solid #eee', flexShrink:0 }}>
+              <button onClick={onClose} style={{ flex:1, padding:'12px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Done</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ padding:'20px 24px', borderBottom:'1px solid #eee', flexShrink:0 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'10px' }}>
+                <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>Record Payment</h2>
+                <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', lineHeight:1, flexShrink:0 }}>×</button>
+              </div>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'4px' }}>For {location.name}</p>
+            </div>
+
+            <div style={{ display:'grid', gap:'16px', padding:'20px 24px', overflowY:'auto', flex:1 }}>
+              {error && (
+                <div style={{ padding:'10px 12px', background:'rgba(239,68,68,0.07)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'9px', fontSize:'12px', color:'#b91c1c' }}>{error}</div>
+              )}
+
+              {/* Section 1: Payment details */}
+              <div>
+                <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', marginBottom:'10px' }}>Payment details</p>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
+                  <div>
+                    <label style={lbl}>Payment date</label>
+                    <input
+                      type="date"
+                      value={payDate}
+                      max={todayStr}
+                      onChange={e=>{ setPayDate(e.target.value); setError('') }}
+                      style={{ ...inp, cursor:'pointer', border:`1.5px solid ${(payDate && !payDateValid)?'rgba(239,68,68,0.45)':'rgba(0,0,0,0.1)'}` }}
+                    />
+                  </div>
+                  <div>
+                    <label style={lbl}>Amount</label>
+                    <div style={{ position:'relative' }}>
+                      <span style={{ position:'absolute', left:'12px', top:'50%', transform:'translateY(-50%)', fontSize:'16px', color:'#8a9e9a' }}>$</span>
+                      <input
+                        value={amount}
+                        onChange={e=>{ setAmount(e.target.value); setError('') }}
+                        placeholder="100.00"
+                        inputMode="decimal"
+                        style={{ ...inp, paddingLeft:'24px', border:`1.5px solid ${(amount && !amountValid)?'rgba(239,68,68,0.45)':'rgba(0,0,0,0.1)'}` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+                {payDate && !payDateValid && <p style={{ fontSize:'11px', color:'#b91c1c', margin:'6px 0 0' }}>Payment date can’t be in the future.</p>}
+                {amount && !amountValid && <p style={{ fontSize:'11px', color:'#b91c1c', margin:'6px 0 0' }}>Enter a positive amount.</p>}
+              </div>
+
+              {/* Section 2: Reason */}
+              <div style={{ borderTop:'1px solid #eee', paddingTop:'16px' }}>
+                <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', marginBottom:'10px' }}>Reason</p>
+                <div style={{ display:'grid', gap:'12px' }}>
+                  <div>
+                    <label style={lbl}>Reason</label>
+                    <select
+                      value={reason}
+                      onChange={e=>{ setReason(e.target.value); setError('') }}
+                      style={{ ...inp, cursor:'pointer' }}
+                    >
+                      <option value="" disabled>Select a reason…</option>
+                      {REASON_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={lbl}>Memo (optional)</label>
+                    <textarea
+                      rows={2}
+                      value={memo}
+                      onChange={e=>setMemo(e.target.value)}
+                      placeholder="2nd team seat added"
+                      style={{ ...inp, fontSize:'14px', resize:'vertical' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={lbl}>Payment method (optional)</label>
+                    <input value={method} onChange={e=>setMethod(e.target.value)} placeholder="Check, wire, ACH, Zelle, cash..." style={inp} />
+                  </div>
+                  <div>
+                    <label style={lbl}>Reference number (optional)</label>
+                    <input value={reference} onChange={e=>setReference(e.target.value)} placeholder="Check #4421" style={inp} />
+                  </div>
+                </div>
+                <p style={help}>Recorded in billing history and billing notes. Does not change the location’s billing model.</p>
+              </div>
+            </div>
+
+            <div style={{ display:'flex', gap:'8px', padding:'16px 24px', borderTop:'1px solid #eee', flexShrink:0 }}>
+              <button onClick={onClose} style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
+              <button onClick={submit} disabled={!canSubmit} style={{ flex:2, padding:'12px', background:canSubmit?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:canSubmit?'white':'#9ca3af', cursor:canSubmit?'pointer':'not-allowed' }}>{submitting?'Recording…':'Record Payment'}</button>
             </div>
           </>
         )}
