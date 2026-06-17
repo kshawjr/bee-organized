@@ -9,6 +9,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { timingSafeEqual } from 'crypto'
 import { supabaseService } from '@/lib/supabase-service'
+import { applyDripSideEffects } from '@/lib/drip-lifecycle'
+import { sendDripStep } from '@/lib/drip-send'
 
 export const runtime = 'nodejs'
 
@@ -73,7 +75,7 @@ export async function POST(req: NextRequest) {
   // Slug lives in locations.location_id (Zoho-style ID, used as slug across repo).
   const { data: location, error: locErr } = await supabaseService
     .from('locations')
-    .select('id, name, location_id')
+    .select('id, name, location_id, lifecycle_status')
     .eq('location_id', location_slug)
     .maybeSingle()
 
@@ -125,6 +127,76 @@ export async function POST(req: NextRequest) {
     )
   }
 
+  // ─── Post-create side effects ─────────────────────────────────
+  // Mirror /api/leads (the in-app POST) so a web-form lead lands in the
+  // same state as a hand-created one. Failures here are non-fatal — the
+  // lead row is already written and that's the primary goal — so we log
+  // and collect warnings rather than returning an error.
+  const warnings: string[] = []
+
+  // Seed creation touchpoint (unconditional, even for pre-launch
+  // locations) so the internal activity log reflects the capture and the
+  // PersonPanel "Last Activity" field isn't an em-dash. Mirrors the
+  // touchpoint written by /api/leads POST 1:1.
+  try {
+    const { error: tpErr } = await supabaseService.from('touchpoints').insert({
+      lead_id:       lead.id,
+      location_uuid: location.id,
+      kind:          'system',
+      method:        'system',
+      label:         'Client created',
+      status:        'done',
+      occurred_at:   now,
+      user_id:       null,
+    })
+    if (tpErr) throw tpErr
+  } catch (err: any) {
+    console.error('[intake] touchpoint insert failed', err)
+    warnings.push(`touchpoint_insert_failed: ${err?.message || String(err)}`)
+  }
+
+  // Drip enrollment is gated on the location having completed onboarding.
+  // lifecycle_status flips 'onboarding' → 'active' on the launch endpoint;
+  // strict === 'active' is fail-closed (null / any other state skips). A
+  // pre-launch location may not have send_from_email / default_drip_path
+  // set yet, so firing the drip would silently half-fail. Capture the lead
+  // + touchpoint regardless, but only enroll active locations.
+  let dripEnrolled = false
+  if (location.lifecycle_status === 'active') {
+    // Mirror /api/leads POST: applyDripSideEffects starts the default drip
+    // (prevStage=null signals a fresh start), then an inline sendDripStep
+    // fires step 1 immediately instead of waiting for the hourly cron. Both
+    // are awaited because Vercel serverless kills background work after the
+    // response is sent. Errors are non-fatal.
+    try {
+      await applyDripSideEffects({
+        leadId:       lead.id,
+        locationUuid: location.id,
+        prevStage:    null,
+        patch:        { stage: 'New' },
+      })
+      dripEnrolled = true
+    } catch (err: any) {
+      console.error('[intake] applyDripSideEffects threw', err)
+      warnings.push(`drip_side_effects_failed: ${err?.message || String(err)}`)
+    }
+
+    if (dripEnrolled) {
+      try {
+        await sendDripStep(lead.id)
+      } catch (err: any) {
+        console.error('[intake] inline sendDripStep threw', err)
+        warnings.push(`drip_send_failed: ${err?.message || String(err)}`)
+      }
+    }
+  } else {
+    console.log(
+      `[intake] location ${location.location_id} is not active ` +
+        `(lifecycle_status=${location.lifecycle_status ?? 'null'}) — ` +
+        `lead captured but drip not enrolled`,
+    )
+  }
+
   return NextResponse.json({
     success: true,
     lead_id: lead.id,
@@ -132,6 +204,9 @@ export async function POST(req: NextRequest) {
       id: location.id,
       name: location.name,
       slug: location.location_id,
+      lifecycle_status: location.lifecycle_status ?? null,
     },
+    drip_enrolled: dripEnrolled,
+    ...(warnings.length ? { warnings } : {}),
   })
 }
