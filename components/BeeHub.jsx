@@ -17000,12 +17000,58 @@ const BILLING_HISTORY = [
   { id:'inv004', date:'Oct 15, 2025', desc:'Manager seat - Jessica Rivera (prorated)',amount:243,  method:'ACH ····7823', status:'paid' },
 ]
 
-function BillingHistorySheet({ onClose }) {
+// Format an integer cent amount as "$1,650.00".
+function fmtCents(cents) {
+  return '$' + (Number(cents || 0) / 100).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 })
+}
+// timestamptz → "Jun 17, 2026" (local time; that's when the payment landed).
+function fmtPaidDate(iso) {
+  if (!iso) return ''
+  try { return new Date(iso).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) }
+  catch { return '' }
+}
+// date column ("2028-03-01") → "Mar 1, 2028". Pin to UTC so the calendar date
+// doesn't slip a day in negative-offset timezones.
+function fmtPeriodDate(d) {
+  if (!d) return ''
+  try { return new Date(d + 'T00:00:00Z').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric', timeZone:'UTC' }) }
+  catch { return '' }
+}
+const INVOICE_SOURCE_LABELS = {
+  manual_conversion: 'Manual record (conversion to direct billing)',
+  stripe: 'Stripe payment',
+  manual_other: 'Manual record',
+}
+
+function BillingHistorySheet({ onClose, locationId=null }) {
   React.useEffect(()=>{
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return ()=>{ document.body.style.overflow = prev }
   }, [])
+
+  const [items, setItems]     = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState('')
+
+  React.useEffect(()=>{
+    if (!locationId) { setLoading(false); return }
+    let cancelled = false
+    setLoading(true)
+    setError('')
+    fetch(`/api/locations/${locationId}/invoices`)
+      .then(async res => {
+        const json = await res.json().catch(()=>({}))
+        if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`)
+        return json
+      })
+      .then(json => { if (!cancelled) setItems(Array.isArray(json.items) ? json.items : []) })
+      .catch(err => { if (!cancelled) setError(err?.message || 'Could not load billing history') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [locationId])
+
+  const totalCents = items.reduce((sum, it) => sum + (it.amountCents || 0), 0)
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
@@ -17018,16 +17064,63 @@ function BillingHistorySheet({ onClose }) {
           </div>
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
         </div>
-        {/* Empty state until Stripe billing is wired — the old BILLING_HISTORY
-            mock array showed fake invoices to real users. Once real invoice
-            data exists, this gets replaced with the transaction list. */}
+
         <div style={{ overflowY:'auto', flex:1 }}>
-          <div style={{ padding:'48px 24px', textAlign:'center' }}>
-            <div style={{ width:'52px', height:'52px', borderRadius:'14px', background:'rgba(34,197,94,0.08)', border:'1px solid rgba(34,197,94,0.2)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'24px', margin:'0 auto 14px' }}>🧾</div>
-            <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'6px' }}>No billing history yet</p>
-            <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, maxWidth:'300px', margin:'0 auto' }}>Invoices and receipts will appear here once Stripe billing is connected.</p>
-          </div>
-          <div style={{ height:'1rem' }} />
+          {loading ? (
+            <div style={{ padding:'48px 24px', textAlign:'center' }}>
+              <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Loading billing history…</p>
+            </div>
+          ) : error ? (
+            <div style={{ padding:'40px 24px', textAlign:'center' }}>
+              <div style={{ width:'52px', height:'52px', borderRadius:'14px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'24px', margin:'0 auto 14px' }}>⚠️</div>
+              <p style={{ fontSize:'13px', color:'#b91c1c', lineHeight:1.5, maxWidth:'320px', margin:'0 auto' }}>{error}</p>
+            </div>
+          ) : items.length === 0 ? (
+            // Empty state — appears for locations with no recorded payments yet.
+            <>
+              <div style={{ padding:'48px 24px', textAlign:'center' }}>
+                <div style={{ width:'52px', height:'52px', borderRadius:'14px', background:'rgba(34,197,94,0.08)', border:'1px solid rgba(34,197,94,0.2)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'24px', margin:'0 auto 14px' }}>🧾</div>
+                <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'6px' }}>No billing history yet</p>
+                <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, maxWidth:'300px', margin:'0 auto' }}>No billing history yet. Once payments are recorded they'll appear here.</p>
+              </div>
+              <div style={{ height:'1rem' }} />
+            </>
+          ) : (
+            <div style={{ padding:'14px 16px' }}>
+              {/* Totals header */}
+              <div style={{ background:'rgba(26,46,43,0.03)', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'12px', padding:'12px 14px', marginBottom:'12px' }}>
+                <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'3px' }}>Total recorded</p>
+                <p style={{ fontSize:'20px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{fmtCents(totalCents)}</p>
+                <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'4px', lineHeight:1.45 }}>Tracking all recorded payments. Stripe-synced records will appear automatically once integration is complete.</p>
+              </div>
+
+              {/* Invoice rows, most recent first */}
+              <div style={{ display:'grid', gap:'8px' }}>
+                {items.map(it => (
+                  <div key={it.id} style={{ background:'white', border:'1px solid rgba(0,0,0,0.08)', borderRadius:'12px', padding:'12px 14px' }}>
+                    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px' }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:'8px', minWidth:0 }}>
+                        <span style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{fmtCents(it.amountCents)}</span>
+                        <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'10px', background:'rgba(34,197,94,0.1)', color:'#15803d', fontWeight:600, flexShrink:0 }}>Paid</span>
+                      </div>
+                      <span style={{ fontSize:'12px', color:'#8a9e9a', flexShrink:0 }}>{fmtPaidDate(it.paidAt)}</span>
+                    </div>
+                    <p style={{ fontSize:'12px', color:'#4a5e5a', marginTop:'6px' }}>{INVOICE_SOURCE_LABELS[it.source] || 'Manual record'}</p>
+                    {it.memo && (
+                      <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px' }}>Memo: {it.memo}</p>
+                    )}
+                    {it.periodEnd && (
+                      <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px' }}>Covers through {fmtPeriodDate(it.periodEnd)}</p>
+                    )}
+                    {it.stripeInvoiceId && (
+                      <p style={{ fontSize:'12px', color:'#6366f1', marginTop:'5px', fontWeight:500 }}>Receipt available</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div style={{ height:'1rem' }} />
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -17115,7 +17208,7 @@ function SubscriptionCard({ profile, settings, locationId='loc1' }) {
           onClose={()=>setShowUpdateModal(false)}
         />
       )}
-      {showHistory&&<BillingHistorySheet onClose={()=>setShowHistory(false)} />}
+      {showHistory&&<BillingHistorySheet locationId={locationId} onClose={()=>setShowHistory(false)} />}
     </>
   )
 }
@@ -18294,6 +18387,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   // Lifted modal state for Settings > Billing (the billing branch renders via
   // an IIFE so it can't hold its own hooks).
   const [showAddSeatsModal, setShowAddSeatsModal] = useState(false)
+  const [showBillingHistory, setShowBillingHistory] = useState(false)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
   const livePrices = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
   // Build settings from selected location if provided. Reads only real saved
@@ -19146,6 +19240,24 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                     </button>
                   </div>
                 </div>
+
+                {/* Billing history — recorded payments (manual conversions
+                    today; Stripe-synced records once that integration lands). */}
+                <button
+                  type="button"
+                  onClick={()=>setShowBillingHistory(true)}
+                  style={{ display:'block', width:'100%', padding:'12px 14px', background:'white', border:'1px solid rgba(0,0,0,0.08)', borderRadius:'14px', fontFamily:'inherit', textAlign:'left', cursor:'pointer', marginBottom:'18px' }}
+                  onMouseEnter={e=>{ e.currentTarget.style.background='rgba(26,46,43,0.03)' }}
+                  onMouseLeave={e=>{ e.currentTarget.style.background='white' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+                    <span style={{ fontSize:'18px' }}>🧾</span>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>View billing history</p>
+                      <p style={{ fontSize:'10.5px', color:'#8a9e9a', lineHeight:1.45 }}>Invoices &amp; recorded payments</p>
+                    </div>
+                    <span style={{ fontSize:'14px', color:'#c8d8d4', flexShrink:0 }}>›</span>
+                  </div>
+                </button>
               </div>
 
               <TierPlansInline />
@@ -19751,6 +19863,12 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
           locationId={currentLocationCtx.id}
           onClose={()=>setShowAddSeatsModal(false)}
           onSeatsAdded={(rows)=>{ seatsCtx?.setSeats?.(prev=>[...prev, ...rows]) }}
+        />
+      )}
+      {showBillingHistory && (
+        <BillingHistorySheet
+          locationId={currentLocationCtx?.id || null}
+          onClose={()=>setShowBillingHistory(false)}
         />
       )}
     </div>

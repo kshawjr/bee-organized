@@ -152,9 +152,35 @@ export async function POST(
     return NextResponse.json({ error: updErr.message }, { status: 500 })
   }
 
+  // Also record a structured billing_invoices row so the owner's billing
+  // history shows the payment (manual_conversion today; Stripe webhooks will
+  // insert here later). The locations UPDATE above is the source of truth for
+  // the conversion — if this insert fails we DON'T fail the request, we just
+  // surface a warning. The billing_notes text line above remains as a backup
+  // audit trail either way.
+  const warnings: string[] = []
+  const amountCents = Math.round(amount * 100)
+  const { error: invoiceErr } = await supabaseService
+    .from('billing_invoices')
+    .insert({
+      location_id: loc.id,
+      amount_cents: amountCents,
+      currency: 'usd',
+      paid_at: new Date().toISOString(),
+      period_end: newPaidThrough,
+      source: 'manual_conversion',
+      memo: paymentMemo || null,
+      recorded_by: caller.id,
+    })
+  if (invoiceErr) {
+    console.error('[convert-billing] invoice insert error', invoiceErr)
+    warnings.push('invoice_record_failed')
+  }
+
   return NextResponse.json({
     success: true,
     location: updated,
     from_source: fromSource,
+    ...(warnings.length ? { warnings } : {}),
   })
 }
