@@ -69,7 +69,9 @@ function ownerCanRead(hubUser: { role: string; location_id: string | null }, tpl
 
 function ownerCanWrite(hubUser: { role: string; location_id: string | null }, tpl: any) {
   if (isAdmin(hubUser.role)) return true
-  if (hubUser.role === 'lite_user') return false
+  // lite_user (read-only) and manager (operational lead; no template config)
+  // cannot write templates. Both can still read via ownerCanRead.
+  if (hubUser.role === 'lite_user' || hubUser.role === 'manager') return false
   // Owners can only modify customs in their own location. Masters are off-limits.
   return tpl.location_uuid != null
     && hubUser.location_id != null

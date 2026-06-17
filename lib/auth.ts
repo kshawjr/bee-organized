@@ -1,7 +1,7 @@
 import { createServerSupabaseClient } from './supabase-server'
 import { redirect } from 'next/navigation'
 
-export type HubRole = 'super_admin' | 'admin' | 'owner' | 'lite_user'
+export type HubRole = 'super_admin' | 'admin' | 'owner' | 'manager' | 'lite_user'
 
 export async function requireAuth() {
   const supabase = await createServerSupabaseClient()
@@ -42,6 +42,20 @@ export function isAdmin(role: string) {
 
 export function isLiteUser(role: string) {
   return role === 'lite_user'
+}
+
+// True for super_admin / admin / owner / manager — i.e. everyone EXCEPT the
+// read-only lite_user. Manager is a real operational role (leads + CRM +
+// feedback for their location) but is NOT elevated — keep using isAdmin()
+// (super_admin + admin) for corporate-only gates, and the explicit owner
+// checks for owner-only config (settings, drips, templates, billing, team).
+export function isManagerOrAbove(role: string) {
+  return (
+    role === 'super_admin' ||
+    role === 'admin' ||
+    role === 'owner' ||
+    role === 'manager'
+  )
 }
 
 // Check if user can see a specific location

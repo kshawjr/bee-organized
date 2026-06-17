@@ -33,7 +33,12 @@ async function authForLocation(locId: string) {
     .single()
   if (!hubUser) return { error: 'no_hub_user_profile', status: 403 as const }
 
-  if (hubUser.role === 'lite_user') return { error: 'forbidden_read_only', status: 403 as const }
+  // Drip-path management is owner/elevated config — block lite_user (read-only)
+  // and manager (operational lead; no drip config). Read access (GET below) is
+  // unaffected: any same-location user can still list paths.
+  if (hubUser.role === 'lite_user' || hubUser.role === 'manager') {
+    return { error: 'forbidden_read_only', status: 403 as const }
+  }
   if (!isAdmin(hubUser.role) && hubUser.location_id !== locId) {
     return { error: 'forbidden_wrong_location', status: 403 as const }
   }

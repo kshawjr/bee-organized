@@ -44,7 +44,11 @@ export async function PATCH(
     .maybeSingle()
   if (!path) return NextResponse.json({ error: 'path_not_found' }, { status: 404 })
 
-  if (hubUser.role === 'lite_user') return NextResponse.json({ error: 'forbidden_read_only' }, { status: 403 })
+  // Drip step edits are owner/elevated config — block lite_user (read-only)
+  // and manager (operational lead; no drip/template config).
+  if (hubUser.role === 'lite_user' || hubUser.role === 'manager') {
+    return NextResponse.json({ error: 'forbidden_read_only' }, { status: 403 })
+  }
   if (!isAdmin(hubUser.role) && hubUser.location_id !== path.location_uuid) {
     return NextResponse.json({ error: 'forbidden_wrong_location' }, { status: 403 })
   }

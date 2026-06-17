@@ -50,7 +50,9 @@ export async function POST(
     .eq('id', user.id)
     .single()
   if (!hubUser) return NextResponse.json({ error: 'no_hub_user_profile' }, { status: 403 })
-  if (hubUser.role === 'lite_user') {
+  // Duplicating a template creates new template config — block lite_user
+  // (read-only) and manager (operational lead; no template config).
+  if (hubUser.role === 'lite_user' || hubUser.role === 'manager') {
     return NextResponse.json({ error: 'forbidden_read_only' }, { status: 403 })
   }
 

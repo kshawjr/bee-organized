@@ -31,7 +31,11 @@ async function loadPathWithAuth(pathId: string) {
     .maybeSingle()
   if (!path) return { error: 'not_found', status: 404 as const }
 
-  if (hubUser.role === 'lite_user') return { error: 'forbidden_read_only', status: 403 as const }
+  // Drip paths are owner/elevated config. lite_user (read-only) and manager
+  // (operational lead — leads/CRM/feedback only) are both blocked here.
+  if (hubUser.role === 'lite_user' || hubUser.role === 'manager') {
+    return { error: 'forbidden_read_only', status: 403 as const }
+  }
   if (!isAdmin(hubUser.role) && hubUser.location_id !== path.location_uuid) {
     return { error: 'forbidden_wrong_location', status: 403 as const }
   }

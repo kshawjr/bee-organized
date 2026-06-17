@@ -34,7 +34,9 @@ export async function DELETE(
     .eq('id', user.id)
     .single()
   if (!hubUser) return NextResponse.json({ error: 'no_hub_user_profile' }, { status: 403 })
-  if (hubUser.role === 'lite_user') {
+  // Drip-path management is owner/elevated config — block lite_user (read-only)
+  // and manager (operational lead; no drip config).
+  if (hubUser.role === 'lite_user' || hubUser.role === 'manager') {
     return NextResponse.json({ error: 'forbidden_read_only' }, { status: 403 })
   }
   if (!isAdmin(hubUser.role) && hubUser.location_id !== locId) {

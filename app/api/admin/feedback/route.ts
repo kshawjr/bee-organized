@@ -1,13 +1,20 @@
 // app/api/admin/feedback/route.ts
 //
-// GET /api/admin/feedback — org-wide feedback triage list. Fail-closed to
-// super_admin / admin (the "corporate" tier). Embeds the submitter (name +
-// email) and the location name so the admin table renders without N+1 lookups.
+// GET /api/admin/feedback — feedback triage list.
+//   - super_admin / admin: org-wide, crosses location boundaries.
+//   - owner / manager: scoped to their own location_id ONLY (they manage
+//     feedback for their franchise; manager is a paid operational role).
+//   - everyone else: 403.
+//
+// Embeds the submitter (name + email) and the location name so the table
+// renders without N+1 lookups.
 //
 // Optional filters via query string: ?status=, ?type=, ?location_id=, ?user_id=
+// For owner/manager the location filter is FORCED to their own location — a
+// ?location_id= pointing elsewhere is ignored, never honored.
 //
-// Reads go through supabaseService (service role) — this is an org-wide view
-// that intentionally crosses location boundaries, so RLS scoping doesn't apply.
+// Reads go through supabaseService (service role); location scoping is enforced
+// in app code here (we add the location_id filter for non-elevated callers).
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
@@ -15,7 +22,10 @@ import { supabaseService } from '@/lib/supabase-service'
 
 export const runtime = 'nodejs'
 
-const ALLOWED_ROLES = ['super_admin', 'admin']
+// Org-wide (cross-location) access. owner/manager are handled separately with
+// a forced location_id scope.
+const ELEVATED_ROLES = ['super_admin', 'admin']
+const LOCATION_SCOPED_ROLES = ['owner', 'manager']
 const VALID_TYPES = new Set(['bug', 'feature'])
 const VALID_STATUSES = new Set([
   'submitted', 'under_review', 'planned', 'in_progress', 'shipped', 'declined',
@@ -28,10 +38,14 @@ export async function GET(req: NextRequest) {
 
   const { data: caller } = await supabase
     .from('hub_users')
-    .select('id, role')
+    .select('id, role, location_id')
     .eq('id', user.id)
     .single()
-  if (!caller || !ALLOWED_ROLES.includes(caller.role)) {
+
+  const isElevatedCaller = !!caller && ELEVATED_ROLES.includes(caller.role)
+  const isLocationScopedCaller =
+    !!caller && LOCATION_SCOPED_ROLES.includes(caller.role) && !!caller.location_id
+  if (!isElevatedCaller && !isLocationScopedCaller) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
@@ -52,8 +66,15 @@ export async function GET(req: NextRequest) {
   const type = req.nextUrl.searchParams.get('type')
   if (type && VALID_TYPES.has(type)) query = query.eq('type', type)
 
-  const locationId = req.nextUrl.searchParams.get('location_id')
-  if (locationId) query = query.eq('location_id', locationId)
+  // owner/manager are hard-scoped to their own location, ignoring any
+  // ?location_id= override. Elevated callers may filter by an arbitrary
+  // location_id (or omit it to see everything).
+  if (isLocationScopedCaller) {
+    query = query.eq('location_id', caller!.location_id)
+  } else {
+    const locationId = req.nextUrl.searchParams.get('location_id')
+    if (locationId) query = query.eq('location_id', locationId)
+  }
 
   const userId = req.nextUrl.searchParams.get('user_id')
   if (userId) query = query.eq('user_id', userId)

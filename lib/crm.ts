@@ -163,13 +163,16 @@ export function canReadLocation(caller: Caller, targetLocationId: string) {
   return isElevated(caller.role) || caller.locationId === targetLocationId
 }
 
-// Write access: elevated OR the location's owner. lite_user is read-only
-// everywhere else, so it must not be able to create/edit/delete CRM data here.
-// (Previously this allowed any hub_user at the location, which leaked write
-// access to lite_user — see audit finding at d414443.)
+// Write access: elevated OR the location's owner/manager. lite_user is
+// read-only everywhere else, so it must not be able to create/edit/delete CRM
+// data here. (Previously this allowed any hub_user at the location, which
+// leaked write access to lite_user — see audit finding at d414443.)
+// Manager is a paid operational role and CAN edit CRM data (companies/partners)
+// for its own location — see migrations/manager_role.sql.
 export function canWriteLocation(caller: Caller, targetLocationId: string) {
   return (
     isElevated(caller.role) ||
-    (caller.locationId === targetLocationId && caller.role === 'owner')
+    (caller.locationId === targetLocationId &&
+      (caller.role === 'owner' || caller.role === 'manager'))
   )
 }

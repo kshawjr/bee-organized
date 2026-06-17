@@ -33,7 +33,9 @@ export async function POST(
 
     const locId = params.id
     const role = hubUser.role
-    if (role === 'lite_user') {
+    // Default drip-path / calendar config is owner/elevated — block lite_user
+    // (read-only) and manager (operational lead; no location/drip config).
+    if (role === 'lite_user' || role === 'manager') {
       return NextResponse.json({ error: 'Read-only role' }, { status: 403 })
     }
     if (role !== 'super_admin' && hubUser.location_id !== locId) {

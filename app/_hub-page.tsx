@@ -26,6 +26,12 @@ function mapRole(dbRole: string | null | undefined): {
       return { role: 'corporate', franchiseRole: 'owner' }
     case 'owner':
       return { role: 'franchise', franchiseRole: 'owner' }
+    case 'manager':
+      // Manager is a real franchise role — keep role='franchise' so the whole
+      // franchise UI (role==='franchise' gates) lights up, and distinguish via
+      // franchiseRole='manager'. NOT collapsed to 'viewer' like lite_user: the
+      // manager gets leads + CRM + feedback, just not owner-only config.
+      return { role: 'franchise', franchiseRole: 'manager' }
     case 'lite_user':
       return { role: 'franchise', franchiseRole: 'viewer' }
     default:
@@ -62,6 +68,11 @@ function mapTier(dbRole: string | null | undefined): string {
       return 'manager'
     case 'owner':
       return 'owner'
+    case 'manager':
+      // Real Hive Manager seat — maps to the 'manager' tier key, which renders
+      // as the 'Hive Manager' label via FRANCHISE_ROLES. Don't collapse to
+      // 'readonly' (that's the genuine read-only Honey Watcher tier).
+      return 'manager'
     case 'lite_user':
       return 'readonly'
     default:

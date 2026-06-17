@@ -38,8 +38,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'step is required' }, { status: 400 })
     }
 
+    // Invited team members (lite_user + manager) run the employee_setup flow,
+    // which skips the locations.onboarding_state cache write below — only the
+    // owner owns their location's onboarding. Manager must not mutate it.
     const onboardingType =
-      hubUser.role === 'lite_user' ? 'employee_setup' : 'owner_setup'
+      hubUser.role === 'lite_user' || hubUser.role === 'manager'
+        ? 'employee_setup'
+        : 'owner_setup'
 
     // ─── 1. Audit log (upsert) ────────────────────────────────────────────────
     const { error: progressErr } = await supabaseService

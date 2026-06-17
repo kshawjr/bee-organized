@@ -127,7 +127,9 @@ export async function POST(req: NextRequest) {
     .single()
   if (!hubUser) return NextResponse.json({ error: 'no_hub_user_profile' }, { status: 403 })
 
-  if (hubUser.role === 'lite_user') {
+  // Templates are owner/elevated config — block lite_user (read-only) and
+  // manager (operational lead; no drip/template config). Both can still GET.
+  if (hubUser.role === 'lite_user' || hubUser.role === 'manager') {
     return NextResponse.json({ error: 'forbidden_read_only' }, { status: 403 })
   }
 

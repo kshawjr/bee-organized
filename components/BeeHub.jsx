@@ -18843,8 +18843,9 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     setEditingStep(null)
   }
 
-  const canManageTeam = ['owner','manager'].includes(franchiseRole)
-  // TODO: Hive Manager view-only access — see tier matrix 'View billing & invoices'
+  // Team management (invite/remove/role change → billable seats) is owner-only.
+  // Manager is an operational lead and explicitly CANNOT manage the team.
+  const canManageTeam = franchiseRole === 'owner'
   const canViewBilling = franchiseRole === 'owner'
   const sections = [
     { key:'profile',   label:'Profile',    icon:'👤' },
@@ -20530,13 +20531,13 @@ const SUBSCRIPTION_TIER_META = [
   { key:'readonly', name:'Honey Watcher', icon:'👁',  color:'#8a9e9a', detail:'Read-only · Add as many as needed' },
 ]
 
-// Worker Bee + Honey Watcher tiers ship later — for now their pricing,
-// quantity selectors, and purchase flows are disabled everywhere the 4-tier
-// matrix appears. Zee Bee + Hive Manager remain fully interactive. Backend
-// (/api/seats/buy-and-invite and /api/hub_users/invite) mirrors this by
-// returning 503 for tier in {light, readonly}. Re-enable by clearing this
-// set + the matching backend check.
-const DEFERRED_TIER_KEYS = new Set(['light', 'readonly'])
+// All four tiers (Zee Bee, Hive Manager, Worker Bee, Honey Watcher) are now
+// live and fully interactive — pricing, quantity selectors, and purchase flows
+// are enabled everywhere the tier matrix appears. The backend 503 backstops in
+// /api/seats/buy-and-invite and /api/hub_users/invite have been removed to
+// match. Kept as an (empty) set + helper so the call sites don't need touching
+// and a future tier can be deferred again by adding its key here.
+const DEFERRED_TIER_KEYS = new Set()
 function isDeferredTier(key) { return DEFERRED_TIER_KEYS.has(key) }
 
 function SubscriptionCalculator({
@@ -29488,6 +29489,12 @@ if (Array.isArray(initialPeople)) return
     // 'Manual' moved out of the nav — the Hive Hub Guide now opens from the
     // top-bar "?" icon; the manual reference still lives in Settings.
     ...(isElevated ? [{ key:'admin', icon:'🏢', label:role==='super_admin'?'Admin':'Corp' }] : []),
+    // Franchise owner + manager get a location-scoped feedback triage view
+    // (AdminFeedbackScreen, server-scoped to their location_id). Elevated users
+    // reach feedback via the Admin screen's Feedback tab instead.
+    ...(role==='franchise' && ['owner','manager'].includes(franchiseRole)
+      ? [{ key:'feedback', icon:'💬', label:'Feedback' }]
+      : []),
   ]
 
   // Heights — demo bar only renders for super_admin AND only on desktop. On
@@ -29622,8 +29629,9 @@ if (Array.isArray(initialPeople)) return
       ? (FRANCHISE_ROLES.find(r => r.key === viewAsUser.role)?.label || 'Corporate')
       : role === 'super_admin' ? 'Super Admin'
       : role === 'corporate'   ? 'Corporate'
-      : role === 'franchise' && franchiseRole === 'owner'  ? 'Zee Bee'
-      : role === 'franchise' && franchiseRole === 'viewer' ? 'Honey Watcher'
+      : role === 'franchise' && franchiseRole === 'owner'   ? 'Zee Bee'
+      : role === 'franchise' && franchiseRole === 'manager' ? 'Hive Manager'
+      : role === 'franchise' && franchiseRole === 'viewer'  ? 'Honey Watcher'
       : ''
     return (
       <div style={{ position:'fixed', inset:0, zIndex:10003, display:'flex' }}>
@@ -29645,7 +29653,9 @@ if (Array.isArray(initialPeople)) return
             {navItems.map(item=>{
               const fr = franchiseRole
               const isReports  = item.key==='reports'  && !['super_admin','corporate'].includes(role) && !['owner','manager'].includes(fr)
-              const isSettings = item.key==='settings' && ['readonly'].includes(fr)
+              // Settings = owner-only config (location/team/billing/drips/Jobber).
+              // Manager has none of those, so hide Settings for manager too.
+              const isSettings = item.key==='settings' && ['readonly','manager'].includes(fr)
               const isPartners = item.key==='partners' && ['readonly'].includes(fr)
               const isLimitedLaunchGated = isLimitedLaunch && (item.key==='partners' || item.key==='reports')
               const isLocked = (isOnboardingState && !isElevated && item.key!=='home') || isReports || isSettings || isPartners || isLimitedLaunchGated
@@ -29700,7 +29710,9 @@ if (Array.isArray(initialPeople)) return
       ? (FRANCHISE_ROLES.find(r => r.key === viewAsUser.role)?.label || 'Corporate')
       : role === 'super_admin' ? 'Super Admin'
       : role === 'corporate'   ? 'Corporate'
-      : role === 'franchise' && franchiseRole === 'owner'  ? 'Zee Bee'
+      : role === 'franchise' && franchiseRole === 'owner'   ? 'Zee Bee'
+      : role === 'franchise' && franchiseRole === 'manager' ? 'Hive Manager'
+      : role === 'franchise' && franchiseRole === 'viewer'  ? 'Honey Watcher'
       : ''
     const menuTop = DEMO_BAR_H + LOC_BAR_H + 48 + 4
     return (
@@ -29862,6 +29874,15 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         <PartnersScreen onNavigate={nav} partners={partners} setPartners={setPartners} companies={companies} setCompanies={setCompanies} locFilter={locFilter} isElevated={isElevated} people={people} initialSelected={globalSelectedPartner} onInitialSelectedConsumed={()=>setGlobalSelectedPartner(null)} onAddToHive={(partner)=>{ addPersonFromPartner(partner); nav('hive') }} />
       </div>
     )
+    // Franchise owner/manager feedback triage. AdminFeedbackScreen calls
+    // /api/admin/feedback, which the server auto-scopes to the caller's
+    // location_id for owner/manager — so this view only ever shows their own
+    // location's feedback. Elevated users use the Admin screen's Feedback tab.
+    if (activeNav==='feedback') return (
+      <div style={pageStyle}>
+        <AdminFeedbackScreen />
+      </div>
+    )
     return (
       <div style={pageStyle}>
         <DashboardScreen
@@ -30013,7 +30034,9 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             // Franchise sub-role gating
             const fr = franchiseRole // owner|manager|light|readonly
             const isReports  = item.key==='reports'  && !['super_admin','corporate'].includes(role) && !['owner','manager'].includes(fr)
-            const isSettings = item.key==='settings' && ['readonly'].includes(fr)
+            // Settings = owner-only config (location/team/billing/drips/Jobber).
+            // Manager has none of those, so hide Settings for manager too.
+            const isSettings = item.key==='settings' && ['readonly','manager'].includes(fr)
             const isPartners = item.key==='partners' && ['readonly'].includes(fr)
             const isLimitedLaunchGated = isLimitedLaunch && (item.key==='partners' || item.key==='reports')
             // Onboarding lockdown only applies to franchise users mid-setup —
@@ -30045,8 +30068,9 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             ? (FRANCHISE_ROLES.find(r => r.key === viewAsUser.role)?.label || 'Corporate')
             : role === 'super_admin' ? 'Super Admin'
             : role === 'corporate'   ? 'Corporate'
-            : role === 'franchise' && franchiseRole === 'owner'  ? 'Zee Bee'
-            : role === 'franchise' && franchiseRole === 'viewer' ? 'Honey Watcher'
+            : role === 'franchise' && franchiseRole === 'owner'   ? 'Zee Bee'
+            : role === 'franchise' && franchiseRole === 'manager' ? 'Hive Manager'
+            : role === 'franchise' && franchiseRole === 'viewer'  ? 'Honey Watcher'
             : ''
           return (
             <div style={{ padding:'14px 16px', borderTop:'1px solid rgba(168,201,196,0.08)' }}>
