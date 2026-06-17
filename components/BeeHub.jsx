@@ -2445,6 +2445,7 @@ function AddressAutofill({ value, onChange, onSelect, onParsed, placeholder='Sta
         onParsed({
           full:   json.formatted || prediction.description,
           street: json.street    || '',
+          apt:    json.apt       || '',
           city:   json.city      || '',
           state:  json.state     || '',
           zip:    json.zip       || '',
@@ -2494,7 +2495,7 @@ function AddressAutofill({ value, onChange, onSelect, onParsed, placeholder='Sta
 }
 
 // Reusable address block: autofill + city/state/zip
-function AddressBlock({ street='', city='', state='', zip='', onChange, label='Address', required=false }) {
+function AddressBlock({ street='', apt='', city='', state='', zip='', onChange, label='Address', required=false }) {
   const inp = { width:'100%', padding:'9px 11px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }
   const lbl = { fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'5px', display:'block' }
   return (
@@ -2503,17 +2504,20 @@ function AddressBlock({ street='', city='', state='', zip='', onChange, label='A
         <label style={lbl}>{label}{required&&<span style={{ color:'#ef4444' }}> *</span>}</label>
         <AddressAutofill
           value={street}
-          onChange={v=>onChange({street:v,city,state,zip})}
-          onParsed={p=>onChange({street:p.street,city:p.city,state:p.state,zip:p.zip})}
+          onChange={v=>onChange({street:v,apt,city,state,zip})}
+          onParsed={p=>onChange({street:p.street,apt:p.apt||'',city:p.city,state:p.state,zip:p.zip})}
           placeholder="Start typing a street address…"
         />
       </div>
       {(street||city||state)&&(
-        <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr', gap:'8px' }}>
-          <input value={city}  onChange={e=>onChange({street,city:e.target.value,state,zip})}  placeholder="City"  style={inp} />
-          <input value={state} onChange={e=>onChange({street,city,state:e.target.value,zip})}  placeholder="ST" maxLength={2} style={inp} />
-          <input value={zip}   onChange={e=>onChange({street,city,state,zip:e.target.value})}  placeholder="ZIP"  style={inp} />
-        </div>
+        <>
+          <input value={apt} onChange={e=>onChange({street,apt:e.target.value,city,state,zip})} placeholder="Apt / Unit (optional)" style={inp} />
+          <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr', gap:'8px' }}>
+            <input value={city}  onChange={e=>onChange({street,apt,city:e.target.value,state,zip})}  placeholder="City"  style={inp} />
+            <input value={state} onChange={e=>onChange({street,apt,city,state:e.target.value,zip})}  placeholder="ST" maxLength={2} style={inp} />
+            <input value={zip}   onChange={e=>onChange({street,apt,city,state,zip:e.target.value})}  placeholder="ZIP"  style={inp} />
+          </div>
+        </>
       )}
     </div>
   )
@@ -2602,6 +2606,7 @@ function AddAddressPopup({ person, update, onClose }) {
   const [mode, setMode] = useState({ kind: 'list', editIndex: null })
   const [fType, setFType] = useState('Service')
   const [fStreet, setFStreet] = useState('')
+  const [fApt, setFApt] = useState('')
   const [fCity, setFCity] = useState('')
   const [fState, setFState] = useState('')
   const [fZip, setFZip] = useState('')
@@ -2613,6 +2618,7 @@ function AddAddressPopup({ person, update, onClose }) {
   function resetForm() {
     setFType('Service')
     setFStreet('')
+    setFApt('')
     setFCity('')
     setFState('')
     setFZip('')
@@ -2643,9 +2649,10 @@ function AddAddressPopup({ person, update, onClose }) {
     const parsed = parseExisting(a.value)
     setFType(a.type || 'Service')
     setFStreet(parsed.street)
-    setFCity(parsed.city)
-    setFState(parsed.state)
-    setFZip(parsed.zip)
+    setFApt(a.apt || '')
+    setFCity(a.city || parsed.city)
+    setFState(a.state || parsed.state)
+    setFZip(a.zip || parsed.zip)
     setMode({ kind: 'edit', editIndex: i })
   }
   function cancelForm() {
@@ -2653,7 +2660,7 @@ function AddAddressPopup({ person, update, onClose }) {
   }
 
   const composedValue = (() => {
-    const street = fStreet.trim()
+    const street = [fStreet.trim(), fApt.trim()].filter(Boolean).join(' ')
     const tail = [fCity.trim(), fState.trim(), fZip.trim()].filter(Boolean).join(' ')
     return [street, tail].filter(Boolean).join(', ')
   })()
@@ -2662,10 +2669,11 @@ function AddAddressPopup({ person, update, onClose }) {
   function saveForm() {
     if (!canSave) return
     const value = composedValue
+    const entry = { type: fType, value, street: fStreet.trim(), apt: fApt.trim(), city: fCity.trim(), state: fState.trim(), zip: fZip.trim() }
     if (mode.kind === 'add') {
-      update({ addresses: [...addrs, { type: fType, value }] })
+      update({ addresses: [...addrs, entry] })
     } else if (mode.kind === 'edit' && mode.editIndex != null) {
-      const next = addrs.map((a, i) => i === mode.editIndex ? { type: fType, value } : a)
+      const next = addrs.map((a, i) => i === mode.editIndex ? entry : a)
       update({ addresses: next })
     }
     setMode({ kind: 'list', editIndex: null })
@@ -2851,11 +2859,22 @@ function AddAddressPopup({ person, update, onClose }) {
                   onChange={(v) => setFStreet(v)}
                   onParsed={(parsed) => {
                     if (parsed.street) setFStreet(parsed.street)
+                    if (parsed.apt) setFApt(parsed.apt)
                     if (parsed.city) setFCity(parsed.city)
                     if (parsed.state) setFState(parsed.state)
                     if (parsed.zip) setFZip(parsed.zip)
                   }}
                   placeholder="Start typing a street address..."
+                />
+              </div>
+
+              <div>
+                <label style={lbl}>Apt / Unit <span style={{ fontWeight:400, textTransform:'none', letterSpacing:0 }}>(optional)</span></label>
+                <input
+                  value={fApt}
+                  onChange={(e) => setFApt(e.target.value)}
+                  placeholder="Apt 4B, Unit 2, Suite 100…"
+                  style={inp}
                 />
               </div>
 
@@ -3076,6 +3095,12 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
       else {
         if (q.includes('@')) set('email', query.trim())
         else if (qDigits.length >= 7) set('phone', query.trim())
+        else {
+          // Name search with no match — prefill first/last so user doesn't have to retype
+          const parts = query.trim().split(/\s+/).filter(Boolean)
+          set('firstName', parts[0] || '')
+          set('lastName', parts.slice(1).join(' ') || '')
+        }
         setPhase('notfound')
       }
     }, 600)
@@ -3086,7 +3111,9 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
   function buildAddressFields() {
     const street = (form.street || '').trim()
     if (!street) return { address: null, addresses: [], city: null, state: null, zip: null }
-    const full = [street, form.city, form.state, form.zip].filter(Boolean).join(', ')
+    const apt = (form.apt || '').trim()
+    const streetWithApt = [street, apt].filter(Boolean).join(' ')
+    const full = [streetWithApt, form.city, form.state, form.zip].filter(Boolean).join(', ')
     return {
       address: full || null,
       city:    form.city  || null,
@@ -3096,6 +3123,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
         type:   form.addrType || 'Service',
         value:  full,
         street,
+        apt,
         city:   form.city  || '',
         state:  form.state || '',
         zip:    form.zip   || '',
@@ -3509,8 +3537,8 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
           {showAddrEntry&&(
             <div style={{ border:'1px solid rgba(168,201,196,0.3)', borderRadius:'10px', padding:'10px 12px' }}>
               <AddressBlock
-                street={form.street||''} city={form.city||''} state={form.state||''} zip={form.zip||''}
-                onChange={({street,city,state,zip})=>{ set('street',street); set('city',city); set('state',state); set('zip',zip) }}
+                street={form.street||''} apt={form.apt||''} city={form.city||''} state={form.state||''} zip={form.zip||''}
+                onChange={({street,apt,city,state,zip})=>{ set('street',street); set('apt',apt); set('city',city); set('state',state); set('zip',zip) }}
                 label=""
               />
             </div>
@@ -13461,7 +13489,7 @@ function AddPartnerModal({ onAdd, onClose, defaultType='partner', defaultName=''
   // Pre-fill name fields from defaultName (e.g. the referrer picker's typed
   // search text). First token → first name, remainder → last name.
   const _np = (defaultName||'').trim().split(/\s+/).filter(Boolean)
-  const [form, setForm] = useState({ firstName:_np[0]||'', lastName:_np.slice(1).join(' ')||'', company:'', title:'', phone:'', email:'', website:'', howWeMet:'', relationship:'', specialties:[], tags:[], tier:null, street:'', city:'', state:'', zip:'' })
+  const [form, setForm] = useState({ firstName:_np[0]||'', lastName:_np.slice(1).join(' ')||'', company:'', title:'', phone:'', email:'', website:'', howWeMet:'', relationship:'', specialties:[], tags:[], tier:null, street:'', apt:'', city:'', state:'', zip:'' })
   const [companyId, setCompanyId] = useState(null)
   const [companySearch, setCompanySearch] = useState('')
   const [showCompanyPicker, setShowCompanyPicker] = useState(false)
@@ -13473,8 +13501,9 @@ function AddPartnerModal({ onAdd, onClose, defaultType='partner', defaultName=''
   const canAdd = type==='company' ? !!form.company.trim() : !!(form.firstName.trim() && form.lastName.trim())
 
   function create() {
-    const addrVal = [form.street,form.city,form.state,form.zip].filter(Boolean).join(', ')
-    const addresses = addrVal ? [{ type:'Business', value:addrVal }] : []
+    const streetWithApt = [form.street, form.apt].filter(Boolean).join(' ')
+    const addrVal = [streetWithApt,form.city,form.state,form.zip].filter(Boolean).join(', ')
+    const addresses = addrVal ? [{ type:'Business', value:addrVal, street:form.street, apt:form.apt, city:form.city, state:form.state, zip:form.zip }] : []
     if (type==='company') {
       onCreateCompany({
         id:`co${Date.now()}`, name:form.company.trim(),
@@ -13608,8 +13637,8 @@ function AddPartnerModal({ onAdd, onClose, defaultType='partner', defaultName=''
           {showAddrToggle&&(
             <div style={{ border:'1px solid rgba(168,201,196,0.3)', borderRadius:'10px', padding:'10px 12px' }}>
               <AddressBlock
-                street={form.street||''} city={form.city||''} state={form.state||''} zip={form.zip||''}
-                onChange={({street,city,state,zip})=>{ set('street',street); set('city',city); set('state',state); set('zip',zip) }}
+                street={form.street||''} apt={form.apt||''} city={form.city||''} state={form.state||''} zip={form.zip||''}
+                onChange={({street,apt,city,state,zip})=>{ set('street',street); set('apt',apt); set('city',city); set('state',state); set('zip',zip) }}
                 label=""
               />
             </div>
@@ -16861,7 +16890,7 @@ function LeadNotificationsCard({ settings, updateLocation, locationId, ownerEmai
                 <div style={{ width:'30px', height:'30px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'11px', fontWeight:700, color:'white', flexShrink:0 }}>{u.initials}</div>
                 <div style={{ flex:1, minWidth:0 }}>
                   <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{u.name}</p>
-                  <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.email}</p>
+                  <p title={u.email} style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.email}</p>
                 </div>
                 <span style={{ fontSize:'10px', padding:'2px 7px', borderRadius:'20px', background:rc?.bg, color:rc?.color, fontWeight:600, flexShrink:0 }}>{rc?.icon} {rc?.label}</span>
               </div>
@@ -16879,7 +16908,7 @@ function LeadNotificationsCard({ settings, updateLocation, locationId, ownerEmai
           {extraEmails.map((email, i) => (
             <div key={i} style={{ padding:'10px 16px', display:'flex', alignItems:'center', gap:'10px', borderTop:'1px solid rgba(0,0,0,0.04)' }}>
               <span style={{ fontSize:'14px' }}>✉️</span>
-              <p style={{ flex:1, fontSize:'13px', color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{email}</p>
+              <p title={email} style={{ flex:1, fontSize:'13px', color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{email}</p>
               <button onClick={() => removeExtra(i)} style={{ background:'none', border:'none', color:'#e5a0a0', cursor:'pointer', fontSize:'16px', flexShrink:0 }}>×</button>
             </div>
           ))}
@@ -22312,7 +22341,7 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
                           </div>
                           <div style={{ flex:1, minWidth:0 }}>
                             <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{o.full_name||o.email}</p>
-                            <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                            <p title={o.email} style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                               {o.email}
                               {o.joined_at ? ` · joined ${new Date(o.joined_at).toLocaleDateString('en-US',{month:'short', year:'numeric'})}` : ''}
                             </p>
@@ -22345,7 +22374,7 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
                       <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:'rgba(245,158,11,0.15)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'14px', flexShrink:0 }}>📬</div>
                       <div style={{ flex:1, minWidth:0 }}>
                         <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{ownerStatus.pending_invite.full_name||ownerStatus.pending_invite.email}</p>
-                        <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        <p title={ownerStatus.pending_invite.email} style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                           {ownerStatus.pending_invite.email}
                           {ownerStatus.pending_invite.invite_expires_at
                             ? ` · expires ${new Date(ownerStatus.pending_invite.invite_expires_at).toLocaleDateString('en-US',{month:'short', day:'numeric'})}`
@@ -23025,7 +23054,7 @@ function UsersTab({ users, setUsers, locations, locFilter, onInvite }) {
             <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.name}</p>
             {u.status==='invited'&&<span style={{ fontSize:'10px', color:'#f59e0b', background:'rgba(245,158,11,0.1)', padding:'1px 6px', borderRadius:'10px', fontWeight:600, flexShrink:0 }}>Invited</span>}
           </div>
-          <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.email}</p>
+          <p title={u.email} style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.email}</p>
         </div>
         {showRolePicker
           ? <select value={u.role} onChange={e=>updateRole(u.id,e.target.value)} style={{ fontSize:'11px', color:rc.color, background:rc.bg, border:`1px solid ${rc.color}40`, borderRadius:'8px', padding:'4px 8px', fontFamily:'inherit', fontWeight:600, cursor:'pointer', outline:'none', flexShrink:0 }}>

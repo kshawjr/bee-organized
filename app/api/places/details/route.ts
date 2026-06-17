@@ -21,6 +21,7 @@ const FIELDS = 'address_components,formatted_address'
 // and a `types[]` array. We pick the right one for each of our fields.
 function parseComponents(components: any[]): {
   street: string
+  apt: string
   city: string
   state: string
   zip: string
@@ -48,11 +49,12 @@ function parseComponents(components: any[]): {
     get('administrative_area_level_3') ||
     get('administrative_area_level_2')
 
+  const apt = get('subpremise')  // apartment / unit number (e.g. "Apt 4B")
   const state = get('administrative_area_level_1', true)  // 2-letter code
   const zip = get('postal_code')
   const country = get('country', true)
 
-  return { street, city, state, zip, country }
+  return { street, apt, city, state, zip, country }
 }
 
 export async function POST(req: NextRequest) {
