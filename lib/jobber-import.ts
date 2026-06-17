@@ -317,6 +317,7 @@ export async function upsertServiceRequest(
     .from('service_requests')
     .select('id')
     .eq('jobber_request_id', jobberRequestId)
+    .eq('location_id', location_id)
     .maybeSingle()
 
   let srId: string
@@ -436,6 +437,7 @@ export async function upsertQuote(
     .from('quotes')
     .select('id, approved_at')
     .eq('jobber_quote_id', jobberQuoteId)
+    .eq('location_id', location_id)
     .maybeSingle()
   if (existing) {
     // Preserve an earlier approved_at if already set — only stamp once.
@@ -475,6 +477,7 @@ export async function upsertJob(
     .from('jobs')
     .select('id')
     .eq('jobber_job_id', jobberJobId)
+    .eq('location_id', location_id)
     .maybeSingle()
   if (existing) {
     await supabaseService.from('jobs').update(payload).eq('id', existing.id)
@@ -518,6 +521,7 @@ export async function upsertInvoice(
     .from('invoices')
     .select('id')
     .eq('jobber_invoice_id', jobberInvoiceId)
+    .eq('location_id', location_id)
     .maybeSingle()
   if (existing) {
     await supabaseService.from('invoices').update(payload).eq('id', existing.id)

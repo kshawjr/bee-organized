@@ -139,6 +139,7 @@ async function findLeadByJobberClientId(
 
 async function findServiceRequestByJobberId(
   jobberRequestGlobalId: string,
+  locationSlug: string,
 ): Promise<{ id: string; lead_id: string } | null> {
   const numeric = extractJobberId(jobberRequestGlobalId)
   if (!numeric) return null
@@ -146,6 +147,7 @@ async function findServiceRequestByJobberId(
     .from('service_requests')
     .select('id, lead_id')
     .eq('jobber_request_id', numeric)
+    .eq('location_id', locationSlug)
     .maybeSingle()
   return data ? { id: data.id, lead_id: data.lead_id } : null
 }
@@ -340,7 +342,7 @@ async function handleQuoteCore(
   const requestGlobalId = quoteRec.request?.id
   if (!requestGlobalId) return { processed: false, error: 'quote_missing_request' }
 
-  let sr = await findServiceRequestByJobberId(requestGlobalId)
+  let sr = await findServiceRequestByJobberId(requestGlobalId, ctx.location.location_id)
   let leadId: string
 
   if (sr) {
@@ -430,7 +432,7 @@ async function handleJobCore(
   let leadId: string | null = null
 
   if (jobRec.request?.id) {
-    sr = await findServiceRequestByJobberId(jobRec.request.id)
+    sr = await findServiceRequestByJobberId(jobRec.request.id, ctx.location.location_id)
     if (!sr) {
       const parent = await fetchAndUpsertRequest(jobRec.request.id, ctx)
       if ('error' in parent) return { processed: false, error: parent.error }
@@ -523,7 +525,7 @@ async function handleInvoiceCore(
   let jobDbId: string | null = null
 
   if (firstJob?.request?.id) {
-    sr = await findServiceRequestByJobberId(firstJob.request.id)
+    sr = await findServiceRequestByJobberId(firstJob.request.id, ctx.location.location_id)
     if (!sr) {
       const parent = await fetchAndUpsertRequest(firstJob.request.id, ctx)
       if ('error' in parent) return { processed: false, error: parent.error }
