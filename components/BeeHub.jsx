@@ -21839,6 +21839,9 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
   const [pendingActionId, setPendingActionId]   = useState('') // resend | revoke
   const [pendingActionError, setPendingActionError] = useState('')
   const [resendResult, setResendResult]         = useState(null)
+  // "Convert to Direct Billing" modal — opened from the Subscription section
+  // when the location is still on a corporate-funded payment_source.
+  const [showConvertBilling, setShowConvertBilling] = useState(false)
 
   const fetchOwnerStatus = React.useCallback(async () => {
     if (!currentLoc?.id) return
@@ -22194,6 +22197,25 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
                     style={{ flex:1, padding:'9px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:(!subDirty||subSaving)?'not-allowed':'pointer', opacity:(!subDirty||subSaving)?0.5:1 }}
                   >{subSaving ? 'Saving…' : 'Save changes'}</button>
                 </div>
+
+                {/* Convert to Direct Billing — only while the location is still
+                    on a corporate-funded source. Reads the SAVED payment_source
+                    (currentLoc), not the unsaved dropdown edit state, so the CTA
+                    reflects what's actually persisted. Auto-hides once converted. */}
+                {(currentLoc.payment_source === 'prepaid_corporate' || currentLoc.payment_source === 'corporate_sponsored') && (
+                  <div style={{ borderTop:'1px dashed rgba(0,0,0,0.1)', paddingTop:'10px', marginTop:'2px' }}>
+                    <button
+                      onClick={()=>setShowConvertBilling(true)}
+                      style={{ width:'100%', padding:'10px', background:'white', border:'1.5px solid #d4a046', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#b07a20', cursor:'pointer' }}
+                    >💳 Convert to Direct Billing</button>
+                    <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'6px', lineHeight:1.45 }}>
+                      {currentLoc.payment_source === 'prepaid_corporate'
+                        ? `Current: corporate-prepaid${currentLoc.paid_through_date ? ` through ${currentLoc.paid_through_date}` : ''}`
+                        : 'Current: corporate-sponsored (no fixed end date)'}
+                      <br/>Use this when owner is ready to convert to direct billing.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -22244,6 +22266,178 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
           onClose={()=>setShowInviteOwner(false)}
         />
       )}
+      {showConvertBilling && (
+        <ConvertBillingModal
+          location={currentLoc}
+          onClose={()=>setShowConvertBilling(false)}
+          onConverted={(updated)=>{
+            // Route flipped payment_source→direct, subscription_status→active,
+            // wrote the new paid_through_date and audit-trail billing_notes.
+            // Reflect it locally so the sheet repaints (CTA auto-hides) and push
+            // the same fields up to the locations list.
+            const nextFields = {
+              payment_source:     updated?.payment_source     ?? 'direct',
+              subscription_status: updated?.subscription_status ?? 'active',
+              paid_through_date:  updated?.paid_through_date  ?? null,
+              billing_notes:      updated?.billing_notes      ?? null,
+            }
+            setCurrentLoc(prev=>({ ...prev, ...nextFields }))
+            onLocationUpdate && onLocationUpdate(currentLoc.id, nextFields)
+            router.refresh()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ConvertBillingModal — captures the payment the owner just made + a new
+// paid-through date, then POSTs /api/locations/[id]/convert-billing to flip a
+// corporate-funded location (prepaid_corporate OR corporate_sponsored) onto
+// direct billing. The amount + memo land in billing_notes as an audit trail
+// until the Stripe integration replaces this. super_admin / admin only (the
+// route enforces it; the opening CTA lives in the super_admin/corporate-gated
+// Subscription section). Matches the AddLocationModal / InviteOwnerModal shell.
+function ConvertBillingModal({ location, onClose, onConverted }) {
+  React.useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+
+  const fromSource = location?.payment_source || ''
+  const fromLabel = fromSource === 'prepaid_corporate' ? 'corporate-prepaid' : 'corporate-sponsored'
+
+  const [amount, setAmount]   = useState('')
+  const [memo, setMemo]       = useState('')
+  const [newDate, setNewDate] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError]     = useState('')
+  const [step, setStep]       = useState('form') // form | success
+  const [result, setResult]   = useState(null)
+
+  const amountNum = Number((amount || '').replace(/[$,\s]/g, ''))
+  const amountValid = Number.isFinite(amountNum) && amountNum > 0
+  const dateValid = /^\d{4}-\d{2}-\d{2}$/.test(newDate)
+  const canSubmit = !submitting && amountValid && dateValid
+
+  async function submit() {
+    if (!canSubmit) return
+    setSubmitting(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/locations/${location.id}/convert-billing`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          new_paid_through_date: newDate,
+          payment_amount: amount.trim(),
+          payment_memo: memo.trim() || undefined,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (res.status === 409 && json.error === 'not_corporate_funded') {
+        setError(`This location is no longer corporate-funded (current: ${json.current}). Nothing to convert.`)
+        return
+      }
+      if (!res.ok || !json.success) throw new Error(json.error || `HTTP ${res.status}`)
+      setResult(json.location)
+      setStep('success')
+      if (onConverted) onConverted(json.location)
+    } catch (err) {
+      setError(err?.message || 'Could not convert to direct billing')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none', boxSizing:'border-box' }
+  const lbl = { fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'5px', display:'block' }
+  const help = { fontSize:'11px', color:'#8a9e9a', marginTop:'5px', lineHeight:1.45 }
+
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div onClick={e=>e.stopPropagation()} style={{ position:'relative', background:'white', width:'100%', maxWidth:'480px', maxHeight:'85vh', borderRadius:'16px', zIndex:1, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', boxSizing:'border-box', overflow:'hidden' }}>
+
+        {step==='success' && result ? (
+          <>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px', borderBottom:'1px solid #eee', flexShrink:0 }}>
+              <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>Converted to direct billing</h2>
+              <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>×</button>
+            </div>
+            <div style={{ padding:'28px 24px', textAlign:'center', overflowY:'auto', flex:1 }}>
+              <div style={{ fontSize:'44px', marginBottom:'10px' }}>✓</div>
+              <p style={{ fontSize:'14px', color:'#4a5e5a', lineHeight:1.5 }}>
+                {result.name || location.name} is now on direct billing through {result.paid_through_date}.
+              </p>
+            </div>
+            <div style={{ display:'flex', gap:'8px', padding:'16px 24px', borderTop:'1px solid #eee', flexShrink:0 }}>
+              <button onClick={onClose} style={{ flex:1, padding:'12px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Close</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ padding:'20px 24px', borderBottom:'1px solid #eee', flexShrink:0 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'10px' }}>
+                <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>Convert to Direct Billing</h2>
+                <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', lineHeight:1, flexShrink:0 }}>×</button>
+              </div>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'4px' }}>
+                Converting {location.name} from {fromLabel} to direct billing
+              </p>
+            </div>
+
+            <div style={{ display:'grid', gap:'16px', padding:'20px 24px', overflowY:'auto', flex:1 }}>
+              {error && (
+                <div style={{ padding:'10px 12px', background:'rgba(239,68,68,0.07)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'9px', fontSize:'12px', color:'#b91c1c' }}>{error}</div>
+              )}
+
+              {/* Section 1: Payment received */}
+              <div>
+                <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', marginBottom:'10px' }}>Payment received</p>
+                <div style={{ display:'grid', gap:'12px' }}>
+                  <div>
+                    <label style={lbl}>Amount</label>
+                    <div style={{ position:'relative' }}>
+                      <span style={{ position:'absolute', left:'12px', top:'50%', transform:'translateY(-50%)', fontSize:'16px', color:'#8a9e9a' }}>$</span>
+                      <input
+                        autoFocus
+                        value={amount}
+                        onChange={e=>{ setAmount(e.target.value); setError('') }}
+                        placeholder="1650.00"
+                        inputMode="decimal"
+                        style={{ ...inp, paddingLeft:'24px', border:`1.5px solid ${(amount && !amountValid)?'rgba(239,68,68,0.45)':'rgba(0,0,0,0.1)'}` }}
+                      />
+                    </div>
+                    {amount && !amountValid && <p style={{ fontSize:'11px', color:'#b91c1c', marginTop:'4px' }}>Enter a positive amount.</p>}
+                  </div>
+                  <div>
+                    <label style={lbl}>Memo (optional)</label>
+                    <input value={memo} onChange={e=>setMemo(e.target.value)} placeholder="Paid via check #4421" style={inp} />
+                  </div>
+                </div>
+                <p style={help}>Recorded in billing notes as audit trail. Stripe integration will replace this in the future.</p>
+              </div>
+
+              {/* Section 2: New billing period */}
+              <div style={{ borderTop:'1px solid #eee', paddingTop:'16px' }}>
+                <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', marginBottom:'10px' }}>New billing period</p>
+                <div>
+                  <label style={lbl}>New paid-through date</label>
+                  <input type="date" value={newDate} onChange={e=>{ setNewDate(e.target.value); setError('') }} style={{ ...inp, cursor:'pointer' }} />
+                </div>
+                <p style={help}>When does this billing period end? Common: 1 year from today, or next March 1 for cohort alignment.</p>
+              </div>
+            </div>
+
+            <div style={{ display:'flex', gap:'8px', padding:'16px 24px', borderTop:'1px solid #eee', flexShrink:0 }}>
+              <button onClick={onClose} style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
+              <button onClick={submit} disabled={!canSubmit} style={{ flex:2, padding:'12px', background:canSubmit?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:canSubmit?'white':'#9ca3af', cursor:canSubmit?'pointer':'not-allowed' }}>{submitting?'Converting…':'Convert'}</button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }
