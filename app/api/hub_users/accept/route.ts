@@ -82,6 +82,40 @@ export async function POST(request: NextRequest) {
     .eq('id', user.id)
     .single()
 
+  // Hard-block 2nd-location accept: if this auth user already has a hub_users
+  // row at a DIFFERENT location, reject before either the insert or seat claim
+  // runs. Without this, the insert short-circuits (user stays at Location A)
+  // but the seat claim still fires → orphaned seat at Location B the user can't
+  // access. When Phase 4 multi-location support ships, this becomes the entry
+  // point for the junction-table path.
+  //
+  // Exemptions (don't block):
+  //   - invite.tier === 'admin': corporate invite, location-less by design.
+  //   - existingHubUser.location_id === null: existing user is corporate (no
+  //     location assigned); location mismatch check doesn't apply.
+  //   - existingHubUser.location_id === invite.location_id: same-location
+  //     re-invite (e.g. after seat reassignment, or 2nd owner-tier invite at
+  //     same location) — normal idempotent accept, continue.
+  if (
+    existingHubUser &&
+    invite.tier !== 'admin' &&
+    existingHubUser.location_id !== null &&
+    existingHubUser.location_id !== invite.location_id
+  ) {
+    return NextResponse.json(
+      {
+        error: 'user_already_at_different_location',
+        message:
+          'This email is already registered at another location. ' +
+          'Multi-location accounts are not yet supported. Contact ' +
+          'support if you need to move locations.',
+        existing_location_id: existingHubUser.location_id,
+        invited_location_id: invite.location_id,
+      },
+      { status: 409 }
+    )
+  }
+
   if (!existingHubUser) {
     const { error: hubInsertErr } = await supabaseService
       .from('hub_users')
