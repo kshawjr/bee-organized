@@ -27591,6 +27591,159 @@ function AdminFeedbackDetailModal({ item, onClose, onSaved }) {
   )
 }
 
+// ─── ProcessRemovalsCard ───────────────────────────────────────────────────
+// Super_admin UI for the scheduled seat removal job (Phase 3A).
+// GET /api/admin/scheduled-removals → preview list.
+// POST /api/admin/process-scheduled-removals → execute removal.
+function ProcessRemovalsCard() {
+  const [preview, setPreview]       = React.useState(null)
+  const [loading, setLoading]       = React.useState(false)
+  const [error, setError]           = React.useState('')
+  const [showModal, setShowModal]   = React.useState(false)
+  const [processing, setProcessing] = React.useState(false)
+  const [result, setResult]         = React.useState(null)
+  const [procError, setProcError]   = React.useState('')
+
+  const load = React.useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch('/api/admin/scheduled-removals')
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`)
+      setPreview(j)
+    } catch (err) {
+      setError(err?.message || 'Could not load preview')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  React.useEffect(() => { load() }, [load])
+
+  async function runProcess() {
+    setProcessing(true)
+    setProcError('')
+    try {
+      const res = await fetch('/api/admin/process-scheduled-removals', { method: 'POST' })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`)
+      setResult(j)
+      load()
+    } catch (err) {
+      setProcError(err?.message || 'Processing failed')
+    } finally {
+      setProcessing(false)
+    }
+  }
+
+  const count = preview?.count ?? 0
+  const items = preview?.items ?? []
+  const TIER_LABELS = { owner: 'Owner', manager: 'Hive Manager', light: 'Worker Bee', readonly: 'Honey Watcher' }
+
+  return (
+    <div style={{ padding:'0 1.25rem 1.5rem' }}>
+      <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', overflow:'hidden' }}>
+        <div style={{ padding:'14px 16px', borderBottom:'1px solid rgba(0,0,0,0.06)', background:'rgba(26,46,43,0.03)', display:'flex', alignItems:'center', gap:'10px' }}>
+          <span style={{ fontSize:'20px' }}>🕐</span>
+          <div style={{ flex:1 }}>
+            <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b' }}>Scheduled Seat Removals</p>
+            <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'1px' }}>Process any seats scheduled for removal up to today's date (UTC)</p>
+          </div>
+          <button onClick={load} title="Refresh" style={{ background:'none', border:'none', cursor:'pointer', fontSize:'16px', color:'#8a9e9a', padding:'4px 6px' }}>↻</button>
+        </div>
+        <div style={{ padding:'16px' }}>
+          {loading && !preview && (
+            <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Loading…</p>
+          )}
+          {error && <p style={{ fontSize:'13px', color:'#ef4444' }}>{error}</p>}
+          {preview && (
+            count === 0 ? (
+              <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                <span style={{ fontSize:'18px' }}>✓</span>
+                <p style={{ fontSize:'13px', color:'#22c55e', fontWeight:600 }}>No pending removals today</p>
+              </div>
+            ) : (
+              <>
+                <p style={{ fontSize:'13px', color:'#1a2e2b', marginBottom:'10px' }}>
+                  <strong>{count}</strong> seat{count !== 1 ? 's' : ''} scheduled for removal on or before today.
+                </p>
+                <div style={{ background:'rgba(217,119,6,0.05)', border:'1px solid rgba(217,119,6,0.2)', borderRadius:'10px', overflow:'hidden', marginBottom:'14px' }}>
+                  {items.map((item, idx) => (
+                    <div key={item.seat_id} style={{ padding:'9px 12px', borderBottom: idx < items.length-1 ? '1px solid rgba(217,119,6,0.1)' : 'none', display:'flex', alignItems:'center', gap:'10px' }}>
+                      <span style={{ fontSize:'14px', flexShrink:0 }}>🕐</span>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <p style={{ fontSize:'12.5px', fontWeight:600, color:'#1a2e2b' }}>{item.location_name} · {TIER_LABELS[item.tier] || item.tier}</p>
+                        <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{item.user_email ? `Assigned to ${item.user_email}` : 'Unassigned'} · removal date: {item.scheduled_removal_at}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={() => { setShowModal(true); setResult(null); setProcError('') }}
+                  style={{ padding:'10px 18px', background:'#d97706', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:'pointer' }}>
+                  Process Pending Removals
+                </button>
+                <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'8px' }}>Marks listed seats as inactive. No mid-cycle credits.</p>
+              </>
+            )
+          )}
+        </div>
+      </div>
+
+      {showModal && (
+        <div style={{ position:'fixed', inset:0, zIndex:9900, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px', background:'rgba(26,46,43,0.55)', fontFamily:'"DM Sans",system-ui,sans-serif' }}>
+          <div style={{ background:'white', borderRadius:'18px', width:'100%', maxWidth:'480px', maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 24px 80px rgba(0,0,0,0.25)', overflow:'hidden' }}>
+            <div style={{ background:'#1a2e2b', padding:'14px 18px', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
+              <span style={{ fontSize:'14px', fontWeight:700, color:'white' }}>
+                {result ? '✓ Removal complete' : `Process ${count} pending removal${count !== 1 ? 's' : ''}?`}
+              </span>
+              <button onClick={() => setShowModal(false)} style={{ background:'none', border:'none', color:'rgba(255,255,255,0.75)', cursor:'pointer', fontSize:'22px', padding:0, lineHeight:1, fontFamily:'inherit' }}>×</button>
+            </div>
+            <div style={{ flex:1, overflowY:'auto', padding:'18px' }}>
+              {result ? (
+                <>
+                  <p style={{ fontSize:'14px', fontWeight:700, color:'#22c55e', marginBottom:'10px' }}>✓ Processed {result.removed_count} seat{result.removed_count !== 1 ? 's' : ''}</p>
+                  <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5 }}>
+                    {result.removed_count} seat{result.removed_count !== 1 ? 's have' : ' has'} been marked inactive. The seat pool for each affected location has been reduced.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p style={{ fontSize:'13px', color:'#4a5e5a', marginBottom:'14px', lineHeight:1.55 }}>
+                    This will mark the following seats as inactive. This action cannot be undone — seats can be re-added later if needed.
+                  </p>
+                  <div style={{ background:'rgba(0,0,0,0.03)', border:'1px solid rgba(0,0,0,0.08)', borderRadius:'10px', overflow:'hidden', marginBottom:'14px' }}>
+                    {items.map((item, idx) => (
+                      <div key={item.seat_id} style={{ padding:'9px 12px', borderBottom: idx < items.length-1 ? '1px solid rgba(0,0,0,0.06)' : 'none' }}>
+                        <p style={{ fontSize:'12.5px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>{item.location_name} — {TIER_LABELS[item.tier] || item.tier}</p>
+                        <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{item.user_email ? `Assigned: ${item.user_email}` : 'Unassigned'} · scheduled: {item.scheduled_removal_at}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {procError && <p style={{ fontSize:'12px', color:'#ef4444', marginBottom:'10px' }}>{procError}</p>}
+                </>
+              )}
+            </div>
+            <div style={{ padding:'12px 18px 18px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'10px', justifyContent:'flex-end', flexShrink:0 }}>
+              {result ? (
+                <button onClick={() => setShowModal(false)} style={{ padding:'9px 20px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:'pointer' }}>Done</button>
+              ) : (
+                <>
+                  <button onClick={() => setShowModal(false)} disabled={processing} style={{ padding:'9px 16px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:processing?'not-allowed':'pointer' }}>Cancel</button>
+                  <button onClick={runProcess} disabled={processing} style={{ padding:'9px 18px', background:processing?'#8a9e9a':'#d97706', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:processing?'not-allowed':'pointer' }}>
+                    {processing ? 'Processing…' : 'Process Removals'}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Admin → Conversions Due tab — lists corporate-funded locations whose
 // sponsorship is ending soon, sorted by urgency. Each row has a
 // "Convert to Direct Billing" action that opens the existing modal.
@@ -28225,7 +28378,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
 
           {/* Sub-tabs — native <select> on mobile (<768px), pill row at ≥768px. */}
           {(()=>{
-            const adminTabs = [{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'content',label:'✏️ Content'}]:[]),...(showFeedbackTab?[{key:'feedback',label:'🐛 Feedback'}]:[]),...(role==='super_admin'?[{key:'conversions',label:'Conversions Due'},{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])]
+            const adminTabs = [{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'content',label:'✏️ Content'}]:[]),...(showFeedbackTab?[{key:'feedback',label:'🐛 Feedback'}]:[]),...(role==='super_admin'?[{key:'conversions',label:'Conversions Due'},{key:'renewals',label:'🕐 Renewals'},{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])]
             return (
               <>
                 <select
@@ -28334,6 +28487,8 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
           <AdminFeedbackScreen onPendingCountChange={handleFeedbackPending} />
         ) : adminTab==='conversions' ? (
           <ConversionsDueTab onOpenLocation={loc=>setSelectedLoc(loc)} />
+        ) : adminTab==='renewals' ? (
+          <ProcessRemovalsCard />
         ) : adminTab==='pricing' ? (
           <PricingManagementTab />
         ) : adminTab==='configure' ? (
