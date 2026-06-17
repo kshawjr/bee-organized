@@ -68,6 +68,7 @@
 import { jobberGraphQL } from './jobber'
 import { supabaseService } from './supabase-service'
 import { applyDripSideEffects } from './drip-lifecycle'
+import { disconnectJobberFromLocation } from './jobber-disconnect'
 import {
   SINGLE_CLIENT_QUERY,
   SINGLE_REQUEST_QUERY,
@@ -886,25 +887,18 @@ export function handlePropertyUpdate(ctx: HandlerCtx) {
 // and hub_users.jobber_user_id so the account identity persists across
 // connect / disconnect cycles (cleaner reconnect, preserved analytics).
 //
+// Shares disconnectJobberFromLocation with the in-app Disconnect button
+// (POST /api/locations/[id]/jobber-disconnect) so the two paths can never
+// drift in which columns they clear.
+//
 // itemId is unused — APP_DISCONNECT scopes by accountId only.
 export async function handleAppDisconnect(ctx: HandlerCtx): Promise<HandlerResult> {
-  const nowIso = new Date().toISOString()
-  const { error } = await supabaseService
-    .from('locations')
-    .update({
-      jobber_connected:     false,
-      jobber_access_token:  null,
-      jobber_refresh_token: null,
-      jobber_account_name:  null,
-      token_expiry:         null,
-      token_expiry_display: null,
-      last_sync_status:     `Disconnected from Jobber: ${new Date().toLocaleString()}`,
-      updated_at:           nowIso,
-    })
-    .eq('id', ctx.location.id)
+  const { error } = await disconnectJobberFromLocation(ctx.location.id, {
+    lastSyncStatus: `Disconnected from Jobber: ${new Date().toLocaleString()}`,
+  })
 
   if (error) {
-    return { processed: false, error: `app_disconnect_write: ${error.message}` }
+    return { processed: false, error: `app_disconnect_write: ${error}` }
   }
 
   return {

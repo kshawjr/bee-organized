@@ -16395,22 +16395,59 @@ function AddStepInline({ pathId, order, templates, onSave, onCancel, smsEnabled 
 
 // ─── Jobber Connection Card ───────────────────────────────────────────────────
 function JobberConnectionCard({ settings, updateLocation }) {
-  const [status, setStatus] = useState(settings.location.jobberStatus||'connected')
+  const [status, setStatus]       = useState(settings.location.jobberStatus||'disconnected')
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy]           = useState(false)
+  const [error, setError]         = useState(null)
+  const [toast, setToast]         = useState(null)
 
-  function handleReconnect() {
-    setStatus('connecting')
-    setTimeout(()=>{ setStatus('connected'); updateLocation('jobberStatus','connected') }, 2200)
+  const locationId   = settings.location.locId || null
+  const accountName  = settings.location.jobberAccountName || ''
+
+  // OAuth entry point — same flow used by initial Connect and by Reconnect.
+  function goConnect() {
+    if (!locationId) { setError('No location id — reload and try again.'); return }
+    window.location.href = '/api/jobber/connect?location_id=' + encodeURIComponent(locationId)
+  }
+
+  // Real disconnect: POST the new route, then flip the card to the
+  // disconnected state and clear the cached workspace name locally so the
+  // UI matches the DB without a reload.
+  async function doDisconnect() {
+    if (!locationId) { setError('No location id — reload and try again.'); return }
+    setBusy(true); setError(null)
+    try {
+      const r = await fetch('/api/locations/' + encodeURIComponent(locationId) + '/jobber-disconnect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (!r.ok) {
+        let detail = `disconnect_failed_${r.status}`
+        try { const j = await r.json(); detail = j.error || detail } catch {}
+        setError(detail); setBusy(false); return
+      }
+      setConfirming(false)
+      setStatus('disconnected')
+      updateLocation('jobberStatus', 'disconnected')
+      updateLocation('jobberAccountName', '')
+      setToast({ kind:'success', msg:'Disconnected from Jobber' })
+      setTimeout(() => setToast(null), 3000)
+    } catch (e) {
+      setError(String(e?.message || e))
+    } finally {
+      setBusy(false)
+    }
   }
 
   const statusConf = {
     connected:    { color:'#22c55e', bg:'rgba(34,197,94,0.08)',  border:'rgba(34,197,94,0.2)',  icon:'✅', label:'Connected'     },
     disconnected: { color:'#ef4444', bg:'rgba(239,68,68,0.08)',  border:'rgba(239,68,68,0.2)',  icon:'❌', label:'Disconnected'  },
-    connecting:   { color:'#f59e0b', bg:'rgba(245,158,11,0.08)', border:'rgba(245,158,11,0.2)', icon:'⏳', label:'Connecting...' },
   }
-  const sc = statusConf[status]||statusConf.connected
+  const sc = statusConf[status]||statusConf.disconnected
 
   return (
     <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', border:'1px solid rgba(0,0,0,0.07)', background:'white' }}>
+      {toast && <InlineToast kind={toast.kind} msg={toast.msg} />}
       <div style={{ padding:'12px 14px', display:'flex', alignItems:'center', gap:'12px' }}>
         <div style={{ width:'34px', height:'34px', borderRadius:'8px', background:'rgba(255,107,53,0.1)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
           <span style={{ fontSize:'16px' }}>⚡</span>
@@ -16418,14 +16455,14 @@ function JobberConnectionCard({ settings, updateLocation }) {
         <div style={{ flex:1, minWidth:0 }}>
           <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Jobber</p>
           <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-            {status==='connected' ? `${settings.location.jobberAccountId||'Connected'} · synced May 5` : status==='connecting' ? 'Connecting...' : 'Connection lost'}
+            {status==='connected' ? 'Syncing clients, jobs & invoices' : 'Not connected'}
           </p>
         </div>
         {status==='connected' ? (
           <span style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:sc.bg, color:sc.color, border:`1px solid ${sc.border}`, fontWeight:600, flexShrink:0 }}>{sc.icon} {sc.label}</span>
         ) : (
-          <button onClick={handleReconnect} style={{ padding:'6px 12px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', flexShrink:0 }}>
-            {status==='connecting' ? 'Connecting…' : '⚡ Reconnect'}
+          <button onClick={goConnect} style={{ padding:'6px 12px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', flexShrink:0 }}>
+            ⚡ Connect Jobber
           </button>
         )}
       </div>
@@ -16433,20 +16470,54 @@ function JobberConnectionCard({ settings, updateLocation }) {
         <div style={{ padding:'9px 14px 11px', borderTop:'1px solid rgba(0,0,0,0.05)', background:'rgba(0,0,0,0.015)' }}>
           <p style={{ fontSize:'11px', color:'#5a6e6a' }}>
             <span style={{ color:'#8a9e9a' }}>Workspace: </span>
-            {settings.location.jobberAccountName
-              ? <span style={{ fontWeight:600, color:'#1a2e2b', fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{settings.location.jobberAccountName}</span>
+            {accountName
+              ? <span style={{ fontWeight:600, color:'#1a2e2b', fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{accountName}</span>
               : <span style={{ fontStyle:'italic', color:'#8a9e9a' }}>Unknown (reconnect to verify)</span>}
           </p>
-          <p style={{ fontSize:'10.5px', color:'#8a9e9a', marginTop:'3px' }}>
-            {settings.location.jobberAccountName
-              ? 'Wrong workspace? Disconnect in Jobber, then reconnect to link a different account.'
-              : 'This connection predates workspace tracking. Reconnect to record which Jobber account is linked.'}
+          <div style={{ display:'flex', gap:'8px', marginTop:'9px' }}>
+            <button onClick={()=>setConfirming(true)} disabled={busy}
+              style={{ padding:'6px 12px', background:'white', border:'1px solid rgba(239,68,68,0.4)', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#ef4444', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
+              Disconnect
+            </button>
+            <button onClick={goConnect} disabled={busy}
+              style={{ padding:'6px 12px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
+              ⚡ Reconnect
+            </button>
+          </div>
+          <p style={{ fontSize:'10.5px', color:'#8a9e9a', marginTop:'7px' }}>
+            Disconnect to clear the connection, then reconnect to a different Jobber workspace. Your imported leads stay.
           </p>
+          {error&&<p style={{ fontSize:'10.5px', color:'#ef4444', marginTop:'5px' }}>Couldn't disconnect: {error}</p>}
         </div>
       )}
       {status==='disconnected'&&(
         <div style={{ padding:'8px 14px 10px', borderTop:'1px solid rgba(0,0,0,0.05)', background:'rgba(239,68,68,0.03)' }}>
-          <p style={{ fontSize:'11px', color:'#ef4444' }}>Connection lost - reconnect to resume syncing clients, jobs, and invoices.</p>
+          <p style={{ fontSize:'11px', color:'#ef4444' }}>Not connected — connect to sync clients, jobs, and invoices.</p>
+          {error&&<p style={{ fontSize:'10.5px', color:'#ef4444', marginTop:'5px' }}>{error}</p>}
+        </div>
+      )}
+
+      {confirming&&(
+        <div onClick={()=>{ if(!busy) setConfirming(false) }}
+          style={{ position:'fixed', inset:0, zIndex:10100, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}>
+          <div onClick={e=>e.stopPropagation()}
+            style={{ background:'white', borderRadius:'14px', padding:'18px', maxWidth:'340px', width:'100%', boxShadow:'0 16px 48px rgba(0,0,0,0.28)' }}>
+            <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', marginBottom:'8px' }}>Disconnect from Jobber?</p>
+            <p style={{ fontSize:'12.5px', color:'#5a6e6a', lineHeight:1.5, marginBottom:'16px' }}>
+              This will stop syncing. Your imported leads and history will remain in Bee Hub. You can reconnect any time.
+            </p>
+            {error&&<p style={{ fontSize:'11px', color:'#ef4444', marginBottom:'10px' }}>Couldn't disconnect: {error}</p>}
+            <div style={{ display:'flex', gap:'8px', justifyContent:'flex-end' }}>
+              <button onClick={()=>setConfirming(false)} disabled={busy}
+                style={{ padding:'8px 14px', background:'white', border:'1px solid rgba(0,0,0,0.15)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#5a6e6a', cursor:busy?'default':'pointer' }}>
+                Cancel
+              </button>
+              <button onClick={doDisconnect} disabled={busy}
+                style={{ padding:'8px 14px', background:'#ef4444', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
+                {busy ? 'Disconnecting…' : 'Disconnect'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
