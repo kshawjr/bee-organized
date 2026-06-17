@@ -22426,9 +22426,11 @@ function ConvertBillingModal({ location, onClose, onConverted }) {
   const fromSource = location?.payment_source || ''
   const fromLabel = fromSource === 'prepaid_corporate' ? 'corporate-prepaid' : 'corporate-sponsored'
 
+  const todayStr = new Date().toISOString().slice(0, 10)
   const [amount, setAmount]   = useState('')
   const [memo, setMemo]       = useState('')
   const [newDate, setNewDate] = useState('')
+  const [payDate, setPayDate] = useState(todayStr) // when payment was received; defaults to today
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]     = useState('')
   const [step, setStep]       = useState('form') // form | success
@@ -22437,7 +22439,9 @@ function ConvertBillingModal({ location, onClose, onConverted }) {
   const amountNum = Number((amount || '').replace(/[$,\s]/g, ''))
   const amountValid = Number.isFinite(amountNum) && amountNum > 0
   const dateValid = /^\d{4}-\d{2}-\d{2}$/.test(newDate)
-  const canSubmit = !submitting && amountValid && dateValid
+  // Payment date must be a real date and not in the future.
+  const payDateValid = /^\d{4}-\d{2}-\d{2}$/.test(payDate) && payDate <= todayStr
+  const canSubmit = !submitting && amountValid && dateValid && payDateValid
 
   async function submit() {
     if (!canSubmit) return
@@ -22451,6 +22455,7 @@ function ConvertBillingModal({ location, onClose, onConverted }) {
           new_paid_through_date: newDate,
           payment_amount: amount.trim(),
           payment_memo: memo.trim() || undefined,
+          payment_date: payDate || undefined,
         }),
       })
       const json = await res.json().catch(() => ({}))
@@ -22515,21 +22520,34 @@ function ConvertBillingModal({ location, onClose, onConverted }) {
               <div>
                 <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', marginBottom:'10px' }}>Payment received</p>
                 <div style={{ display:'grid', gap:'12px' }}>
-                  <div>
-                    <label style={lbl}>Amount</label>
-                    <div style={{ position:'relative' }}>
-                      <span style={{ position:'absolute', left:'12px', top:'50%', transform:'translateY(-50%)', fontSize:'16px', color:'#8a9e9a' }}>$</span>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
+                    <div>
+                      <label style={lbl}>Payment date</label>
                       <input
-                        autoFocus
-                        value={amount}
-                        onChange={e=>{ setAmount(e.target.value); setError('') }}
-                        placeholder="1650.00"
-                        inputMode="decimal"
-                        style={{ ...inp, paddingLeft:'24px', border:`1.5px solid ${(amount && !amountValid)?'rgba(239,68,68,0.45)':'rgba(0,0,0,0.1)'}` }}
+                        type="date"
+                        value={payDate}
+                        max={todayStr}
+                        onChange={e=>{ setPayDate(e.target.value); setError('') }}
+                        style={{ ...inp, cursor:'pointer', border:`1.5px solid ${(payDate && !payDateValid)?'rgba(239,68,68,0.45)':'rgba(0,0,0,0.1)'}` }}
                       />
                     </div>
-                    {amount && !amountValid && <p style={{ fontSize:'11px', color:'#b91c1c', marginTop:'4px' }}>Enter a positive amount.</p>}
+                    <div>
+                      <label style={lbl}>Amount</label>
+                      <div style={{ position:'relative' }}>
+                        <span style={{ position:'absolute', left:'12px', top:'50%', transform:'translateY(-50%)', fontSize:'16px', color:'#8a9e9a' }}>$</span>
+                        <input
+                          value={amount}
+                          onChange={e=>{ setAmount(e.target.value); setError('') }}
+                          placeholder="1650.00"
+                          inputMode="decimal"
+                          style={{ ...inp, paddingLeft:'24px', border:`1.5px solid ${(amount && !amountValid)?'rgba(239,68,68,0.45)':'rgba(0,0,0,0.1)'}` }}
+                        />
+                      </div>
+                    </div>
                   </div>
+                  {payDate && !payDateValid && <p style={{ fontSize:'11px', color:'#b91c1c', margin:0 }}>Payment date can’t be in the future.</p>}
+                  {amount && !amountValid && <p style={{ fontSize:'11px', color:'#b91c1c', margin:0 }}>Enter a positive amount.</p>}
+                  <p style={{ fontSize:'11px', color:'#8a9e9a', margin:0, lineHeight:1.45 }}>When did you receive payment? Defaults to today.</p>
                   <div>
                     <label style={lbl}>Memo (optional)</label>
                     <input value={memo} onChange={e=>setMemo(e.target.value)} placeholder="Paid via check #4421" style={inp} />

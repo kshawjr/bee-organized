@@ -77,6 +77,27 @@ export async function POST(
     )
   }
 
+  // Optional retroactive payment date — when the owner actually paid before the
+  // conversion was processed. Defaults to today. Must be a valid YYYY-MM-DD and
+  // not in the future.
+  const today = new Date().toISOString().slice(0, 10)
+  let paymentDate = today
+  if (body.payment_date != null && body.payment_date !== '') {
+    if (!isValidYmd(body.payment_date)) {
+      return NextResponse.json(
+        { error: 'invalid payment_date — expected YYYY-MM-DD' },
+        { status: 400 }
+      )
+    }
+    if (body.payment_date > today) {
+      return NextResponse.json(
+        { error: 'payment_date cannot be in the future' },
+        { status: 400 }
+      )
+    }
+    paymentDate = body.payment_date
+  }
+
   // Accept "1650" or "1650.00" (and a leading $/commas defensively); must parse
   // to a positive, finite number.
   const rawAmount =
@@ -118,14 +139,19 @@ export async function POST(
 
   // Build the conversion audit line, recording which type we converted FROM and
   // the payment received, then preserve any prior notes underneath a separator.
-  const today = new Date().toISOString().slice(0, 10)
+  // When the payment landed on an earlier date than today (retroactive), call
+  // it out ("$X on <date>"); for same-day payments keep the terser form.
   const amountStr = amount.toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })
+  const paymentClause =
+    paymentDate !== today
+      ? `Payment received: $${amountStr} on ${paymentDate}.`
+      : `Payment received: $${amountStr}.`
   const conversionLine =
     `Converted from ${fromSource} to direct billing on ${today}. ` +
-    `Payment received: $${amountStr}.` +
+    paymentClause +
     (paymentMemo ? ` ${paymentMemo}` : '')
   const prior = (loc.billing_notes || '').trim()
   const newBillingNotes = prior
@@ -166,7 +192,11 @@ export async function POST(
       location_id: loc.id,
       amount_cents: amountCents,
       currency: 'usd',
-      paid_at: new Date().toISOString(),
+      // Retroactive payments use the supplied date (UTC start-of-day); same-day
+      // conversions keep the precise current timestamp.
+      paid_at: paymentDate !== today
+        ? `${paymentDate}T00:00:00Z`
+        : new Date().toISOString(),
       period_end: newPaidThrough,
       source: 'manual_conversion',
       memo: paymentMemo || null,
