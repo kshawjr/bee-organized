@@ -55,7 +55,7 @@ const CurrentUserContext = createContext(null)
 // have no location-scoped UI). Consumed by SettingsScreen and any other
 // screen that needs the live jobber_connected / jobber_account_id state
 // instead of falling back to the ALL_LOCATIONS mock.
-// Value shape: { id, name, jobber_connected, jobber_account_id, last_sync_status, token_expiry } or null.
+// Value shape: { id, name, jobber_connected, jobber_account_id, jobber_account_name, last_sync_status, token_expiry } or null.
 const CurrentLocationContext = createContext(null)
 
 // Real hub_users roster from Supabase. For super_admin / corporate this is
@@ -11281,10 +11281,12 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     if (!result) return
 
     if (result === 'connected') {
+      const acct = params.get('acct') || ''
       // Persist intent to survive a potential unmount-before-render cycle.
       // The hydrate effect below consumes this on the next fresh mount.
       sessionStorage.setItem('bee.oauth.return', JSON.stringify({
         kind: 'jobber-connected',
+        acct,
         at: Date.now(),
       }))
       setCompletedSteps(prev => ({ ...prev, jobber: true }))
@@ -11293,7 +11295,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
       // activeStepOpen since setActiveStepOpen('import') above hasn't been
       // applied yet in this closure.
       persistStep('jobber', null, { activeStepOpen: 'import' })
-      setToast({ kind: 'success', msg: 'Jobber connected ✓' })
+      setToast({ kind: 'success', msg: acct ? `Connected to Jobber workspace: ${acct} ✓` : 'Jobber connected ✓' })
     } else if (result === 'error') {
       const reason = params.get('reason') || 'unknown'
       sessionStorage.setItem('bee.oauth.return', JSON.stringify({
@@ -11337,7 +11339,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
       // activeStepOpen since setActiveStepOpen('import') above hasn't been
       // applied yet in this closure.
       persistStep('jobber', null, { activeStepOpen: 'import' })
-      setToast({ kind: 'success', msg: 'Jobber connected ✓' })
+      setToast({ kind: 'success', msg: payload.acct ? `Connected to Jobber workspace: ${payload.acct} ✓` : 'Jobber connected ✓' })
     } else if (payload.kind === 'jobber-error') {
       setActiveStepOpen('jobber')
       setToast({ kind: 'error', msg: `Couldn't connect Jobber: ${payload.reason || 'unknown'}` })
@@ -16427,6 +16429,21 @@ function JobberConnectionCard({ settings, updateLocation }) {
           </button>
         )}
       </div>
+      {status==='connected'&&(
+        <div style={{ padding:'9px 14px 11px', borderTop:'1px solid rgba(0,0,0,0.05)', background:'rgba(0,0,0,0.015)' }}>
+          <p style={{ fontSize:'11px', color:'#5a6e6a' }}>
+            <span style={{ color:'#8a9e9a' }}>Workspace: </span>
+            {settings.location.jobberAccountName
+              ? <span style={{ fontWeight:600, color:'#1a2e2b', fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{settings.location.jobberAccountName}</span>
+              : <span style={{ fontStyle:'italic', color:'#8a9e9a' }}>Unknown (reconnect to verify)</span>}
+          </p>
+          <p style={{ fontSize:'10.5px', color:'#8a9e9a', marginTop:'3px' }}>
+            {settings.location.jobberAccountName
+              ? 'Wrong workspace? Disconnect in Jobber, then reconnect to link a different account.'
+              : 'This connection predates workspace tracking. Reconnect to record which Jobber account is linked.'}
+          </p>
+        </div>
+      )}
       {status==='disconnected'&&(
         <div style={{ padding:'8px 14px 10px', borderTop:'1px solid rgba(0,0,0,0.05)', background:'rgba(239,68,68,0.03)' }}>
           <p style={{ fontSize:'11px', color:'#ef4444' }}>Connection lost - reconnect to resume syncing clients, jobs, and invoices.</p>
@@ -18263,6 +18280,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
       bookingLink:     currentLocationCtx.calendar_link || '',
       jobberStatus:    currentLocationCtx.jobber_connected ? 'connected' : 'disconnected',
       jobberAccountId: currentLocationCtx.jobber_account_id || '',
+      jobberAccountName: currentLocationCtx.jobber_account_name || '',
       jobberInitialImportCompletedAt: currentLocationCtx.jobber_initial_import_completed_at || null,
       sendFromName:    currentLocationCtx.sender_name || '',
       sendFromEmail:   currentLocationCtx.send_from_email || '',

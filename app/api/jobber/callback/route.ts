@@ -97,6 +97,7 @@ export async function GET(request: NextRequest) {
     })
     const accountData = await accountRes.json()
     const accountId   = accountData.data?.account?.id ?? null
+    const accountName = accountData.data?.account?.name ?? null
     const expiryMs    = Date.now() + 55 * 60 * 1000
     const syncStatus  = `Connected via Hub: ${new Date().toLocaleString()}`
 
@@ -105,6 +106,7 @@ export async function GET(request: NextRequest) {
       jobber_access_token:  tokens.access_token,
       jobber_refresh_token: tokens.refresh_token,
       jobber_account_id:    accountId,
+      jobber_account_name:  accountName,
       jobber_client_id_app: process.env.JOBBER_CLIENT_ID,
       jobber_secret_app:    process.env.JOBBER_CLIENT_SECRET,
       token_expiry:         expiryMs,
@@ -173,7 +175,7 @@ export async function GET(request: NextRequest) {
       console.warn('⚠ Zoho dual-write skipped (non-fatal):', zohoErr)
     }
 
-    return redirectHome(request, { jobber: 'connected', loc: locationId })
+    return redirectHome(request, { jobber: 'connected', loc: locationId, acct: accountName || '' })
   } catch (err) {
     console.error('Callback error:', err)
     return redirectHome(request, { jobber: 'error', reason: 'callback_failed', loc: locationId })

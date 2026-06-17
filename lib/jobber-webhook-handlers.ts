@@ -895,6 +895,7 @@ export async function handleAppDisconnect(ctx: HandlerCtx): Promise<HandlerResul
       jobber_connected:     false,
       jobber_access_token:  null,
       jobber_refresh_token: null,
+      jobber_account_name:  null,
       token_expiry:         null,
       token_expiry_display: null,
       last_sync_status:     `Disconnected from Jobber: ${new Date().toLocaleString()}`,
