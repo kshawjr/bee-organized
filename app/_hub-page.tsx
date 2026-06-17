@@ -294,7 +294,7 @@ export default async function HubPage({
     const { data: seatsRaw, error: seatsErr } = await supabaseService
       .from('subscription_seats')
       .select(
-        'id, location_id, tier, user_id, status, added_at, removed_at, prorated_cost, added_by, notes'
+        'id, location_id, tier, user_id, status, is_primary, added_at, removed_at, prorated_cost, added_by, notes'
       )
       .eq('location_id', currentLocation.id)
       .eq('status', 'active')
@@ -338,17 +338,51 @@ export default async function HubPage({
 
     if (usersErr) console.error('[hub-page] hub_users fetch error:', usersErr.message)
 
-    const ownersByLoc: Record<string, { name: string; userCount: number }> = {}
+    // Phase 2: owner seats carry the is_primary designation. Map each claimed
+    // owner seat's user_id → is_primary so the location list can mark the
+    // primary owner. Owners predating the seat model have no seat row; they
+    // fall back to "first owner = primary" below (mirrors the resolver).
+    const { data: ownerSeatRows, error: ownerSeatsErr } = await supabaseService
+      .from('subscription_seats')
+      .select('user_id, location_id, is_primary')
+      .eq('tier', 'owner')
+      .eq('status', 'active')
+      .not('user_id', 'is', null)
+    if (ownerSeatsErr) console.error('[hub-page] owner seats fetch error:', ownerSeatsErr.message)
+    const primaryByUserId: Record<string, boolean> = {}
+    ;(ownerSeatRows || []).forEach((s: any) => {
+      if (s.user_id) primaryByUserId[s.user_id] = !!s.is_primary
+    })
+
+    // ownersByLoc now holds the full owner roster per location (up to 2),
+    // each marked with is_primary, plus a resolved `primary` and display
+    // `name` (primary's name, falling back to the first owner). `name` keeps
+    // the legacy `location.owner` string consumers working unchanged.
+    const ownersByLoc: Record<
+      string,
+      { owners: any[]; primary: any | null; count: number; name: string | null }
+    > = {}
     const userCountByLoc: Record<string, number> = {}
     ;(allUsers || []).forEach((u: any) => {
       if (!u.location_id) return
       userCountByLoc[u.location_id] = (userCountByLoc[u.location_id] || 0) + 1
-      if (u.role === 'owner' && !ownersByLoc[u.location_id]) {
-        ownersByLoc[u.location_id] = {
-          name: u.full_name || u.email,
-          userCount: 0,
+      if (u.role === 'owner') {
+        if (!ownersByLoc[u.location_id]) {
+          ownersByLoc[u.location_id] = { owners: [], primary: null, count: 0, name: null }
         }
+        const entry = ownersByLoc[u.location_id]
+        entry.owners.push({
+          id: u.id,
+          name: u.full_name || u.email,
+          email: u.email,
+          is_primary: !!primaryByUserId[u.id],
+        })
+        entry.count = entry.owners.length
       }
+    })
+    Object.values(ownersByLoc).forEach((entry) => {
+      entry.primary = entry.owners.find((o: any) => o.is_primary) || entry.owners[0] || null
+      entry.name = entry.primary?.name || null
     })
 
     initialUsers = (allUsers || []).map(buildLocationUser)
@@ -373,6 +407,9 @@ export default async function HubPage({
         name: row.name,
         state: row.state || '',
         owner: ownersByLoc[row.id]?.name || null,
+        owners: ownersByLoc[row.id]?.owners || [],
+        primaryOwner: ownersByLoc[row.id]?.primary || null,
+        ownerCount: ownersByLoc[row.id]?.count || 0,
         crmStatus,
         lifecycle_status: lifecycle,
         subscription_status: subStatus,
@@ -609,6 +646,16 @@ export default async function HubPage({
     }
   }
 
+  // Phase 2 co-owner onboarding: is the signed-in owner the DESIGNATED primary
+  // owner of their location? A co-owner (owner seat with is_primary=false)
+  // joining an already-launched location gets the slim onboarding flow. Owners
+  // with no seat row (legacy/pre-seat) default to primary so they're never
+  // mistakenly routed into the co-owner flow.
+  const myOwnerSeat = (initialSeats || []).find(
+    (s: any) => s.tier === 'owner' && s.user_id === hubUser.id
+  )
+  const isPrimaryOwner = myOwnerSeat ? !!myOwnerSeat.is_primary : true
+
   return (
     <BeeHub
       initialRoute={initialRoute}
@@ -640,6 +687,7 @@ export default async function HubPage({
         first_name: profileFields.first_name,
         last_name: profileFields.last_name,
         phone: profileFields.phone,
+        isPrimaryOwner,
       }}
     />
   )

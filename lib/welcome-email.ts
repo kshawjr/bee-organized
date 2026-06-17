@@ -14,6 +14,7 @@
 import { supabaseService } from './supabase-service'
 import { sendEmail, renderTemplate, type RenderContext } from './resend'
 import { bodyToHtml } from './drip-send'
+import { getPrimaryOwnerForLocation } from './owner-resolution'
 
 const WELCOME_LEGACY_ID = 'welcome'
 const WELCOME_DELAY_MS = 24 * 60 * 60 * 1000  // 24 hours
@@ -105,14 +106,10 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
     return { sent: false, error: `template_lookup: ${tplErr?.message ?? 'missing'}` }
   }
 
-  // Owners (location owner + assigned-to user)
-  const { data: locOwner } = await supabaseService
-    .from('hub_users')
-    .select('full_name')
-    .eq('location_id', loc.id)
-    .eq('role', 'owner')
-    .limit(1)
-    .maybeSingle()
+  // Owners (location owner + assigned-to user). Location owner resolves to the
+  // DESIGNATED primary owner (Phase 2) via the shared resolver, which falls
+  // back to legacy hub_users role='owner' for pre-seat locations.
+  const locOwner = await getPrimaryOwnerForLocation(loc.id)
   const locationOwnerName = locOwner?.full_name ?? null
 
   let ownerName: string | null = locationOwnerName

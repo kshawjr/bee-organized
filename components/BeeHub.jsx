@@ -19910,7 +19910,126 @@ function FollowUpReminders({ followUps, setFollowUps, locFilter }) {
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null }) {
+// Slim onboarding for a CO-OWNER joining an ALREADY-LAUNCHED location.
+// Unlike the full owner wizard (drips / Jobber / email config), the location
+// is already set up, so the co-owner only confirms a personal profile and
+// gets a brief welcome, then drops straight into the app. Does NOT touch
+// location.onboarding_state, subscription_seats, drip paths, or email config.
+// Completion is signaled durably by hub_users.phone being set (saved here).
+function SlimCoOwnerOnboarding({ locationId, locationName, profile, topOffset=0, onComplete }) {
+  const [stepIdx, setStepIdx]   = useState(0) // 0 = welcome, 1 = profile
+  const [primaryName, setPrimaryName] = useState('')
+  const [firstName, setFirstName] = useState(profile?.first_name || '')
+  const [lastName, setLastName]   = useState(profile?.last_name || '')
+  const [phone, setPhone]         = useState(profile?.phone || '')
+  const [saving, setSaving]       = useState(false)
+  const [error, setError]         = useState('')
+
+  // Best-effort: resolve the primary owner's name for the welcome copy. If the
+  // fetch fails we fall back to generic "The location owner" wording.
+  useEffect(() => {
+    if (!locationId) return
+    let cancelled = false
+    fetch(`/api/locations/${locationId}/owner-status`)
+      .then(r => r.json())
+      .then(j => { if (!cancelled) setPrimaryName(j?.primary_owner?.full_name || '') })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [locationId])
+
+  const canSave = !!(firstName.trim() && lastName.trim() && phone.trim()) && !saving
+
+  async function save() {
+    if (!canSave) return
+    setSaving(true)
+    setError('')
+    try {
+      const res = await fetch('/api/hub_users/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
+          phone: phone.trim(),
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`)
+      onComplete && onComplete()
+    } catch (err) {
+      setError(err?.message || 'Could not save your profile')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const fieldStyle = { width:'100%', padding:'12px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', background:'white' }
+  const labelStyle = { display:'block', fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }
+  const locName = locationName || 'this location'
+
+  return (
+    <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingTop:`${topOffset}px`, display:'flex', alignItems:'center', justifyContent:'center', padding:'2rem 1.25rem' }}>
+      <div style={{ width:'100%', maxWidth:'440px' }}>
+        {stepIdx === 0 ? (
+          <div style={{ background:'white', border:'1px solid rgba(0,0,0,0.06)', borderRadius:'18px', padding:'30px 26px', boxShadow:'0 8px 30px rgba(26,46,43,0.06)', textAlign:'center' }}>
+            <div style={{ fontSize:'48px', marginBottom:'12px' }}>🐝</div>
+            <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'10px' }}>Welcome to {locName}</h1>
+            <p style={{ fontSize:'14px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'8px' }}>
+              {primaryName ? <><strong>{primaryName}</strong> has set up this location.</> : 'This location is already set up and running.'}
+            </p>
+            <p style={{ fontSize:'14px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'22px' }}>
+              You&apos;ll have <strong>full access</strong> alongside them as a co-owner — clients, drips, billing, and team are all yours to manage.
+            </p>
+            <button
+              onClick={()=>setStepIdx(1)}
+              style={{ width:'100%', padding:'14px', background:BRAND.dark, border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}
+            >Continue →</button>
+          </div>
+        ) : (
+          <div style={{ background:'white', border:'1px solid rgba(0,0,0,0.06)', borderRadius:'18px', padding:'28px 26px', boxShadow:'0 8px 30px rgba(26,46,43,0.06)' }}>
+            <h1 style={{ fontSize:'21px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>Your profile</h1>
+            <p style={{ fontSize:'13px', color:'#8a9e9a', lineHeight:1.5, marginBottom:'20px' }}>A couple of details so your team knows who you are. You can change these later in Settings.</p>
+
+            <div style={{ display:'flex', gap:'10px', marginBottom:'14px' }}>
+              <div style={{ flex:1 }}>
+                <label style={labelStyle}>First name</label>
+                <input autoFocus value={firstName} onChange={e=>{setFirstName(e.target.value); setError('')}} placeholder="First" style={fieldStyle} />
+              </div>
+              <div style={{ flex:1 }}>
+                <label style={labelStyle}>Last name</label>
+                <input value={lastName} onChange={e=>{setLastName(e.target.value); setError('')}} placeholder="Last" style={fieldStyle} />
+              </div>
+            </div>
+
+            <div style={{ marginBottom:'14px' }}>
+              <label style={labelStyle}>Phone</label>
+              <input value={phone} onChange={e=>{setPhone(e.target.value); setError('')}} placeholder="(555) 123-4567" inputMode="tel" style={fieldStyle} />
+            </div>
+
+            <div style={{ marginBottom:'18px' }}>
+              <label style={labelStyle}>Email</label>
+              <input value={profile?.email || ''} disabled style={{ ...fieldStyle, background:'#f3f4f6', color:'#8a9e9a', cursor:'not-allowed' }} />
+            </div>
+
+            {error && (
+              <div style={{ marginBottom:'12px', padding:'9px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.18)', borderRadius:'9px' }}>
+                <p style={{ fontSize:'12px', color:'#b91c1c', fontWeight:500 }}>{error}</p>
+              </div>
+            )}
+
+            <button
+              onClick={save}
+              disabled={!canSave}
+              style={{ width:'100%', padding:'14px', background:canSave?BRAND.dark:'#e5e7eb', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:canSave?'white':'#9ca3af', cursor:canSave?'pointer':'not-allowed' }}
+            >{saving ? 'Saving…' : 'Save & Continue'}</button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
@@ -19927,6 +20046,12 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   // state lets the user exit without a DB write. Resets on page reload —
   // follow-up commit should flip subscription_status on the server.
   const [onboardingDismissed, setOnboardingDismissed] = useState(false)
+  // Co-owner slim onboarding: once they save their profile (or if it's already
+  // complete) we drop them into the app. slimDone covers the in-session flip;
+  // the durable signal is currentUserProfile.phone being set server-side.
+  const [slimDone, setSlimDone] = useState(false)
+  const needsCoOwnerSlim =
+    isCoOwner && crmStatus === 'active' && !slimDone && !(currentUserProfile?.phone)
   const isReadOnly   = crmStatus === 'inactive'
   const isLiteUser   = franchiseRole === 'light' || franchiseRole === 'readonly'
   const canSeeFinancials = !isLiteUser
@@ -20092,6 +20217,18 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     }
   }, [isOnboarding, activeNav])
 
+
+  // Co-owner joining an already-launched location → slim onboarding (welcome +
+  // profile), NOT the full owner wizard. Checked before the wizard branch.
+  if (needsCoOwnerSlim) return (
+    <SlimCoOwnerOnboarding
+      locationId={currentLocation?.id || null}
+      locationName={currentLocation?.name || locationName || null}
+      profile={currentUserProfile}
+      topOffset={topOffset}
+      onComplete={()=>{ setSlimDone(true); nav('home') }}
+    />
+  )
 
   if (isOnboarding && !onboardingDismissed) return (
     <OnboardingScreen ownerName={ownerName} ownerEmail={ownerEmail} franchiseRole={franchiseRole} topOffset={topOffset} onComplete={onCompleteOnboarding} onSkipOnboarding={()=>{
@@ -20548,7 +20685,7 @@ const FRANCHISE_ROLES = [
 // (and DEFAULT_TIER_PRICES in lib/subscription-math.ts). Kept colocated with
 // TierPlansInline so seat icons/colors stay consistent.
 const SUBSCRIPTION_TIER_META = [
-  { key:'owner',    name:'Zee Bee',       icon:'👑', color:'#d4a046', detail:'Required · One per location' },
+  { key:'owner',    name:'Zee Bee',       icon:'👑', color:'#d4a046', detail:'Required · Up to 2 per location' },
   { key:'manager',  name:'Hive Manager',  icon:'🍯', color:'#6366f1', detail:'Operations & team leads' },
   { key:'light',    name:'Worker Bee',    icon:'🐝', color:'#10b981', detail:'Schedulers, customer service' },
   { key:'readonly', name:'Honey Watcher', icon:'👁',  color:'#8a9e9a', detail:'Read-only · Add as many as needed' },
@@ -21851,6 +21988,12 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
   const [pendingActionId, setPendingActionId]   = useState('') // resend | revoke
   const [pendingActionError, setPendingActionError] = useState('')
   const [resendResult, setResendResult]         = useState(null)
+  // "Make Primary" designation (Phase 2 co-owner). makingPrimaryId holds the
+  // owner_user_id currently being promoted; primaryToast/primaryError surface
+  // the result inline.
+  const [makingPrimaryId, setMakingPrimaryId]   = useState('')
+  const [primaryError, setPrimaryError]         = useState('')
+  const [primaryToast, setPrimaryToast]         = useState('')
   // "Convert to Direct Billing" modal — opened from the Subscription section
   // when the location is still on a corporate-funded payment_source.
   const [showConvertBilling, setShowConvertBilling] = useState(false)
@@ -21914,6 +22057,37 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
       setPendingActionError(err?.message || 'Could not resend invitation')
     } finally {
       setPendingActionId('')
+    }
+  }
+
+  // Designate a co-owner as the primary owner (the outbound sending identity).
+  // Optimistically flips the badges, then refetches for the authoritative
+  // state. Any owner of the location, super_admin, or admin can do this.
+  async function makePrimary(ownerUserId) {
+    if (!ownerUserId || !currentLoc?.id || makingPrimaryId) return
+    setMakingPrimaryId(ownerUserId)
+    setPrimaryError('')
+    setPrimaryToast('')
+    try {
+      const res = await fetch(`/api/locations/${currentLoc.id}/primary-owner`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner_user_id: ownerUserId }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.message || json.error || `HTTP ${res.status}`)
+      setOwnerStatus(prev => prev ? {
+        ...prev,
+        owners: (prev.owners || []).map(o => ({ ...o, is_primary: o.id === ownerUserId })),
+        primary_owner: (prev.owners || []).find(o => o.id === ownerUserId) || prev.primary_owner,
+      } : prev)
+      setPrimaryToast('Primary owner updated')
+      await fetchOwnerStatus()
+      setTimeout(() => setPrimaryToast(''), 2500)
+    } catch (err) {
+      setPrimaryError(err?.message || 'Could not update primary owner')
+    } finally {
+      setMakingPrimaryId('')
     }
   }
 
@@ -22047,12 +22221,13 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
             ))}
           </div>
 
-          {/* Owner seat — claimed user, pending invite, or unclaimed-with-CTA.
+          {/* Owners — up to two claimed owners (primary + co-owner), any
+              pending owner invite, and an invite CTA while under the cap.
               Only renders for super_admin/corporate; owners managing their
               own team have a different surface in Settings → Team. */}
           {canInviteOwner && (
             <div>
-              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Owner</p>
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>{(ownerStatus?.count || 0) > 1 ? 'Owners' : 'Owner'}</p>
               <div style={{ background:'#f7f5f0', borderRadius:'10px', padding:'12px' }}>
                 {ownerStatusLoading && !ownerStatus && (
                   <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Loading owner status…</p>
@@ -22060,22 +22235,45 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
                 {ownerStatusError && (
                   <p style={{ fontSize:'12px', color:'#b91c1c' }}>{ownerStatusError}</p>
                 )}
-                {ownerStatus && ownerStatus.owner_user && (
-                  <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-                    <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:'linear-gradient(135deg,#d4a046,#b07a20)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'12px', fontWeight:700, color:'white', flexShrink:0 }}>
-                      {(ownerStatus.owner_user.full_name||ownerStatus.owner_user.email||'?').split(/\s+/).map(w=>w[0]).join('').slice(0,2).toUpperCase()}
-                    </div>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{ownerStatus.owner_user.full_name||ownerStatus.owner_user.email}</p>
-                      <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                        {ownerStatus.owner_user.email}
-                        {ownerStatus.owner_user.joined_at ? ` · joined ${new Date(ownerStatus.owner_user.joined_at).toLocaleDateString('en-US',{month:'short', year:'numeric'})}` : ''}
-                      </p>
-                    </div>
-                    <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'10px', background:'rgba(34,197,94,0.1)', color:'#15803d', fontWeight:600, flexShrink:0 }}>✓ Claimed</span>
+                {ownerStatus && (ownerStatus.owners?.length > 0) && (
+                  <div style={{ display:'grid', gap:'8px', marginBottom: (ownerStatus.pending_invite || (ownerStatus.count||0) < 2) ? '10px' : 0 }}>
+                    {ownerStatus.owners.map((o) => {
+                      const showMakePrimary = !o.is_primary && (ownerStatus.owners.length > 1)
+                      return (
+                        <div key={o.id} style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+                          <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:'linear-gradient(135deg,#d4a046,#b07a20)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'12px', fontWeight:700, color:'white', flexShrink:0 }}>
+                            {(o.full_name||o.email||'?').split(/\s+/).map(w=>w[0]).join('').slice(0,2).toUpperCase()}
+                          </div>
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{o.full_name||o.email}</p>
+                            <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                              {o.email}
+                              {o.joined_at ? ` · joined ${new Date(o.joined_at).toLocaleDateString('en-US',{month:'short', year:'numeric'})}` : ''}
+                            </p>
+                          </div>
+                          {o.is_primary ? (
+                            <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'10px', background:'rgba(212,160,70,0.15)', color:'#b07a20', fontWeight:700, flexShrink:0, letterSpacing:'0.3px' }}>★ PRIMARY</span>
+                          ) : showMakePrimary ? (
+                            <button
+                              onClick={()=>makePrimary(o.id)}
+                              disabled={!!makingPrimaryId}
+                              style={{ fontSize:'10px', padding:'4px 9px', borderRadius:'10px', background:'white', border:'1px solid rgba(0,0,0,0.12)', color:'#1a2e2b', fontWeight:600, flexShrink:0, fontFamily:'inherit', cursor:makingPrimaryId?'wait':'pointer', opacity:makingPrimaryId?0.6:1 }}
+                            >{makingPrimaryId===o.id ? 'Setting…' : 'Make Primary'}</button>
+                          ) : (
+                            <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'10px', background:'rgba(34,197,94,0.1)', color:'#15803d', fontWeight:600, flexShrink:0 }}>✓ Claimed</span>
+                          )}
+                        </div>
+                      )
+                    })}
+                    {primaryToast && (
+                      <p style={{ fontSize:'11px', color:'#15803d', margin:0 }}>{primaryToast}</p>
+                    )}
+                    {primaryError && (
+                      <p style={{ fontSize:'11px', color:'#b91c1c', margin:0 }}>{primaryError}</p>
+                    )}
                   </div>
                 )}
-                {ownerStatus && !ownerStatus.owner_user && ownerStatus.pending_invite && (
+                {ownerStatus && ownerStatus.pending_invite && (
                   <div>
                     <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'10px' }}>
                       <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:'rgba(245,158,11,0.15)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'14px', flexShrink:0 }}>📬</div>
@@ -22113,13 +22311,17 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
                     </div>
                   </div>
                 )}
-                {ownerStatus && !ownerStatus.owner_user && !ownerStatus.pending_invite && (
+                {ownerStatus && !ownerStatus.pending_invite && (ownerStatus.count || 0) < 2 && (
                   <div>
-                    <p style={{ fontSize:'12px', color:'#4a5e5a', marginBottom:'10px' }}>Owner seat unclaimed. Send an invitation to bring the franchise owner onboard.</p>
+                    <p style={{ fontSize:'12px', color:'#4a5e5a', marginBottom:'10px' }}>
+                      {(ownerStatus.count || 0) === 0
+                        ? 'Owner seat unclaimed. Send an invitation to bring the franchise owner onboard.'
+                        : 'Add a co-owner with full access alongside the current owner (up to 2 owners).'}
+                    </p>
                     <button
                       onClick={()=>setShowInviteOwner(true)}
                       style={{ width:'100%', padding:'10px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}
-                    >✉️ Invite Owner</button>
+                    >{(ownerStatus.count || 0) === 0 ? '✉️ Invite Owner' : '✉️ Invite Co-Owner'}</button>
                   </div>
                 )}
               </div>
@@ -23124,7 +23326,9 @@ function InviteOwnerModal({ location, onSuccess, onClose }) {
         setWarnings(json.warnings || [{ code:'confirm', message:'Please confirm to continue.' }])
         return
       }
-      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`)
+      // Hard cap (max_owners_reached) and other failures carry a friendly
+      // `message`; prefer it over the raw error code.
+      if (!res.ok) throw new Error(json.message || json.error || `HTTP ${res.status}`)
       setResult(json)
       setStep('sent')
       if (onSuccess) onSuccess(json)
@@ -29944,6 +30148,8 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           setFollowUps={setFollowUps}
           currentUserId={viewAsUser?.id || currentUser?.id || 'u11'}
           currentLocation={currentLocation}
+          isCoOwner={role==='franchise' && franchiseRole==='owner' && currentUser?.isPrimaryOwner===false && !viewAsUser}
+          currentUserProfile={currentUser ? { id: currentUser.id, email: currentUser.email, first_name: currentUser.first_name, last_name: currentUser.last_name, phone: currentUser.phone } : null}
         />
       </div>
     )

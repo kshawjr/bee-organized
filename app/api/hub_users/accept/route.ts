@@ -150,6 +150,31 @@ export async function POST(request: NextRequest) {
       console.error('[accept seat claim]', claimErr)
       return NextResponse.json({ error: claimErr.message }, { status: 500 })
     }
+
+    // Phase 2: the FIRST owner to claim a seat at a location becomes the
+    // designated primary owner (the sending identity for emails/drips) when
+    // no primary is set yet. A co-owner accepting later (a primary already
+    // exists) is left is_primary=false and is promoted only via an explicit
+    // "Make Primary" action. Best-effort: a failure here leaves the seat
+    // claimed but undesignated; the resolver's earliest-owner fallback keeps
+    // outbound identity deterministic until someone designates a primary.
+    if (invite.tier === 'owner') {
+      const { count: primaryCount } = await supabaseService
+        .from('subscription_seats')
+        .select('id', { count: 'exact', head: true })
+        .eq('location_id', invite.location_id)
+        .eq('tier', 'owner')
+        .eq('is_primary', true)
+      if ((primaryCount ?? 0) === 0) {
+        const { error: primaryErr } = await supabaseService
+          .from('subscription_seats')
+          .update({ is_primary: true, updated_at: new Date().toISOString() })
+          .eq('id', seatId)
+        if (primaryErr) {
+          console.error('[accept mark primary owner]', primaryErr)
+        }
+      }
+    }
   }
 
   // Mark invite consumed last — if it fails the seat claim still stands,

@@ -58,43 +58,69 @@ export async function GET(
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
-  const { data: ownerSeat, error: seatErr } = await supabaseService
+  // Phase 2: a location may have up to TWO owner seats (primary + co-owner).
+  // Fetch all active owner seats, ordered earliest-first, and resolve each
+  // claimed one to its hub_users row.
+  const { data: ownerSeats, error: seatErr } = await supabaseService
     .from('subscription_seats')
-    .select('id, location_id, tier, user_id, status, added_at')
+    .select('id, location_id, tier, user_id, status, is_primary, added_at')
     .eq('location_id', locationId)
     .eq('tier', 'owner')
     .eq('status', 'active')
     .order('added_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
   if (seatErr) {
     console.error('[owner-status seat fetch]', seatErr)
     return NextResponse.json({ error: seatErr.message }, { status: 500 })
   }
 
-  let owner_user: any = null
-  if (ownerSeat?.user_id) {
-    const { data: hu } = await supabaseService
+  const claimedSeats = (ownerSeats || []).filter((s: any) => s.user_id)
+  const userIds = claimedSeats.map((s: any) => s.user_id)
+
+  const usersById: Record<string, any> = {}
+  if (userIds.length > 0) {
+    const { data: hus } = await supabaseService
       .from('hub_users')
       .select('id, full_name, email, created_at, invite_accepted_at')
-      .eq('id', ownerSeat.user_id)
-      .maybeSingle()
-    if (hu) {
-      owner_user = {
+      .in('id', userIds)
+    ;(hus || []).forEach((hu: any) => {
+      usersById[hu.id] = hu
+    })
+  }
+
+  // One entry per CLAIMED owner seat, carrying the is_primary marker.
+  const owners = claimedSeats
+    .map((seat: any) => {
+      const hu = usersById[seat.user_id]
+      if (!hu) return null
+      return {
         id: hu.id,
         full_name: hu.full_name,
         email: hu.email,
+        is_primary: !!seat.is_primary,
+        seat_id: seat.id,
         joined_at: hu.invite_accepted_at || hu.created_at,
+        claimed_at: seat.added_at,
       }
-    }
-  }
+    })
+    .filter(Boolean) as any[]
 
-  // Pending owner-tier invite (if any). Only relevant when the seat is
-  // unclaimed — a claimed seat with an outstanding invite would be a bug
-  // we'd want to surface, but in practice the invite would just 410 on
-  // accept and the row is harmless.
+  const primary_owner = owners.find((o) => o.is_primary) || null
+
+  // Backward-compat: single-owner card consumers read `owner_user`. Resolve
+  // it to the primary owner, falling back to the earliest claimed owner.
+  const owner_user = primary_owner || owners[0] || null
+
+  // Backward-compat single seat shape: the primary's seat, else the earliest.
+  const primarySeatRow =
+    (ownerSeats || []).find((s: any) => s.is_primary && s.user_id) ||
+    claimedSeats[0] ||
+    (ownerSeats || [])[0] ||
+    null
+
+  // Outstanding owner-tier invite, if any. Still relevant alongside a claimed
+  // owner (e.g. one owner claimed, a co-owner invite pending).
   let pending_invite: any = null
-  if (!owner_user) {
+  {
     const { data: inv } = await supabaseService
       .from('pending_invites')
       .select('id, email, full_name, tier, invite_expires_at, created_at')
@@ -120,8 +146,13 @@ export async function GET(
 
   return NextResponse.json({
     location_id: locationId,
-    seat: ownerSeat
-      ? { id: ownerSeat.id, tier: ownerSeat.tier, user_id: ownerSeat.user_id }
+    // New multi-owner shape
+    owners,
+    primary_owner,
+    count: owners.length,
+    // Backward-compat fields (single-owner consumers)
+    seat: primarySeatRow
+      ? { id: primarySeatRow.id, tier: primarySeatRow.tier, user_id: primarySeatRow.user_id }
       : null,
     owner_user,
     pending_invite,

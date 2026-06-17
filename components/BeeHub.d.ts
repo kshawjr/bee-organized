@@ -160,6 +160,10 @@ interface BeeHubProps {
     first_name?: string | null
     last_name?: string | null
     phone?: string | null
+    // Phase 2 — is this owner the DESIGNATED primary owner of their location?
+    // false routes a co-owner into the slim onboarding flow. Defaults true for
+    // non-owners / legacy owners with no seat row.
+    isPrimaryOwner?: boolean
   }
   initialLookups?: LookupsByCategory
   initialPeople?: any[]

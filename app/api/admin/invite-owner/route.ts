@@ -321,6 +321,22 @@ export async function POST(request: NextRequest) {
   const claimedOwnerSeat = (ownerSeats || []).find((s: any) => s.user_id)
   const unclaimedOwnerSeat = (ownerSeats || []).find((s: any) => !s.user_id)
 
+  // Hard cap at 2 owner seats per location — enforced even with force=true
+  // (a cap, not a warning). The route reuses an existing UNCLAIMED owner seat
+  // when one is present (no new seat created), so the only way to exceed the
+  // cap is when we'd have to CREATE a 3rd seat: i.e. 2 active seats already
+  // exist and none of them is free to reuse.
+  if (!unclaimedOwnerSeat && (ownerSeats || []).length >= 2) {
+    return NextResponse.json(
+      {
+        error: 'max_owners_reached',
+        message:
+          'This location already has 2 owners (the maximum). Remove one before adding another.',
+      },
+      { status: 409 }
+    )
+  }
+
   const { data: pendingOwnerInvite } = await supabaseService
     .from('pending_invites')
     .select('id, email')
@@ -338,7 +354,7 @@ export async function POST(request: NextRequest) {
       warnings.push({
         code: 'owner_exists',
         message:
-          'This location already has a claimed owner. Continuing will create a SECOND owner seat.',
+          'This location already has an owner. Adding this person will make them a co-owner with full access alongside the existing owner.',
       })
     }
     if (pendingOwnerInvite) {

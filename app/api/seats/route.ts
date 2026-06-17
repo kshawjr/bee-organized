@@ -152,6 +152,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
+  // Hard cap: a location may have at most 2 owner seats (primary + one
+  // co-owner). Counts assigned AND unassigned active owner seats so a
+  // pre-allocated-but-unclaimed seat still counts toward the limit. Includes
+  // the requested quantity so a bulk create can't leapfrog the cap.
+  if (tier === 'owner') {
+    const { count } = await supabaseService
+      .from('subscription_seats')
+      .select('id', { count: 'exact', head: true })
+      .eq('location_id', location_id)
+      .eq('tier', 'owner')
+      .eq('status', 'active')
+    if ((count ?? 0) + qty > 2) {
+      return NextResponse.json(
+        {
+          error: 'max_owners_reached',
+          message: 'A location can have at most 2 owner seats.',
+        },
+        { status: 409 }
+      )
+    }
+  }
+
   // Use service role for the insert so first-time owners (whose RLS context
   // works fine but whose policy depends on a hub_users row that may have
   // been created via service-role) write atomically. App-layer check above

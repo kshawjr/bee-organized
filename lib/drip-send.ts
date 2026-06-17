@@ -14,6 +14,7 @@ import { supabaseService } from './supabase-service'
 import { sendEmail, renderTemplate, type RenderContext } from './resend'
 import { nextSendAt } from './drip-time'
 import { scheduleWelcomeEmail } from './welcome-email'
+import { getPrimaryOwnerForLocation } from './owner-resolution'
 
 export type SendDripResult = {
   sent: boolean
@@ -135,14 +136,11 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     return { sent: false, error: `loc_lookup: ${locErr?.message ?? 'missing'}` }
   }
 
-  // Location owner (one query, two uses: phone fallback + location_owner_name).
-  const { data: locOwner } = await supabaseService
-    .from('hub_users')
-    .select('full_name, phone')
-    .eq('location_id', loc.id)
-    .eq('role', 'owner')
-    .limit(1)
-    .maybeSingle()
+  // Location owner (two uses: phone fallback + location_owner_name). Resolves
+  // to the DESIGNATED primary owner (Phase 2 co-owner support) via the shared
+  // resolver, which falls back to legacy hub_users role='owner' for pre-seat
+  // locations so {{owner_name}} / phone fallback never regress.
+  const locOwner = await getPrimaryOwnerForLocation(loc.id)
 
   const phone: string | null = loc.phone ?? locOwner?.phone ?? null
   const locationOwnerName = locOwner?.full_name ?? null

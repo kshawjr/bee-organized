@@ -23,6 +23,7 @@
 import { supabaseService } from './supabase-service'
 import { sendEmail, renderTemplate, type RenderContext } from './resend'
 import { bodyToHtml } from './drip-send'
+import { getPrimaryOwnerForLocation } from './owner-resolution'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -216,14 +217,10 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
     return { sent: false, error: `loc_lookup: ${locErr?.message ?? 'missing'}` }
   }
 
-  // Owners
-  const { data: locOwner } = await supabaseService
-    .from('hub_users')
-    .select('full_name')
-    .eq('location_id', loc.id)
-    .eq('role', 'owner')
-    .limit(1)
-    .maybeSingle()
+  // Owners — resolve the location's DESIGNATED primary owner (Phase 2 co-owner
+  // support) so the sending identity is deterministic when a location has two
+  // owners. Falls back to legacy hub_users role='owner' inside the resolver.
+  const locOwner = await getPrimaryOwnerForLocation(loc.id)
   const locationOwnerName = locOwner?.full_name ?? null
 
   let ownerName: string | null = locationOwnerName
