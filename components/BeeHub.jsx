@@ -18847,16 +18847,28 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   // Manager is an operational lead and explicitly CANNOT manage the team.
   const canManageTeam = franchiseRole === 'owner'
   const canViewBilling = franchiseRole === 'owner'
+  // Manager is an operational lead: they get Settings ONLY to edit their own
+  // Profile (name/phone — a self-edit on hub_users). Every other Settings
+  // section (Location/Team/Billing/Communication/Templates/Automation/Alerts)
+  // is owner-only config and stays hidden for manager. Readonly never reaches
+  // SettingsScreen at all (nav-level lockout).
+  const isManager = franchiseRole === 'manager'
   const sections = [
     { key:'profile',   label:'Profile',    icon:'👤' },
-    { key:'location',  label:'My Location',icon:'📍' },
+    ...(isManager ? [] : [{ key:'location',  label:'My Location',icon:'📍' }]),
     ...(canManageTeam ? [{ key:'team', label:'Team', icon:'👥' }] : []),
     ...(canViewBilling ? [{ key:'billing', label:'Billing', icon:'💳' }] : []),
-    { key:'paths',     label:'Communication', icon:'📧' },
-    { key:'templates', label:'Templates',  icon:'📝' },
-    { key:'automation',label:'Automation', icon:'⚡' },
-    { key:'notifs',    label:'Alerts',     icon:'🔔' },
+    ...(isManager ? [] : [
+      { key:'paths',     label:'Communication', icon:'📧' },
+      { key:'templates', label:'Templates',  icon:'📝' },
+      { key:'automation',label:'Automation', icon:'⚡' },
+      { key:'notifs',    label:'Alerts',     icon:'🔔' },
+    ]),
   ]
+  // Deep-link / stale-state safety: if activeSection isn't one this role can
+  // see (e.g. manager hits ?section=billing), show a polite no-access notice
+  // instead of leaking the hidden section's UI.
+  const sectionAllowed = sections.some(s => s.key === activeSection)
 
   return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem', width:'100%', position:'relative' }}>
@@ -18903,6 +18915,15 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
       </div>
 
       <div style={{ display:'grid', gap:'0' }}>
+
+        {!sectionAllowed ? (
+          <div style={{ padding:'40px 24px', textAlign:'center' }}>
+            <div style={{ fontSize:'40px', marginBottom:'12px' }}>🔒</div>
+            <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>You don't have access to this section</p>
+            <p style={{ fontSize:'13px', color:'#8a9e9a', lineHeight:1.5, maxWidth:'320px', margin:'0 auto 18px' }}>This part of Settings is managed by your franchise owner. You can still update your own profile.</p>
+            <button onClick={()=>{ setActiveSection('profile'); window.scrollTo(0,0) }} style={{ padding:'12px 24px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Go to Profile</button>
+          </div>
+        ) : (<>
 
         {/* ── Profile ── */}
         {activeSection==='profile'&&(
@@ -19709,6 +19730,8 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             <div style={{ height:'1rem' }} />
           </>
         )}
+
+        </>)}
 
       </div>
 
@@ -29653,9 +29676,11 @@ if (Array.isArray(initialPeople)) return
             {navItems.map(item=>{
               const fr = franchiseRole
               const isReports  = item.key==='reports'  && !['super_admin','corporate'].includes(role) && !['owner','manager'].includes(fr)
-              // Settings = owner-only config (location/team/billing/drips/Jobber).
-              // Manager has none of those, so hide Settings for manager too.
-              const isSettings = item.key==='settings' && ['readonly','manager'].includes(fr)
+              // Settings nav: manager gets it back so they can edit their own
+              // Profile (name/phone). SettingsScreen gates every other section
+              // (Location/Team/Billing/Communication/Templates/Jobber) owner-only,
+              // so manager sees ONLY Profile. Readonly stays fully locked out.
+              const isSettings = item.key==='settings' && ['readonly'].includes(fr)
               const isPartners = item.key==='partners' && ['readonly'].includes(fr)
               const isLimitedLaunchGated = isLimitedLaunch && (item.key==='partners' || item.key==='reports')
               const isLocked = (isOnboardingState && !isElevated && item.key!=='home') || isReports || isSettings || isPartners || isLimitedLaunchGated
@@ -30034,9 +30059,11 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             // Franchise sub-role gating
             const fr = franchiseRole // owner|manager|light|readonly
             const isReports  = item.key==='reports'  && !['super_admin','corporate'].includes(role) && !['owner','manager'].includes(fr)
-            // Settings = owner-only config (location/team/billing/drips/Jobber).
-            // Manager has none of those, so hide Settings for manager too.
-            const isSettings = item.key==='settings' && ['readonly','manager'].includes(fr)
+            // Settings nav: manager gets it back so they can edit their own
+            // Profile (name/phone). SettingsScreen gates every other section
+            // (Location/Team/Billing/Communication/Templates/Jobber) owner-only,
+            // so manager sees ONLY Profile. Readonly stays fully locked out.
+            const isSettings = item.key==='settings' && ['readonly'].includes(fr)
             const isPartners = item.key==='partners' && ['readonly'].includes(fr)
             const isLimitedLaunchGated = isLimitedLaunch && (item.key==='partners' || item.key==='reports')
             // Onboarding lockdown only applies to franchise users mid-setup —
