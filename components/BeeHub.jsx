@@ -26841,6 +26841,249 @@ function AdminFeedbackScreen({ onPendingCountChange = () => {} }) {
   )
 }
 
+// Timezone options for the Create Location form. Mirrors the friendly-label
+// list the Settings → Location step offers; locations.timezone is stored as
+// these labels app-wide and lib/drip-time.ts normalizes them to IANA for
+// scheduling. "Eastern Time (ET)" is the label equivalent of the DB default
+// 'America/New_York', so it's our default selection.
+const US_TIMEZONES = [
+  { value:'Eastern Time (ET)',  label:'Eastern Time (ET) — New York, Miami' },
+  { value:'Central Time (CT)',  label:'Central Time (CT) — Chicago, Dallas, Kansas City' },
+  { value:'Mountain Time (MT)', label:'Mountain Time (MT) — Denver, Phoenix' },
+  { value:'Pacific Time (PT)',  label:'Pacific Time (PT) — Los Angeles, Seattle' },
+  { value:'Alaska Time (AKT)',  label:'Alaska Time (AKT)' },
+  { value:'Hawaii Time (HT)',   label:'Hawaii Time (HT)' },
+]
+
+function slugify(s) {
+  return String(s)
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')   // non-alphanumerics → hyphen
+    .replace(/^-+|-+$/g, '')        // trim leading/trailing hyphens
+    .slice(0, 50)
+}
+
+// AddLocationModal — "+ Add Location" form for super_admin / corporate. Creates
+// a bare location row (POST /api/admin/locations); the slug is written to BOTH
+// location_id and slug columns server-side. On success it offers a direct
+// hand-off to the existing Invite Owner flow.
+//
+// Props:
+//   onClose()              — dismiss
+//   onCreated(location)    — fired once with the fresh DB row so the caller can
+//                            add it to the locations list
+//   onInviteOwner(location)— "Invite Owner Now" hand-off; caller opens
+//                            InviteOwnerModal pre-selected to this location
+function AddLocationModal({ onClose, onCreated, onInviteOwner }) {
+  React.useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+
+  const [name, setName]           = useState('')
+  const [slug, setSlug]           = useState('')
+  const [slugTouched, setSlugTouched] = useState(false)
+  const [timezone, setTimezone]   = useState('Eastern Time (ET)')
+  const [address, setAddress]     = useState('')
+  const [city, setCity]           = useState('')
+  const [stateAbbr, setStateAbbr] = useState('')
+  const [zip, setZip]             = useState('')
+  const [phone, setPhone]         = useState('')
+  const [email, setEmail]         = useState('')
+
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError]         = useState('')
+  const [slugError, setSlugError] = useState('')
+  const [step, setStep]           = useState('form') // form | success
+  const [created, setCreated]     = useState(null)
+
+  const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/
+  const trimmedName = name.trim()
+  const trimmedSlug = slug.trim()
+  const nameValid = trimmedName.length >= 1 && trimmedName.length <= 100
+  const slugValid = trimmedSlug.length >= 1 && trimmedSlug.length <= 50 && SLUG_RE.test(trimmedSlug)
+  const emailValid = !email.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+  const stateValid = !stateAbbr.trim() || stateAbbr.trim().length === 2
+  const canSubmit = !submitting && nameValid && slugValid && !!timezone && emailValid && stateValid
+
+  // Auto-suggest slug from name until the operator edits the slug themselves.
+  function onNameChange(v) {
+    setName(v)
+    setError('')
+    if (!slugTouched) setSlug(slugify(v))
+  }
+  function onSlugChange(v) {
+    setSlugTouched(true)
+    setSlug(v)
+    setSlugError('')
+    setError('')
+  }
+
+  async function submit() {
+    if (!canSubmit) return
+    setSubmitting(true)
+    setError('')
+    setSlugError('')
+    try {
+      const res = await fetch('/api/admin/locations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: trimmedName,
+          slug: trimmedSlug,
+          timezone,
+          address: address.trim() || undefined,
+          city: city.trim() || undefined,
+          state: stateAbbr.trim() || undefined,
+          zip: zip.trim() || undefined,
+          phone: phone.trim() || undefined,
+          email: email.trim() || undefined,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (res.status === 409 && json.error === 'slug_already_exists') {
+        const who = json.existing_location_name ? ` ('${json.existing_location_name}')` : ''
+        setSlugError(`A location with slug '${trimmedSlug}'${who} already exists. Pick a different slug.`)
+        return
+      }
+      if (!res.ok || !json.success) throw new Error(json.error || `HTTP ${res.status}`)
+      setCreated(json.location)
+      setStep('success')
+      if (onCreated) onCreated(json.location)
+    } catch (err) {
+      setError(err?.message || 'Could not create location')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none', boxSizing:'border-box' }
+  const lbl = { fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'5px', display:'block' }
+  const req = <span style={{ color:'#ef4444' }}>*</span>
+
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div onClick={e=>e.stopPropagation()} style={{ position:'relative', background:'white', width:'100%', maxWidth:'580px', maxHeight:'85vh', borderRadius:'16px', zIndex:1, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', boxSizing:'border-box', overflow:'hidden' }}>
+
+        {step==='success' && created ? (
+          <>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px', borderBottom:'1px solid #eee', flexShrink:0 }}>
+              <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>Location created</h2>
+              <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>×</button>
+            </div>
+            <div style={{ padding:'28px 24px', textAlign:'center', overflowY:'auto', flex:1 }}>
+              <div style={{ fontSize:'44px', marginBottom:'10px' }}>✓</div>
+              <h3 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'6px' }}>{created.name}</h3>
+              <p style={{ fontSize:'14px', color:'#4a5e5a', lineHeight:1.5 }}>
+                {created.name} is ready. You can now invite the owner.
+              </p>
+              <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'8px' }}>slug: <code>{created.slug || created.location_id}</code></p>
+            </div>
+            <div style={{ display:'flex', gap:'8px', padding:'16px 24px', borderTop:'1px solid #eee', flexShrink:0 }}>
+              <button onClick={onClose} style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Done</button>
+              <button onClick={()=>{ if (onInviteOwner) onInviteOwner(created) }} style={{ flex:2, padding:'12px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>✉️ Invite Owner Now</button>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Sticky header */}
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px', borderBottom:'1px solid #eee', flexShrink:0 }}>
+              <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>Add Location</h2>
+              <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>×</button>
+            </div>
+
+            {/* Scrollable body */}
+            <div style={{ display:'grid', gap:'14px', padding:'20px 24px', overflowY:'auto', flex:1 }}>
+              {error && (
+                <div style={{ padding:'10px 12px', background:'rgba(239,68,68,0.07)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'9px', fontSize:'12px', color:'#b91c1c' }}>{error}</div>
+              )}
+
+              {/* Section 1: Basics */}
+              <div>
+                <label style={lbl}>Location Name {req}</label>
+                <input autoFocus value={name} onChange={e=>onNameChange(e.target.value)} placeholder="e.g. Palm Beach" maxLength={100} style={inp} />
+              </div>
+
+              <div>
+                <label style={lbl}>Slug (URL identifier) {req}</label>
+                <input value={slug} onChange={e=>onSlugChange(e.target.value)} placeholder="e.g. palm-beach" maxLength={50}
+                  style={{ ...inp, border:`1.5px solid ${(slugError||(slug&&!slugValid))?'rgba(239,68,68,0.45)':'rgba(0,0,0,0.1)'}` }} />
+                <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'5px', lineHeight:1.45 }}>Lowercase letters, numbers, and hyphens only. Used for internal references.</p>
+                {slug && !slugValid && !slugError && (
+                  <p style={{ fontSize:'11px', color:'#b91c1c', marginTop:'4px' }}>Use lowercase letters, numbers, and single hyphens only (e.g. "palm-beach").</p>
+                )}
+                {slugError && (
+                  <p style={{ fontSize:'11px', color:'#b91c1c', marginTop:'4px' }}>{slugError}</p>
+                )}
+              </div>
+
+              <div>
+                <label style={lbl}>Timezone</label>
+                <select value={timezone} onChange={e=>setTimezone(e.target.value)} style={{ ...inp, cursor:'pointer' }}>
+                  {US_TIMEZONES.map(tz=>(
+                    <option key={tz.value} value={tz.value}>{tz.label}</option>
+                  ))}
+                </select>
+                <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'5px' }}>Used for drip email scheduling.</p>
+              </div>
+
+              {/* Section 2: Address & contact */}
+              <div style={{ borderTop:'1px solid #eee', paddingTop:'14px' }}>
+                <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>Address &amp; contact</p>
+                <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Optional — owner can complete during onboarding.</p>
+              </div>
+
+              <div>
+                <label style={lbl}>Address</label>
+                <input value={address} onChange={e=>setAddress(e.target.value)} placeholder="123 Main St" style={inp} />
+              </div>
+
+              <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:'10px' }}>
+                <div>
+                  <label style={lbl}>City</label>
+                  <input value={city} onChange={e=>setCity(e.target.value)} placeholder="City" style={inp} />
+                </div>
+                <div>
+                  <label style={lbl}>State</label>
+                  <input value={stateAbbr} onChange={e=>setStateAbbr(e.target.value.toUpperCase())} placeholder="FL" maxLength={2}
+                    style={{ ...inp, border:`1.5px solid ${!stateValid?'rgba(239,68,68,0.45)':'rgba(0,0,0,0.1)'}`, textTransform:'uppercase' }} />
+                </div>
+              </div>
+
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
+                <div>
+                  <label style={lbl}>Zip</label>
+                  <input value={zip} onChange={e=>setZip(e.target.value)} placeholder="33480" style={inp} />
+                </div>
+                <div>
+                  <label style={lbl}>Phone</label>
+                  <input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="(561) 555-0123" style={inp} />
+                </div>
+              </div>
+
+              <div>
+                <label style={lbl}>Email</label>
+                <input value={email} onChange={e=>{setEmail(e.target.value); setError('')}} placeholder="hello@example.com" type="email"
+                  style={{ ...inp, border:`1.5px solid ${!emailValid?'rgba(239,68,68,0.45)':'rgba(0,0,0,0.1)'}` }} />
+                {!emailValid && <p style={{ fontSize:'11px', color:'#b91c1c', marginTop:'4px' }}>Enter a valid email address.</p>}
+              </div>
+            </div>
+
+            {/* Sticky footer */}
+            <div style={{ display:'flex', gap:'8px', padding:'16px 24px', borderTop:'1px solid #eee', flexShrink:0 }}>
+              <button onClick={onClose} style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
+              <button onClick={submit} disabled={!canSubmit} style={{ flex:2, padding:'12px', background:canSubmit?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:canSubmit?'white':'#9ca3af', cursor:canSubmit?'pointer':'not-allowed' }}>{submitting?'Creating…':'📍 Create Location'}</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, onStatusChange, users=USERS_DATA, setUsers=()=>{}, people=[], setPeople=()=>{}, binPeople=[], setBinPeople=()=>{}, partners=[], setPartners=()=>{}, guideSlides=[], setGuideSlides=()=>{}, manualSlides=[], setManualSlides=()=>{}, initialLocations=null }) {
   const [adminTab, setAdminTab]   = useState('locations')
   // Count of 'submitted' (unhandled) feedback items, reported up by
@@ -26869,6 +27112,49 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
   const [search, setSearch]       = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [showInvite, setShowInvite] = useState(false)
+  const [showAddLocation, setShowAddLocation] = useState(false)
+  // Set to a freshly-created location when the operator clicks "Invite Owner
+  // Now" on the AddLocationModal success screen — opens InviteOwnerModal
+  // pre-selected to it.
+  const [inviteOwnerLoc, setInviteOwnerLoc] = useState(null)
+  const canAddLocation = role==='super_admin' || role==='corporate' || role==='admin'
+
+  // Map a fresh DB row (from POST /api/admin/locations) into the AdminScreen
+  // locations shape and prepend it, so the new row appears immediately. Mirrors
+  // the mapping in _hub-page.tsx for a brand-new (onboarding, no-owner) row.
+  function handleLocationCreated(row) {
+    if (!row || !row.id) return
+    setLocations(prev => {
+      if (prev.some(l => l.id === row.id)) return prev
+      const newLoc = {
+        id: row.id,
+        name: row.name,
+        state: row.state || '',
+        owner: null,
+        crmStatus: 'onboarding',
+        lifecycle_status: row.lifecycle_status || 'onboarding',
+        subscription_status: row.subscription_status || 'deferred',
+        subscription_plan: null,
+        payment_source: row.payment_source || 'none',
+        paid_through_date: null,
+        billing_notes: null,
+        phone: '', website: '', reviewsLink: '', bookingLink: '', email: '',
+        timezone: row.timezone || '',
+        path: '',
+        jobberConnected: false,
+        jobberAccountId: null,
+        last_sync_status: null,
+        leads: 0, revenue: 0, collected: 0,
+        userCount: 0,
+        joinedDate: 'Just now',
+        onboarding_state: {},
+        default_drip_path: null,
+        default_move_drip_path: null,
+        activated_at: null,
+      }
+      return [newLoc, ...prev]
+    })
+  }
 
   function updateStatus(id, status) {
     setLocations(prev=>prev.map(l=>l.id===id?{...l,crmStatus:status}:l))
@@ -26915,7 +27201,12 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
               </h1>
               <p style={{ fontSize:'13px', color:'rgba(168,201,196,0.7)' }}>{locations.length} locations · {users.length} users</p>
             </div>
-            <button onClick={()=>setShowInvite(true)} style={{ padding:'8px 14px', background:'rgba(168,201,196,0.15)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:'pointer' }}>+ Invite</button>
+            <div style={{ display:'flex', gap:'8px', flexShrink:0 }}>
+              {canAddLocation && (
+                <button onClick={()=>setShowAddLocation(true)} style={{ padding:'8px 14px', background:'rgba(168,201,196,0.15)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:'pointer' }}>+ Add Location</button>
+              )}
+              <button onClick={()=>setShowInvite(true)} style={{ padding:'8px 14px', background:'rgba(168,201,196,0.15)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:'pointer' }}>+ Invite</button>
+            </div>
           </div>
 
           {/* Sub-tabs — native <select> on mobile (<768px), pill row at ≥768px. */}
@@ -27107,6 +27398,25 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
           partners={partners}
           onClose={()=>setDrillLoc(null)}
           onViewAs={onViewLocation}
+        />
+      )}
+      {showAddLocation&&(
+        <AddLocationModal
+          onClose={()=>setShowAddLocation(false)}
+          onCreated={handleLocationCreated}
+          onInviteOwner={(loc)=>{ setShowAddLocation(false); setInviteOwnerLoc(loc) }}
+        />
+      )}
+      {inviteOwnerLoc&&(
+        <InviteOwnerModal
+          location={inviteOwnerLoc}
+          onSuccess={()=>{
+            // Route flips lifecycle_status→onboarding, subscription_status→
+            // deferred — the new row is already in those states, but reflect
+            // it locally for consistency with LocationDetailSheet's handler.
+            updateLocationFields(inviteOwnerLoc.id, { lifecycle_status:'onboarding', subscription_status:'deferred' })
+          }}
+          onClose={()=>setInviteOwnerLoc(null)}
         />
       )}
     </>
