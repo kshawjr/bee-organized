@@ -34,6 +34,68 @@ export async function jobberQuery(accessToken: string, query: string, variables?
   return res.json()
 }
 
+// ── Throttle-aware query wrapper ──────────────────────────────
+// Reads extensions.cost.throttleStatus from every response, pre-checks
+// budget before each request, and retries with exponential backoff on
+// THROTTLED errors. Module-level state persists across calls within a
+// single serverless invocation (reset on cold start = conservatively safe).
+
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
+
+export class JobberThrottleError extends Error {
+  constructor(errors: any[]) {
+    super('Jobber rate limit exhausted after retries: ' + JSON.stringify(errors))
+    this.name = 'JobberThrottleError'
+  }
+}
+
+let lastThrottle = {
+  maximumAvailable: 2500,
+  currentlyAvailable: 2500,
+  restoreRate: 50,
+}
+
+export async function jobberQueryThrottled(
+  accessToken: string,
+  query: string,
+  variables?: object,
+  opts: { retries?: number; onThrottlePause?: (waitMs: number) => void } = {},
+): Promise<any> {
+  const retries = opts.retries ?? 3
+  const estimatedCost = 50
+
+  if (lastThrottle.currentlyAvailable < estimatedCost) {
+    const waitMs = Math.ceil(
+      ((estimatedCost - lastThrottle.currentlyAvailable) / lastThrottle.restoreRate + 0.5) * 1000
+    )
+    console.log(`[jobber-throttle] Budget low (${lastThrottle.currentlyAvailable}/${lastThrottle.maximumAvailable}), waiting ${waitMs}ms`)
+    opts.onThrottlePause?.(waitMs)
+    await sleep(waitMs)
+  }
+
+  const result = await jobberQuery(accessToken, query, variables)
+
+  const throttleStatus = result?.extensions?.cost?.throttleStatus
+  if (throttleStatus) {
+    lastThrottle = throttleStatus
+    const cost = result.extensions?.cost
+    console.log(`[jobber-throttle] cost=${cost?.actualQueryCost} budget=${throttleStatus.currentlyAvailable}/${throttleStatus.maximumAvailable}`)
+  }
+
+  if (result?.errors?.some((e: any) => e.extensions?.code === 'THROTTLED')) {
+    if (retries > 0) {
+      const cooldownMs = Math.ceil((lastThrottle.maximumAvailable / lastThrottle.restoreRate) * 1000)
+      console.warn(`[jobber-throttle] THROTTLED — pausing ${cooldownMs}ms, ${retries} retries left`)
+      opts.onThrottlePause?.(cooldownMs)
+      await sleep(cooldownMs)
+      return jobberQueryThrottled(accessToken, query, variables, { ...opts, retries: retries - 1 })
+    }
+    throw new JobberThrottleError(result.errors)
+  }
+
+  return result
+}
+
 // ── Get location from Supabase ────────────────────────────────
 export async function getLocation(locationId: string) {
   const { data, error } = await supabase

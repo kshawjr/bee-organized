@@ -48,7 +48,7 @@
 // Hardening pass: add UNIQUE constraints + switch to ON CONFLICT upserts.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { getValidJobberToken, jobberQuery } from '@/lib/jobber'
+import { getValidJobberToken, jobberQueryThrottled } from '@/lib/jobber'
 import { supabaseService } from '@/lib/supabase-service'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { canRunImport } from '@/lib/auth'
@@ -98,6 +98,7 @@ async function fetchAll(
   key: string,
   devMode = false,
   limitToFirstPage = false,
+  onThrottlePause?: (waitMs: number) => void,
 ): Promise<any[]> {
   const all: any[] = []
   let cursor: string | null = null
@@ -105,8 +106,11 @@ async function fetchAll(
   let pages = 0
 
   while (hasMore) {
-    const res = await jobberQuery(token, query, cursor ? { after: cursor } : {})
-    if (res.errors) throw new Error(`${key} error: ${JSON.stringify(res.errors)}`)
+    const res = await jobberQueryThrottled(token, query, cursor ? { after: cursor } : {}, { onThrottlePause })
+    // Non-throttle errors (auth, syntax, etc.) — throw immediately
+    if (res.errors?.some((e: any) => e.extensions?.code !== 'THROTTLED')) {
+      throw new Error(`${key} error: ${JSON.stringify(res.errors)}`)
+    }
     const page = res.data?.[key]
     if (!page) break
     all.push(...page.nodes)
@@ -214,24 +218,29 @@ export async function POST(req: NextRequest) {
         const jobberToken = await getValidJobberToken(location)
         const devMode = mode === 'dev'
 
+        // Surfaced to the client when Jobber's rate limit requires a pause.
+        const onThrottlePause = async (waitMs: number) => {
+          const secs = Math.ceil(waitMs / 1000)
+          const msg = `Pausing ${secs}s for Jobber API rate limit...`
+          emit({ throttle_pause: true, wait_ms: waitMs, message: msg })
+          await updateProgress(jobId, { phase: msg })
+        }
+
         // ─── fetch all entities (flat queries with pacing) ──
         await updateProgress(jobId, { phase: 'clients' })
-        const clients = await fetchAll(jobberToken, CLIENTS_QUERY, 'clients', devMode, true)
-        await new Promise(r => setTimeout(r, 800))
+        const clients = await fetchAll(jobberToken, CLIENTS_QUERY, 'clients', devMode, true, onThrottlePause)
 
         await updateProgress(jobId, {
           phase: 'requests',
           total_records: clients.length,
         })
-        const requests = await fetchAll(jobberToken, REQUESTS_QUERY, 'requests', false)
-        await new Promise(r => setTimeout(r, 800))
+        const requests = await fetchAll(jobberToken, REQUESTS_QUERY, 'requests', false, false, onThrottlePause)
 
         await updateProgress(jobId, { phase: 'quotes' })
-        const quotes = await fetchAll(jobberToken, QUOTES_QUERY, 'quotes', false)
-        await new Promise(r => setTimeout(r, 800))
+        const quotes = await fetchAll(jobberToken, QUOTES_QUERY, 'quotes', false, false, onThrottlePause)
 
         await updateProgress(jobId, { phase: 'jobs' })
-        const jobs = await fetchAll(jobberToken, JOBS_QUERY, 'jobs', false)
+        const jobs = await fetchAll(jobberToken, JOBS_QUERY, 'jobs', false, false, onThrottlePause)
 
         // ─── build lookup maps ──
         const clientIds = new Set(clients.map((c: any) => c.id))
