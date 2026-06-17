@@ -1,5 +1,3 @@
-// @ts-nocheck — describe/it/expect are provided by Jest or Vitest once a test
-// runner is wired in. Remove this directive after the runner is configured.
 import {
   DEFAULT_TIER_PRICES,
   type SeatLine,
