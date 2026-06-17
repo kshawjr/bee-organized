@@ -18,20 +18,20 @@
 //      transition (see TOPIC → STAGE MAP below).
 //
 // TOPIC → STAGE MAP (matches Kevin's spec):
-//   REQUEST_CREATE   → 'Request'        forward-only
-//   REQUEST_UPDATE   → (no change)      soft-destroys if Jobber returns
-//                                       not-found (race: DESTROY may
-//                                       arrive before UPDATE in a batch)
-//   REQUEST_DESTROY  → (no change)      null jobber_request_id +
-//                                       jobber_assessment_id on lead
-//   QUOTE_CREATE     → 'Estimate Sent'  forward-only
+//   REQUEST_CREATE   → 'Request'           forward-only
+//   REQUEST_UPDATE   → (no change)         soft-destroys if Jobber returns
+//                                          not-found (race: DESTROY may
+//                                          arrive before UPDATE in a batch)
+//   REQUEST_DESTROY  → (no change)         null jobber_request_id +
+//                                          jobber_assessment_id on lead
+//   QUOTE_CREATE     → 'Estimate Sent'     forward-only
 //   QUOTE_UPDATE     → (no change)
-//   QUOTE_SENT       → 'Estimate Sent'  forward-only (idempotent)
-//   QUOTE_APPROVED   → (no change)      stamp quote_approved_at
-//   QUOTE_DESTROY    → (no change)      null jobber_quote_id on lead
-//   JOB_CREATE       → (no change)      stamp job_created_at +
-//                                       scheduled_at (Job in Progress
-//                                       is owner-driven only)
+//   QUOTE_SENT       → 'Estimate Sent'     forward-only (idempotent)
+//   QUOTE_APPROVED   → 'Job in Progress'   forward-only + stamp quote_approved_at
+//   QUOTE_DESTROY    → (no change)         null jobber_quote_id on lead
+//   JOB_CREATE       → 'Job in Progress'   forward-only + stamp job_created_at +
+//                                          scheduled_at (belt-and-suspenders with
+//                                          QUOTE_APPROVED; idempotent via rank guard)
 //   JOB_UPDATE       → (no change)
 //   JOB_COMPLETE     → 'Closed Won'     forward-only + stop drip
 //   JOB_DESTROY      → (no change)      null jobber_job_id on lead
@@ -316,7 +316,7 @@ export async function handleRequestUpdate(ctx: HandlerCtx): Promise<HandlerResul
 // that holds this event's timestamp (or null when none).
 async function handleQuoteCore(
   ctx: HandlerCtx,
-  stagePromotion: 'Estimate Sent' | null,
+  stagePromotion: 'Estimate Sent' | 'Job in Progress' | null,
   stampField: 'quote_created_at' | 'quote_sent_at' | 'quote_approved_at' | null,
 ): Promise<HandlerResult> {
   const globalId = encodeJobberId('Quote', ctx.itemId)
@@ -396,15 +396,15 @@ export function handleQuoteSent(ctx: HandlerCtx) {
   return handleQuoteCore(ctx, 'Estimate Sent', 'quote_sent_at')
 }
 
-// QUOTE_APPROVED → no stage change, stamp quote_approved_at
+// QUOTE_APPROVED → 'Job in Progress' (forward-only) + stamp quote_approved_at
 export function handleQuoteApproved(ctx: HandlerCtx) {
-  return handleQuoteCore(ctx, null, 'quote_approved_at')
+  return handleQuoteCore(ctx, 'Job in Progress', 'quote_approved_at')
 }
 
 // Internal: shared job pipeline.
 async function handleJobCore(
   ctx: HandlerCtx,
-  stagePromotion: 'Closed Won' | null,
+  stagePromotion: 'Job in Progress' | 'Closed Won' | null,
   stampField: 'job_created_at' | 'job_completed_at' | null,
 ): Promise<HandlerResult> {
   const globalId = encodeJobberId('Job', ctx.itemId)
@@ -476,10 +476,9 @@ async function handleJobCore(
   return { processed: true, lead_id: leadId, lead_stage: stage, prev_stage: stage }
 }
 
-// JOB_CREATE   → no stage change (Job in Progress is owner-driven)
-//                + stamp job_created_at + scheduled_at + jobber_job_id
+// JOB_CREATE → 'Job in Progress' (forward-only) + stamp job_created_at + scheduled_at
 export function handleJobCreate(ctx: HandlerCtx) {
-  return handleJobCore(ctx, null, 'job_created_at')
+  return handleJobCore(ctx, 'Job in Progress', 'job_created_at')
 }
 
 // JOB_UPDATE   → no stage change, refresh job data + scheduled_at
