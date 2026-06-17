@@ -20,6 +20,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { supabaseService } from './supabase-service'
+import { getPrimaryOwnerForLocation } from './owner-resolution'
 
 // ── GraphQL: bulk pagination queries (used by the import route) ────
 
@@ -275,10 +276,16 @@ export async function upsertLead(
     await supabaseService.from('leads').update(payload).eq('id', existing.id)
     return { id: existing.id, created: false, stage: existing.stage as string | null }
   }
+  // Default new leads to the location's primary owner so they're never
+  // orphaned (assigned_to=null). Fetched per-insert rather than once
+  // up-front so the webhook path (single-record creates) also benefits.
+  const primaryOwner = await getPrimaryOwnerForLocation(location_uuid)
+
   const { data, error } = await supabaseService
     .from('leads')
     .insert({
       ...payload,
+      assigned_to: primaryOwner?.id ?? null,
       created_at: client.createdAt || new Date().toISOString(),
       import_source: importSource,
       paused: true,

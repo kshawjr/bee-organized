@@ -185,7 +185,7 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
   const quoteRow = (joined.quotes || [])
     .slice()
     .sort((a, b) => new Date(b.sent_at || b.created_at).getTime() - new Date(a.sent_at || a.created_at).getTime())[0]
-  const estimateSent = quoteRow?.sent_at ? fmtDate(quoteRow.sent_at) : null
+  const estimateSent = quoteRow ? fmtDate(quoteRow.sent_at || quoteRow.created_at) : null
   const estimateApproved = quoteRow?.approved_at ? fmtDate(quoteRow.approved_at) : null
 
   // Most recent service_request — drives Assessment milestone hyperlinks

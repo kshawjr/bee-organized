@@ -329,6 +329,7 @@ export async function POST(req: NextRequest) {
           message:
             `Leads: ${stats.leads_created} created, ${stats.leads_updated} updated; ` +
             `Requests: ${stats.requests_created} created, ${stats.requests_updated} updated; ` +
+            `Quotes: ${stats.quotes_created} created, ${stats.quotes_updated} updated; ` +
             `Jobs: ${stats.jobs_created} created, ${stats.jobs_updated} updated; ` +
             `Invoices: ${stats.invoices_created} created, ${stats.invoices_updated} updated; ` +
             `Errors: ${stats.errors.length}`,
