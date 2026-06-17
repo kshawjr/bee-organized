@@ -53,7 +53,12 @@ export async function POST(req: NextRequest) {
     .single()
   if (!hubUser) return NextResponse.json({ error: 'no_hub_user_profile' }, { status: 403 })
 
-  let body: { type?: string; title?: string; description?: string }
+  let body: {
+    type?: string
+    title?: string
+    description?: string
+    attachments?: Array<{ path?: string; name?: string; size?: number; type?: string }>
+  }
   try { body = await req.json() } catch {
     return NextResponse.json({ error: 'invalid_json_body' }, { status: 400 })
   }
@@ -73,6 +78,36 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'description_must_be_1_2000_chars' }, { status: 400 })
   }
 
+  // ─── Attachments (optional) ───────────────────────────────────
+  // Each entry is metadata returned by /api/feedback/upload. We re-validate
+  // here as defense in depth: cap at 5, require the storage path to live under
+  // the caller's own user_id folder (prevents a tampered body from attaching
+  // someone else's — or an arbitrary — object to this item).
+  const rawAttachments = body.attachments
+  let attachments: Array<{ path: string; name: string; size: number; type: string; uploaded_at: string }> = []
+  if (rawAttachments !== undefined) {
+    if (!Array.isArray(rawAttachments)) {
+      return NextResponse.json({ error: 'attachments_must_be_array' }, { status: 400 })
+    }
+    if (rawAttachments.length > 5) {
+      return NextResponse.json({ error: 'too_many_attachments_max_5' }, { status: 400 })
+    }
+    const now = new Date().toISOString()
+    for (const a of rawAttachments) {
+      const path = String(a?.path || '')
+      if (!path || path.split('/')[0] !== user.id || path.includes('..')) {
+        return NextResponse.json({ error: 'invalid_attachment_path' }, { status: 400 })
+      }
+      attachments.push({
+        path,
+        name: String(a?.name || 'file').slice(0, 200),
+        size: Number.isFinite(a?.size) ? Number(a?.size) : 0,
+        type: String(a?.type || 'application/octet-stream').slice(0, 120),
+        uploaded_at: now,
+      })
+    }
+  }
+
   const { data: row, error } = await supabaseService
     .from('feedback_items')
     .insert({
@@ -82,6 +117,7 @@ export async function POST(req: NextRequest) {
       title,
       description,
       status: 'submitted',
+      attachments,
     })
     .select('*')
     .single()

@@ -25213,6 +25213,60 @@ function FeedbackStatusBadge({ status }) {
   )
 }
 
+// Human-readable byte size: "1.2 MB", "840 KB", "12 B".
+function feedbackFmtBytes(n) {
+  const b = Number(n) || 0
+  if (b < 1024) return `${b} B`
+  const kb = b / 1024
+  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`
+  const mb = kb / 1024
+  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`
+}
+
+function feedbackIsImage(type) {
+  return typeof type === 'string' && type.startsWith('image/')
+}
+
+// Build the signed-URL endpoint href for a stored attachment. Each path
+// segment is encoded so spaces/specials survive the catch-all route, and the
+// route 302-redirects to the real signed URL — so this works as both an <a
+// href> (click to open) and an <img src> (thumbnail follows the redirect).
+function feedbackAttUrl(path) {
+  return '/api/feedback/attachment/' + String(path || '').split('/').map(encodeURIComponent).join('/')
+}
+
+// A single attachment, used in My Items + Admin detail. Images render as a
+// thumbnail; everything else as a 📎 filename·size chip. Clicking opens the
+// file in a new tab via the signed-URL endpoint.
+function FeedbackAttachmentChip({ att, thumb = 80 }) {
+  const url = feedbackAttUrl(att.path)
+  if (feedbackIsImage(att.type)) {
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer" title={`${att.name} · ${feedbackFmtBytes(att.size)}`} style={{ display:'inline-block', textDecoration:'none' }}>
+        <img src={url} alt={att.name} style={{ width:`${thumb}px`, height:`${thumb}px`, objectFit:'cover', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.1)', display:'block', background:'#f0efe9' }} />
+      </a>
+    )
+  }
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" style={{ display:'inline-flex', alignItems:'center', gap:'6px', maxWidth:'220px', padding:'6px 10px', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.12)', background:'white', textDecoration:'none', color:'#1a2e2b', fontSize:'12px', fontFamily:'inherit' }}>
+      <span style={{ flexShrink:0 }}>📎</span>
+      <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{att.name}</span>
+      <span style={{ color:'#8a9e9a', flexShrink:0 }}>· {feedbackFmtBytes(att.size)}</span>
+    </a>
+  )
+}
+
+// Wrapped row of attachment chips. Returns null when there's nothing to show.
+function FeedbackAttachmentList({ attachments, thumb = 80 }) {
+  const atts = Array.isArray(attachments) ? attachments : []
+  if (atts.length === 0) return null
+  return (
+    <div style={{ display:'flex', flexWrap:'wrap', gap:'8px', alignItems:'center' }}>
+      {atts.map((a, i) => <FeedbackAttachmentChip key={a.path || i} att={a} thumb={thumb} />)}
+    </div>
+  )
+}
+
 // One card in the "My Items" tab — handles its own show-more collapse.
 function FeedbackItemCard({ item }) {
   const [expanded, setExpanded] = useState(false)
@@ -25245,6 +25299,12 @@ function FeedbackItemCard({ item }) {
           )}
         </div>
       )}
+      {Array.isArray(item.attachments) && item.attachments.length > 0 && (
+        <div style={{ marginTop:'12px', marginLeft:'26px' }}>
+          <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', marginBottom:'6px' }}>📎 {item.attachments.length} attachment{item.attachments.length !== 1 ? 's' : ''}</p>
+          <FeedbackAttachmentList attachments={item.attachments} thumb={80} />
+        </div>
+      )}
     </div>
   )
 }
@@ -25263,6 +25323,46 @@ function FeedbackModal({ onClose }) {
   const [submitError, setSubmitError] = useState(null)
   const [toast, setToast]       = useState(null)
   const bodyRef = useRef(null)
+
+  // Attachments — selected client-side, uploaded only at submit time. Each
+  // entry: { id, file, preview }. preview is an image data URL (or null).
+  const FB_MAX_FILES = 5
+  const FB_MAX_BYTES = 10 * 1024 * 1024
+  const [files, setFiles]       = useState([])
+  const [uploadProgress, setUploadProgress] = useState(null) // e.g. "Uploading 1 of 3…"
+  const fileInputRef = useRef(null)
+
+  function onPickFiles(e) {
+    const picked = Array.from(e.target.files || [])
+    e.target.value = '' // allow re-picking the same file after a remove
+    if (picked.length === 0) return
+    setSubmitError(null)
+    setFiles(prev => {
+      const next = [...prev]
+      for (const file of picked) {
+        if (next.length >= FB_MAX_FILES) {
+          setSubmitError(`You can attach up to ${FB_MAX_FILES} files.`)
+          break
+        }
+        if (file.size > FB_MAX_BYTES) {
+          setSubmitError(`"${file.name}" is larger than 10MB and was skipped.`)
+          continue
+        }
+        const entry = { id: `${file.name}-${file.size}-${file.lastModified}-${next.length}`, file, preview: null }
+        next.push(entry)
+        if (file.type && file.type.startsWith('image/')) {
+          const reader = new FileReader()
+          reader.onload = () => setFiles(cur => cur.map(f => f.id === entry.id ? { ...f, preview: reader.result } : f))
+          reader.readAsDataURL(file)
+        }
+      }
+      return next
+    })
+  }
+
+  function removeFile(id) {
+    setFiles(prev => prev.filter(f => f.id !== id))
+  }
 
   async function loadItems() {
     setLoading(true)
@@ -25294,24 +25394,43 @@ function FeedbackModal({ onClose }) {
     setSubmitting(true)
     setSubmitError(null)
     try {
+      // 1) Upload any selected files first, collecting their stored metadata.
+      //    A failure here leaves the form (and file selection) intact so the
+      //    user can retry without re-entering anything.
+      const uploaded = []
+      for (let i = 0; i < files.length; i++) {
+        setUploadProgress(`Uploading ${i + 1} of ${files.length}…`)
+        const fd = new FormData()
+        fd.append('file', files[i].file)
+        const upRes = await fetch('/api/feedback/upload', { method: 'POST', body: fd })
+        if (!upRes.ok) {
+          const err = await upRes.json().catch(() => ({}))
+          throw new Error(err.detail || err.error || `Upload failed (${upRes.status})`)
+        }
+        uploaded.push(await upRes.json())
+      }
+      setUploadProgress(null)
+
+      // 2) Create the feedback item with the uploaded attachment metadata.
       const res = await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, title: title.trim(), description: desc.trim() }),
+        body: JSON.stringify({ type, title: title.trim(), description: desc.trim(), attachments: uploaded }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
         throw new Error(err.error || `HTTP ${res.status}`)
       }
       // Reset form, switch to My Items, refresh, toast.
-      setTitle(''); setDesc(''); setType('bug')
+      setTitle(''); setDesc(''); setType('bug'); setFiles([])
       setTab('mine')
       setToast("Submitted! We'll review and respond.")
       await loadItems()
       if (bodyRef.current) bodyRef.current.scrollTop = 0
     } catch (e) {
-      setSubmitError('Could not submit — please try again.')
+      setSubmitError(e?.message ? `Could not submit — ${e.message}` : 'Could not submit — please try again.')
     } finally {
+      setUploadProgress(null)
       setSubmitting(false)
     }
   }
@@ -25388,9 +25507,40 @@ function FeedbackModal({ onClose }) {
                 <textarea value={desc} maxLength={2000} onChange={e => setDesc(e.target.value)} rows={6} placeholder="What happened (or what would you like)?" style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', resize:'vertical', lineHeight:1.5 }} />
               </div>
               <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5 }}>Be specific. Include steps to reproduce for bugs.</p>
+              {/* Attachments */}
+              <div>
+                <label style={{ display:'block', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'2px' }}>Attachments (optional)</label>
+                <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, marginBottom:'8px' }}>Up to 5 files, 10MB each. Screenshots/videos especially helpful.</p>
+                <input ref={fileInputRef} type="file" multiple onChange={onPickFiles} style={{ display:'none' }} />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                  disabled={files.length >= FB_MAX_FILES || submitting}
+                  style={{ padding:'9px 14px', borderRadius:'10px', border:'1.5px dashed rgba(0,0,0,0.2)', background:'white', cursor: (files.length >= FB_MAX_FILES || submitting) ? 'default' : 'pointer', fontFamily:'inherit', fontSize:'13px', fontWeight:600, color: (files.length >= FB_MAX_FILES) ? '#8a9e9a' : '#1a2e2b', opacity: (files.length >= FB_MAX_FILES || submitting) ? 0.55 : 1 }}>
+                  📎 {files.length === 0 ? 'Add file' : files.length >= FB_MAX_FILES ? 'Maximum 5 files' : 'Add another file'}
+                </button>
+                {files.length > 0 && (
+                  <div style={{ display:'flex', flexDirection:'column', gap:'8px', marginTop:'10px' }}>
+                    {files.map(f => (
+                      <div key={f.id} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'8px 10px', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'10px', background:'white' }}>
+                        {f.preview ? (
+                          <img src={f.preview} alt="" style={{ width:'40px', height:'40px', objectFit:'cover', borderRadius:'6px', flexShrink:0, border:'1px solid rgba(0,0,0,0.08)' }} />
+                        ) : (
+                          <span style={{ width:'40px', height:'40px', display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:'18px', background:'#f0efe9', borderRadius:'6px', flexShrink:0 }}>📄</span>
+                        )}
+                        <div style={{ minWidth:0, flex:1 }}>
+                          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{f.file.name}</p>
+                          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{feedbackFmtBytes(f.file.size)}</p>
+                        </div>
+                        <button type="button" onClick={() => removeFile(f.id)} disabled={submitting} aria-label={`Remove ${f.file.name}`} style={{ background:'none', border:'none', color:'#8a9e9a', cursor: submitting ? 'default' : 'pointer', fontSize:'20px', lineHeight:1, padding:'0 4px', flexShrink:0 }}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               {submitError && <p style={{ fontSize:'12px', color:'#b91c1c' }}>{submitError}</p>}
               <button onClick={handleSubmit} disabled={!canSubmit} style={{ padding:'12px', borderRadius:'10px', border:'none', cursor: canSubmit ? 'pointer' : 'default', fontFamily:'inherit', fontSize:'14px', fontWeight:700, color:'white', background: canSubmit ? '#1a2e2b' : 'rgba(26,46,43,0.35)' }}>
-                {submitting ? 'Submitting…' : 'Submit'}
+                {uploadProgress ? uploadProgress : submitting ? 'Submitting…' : 'Submit'}
               </button>
             </div>
           )}
@@ -26532,6 +26682,13 @@ function AdminFeedbackDetailModal({ item, onClose, onSaved }) {
             <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>Description</p>
             <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{item.description}</p>
           </div>
+          {/* Attachments */}
+          {Array.isArray(item.attachments) && item.attachments.length > 0 && (
+            <div>
+              <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>📎 Attachments ({item.attachments.length})</p>
+              <FeedbackAttachmentList attachments={item.attachments} thumb={88} />
+            </div>
+          )}
           {/* Status */}
           <div>
             <label style={{ display:'block', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>Status</label>
@@ -26654,7 +26811,12 @@ function AdminFeedbackScreen({ onPendingCountChange = () => {} }) {
           {filtered.map(it => (
             <button key={it.id} onClick={() => setSelected(it)} style={{ width:'100%', display:'grid', gridTemplateColumns:'28px 1fr 1.1fr 120px 110px', gap:'10px', alignItems:'center', padding:'11px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)', background:'white', border:'none', borderLeft:'none', borderRight:'none', cursor:'pointer', textAlign:'left', fontFamily:'inherit' }}>
               <span style={{ fontSize:'16px' }}>{it.type === 'bug' ? '🐛' : '✨'}</span>
-              <span style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{it.title}</span>
+              <span style={{ display:'flex', alignItems:'center', gap:'8px', minWidth:0 }}>
+                <span style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{it.title}</span>
+                {Array.isArray(it.attachments) && it.attachments.length > 0 && (
+                  <span style={{ flexShrink:0, fontSize:'11px', fontWeight:600, color:'#8a9e9a' }}>📎 {it.attachments.length}</span>
+                )}
+              </span>
               <span style={{ fontSize:'12px', color:'#4a5e5a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                 {it.submitter_name || 'Unknown'}{it.location_name ? ` · ${it.location_name}` : ''}
               </span>
