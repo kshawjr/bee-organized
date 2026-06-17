@@ -25114,7 +25114,7 @@ function SlideEditForm({ slide, isNew, onSave, onCancel, allChapters = [] }) {
 // Self-contained: owns its hover + open state, closes on outside click (a
 // document listener, so it's immune to the surrounding stacking contexts).
 // `compact` trims the label a touch on mobile so it doesn't crowd the top bar.
-function HelpIconButton({ onOpenGuide, onOpenManual, onOpen, title = 'Help', compact = false }) {
+function HelpIconButton({ onOpenGuide, onOpenManual, onOpenFeedback, onOpen, title = 'Help', compact = false }) {
   const [hover, setHover] = useState(false)
   const [open, setOpen] = useState(false)
   const [hoverItem, setHoverItem] = useState(null)
@@ -25128,6 +25128,7 @@ function HelpIconButton({ onOpenGuide, onOpenManual, onOpen, title = 'Help', com
   const items = [
     { key:'guide',  icon:'🚀', label:'Quick Start Guide', run:onOpenGuide },
     { key:'manual', icon:'📖', label:'Manual',            run:onOpenManual },
+    { key:'feedback', icon:'🐛', label:'Report a Bug / Suggest a Feature', run:onOpenFeedback },
   ]
   return (
     <div ref={wrapRef} style={{ position:'relative', display:'inline-flex', flexShrink:0 }}>
@@ -25163,6 +25164,243 @@ function HelpIconButton({ onOpenGuide, onOpenManual, onOpen, title = 'Help', com
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════
+//  FEEDBACK / BUG-REPORT system
+//  - FeedbackModal: user-facing modal (My Items + Submit tabs), reached
+//    from the "? Help" pill's 3rd option.
+//  - AdminFeedbackScreen: super_admin / admin triage view, a tab in the
+//    Admin area.
+//  Both share FEEDBACK_STATUS_CONF + the relative-time helper below.
+// ═══════════════════════════════════════════════════════
+
+// Status → display config. Keys mirror the DB check constraint on
+// feedback_items.status. Colors per Kevin's design spec.
+const FEEDBACK_STATUS_CONF = {
+  submitted:    { label:'Submitted',    color:'#6b7280', bg:'rgba(107,114,128,0.12)' },
+  under_review: { label:'Under Review', color:'#2563eb', bg:'rgba(37,99,235,0.12)'  },
+  planned:      { label:'Planned',      color:'#7c3aed', bg:'rgba(124,58,237,0.12)' },
+  in_progress:  { label:'In Progress',  color:'#d97706', bg:'rgba(217,119,6,0.14)'  },
+  shipped:      { label:'Shipped',      color:'#16a34a', bg:'rgba(22,163,74,0.13)'  },
+  declined:     { label:'Declined',     color:'#b91c1c', bg:'rgba(185,28,28,0.10)'  },
+}
+const FEEDBACK_STATUS_ORDER = ['submitted','under_review','planned','in_progress','shipped','declined']
+
+function feedbackTimeAgo(iso) {
+  if (!iso) return ''
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return ''
+  const diff = Date.now() - then
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins} minute${mins !== 1 ? 's' : ''} ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs} hour${hrs !== 1 ? 's' : ''} ago`
+  const days = Math.floor(hrs / 24)
+  if (days < 30) return `${days} day${days !== 1 ? 's' : ''} ago`
+  return new Date(iso).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })
+}
+
+function FeedbackStatusBadge({ status }) {
+  const conf = FEEDBACK_STATUS_CONF[status] || FEEDBACK_STATUS_CONF.submitted
+  return (
+    <span style={{ display:'inline-block', padding:'3px 9px', borderRadius:'20px', fontSize:'11px', fontWeight:700, color:conf.color, background:conf.bg, whiteSpace:'nowrap', lineHeight:1.3 }}>
+      {conf.label}
+    </span>
+  )
+}
+
+// One card in the "My Items" tab — handles its own show-more collapse.
+function FeedbackItemCard({ item }) {
+  const [expanded, setExpanded] = useState(false)
+  const long = (item.description || '').length > 150
+  const shown = !long || expanded ? item.description : `${item.description.slice(0, 150)}…`
+  return (
+    <div style={{ border:'1px solid rgba(0,0,0,0.08)', borderRadius:'12px', padding:'14px', background:'white' }}>
+      <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:'10px', marginBottom:'6px' }}>
+        <div style={{ display:'flex', alignItems:'flex-start', gap:'8px', minWidth:0 }}>
+          <span style={{ fontSize:'18px', lineHeight:1.2, flexShrink:0 }}>{item.type === 'bug' ? '🐛' : '✨'}</span>
+          <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', lineHeight:1.35, wordBreak:'break-word' }}>{item.title}</p>
+        </div>
+        <FeedbackStatusBadge status={item.status} />
+      </div>
+      <p style={{ fontSize:'11px', color:'#8a9e9a', margin:'0 0 8px 26px' }}>{feedbackTimeAgo(item.created_at)}</p>
+      <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.55, margin:'0 0 0 26px', whiteSpace:'pre-wrap', wordBreak:'break-word' }}>
+        {shown}
+        {long && (
+          <button onClick={() => setExpanded(e => !e)} style={{ marginLeft:'6px', background:'none', border:'none', color:'#2563eb', fontFamily:'inherit', fontSize:'13px', fontWeight:600, cursor:'pointer', padding:0 }}>
+            {expanded ? 'Show less' : 'Show more'}
+          </button>
+        )}
+      </p>
+      {item.admin_response && (
+        <div style={{ marginTop:'12px', marginLeft:'26px', padding:'10px 12px', background:'rgba(168,201,196,0.14)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'10px' }}>
+          <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b', marginBottom:'4px' }}>💬 Response from team</p>
+          <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.55, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{item.admin_response}</p>
+          {item.admin_response_at && (
+            <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'5px' }}>{feedbackTimeAgo(item.admin_response_at)}</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FeedbackModal({ onClose }) {
+  const [tab, setTab]           = useState('mine') // 'mine' (default) | 'submit'
+  const [items, setItems]       = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [loadError, setLoadError] = useState(null)
+
+  // Submit form
+  const [type, setType]         = useState('bug')
+  const [title, setTitle]       = useState('')
+  const [desc, setDesc]         = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState(null)
+  const [toast, setToast]       = useState(null)
+  const bodyRef = useRef(null)
+
+  async function loadItems() {
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const res = await fetch('/api/feedback')
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      setItems(Array.isArray(data.items) ? data.items : [])
+    } catch (e) {
+      setLoadError("Couldn't load your items. Please try again.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { loadItems() }, [])
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 3200)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  const canSubmit = title.trim().length > 0 && desc.trim().length > 0 && !submitting
+
+  async function handleSubmit() {
+    if (!canSubmit) return
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      const res = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, title: title.trim(), description: desc.trim() }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error || `HTTP ${res.status}`)
+      }
+      // Reset form, switch to My Items, refresh, toast.
+      setTitle(''); setDesc(''); setType('bug')
+      setTab('mine')
+      setToast("Submitted! We'll review and respond.")
+      await loadItems()
+      if (bodyRef.current) bodyRef.current.scrollTop = 0
+    } catch (e) {
+      setSubmitError('Could not submit — please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const tabBtn = (key, label) => (
+    <button
+      onClick={() => setTab(key)}
+      style={{ flex:1, padding:'11px', background:'none', border:'none', borderBottom: tab === key ? '2px solid #1a2e2b' : '2px solid transparent', cursor:'pointer', fontFamily:'inherit', fontSize:'13px', fontWeight: tab === key ? 700 : 500, color: tab === key ? '#1a2e2b' : '#8a9e9a' }}>
+      {label}
+    </button>
+  )
+
+  return (
+    <div onMouseDown={e => { if (e.target === e.currentTarget) onClose() }} style={{ position:'fixed', inset:0, zIndex:10120, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px', background:'rgba(26,46,43,0.55)', fontFamily:'"DM Sans",system-ui,sans-serif' }}>
+      <div style={{ background:'white', borderRadius:'16px', width:'100%', maxWidth:'600px', maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 24px 80px rgba(0,0,0,0.25)', overflow:'hidden' }}>
+        {/* Sticky header */}
+        <div style={{ padding:'16px 20px', borderBottom:'1px solid rgba(0,0,0,0.07)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', flexShrink:0 }}>
+          <h2 style={{ fontSize:'17px', fontFamily:'Georgia,serif', color:'#1a2e2b', margin:0 }}>🐛 Feedback</h2>
+          <button onClick={onClose} aria-label="Close" style={{ background:'none', border:'none', color:'#8a9e9a', cursor:'pointer', fontSize:'24px', lineHeight:1, padding:0 }}>×</button>
+        </div>
+        {/* Tab strip */}
+        <div style={{ display:'flex', borderBottom:'1px solid rgba(0,0,0,0.07)', flexShrink:0 }}>
+          {tabBtn('mine', 'My Items')}
+          {tabBtn('submit', 'Submit')}
+        </div>
+        {/* Scrollable body */}
+        <div ref={bodyRef} style={{ padding:'18px 20px', overflowY:'auto', flex:1 }}>
+          {tab === 'mine' ? (
+            loading ? (
+              <p style={{ fontSize:'13px', color:'#8a9e9a', textAlign:'center', padding:'30px 0' }}>Loading…</p>
+            ) : loadError ? (
+              <div style={{ textAlign:'center', padding:'24px 0' }}>
+                <p style={{ fontSize:'13px', color:'#b91c1c', marginBottom:'10px' }}>{loadError}</p>
+                <button onClick={loadItems} style={{ padding:'8px 16px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Retry</button>
+              </div>
+            ) : items.length === 0 ? (
+              <div style={{ textAlign:'center', padding:'34px 16px' }}>
+                <div style={{ fontSize:'34px', marginBottom:'10px' }}>📭</div>
+                <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>You haven't submitted anything yet</p>
+                <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>Switch to the Submit tab to file your first bug report or feature request.</p>
+              </div>
+            ) : (
+              <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
+                {items.map(it => <FeedbackItemCard key={it.id} item={it} />)}
+              </div>
+            )
+          ) : (
+            <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
+              {/* Type toggle */}
+              <div>
+                <label style={{ display:'block', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'7px' }}>Type</label>
+                <div style={{ display:'flex', gap:'8px' }}>
+                  {[{ k:'bug', icon:'🐛', label:'Bug' }, { k:'feature', icon:'✨', label:'Feature' }].map(o => (
+                    <button key={o.k} onClick={() => setType(o.k)} style={{ flex:1, padding:'10px', borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', fontSize:'13px', fontWeight:600, border:'1.5px solid', borderColor: type === o.k ? '#1a2e2b' : 'rgba(0,0,0,0.1)', background: type === o.k ? '#1a2e2b' : 'white', color: type === o.k ? 'white' : '#4a5e5a' }}>
+                      {o.icon} {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {/* Title */}
+              <div>
+                <label style={{ display:'flex', alignItems:'center', justifyContent:'space-between', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>
+                  <span>Title</span>
+                  <span style={{ fontSize:'11px', fontWeight:500, color: title.length > 100 ? '#b91c1c' : '#8a9e9a' }}>{title.length}/100</span>
+                </label>
+                <input value={title} maxLength={100} onChange={e => setTitle(e.target.value)} placeholder="Short summary" style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
+              </div>
+              {/* Description */}
+              <div>
+                <label style={{ display:'flex', alignItems:'center', justifyContent:'space-between', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>
+                  <span>Description</span>
+                  <span style={{ fontSize:'11px', fontWeight:500, color: desc.length > 2000 ? '#b91c1c' : '#8a9e9a' }}>{desc.length}/2000</span>
+                </label>
+                <textarea value={desc} maxLength={2000} onChange={e => setDesc(e.target.value)} rows={6} placeholder="What happened (or what would you like)?" style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', resize:'vertical', lineHeight:1.5 }} />
+              </div>
+              <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5 }}>Be specific. Include steps to reproduce for bugs.</p>
+              {submitError && <p style={{ fontSize:'12px', color:'#b91c1c' }}>{submitError}</p>}
+              <button onClick={handleSubmit} disabled={!canSubmit} style={{ padding:'12px', borderRadius:'10px', border:'none', cursor: canSubmit ? 'pointer' : 'default', fontFamily:'inherit', fontSize:'14px', fontWeight:700, color:'white', background: canSubmit ? '#1a2e2b' : 'rgba(26,46,43,0.35)' }}>
+                {submitting ? 'Submitting…' : 'Submit'}
+              </button>
+            </div>
+          )}
+        </div>
+        {toast && (
+          <div style={{ position:'absolute', top:'14px', left:'50%', transform:'translateX(-50%)', background:'rgba(34,197,94,0.97)', color:'white', padding:'9px 16px', borderRadius:'10px', fontSize:'13px', fontWeight:600, boxShadow:'0 8px 24px rgba(0,0,0,0.2)', zIndex:10 }}>
+            {toast}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -26244,8 +26482,222 @@ function VariableReference() {
   )
 }
 
+// Admin triage detail modal — opened by clicking a row in AdminFeedbackScreen.
+function AdminFeedbackDetailModal({ item, onClose, onSaved }) {
+  const [status, setStatus]   = useState(item.status)
+  const [response, setResponse] = useState(item.admin_response || '')
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState(null)
+
+  async function save() {
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/admin/feedback/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, admin_response: response.trim() || null }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error || `HTTP ${res.status}`)
+      }
+      const updated = await res.json()
+      onSaved(updated)
+    } catch (e) {
+      setError('Could not save — please try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div onMouseDown={e => { if (e.target === e.currentTarget) onClose() }} style={{ position:'fixed', inset:0, zIndex:10130, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px', background:'rgba(26,46,43,0.55)', fontFamily:'"DM Sans",system-ui,sans-serif' }}>
+      <div style={{ background:'white', borderRadius:'16px', width:'100%', maxWidth:'600px', maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 24px 80px rgba(0,0,0,0.25)', overflow:'hidden' }}>
+        <div style={{ padding:'16px 20px', borderBottom:'1px solid rgba(0,0,0,0.07)', display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:'12px', flexShrink:0 }}>
+          <h2 style={{ fontSize:'16px', fontFamily:'Georgia,serif', color:'#1a2e2b', margin:0, lineHeight:1.35 }}>
+            {item.type === 'bug' ? '🐛' : '✨'} {item.title}
+          </h2>
+          <button onClick={onClose} aria-label="Close" style={{ background:'none', border:'none', color:'#8a9e9a', cursor:'pointer', fontSize:'24px', lineHeight:1, padding:0, flexShrink:0 }}>×</button>
+        </div>
+        <div style={{ padding:'18px 20px', overflowY:'auto', flex:1, display:'flex', flexDirection:'column', gap:'16px' }}>
+          {/* Submitter info */}
+          <div style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>
+            <div><strong>From:</strong> {item.submitter_name || 'Unknown'}{item.submitter_email ? ` · ${item.submitter_email}` : ''}</div>
+            <div><strong>Location:</strong> {item.location_name || '—'}</div>
+            <div><strong>Submitted:</strong> {feedbackTimeAgo(item.created_at)}</div>
+          </div>
+          {/* Description */}
+          <div>
+            <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>Description</p>
+            <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{item.description}</p>
+          </div>
+          {/* Status */}
+          <div>
+            <label style={{ display:'block', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>Status</label>
+            <select value={status} onChange={e => setStatus(e.target.value)} style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', background:'white', cursor:'pointer' }}>
+              {FEEDBACK_STATUS_ORDER.map(s => (
+                <option key={s} value={s}>{FEEDBACK_STATUS_CONF[s].label}</option>
+              ))}
+            </select>
+          </div>
+          {/* Admin response */}
+          <div>
+            <label style={{ display:'block', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>Response to user</label>
+            <textarea value={response} onChange={e => setResponse(e.target.value)} rows={4} placeholder="Optional — shown to the submitter on their item." style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', resize:'vertical', lineHeight:1.5 }} />
+          </div>
+          {error && <p style={{ fontSize:'12px', color:'#b91c1c' }}>{error}</p>}
+        </div>
+        <div style={{ padding:'14px 20px', borderTop:'1px solid rgba(0,0,0,0.07)', display:'flex', justifyContent:'flex-end', gap:'10px', flexShrink:0 }}>
+          <button onClick={onClose} style={{ padding:'10px 16px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:'pointer' }}>Close</button>
+          <button onClick={save} disabled={saving} style={{ padding:'10px 18px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1 }}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Admin-area "Feedback" tab — org-wide triage list + detail modal.
+function AdminFeedbackScreen({ onPendingCountChange = () => {} }) {
+  const [items, setItems]       = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [error, setError]       = useState(null)
+  const [typeFilter, setTypeFilter]     = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [locFilter, setLocFilter]       = useState('all')
+  const [userQuery, setUserQuery]       = useState('')
+  const [selected, setSelected] = useState(null)
+
+  async function load() {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/admin/feedback')
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      setItems(Array.isArray(data.items) ? data.items : [])
+    } catch (e) {
+      setError("Couldn't load feedback. Please try again.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [])
+
+  useEffect(() => {
+    onPendingCountChange(items.filter(i => i.status === 'submitted').length)
+  }, [items, onPendingCountChange])
+
+  // Distinct locations present in the data, for the filter dropdown.
+  const locOptions = (() => {
+    const seen = new Map()
+    items.forEach(i => { if (i.location_id) seen.set(i.location_id, i.location_name || i.location_id) })
+    return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+  })()
+
+  const filtered = items.filter(i => {
+    if (typeFilter !== 'all' && i.type !== typeFilter) return false
+    if (statusFilter !== 'all' && i.status !== statusFilter) return false
+    if (locFilter !== 'all' && i.location_id !== locFilter) return false
+    if (userQuery.trim()) {
+      const q = userQuery.trim().toLowerCase()
+      const hay = `${i.submitter_name || ''} ${i.submitter_email || ''}`.toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  })
+
+  const selStyle = { padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#1a2e2b', background:'white', cursor:'pointer' }
+
+  return (
+    <div style={{ padding:'14px 1.25rem 1rem', fontFamily:'DM Sans,system-ui,sans-serif' }}>
+      {/* Filter strip */}
+      <div style={{ display:'flex', flexWrap:'wrap', gap:'8px', marginBottom:'14px' }}>
+        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} style={selStyle}>
+          <option value="all">All types</option>
+          <option value="bug">🐛 Bugs</option>
+          <option value="feature">✨ Features</option>
+        </select>
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={selStyle}>
+          <option value="all">All statuses</option>
+          {FEEDBACK_STATUS_ORDER.map(s => (
+            <option key={s} value={s}>{FEEDBACK_STATUS_CONF[s].label}</option>
+          ))}
+        </select>
+        <select value={locFilter} onChange={e => setLocFilter(e.target.value)} style={selStyle}>
+          <option value="all">All locations</option>
+          {locOptions.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+        </select>
+        <input value={userQuery} onChange={e => setUserQuery(e.target.value)} placeholder="Search by user name/email" style={{ ...selStyle, cursor:'text', flex:'1 1 180px', minWidth:'150px' }} />
+      </div>
+
+      {loading ? (
+        <p style={{ fontSize:'13px', color:'#8a9e9a', textAlign:'center', padding:'30px 0' }}>Loading…</p>
+      ) : error ? (
+        <div style={{ textAlign:'center', padding:'24px 0' }}>
+          <p style={{ fontSize:'13px', color:'#b91c1c', marginBottom:'10px' }}>{error}</p>
+          <button onClick={load} style={{ padding:'8px 16px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Retry</button>
+        </div>
+      ) : filtered.length === 0 ? (
+        <p style={{ fontSize:'13px', color:'#8a9e9a', textAlign:'center', padding:'30px 0' }}>
+          {items.length === 0 ? 'No feedback submitted yet.' : 'No items match these filters.'}
+        </p>
+      ) : (
+        <div style={{ background:'white', border:'1px solid rgba(0,0,0,0.08)', borderRadius:'12px', overflow:'hidden' }}>
+          {/* Header row (≥640px) */}
+          <div className="bee-fb-row bee-fb-head" style={{ display:'grid', gridTemplateColumns:'28px 1fr 1.1fr 120px 110px', gap:'10px', padding:'10px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)', fontSize:'11px', fontWeight:700, color:'#8a9e9a' }}>
+            <span></span><span>Title</span><span>Submitter</span><span>Status</span><span>Submitted</span>
+          </div>
+          {filtered.map(it => (
+            <button key={it.id} onClick={() => setSelected(it)} style={{ width:'100%', display:'grid', gridTemplateColumns:'28px 1fr 1.1fr 120px 110px', gap:'10px', alignItems:'center', padding:'11px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)', background:'white', border:'none', borderLeft:'none', borderRight:'none', cursor:'pointer', textAlign:'left', fontFamily:'inherit' }}>
+              <span style={{ fontSize:'16px' }}>{it.type === 'bug' ? '🐛' : '✨'}</span>
+              <span style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{it.title}</span>
+              <span style={{ fontSize:'12px', color:'#4a5e5a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                {it.submitter_name || 'Unknown'}{it.location_name ? ` · ${it.location_name}` : ''}
+              </span>
+              <span><FeedbackStatusBadge status={it.status} /></span>
+              <span style={{ fontSize:'11px', color:'#8a9e9a' }}>{feedbackTimeAgo(it.created_at)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {selected && (
+        <AdminFeedbackDetailModal
+          item={selected}
+          onClose={() => setSelected(null)}
+          onSaved={(updated) => {
+            setItems(prev => prev.map(i => i.id === updated.id ? { ...i, ...updated } : i))
+            setSelected(null)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
 function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, onStatusChange, users=USERS_DATA, setUsers=()=>{}, people=[], setPeople=()=>{}, binPeople=[], setBinPeople=()=>{}, partners=[], setPartners=()=>{}, guideSlides=[], setGuideSlides=()=>{}, manualSlides=[], setManualSlides=()=>{}, initialLocations=null }) {
   const [adminTab, setAdminTab]   = useState('locations')
+  // Count of 'submitted' (unhandled) feedback items, reported up by
+  // AdminFeedbackScreen so the Feedback tab can show a badge + red dot.
+  const [feedbackPending, setFeedbackPending] = useState(0)
+  const handleFeedbackPending = React.useCallback((n) => setFeedbackPending(n), [])
+  const showFeedbackTab = role === 'super_admin' || role === 'corporate' || role === 'admin'
+  // Prime the badge count on mount so the unhandled-feedback indicator shows
+  // before the operator ever opens the Feedback tab. AdminFeedbackScreen keeps
+  // it fresh thereafter via onPendingCountChange.
+  useEffect(() => {
+    if (!showFeedbackTab) return
+    let cancelled = false
+    fetch('/api/admin/feedback?status=submitted')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (!cancelled && d && Array.isArray(d.items)) setFeedbackPending(d.items.length) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [showFeedbackTab])
   // Real Supabase locations when provided by App (super_admin/corporate
   // sign-ins via page.tsx fetch); falls back to mock for view-as flows
   // and demo paths where initialLocations is null.
@@ -26306,7 +26758,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
 
           {/* Sub-tabs — native <select> on mobile (<768px), pill row at ≥768px. */}
           {(()=>{
-            const adminTabs = [{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'content',label:'✏️ Content'}]:[]),...(role==='super_admin'?[{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])]
+            const adminTabs = [{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'content',label:'✏️ Content'}]:[]),...(showFeedbackTab?[{key:'feedback',label:'🐛 Feedback'}]:[]),...(role==='super_admin'?[{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])]
             return (
               <>
                 <select
@@ -26316,13 +26768,16 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
                   onChange={e=>{ setAdminTab(e.target.value); setSearch('') }}
                   style={{ width:'100%', padding:'12px 38px 12px 14px', marginTop:'4px', borderRadius:'10px', border:'none', background:'white', color:'#1a2e2b', fontFamily:'inherit', fontWeight:600, cursor:'pointer', appearance:'none', backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%231a2e2b' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat:'no-repeat', backgroundPosition:'right 14px center' }}>
                   {adminTabs.map(t=>(
-                    <option key={t.key} value={t.key}>{t.label}</option>
+                    <option key={t.key} value={t.key}>{t.key==='feedback'&&feedbackPending>0?`${t.label} (${feedbackPending})`:t.label}</option>
                   ))}
                 </select>
                 <div className="bee-tab-pills" style={{ display:'flex', gap:'4px', background:'rgba(0,0,0,0.15)', borderRadius:'10px', padding:'3px', marginTop:'4px' }}>
                   {adminTabs.map(t=>(
-                    <button key={t.key} onClick={()=>{ setAdminTab(t.key); setSearch('') }} style={{ flex:1, padding:'7px', borderRadius:'8px', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', fontWeight:adminTab===t.key?600:400, background:adminTab===t.key?'white':'transparent', color:adminTab===t.key?'#1a2e2b':'rgba(168,201,196,0.7)' }}>
-                      {t.label}
+                    <button key={t.key} onClick={()=>{ setAdminTab(t.key); setSearch('') }} style={{ position:'relative', flex:1, padding:'7px', borderRadius:'8px', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', fontWeight:adminTab===t.key?600:400, background:adminTab===t.key?'white':'transparent', color:adminTab===t.key?'#1a2e2b':'rgba(168,201,196,0.7)', display:'inline-flex', alignItems:'center', justifyContent:'center', gap:'5px' }}>
+                      <span>{t.label}</span>
+                      {t.key==='feedback'&&feedbackPending>0&&(
+                        <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', minWidth:'16px', height:'16px', padding:'0 4px', borderRadius:'8px', background:'#ef4444', color:'white', fontSize:'10px', fontWeight:700, lineHeight:1 }}>{feedbackPending}</span>
+                      )}
                     </button>
                   ))}
                 </div>
@@ -26408,6 +26863,8 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
             }}
             locations={locations}
           />
+        ) : adminTab==='feedback' ? (
+          <AdminFeedbackScreen onPendingCountChange={handleFeedbackPending} />
         ) : adminTab==='pricing' ? (
           <PricingManagementTab />
         ) : adminTab==='configure' ? (
@@ -27973,6 +28430,8 @@ export default function App({
   // Hive Hub Manual: reference-only, never auto-opens, no dismiss flag.
   const [manualSlides, setManualSlides]     = useState(Array.isArray(initialManualSlides) ? initialManualSlides : [])
   const [showManual, setShowManual]         = useState(false)
+  // Feedback / bug-report modal — opened from the "? Help" pill's 3rd option.
+  const [showFeedback, setShowFeedback]     = useState(false)
   // Seat pricing: single source of truth from Supabase tier_prices. Falls back
   // to DEFAULT_TIER_PRICES synthetic rows if the table is empty / unmigrated,
   // so renders never crash on a fresh environment.
@@ -28397,7 +28856,7 @@ if (Array.isArray(initialPeople)) return
           style={{ width:'44px', height:'44px', display:'flex', alignItems:'center', justifyContent:'center', background:'none', border:'none', cursor:'pointer', flexShrink:0, color:'rgba(168,201,196,0.85)', fontSize:'18px' }}>
           🔍
         </button>
-        <HelpIconButton onOpenGuide={openGuide} onOpenManual={()=>{ dismissGuideHint(); setShowManual(true) }} onOpen={dismissGuideHint} compact title="Help" />
+        <HelpIconButton onOpenGuide={openGuide} onOpenManual={()=>{ dismissGuideHint(); setShowManual(true) }} onOpenFeedback={()=>{ dismissGuideHint(); setShowFeedback(true) }} onOpen={dismissGuideHint} compact title="Help" />
         <button
           onClick={()=>setShowMobileProfile(v=>!v)}
           aria-label="Profile menu"
@@ -28788,6 +29247,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         open={showManual}
         onClose={() => setShowManual(false)}
       />
+      {showFeedback && <FeedbackModal onClose={() => setShowFeedback(false)} />}
       <LocPickerDropdown />
 
       {/* Sidebar nav - desktop only */}
@@ -28802,7 +29262,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
               <p style={{ fontSize:'14px', fontWeight:700, color:'white', fontFamily:'Georgia,serif', lineHeight:1 }}>Bee Hub</p>
               <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.5)', marginTop:'2px' }}>Bee Organized</p>
             </div>
-            <HelpIconButton onOpenGuide={openGuide} onOpenManual={()=>{ dismissGuideHint(); setShowManual(true) }} onOpen={dismissGuideHint} title="Help" />
+            <HelpIconButton onOpenGuide={openGuide} onOpenManual={()=>{ dismissGuideHint(); setShowManual(true) }} onOpenFeedback={()=>{ dismissGuideHint(); setShowFeedback(true) }} onOpen={dismissGuideHint} title="Help" />
           </div>
         </div>
         {/* Nav items */}
