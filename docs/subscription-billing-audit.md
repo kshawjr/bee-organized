@@ -30,7 +30,7 @@
 | Column | Type | Allowed values (code-enforced) | Written by |
 |---|---|---|---|
 | `payment_source` | text | PATCH allows `none, direct, prepaid_corporate, corporate_sponsored, corporate, stripe`; invite-owner offers only `prepaid_corporate, corporate_sponsored, direct` | `subscription/route.ts:96`, `convert-billing/route.ts:164` (→direct), `invite-owner/route.ts:369` |
-| `subscription_status` | text | PATCH allows `deferred, trial, active, past_due, canceled`. `inactive` is **read** but not in the allow-list (legacy, DB-edit only) | `subscription/route.ts:82`, `complete-onboarding/route.ts:45` (→active), `convert-billing/route.ts:165` (→active), `invite-owner/route.ts:371` (→deferred) |
+| `subscription_status` | text | PATCH allows `deferred, active, past_due, canceled`. `inactive` is **read** but not in the allow-list (legacy, DB-edit only). `trial` was removed (Phase 3C) — nothing ever set or honored it. | `subscription/route.ts:82`, `complete-onboarding/route.ts:45` (→active), `convert-billing/route.ts:165` (→active), `invite-owner/route.ts:371` (→deferred) |
 | `lifecycle_status` | text | `onboarding, active, paused, inactive` (no code validator) | `launch/route.ts:46` (→active), `admin/locations/route.ts:185` (→onboarding), `invite-owner/route.ts:372` |
 | `subscription_plan` | text | `owner_annual` seen; no validator | `subscription/route.ts:108`, `invite-owner/route.ts:373` |
 | `paid_through_date` | date | YYYY-MM-DD; NULL for sponsored | `subscription/route.ts:100`, `convert-billing/route.ts:166`, `invite-owner/route.ts:370` |
@@ -111,7 +111,7 @@ Three **independent** status fields (launch.route explicitly documents they don'
 
 **`subscription_status`** (billing UI, only matters post-launch):
 - initial `deferred` (invite-owner / default) → `active` on onboarding pay (`complete-onboarding:45`) **or** convert-billing (`convert-billing:165`) **or** super_admin PATCH.
-- `trial`, `past_due`, `canceled` reachable **only via manual super_admin PATCH** — no automation, no Stripe webhook.
+- `past_due`, `canceled` reachable **only via manual super_admin PATCH** — no automation, no Stripe webhook. (`trial` removed in Phase 3C — was dead value.)
 - `past_due` → forces Hive read-only + PastDueBar (`BeeHub.jsx:20037,20210`) but **does not block lead intake/drips**; the "14-day grace" countdown is **hardcoded**, no real clock.
 
 **`lifecycle_status`** (the real functional gate):
@@ -263,7 +263,7 @@ Complexity is rough eng effort (S≈hours, M≈1–3 days, L≈1 sprint, XL≈mu
 7. **Renewal anniversary** is hardcoded to March 1 for everyone. Correct, or do locations need individual anniversaries? (Affects proration + future Stripe subscription setup.)
 8. **Past-due policy:** the 14-day grace is fake and enforces nothing. What should actually happen when payment fails / lapses?
 9. **Corporate-sponsored end-of-life:** the tracking columns are dead and conversion is fully manual. How does HQ actually get reminded/billed, and should the app track sponsorship expiry?
-10. **`trial` status** exists in the allow-list but nothing sets/honors it — build trials or drop it?
+10. ~~**`trial` status** exists in the allow-list but nothing sets/honors it — build trials or drop it?~~ **RESOLVED (Phase 3C):** Dropped entirely. CHECK constraint tightened to 4 values; API allow-list and TypeScript types updated. If trials are ever needed, add as a new feature from scratch.
 11. **Seat-count reduction:** owners can release a seat (back to pool, still billable) but can't *remove* one. Intended, or should owners be able to lower their paid count (with refund/credit policy)?
 12. **Stripe account reality:** does a Bee Organized Stripe account exist with products/prices for the four tiers? (No env vars suggests no integration has ever been attempted.)
 
