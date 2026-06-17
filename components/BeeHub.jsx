@@ -10798,15 +10798,6 @@ const D_UPCOMING = [
   { id:'a3', locationId:'loc_scottsdale', client:'Rachel Kim',     location:'Boulder',          type:'In-Person Assessment', time:'9:30 AM',  date:'Tomorrow', ref:'REQ-1055' },
 ]
 
-const D_RECENT_ACTIVITY = [
-  { icon:'✨', text:'New client - Megan Torres · Aurora',          location:'Aurora',           ts:'1h ago',    color:'#6366f1' },
-  { icon:'📲', text:'Reached out to Jennifer Torres · Denver',   location:'Denver',           ts:'2h ago',    color:'#f97316' },
-  { icon:'⚡', text:'Claire Davidson sent to Jobber · Aurora',   location:'Aurora',           ts:'Yesterday', color:'#10b981' },
-  { icon:'📅', text:'Assessment scheduled - Rachel Kim · Boulder', location:'Boulder',        ts:'Yesterday', color:'#0ea5e9' },
-  { icon:'💰', text:'Invoice paid - Diana Walsh · Boulder',       location:'Boulder',          ts:'2 days ago',color:'#22c55e' },
-  { icon:'🏆', text:'Closed Won - Maria Gonzalez · Aurora',      location:'Aurora',           ts:'3 days ago',color:'#d4a046' },
-]
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // ─── Stat Card ────────────────────────────────────────────────────────────────
@@ -16991,15 +16982,6 @@ function SmsAddonCard({ settings, updateLocation }) {
   )
 }
 
-// ─── Subscription Card (Profile - simple recap) ───────────────────────────────
-// ─── Billing History Sheet ────────────────────────────────────────────────────
-const BILLING_HISTORY = [
-  { id:'inv001', date:'Mar 1, 2026',  desc:'Annual Renewal - Owner + 2 seats + SMS', amount:1075, method:'ACH ····7823', status:'paid' },
-  { id:'inv002', date:'Jan 12, 2026', desc:'SMS Messaging Add-on (prorated)',         amount:18,   method:'ACH ····7823', status:'paid' },
-  { id:'inv003', date:'Oct 15, 2025', desc:'Activation - Owner seat (prorated)',      amount:314,  method:'ACH ····7823', status:'paid' },
-  { id:'inv004', date:'Oct 15, 2025', desc:'Manager seat - Jessica Rivera (prorated)',amount:243,  method:'ACH ····7823', status:'paid' },
-]
-
 // Format an integer cent amount as "$1,650.00".
 function fmtCents(cents) {
   return '$' + (Number(cents || 0) / 100).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 })
@@ -17124,92 +17106,6 @@ function BillingHistorySheet({ onClose, locationId=null }) {
         </div>
       </div>
     </div>
-  )
-}
-
-function SubscriptionCard({ profile, settings, locationId='loc1' }) {
-  const tierPricesCtx = useContext(TierPricesContext)
-  const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
-  const livePrices = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
-  const [showUpdateModal, setShowUpdateModal] = useState(false)
-  const [showHistory, setShowHistory]         = useState(false)
-  const [payMethod, setPayMethod] = useState(null)
-  const rc    = FRANCHISE_ROLES.find(r=>r.key===profile.plan)||FRANCHISE_ROLES[0]
-  const price = getTierPrice(profile.plan) || getTierPrice('owner')
-  const smsEnabled = settings?.location?.smsEnabled || false
-  const renewalUsers = useContext(LocationUsersContext) || USERS_DATA
-  const renewal = calcRenewalTotal(locationId, smsEnabled, livePrices, renewalUsers)
-  // Always include the owner seat if no users found (owner may not be in USERS_DATA)
-  const smsPrice = APP_ADDONS.find(a=>a.id==='sms')?.price || 0
-  const renewalTotal = renewal.total > 0 ? renewal.total : price + (smsEnabled ? smsPrice : 0)
-  const renewalSeats = renewal.users.length > 0 ? renewal.users.length : 1
-  const sc = {
-    active:  { color:'#22c55e', bg:'rgba(34,197,94,0.08)',  border:'rgba(34,197,94,0.2)',  label:'Active',  icon:'✅' },
-    pastdue: { color:'#ef4444', bg:'rgba(239,68,68,0.08)',  border:'rgba(239,68,68,0.2)',  label:'Past Due',icon:'⚠️' },
-    inactive:{ color:'#8a9e9a', bg:'rgba(138,158,154,0.08)',border:'rgba(138,158,154,0.2)',label:'Inactive',icon:'⏸' },
-  }[profile.subStatus||'active']
-
-  return (
-    <>
-      <div style={{ margin:'0 12px', borderRadius:'14px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', border:'1px solid rgba(0,0,0,0.07)' }}>
-        {/* Plan header */}
-        <div style={{ background:'linear-gradient(135deg,#1a2e2b,#2a4a40)', padding:'14px 16px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-            <span style={{ fontSize:'18px' }}>{rc.icon}</span>
-            <div>
-              <p style={{ fontSize:'15px', fontWeight:700, color:'white', fontFamily:'Georgia,serif' }}>{rc.label} Plan</p>
-              <p style={{ fontSize:'11px', color:'rgba(168,201,196,0.7)' }}>${price.toLocaleString()}/yr · renews March 1, 2027</p>
-            </div>
-          </div>
-          <span style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:sc.bg, color:sc.color, border:`1px solid ${sc.border}`, fontWeight:600, flexShrink:0 }}>{sc.icon} {sc.label}</span>
-        </div>
-        {/* Auto-charge info */}
-        <div style={{ background:'white', padding:'12px 16px', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-            <div>
-              <p style={{ fontSize:'11px', color:'#8a9e9a', marginBottom:'2px' }}>Auto-charge on March 1</p>
-              <p style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>${renewalTotal.toLocaleString()}</p>
-              <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>
-                {renewalSeats} seat{renewalSeats!==1?'s':''} · ${(getTierPrice(profile.plan) || getTierPrice('owner')).toLocaleString()}/yr
-                {smsEnabled?` + SMS $${smsPrice}/yr`:''}
-              </p>
-            </div>
-            <div style={{ textAlign:'right' }}>
-              <p style={{ fontSize:'10px', color:'#8a9e9a', marginBottom:'3px' }}>Payment on file</p>
-              {payMethod ? (
-                <>
-                  <div style={{ display:'flex', alignItems:'center', gap:'5px', justifyContent:'flex-end' }}>
-                    <span style={{ fontSize:'13px' }}>{payMethod.type==='ach'?'🏦':'💳'}</span>
-                    <span style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b' }}>{payMethod.label}</span>
-                  </div>
-                  <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'1px' }}>····{payMethod.last4}</p>
-                </>
-              ) : (
-                <p style={{ fontSize:'12px', color:'#ef4444', fontWeight:500 }}>Not on file</p>
-              )}
-            </div>
-          </div>
-        </div>
-        {/* Actions */}
-        <div style={{ background:'white', padding:'10px 16px 14px', display:'flex', gap:'8px' }}>
-          <button onClick={()=>setShowUpdateModal(true)} style={{ flex:1, padding:'10px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:'#4a5e5a', cursor:'pointer' }}>
-            Update Payment Method
-          </button>
-          <button onClick={()=>setShowHistory(true)} style={{ padding:'10px 14px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>
-            History
-          </button>
-        </div>
-      </div>
-
-      {showUpdateModal&&(
-        <UpdatePaymentModal
-          current={payMethod}
-          onSave={(m)=>{ setPayMethod(m); setShowUpdateModal(false) }}
-          onClose={()=>setShowUpdateModal(false)}
-        />
-      )}
-      {showHistory&&<BillingHistorySheet locationId={locationId} onClose={()=>setShowHistory(false)} />}
-    </>
   )
 }
 
@@ -17522,16 +17418,6 @@ function AlertRow({ icon, label, desc, value, onChange, channels, onChannels, sm
 }
 
 // ─── Team Section (Settings) ──────────────────────────────────────────────────
-// Mock subscription data per user
-const USER_SUB_DATA = {
-  u1: { status:'active',  method:'ach', last4:'7823', renewDate:'Mar 1, 2027', amount:550  },
-  u2: { status:'active',  method:'cc',  last4:'4242', renewDate:'Mar 1, 2027', amount:425  },
-  u3: { status:'pastdue', method:'ach', last4:'1190', renewDate:'Mar 1, 2027', amount:225  },
-  u4: { status:'active',  method:'ach', last4:'8801', renewDate:'Mar 1, 2027', amount:550  },
-  u5: { status:'active',  method:'cc',  last4:'5555', renewDate:'Mar 1, 2027', amount:425  },
-  u9: { status:'active',  method:'ach', last4:'3344', renewDate:'Mar 1, 2027', amount:550  },
-}
-
 
 // ─── SMS & Voice Info Modal ───────────────────────────────────────────────────
 function SmsVoiceInfoModal({ onClose }) {
@@ -28277,153 +28163,6 @@ function ReportFilters({ range, setRange, locId, setLocId, source, setSource, pr
 }
 
 // ─── Report Sections ──────────────────────────────────────────────────────────
-function SuperAdminReports({ range, locId, source, project }) {
-  const locs = ALL_ACTIVE_LOC_IDS.map(id=>({ id, loc:ALL_LOCATIONS.find(l=>l.id===id), rev:totalRevByLoc(id), royalty:royaltyByLoc(id) })).filter(x=>x.loc).sort((a,b)=>b.rev-a.rev)
-  const totalRev     = locs.reduce((s,l)=>s+l.rev,0)
-  const totalRoyalty = locs.reduce((s,l)=>s+l.royalty,0)
-  const platformRevByMonth = REPORT_MONTHS.map((_,i)=>ALL_ACTIVE_LOC_IDS.reduce((s,id)=>{const d=seedRevByLoc(id);return s+(d[i]||0)},0))
-
-  return (
-    <div style={{ display:'grid', gap:'12px' }}>
-      {/* Platform KPIs */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'8px' }}>
-        {[
-          { label:'Total Revenue',  value:`$${(totalRev/1000).toFixed(0)}k`,    color:'#1a2e2b' },
-          { label:'Total Royalties',value:`$${(totalRoyalty/1000).toFixed(0)}k`, color:'#6366f1' },
-          { label:'Active Locs',    value:locs.length,                           color:'#10b981' },
-        ].map(s=>(
-          <div key={s.label} style={{ background:'white', borderRadius:'12px', padding:'12px', border:'1px solid rgba(0,0,0,0.06)' }}>
-            <p style={{ fontSize:'20px', fontWeight:700, color:s.color, fontFamily:'Georgia,serif', marginBottom:'3px' }}>{s.value}</p>
-            <p style={{ fontSize:'10px', color:'#8a9e9a' }}>{s.label}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Platform Revenue Trend */}
-      <ReportCard title="Platform Revenue" subtitle="All locations combined">
-        <BarChart data={platformRevByMonth} labels={REPORT_MONTHS} color='#a8c9c4' formatVal={v=>`$${(v/1000).toFixed(0)}k`} />
-      </ReportCard>
-
-      {/* Location Leaderboard */}
-      <ReportCard title="Location Leaderboard" subtitle="Ranked by total revenue">
-        {locs.slice(0,8).map((l,i)=>(
-          <div key={l.id} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'8px 0', borderBottom:'1px solid rgba(0,0,0,0.04)' }}>
-            <span style={{ fontSize:'12px', fontWeight:700, color:'#b0c0bc', width:'16px', flexShrink:0 }}>#{i+1}</span>
-            <div style={{ flex:1, minWidth:0 }}>
-              <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{l.loc.name}, {l.loc.state}</p>
-              <div style={{ height:'4px', background:'rgba(0,0,0,0.05)', borderRadius:'2px', overflow:'hidden', marginTop:'3px' }}>
-                <div style={{ height:'100%', width:`${(l.rev/locs[0].rev)*100}%`, background:'#a8c9c4', borderRadius:'2px' }} />
-              </div>
-            </div>
-            <div style={{ textAlign:'right', flexShrink:0 }}>
-              <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>${l.rev.toLocaleString()}</p>
-              <p style={{ fontSize:'10px', color:'#6366f1' }}>${l.royalty.toLocaleString()} royalty</p>
-            </div>
-          </div>
-        ))}
-      </ReportCard>
-
-      {/* Royalty Collection */}
-      <ReportCard title="Royalty Collection" subtitle="6% of collected revenue">
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'10px' }}>
-          <div style={{ background:'rgba(99,102,241,0.06)', borderRadius:'10px', padding:'12px' }}>
-            <p style={{ fontSize:'20px', fontWeight:700, color:'#6366f1', fontFamily:'Georgia,serif' }}>${totalRoyalty.toLocaleString()}</p>
-            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Total owed</p>
-          </div>
-          <div style={{ background:'rgba(34,197,94,0.06)', borderRadius:'10px', padding:'12px' }}>
-            <p style={{ fontSize:'20px', fontWeight:700, color:'#22c55e', fontFamily:'Georgia,serif' }}>${Math.round(totalRoyalty*0.88).toLocaleString()}</p>
-            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Collected</p>
-          </div>
-        </div>
-        <BarChart data={locs.slice(0,6).map(l=>l.royalty)} labels={locs.slice(0,6).map(l=>l.loc.name.split(' ')[0])} color='#6366f1' height={80} formatVal={v=>`$${v}`} />
-      </ReportCard>
-
-      {/* Sync Health */}
-      <ReportCard title="Sync Health" subtitle="Jobber integration status">
-        {[
-          { label:'Success Rate', value:'94%',   color:'#22c55e' },
-          { label:'Errors (30d)', value:'12',     color:'#ef4444' },
-          { label:'Warnings',     value:'28',     color:'#f59e0b' },
-          { label:'Avg Sync Time',value:'340ms',  color:'#1a2e2b' },
-        ].map(s=><StatRow key={s.label} label={s.label} value={s.value} color={s.color} />)}
-        <div style={{ marginTop:'10px' }}>
-          <p style={{ fontSize:'10px', color:'#8a9e9a', marginBottom:'6px' }}>Daily sync success rate</p>
-          <LineChart data={[96,94,98,92,95,97,93,96,94,97,95,94,96,98]} color='#22c55e' height={60} />
-        </div>
-      </ReportCard>
-    </div>
-  )
-}
-
-function CorporateReports({ range, locId, source, project }) {
-  const locs = ALL_ACTIVE_LOC_IDS.map(id=>({ id, loc:ALL_LOCATIONS.find(l=>l.id===id), rev:totalRevByLoc(id), royalty:royaltyByLoc(id) })).filter(x=>x.loc)
-  const filtered = locId==='all' ? locs : locs.filter(l=>l.id===locId)
-
-  const pipelineData = STAGES.filter(s=>!['Closed Won','Closed Lost'].includes(s.key)).map(s=>({
-    ...s, count: ALL_PEOPLE.filter(p=>p.stage===s.key&&(locId==='all'||p.locationId===locId)).length
-  })).filter(s=>s.count>0)
-  const maxPipeline = Math.max(...pipelineData.map(s=>s.count),1)
-
-  const srcData  = REPORT_SOURCES.map((s,i)=>({ s, v:source==='all'?REPORT_SOURCE_DIST[i]:i===REPORT_SOURCES.indexOf(source)?100:0 })).filter(x=>x.v>0)
-  const projData = REPORT_PROJECTS.map((p,i)=>({ p, v:project==='all'?REPORT_PROJECT_DIST[i]:i===REPORT_PROJECTS.indexOf(project)?100:0 })).filter(x=>x.v>0)
-
-  return (
-    <div style={{ display:'grid', gap:'12px' }}>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'8px' }}>
-        {[
-          { label:'Total Revenue',    value:`$${(filtered.reduce((s,l)=>s+l.rev,0)/1000).toFixed(0)}k`, color:'#1a2e2b' },
-          { label:'Royalties Due',    value:`$${(filtered.reduce((s,l)=>s+l.royalty,0)/1000).toFixed(1)}k`, color:'#6366f1' },
-          { label:'Locations',        value:filtered.length, color:'#10b981' },
-        ].map(s=>(
-          <div key={s.label} style={{ background:'white', borderRadius:'12px', padding:'12px', border:'1px solid rgba(0,0,0,0.06)' }}>
-            <p style={{ fontSize:'20px', fontWeight:700, color:s.color, fontFamily:'Georgia,serif', marginBottom:'3px' }}>{s.value}</p>
-            <p style={{ fontSize:'10px', color:'#8a9e9a' }}>{s.label}</p>
-          </div>
-        ))}
-      </div>
-
-      <ReportCard title="Pipeline Distribution" subtitle="Active client across all stages">
-        {pipelineData.map(s=>(
-          <div key={s.key} style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'8px' }}>
-            <span style={{ fontSize:'13px', width:'18px', flexShrink:0 }}>{s.icon}</span>
-            <span style={{ fontSize:'11px', color:'#8a9e9a', width:'90px', flexShrink:0 }}>{s.label}</span>
-            <div style={{ flex:1, height:'8px', background:'rgba(0,0,0,0.05)', borderRadius:'4px', overflow:'hidden' }}>
-              <div style={{ height:'100%', width:`${(s.count/maxPipeline)*100}%`, background:s.color, borderRadius:'4px' }} />
-            </div>
-            <span style={{ fontSize:'12px', fontWeight:700, color:s.color, width:'24px', textAlign:'right', flexShrink:0 }}>{s.count}</span>
-          </div>
-        ))}
-      </ReportCard>
-
-      <ReportCard title="Location Comparison" subtitle="Revenue & royalty by location">
-        {filtered.sort((a,b)=>b.rev-a.rev).map((l,i)=>(
-          <div key={l.id} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'7px 0', borderBottom:'1px solid rgba(0,0,0,0.04)' }}>
-            <span style={{ fontSize:'11px', color:'#b0c0bc', width:'16px', flexShrink:0 }}>#{i+1}</span>
-            <span style={{ fontSize:'12px', color:'#1a2e2b', fontWeight:500, flex:1 }}>{l.loc.name}</span>
-            <span style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>${l.rev.toLocaleString()}</span>
-            <span style={{ fontSize:'11px', color:'#6366f1' }}>${l.royalty.toLocaleString()}</span>
-          </div>
-        ))}
-      </ReportCard>
-
-      <ReportCard title="Client Sources" subtitle="Where client comes from">
-        <BarChart data={srcData.map(x=>x.v)} labels={srcData.map(x=>x.s.split(' ')[0])} color='#a8c9c4' height={100} formatVal={v=>`${v}%`} />
-      </ReportCard>
-
-      <ReportCard title="Service Types" subtitle="Most common project types">
-        {projData.map((p,i)=>(
-          <div key={p.p} style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'8px' }}>
-            <span style={{ fontSize:'11px', color:'#8a9e9a', flex:1 }}>{p.p}</span>
-            <div style={{ width:'100px', height:'6px', background:'rgba(0,0,0,0.05)', borderRadius:'3px', overflow:'hidden' }}>
-              <div style={{ height:'100%', width:`${p.v}%`, background:'#d4a046', borderRadius:'3px' }} />
-            </div>
-            <span style={{ fontSize:'11px', fontWeight:600, color:'#d4a046', width:'28px', textAlign:'right' }}>{p.v}%</span>
-          </div>
-        ))}
-      </ReportCard>
-    </div>
-  )
-}
 
 function FranchiseReports({ range, locId, source, project, people, locFilter }) {
   const PARTNERS = useContext(PartnersContext)?.partners || []
@@ -28589,43 +28328,10 @@ function FranchiseReports({ range, locId, source, project, people, locFilter }) 
   )
 }
 
-function LightReports({ people, locFilter }) {
-  const myPeople = people.filter(p=>!p.isJunk&&(locFilter==='all'||p.locationId===locFilter))
-  const active = myPeople.filter(p=>!['Closed Won','Closed Lost'].includes(p.stage))
-  const stages = STAGES.filter(s=>!['Closed Won','Closed Lost'].includes(s.key)).map(s=>({...s,count:myPeople.filter(p=>p.stage===s.key).length})).filter(s=>s.count>0)
-  const max = Math.max(...stages.map(s=>s.count),1)
-  return (
-    <div style={{ display:'grid', gap:'12px' }}>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
-        <div style={{ background:'white', borderRadius:'12px', padding:'14px', border:'1px solid rgba(0,0,0,0.06)' }}>
-          <p style={{ fontSize:'24px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'3px' }}>{active.length}</p>
-          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Active Client</p>
-        </div>
-        <div style={{ background:'white', borderRadius:'12px', padding:'14px', border:'1px solid rgba(0,0,0,0.06)' }}>
-          <p style={{ fontSize:'24px', fontWeight:700, color:'#22c55e', fontFamily:'Georgia,serif', marginBottom:'3px' }}>{myPeople.filter(p=>p.stage==='Closed Won').length}</p>
-          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Closed Won</p>
-        </div>
-      </div>
-      <ReportCard title="Pipeline Summary">
-        {stages.map(s=>(
-          <div key={s.key} style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'8px' }}>
-            <span style={{ fontSize:'13px', width:'18px', flexShrink:0 }}>{s.icon}</span>
-            <span style={{ fontSize:'11px', color:'#8a9e9a', flex:1 }}>{s.label}</span>
-            <div style={{ width:'80px', height:'6px', background:'rgba(0,0,0,0.05)', borderRadius:'3px', overflow:'hidden' }}>
-              <div style={{ height:'100%', width:`${(s.count/max)*100}%`, background:s.color, borderRadius:'3px' }} />
-            </div>
-            <span style={{ fontSize:'12px', fontWeight:700, color:s.color, width:'20px', textAlign:'right' }}>{s.count}</span>
-          </div>
-        ))}
-      </ReportCard>
-    </div>
-  )
-}
-
 // ─── Reports Coming Soon Placeholder ──────────────────────────────────────────
-// Elevated reporting (SuperAdminReports + SyncLogContent) has no real backend
-// yet — both rendered mock data. Until the reporting backends land, the whole
-// elevated Reports path shows this honest placeholder. Mirrors the brand-teal
+// Elevated reporting has no real backend yet — the former platform/sync-log
+// views rendered mock data and were removed. Until the reporting backends land,
+// the elevated Reports path shows this honest placeholder. Mirrors the brand-teal
 // centered-card treatment used elsewhere. The owner-facing FranchiseReports
 // path is real and unaffected.
 function ReportsComingSoonPlaceholder() {
@@ -28679,100 +28385,6 @@ function ReportsScreen({ role, people=[], locFilter='all' }) {
     </div>
   )
 }
-
-function SyncLogContent() {
-  const [search, setSearch]               = useState('')
-  const [statusFilter, setStatusFilter]   = useState('')
-  const [typeFilter, setTypeFilter]       = useState('')
-  const [page, setPage]                   = useState(0)
-  const PAGE_SIZE = 25
-  const statusConf = {
-    success: { color:'#22c55e', bg:'rgba(34,197,94,0.08)',  border:'rgba(34,197,94,0.2)',  icon:'✅' },
-    warning: { color:'#f59e0b', bg:'rgba(245,158,11,0.08)', border:'rgba(245,158,11,0.2)', icon:'⚠️' },
-    error:   { color:'#ef4444', bg:'rgba(239,68,68,0.08)',  border:'rgba(239,68,68,0.2)',  icon:'❌' },
-  }
-  const typeLabel = { jobber_sync:'Jobber Sync', lead_import:'Import', token_refresh:'Token', webhook:'Webhook', export:'Export' }
-  const typeIcon  = { jobber_sync:'⚡', lead_import:'📥', token_refresh:'🔑', webhook:'🔗', export:'📤' }
-  function fmtTs(ts) {
-    const diff = Date.now() - ts.getTime()
-    const mins = Math.floor(diff/60000)
-    if (mins<60) return `${mins}m ago`
-    const hrs = Math.floor(mins/60)
-    if (hrs<24) return `${hrs}h ago`
-    return ts.toLocaleDateString('en-US',{month:'short',day:'numeric'})
-  }
-  const filtered = SYNC_LOG_DATA.filter(e=>{
-    const q=search.toLowerCase()
-    return (!search||e.message.toLowerCase().includes(q)||e.locationName.toLowerCase().includes(q))
-      &&(!statusFilter||e.status===statusFilter)
-      &&(!typeFilter||e.type===typeFilter)
-  })
-  const paged = filtered.slice(page*PAGE_SIZE,(page+1)*PAGE_SIZE)
-  const totalPages = Math.ceil(filtered.length/PAGE_SIZE)
-  const successRate = Math.round((SYNC_LOG_DATA.filter(e=>e.status==='success').length/SYNC_LOG_DATA.length)*100)
-
-  return (
-    <div style={{ display:'grid', gap:'10px' }}>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'8px' }}>
-        {[
-          {label:'Success Rate',value:`${successRate}%`,color:'#22c55e'},
-          {label:'Errors',value:SYNC_LOG_DATA.filter(e=>e.status==='error').length,color:'#ef4444'},
-          {label:'Warnings',value:SYNC_LOG_DATA.filter(e=>e.status==='warning').length,color:'#f59e0b'},
-          {label:'Last Sync',value:fmtTs(SYNC_LOG_DATA[0].ts),color:'#1a2e2b'},
-        ].map(s=>(
-          <div key={s.label} style={{ background:'white', borderRadius:'12px', padding:'10px 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-            <p style={{ fontSize:'16px', fontWeight:700, color:s.color, fontFamily:'Georgia,serif', marginBottom:'2px' }}>{s.value}</p>
-            <p style={{ fontSize:'10px', color:'#8a9e9a' }}>{s.label}</p>
-          </div>
-        ))}
-      </div>
-      <input value={search} onChange={e=>{setSearch(e.target.value);setPage(0)}} placeholder="Search messages, locations…" style={{ width:'100%', padding:'10px 14px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none', boxSizing:'border-box' }} />
-      <div style={{ display:'flex', gap:'6px', overflowX:'auto' }}>
-        {[{val:'',label:'All'},{val:'success',label:'✅'},{val:'warning',label:'⚠️'},{val:'error',label:'❌'}].map(f=>(
-          <button key={f.val} onClick={()=>{setStatusFilter(f.val);setPage(0)}} style={{ padding:'5px 12px', borderRadius:'20px', border:'1.5px solid', borderColor:statusFilter===f.val?'#1a2e2b':'rgba(0,0,0,0.08)', background:statusFilter===f.val?'#1a2e2b':'white', fontSize:'12px', fontFamily:'inherit', color:statusFilter===f.val?'white':'#4a5e5a', flexShrink:0, cursor:'pointer' }}>{f.label}</button>
-        ))}
-        {Object.entries(typeLabel).map(([val,label])=>(
-          <button key={val} onClick={()=>{setTypeFilter(typeFilter===val?'':val);setPage(0)}} style={{ padding:'5px 12px', borderRadius:'20px', border:'1.5px solid', borderColor:typeFilter===val?'#6366f1':'rgba(0,0,0,0.08)', background:typeFilter===val?'rgba(99,102,241,0.08)':'white', fontSize:'12px', fontFamily:'inherit', color:typeFilter===val?'#6366f1':'#4a5e5a', flexShrink:0, cursor:'pointer', whiteSpace:'nowrap' }}>{typeIcon[val]} {label}</button>
-        ))}
-      </div>
-      <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-        {paged.map((entry,i)=>{
-          const sc=statusConf[entry.status]
-          return (
-            <div key={entry.id} style={{ background:'white', borderBottom:i<paged.length-1?'1px solid rgba(0,0,0,0.04)':'none', padding:'12px 16px' }}>
-              <div style={{ display:'flex', alignItems:'flex-start', gap:'10px' }}>
-                <div style={{ width:'32px', height:'32px', borderRadius:'8px', background:sc.bg, border:`1px solid ${sc.border}`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'14px', flexShrink:0 }}>{sc.icon}</div>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ display:'flex', gap:'6px', marginBottom:'3px', flexWrap:'wrap' }}>
-                    <span style={{ fontSize:'11px', padding:'1px 7px', borderRadius:'20px', background:'rgba(99,102,241,0.08)', color:'#6366f1', fontWeight:600 }}>{typeIcon[entry.type]} {typeLabel[entry.type]}</span>
-                    <span style={{ fontSize:'11px', color:'#8a9e9a' }}>📍 {entry.locationName}</span>
-                  </div>
-                  <p style={{ fontSize:'13px', color:entry.status==='error'?'#ef4444':entry.status==='warning'?'#b07a20':'#1a2e2b', lineHeight:1.4 }}>{entry.message}</p>
-                </div>
-                <div style={{ textAlign:'right', flexShrink:0 }}>
-                  <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{fmtTs(entry.ts)}</p>
-                  {entry.duration&&<p style={{ fontSize:'10px', color:'#b0c0bc' }}>{entry.duration}</p>}
-                </div>
-              </div>
-            </div>
-          )
-        })}
-        {paged.length===0&&<div style={{ background:'white', padding:'3rem', textAlign:'center', color:'#b0c0bc' }}>No entries match your filters</div>}
-      </div>
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-        <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{filtered.length} entries</span>
-        {totalPages>1&&(
-          <div style={{ display:'flex', gap:'6px' }}>
-            <button onClick={()=>setPage(p=>Math.max(0,p-1))} disabled={page===0} style={{ padding:'5px 12px', borderRadius:'7px', border:'1px solid rgba(0,0,0,0.1)', background:page===0?'rgba(0,0,0,0.03)':'white', color:page===0?'#c8d8d4':'#1a2e2b', cursor:page===0?'default':'pointer', fontFamily:'inherit', fontSize:'12px' }}>← Prev</button>
-            <span style={{ fontSize:'12px', color:'#8a9e9a', padding:'5px 6px' }}>{page+1}/{totalPages}</span>
-            <button onClick={()=>setPage(p=>Math.min(totalPages-1,p+1))} disabled={page===totalPages-1} style={{ padding:'5px 12px', borderRadius:'7px', border:'1px solid rgba(0,0,0,0.1)', background:page===totalPages-1?'rgba(0,0,0,0.03)':'white', color:page===totalPages-1?'#c8d8d4':'#1a2e2b', cursor:page===totalPages-1?'default':'pointer', fontFamily:'inherit', fontSize:'12px' }}>Next →</button>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 
 // ═══════════════════════════════════════════════════════
 //  ROOT APP - Role-aware shell

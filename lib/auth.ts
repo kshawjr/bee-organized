@@ -40,10 +40,6 @@ export function isAdmin(role: string) {
   return role === 'super_admin' || role === 'admin'
 }
 
-export function isOwnerOrAbove(role: string) {
-  return ['super_admin', 'admin', 'owner'].includes(role)
-}
-
 export function isLiteUser(role: string) {
   return role === 'lite_user'
 }
