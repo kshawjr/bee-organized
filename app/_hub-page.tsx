@@ -320,7 +320,7 @@ export default async function HubPage({
     const { data: locs, error: locsErr } = await supabaseService
       .from('locations')
       .select(
-        'id, name, state, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, last_sync_status, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at'
+        'id, name, state, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, last_sync_status, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at, corporate_sponsorship_started_at, corporate_sponsorship_ends_at'
       )
       .order('name', { ascending: true })
 
@@ -436,6 +436,8 @@ export default async function HubPage({
         default_drip_path: row.default_drip_path || null,
         default_move_drip_path: row.default_move_drip_path || null,
         activated_at: row.activated_at || null,
+        corporate_sponsorship_started_at: row.corporate_sponsorship_started_at || null,
+        corporate_sponsorship_ends_at: row.corporate_sponsorship_ends_at || null,
       }
     })
   } else if (hubUser.location_id) {

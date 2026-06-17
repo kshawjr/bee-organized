@@ -165,6 +165,8 @@ export async function POST(
       subscription_status: 'active',
       paid_through_date: newPaidThrough,
       billing_notes: newBillingNotes,
+      corporate_sponsorship_started_at: null,
+      corporate_sponsorship_ends_at: null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', locationUuid)

@@ -22418,6 +22418,28 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
                   >{subSaving ? 'Saving…' : 'Save changes'}</button>
                 </div>
 
+                {/* Sponsorship period — shown for corp-funded locations */}
+                {(currentLoc.payment_source === 'prepaid_corporate' || currentLoc.payment_source === 'corporate_sponsored') && currentLoc.corporate_sponsorship_started_at && (()=>{
+                  const startedAt = new Date(currentLoc.corporate_sponsorship_started_at)
+                  const endsAt = currentLoc.corporate_sponsorship_ends_at ? new Date(currentLoc.corporate_sponsorship_ends_at) : null
+                  const fmtD = d => d.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'})
+                  const daysLeft = endsAt ? Math.round((endsAt.getTime()-Date.now())/(1000*60*60*24)) : null
+                  const nearEnd = daysLeft !== null && daysLeft < 30
+                  return (
+                    <div style={{ padding:'10px 12px', borderRadius:'8px', background: nearEnd ? 'rgba(234,179,8,0.1)' : 'rgba(168,201,196,0.06)', border: `1px solid ${nearEnd ? 'rgba(234,179,8,0.3)' : 'rgba(168,201,196,0.15)'}` }}>
+                      <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Sponsorship Period</p>
+                      <p style={{ fontSize:'11px', color:'#1a2e2b', margin:0, lineHeight:1.5 }}>
+                        Started: {fmtD(startedAt)} · Ends: {endsAt ? fmtD(endsAt) : 'no end date'}
+                        {daysLeft !== null && (
+                          <span style={{ marginLeft:'8px', fontWeight:700, color: daysLeft < 0 ? '#ef4444' : daysLeft < 7 ? '#f97316' : '#eab308' }}>
+                            {daysLeft < 0 ? `(${Math.abs(daysLeft)}d past due)` : daysLeft === 0 ? '(due today)' : `(${daysLeft}d left)`}
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  )
+                })()}
+
                 {/* Convert to Direct Billing — only while the location is still
                     on a corporate-funded source. Reads the SAVED payment_source
                     (currentLoc), not the unsaved dropdown edit state, so the CTA
@@ -27471,6 +27493,145 @@ function AdminFeedbackDetailModal({ item, onClose, onSaved }) {
   )
 }
 
+// Admin → Conversions Due tab — lists corporate-funded locations whose
+// sponsorship is ending soon, sorted by urgency. Each row has a
+// "Convert to Direct Billing" action that opens the existing modal.
+function ConversionsDueTab({ onOpenLocation = () => {} }) {
+  const [daysAhead, setDaysAhead] = React.useState(30)
+  const [includeUndated, setIncludeUndated] = React.useState(false)
+  const [items, setItems] = React.useState(null)
+  const [loading, setLoading] = React.useState(false)
+  const [error, setError] = React.useState('')
+  const [convertLoc, setConvertLoc] = React.useState(null)
+
+  const load = React.useCallback(async (days, undated) => {
+    setLoading(true)
+    setError('')
+    try {
+      const params = new URLSearchParams({ days_ahead: String(days) })
+      if (undated) params.set('include_undated', 'true')
+      const res = await fetch(`/api/admin/conversions-due?${params}`)
+      const json = await res.json()
+      if (!res.ok) { setError(json.error || 'Failed to load'); setItems([]); return }
+      setItems(json.items || [])
+    } catch (e) {
+      setError(e.message || 'Failed to load')
+      setItems([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  React.useEffect(() => { load(daysAhead, includeUndated) }, [load, daysAhead, includeUndated])
+
+  function urgencyColor(days) {
+    if (days === null) return '#8a9e9a'
+    if (days < 0) return '#ef4444'
+    if (days < 7) return '#f97316'
+    if (days < 30) return '#eab308'
+    return '#8a9e9a'
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return '—'
+    try { return new Date(iso).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }) }
+    catch { return iso }
+  }
+
+  const sourceLabel = s => s === 'prepaid_corporate' ? 'Prepaid' : 'Sponsored'
+
+  return (
+    <div style={{ padding:'0 1.25rem 2rem', display:'grid', gap:'12px' }}>
+      <div>
+        <p style={{ fontSize:'11px', color:'rgba(168,201,196,0.7)', marginBottom:'4px' }}>Locations with corporate sponsorship ending soon</p>
+        <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', alignItems:'center' }}>
+          <select
+            value={daysAhead}
+            onChange={e=>setDaysAhead(Number(e.target.value))}
+            style={{ padding:'7px 10px', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.1)', fontSize:'12px', fontFamily:'inherit', color:'#1a2e2b', background:'white', cursor:'pointer' }}
+          >
+            <option value={0}>Past Due only</option>
+            <option value={30}>Next 30 days</option>
+            <option value={60}>Next 60 days</option>
+            <option value={90}>Next 90 days</option>
+          </select>
+          <label style={{ display:'flex', alignItems:'center', gap:'5px', fontSize:'12px', color:'rgba(168,201,196,0.8)', cursor:'pointer' }}>
+            <input type="checkbox" checked={includeUndated} onChange={e=>setIncludeUndated(e.target.checked)} />
+            Include sponsored without end date
+          </label>
+        </div>
+      </div>
+
+      {loading && <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.7)', margin:0 }}>Loading…</p>}
+      {error && <p style={{ fontSize:'12px', color:'#ef4444', margin:0 }}>{error}</p>}
+
+      {!loading && items !== null && items.length === 0 && (
+        <div style={{ padding:'2rem', textAlign:'center', color:'rgba(168,201,196,0.5)', fontSize:'13px' }}>
+          No conversions due in the selected period. ✓
+        </div>
+      )}
+
+      {!loading && items && items.length > 0 && (
+        <div style={{ display:'grid', gap:'8px' }}>
+          {items.map(item => {
+            const color = urgencyColor(item.days_until_end)
+            return (
+              <div key={item.location_id} style={{ background:'rgba(168,201,196,0.07)', border:'1px solid rgba(168,201,196,0.15)', borderRadius:'10px', padding:'12px 14px', display:'grid', gap:'6px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'8px' }}>
+                  <button
+                    onClick={()=>onOpenLocation({ id: item.location_id, name: item.name })}
+                    style={{ background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'14px', fontWeight:600, color:'white', textAlign:'left', padding:0 }}
+                  >{item.name}</button>
+                  <span style={{ flexShrink:0, padding:'2px 8px', borderRadius:'10px', background:'rgba(168,201,196,0.12)', color:'rgba(168,201,196,0.8)', fontSize:'10px', fontWeight:600 }}>
+                    {sourceLabel(item.payment_source)}
+                  </span>
+                </div>
+                <div style={{ display:'flex', gap:'12px', flexWrap:'wrap', alignItems:'center' }}>
+                  <span style={{ fontSize:'11px', color:'#8a9e9a' }}>
+                    Ends: <strong style={{ color:'white' }}>{fmtDate(item.sponsorship_ends_at)}</strong>
+                  </span>
+                  {item.days_until_end !== null && (
+                    <span style={{ fontSize:'11px', fontWeight:700, color }}>
+                      {item.days_until_end < 0
+                        ? `${Math.abs(item.days_until_end)}d past due`
+                        : item.days_until_end === 0
+                        ? 'Due today'
+                        : `${item.days_until_end}d left`}
+                    </span>
+                  )}
+                  {item.days_until_end === null && (
+                    <span style={{ fontSize:'11px', color:'#8a9e9a' }}>No end date</span>
+                  )}
+                </div>
+                {(item.owner_name || item.owner_email) && (
+                  <p style={{ fontSize:'11px', color:'#8a9e9a', margin:0 }}>
+                    {item.owner_name || ''}{item.owner_name && item.owner_email ? ' · ' : ''}{item.owner_email || ''}
+                  </p>
+                )}
+                <button
+                  onClick={()=>setConvertLoc({ id: item.location_id, name: item.name, payment_source: item.payment_source })}
+                  style={{ alignSelf:'flex-start', marginTop:'2px', padding:'7px 12px', background:'white', border:'1.5px solid #d4a046', borderRadius:'7px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#b07a20', cursor:'pointer' }}
+                >💳 Convert to Direct Billing</button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {convertLoc && (
+        <ConvertBillingModal
+          location={convertLoc}
+          onClose={()=>setConvertLoc(null)}
+          onConverted={()=>{
+            setConvertLoc(null)
+            load(daysAhead, includeUndated)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
 // Admin-area "Feedback" tab — org-wide triage list + detail modal.
 function AdminFeedbackScreen({ onPendingCountChange = () => {} }) {
   const [items, setItems]       = useState([])
@@ -27966,7 +28127,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
 
           {/* Sub-tabs — native <select> on mobile (<768px), pill row at ≥768px. */}
           {(()=>{
-            const adminTabs = [{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'content',label:'✏️ Content'}]:[]),...(showFeedbackTab?[{key:'feedback',label:'🐛 Feedback'}]:[]),...(role==='super_admin'?[{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])]
+            const adminTabs = [{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'content',label:'✏️ Content'}]:[]),...(showFeedbackTab?[{key:'feedback',label:'🐛 Feedback'}]:[]),...(role==='super_admin'?[{key:'conversions',label:'Conversions Due'},{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])]
             return (
               <>
                 <select
@@ -28073,6 +28234,8 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
           />
         ) : adminTab==='feedback' ? (
           <AdminFeedbackScreen onPendingCountChange={handleFeedbackPending} />
+        ) : adminTab==='conversions' ? (
+          <ConversionsDueTab onOpenLocation={loc=>setSelectedLoc(loc)} />
         ) : adminTab==='pricing' ? (
           <PricingManagementTab />
         ) : adminTab==='configure' ? (

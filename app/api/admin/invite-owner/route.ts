@@ -379,6 +379,15 @@ export async function POST(request: NextRequest) {
   }
 
   // ─── Write 1: location config ───
+  const now = new Date().toISOString()
+  // Sponsorship tracking: populate started_at now; ends_at = paid_through_date
+  // for prepaid_corporate (known end), NULL for corporate_sponsored (open-ended),
+  // and both NULL for direct (not sponsored).
+  const sponsorshipStartedAt =
+    source === 'prepaid_corporate' || source === 'corporate_sponsored' ? now : null
+  const sponsorshipEndsAt =
+    source === 'prepaid_corporate' ? (paidThrough ?? null) : null
+
   const { error: locUpdateErr } = await supabaseService
     .from('locations')
     .update({
@@ -389,7 +398,9 @@ export async function POST(request: NextRequest) {
       subscription_plan: 'owner_annual',
       billing_notes: notes,
       onboarding_state: {},
-      updated_at: new Date().toISOString(),
+      corporate_sponsorship_started_at: sponsorshipStartedAt,
+      corporate_sponsorship_ends_at: sponsorshipEndsAt,
+      updated_at: now,
     })
     .eq('id', location_id)
   if (locUpdateErr) {
