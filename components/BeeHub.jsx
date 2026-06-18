@@ -18334,7 +18334,10 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     }
   })()
 
-  const locLocation = currentLocationCtx ? (()=>{
+  // isSuperAdmin + selectedLoc means they've picked a specific franchise location
+  // to view — bypass their own session currentLocationCtx (which would otherwise
+  // always win and show their default/KC location regardless of the picker).
+  const locLocation = (currentLocationCtx && !(isSuperAdmin && selectedLoc)) ? (()=>{
     // Real franchise owner sign-in: hydrate every field from the locations
     // row that page.tsx fetched. DB stores address parts separately
     // (address / city / state / zip); Settings UI shows a single address
