@@ -55,6 +55,7 @@ import { canRunImport } from '@/lib/auth'
 import { writeSyncLog } from '@/lib/sync-log'
 import {
   CLIENTS_QUERY,
+  INCREMENTAL_CLIENTS_QUERY,
   REQUESTS_QUERY,
   QUOTES_QUERY,
   JOBS_QUERY,
@@ -99,6 +100,7 @@ async function fetchAll(
   devMode = false,
   limitToFirstPage = false,
   onThrottlePause?: (waitMs: number) => void,
+  extraVars: Record<string, any> = {},
 ): Promise<any[]> {
   const all: any[] = []
   let cursor: string | null = null
@@ -106,7 +108,8 @@ async function fetchAll(
   let pages = 0
 
   while (hasMore) {
-    const res = await jobberQueryThrottled(token, query, cursor ? { after: cursor } : {}, { onThrottlePause })
+    const vars = cursor ? { after: cursor, ...extraVars } : { ...extraVars }
+    const res = await jobberQueryThrottled(token, query, vars, { onThrottlePause })
     // Non-throttle errors (auth, syntax, etc.) — throw immediately
     if (res.errors?.some((e: any) => e.extensions?.code !== 'THROTTLED')) {
       throw new Error(`${key} error: ${JSON.stringify(res.errors)}`)
@@ -118,7 +121,6 @@ async function fetchAll(
     cursor = page.pageInfo.endCursor
     pages++
     if (devMode && limitToFirstPage && pages >= 1) break
-    if (hasMore) await new Promise(r => setTimeout(r, 400))
   }
   return all
 }
@@ -230,6 +232,14 @@ export async function POST(req: NextRequest) {
         await updateProgress(jobId, { phase: 'clients' })
         const clients = await fetchAll(jobberToken, CLIENTS_QUERY, 'clients', devMode, true, onThrottlePause)
 
+        // Sort newest-first so that if Vercel kills the function before the write loop
+        // finishes, recent clients are written before stale ones (Bug B: new leads missing).
+        clients.sort((a: any, b: any) =>
+          new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()
+        )
+        console.log(`[jobber-import] fetched ${clients.length} clients; newest: ${clients[0]?.createdAt ?? 'n/a'}, oldest: ${clients[clients.length - 1]?.createdAt ?? 'n/a'}`)
+
+        // Set total immediately so the UI shows "0 of N" within seconds of the fetch completing.
         await updateProgress(jobId, {
           phase: 'requests',
           total_records: clients.length,
@@ -272,6 +282,7 @@ export async function POST(req: NextRequest) {
         }
 
         // ─── upsert phase ──
+        // Write total before the loop so the UI shows "0 of N" immediately.
         await updateProgress(jobId, {
           phase: 'writing',
           total_records: clients.length,
@@ -326,8 +337,43 @@ export async function POST(req: NextRequest) {
             stats.errors.push(`${client.firstName} ${client.lastName}: ${err.message}`)
           }
           processed++
-          if (processed % 5 === 0 || processed === clients.length) {
+          // Update DB every 50 records so the UI shows live progress.
+          // Also write on the very last record so the final count is exact.
+          if (processed % 50 === 0 || processed === clients.length) {
             await updateProgress(jobId, { processed_records: processed })
+          }
+        }
+
+        // ─── incremental pass ─────────────────────────────────────────
+        // Fetch clients updated since the last import timestamp to catch records that
+        // Jobber may not surface when sorting by CREATED_AT (e.g. re-activated clients,
+        // or records beyond a server-side cursor boundary).  This is a best-effort catch-up
+        // — if Jobber doesn't support the filter, we log and move on without failing.
+        const lastImportAt = location.jobber_initial_import_completed_at
+        if (lastImportAt) {
+          await updateProgress(jobId, { phase: 'incremental' })
+          try {
+            const recentClients = await fetchAll(
+              jobberToken,
+              INCREMENTAL_CLIENTS_QUERY,
+              'clients',
+              false,
+              false,
+              onThrottlePause,
+              { since: lastImportAt },
+            )
+            console.log(`[jobber-import] incremental pass: ${recentClients.length} clients updated since ${lastImportAt}`)
+            for (const client of recentClients) {
+              try {
+                const { created } = await upsertLead(client, locSlug, locUuid, { importSource: 'jobber_initial' })
+                created ? stats.leads_created++ : stats.leads_updated++
+              } catch (err: any) {
+                stats.errors.push(`[incremental] ${client.firstName} ${client.lastName}: ${err.message}`)
+              }
+            }
+          } catch (err: any) {
+            // Non-fatal — log and continue so the import still completes.
+            console.warn('[jobber-import] incremental pass failed (filter may be unsupported):', err.message)
           }
         }
 

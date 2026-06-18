@@ -38,6 +38,23 @@ export const CLIENTS_QUERY = `
   }
 `
 
+// Incremental variant — fetches only clients created/updated after a given timestamp.
+// Used as a second pass to catch records Jobber may not surface in the sorted full-scan.
+// filter.createdAt.greaterThan catches brand-new clients; updatedAt catches edits to existing.
+export const INCREMENTAL_CLIENTS_QUERY = `
+  query GetRecentClients($after: String, $since: ISO8601DateTime!) {
+    clients(first: 50, after: $after, filter: { updatedAt: { greaterThan: $since } }) {
+      nodes {
+        id firstName lastName companyName createdAt
+        emails { address primary }
+        phones  { number  primary }
+        billingAddress { street city province postalCode }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`
+
 export const REQUESTS_QUERY = `
   query GetRequests($after: String) {
     requests(first: 50, after: $after) {
