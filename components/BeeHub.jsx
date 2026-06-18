@@ -28505,6 +28505,7 @@ function SuperAdminLayout({
   binPeople=[], setBinPeople=()=>{}, partners=[], setPartners=()=>{},
   guideSlides=[], setGuideSlides=()=>{}, manualSlides=[], setManualSlides=()=>{},
   initialLocations=null, isMobile=false, topOffset=0, initialSection='dashboard',
+  onExitAdmin=null,
 }) {
   const currentUser = useContext(CurrentUserContext)
 
@@ -28656,6 +28657,25 @@ function SuperAdminLayout({
 
   const SidebarNav = () => (
     <div style={{ padding:'12px 10px' }}>
+      {onExitAdmin && (
+        <div style={{ marginBottom:'10px', paddingBottom:'10px', borderBottom:'1px solid rgba(0,0,0,0.08)' }}>
+          <button
+            onClick={onExitAdmin}
+            style={{
+              width:'100%', display:'flex', alignItems:'center', gap:'9px',
+              padding:'8px 10px', borderRadius:'8px', border:'none', cursor:'pointer',
+              fontFamily:'inherit', fontSize:'13px', fontWeight:500,
+              background:'rgba(168,201,196,0.15)', color:'#4a5e5a',
+              transition:'background 0.1s',
+            }}
+            onMouseEnter={e=>e.currentTarget.style.background='rgba(168,201,196,0.3)'}
+            onMouseLeave={e=>e.currentTarget.style.background='rgba(168,201,196,0.15)'}
+          >
+            <span style={{ fontSize:'15px', lineHeight:1 }}>←</span>
+            <span style={{ flex:1, textAlign:'left' }}>Exit Admin View</span>
+          </button>
+        </div>
+      )}
       {sidebarGroups.map((grp, gi) => (
         <div key={gi} style={{ marginBottom:'2px' }}>
           {grp.header && (
@@ -31329,8 +31349,10 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
 
   const screen = () => {
     // Elevated users (super_admin / corporate) get the unified SuperAdminLayout
-    // for both the Admin and Settings nav destinations. Settings routes to Profile.
-    if (isElevated && (activeNav==='admin' || activeNav==='settings')) return (
+    // for the Admin nav destination. /settings continues to show the franchise-style
+    // SettingsScreen for all roles so elevated users retain access to Profile /
+    // Location / Team / Billing / Communication / Templates / Jobber.
+    if (isElevated && activeNav==='admin') return (
       <div style={{ paddingTop:`${TOTAL_TOP}px` }}>
         <SuperAdminLayout
           key="super-admin-layout"
@@ -31354,7 +31376,8 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           initialLocations={initialLocations}
           isMobile={isMobile}
           topOffset={TOTAL_TOP}
-          initialSection={activeNav==='settings' ? 'profile' : 'dashboard'}
+          initialSection='dashboard'
+          onExitAdmin={()=>nav('hive')}
         />
       </div>
     )
