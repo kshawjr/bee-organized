@@ -299,8 +299,31 @@ export async function POST(req: NextRequest) {
           errors: [] as string[],
         }
 
-        let processed = 0
+        // ─── RESUME SUPPORT ──────────────────────────────────────────
+        // Load jobber_client_ids already written for this location so a
+        // re-run skips them (idempotent; upsert already dedupes, this just
+        // saves the write cost). Lets a timed-out import continue cheaply.
+        const { data: existingRows } = await supabaseService
+          .from('leads')
+          .select('jobber_client_id')
+          .eq('location_uuid', locUuid)
+          .not('jobber_client_id', 'is', null)
+        const alreadyWritten = new Set((existingRows || []).map(r => r.jobber_client_id))
+
+        // Cap writes per invocation so we never hit the 300s wall mid-record.
+        const WRITE_BATCH_CAP = 400
+        let wroteThisRun = 0
+        let hitCap = false
+
+        let processed = alreadyWritten.size  // count already-done toward progress
         for (const client of clients) {
+          // Skip clients already written in a previous (timed-out) run.
+          if (alreadyWritten.has(client.id)) continue
+
+          // Stop this invocation once we've written a full batch — the client
+          // will re-POST to continue. Prevents mid-record Vercel kill.
+          if (wroteThisRun >= WRITE_BATCH_CAP) { hitCap = true; break }
+
           try {
             const { id: leadId, created } = await upsertLead(client, locSlug, locUuid, {
               importSource: 'jobber_initial',
@@ -317,16 +340,13 @@ export async function POST(req: NextRequest) {
                 const aRes = await upsertAssessment(request, reqDbId, leadId, locSlug)
                 aRes.created ? stats.assessments_created++ : stats.assessments_updated++
               }
-
               for (const quote of (quotesByReq[request.id] || [])) {
                 const qRes = await upsertQuote(quote, reqDbId, leadId, locSlug)
                 qRes.created ? stats.quotes_created++ : stats.quotes_updated++
               }
-
               for (const job of (jobsByReq[request.id] || [])) {
                 const jRes = await upsertJob(job, reqDbId, leadId, locSlug)
                 jRes.created ? stats.jobs_created++ : stats.jobs_updated++
-
                 for (const inv of (job.invoices?.nodes || [])) {
                   const iRes = await upsertInvoice(inv, jRes.id, reqDbId, leadId, locSlug)
                   iRes.created ? stats.invoices_created++ : stats.invoices_updated++
@@ -337,11 +357,23 @@ export async function POST(req: NextRequest) {
             stats.errors.push(`${client.firstName} ${client.lastName}: ${err.message}`)
           }
           processed++
-          // Update DB every 50 records so the UI shows live progress.
-          // Also write on the very last record so the final count is exact.
+          wroteThisRun++
           if (processed % 50 === 0 || processed === clients.length) {
             await updateProgress(jobId, { processed_records: processed })
           }
+        }
+
+        if (hitCap) {
+          // More clients remain — mark job resumable and signal client to continue.
+          await updateProgress(jobId, {
+            status: 'running',
+            phase: `batched — ${processed}/${clients.length}, continuing`,
+            processed_records: processed,
+            total_records: clients.length,
+          })
+          emit({ continue: true, processed, total: clients.length, job_id: jobId })
+          controller.close()
+          return
         }
 
         // ─── incremental pass ─────────────────────────────────────────

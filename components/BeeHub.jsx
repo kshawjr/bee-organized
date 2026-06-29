@@ -12057,39 +12057,44 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
     if (!locationId || isRunning) return
     setError(null); setStatus(null); setSummary(null)
     try {
-      const r = await fetch(
-        '/api/import/jobber-clients?location_id=' + encodeURIComponent(locationId),
-        { method:'POST' },
-      )
-      if (!r.ok || !r.body) {
-        let detail = 'import_failed'
-        try { const j = await r.json(); detail = j.error || detail } catch {}
-        setError(detail); return
-      }
-
-      // NDJSON stream — first chunk gives us a job_id so the polling
-      // useEffect can fire immediately and the bees + counter render
-      // during the import (not just after it finishes). Final chunk is
-      // the summary or an error.
-      const reader = r.body.getReader()
-      const decoder = new TextDecoder()
-      let buf = ''
+      // Import is now batched server-side (Vercel 300s cap). When a streamed
+      // line is { continue: true }, re-POST to write the next batch. The
+      // poller drives the "X of Y" bee animation off processed_records, which
+      // keeps climbing across batches.
+      let keepGoing = true
       let saw = null
       let gotJob = false
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
-        let nl
-        while ((nl = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, nl).trim()
-          buf = buf.slice(nl + 1)
-          if (!line) continue
-          let msg
-          try { msg = JSON.parse(line) } catch { continue }
-          if (msg.job_id && !gotJob) { gotJob = true; setJobId(msg.job_id) }
-          if (msg.done) saw = msg
-          if (msg.error) saw = msg
+      while (keepGoing) {
+        keepGoing = false
+        const r = await fetch(
+          '/api/import/jobber-clients?location_id=' + encodeURIComponent(locationId),
+          { method:'POST' },
+        )
+        if (!r.ok || !r.body) {
+          let detail = 'import_failed'
+          try { const j = await r.json(); detail = j.error || detail } catch {}
+          setError(detail); return
+        }
+
+        const reader = r.body.getReader()
+        const decoder = new TextDecoder()
+        let buf = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          let nl
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, nl).trim()
+            buf = buf.slice(nl + 1)
+            if (!line) continue
+            let msg
+            try { msg = JSON.parse(line) } catch { continue }
+            if (msg.job_id && !gotJob) { gotJob = true; setJobId(msg.job_id) }
+            if (msg.continue) keepGoing = true
+            if (msg.done) saw = msg
+            if (msg.error) saw = msg
+          }
         }
       }
 
@@ -16653,37 +16658,41 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
     setError(null); setStatus(null); setSummary(null)
     setImportState('running')
     try {
-      const r = await fetch(
-        '/api/import/jobber-clients?location_id=' + encodeURIComponent(locationId),
-        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
-      )
-      if (!r.ok || !r.body) {
-        let detail = `import_failed_${r.status}`
-        try { const j = await r.json(); detail = j.error || detail } catch {}
-        setError(detail); setImportState('error'); return
-      }
-
-      // Stream is NDJSON: first chunk carries the job_id (so polling starts
-      // immediately and drives the bees + counter UI during the import); the
-      // final chunk carries the summary or error once the import finishes.
-      const reader = r.body.getReader()
-      const decoder = new TextDecoder()
-      let buf = ''
+      // Import is now batched server-side (Vercel 300s cap). When a streamed
+      // line is { continue: true }, re-POST to write the next batch.
+      let keepGoing = true
       let saw = null
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
-        let nl
-        while ((nl = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, nl).trim()
-          buf = buf.slice(nl + 1)
-          if (!line) continue
-          let msg
-          try { msg = JSON.parse(line) } catch { continue }
-          if (msg.job_id && !jobId) setJobId(msg.job_id)
-          if (msg.done) saw = msg
-          if (msg.error) saw = msg
+      while (keepGoing) {
+        keepGoing = false
+        const r = await fetch(
+          '/api/import/jobber-clients?location_id=' + encodeURIComponent(locationId),
+          { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+        )
+        if (!r.ok || !r.body) {
+          let detail = `import_failed_${r.status}`
+          try { const j = await r.json(); detail = j.error || detail } catch {}
+          setError(detail); setImportState('error'); return
+        }
+
+        const reader = r.body.getReader()
+        const decoder = new TextDecoder()
+        let buf = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          let nl
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, nl).trim()
+            buf = buf.slice(nl + 1)
+            if (!line) continue
+            let msg
+            try { msg = JSON.parse(line) } catch { continue }
+            if (msg.job_id && !jobId) setJobId(msg.job_id)
+            if (msg.continue) keepGoing = true
+            if (msg.done) saw = msg
+            if (msg.error) saw = msg
+          }
         }
       }
 
