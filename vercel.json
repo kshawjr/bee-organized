@@ -1,5 +1,12 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "fluid": true,
   "crons": [
     { "path": "/api/cron/send-drips", "schedule": "0 * * * *" }
-  ]
+  ],
+  "functions": {
+    "app/api/import/jobber-clients/route.ts": {
+      "maxDuration": 800
+    }
+  }
 }

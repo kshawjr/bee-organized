@@ -68,7 +68,7 @@ import {
 } from '@/lib/jobber-import'
 
 export const runtime = 'nodejs'
-export const maxDuration = 300
+export const maxDuration = 800
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
