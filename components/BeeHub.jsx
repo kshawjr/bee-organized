@@ -12057,50 +12057,20 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
     if (!locationId || isRunning) return
     setError(null); setStatus(null); setSummary(null)
     try {
-      // Import is now batched server-side (Vercel 300s cap). When a streamed
-      // line is { continue: true }, re-POST to write the next batch. The
-      // poller drives the "X of Y" bee animation off processed_records, which
-      // keeps climbing across batches.
-      let keepGoing = true
-      let saw = null
-      let gotJob = false
-      while (keepGoing) {
-        keepGoing = false
-        const r = await fetch(
-          '/api/import/jobber-clients?location_id=' + encodeURIComponent(locationId),
-          { method:'POST' },
-        )
-        if (!r.ok || !r.body) {
-          let detail = 'import_failed'
-          try { const j = await r.json(); detail = j.error || detail } catch {}
-          setError(detail); return
-        }
-
-        const reader = r.body.getReader()
-        const decoder = new TextDecoder()
-        let buf = ''
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buf += decoder.decode(value, { stream: true })
-          let nl
-          while ((nl = buf.indexOf('\n')) >= 0) {
-            const line = buf.slice(0, nl).trim()
-            buf = buf.slice(nl + 1)
-            if (!line) continue
-            let msg
-            try { msg = JSON.parse(line) } catch { continue }
-            if (msg.job_id && !gotJob) { gotJob = true; setJobId(msg.job_id) }
-            if (msg.continue) keepGoing = true
-            if (msg.done) saw = msg
-            if (msg.error) saw = msg
-          }
-        }
+      // Fire-and-forget: server runs the import detached via waitUntil and
+      // writes progress to import_jobs. We just need the job_id to start the
+      // status poller (useEffect above), which drives the "X of Y" UI off
+      // processed_records.
+      const res = await fetch(
+        '/api/import/jobber-clients?location_id=' + encodeURIComponent(locationId),
+        { method: 'POST' },
+      )
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        setError(e.error || `Import failed to start (${res.status})`); return
       }
-
-      if (saw?.error) setError(saw.error)
-      else if (saw?.done) setSummary(saw)
-      else setError('stream_ended_unexpectedly')
+      const { job_id } = await res.json()
+      setJobId(job_id)
     } catch (e) {
       setError(String(e?.message || e))
     }
@@ -16658,51 +16628,21 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
     setError(null); setStatus(null); setSummary(null)
     setImportState('running')
     try {
-      // Import is now batched server-side (Vercel 300s cap). When a streamed
-      // line is { continue: true }, re-POST to write the next batch.
-      let keepGoing = true
-      let saw = null
-      while (keepGoing) {
-        keepGoing = false
-        const r = await fetch(
-          '/api/import/jobber-clients?location_id=' + encodeURIComponent(locationId),
-          { method: 'POST', headers: { 'Content-Type': 'application/json' } }
-        )
-        if (!r.ok || !r.body) {
-          let detail = `import_failed_${r.status}`
-          try { const j = await r.json(); detail = j.error || detail } catch {}
-          setError(detail); setImportState('error'); return
-        }
-
-        const reader = r.body.getReader()
-        const decoder = new TextDecoder()
-        let buf = ''
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buf += decoder.decode(value, { stream: true })
-          let nl
-          while ((nl = buf.indexOf('\n')) >= 0) {
-            const line = buf.slice(0, nl).trim()
-            buf = buf.slice(nl + 1)
-            if (!line) continue
-            let msg
-            try { msg = JSON.parse(line) } catch { continue }
-            if (msg.job_id && !jobId) setJobId(msg.job_id)
-            if (msg.continue) keepGoing = true
-            if (msg.done) saw = msg
-            if (msg.error) saw = msg
-          }
-        }
+      // Fire-and-forget: server runs the import detached via waitUntil and
+      // writes progress to import_jobs. We just need the job_id to start the
+      // status poller (useEffect above), which drives the "X of Y" UI off
+      // processed_records and flips importState to 'complete' when done.
+      const res = await fetch(
+        '/api/import/jobber-clients?location_id=' + encodeURIComponent(locationId),
+        { method: 'POST' },
+      )
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        setError(e.error || `Import failed to start (${res.status})`)
+        setImportState('error'); return
       }
-
-      if (saw?.error) {
-        setError(saw.error); setImportState('error')
-      } else if (saw?.done) {
-        setSummary(saw); setImportState('complete'); router.refresh()
-      } else {
-        setError('stream_ended_unexpectedly'); setImportState('error')
-      }
+      const { job_id } = await res.json()
+      setJobId(job_id)
     } catch (e) {
       setError(String(e?.message || e))
       setImportState('error')

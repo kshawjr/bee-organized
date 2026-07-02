@@ -48,6 +48,7 @@
 // Hardening pass: add UNIQUE constraints + switch to ON CONFLICT upserts.
 
 import { NextRequest, NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { getValidJobberToken, jobberQueryThrottled } from '@/lib/jobber'
 import { supabaseService } from '@/lib/supabase-service'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
@@ -203,19 +204,11 @@ export async function POST(req: NextRequest) {
 
   const jobId = importJob.id
 
-  // ─── stream the response so the client gets job_id immediately ──
-  // The heavy import work runs inside the stream's start() callback. The
-  // first chunk hands the job_id to the client (which kicks off polling for
-  // the live "Importing X of Y" UI). The final chunk carries the summary
-  // (or an error) so the client doesn't need a second round-trip.
-  const encoder = new TextEncoder()
-  const stream = new ReadableStream({
-    async start(controller) {
-      const emit = (obj: any) => controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n'))
-
-      // 1️⃣ first chunk: job_id (lets the client start polling within ms)
-      emit({ job_id: jobId, started: true })
-
+  // Run the import detached from the request via waitUntil so it survives
+  // after we return the response. All progress is written to import_jobs
+  // (read by /api/import/status/[id] polling), so no stream is needed.
+  const emit = (_obj: any) => {}  // no-op: progress goes to DB, not a stream
+  const runImport = async () => {
       try {
         const jobberToken = await getValidJobberToken(location)
         const devMode = mode === 'dev'
@@ -372,7 +365,6 @@ export async function POST(req: NextRequest) {
             total_records: clients.length,
           })
           emit({ continue: true, processed, total: clients.length, job_id: jobId })
-          controller.close()
           return
         }
 
@@ -467,17 +459,11 @@ export async function POST(req: NextRequest) {
           completed_at: new Date().toISOString(),
         })
         emit({ error: String(err?.message || err), job_id: jobId })
-      } finally {
-        controller.close()
       }
-    },
-  })
+      // no finally/controller.close needed — nothing is streaming
+  }
 
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'application/x-ndjson; charset=utf-8',
-      'Cache-Control': 'no-store, no-transform',
-      'X-Accel-Buffering': 'no',
-    },
-  })
+  // Launch detached; return job_id immediately so the connection closes fast.
+  waitUntil(runImport())
+  return NextResponse.json({ job_id: jobId, started: true })
 }
