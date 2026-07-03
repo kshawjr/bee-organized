@@ -33,6 +33,8 @@ type LeadRow = {
   addresses: any
   jobber_client_id: string | null
   jobber_synced_at: string | null
+  paid_amount?: number | null
+  invoice_paid_at?: string | null
   created_at: string | null
   updated_at: string | null
   request_details: string | null
@@ -276,6 +278,10 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     activity,
     jobs,
     invoices,
+    // Lead-row payment roll-ups (written by the bulk import alongside the
+    // invoice rows) — financials fallback when invoice child rows are absent.
+    paidAmount: row.paid_amount ?? null,
+    invoicePaidAt: row.invoice_paid_at || null,
     assessment,
     assessmentType,
     estimateSent,

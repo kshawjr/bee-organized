@@ -9663,11 +9663,18 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson, onError }) {
   )
   const jobberTotal = person.jobberClient?.jobs?.reduce((s,j)=>s+j.amount,0)||0
   const invoiceTotal = person.invoices?.reduce((s,i)=>s+i.amount,0)||0
-  const totalSpent = jobberTotal || invoiceTotal  // prefer Jobber jobs as source of truth
+  const rollupPaid = person.paidAmount || 0  // lead-row roll-up — fallback when invoice rows absent
+  const totalSpent = jobberTotal || invoiceTotal || rollupPaid  // prefer Jobber jobs as source of truth
   const paidTotal  = person.jobberClient?.jobs
     ? person.jobberClient.jobs.filter(j=>j.status==='Completed').reduce((s,j)=>s+j.amount,0)
-    : person.invoices?.reduce((s,i)=>s+(i.paidAmount ?? (i.status==='Paid'?i.amount:0)),0)||0
-  const inProgressTotal = person.jobberClient?.jobs?.filter(j=>j.status==='In Progress').reduce((s,j)=>s+j.amount,0)||0
+    : person.invoices?.length
+      ? person.invoices.reduce((s,i)=>s+(i.paidAmount ?? (i.status==='Paid'?i.amount:0)),0)
+      : rollupPaid
+  // jobberClient is hardcoded null in mapLeadToPerson — real records fall
+  // through to person.jobs (mapper shape: status lowercase, total).
+  const inProgressTotal = person.jobberClient?.jobs
+    ? person.jobberClient.jobs.filter(j=>j.status==='In Progress').reduce((s,j)=>s+j.amount,0)
+    : person.jobs?.filter(j=>!['completed','archived'].includes((j.status||'').toLowerCase())).reduce((s,j)=>s+(j.total||0),0)||0
   const jobCount   = person.jobs?.length||0
   const hasHistory = person.jobberClient?.jobs?.length>0
 

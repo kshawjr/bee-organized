@@ -517,26 +517,66 @@ export default async function HubPage({
     } else if (leadsRaw && leadsRaw.length > 0) {
       const leadIds = leadsRaw.map((l: any) => l.id)
 
+      // Child-table fetch. The single-shot `.in('lead_id', leadIds)` queries
+      // this replaces had two failure modes with a large tenant: PostgREST's
+      // 1000-row cap truncated results tenant-wide (same bug 80ded92 fixed
+      // for leads), and 1000+ UUIDs in a GET query string could fail on URL
+      // length — with the error silently dropped by `{ data }` destructuring,
+      // leaving every lead with empty joins. Chunk the ids to keep URLs
+      // bounded, paginate each chunk, and log errors loudly. A lead's rows
+      // all come from its own chunk, so per-lead ordering is preserved.
+      // keyCols is a unique tiebreaker so pagination is deterministic under
+      // equal orderCol — 'id' everywhere except lead_tags (composite PK).
+      const fetchChildRows = async (
+        table: string,
+        ids: string[],
+        orderCol?: string,
+        ascending = false,
+        keyCols: string[] = ['id'],
+      ): Promise<any[]> => {
+        const CHUNK = 200
+        const rows: any[] = []
+        for (let i = 0; i < ids.length; i += CHUNK) {
+          const chunk = ids.slice(i, i + CHUNK)
+          for (let from = 0; ; from += PAGE) {
+            let q = supabaseService.from(table).select('*').in('lead_id', chunk)
+            if (orderCol) q = q.order(orderCol, { ascending })
+            for (const col of keyCols) q = q.order(col, { ascending: true })
+            q = q.range(from, from + PAGE - 1)
+            const { data, error } = await q
+            if (error) {
+              console.error(
+                `[hub-page] ${table} child fetch FAILED (chunk ${i / CHUNK + 1}/${Math.ceil(ids.length / CHUNK)}, offset ${from}): ${error.message} — leads in this chunk render without ${table} data`
+              )
+              break
+            }
+            rows.push(...(data || []))
+            if ((data || []).length < PAGE) break
+          }
+        }
+        return rows
+      }
+
       const [
-        { data: leadNotesRaw },
-        { data: touchpointsRaw },
-        { data: leadContactsRaw },
-        { data: leadTagsRaw },
-        { data: assessmentsRaw },
-        { data: serviceRequestsRaw },
-        { data: quotesRaw },
-        { data: jobsRaw },
-        { data: invoicesRaw },
+        leadNotesRaw,
+        touchpointsRaw,
+        leadContactsRaw,
+        leadTagsRaw,
+        assessmentsRaw,
+        serviceRequestsRaw,
+        quotesRaw,
+        jobsRaw,
+        invoicesRaw,
       ] = await Promise.all([
-        supabaseService.from('lead_notes').select('*').in('lead_id', leadIds).order('created_at', { ascending: false }),
-        supabaseService.from('touchpoints').select('*').in('lead_id', leadIds).order('occurred_at', { ascending: false }),
-        supabaseService.from('lead_contacts').select('*').in('lead_id', leadIds).order('created_at', { ascending: true }),
-        supabaseService.from('lead_tags').select('*').in('lead_id', leadIds),
-        supabaseService.from('assessments').select('*').in('lead_id', leadIds).order('scheduled_at', { ascending: false }),
-        supabaseService.from('service_requests').select('*').in('lead_id', leadIds).order('created_at', { ascending: false }),
-        supabaseService.from('quotes').select('*').in('lead_id', leadIds).order('sent_at', { ascending: false }),
-        supabaseService.from('jobs').select('*').in('lead_id', leadIds).order('scheduled_start', { ascending: false }),
-        supabaseService.from('invoices').select('*').in('lead_id', leadIds).order('issued_at', { ascending: false }),
+        fetchChildRows('lead_notes', leadIds, 'created_at'),
+        fetchChildRows('touchpoints', leadIds, 'occurred_at'),
+        fetchChildRows('lead_contacts', leadIds, 'created_at', true),
+        fetchChildRows('lead_tags', leadIds, undefined, false, ['lead_id', 'tag_lookup_id']),
+        fetchChildRows('assessments', leadIds, 'scheduled_at'),
+        fetchChildRows('service_requests', leadIds, 'created_at'),
+        fetchChildRows('quotes', leadIds, 'sent_at'),
+        fetchChildRows('jobs', leadIds, 'scheduled_start'),
+        fetchChildRows('invoices', leadIds, 'issued_at'),
       ])
 
       const tagLookupIds = Array.from(new Set((leadTagsRaw || []).map((lt: any) => lt.tag_lookup_id)))
