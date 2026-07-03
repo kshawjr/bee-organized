@@ -128,6 +128,7 @@ const INVOICE_STATUS = {
   'Draft':            { color:'#8a9e9a', bg:'rgba(138,158,154,0.1)', icon:'📝' },
   'Sent':             { color:'#6366f1', bg:'rgba(99,102,241,0.1)',  icon:'📤' },
   'Awaiting Payment': { color:'#f59e0b', bg:'rgba(245,158,11,0.1)',  icon:'⏳' },
+  'Partial':          { color:'#0ea5e9', bg:'rgba(14,165,233,0.1)',  icon:'💰' },
   'Paid':             { color:'#22c55e', bg:'rgba(34,197,94,0.1)',   icon:'✅' },
   'Bad Debt':         { color:'#ef4444', bg:'rgba(239,68,68,0.1)',   icon:'❌' },
   'Void':             { color:'#d1d5db', bg:'rgba(209,213,219,0.2)', icon:'🚫' },
@@ -9665,7 +9666,7 @@ function AccountPanel({ person, allPeople, onClose, onUpdatePerson, onError }) {
   const totalSpent = jobberTotal || invoiceTotal  // prefer Jobber jobs as source of truth
   const paidTotal  = person.jobberClient?.jobs
     ? person.jobberClient.jobs.filter(j=>j.status==='Completed').reduce((s,j)=>s+j.amount,0)
-    : person.invoices?.filter(i=>i.status==='Paid').reduce((s,i)=>s+i.amount,0)||0
+    : person.invoices?.reduce((s,i)=>s+(i.paidAmount ?? (i.status==='Paid'?i.amount:0)),0)||0
   const inProgressTotal = person.jobberClient?.jobs?.filter(j=>j.status==='In Progress').reduce((s,j)=>s+j.amount,0)||0
   const jobCount   = person.jobs?.length||0
   const hasHistory = person.jobberClient?.jobs?.length>0

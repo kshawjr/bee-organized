@@ -98,6 +98,17 @@ function fmtDate(iso: string | null | undefined): string {
   }
 }
 
+// DB invoice statuses (lowercase, written by lib/jobber-import.ts) → the
+// capitalized labels BeeHub.jsx compares against and keys INVOICE_STATUS on.
+const INVOICE_STATUS_LABELS: Record<string, string> = {
+  paid: 'Paid',
+  partial: 'Partial',
+  sent: 'Awaiting Payment',
+  bad_debt: 'Bad Debt',
+  draft: 'Draft',
+  void: 'Void',
+}
+
 export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
   // Addresses
   const addresses = Array.isArray(row.addresses) ? row.addresses : []
@@ -204,17 +215,26 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     jobberRef: j.jobber_job_id || null,
   }))
 
-  // Invoices
+  // Invoices — components/BeeHub.jsx (INVOICE_STATUS map, PersonPanel,
+  // InvoicePopup) speaks the capitalized mock-data vocabulary and reads
+  // `number`/`date`/`paidDate`/`dueDate`. DB stays lowercase; this mapping
+  // is the single normalization point.
   const invoices = (joined.invoices || []).map(inv => ({
     id: inv.id,
     amount: inv.total || 0,
     paidAmount: inv.paid_amount || 0,
     balance: inv.balance_owing || 0,
-    status: inv.status || 'Draft',
+    status: INVOICE_STATUS_LABELS[(inv.status || '').toLowerCase()] || inv.status || 'Draft',
     issuedAt: inv.issued_at ? fmtDate(inv.issued_at) : null,
     paidAt: inv.paid_at ? fmtDate(inv.paid_at) : null,
     invoiceUrl: inv.invoice_url || null,
     jobberRef: inv.jobber_invoice_id || null,
+    // Compat aliases — raw ISO dates: BeeHub's fmtDate formats ISO input
+    // and passes through anything already formatted.
+    number: `INV-${String(inv.jobber_invoice_id || inv.id).slice(-6).toUpperCase()}`,
+    date: inv.issued_at || null,
+    paidDate: inv.paid_at || null,
+    dueDate: null, // not imported from Jobber
   }))
 
   return {
