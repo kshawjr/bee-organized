@@ -12014,6 +12014,24 @@ function JobberConnectStep({ markDone, setActiveStepOpen }) {
   )
 }
 
+// Turn a raw import_jobs.phase string into user-facing progress text, shown
+// while no per-record counts exist yet (a "0 of N" counter reads as frozen).
+// Raw phases written by the import route: 'starting', 'fetching clients' /
+// 'fetching requests' / 'fetching quotes' / 'fetching jobs', 'fetching —
+// continuing (2/4 entities)', 'Pausing 12s for Jobber API rate limit...',
+// 'writing', 'batched — 200/1400, continuing', 'incremental', 'done'.
+function humanizeImportPhase(phase) {
+  const p = String(phase || '')
+  if (/^Pausing/.test(p)) return p  // throttle-pause text is already user-facing
+  if (/^fetching clients/.test(p))  return 'Fetching clients from Jobber…'
+  if (/^fetching requests/.test(p)) return 'Fetching requests from Jobber…'
+  if (/^fetching quotes/.test(p))   return 'Fetching quotes from Jobber…'
+  if (/^fetching jobs/.test(p))     return 'Fetching jobs from Jobber…'
+  if (/^fetching/.test(p))          return 'Fetching data from Jobber…'
+  if (/^writing|^batched/.test(p))  return 'Writing records…'
+  return 'Preparing import…'
+}
+
 function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAdvanceFromStep }) {
   const currentUser = useContext(CurrentUserContext)
   const locationId  = currentUser?.locationId || null
@@ -12022,7 +12040,30 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
   const [status,  setStatus]  = useState(null)   // polled import_jobs row
   const [summary, setSummary] = useState(null)   // initial POST response
   const [error,   setError]   = useState(null)   // network or HTTP error
+  const [checkingActive, setCheckingActive] = useState(true) // mount check for in-flight job
   const continuingRef = useRef(false)            // dedupe in-flight re-POSTs
+
+  // Resume an in-flight import on mount: the server job survives a page
+  // reload (it runs detached via waitUntil), but jobId state doesn't. Ask
+  // /api/import/active and re-attach the poller if a running job exists.
+  useEffect(() => {
+    if (!locationId) { setCheckingActive(false); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await fetch('/api/import/active?location_id=' + encodeURIComponent(locationId))
+        if (r.ok) {
+          const { job } = await r.json()
+          if (!cancelled && job && job.status === 'running') {
+            setStatus(job)
+            setJobId(job.id)
+          }
+        }
+      } catch { /* fall through to idle — user can still start manually */ }
+      finally { if (!cancelled) setCheckingActive(false) }
+    })()
+    return () => { cancelled = true }
+  }, [locationId])
 
   const isTerminal = status?.status === 'completed' || status?.status === 'failed'
   const isRunning  = jobId && !isTerminal && !error
@@ -12174,11 +12215,17 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
 
   // ─── running ──
   if (isRunning) {
-    const hasTotal = (status?.total_records || 0) > 0
+    const processed = status?.processed_records || 0
+    const rawPhase  = status?.phase || ''
+    // Before any records are counted (or while a fetch segment runs), a
+    // "0 of N" counter reads as frozen — show humanized phase text with the
+    // indeterminate bar instead; flip to X-of-Y once counts move.
+    const preCount  = processed === 0 || /^fetching/.test(rawPhase)
+    const hasTotal  = !preCount && (status?.total_records || 0) > 0
     const pct = hasTotal
-      ? Math.min(100, Math.round(((status.processed_records || 0) / status.total_records) * 100))
+      ? Math.min(100, Math.round((processed / status.total_records) * 100))
       : 0
-    const phaseLabel = status?.phase || 'starting'
+    const phaseLabel = rawPhase || 'starting'
     return (
       <div style={{ display:'grid', gap:'8px' }}>
         {/* Bee swarm — duplicated from ClientImportCard. DRY into a shared
@@ -12220,8 +12267,9 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
           <span style={{ position:'absolute', top:'20px', left:'80%', fontSize:'24px', animation:'bee-fly-4 4.5s ease-in-out infinite' }}>🐝</span>
         </div>
         <p style={{ fontSize:'12px', color:'#4a5e5a' }}>
-          {phaseLabel} — {status?.processed_records || 0}
-          {hasTotal ? ` of ${status.total_records}` : ''}
+          {preCount
+            ? humanizeImportPhase(rawPhase)
+            : `${phaseLabel} — ${processed}${hasTotal ? ` of ${status.total_records}` : ''}`}
         </p>
         {hasTotal ? (
           <div style={{ height:'8px', background:'rgba(168,201,196,0.2)', borderRadius:'4px', overflow:'hidden' }}>
@@ -12239,6 +12287,10 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
       </div>
     )
   }
+
+  // ─── mount check in flight — don't flash a clickable Start over a
+  // possibly-running job ──
+  if (checkingActive) return null
 
   // ─── idle ──
   return (
@@ -16549,7 +16601,31 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
   const [summary, setSummary]         = useState(null)   // { total_clients, leads_created, ... }
   const [error, setError]             = useState(null)
   const [skipped, setSkipped]         = useState(false)  // session-only collapse
+  const [checkingActive, setCheckingActive] = useState(true) // mount check for in-flight job
   const continuingRef                 = useRef(false)    // dedupe in-flight re-POSTs
+
+  // Resume an in-flight import on mount: the server job survives a page
+  // reload (it runs detached via waitUntil), but jobId state doesn't. Ask
+  // /api/import/active and re-attach the poller if a running job exists.
+  useEffect(() => {
+    if (!locationId) { setCheckingActive(false); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await fetch('/api/import/active?location_id=' + encodeURIComponent(locationId))
+        if (r.ok) {
+          const { job } = await r.json()
+          if (!cancelled && job && job.status === 'running') {
+            setStatus(job)
+            setJobId(job.id)
+            setImportState('running')
+          }
+        }
+      } catch { /* fall through to idle — user can still start manually */ }
+      finally { if (!cancelled) setCheckingActive(false) }
+    })()
+    return () => { cancelled = true }
+  }, [locationId])
 
   // Status polling + auto-continue: when the server checkpoints mid-import
   // (phase startsWith 'fetching' or 'batched' while status='running'), re-POST
@@ -16686,9 +16762,19 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
     }
   }
 
+  // ─── mount check in flight — don't flash a clickable Start over a
+  // possibly-running job ──
+  if (checkingActive && importState === 'idle') return null
+
   // ─── Display helpers ──
-  const progressPct = status?.processed_records && status?.total_records
-    ? Math.min(100, Math.round((status.processed_records / status.total_records) * 100))
+  const processed = status?.processed_records || 0
+  const rawPhase  = status?.phase || ''
+  // Before any records are counted (or while a fetch segment runs), a
+  // "0 of N" counter reads as frozen — show humanized phase text with an
+  // indeterminate bar instead; flip to X-of-Y once counts move.
+  const preCount  = processed === 0 || /^fetching/.test(rawPhase)
+  const progressPct = !preCount && processed && status?.total_records
+    ? Math.min(100, Math.round((processed / status.total_records) * 100))
     : null
 
   return (
@@ -16704,9 +16790,9 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
           </p>
           <p style={{ fontSize:'11px', color:'#8a9e9a' }}>
             {importState === 'idle' && 'Bring your existing clients into Bee Hub'}
-            {importState === 'running' && (status?.processed_records != null
-              ? `Importing… ${status.processed_records} of ${status.total_records ?? '?'} clients`
-              : 'Starting import…')}
+            {importState === 'running' && (preCount
+              ? humanizeImportPhase(rawPhase)
+              : `Importing… ${processed} of ${status?.total_records ?? '?'} clients`)}
             {importState === 'complete' && `${summary?.total_clients ?? status?.processed_records ?? 0} clients imported`}
             {importState === 'error' && (error || 'Import failed')}
           </p>
@@ -16762,7 +16848,15 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
         </div>
       )}
 
-      {/* Progress bar */}
+      {/* Progress bar — indeterminate while pre-count, determinate after */}
+      {importState === 'running' && progressPct == null && (
+        <div style={{ padding:'0 14px 12px' }}>
+          <div style={{ height:'6px', background:'rgba(168,201,196,0.2)', borderRadius:'3px', overflow:'hidden', position:'relative' }}>
+            <div style={{ position:'absolute', top:0, bottom:0, width:'30%', background:'linear-gradient(90deg,transparent,#a8c9c4,transparent)', borderRadius:'3px', animation:'beeImportIndeterminate 1.4s ease-in-out infinite' }} />
+            <style>{`@keyframes beeImportIndeterminate { 0%{left:-30%} 100%{left:100%} }`}</style>
+          </div>
+        </div>
+      )}
       {importState === 'running' && progressPct != null && (
         <div style={{ padding:'0 14px 12px' }}>
           <div style={{ height:'6px', background:'rgba(168,201,196,0.2)', borderRadius:'3px', overflow:'hidden' }}>
