@@ -521,6 +521,11 @@ export async function POST(req: NextRequest) {
         const alreadyWritten = new Set((existingRows || []).map(r => r.jobber_client_id))
         const unwritten = clients.filter((c: any) => !alreadyWritten.has(extractJobberId(c.id)))
         console.log(`[jobber-import] ${alreadyWritten.size} already written, ${unwritten.length} unwritten this segment`)
+        // TEMP DIAGNOSTIC — remove after Portland stuck-at-1400 investigation.
+        console.log(`[import-debug] clients loaded: ${clients.length}, alreadyWritten: ${alreadyWritten.size}, unwritten: ${unwritten.length}`)
+        console.log(`[import-debug] sample client.id: ${JSON.stringify(clients[0]?.id)}, extractJobberId: ${extractJobberId(clients[0]?.id)}`)
+        console.log(`[import-debug] sample alreadyWritten values: ${JSON.stringify(Array.from(alreadyWritten).slice(0, 3))}`)
+        console.log(`[import-debug] is sample client in alreadyWritten? ${alreadyWritten.has(extractJobberId(clients[0]?.id))}`)
 
         // Set total_records to the FULL staged count so the "X of Y" UI still
         // shows overall progress. processed starts at alreadyWritten.size below.
