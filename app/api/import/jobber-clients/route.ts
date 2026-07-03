@@ -516,19 +516,34 @@ export async function POST(req: NextRequest) {
         //     don't get iterated during map construction)
         //   * the write loop iterates only unwritten (no more wasted budget
         //     scanning-and-skipping the already-done prefix)
-        const { data: existingRows } = await supabaseService
-          .from('leads')
-          .select('jobber_client_id')
-          .eq('location_uuid', locUuid)
-          .not('jobber_client_id', 'is', null)
-        const alreadyWritten = new Set((existingRows || []).map(r => r.jobber_client_id))
-        const unwritten = clients.filter((c: any) => !alreadyWritten.has(extractJobberId(c.id)))
+        // Paginate in 1000-row chunks — Supabase's default range cap is 1000,
+        // so a single query silently truncates when leads > 1000 (root cause of
+        // Portland stuck-at-1400: alreadyWritten.size capped at 1000, making
+        // 400 already-written leads look unwritten every segment → infinite loop).
+        const alreadyWritten = new Set<string>()
+        {
+          const PAGE = 1000
+          let from = 0
+          while (true) {
+            const { data: page, error: pageErr } = await supabaseService
+              .from('leads')
+              .select('jobber_client_id')
+              .eq('location_uuid', locUuid)
+              .not('jobber_client_id', 'is', null)
+              .range(from, from + PAGE - 1)
+            if (pageErr) throw new Error(`alreadyWritten load failed: ${pageErr.message}`)
+            for (const r of page ?? []) if (r.jobber_client_id) alreadyWritten.add(String(r.jobber_client_id))
+            if (!page || page.length < PAGE) break
+            from += PAGE
+          }
+        }
+        const unwritten = clients.filter((c: any) => { const id = extractJobberId(c.id); return id === null || !alreadyWritten.has(id) })
         console.log(`[jobber-import] ${alreadyWritten.size} already written, ${unwritten.length} unwritten this segment`)
         // TEMP DIAGNOSTIC — remove after Portland stuck-at-1400 investigation.
         console.log(`[import-debug] clients loaded: ${clients.length}, alreadyWritten: ${alreadyWritten.size}, unwritten: ${unwritten.length}`)
         console.log(`[import-debug] sample client.id: ${JSON.stringify(clients[0]?.id)}, extractJobberId: ${extractJobberId(clients[0]?.id)}`)
         console.log(`[import-debug] sample alreadyWritten values: ${JSON.stringify(Array.from(alreadyWritten).slice(0, 3))}`)
-        console.log(`[import-debug] is sample client in alreadyWritten? ${alreadyWritten.has(extractJobberId(clients[0]?.id))}`)
+        { const _sampleId = extractJobberId(clients[0]?.id); console.log('[import-debug] is sample client in alreadyWritten?', _sampleId !== null && alreadyWritten.has(_sampleId)) }
 
         // Set total_records to the FULL staged count so the "X of Y" UI still
         // shows overall progress. processed starts at alreadyWritten.size below.
