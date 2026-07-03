@@ -17606,16 +17606,24 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
   // Jobber roster cache from locations.jobber_team_roster. Used to power
   // the "linked status" badges + the manual override dropdown in
   // MemberDetailPopup. Refreshed on demand via the button below.
-  const [jobberRoster, setJobberRoster] = useState(() =>
-    Array.isArray(currentLocationCtx?.jobber_team_roster)
-      ? currentLocationCtx.jobber_team_roster
-      : []
-  )
+  // super_admin has no CurrentLocationContext (null by design). When they use
+  // the location switcher, SettingsScreen threads the switched-to location's
+  // jobber_* fields through the `settings` prop — fall back to those so the
+  // roster sync button + linked badges reflect the real DB state instead of
+  // silently disappearing.
+  const [jobberRoster, setJobberRoster] = useState(() => {
+    if (Array.isArray(currentLocationCtx?.jobber_team_roster)) return currentLocationCtx.jobber_team_roster
+    if (Array.isArray(settings?.location?.jobberTeamRoster)) return settings.location.jobberTeamRoster
+    return []
+  })
   const [rosterSyncedAt, setRosterSyncedAt] = useState(
-    currentLocationCtx?.jobber_team_roster_synced_at || null
+    currentLocationCtx?.jobber_team_roster_synced_at
+      ?? settings?.location?.jobberTeamRosterSyncedAt
+      ?? null
   )
   const [refreshingRoster, setRefreshingRoster] = useState(false)
   const jobberConnected = !!currentLocationCtx?.jobber_connected
+    || settings?.location?.jobberStatus === 'connected'
 
   async function refreshJobberRoster() {
     if (!dbLocationId || refreshingRoster) return
@@ -18362,8 +18370,15 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     timezone:       selectedLoc.timezone,
     assessmentType: selectedLoc.assessmentType,
     smsEnabled:     selectedLoc.smsEnabled,
-    jobberStatus:   selectedLoc.jobberStatus,
+    // initialLocations rows expose jobberConnected (boolean) not jobberStatus.
+    // Derive the string form here so JobberConnectionCard / ClientImportCard
+    // don't fall back to 'disconnected' when a real DB row is present.
+    jobberStatus:   selectedLoc.jobberConnected ? 'connected' : 'disconnected',
     jobberAccountId:selectedLoc.jobberAccountId,
+    jobberAccountName: selectedLoc.jobberAccountName || '',
+    jobberInitialImportCompletedAt: selectedLoc.jobberInitialImportCompletedAt || null,
+    jobberTeamRoster: selectedLoc.jobberTeamRoster || [],
+    jobberTeamRosterSyncedAt: selectedLoc.jobberTeamRosterSyncedAt || null,
     crmStatus:      selectedLoc.crmStatus,
     sendFromName:   selectedLoc.owner ? `Bee Organized ${selectedLoc.name}` : '',
     sendFromEmail:  selectedLoc.email || '',
@@ -19045,7 +19060,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             <JobberConnectionCard settings={settings} updateLocation={updateLocation} />
             <div style={{ height:'8px' }} />
             <ClientImportCard
-              isJobberConnected={settings.location.jobberStatus==='connected'||!settings.location.jobberStatus}
+              isJobberConnected={settings.location.jobberStatus==='connected'}
               locationId={settings.location.locId||'loc1'}
               initialImportCompletedAt={settings.location.jobberInitialImportCompletedAt}
             />

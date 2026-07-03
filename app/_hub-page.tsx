@@ -320,7 +320,7 @@ export default async function HubPage({
     const { data: locs, error: locsErr } = await supabaseService
       .from('locations')
       .select(
-        'id, name, state, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, last_sync_status, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at, corporate_sponsorship_started_at, corporate_sponsorship_ends_at'
+        'id, name, state, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at, corporate_sponsorship_started_at, corporate_sponsorship_ends_at'
       )
       .order('name', { ascending: true })
 
@@ -426,6 +426,10 @@ export default async function HubPage({
         path: '',
         jobberConnected: !!row.jobber_account_id,
         jobberAccountId: row.jobber_account_id || null,
+        jobberAccountName: row.jobber_account_name || null,
+        jobberInitialImportCompletedAt: row.jobber_initial_import_completed_at || null,
+        jobberTeamRoster: Array.isArray(row.jobber_team_roster) ? row.jobber_team_roster : [],
+        jobberTeamRosterSyncedAt: row.jobber_team_roster_synced_at || null,
         last_sync_status: row.last_sync_status || null,
         leads: 0,
         revenue: 0,
