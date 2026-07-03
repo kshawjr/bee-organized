@@ -69,6 +69,11 @@ import {
   upsertInvoice,
   extractJobberId,
 } from '@/lib/jobber-import'
+import {
+  ensureEngagementForServiceRequest,
+  attachToEngagement,
+  maybeAdvanceEngagementStage,
+} from '@/lib/engagements'
 
 export const runtime = 'nodejs'
 export const maxDuration = 800
@@ -602,6 +607,8 @@ export async function POST(req: NextRequest) {
           invoices_created: 0, invoices_updated: 0,
           marked_junk: 0,      // no contact info + no history → is_junk
           auto_closed_won: 0,  // paid + complete, nothing pending after
+          engagements_founded: 0,  // step-3 dual-write (additive)
+          engagement_errors: 0,
           errors: [] as string[],
         }
 
@@ -641,16 +648,25 @@ export async function POST(req: NextRequest) {
                 const aRes = await upsertAssessment(request, reqDbId, leadId, locSlug)
                 aRes.created ? stats.assessments_created++ : stats.assessments_updated++
               }
+              // Child DB ids for the engagement pass below (step-3 dual-write).
+              const engQuoteIds: string[] = []
+              const engJobIds: string[] = []
+              const engInvoiceIds: string[] = []
+              let engJobTitle: string | null = null
               for (const quote of (quotesByReq[request.id] || [])) {
                 const qRes = await upsertQuote(quote, reqDbId, leadId, locSlug)
                 qRes.created ? stats.quotes_created++ : stats.quotes_updated++
+                engQuoteIds.push(qRes.id)
               }
               for (const job of (jobsByReq[request.id] || [])) {
                 const jRes = await upsertJob(job, reqDbId, leadId, locSlug)
                 jRes.created ? stats.jobs_created++ : stats.jobs_updated++
+                engJobIds.push(jRes.id)
+                if (!engJobTitle && job.title?.trim()) engJobTitle = job.title.trim()
                 for (const inv of (job.invoices?.nodes || [])) {
                   const iRes = await upsertInvoice(inv, jRes.id, reqDbId, leadId, locSlug)
                   iRes.created ? stats.invoices_created++ : stats.invoices_updated++
+                  engInvoiceIds.push(iRes.id)
                   // Lead roll-up for historical paid invoices — mirrors the
                   // INVOICE_PAID webhook denorm (paid_amount / balance_owing /
                   // invoice_paid_at) but deliberately does NOT promote stage
@@ -671,6 +687,28 @@ export async function POST(req: NextRequest) {
                       .eq('id', leadId)
                   }
                 }
+              }
+
+              // ─── dual-write: engagements (step 3, additive) ──
+              // Every SR founds one engagement (rule 1); this request's
+              // children attach to it; stage derives in backfill mode (§5
+              // stale rules, silent). Failures are counted and logged but
+              // never break the import — leads.stage below stays the
+              // board's authority until the step-4 read flip.
+              try {
+                const ens = await ensureEngagementForServiceRequest(reqDbId, leadId, { title: engJobTitle })
+                if (ens) {
+                  if (ens.created) stats.engagements_founded++
+                  for (const qid of engQuoteIds) await attachToEngagement('quotes', qid, ens.id)
+                  for (const jid of engJobIds) await attachToEngagement('jobs', jid, ens.id)
+                  for (const iid of engInvoiceIds) await attachToEngagement('invoices', iid, ens.id)
+                  await maybeAdvanceEngagementStage(ens.id, { mode: 'backfill' })
+                } else {
+                  stats.engagement_errors++
+                }
+              } catch (err: any) {
+                stats.engagement_errors++
+                console.error('[engagements] import dual-write failed', err?.message || err)
               }
             }
 
@@ -790,6 +828,7 @@ export async function POST(req: NextRequest) {
             `Invoices: ${stats.invoices_created} created, ${stats.invoices_updated} updated; ` +
             `Marked junk (no contact info): ${stats.marked_junk}; ` +
             `Auto-closed Won (paid + complete): ${stats.auto_closed_won}; ` +
+            `Engagements founded: ${stats.engagements_founded} (${stats.engagement_errors} errors); ` +
             `Errors: ${stats.errors.length}`,
         })
 

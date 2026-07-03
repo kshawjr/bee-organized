@@ -16,6 +16,13 @@
 //   5. Forward-only stage promotion via promoteLeadStage +
 //      applyDripSideEffects, but ONLY for the topics that drive a
 //      transition (see TOPIC → STAGE MAP below).
+//   6. Phase 1 step-3 dual-write (ADDITIVE): REQUEST ingests found an
+//      engagement (rule 1, via fetchAndUpsertRequest); QUOTE_/JOB_/
+//      INVOICE_ topics resolve + attach their row to its engagement and
+//      forward-only advance the ENGAGEMENT stage (lib/engagements.ts).
+//      The lead-stage map below is untouched; the board still reads
+//      leads until the step-4 read flip. Engagement failures log and
+//      never affect the handler result.
 //
 // TOPIC → STAGE MAP (matches Kevin's spec):
 //   REQUEST_CREATE   → 'Request'           forward-only
@@ -85,6 +92,12 @@ import {
   extractJobberId,
   promoteLeadStage,
 } from './jobber-import'
+import {
+  ensureEngagementForServiceRequest,
+  resolveEngagementForChild,
+  attachToEngagement,
+  maybeAdvanceEngagementStage,
+} from './engagements'
 import type { LocationRow } from './jobber-webhook'
 
 type JobberType = 'Client' | 'Request' | 'Quote' | 'Job' | 'Invoice' | 'Property'
@@ -216,6 +229,15 @@ async function fetchAndUpsertRequest(
 
   if (reqRec.assessment?.startAt) {
     await upsertAssessment(reqRec, sr.id, lead.id, ctx.location.location_id)
+  }
+
+  // Dual-write (step 3): rule 1 — every request founds an engagement.
+  // Sits here (not just REQUEST_CREATE) so the quote/job/invoice
+  // fallback ingests also found. Additive: failures log, never bubble.
+  try {
+    await ensureEngagementForServiceRequest(sr.id, lead.id)
+  } catch (err: any) {
+    console.error('[engagements] request founding failed (webhook)', err?.message || err)
   }
 
   return {
@@ -356,7 +378,25 @@ async function handleQuoteCore(
   }
 
   // Upsert the quotes row (sub-table source of truth).
-  await upsertQuote(quoteRec, sr.id, leadId, ctx.location.location_id)
+  const qRes = await upsertQuote(quoteRec, sr.id, leadId, ctx.location.location_id)
+
+  // Dual-write (step 3): resolve + attach + forward-only stage advance.
+  // Additive: leads.stage promotion below is untouched.
+  try {
+    const engId = await resolveEngagementForChild({
+      childTable: 'quotes',
+      childId: qRes.id,
+      leadId,
+      serviceRequestId: sr.id,
+      locationSlug: ctx.location.location_id,
+    })
+    if (engId) {
+      await attachToEngagement('quotes', qRes.id, engId)
+      await maybeAdvanceEngagementStage(engId)
+    }
+  } catch (err: any) {
+    console.error('[engagements] quote dual-write failed', err?.message || err)
+  }
 
   // Lead-level denormalizations: id + amount, plus this event's timestamp.
   const stampValue = ctx.occurredAt || new Date().toISOString()
@@ -449,7 +489,27 @@ async function handleJobCore(
     return { processed: false, error: 'job_no_matching_lead' }
   }
 
-  await upsertJob(jobRec, sr?.id || null, leadId, ctx.location.location_id)
+  const jRes = await upsertJob(jobRec, sr?.id || null, leadId, ctx.location.location_id)
+
+  // Dual-write (step 3): resolve via SR, then Job.quote (jobs.quote_id,
+  // resolved inside upsertJob), then rule-5 fallbacks. Additive.
+  try {
+    const engId = await resolveEngagementForChild({
+      childTable: 'jobs',
+      childId: jRes.id,
+      leadId,
+      serviceRequestId: sr?.id || null,
+      quoteDbId: jRes.quote_db_id ?? null,
+      title: jobRec.title || null,
+      locationSlug: ctx.location.location_id,
+    })
+    if (engId) {
+      await attachToEngagement('jobs', jRes.id, engId)
+      await maybeAdvanceEngagementStage(engId)
+    }
+  } catch (err: any) {
+    console.error('[engagements] job dual-write failed', err?.message || err)
+  }
 
   // Lead-level: jobber_job_id, scheduled_at (job.startAt), and the
   // event's own timestamp column.
@@ -551,7 +611,26 @@ async function handleInvoiceCore(
     return { processed: false, error: 'invoice_no_matching_lead' }
   }
 
-  await upsertInvoice(invRec, jobDbId, sr?.id || null, leadId, ctx.location.location_id)
+  const iRes = await upsertInvoice(invRec, jobDbId, sr?.id || null, leadId, ctx.location.location_id)
+
+  // Dual-write (step 3): invoice attaches via its job (then SR / rule-5
+  // fallbacks). Additive.
+  try {
+    const engId = await resolveEngagementForChild({
+      childTable: 'invoices',
+      childId: iRes.id,
+      leadId,
+      serviceRequestId: sr?.id || null,
+      jobDbId,
+      locationSlug: ctx.location.location_id,
+    })
+    if (engId) {
+      await attachToEngagement('invoices', iRes.id, engId)
+      await maybeAdvanceEngagementStage(engId)
+    }
+  } catch (err: any) {
+    console.error('[engagements] invoice dual-write failed', err?.message || err)
+  }
 
   // Lead-level denormalizations.
   const totalNum = invRec.amounts?.total ? parseFloat(invRec.amounts.total) : null

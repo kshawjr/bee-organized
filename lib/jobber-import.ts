@@ -87,6 +87,7 @@ export const JOBS_QUERY = `
       nodes {
         id createdAt jobberWebUri title jobStatus startAt completedAt total
         request { id }
+        quote { id }
         invoices(first: 10) {
           nodes {
             id createdAt jobberWebUri invoiceStatus
@@ -144,6 +145,7 @@ export const SINGLE_JOB_QUERY = `
     job(id: $id) {
       id createdAt jobberWebUri title jobStatus startAt completedAt total
       request { id client { id } }
+      quote { id }
       client { id }
       invoices(first: 10) {
         nodes {
@@ -553,7 +555,25 @@ export async function upsertJob(
   location_id: string,
 ) {
   const jobberJobId = extractJobberId(job.id)
-  const payload = {
+
+  // Job.quote → jobs.quote_id (Phase 1 step 3; JOBS_QUERY/SINGLE_JOB_QUERY
+  // widened fail-loud per decision 14 context). Only written when the quote
+  // row already exists locally, and never nulled here — a missed lookup
+  // (e.g. JOB_CREATE webhook racing QUOTE_CREATE) can't erase an earlier
+  // link; the next job upsert heals it.
+  let quoteDbId: string | null = null
+  const jobberQuoteId = extractJobberId(job.quote?.id)
+  if (jobberQuoteId) {
+    const { data: quoteRow } = await supabaseService
+      .from('quotes')
+      .select('id')
+      .eq('jobber_quote_id', jobberQuoteId)
+      .eq('location_id', location_id)
+      .maybeSingle()
+    if (quoteRow) quoteDbId = quoteRow.id
+  }
+
+  const payload: Record<string, any> = {
     service_request_id, lead_id, location_id,
     jobber_job_id: jobberJobId,
     job_url: job.jobberWebUri || null,
@@ -565,6 +585,7 @@ export async function upsertJob(
     jobber_synced_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   }
+  if (quoteDbId) payload.quote_id = quoteDbId
   const { data: existing } = await supabaseService
     .from('jobs')
     .select('id')
@@ -573,7 +594,7 @@ export async function upsertJob(
     .maybeSingle()
   if (existing) {
     await supabaseService.from('jobs').update(payload).eq('id', existing.id)
-    return { id: existing.id, created: false }
+    return { id: existing.id, created: false, quote_db_id: quoteDbId }
   }
   const { data, error } = await supabaseService
     .from('jobs')
@@ -581,7 +602,7 @@ export async function upsertJob(
     .select('id')
     .single()
   if (error) throw new Error(`Job: ${error.message}`)
-  return { id: data.id, created: true }
+  return { id: data.id, created: true, quote_db_id: quoteDbId }
 }
 
 export async function upsertInvoice(
