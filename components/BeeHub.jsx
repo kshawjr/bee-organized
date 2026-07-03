@@ -18415,6 +18415,21 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     profile:  locProfile,
     location: locLocation,
   })
+  // useState initializes once — a super_admin toggling from KC to Portland
+  // via the location switcher would otherwise keep the first-mount snapshot
+  // (KC's data) frozen in settings. Reset when the underlying location's id
+  // actually changes to a different non-null value. Ref guard avoids losing
+  // in-flight edits on a transient null (e.g. initialLocations briefly empty
+  // during a re-render). Skips the initial mount — the useState initializer
+  // already covered it.
+  const prevLocId = useRef(selectedLoc?.id ?? currentLocationCtx?.id ?? null)
+  useEffect(() => {
+    const newId = selectedLoc?.id ?? currentLocationCtx?.id ?? null
+    if (newId && newId !== prevLocId.current) {
+      prevLocId.current = newId
+      setSettings({ ...DEFAULT_SETTINGS, profile: locProfile, location: locLocation })
+    }
+  }, [selectedLoc?.id, currentLocationCtx?.id])
   const [activeSection, setActiveSection] = useState(initialSection||'profile')
 
   function updateProfile(key, val) { setSettings(s=>({...s, profile:{...s.profile,[key]:val}})) }

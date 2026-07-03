@@ -320,7 +320,7 @@ export default async function HubPage({
     const { data: locs, error: locsErr } = await supabaseService
       .from('locations')
       .select(
-        'id, name, state, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at, corporate_sponsorship_started_at, corporate_sponsorship_ends_at'
+        'id, name, address, city, state, zip, phone, email, timezone, reviews_link, calendar_link, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at, corporate_sponsorship_started_at, corporate_sponsorship_ends_at'
       )
       .order('name', { ascending: true })
 
@@ -417,12 +417,18 @@ export default async function HubPage({
         payment_source: row.payment_source || 'none',
         paid_through_date: row.paid_through_date || null,
         billing_notes: row.billing_notes || null,
-        phone: '',
+        // DB stores address parts separately; combine for display (matches the
+        // franchise-owner path in SettingsScreen's currentLocationCtx branch).
+        address: (() => {
+          const cityStateZip = [row.city, [row.state, row.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')
+          return [row.address, cityStateZip].filter(Boolean).join(', ')
+        })(),
+        phone: row.phone || '',
         website: '',
-        reviewsLink: '',
-        bookingLink: '',
-        email: '',
-        timezone: '',
+        reviewsLink: row.reviews_link || '',
+        bookingLink: row.calendar_link || '',
+        email: row.email || '',
+        timezone: row.timezone || '',
         path: '',
         jobberConnected: !!row.jobber_account_id,
         jobberAccountId: row.jobber_account_id || null,
