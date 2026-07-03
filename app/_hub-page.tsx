@@ -473,23 +473,44 @@ export default async function HubPage({
   let initialPeople: any[] = []
   let initialBinPeople: any[] = []
   {
-    let q = supabaseService
-      .from('leads')
-      // "not junk" = false OR NULL. Jobber-imported leads leave is_junk
-      // unset (NULL), and `.eq('is_junk', false)` does NOT match NULL in
-      // Postgres — those leads loaded nowhere (not here, not the bin which
-      // is is_junk=true) and were invisible app-wide. `is_junk IS NOT TRUE`
-      // matches false and NULL, still excluding genuinely junked leads.
-      .select('*')
-      .not('is_junk', 'is', true)
-      .order('created_at', { ascending: false })
-      .limit(1000)
+    // Paginated load — a single .limit(1000) silently truncated locations
+    // with >1000 leads (Portland: 1616), so the client-side "Active" count
+    // and every derived stat ran over an incomplete set. Same short-page
+    // loop as the alreadyWritten fix in the import route (3099875).
+    // MAX_LEADS is a payload safety ceiling for the elevated all-locations
+    // view — hitting it is the trigger point for moving these stats to
+    // server-side counts instead of shipping every row to the client.
+    const PAGE = 1000
+    const MAX_LEADS = 10000
+    let leadsRaw: any[] | null = []
+    let leadsError: { message: string } | null = null
+    for (let from = 0; from < MAX_LEADS; from += PAGE) {
+      let q = supabaseService
+        .from('leads')
+        // "not junk" = false OR NULL. Jobber-imported leads leave is_junk
+        // unset (NULL), and `.eq('is_junk', false)` does NOT match NULL in
+        // Postgres — those leads loaded nowhere (not here, not the bin which
+        // is is_junk=true) and were invisible app-wide. `is_junk IS NOT TRUE`
+        // matches false and NULL, still excluding genuinely junked leads.
+        .select('*')
+        .not('is_junk', 'is', true)
+        .order('created_at', { ascending: false })
+        .range(from, from + PAGE - 1)
 
-    if (!isElevated && hubUser.location_id) {
-      q = q.eq('location_uuid', hubUser.location_id)
+      if (!isElevated && hubUser.location_id) {
+        q = q.eq('location_uuid', hubUser.location_id)
+      }
+
+      const { data: pageRows, error: pageErr } = await q
+      if (pageErr) { leadsError = pageErr; leadsRaw = null; break }
+      leadsRaw.push(...(pageRows || []))
+      if ((pageRows || []).length < PAGE) break
+      if (from + PAGE >= MAX_LEADS) {
+        console.warn(
+          `[hub-page] leads load hit ${MAX_LEADS}-row safety ceiling for ${hubUser.email} — stats are truncated; time to move to server-side counts`
+        )
+      }
     }
-
-    const { data: leadsRaw, error: leadsError } = await q
 
     if (leadsError) {
       console.error('[hub-page] leads fetch error:', leadsError.message)
