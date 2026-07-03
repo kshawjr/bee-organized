@@ -31297,7 +31297,11 @@ if (Array.isArray(initialPeople)) return
   // mobile the super_admin "View as / Exit" controls live inside
   // MobileProfileMenu instead, freeing 32px of vertical real estate.
   const DEMO_BAR_H  = (role === 'super_admin' && !isMobile) ? 32 : 0
-  const LOC_BAR_H   = isElevated ? 36 : 0
+  // Location banner is MOBILE-ONLY since the picker moved to the sidebar
+  // footer on desktop (sidebar doesn't exist on mobile, so the banner stays
+  // there). Same desktop/mobile split pattern as DEMO_BAR_H above — every
+  // TOTAL_TOP-derived offset collapses automatically on desktop.
+  const LOC_BAR_H   = (isElevated && isMobile) ? 36 : 0
   // MobileTopBar (hamburger + profile) only shows on mobile and pushes everything
   // below it down by 48px. TOTAL_TOP threads through every sticky/padding calc.
   const MOBILE_NAV_H = isMobile ? 48 : 0
@@ -31340,9 +31344,11 @@ if (Array.isArray(initialPeople)) return
     </div>
     )
   }
-  // ── Location banner ────────────────────────────────────────────────────────
+  // ── Location banner (MOBILE-ONLY) ──────────────────────────────────────────
+  // Desktop elevated users pick locations from the sidebar footer control;
+  // mobile keeps this banner (no sidebar exists below 768px).
   const LocBanner = () => {
-    if (!isElevated) return null
+    if (!isElevated || !isMobile) return null
     const sc = selectedLoc ? (CRM_STATUS_CONF[locStatuses[selectedLoc.id]||selectedLoc.crmStatus]) : null
     return (
       <div className="bee-loc-banner" style={{ position:'fixed', top:`${DEMO_BAR_H}px`, left:0, right:0, height:'36px', background:'#0f1f1c', borderBottom:'1px solid rgba(168,201,196,0.12)', zIndex:10000, display:'flex', alignItems:'center', padding:'0 12px', gap:'8px' }}>
@@ -31580,7 +31586,12 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     return (
       <>
         <div style={{ position:'fixed', inset:0, zIndex:9998 }} onClick={()=>setShowLocPicker(false)} />
-        <div style={{ position:'fixed', top:`${TOTAL_TOP}px`, left:0, right:0, background:'white', zIndex:9999, borderBottom:'1px solid rgba(0,0,0,0.1)', boxShadow:'0 4px 20px rgba(0,0,0,0.12)', maxHeight:'70vh', display:'flex', flexDirection:'column' }}>
+        <div style={{ position:'fixed', ...(isMobile
+          ? { top:`${TOTAL_TOP}px`, left:0, right:0, borderBottom:'1px solid rgba(0,0,0,0.1)' }
+          // Desktop: the trigger lives in the sidebar footer (lower left),
+          // so the sheet anchors there as a popover instead of a top sheet.
+          : { bottom:'16px', left:'228px', width:'360px', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)' }
+        ), background:'white', zIndex:9999, boxShadow:'0 4px 20px rgba(0,0,0,0.12)', maxHeight:'70vh', display:'flex', flexDirection:'column' }}>
           {/* Search */}
           <div style={{ padding:'10px 12px', borderBottom:'1px solid rgba(0,0,0,0.06)', flexShrink:0 }}>
             <input
@@ -31885,6 +31896,29 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             <span style={{ fontSize:'10px', background:'rgba(168,201,196,0.12)', padding:'1px 5px', borderRadius:'4px', color:'rgba(168,201,196,0.4)' }}>⌘K</span>
           </button>
         </div>
+        {/* Location picker — elevated roles only. Relocated from the old
+            top-bar LocBanner (which is now mobile-only). A quiet context
+            setter in the footer idiom: same muted fill as the Search
+            button, one line, ellipsized. Same locFilter state + picker
+            sheet as before — zero behavior change. */}
+        {isElevated && (() => {
+          const sc = selectedLoc ? CRM_STATUS_CONF[locStatuses[selectedLoc.id]||selectedLoc.crmStatus] : null
+          return (
+            <div style={{ padding:'8px 10px', borderTop:'1px solid rgba(168,201,196,0.08)' }}>
+              <button onClick={()=>setShowLocPicker(!showLocPicker)} style={{ width:'100%', padding:'8px 12px', background:'rgba(168,201,196,0.08)', border:'1px solid rgba(168,201,196,0.15)', borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'8px', textAlign:'left' }}>
+                <span style={{ fontSize:'12px', flexShrink:0 }}>📍</span>
+                <span style={{ flex:1, minWidth:0, fontSize:'12px', fontWeight:600, color:selectedLoc?'white':'rgba(168,201,196,0.7)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  {selectedLoc ? `${selectedLoc.name}, ${selectedLoc.state}` : 'All Locations'}
+                </span>
+                {selectedLoc&&sc&&<span style={{ fontSize:'10px', padding:'1px 5px', borderRadius:'10px', background:sc.bg, color:sc.color, fontWeight:600, flexShrink:0 }}>{sc.icon}</span>}
+                {locFilter!=='all'&&(
+                  <span onClick={(e)=>{ e.stopPropagation(); setLocFilter('all') }} title="Back to all locations" style={{ fontSize:'10px', color:'rgba(168,201,196,0.6)', background:'rgba(168,201,196,0.1)', borderRadius:'6px', padding:'2px 6px', flexShrink:0, cursor:'pointer' }}>×</span>
+                )}
+                <span style={{ fontSize:'9px', color:'rgba(168,201,196,0.4)', flexShrink:0 }}>▼</span>
+              </button>
+            </div>
+          )
+        })()}
         {/* User info at bottom */}
         {(() => {
           const sidebarName = viewAsUser?.name || currentUser?.name || 'Kevin Shaw'
