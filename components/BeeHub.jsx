@@ -12032,6 +12032,50 @@ function humanizeImportPhase(phase) {
   return 'Preparing import…'
 }
 
+// ── Import ETA (rolling rate over the poller's status samples) ──
+// Both import UIs push {t, n: processed_records} samples on each running
+// poll tick (recordEtaSample), then render importEtaText under the X-of-Y
+// counter. Rate over the last 45s of samples gives a soft time-remaining
+// estimate — deliberately vague wording, never a seconds countdown.
+const ETA_WINDOW_MS   = 45_000
+const ETA_MIN_SPAN_MS = 8_000  // below this the rate is noise, show nothing
+
+function recordEtaSample(samplesRef, lastProgressRef, n) {
+  const t = Date.now()
+  samplesRef.current.push({ t, n })
+  samplesRef.current = samplesRef.current.filter(s => t - s.t <= ETA_WINDOW_MS)
+  if (!lastProgressRef.current || n > lastProgressRef.current.n) {
+    lastProgressRef.current = { t, n }
+  }
+}
+
+function importEtaText(samplesRef, lastProgressRef, status) {
+  if (!status || status.status !== 'running') return null
+  const phase     = String(status.phase || '')
+  const processed = status.processed_records || 0
+  const total     = status.total_records || 0
+  // Only meaningful while records are being written — fetch phases are
+  // covered by the humanized phase text instead.
+  if (processed <= 0 || !/^writing|^batched/.test(phase)) return null
+  // Stalled: no forward progress for >45s while still running — the server
+  // is between segments (continuation POST or rate-limit pause), so a
+  // number would be a lie.
+  if (lastProgressRef.current && Date.now() - lastProgressRef.current.t > ETA_WINDOW_MS) {
+    return 'Continuing shortly…'
+  }
+  const s = samplesRef.current
+  if (s.length < 2) return null
+  const oldest = s[0], newest = s[s.length - 1]
+  const spanMs = newest.t - oldest.t
+  if (spanMs < ETA_MIN_SPAN_MS) return null
+  const rate = (newest.n - oldest.n) / (spanMs / 1000)
+  if (rate <= 0 || total <= processed) return null
+  const secs = (total - processed) / rate
+  if (secs >= 120) return `About ${Math.round(secs / 60)} minutes remaining`
+  if (secs >= 30)  return 'About a minute remaining'
+  return 'Almost done…'
+}
+
 function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAdvanceFromStep }) {
   const currentUser = useContext(CurrentUserContext)
   const locationId  = currentUser?.locationId || null
@@ -12042,6 +12086,8 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
   const [error,   setError]   = useState(null)   // network or HTTP error
   const [checkingActive, setCheckingActive] = useState(true) // mount check for in-flight job
   const continuingRef = useRef(false)            // dedupe in-flight re-POSTs
+  const etaSamplesRef   = useRef([])             // rolling {t, n} samples for ETA
+  const lastProgressRef = useRef(null)           // {t, n} at last processed_records increase
 
   // Resume an in-flight import on mount: the server job survives a page
   // reload (it runs detached via waitUntil), but jobId state doesn't. Ask
@@ -12080,6 +12126,9 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
     if (!jobId) return
     let stopped  = false
     let timer
+    // Fresh job = fresh rate window; stale samples would skew the ETA.
+    etaSamplesRef.current   = []
+    lastProgressRef.current = null
 
     const maybeContinue = async (d) => {
       if (continuingRef.current) return
@@ -12101,7 +12150,11 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
         if (stopped) return
         if (!r.ok) { setError(d.error || 'status_fetch_failed'); return }
         setStatus(d)
-        if (d.status === 'completed' || d.status === 'failed') return
+        if (d.status === 'completed' || d.status === 'failed') {
+          etaSamplesRef.current = []; lastProgressRef.current = null
+          return
+        }
+        recordEtaSample(etaSamplesRef, lastProgressRef, d.processed_records || 0)
         void maybeContinue(d)
         timer = setTimeout(tick, 2000)
       } catch {
@@ -12226,6 +12279,7 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
       ? Math.min(100, Math.round((processed / status.total_records) * 100))
       : 0
     const phaseLabel = rawPhase || 'starting'
+    const etaText = importEtaText(etaSamplesRef, lastProgressRef, status)
     return (
       <div style={{ display:'grid', gap:'8px' }}>
         {/* Bee swarm — duplicated from ClientImportCard. DRY into a shared
@@ -12271,6 +12325,9 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
             ? humanizeImportPhase(rawPhase)
             : `${phaseLabel} — ${processed}${hasTotal ? ` of ${status.total_records}` : ''}`}
         </p>
+        {etaText && (
+          <p style={{ fontSize:'10px', color:'#8a9e9a' }}>{etaText}</p>
+        )}
         {hasTotal ? (
           <div style={{ height:'8px', background:'rgba(168,201,196,0.2)', borderRadius:'4px', overflow:'hidden' }}>
             <div style={{ height:'100%', width:`${pct}%`, background:'linear-gradient(90deg,#1a2e2b,#a8c9c4)', borderRadius:'4px', transition:'width 0.3s ease' }} />
@@ -16603,6 +16660,8 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
   const [skipped, setSkipped]         = useState(false)  // session-only collapse
   const [checkingActive, setCheckingActive] = useState(true) // mount check for in-flight job
   const continuingRef                 = useRef(false)    // dedupe in-flight re-POSTs
+  const etaSamplesRef                 = useRef([])       // rolling {t, n} samples for ETA
+  const lastProgressRef               = useRef(null)     // {t, n} at last processed_records increase
 
   // Resume an in-flight import on mount: the server job survives a page
   // reload (it runs detached via waitUntil), but jobId state doesn't. Ask
@@ -16634,6 +16693,9 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
     if (importState !== 'running' || !jobId) return
     let cancelled = false
     let timer = null
+    // Fresh job = fresh rate window; stale samples would skew the ETA.
+    etaSamplesRef.current   = []
+    lastProgressRef.current = null
 
     const maybeContinue = async (d) => {
       if (continuingRef.current) return
@@ -16664,14 +16726,17 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
           // Status endpoint only returns progress fields, not leads_created etc.
           setSummary(prev => prev && prev.leads_created != null ? prev : d)
           setImportState('complete')
+          etaSamplesRef.current = []; lastProgressRef.current = null
           router.refresh()
           return
         }
         if (d.status === 'failed' || d.status === 'error') {
           setError(d.error || d.status_message || 'import_failed')
           setImportState('error')
+          etaSamplesRef.current = []; lastProgressRef.current = null
           return
         }
+        recordEtaSample(etaSamplesRef, lastProgressRef, d.processed_records || 0)
         void maybeContinue(d)
         // still running — schedule next poll
         timer = setTimeout(poll, 1500)
@@ -16776,6 +16841,9 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
   const progressPct = !preCount && processed && status?.total_records
     ? Math.min(100, Math.round((processed / status.total_records) * 100))
     : null
+  const etaText = importState === 'running'
+    ? importEtaText(etaSamplesRef, lastProgressRef, status)
+    : null
 
   return (
     <div style={{ margin:'0 12px', borderRadius:'12px', background:'white', border:'1px solid rgba(0,0,0,0.07)', overflow:'hidden' }}>
@@ -16796,6 +16864,9 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
             {importState === 'complete' && `${summary?.total_clients ?? status?.processed_records ?? 0} clients imported`}
             {importState === 'error' && (error || 'Import failed')}
           </p>
+          {etaText && (
+            <p style={{ fontSize:'10px', color:'#b0c0bc' }}>{etaText}</p>
+          )}
         </div>
         {importState === 'idle' && (
           <button onClick={()=>setSkipped(true)}
