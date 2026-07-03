@@ -404,6 +404,11 @@ export default async function HubPage({
 
       return {
         id: row.id,
+        // Slug (locations.location_id, e.g. 'loc_portland') — matches
+        // route.ts's locSlug and every child-table write. SettingsScreen's
+        // selectedLoc branch prefers this over the UUID so the import
+        // button POSTs the same slug the rest of the codebase uses.
+        locationId: row.location_id,
         name: row.name,
         state: row.state || '',
         owner: ownersByLoc[row.id]?.name || null,

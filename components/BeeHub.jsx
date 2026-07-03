@@ -18360,7 +18360,10 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
       notifEmails:     currentLocationCtx.send_from_email ? [currentLocationCtx.send_from_email] : [],
     }
   })() : selectedLoc ? {
-    locId:          selectedLoc.id,
+    // Prefer the slug (matches route.ts locSlug + every child-table write).
+    // Falls back to the UUID for older initialLocations rows that predate the
+    // locationId mapping in _hub-page.tsx.
+    locId:          selectedLoc.locationId || selectedLoc.id,
     name:           selectedLoc.name,
     address:        selectedLoc.address,
     phone:          selectedLoc.phone,
@@ -18424,15 +18427,28 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   // (KC's data) frozen in settings. Reset when the underlying location's id
   // actually changes to a different non-null value. Ref guard avoids losing
   // in-flight edits on a transient null (e.g. initialLocations briefly empty
-  // during a re-render). Skips the initial mount — the useState initializer
-  // already covered it.
+  // during a re-render).
+  //
+  // Ref-fresh hardening: the effect body reads locLocation/locProfile from
+  // refs updated at every render, NOT from closure. This eliminates the
+  // (unlikely but dangerous) case where the effect fires with a stale
+  // closure — writing the wrong location into settings.location.locId
+  // would silently target the wrong location's Jobber import.
+  const locLocationRef = useRef(locLocation)
+  locLocationRef.current = locLocation
+  const locProfileRef = useRef(locProfile)
+  locProfileRef.current = locProfile
+
   const prevLocId = useRef(selectedLoc?.id ?? currentLocationCtx?.id ?? null)
   useEffect(() => {
     const newId = selectedLoc?.id ?? currentLocationCtx?.id ?? null
-    if (newId && newId !== prevLocId.current) {
-      prevLocId.current = newId
-      setSettings({ ...DEFAULT_SETTINGS, profile: locProfile, location: locLocation })
-    }
+    if (!newId || newId === prevLocId.current) return
+    prevLocId.current = newId
+    setSettings({
+      ...DEFAULT_SETTINGS,
+      profile:  locProfileRef.current,
+      location: locLocationRef.current,
+    })
   }, [selectedLoc?.id, currentLocationCtx?.id])
   const [activeSection, setActiveSection] = useState(initialSection||'profile')
 
