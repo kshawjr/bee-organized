@@ -10072,6 +10072,11 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
   useEffect(() => {
     try { const v = localStorage.getItem('bee_hive_view'); if (v && (v !== 'engagements' || newBoardAllowed)) setView(v) } catch {}
   }, [])
+  // TEMP instrumentation — new-board gate diagnosis (remove after incident
+  // follow-up). Logs which HiveScreen instance rendered and its gate inputs.
+  useEffect(() => {
+    console.log('[new-board-gate] HiveScreen', { newBoardAllowed, engagementCount: (engagements||[]).length, view, viewMode, isElevated, locFilter })
+  }, [newBoardAllowed, view, viewMode])
   const [selected, setSelected] = useState(initialSelected)
   const [viewingCard, setViewingCard] = useState(null)
 
@@ -30805,6 +30810,11 @@ export default function App({
 } = {}) {
   const router = useRouter()
   const [role, setRole]                     = useState(initialRole ?? 'super_admin')
+  // TEMP instrumentation — new-board gate diagnosis (remove after incident
+  // follow-up). Traces the role vocabulary actually reaching App.
+  useEffect(() => {
+    console.log('[new-board-gate] App', { initialRole, role, initialEngagementsLen: Array.isArray(initialEngagements) ? initialEngagements.length : null })
+  }, [role])
   const [toast, setToast]                   = useState(null)
   useEffect(() => {
     if (!toast) return
