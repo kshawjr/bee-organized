@@ -12221,6 +12221,8 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
         {summary && (
           <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5 }}>
             {fmtCount('Clients', summary.leads_created, summary.leads_updated)} · {fmtCount('Requests', summary.requests_created, summary.requests_updated)}{fmtStages(summary.requests_by_stage)} · {fmtCount('Jobs', summary.jobs_created, summary.jobs_updated)} · {fmtCount('Invoices', summary.invoices_created, summary.invoices_updated)}
+            {summary.marked_junk > 0 ? ` · ${summary.marked_junk} marked junk (no contact info)` : ''}
+            {summary.auto_closed_won > 0 ? ` · ${summary.auto_closed_won} auto-closed Won (paid + complete)` : ''}
           </p>
         )}
       </div>
@@ -16949,6 +16951,8 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
             {summary.requests_updated ? `, ${summary.requests_updated} updated` : ''}
             {' · '}Jobs: {summary.jobs_created ?? 0}
             {' · '}Invoices: {summary.invoices_created ?? 0}
+            {summary.marked_junk > 0 ? ` · ${summary.marked_junk} marked junk (no contact info)` : ''}
+            {summary.auto_closed_won > 0 ? ` · ${summary.auto_closed_won} auto-closed Won (paid + complete)` : ''}
           </p>
         </div>
       )}

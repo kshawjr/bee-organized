@@ -62,6 +62,7 @@ import {
   JOBS_QUERY,
   upsertLead,
   upsertServiceRequest,
+  determineLeadStage,
   upsertAssessment,
   upsertQuote,
   upsertJob,
@@ -599,6 +600,8 @@ export async function POST(req: NextRequest) {
           quotes_created: 0, quotes_updated: 0,
           jobs_created: 0, jobs_updated: 0,
           invoices_created: 0, invoices_updated: 0,
+          marked_junk: 0,      // no contact info + no history → is_junk
+          auto_closed_won: 0,  // paid + complete, nothing pending after
           errors: [] as string[],
         }
 
@@ -625,7 +628,11 @@ export async function POST(req: NextRequest) {
             created ? stats.leads_created++ : stats.leads_updated++
 
             for (const request of (reqByClient[client.id] || [])) {
-              const reqResult = await upsertServiceRequest(request, leadId, locSlug)
+              // promoteLead:false — lead.stage is now set explicitly by
+              // determineLeadStage after all sub-records are written (below),
+              // so the per-SR forward-only promotion would just churn writes.
+              // The SR row's own stage still comes from determineStage.
+              const reqResult = await upsertServiceRequest(request, leadId, locSlug, { promoteLead: false })
               reqResult.created ? stats.requests_created++ : stats.requests_updated++
               stats.requests_by_stage[reqResult.stage] = (stats.requests_by_stage[reqResult.stage] || 0) + 1
               const reqDbId = reqResult.id
@@ -666,6 +673,36 @@ export async function POST(req: NextRequest) {
                 }
               }
             }
+
+            // ─── lead-level stage classification ──
+            // Now that every sub-record is written, classify the lead from
+            // its full history (latest engagement wins) and write the stage
+            // explicitly. Junk flag is one-way: set when unreachable+empty,
+            // never cleared here (an owner-junked lead stays junked).
+            // Deliberately NOT touched: paused, drips, webhook stage logic.
+            const clientReqs     = reqByClient[client.id] || []
+            const clientQuotes   = clientReqs.flatMap((r: any) => quotesByReq[r.id] || [])
+            const clientJobs     = clientReqs.flatMap((r: any) => jobsByReq[r.id] || [])
+            const clientInvoices = clientJobs.flatMap((j: any) => j.invoices?.nodes || [])
+            const leadEmail = client.emails?.find((e: any) => e.primary)?.address ?? client.emails?.[0]?.address ?? null
+            const leadPhone = client.phones?.find((p: any) => p.primary)?.number  ?? client.phones?.[0]?.number  ?? null
+            const { stage: leadStage, isJunk } = determineLeadStage({
+              email: leadEmail,
+              phone: leadPhone,
+              clientCreatedAt: client.createdAt || null,
+              requests: clientReqs,
+              quotes: clientQuotes,
+              jobs: clientJobs,
+              invoices: clientInvoices,
+            })
+            const stagePatch: Record<string, any> = {
+              stage: leadStage,
+              updated_at: new Date().toISOString(),
+            }
+            if (isJunk) stagePatch.is_junk = true
+            await supabaseService.from('leads').update(stagePatch).eq('id', leadId)
+            if (isJunk) stats.marked_junk++
+            if (leadStage === 'Closed Won') stats.auto_closed_won++
           } catch (err: any) {
             stats.errors.push(`${client.firstName} ${client.lastName}: ${err.message}`)
           }
@@ -751,6 +788,8 @@ export async function POST(req: NextRequest) {
             `Quotes: ${stats.quotes_created} created, ${stats.quotes_updated} updated; ` +
             `Jobs: ${stats.jobs_created} created, ${stats.jobs_updated} updated; ` +
             `Invoices: ${stats.invoices_created} created, ${stats.invoices_updated} updated; ` +
+            `Marked junk (no contact info): ${stats.marked_junk}; ` +
+            `Auto-closed Won (paid + complete): ${stats.auto_closed_won}; ` +
             `Errors: ${stats.errors.length}`,
         })
 

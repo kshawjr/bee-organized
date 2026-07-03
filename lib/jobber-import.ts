@@ -236,6 +236,74 @@ export function determineStage(request: any): string {
   return 'New'
 }
 
+// ── lead-level stage classifier (bulk import ONLY) ────────────────
+// determineStage above is per-service-request and stays as-is for the
+// webhook path (SR rows keep their 'Request' classification). This one
+// looks at a client's ENTIRE history and answers "where does this lead
+// belong on the board right now" — most recent engagement wins, so a
+// new request after an old paid job classifies as 'New', not 'Closed
+// Won'. All ages are measured against import time. Returns lead-stage
+// strings matching BeeHub's STAGES keys; never returns 'Request'.
+export function determineLeadStage(
+  bundle: {
+    email: string | null
+    phone: string | null
+    clientCreatedAt: string | null
+    requests: any[]   // { createdAt }
+    quotes: any[]     // { createdAt }
+    jobs: any[]       // { jobStatus, startAt, completedAt, createdAt }
+    invoices: any[]   // { invoiceStatus, createdAt }
+  },
+  nowMs: number = Date.now(),
+): { stage: string; isJunk: boolean } {
+  const ts = (v: any) => (v ? new Date(v).getTime() : 0)
+  const aged = (t: number) => nowMs - t > NURTURING_AGE_MS
+  const { email, phone, clientCreatedAt, requests, quotes, jobs, invoices } = bundle
+
+  // 1. Unreachable and nothing to work: no way to contact, no history.
+  //    Junked rather than staged — filtered off the board entirely.
+  const hasActivity = requests.length > 0 || quotes.length > 0 || jobs.length > 0 || invoices.length > 0
+  if (!email && !phone && !hasActivity) return { stage: 'New', isJunk: true }
+
+  // 2. Any job still active/scheduled is current work, full stop.
+  const jobDone = (j: any) =>
+    !!j.completedAt || (j.jobStatus || '').toLowerCase().includes('complet')
+  if (jobs.some((j) => !jobDone(j))) return { stage: 'Job in Progress', isJunk: false }
+
+  // Most recent engagement wins. Ties (same-timestamp chain events)
+  // resolve to the more advanced state: invoice ≥ job ≥ quote ≥ request,
+  // via strict > on the earlier-chain comparisons below.
+  const isPaid = (i: any) => (i.invoiceStatus || '').toUpperCase() === 'PAID'
+  const lastRequest = Math.max(0, ...requests.map((r) => ts(r.createdAt)))
+  const lastQuote   = Math.max(0, ...quotes.map((q) => ts(q.createdAt)))
+  const lastJob     = Math.max(0, ...jobs.map((j) => Math.max(ts(j.completedAt), ts(j.startAt), ts(j.createdAt))))
+  const lastPaid    = Math.max(0, ...invoices.filter(isPaid).map((i) => ts(i.createdAt)))
+  const lastUnpaid  = Math.max(0, ...invoices.filter((i) => !isPaid(i)).map((i) => ts(i.createdAt)))
+  const head = Math.max(lastRequest, lastQuote, lastJob, lastPaid, lastUnpaid)
+
+  if (head > 0) {
+    // 6. Fresh request after (or without) anything else — re-engaged.
+    if (lastRequest === head && lastRequest > lastQuote && lastRequest > lastJob && lastRequest > lastPaid && lastRequest > lastUnpaid) {
+      return { stage: aged(lastRequest) ? 'Nurturing' : 'New', isJunk: false }
+    }
+    // 5. Quote sent, nothing after it.
+    if (lastQuote === head && lastQuote > lastJob && lastQuote > lastPaid && lastQuote > lastUnpaid) {
+      return { stage: aged(lastQuote) ? 'Nurturing' : 'Estimate Sent', isJunk: false }
+    }
+    // 4. Paid, and nothing pending after the payment.
+    if (lastPaid === head && lastPaid >= lastUnpaid) {
+      return { stage: 'Closed Won', isJunk: false }
+    }
+    // 3. Completed job with an unpaid or missing invoice — money outstanding.
+    return { stage: 'Final Processing', isJunk: false }
+  }
+
+  // 7. Bare contact — reachable but no activity ever. Age by client
+  //    creation; unknown createdAt is treated as old (Nurturing).
+  const created = ts(clientCreatedAt)
+  return { stage: created && !aged(created) ? 'New' : 'Nurturing', isJunk: false }
+}
+
 // ── upserts ───────────────────────────────────────────────────────
 
 // importSource tags the origin of records this function creates. It's
