@@ -170,6 +170,11 @@ lib/
 engagements.ts (founding, attachment, stage derivation)
 client-status.ts Rules: no new code in BeeHub.jsx if it can be a module; every extraction its own commit; mock constants do NOT migrate — extracted components read only mapper output/props.
 
+**Bundle-isolation rules (added after the 2026-07-03 incidents):**
+- Nothing under `components/` may import `lib/engagements.ts` or any module reaching `lib/supabase-service` / `lib/sync-log`. Shared constants live in PURE zero-import modules (`components/hive/shared/stageRank.js`, `betaGate.js`).
+- ALL beta/step-4 screens mount via `next/dynamic` (`ssr:false`) from BeeHub — separate chunk, loaded only behind `canSeeBetaBoard`. Main-bundle isolation is mandatory until the read flip is permanent.
+- Before pushing any change to the beta import graph: `grep -rl SUPABASE_SERVICE_ROLE_KEY .next/static/chunks/` must return nothing.
+
 ## 8.6 Design language (app-wide, LOCKED as direction)
 
 Phase 1 look = the app's look. 0.5px hairlines, white cards on quiet surfaces, colored status chips (dark-on-light ramp text), two-line rows, horizontal filter chips, minimal buttons, icon+action banners. Color semantics: teal=new/go, blue=in-motion, amber=attention/nurture, red=money-owed, purple=relationship/repeat, gray=past/closed. Deliverable during step 4: docs/bee-hub-design-language.md.

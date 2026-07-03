@@ -3,7 +3,13 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from "react"
 import { useRouter } from "next/navigation"
 import { useLeadsRealtime } from "@/lib/use-leads-realtime"
-import EngagementBoard from "@/components/hive/EngagementBoard"
+import dynamic from "next/dynamic"
+import { canSeeBetaBoard } from "@/components/hive/shared/betaGate"
+// Phase 1 beta surfaces are DYNAMIC imports only (ssr:false) — separate
+// chunk, loaded when the toggle flips. A crash in beta code must never
+// reach the main bundle (two all-user incident scares on 2026-07-03).
+// Rule recorded in docs/hive-phase1-engagements.md §8.5.
+const EngagementBoard = dynamic(() => import("@/components/hive/EngagementBoard"), { ssr: false, loading: () => null })
 import {
   DEFAULT_TIER_PRICES,
   getSubscriptionDisplay,
@@ -31671,7 +31677,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     )
     if (activeNav==='hive') return (
       <div style={pageStyle}>
-        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={role==='super_admin'} />
+        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} />
         {toast && <InlineToast {...toast} />}
       </div>
     )
@@ -31723,7 +31729,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           }}
           followUps={followUps}
           engagements={Array.isArray(initialEngagements)?initialEngagements:[]}
-          newBoardAllowed={role==='super_admin'}
+          newBoardAllowed={canSeeBetaBoard(role)}
           onCompleteOnboarding={()=>{
             // Real franchise owners have franchiseLoc=null (no selectedLoc,
             // no viewAsUser) — fall back to their currentUser.locationId so
