@@ -130,26 +130,40 @@ async function fetchAll(
 // ── handler ───────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  // ─── auth ──
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  // ─── internal continuation: skip user-auth for self-chain / cron sweeper ──
+  // The waitUntil self-chain (see selfContinue below) and the cron sweeper
+  // (/api/cron/import-sweeper) re-POST here with no user session. They
+  // authenticate via x-import-continue-secret == CRON_SECRET. Only auth is
+  // bypassed — the location lookup and the atomic location claim still run,
+  // so two continuations can't double-drive a segment.
+  const isInternalContinue =
+    !!process.env.CRON_SECRET &&
+    req.headers.get('x-import-continue-secret') === process.env.CRON_SECRET
 
-  const { data: hubUser } = await supabase
-    .from('hub_users')
-    .select('*')
-    .eq('id', user.id)
-    .single()
-  if (!hubUser) return NextResponse.json({ error: 'no_profile' }, { status: 403 })
+  // ─── auth (user-session path) ──
+  let hubUser: any = null
+  if (!isInternalContinue) {
+    const supabase = await createServerSupabaseClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
-  if (!canRunImport(hubUser.role)) {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+    const { data: hu } = await supabase
+      .from('hub_users')
+      .select('*')
+      .eq('id', user.id)
+      .single()
+    if (!hu) return NextResponse.json({ error: 'no_profile' }, { status: 403 })
+    if (!canRunImport(hu.role)) {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+    }
+    hubUser = hu
   }
 
   // ─── input (query param wins, fall back to JSON body) ──
   const url = new URL(req.url)
   const queryLocId = url.searchParams.get('location_id')
   const queryMode  = url.searchParams.get('mode')
+  const selfOrigin = url.origin
 
   let body: any = {}
   try { body = await req.json() } catch { /* no body is fine */ }
@@ -167,8 +181,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Owner can only import their own location. super_admin can import any.
-  // hub_users.location_id stores the UUID, matching locations.id.
-  if (hubUser.role === 'owner' && hubUser.location_id !== location.id) {
+  // Skipped for internal continuations (trusted caller — cron / self-chain).
+  if (!isInternalContinue && hubUser?.role === 'owner' && hubUser.location_id !== location.id) {
     return NextResponse.json({ error: 'forbidden_location' }, { status: 403 })
   }
 
@@ -263,6 +277,20 @@ export async function POST(req: NextRequest) {
     } else {
       jobId = created.id
     }
+  }
+
+  // Fire the next segment server-side so the import continues without a
+  // browser. Uses this deployment's own origin + the internal-continue
+  // secret (matches x-import-continue-secret gate at top of POST) to pass
+  // auth without a user session. Best-effort — cron sweeper is the backstop
+  // if the fetch fails or the chain otherwise breaks.
+  const selfContinue = () => {
+    waitUntil(
+      fetch(`${selfOrigin}/api/import/jobber-clients?location_id=${encodeURIComponent(locSlug)}&_continue=1`, {
+        method: 'POST',
+        headers: { 'x-import-continue-secret': process.env.CRON_SECRET || '' },
+      }).catch(() => {})
+    )
   }
 
   // Run the import detached from the request via waitUntil so it survives
@@ -400,6 +428,7 @@ export async function POST(req: NextRequest) {
           })
           await releaseMutex()
           emit({ continue: true, job_id: jobId })
+          selfContinue()
           return
         }
 
@@ -563,6 +592,7 @@ export async function POST(req: NextRequest) {
           })
           await releaseMutex()
           emit({ continue: true, processed, total: clients.length, job_id: jobId })
+          selfContinue()
           return
         }
 
