@@ -181,28 +181,56 @@ export async function POST(req: NextRequest) {
   const locSlug: string = location.location_id
   const locUuid: string = location.id
 
-  // ─── create import_jobs row ──
-  const { data: importJob, error: jobErr } = await supabaseService
+  // ─── reuse an existing in-flight job for this location ──────
+  // Prevents duplicate concurrent imports (double-click, poller + onboarding
+  // both firing, page reload). A single re-POST should RESUME the running job,
+  // not spawn a rival that fights for the same Jobber rate budget.
+  const { data: existingJob } = await supabaseService
     .from('import_jobs')
-    .insert({
-      location_id: locSlug,
-      type: 'jobber_clients',
-      status: 'running',
-      phase: 'starting',
-      total_records: 0,
-      processed_records: 0,
-      started_at: new Date().toISOString(),
-    })
-    .select('id')
-    .single()
-  if (jobErr || !importJob) {
-    return NextResponse.json(
-      { error: 'failed_to_create_import_job', detail: jobErr?.message },
-      { status: 500 },
-    )
-  }
+    .select('id, status, segment_started_at')
+    .eq('location_id', locSlug)
+    .eq('type', 'jobber_clients')
+    .eq('status', 'running')
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
 
-  const jobId = importJob.id
+  let jobId: string
+  if (existingJob) {
+    // A job is already running for this location. Only resume it if its
+    // segment mutex is stale (>90s) — meaning the prior segment died and
+    // nothing is actively working it. If the mutex is FRESH, another segment
+    // is genuinely mid-flight; return its id and let the poller keep polling,
+    // do NOT start a rival segment.
+    const mutexAgeMs = existingJob.segment_started_at
+      ? Date.now() - new Date(existingJob.segment_started_at).getTime()
+      : Infinity
+    jobId = existingJob.id
+    if (mutexAgeMs < 90_000) {
+      // Fresh segment already working — just hand back the job id, no new segment.
+      return NextResponse.json({ job_id: jobId, started: true, resumed: false, already_active: true })
+    }
+    // Stale — fall through to launch a resuming segment against this same jobId.
+  } else {
+    // No running job — create a fresh one.
+    const { data: importJob, error: jobErr } = await supabaseService
+      .from('import_jobs')
+      .insert({
+        location_id: locSlug,
+        type: 'jobber_clients',
+        status: 'running',
+        phase: 'starting',
+        total_records: 0,
+        processed_records: 0,
+        started_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single()
+    if (jobErr || !importJob) {
+      return NextResponse.json({ error: 'failed_to_create_import_job', detail: jobErr?.message }, { status: 500 })
+    }
+    jobId = importJob.id
+  }
 
   // Run the import detached from the request via waitUntil so it survives
   // after we return the response. All progress is written to import_jobs
