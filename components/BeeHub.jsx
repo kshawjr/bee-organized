@@ -12022,6 +12022,7 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
   const [status,  setStatus]  = useState(null)   // polled import_jobs row
   const [summary, setSummary] = useState(null)   // initial POST response
   const [error,   setError]   = useState(null)   // network or HTTP error
+  const continuingRef = useRef(false)            // dedupe in-flight re-POSTs
 
   const isTerminal = status?.status === 'completed' || status?.status === 'failed'
   const isRunning  = jobId && !isTerminal && !error
@@ -12030,10 +12031,27 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
 
   // Polling loop — fires once per jobId; chains setTimeout instead of
   // setInterval so a slow status fetch doesn't pile up overlapping requests.
+  // Auto-continue: when the server checkpoints mid-import (phase starts with
+  // 'fetching' or 'batched' while status='running'), re-POST to launch the
+  // next segment. The server is fire-and-forget via waitUntil, so the POST
+  // returns immediately with the same job_id.
   useEffect(() => {
     if (!jobId) return
     let stopped  = false
     let timer
+
+    const maybeContinue = async (d) => {
+      if (continuingRef.current) return
+      if (d?.status !== 'running') return
+      const phase = d?.phase || ''
+      if (!/^fetching|^batched/.test(phase)) return
+      if (!locationId) return
+      continuingRef.current = true
+      try {
+        await fetch('/api/import/jobber-clients?location_id=' + encodeURIComponent(locationId), { method: 'POST' })
+      } catch { /* poller will retry via next tick */ }
+      finally { continuingRef.current = false }
+    }
 
     const tick = async () => {
       try {
@@ -12043,6 +12061,7 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
         if (!r.ok) { setError(d.error || 'status_fetch_failed'); return }
         setStatus(d)
         if (d.status === 'completed' || d.status === 'failed') return
+        void maybeContinue(d)
         timer = setTimeout(tick, 2000)
       } catch {
         if (!stopped) timer = setTimeout(tick, 2000)
@@ -12051,7 +12070,7 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
 
     timer = setTimeout(tick, 0)
     return () => { stopped = true; clearTimeout(timer) }
-  }, [jobId])
+  }, [jobId, locationId])
 
   async function startImport() {
     if (!locationId || isRunning) return
@@ -16530,12 +16549,29 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
   const [summary, setSummary]         = useState(null)   // { total_clients, leads_created, ... }
   const [error, setError]             = useState(null)
   const [skipped, setSkipped]         = useState(false)  // session-only collapse
+  const continuingRef                 = useRef(false)    // dedupe in-flight re-POSTs
 
-  // Status polling
+  // Status polling + auto-continue: when the server checkpoints mid-import
+  // (phase startsWith 'fetching' or 'batched' while status='running'), re-POST
+  // to launch the next segment. Server is fire-and-forget via waitUntil.
   useEffect(() => {
     if (importState !== 'running' || !jobId) return
     let cancelled = false
     let timer = null
+
+    const maybeContinue = async (d) => {
+      if (continuingRef.current) return
+      if (d?.status !== 'running') return
+      const phase = d?.phase || ''
+      if (!/^fetching|^batched/.test(phase)) return
+      if (!locationId) return
+      continuingRef.current = true
+      try {
+        await fetch('/api/import/jobber-clients?location_id=' + encodeURIComponent(locationId), { method: 'POST' })
+      } catch { /* poller will retry via next tick */ }
+      finally { continuingRef.current = false }
+    }
+
     const poll = async () => {
       try {
         const r = await fetch(`/api/import/status/${jobId}`)
@@ -16560,6 +16596,7 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
           setImportState('error')
           return
         }
+        void maybeContinue(d)
         // still running — schedule next poll
         timer = setTimeout(poll, 1500)
       } catch (e) {
@@ -16573,7 +16610,7 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [importState, jobId])
+  }, [importState, jobId, locationId])
 
   if (!isJobberConnected) return null
 

@@ -209,6 +209,45 @@ export async function POST(req: NextRequest) {
   // (read by /api/import/status/[id] polling), so no stream is needed.
   const emit = (_obj: any) => {}  // no-op: progress goes to DB, not a stream
   const runImport = async () => {
+      // Wall-clock guard: stop fetching before the 800s Vercel wall and let the
+      // frontend re-POST to resume from the persisted cursor. 600s leaves ample
+      // headroom for the write phase (or a mid-page throttle pause) to finish.
+      const RUN_START = Date.now()
+      const TIME_BUDGET_MS = 600_000
+      const timeLow = () => Date.now() - RUN_START > TIME_BUDGET_MS
+
+      // Per-job mutex: because the frontend re-POSTs to auto-continue and the
+      // POST returns immediately (waitUntil is fire-and-forget), the poller
+      // can't tell if the prior segment is still running server-side. Claim
+      // segment_started_at atomically — only proceed if the row is null or
+      // stale (>90s old). Stale reclaim covers crashed segments.
+      const MUTEX_TTL_MS = 90_000
+      const nowIso = new Date().toISOString()
+      const cutoffIso = new Date(Date.now() - MUTEX_TTL_MS).toISOString()
+      const { data: claimed } = await supabaseService
+        .from('import_jobs')
+        .update({ segment_started_at: nowIso })
+        .eq('id', jobId)
+        .or(`segment_started_at.is.null,segment_started_at.lt.${cutoffIso}`)
+        .select('id')
+      if (!claimed || claimed.length === 0) {
+        console.log(`[jobber-import] segment already running for job ${jobId} — exiting without spawning rival`)
+        return
+      }
+
+      // Clear the mutex from any exit path. Idempotent — safe to call more
+      // than once. Every return below must call this before returning.
+      const releaseMutex = async () => {
+        try {
+          await supabaseService
+            .from('import_jobs')
+            .update({ segment_started_at: null })
+            .eq('id', jobId)
+        } catch (err) {
+          console.error('[import_jobs mutex release failed]', err)
+        }
+      }
+
       try {
         const jobberToken = await getValidJobberToken(location)
         const devMode = mode === 'dev'
@@ -221,9 +260,91 @@ export async function POST(req: NextRequest) {
           await updateProgress(jobId, { phase: msg })
         }
 
-        // ─── fetch all entities (flat queries with pacing) ──
-        await updateProgress(jobId, { phase: 'clients' })
-        const clients = await fetchAll(jobberToken, CLIENTS_QUERY, 'clients', devMode, true, onThrottlePause)
+        // ─── resumable segmented fetch ────────────────────────────────
+        // Each entity pages into import_staging with the endCursor persisted to
+        // import_jobs.fetch_cursors after every page. If we time out or trip
+        // Jobber's 10k-cost budget, the next invocation resumes cleanly instead
+        // of restarting the whole account-wide fetch.
+        const { data: jobRow } = await supabaseService
+          .from('import_jobs')
+          .select('fetch_cursors, fetch_complete')
+          .eq('id', jobId)
+          .single()
+        const cursors: Record<string, string | null> = jobRow?.fetch_cursors || {}
+        const complete: Record<string, boolean> = jobRow?.fetch_complete || {}
+
+        const fetchEntityResumable = async (entity: string, query: string) => {
+          if (complete[entity]) return
+          let cursor: string | null = cursors[entity] || null
+          for (;;) {
+            const vars = cursor ? { after: cursor } : {}
+            const res = await jobberQueryThrottled(jobberToken, query, vars, { onThrottlePause })
+            if (res.errors?.some((e: any) => e.extensions?.code !== 'THROTTLED')) {
+              throw new Error(`${entity} error: ${JSON.stringify(res.errors)}`)
+            }
+            const page = res.data?.[entity]
+            if (!page) break
+            if (page.nodes.length) {
+              // Upsert with dedup: a re-fetched page (crash-in-window recovery
+              // or overlapping segment) is a no-op instead of a double-insert.
+              // onConflict targets the generated node_id column (idx_import_staging_dedup).
+              await supabaseService
+                .from('import_staging')
+                .upsert(
+                  page.nodes.map((n: any) => ({ job_id: jobId, entity, node: n })),
+                  { onConflict: 'job_id,entity,node_id', ignoreDuplicates: true },
+                )
+            }
+            cursor = page.pageInfo.endCursor
+            cursors[entity] = cursor
+            await supabaseService.from('import_jobs').update({ fetch_cursors: cursors }).eq('id', jobId)
+            if (!page.pageInfo.hasNextPage) { complete[entity] = true; break }
+            if (timeLow()) break   // checkpoint: resume this entity next segment
+            if (devMode && entity === 'clients') { complete[entity] = true; break }  // dev-mode first-page cap
+          }
+          await supabaseService.from('import_jobs').update({ fetch_complete: complete }).eq('id', jobId)
+        }
+
+        await updateProgress(jobId, { phase: 'fetching clients' })
+        await fetchEntityResumable('clients', CLIENTS_QUERY)
+        if (!timeLow()) { await updateProgress(jobId, { phase: 'fetching requests' }); await fetchEntityResumable('requests', REQUESTS_QUERY) }
+        if (!timeLow()) { await updateProgress(jobId, { phase: 'fetching quotes' });   await fetchEntityResumable('quotes',   QUOTES_QUERY) }
+        if (!timeLow()) { await updateProgress(jobId, { phase: 'fetching jobs' });     await fetchEntityResumable('jobs',     JOBS_QUERY) }
+
+        const allFetched = ['clients', 'requests', 'quotes', 'jobs'].every(e => complete[e])
+        if (!allFetched) {
+          const doneCount = ['clients', 'requests', 'quotes', 'jobs'].filter(e => complete[e]).length
+          await updateProgress(jobId, {
+            status: 'running',
+            phase: `fetching — continuing (${doneCount}/4 entities)`,
+          })
+          await releaseMutex()
+          emit({ continue: true, job_id: jobId })
+          return
+        }
+
+        // ─── load staged nodes back into memory for the write loop ────
+        const loadStaged = async (entity: string): Promise<any[]> => {
+          const out: any[] = []
+          let from = 0
+          for (;;) {
+            const { data } = await supabaseService
+              .from('import_staging')
+              .select('node')
+              .eq('job_id', jobId)
+              .eq('entity', entity)
+              .range(from, from + 999)
+            if (!data?.length) break
+            out.push(...data.map((r: any) => r.node))
+            if (data.length < 1000) break
+            from += 1000
+          }
+          return out
+        }
+        const clients  = await loadStaged('clients')
+        const requests = await loadStaged('requests')
+        const quotes   = await loadStaged('quotes')
+        const jobs     = await loadStaged('jobs')
 
         // Sort newest-first so that if Vercel kills the function before the write loop
         // finishes, recent clients are written before stale ones (Bug B: new leads missing).
@@ -234,16 +355,9 @@ export async function POST(req: NextRequest) {
 
         // Set total immediately so the UI shows "0 of N" within seconds of the fetch completing.
         await updateProgress(jobId, {
-          phase: 'requests',
+          phase: 'writing',
           total_records: clients.length,
         })
-        const requests = await fetchAll(jobberToken, REQUESTS_QUERY, 'requests', false, false, onThrottlePause)
-
-        await updateProgress(jobId, { phase: 'quotes' })
-        const quotes = await fetchAll(jobberToken, QUOTES_QUERY, 'quotes', false, false, onThrottlePause)
-
-        await updateProgress(jobId, { phase: 'jobs' })
-        const jobs = await fetchAll(jobberToken, JOBS_QUERY, 'jobs', false, false, onThrottlePause)
 
         // ─── build lookup maps ──
         const clientIds = new Set(clients.map((c: any) => c.id))
@@ -364,6 +478,7 @@ export async function POST(req: NextRequest) {
             processed_records: processed,
             total_records: clients.length,
           })
+          await releaseMutex()
           emit({ continue: true, processed, total: clients.length, job_id: jobId })
           return
         }
@@ -424,6 +539,14 @@ export async function POST(req: NextRequest) {
             : {}),
         })
 
+        // Staging is only useful while the job is running — drop it once we finish.
+        try {
+          await supabaseService.from('import_staging').delete().eq('job_id', jobId)
+        } catch (err) {
+          console.error('[import_staging cleanup failed]', err)
+        }
+        await releaseMutex()
+
         // One-time gate: mark initial import done. Set even when some rows
         // errored — webhook sync handles missed records going forward, and
         // re-running the bulk import would create duplicates in tables that
@@ -458,6 +581,7 @@ export async function POST(req: NextRequest) {
           error_message: String(err?.message || err),
           completed_at: new Date().toISOString(),
         })
+        await releaseMutex()
         emit({ error: String(err?.message || err), job_id: jobId })
       }
       // no finally/controller.close needed — nothing is streaming
