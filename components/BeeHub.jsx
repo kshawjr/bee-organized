@@ -10287,8 +10287,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
       <div>
         <HiveShell
           engagements={engagements}
-          locations={locations}
-          showLocationFilter={isElevated}
+          locFilter={locFilter}
           setToast={setToast}
           onExitBeta={()=>{ setView('kanban'); try{localStorage.setItem('bee_hive_view','kanban')}catch(e){} }}
           onOpenClient={(clientId)=>{

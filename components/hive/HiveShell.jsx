@@ -13,9 +13,8 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React from 'react'
 import EngagementBoard from './EngagementBoard'
-import FilterChips from '@/components/ui/FilterChips'
 
 const TABS = [
   { key: 'inbox',   label: 'Inbox',   live: false, badge: true },
@@ -62,45 +61,27 @@ function TabPill({ tab, active }) {
   )
 }
 
-// Location filter: shell-owned (the legacy locFilter is part of the hidden
-// chrome and never reaches the board). Elevated users only — owners' rows
-// arrive location-scoped from the server. Options are the locations that
-// actually have open engagements (legacy-filter semantics), labeled via the
-// locations prop (loc.id is the uuid engagements carry).
-const CHIPS_MAX = 5
-
+// Location scoping: the beta view follows the EXISTING app-level location
+// switcher (App top bar — visible above the shell), exactly like the legacy
+// board: HiveScreen passes its locFilter prop through and the engagement
+// set filters client-side on location_uuid (locFilter holds 'all' or the
+// location uuid — the same vocabulary people-mapper documents).
 export default function HiveShell({
   engagements = [],
-  locations = [],
-  showLocationFilter = false,
+  locFilter = 'all',
   onOpenClient = () => {},
   setToast = () => {},
   onExitBeta = () => {},
 }) {
-  const [locFilter, setLocFilter] = useState('all')
-
-  const locOptions = useMemo(() => {
-    const counts = new Map()
-    for (const e of engagements) {
-      if (e.location_uuid) counts.set(e.location_uuid, (counts.get(e.location_uuid) || 0) + 1)
-    }
-    const nameOf = (uuid) => locations.find(l => l.id === uuid)?.name || 'Unknown location'
-    return [...counts.entries()]
-      .map(([uuid, count]) => ({ key: uuid, label: nameOf(uuid), count }))
-      .sort((a, b) => a.label.localeCompare(b.label))
-  }, [engagements, locations])
-
   const filtered = locFilter === 'all'
     ? engagements
     : engagements.filter(e => e.location_uuid === locFilter)
   const openCount = filtered.length
 
-  const filterVisible = showLocationFilter && locOptions.length > 1
-
   return (
     <div style={{ background: '#fdfdfc', minHeight: '100vh', padding: '1rem 1rem 5rem', fontFamily: 'DM Sans,system-ui,sans-serif' }}>
       {/* Top row: tab pills left, quiet counter + escape hatch right */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: filterVisible ? '10px' : '16px', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flex: 1, minWidth: 0 }}>
           {TABS.map(t => <TabPill key={t.key} tab={t} active={t.key === 'board'} />)}
         </div>
@@ -119,33 +100,6 @@ export default function HiveShell({
           </button>
         </div>
       </div>
-
-      {filterVisible && (
-        <div style={{ marginBottom: '16px' }}>
-          {locOptions.length <= CHIPS_MAX ? (
-            <FilterChips
-              items={[{ key: 'all', label: 'All locations', count: engagements.length }, ...locOptions]}
-              active={locFilter}
-              onChange={setLocFilter}
-            />
-          ) : (
-            <select
-              value={locFilter}
-              onChange={(e) => setLocFilter(e.target.value)}
-              style={{
-                padding: '5px 10px', borderRadius: '10px',
-                border: '0.5px solid rgba(0,0,0,0.15)', background: '#fff',
-                fontSize: '12px', color: '#1a1a18', fontFamily: 'inherit', cursor: 'pointer',
-              }}
-            >
-              <option value="all">All locations ({engagements.length})</option>
-              {locOptions.map(o => (
-                <option key={o.key} value={o.key}>{o.label} ({o.count})</option>
-              ))}
-            </select>
-          )}
-        </div>
-      )}
 
       <EngagementBoard engagements={filtered} onOpenClient={onOpenClient} setToast={setToast} />
     </div>
