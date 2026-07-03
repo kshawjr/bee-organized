@@ -13,8 +13,9 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React from 'react'
+import React, { useState } from 'react'
 import EngagementBoard from './EngagementBoard'
+import EngagementPanel from './EngagementPanel'
 
 const TABS = [
   { key: 'inbox',   label: 'Inbox',   live: false, badge: true },
@@ -73,9 +74,19 @@ export default function HiveShell({
   setToast = () => {},
   onExitBeta = () => {},
 }) {
-  const filtered = locFilter === 'all'
+  // Engagement panel (card click-through) + patches the panel makes
+  // (title rename, stage advance) — applied over the server rows so the
+  // board reflects them immediately without a reload.
+  const [panelEngagement, setPanelEngagement] = useState(null)
+  const [rowPatches, setRowPatches] = useState({})
+
+  const patched = Object.keys(rowPatches).length === 0
     ? engagements
-    : engagements.filter(e => e.location_uuid === locFilter)
+    : engagements.map(e => (rowPatches[e.id] ? { ...e, ...rowPatches[e.id] } : e))
+
+  const filtered = locFilter === 'all'
+    ? patched
+    : patched.filter(e => e.location_uuid === locFilter)
   const openCount = filtered.length
 
   return (
@@ -101,7 +112,23 @@ export default function HiveShell({
         </div>
       </div>
 
-      <EngagementBoard engagements={filtered} onOpenClient={onOpenClient} setToast={setToast} />
+      <EngagementBoard
+        engagements={filtered}
+        onOpenClient={onOpenClient}
+        onOpenEngagement={(e) => setPanelEngagement(e)}
+        setToast={setToast}
+      />
+
+      {panelEngagement && (
+        <EngagementPanel
+          engagementId={panelEngagement.id}
+          seed={panelEngagement}
+          onClose={() => setPanelEngagement(null)}
+          onOpenClient={(clientId) => { setPanelEngagement(null); onOpenClient(clientId) }}
+          onChanged={(id, patch) => setRowPatches(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))}
+          setToast={setToast}
+        />
+      )}
     </div>
   )
 }

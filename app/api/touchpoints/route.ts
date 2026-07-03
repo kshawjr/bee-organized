@@ -118,6 +118,12 @@ export async function POST(req: Request) {
     lead_id,
     location_uuid: lead.location_uuid,
     kind,
+    // Phase 1: touchpoints can carry engagement context (column exists
+    // since the step-1 migration). Optional — client-level touchpoints
+    // pass nothing and behave exactly as before.
+    ...(typeof body.engagement_id === 'string' && body.engagement_id
+      ? { engagement_id: body.engagement_id }
+      : {}),
     label: label.trim(),
     method: method ?? null,
     status: status ?? null,

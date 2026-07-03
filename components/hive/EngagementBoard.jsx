@@ -137,7 +137,7 @@ function EngagementCard({ e, onOpen, draggable, onDragStart }) {
   )
 }
 
-export default function EngagementBoard({ engagements = [], onOpenClient = () => {}, setToast = () => {} }) {
+export default function EngagementBoard({ engagements = [], onOpenClient = () => {}, onOpenEngagement = null, setToast = () => {} }) {
   // Local rows for optimistic drag moves; resync when the server prop changes.
   const [rows, setRows] = useState(engagements)
   useEffect(() => { setRows(engagements) }, [engagements])
@@ -183,9 +183,11 @@ export default function EngagementBoard({ engagements = [], onOpenClient = () =>
   }
 
   function openCard(e) {
-    // TODO(EngagementPanel): mount the engagement panel here instead of the
-    // client PersonPanel once it exists — pass e.id, keep client fallback.
-    onOpenClient(e.client_id)
+    // EngagementPanel is the click-through (HiveShell passes
+    // onOpenEngagement); PersonPanel remains the fallback for any
+    // legacy mount without the panel wiring.
+    if (onOpenEngagement) onOpenEngagement(e)
+    else onOpenClient(e.client_id)
   }
 
   const renderColumn = (stage, { droppable }) => {
