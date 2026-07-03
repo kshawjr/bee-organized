@@ -86,6 +86,7 @@ export async function GET(req: NextRequest) {
   await Promise.all(
     jobs.map(async (j: any) => {
       try {
+        console.log('[import-sweeper] continuation URL:', `${origin}/api/import/jobber-clients?location_id=${encodeURIComponent(j.location_id)}&_continue=1`, '| VERCEL_PROJECT_PRODUCTION_URL:', process.env.VERCEL_PROJECT_PRODUCTION_URL ?? '(unset)')
         const r = await fetch(
           `${origin}/api/import/jobber-clients?location_id=${encodeURIComponent(j.location_id)}&_continue=1`,
           {
