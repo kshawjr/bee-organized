@@ -61,6 +61,7 @@ A client exists in Bee Hub from first contact (webform, manual add, referral). A
 
 - Request-only engagement older than 30 days → close as Lost at backfill (`closed_reason='stale_on_import'`, system note). Client → status **Nurturing** (marketable pool). No board ghost.
 - Request-only within 30 days → live engagement in Request.
+- **Quote-only engagement stale >30 days → close as Lost at backfill** (`closed_reason='stale_on_import'`) — **Ruling A (2026-07-03, decision 14):** an unanswered old estimate is not a live deal; the client joins the nurture pool at the client level; new interest founds a new engagement. Quote-only within 30 days → live engagement in Estimate.
 - Request that led anywhere → founds normally, stage per 447be62 rules re-expressed per engagement.
 - Paid + complete → Closed Won (silent). Clients with paid history, no open work → **Past client**.
 - No email AND no phone AND no activity → `is_junk=true`.
@@ -221,3 +222,4 @@ leads.stage: ~80 reads (BeeHub 10024–10694 board, 20230–20484 dashboard, 255
 11. Views: Inbox | Board | List | Clients (within Clients section); mobile = bottom tabs, single-column board, bottom-sheet panel
 12. Strangler file split; primitives in components/ui/; mocks don't migrate
 13. Phase 1 look = app-wide design language; Phase 1.5 visual sweep
+14. Ruling A (backfill): stale (>30d) quote-only engagements close as Lost on import (`stale_on_import`) — an unanswered old estimate is not a live deal; client joins the nurture pool; new interest founds a new engagement
