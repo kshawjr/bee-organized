@@ -8,8 +8,9 @@ import { canSeeBetaBoard } from "@/components/hive/shared/betaGate"
 // Phase 1 beta surfaces are DYNAMIC imports only (ssr:false) — separate
 // chunk, loaded when the toggle flips. A crash in beta code must never
 // reach the main bundle (two all-user incident scares on 2026-07-03).
-// Rule recorded in docs/hive-phase1-engagements.md §8.5.
-const EngagementBoard = dynamic(() => import("@/components/hive/EngagementBoard"), { ssr: false, loading: () => null })
+// Rule recorded in docs/hive-phase1-engagements.md §8.5. HiveShell owns
+// the board (and future beta screens) inside that one chunk.
+const HiveShell = dynamic(() => import("@/components/hive/HiveShell"), { ssr: false, loading: () => null })
 import {
   DEFAULT_TIER_PRICES,
   getSubscriptionDisplay,
@@ -10274,6 +10275,39 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
 
   // Reset to page 0 when filters change
   React.useEffect(()=>{ setPage(0) }, [search, stageFilters, sourceFilters, assigneeFilters, tagFilters, timeFilter, viewMode, locFilter])
+
+  // ── Phase 1 beta shell (super_admin toggle ON) ──────────────────
+  // Replaces the ENTIRE legacy Clients content area (header/tabs/search
+  // hidden, not restyled) with the four-tab HiveShell. Sits after every
+  // hook declaration (rules of hooks); the legacy return below is
+  // untouched for everyone else. PersonPanel + card viewer stay mounted
+  // here so board card clicks keep working during dual-read.
+  if (view==='engagements' && newBoardAllowed) {
+    return (
+      <div>
+        <HiveShell
+          engagements={engagements}
+          setToast={setToast}
+          onExitBeta={()=>{ setView('kanban'); try{localStorage.setItem('bee_hive_view','kanban')}catch(e){} }}
+          onOpenClient={(clientId)=>{
+            const p = people.find(x=>x.id===clientId)
+            if (p) setSelected(p)
+            else setToast({ kind:'error', msg:'Client record not loaded — try the classic board' })
+          }}
+        />
+        {selected&&(()=>{
+          const idx = sorted.findIndex(p=>p.id===selected.id)
+          return <PersonPanel person={selected} onClose={()=>setSelected(null)} onUpdate={updatePerson} onMarkJunk={markJunk} onResurrect={()=>{ resurrectPerson(selected.id); setSelected(null) }} onAddFollowUp={onAddFollowUp} onViewCard={(p)=>setViewingCard(p)} allPeople={allPeople}
+            onPrev={idx>0?()=>setSelected(sorted[idx-1]):null}
+            onNext={idx<sorted.length-1?()=>setSelected(sorted[idx+1]):null}
+            navLabel={`${idx+1} / ${sorted.length}`}
+          />
+        })()}
+        {viewingCard&&<CardViewerModal cardImage={viewingCard.cardImage||null} onClose={()=>setViewingCard(null)} />}
+      </div>
+    )
+  }
+
   return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', padding:'1.25rem 1rem 5rem' }}>
       {readOnly&&<ReadOnlyBanner />}
@@ -10723,22 +10757,6 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
             })}
           </div>
         </div>
-      )}
-
-      {/* Phase 1 step 4: engagement board (super_admin beta — dual-read).
-          One card per open engagement; legacy kanban above is untouched.
-          Open tab only — terminal engagements have no board columns yet
-          (closed views arrive with the EngagementList/Panel screens). */}
-      {view==='engagements'&&newBoardAllowed&&viewMode==='open'&&(
-        <EngagementBoard
-          engagements={engagements}
-          setToast={setToast}
-          onOpenClient={(clientId)=>{
-            const p = people.find(x=>x.id===clientId)
-            if (p) setSelected(p)
-            else setToast({ kind:'error', msg:'Client record not loaded — try the classic board' })
-          }}
-        />
       )}
 
       {/* Kanban Legend */}

@@ -1,0 +1,92 @@
+// components/hive/HiveShell.jsx
+// ─────────────────────────────────────────────────────────────
+// HIVE Phase 1 beta shell (doc §7) — the four-tab chrome around the
+// step-4 screens: Inbox | Board | List | Clients. When the beta toggle
+// is on, this REPLACES the legacy Clients content area entirely (the
+// legacy header/tabs/search are hidden, not restyled).
+//
+// Board is the only live tab; Inbox/List/Clients are disabled 'soon'
+// placeholders until their screens land. Lives inside the beta dynamic
+// chunk — BeeHub dynamic-imports THIS module (ssr:false) and this
+// module imports EngagementBoard statically, so all beta code stays
+// out of the main bundle (§8.5 bundle-isolation rules).
+// ─────────────────────────────────────────────────────────────
+'use client'
+
+import React from 'react'
+import EngagementBoard from './EngagementBoard'
+
+const TABS = [
+  { key: 'inbox',   label: 'Inbox',   live: false, badge: true },
+  { key: 'board',   label: 'Board',   live: true },
+  { key: 'list',    label: 'List',    live: false },
+  { key: 'clients', label: 'Clients', live: false },
+]
+
+function TabPill({ tab, active }) {
+  if (!tab.live) {
+    return (
+      <span
+        title="Coming soon"
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: '5px',
+          padding: '6px 14px', borderRadius: '20px',
+          border: '0.5px solid transparent',
+          fontSize: '13px', fontWeight: 400, color: '#b5b3ac',
+          cursor: 'default', userSelect: 'none', whiteSpace: 'nowrap',
+        }}
+      >
+        {tab.label}
+        {tab.badge && (
+          <span style={{ padding: '0 6px', borderRadius: '8px', background: '#F1EFE8', color: '#b5b3ac', fontSize: '10px', lineHeight: 1.6 }}>–</span>
+        )}
+        <span style={{ fontSize: '9px', color: '#c9c7c0', fontWeight: 400 }}>soon</span>
+      </span>
+    )
+  }
+  return (
+    <span
+      style={{
+        display: 'inline-flex', alignItems: 'center',
+        padding: '6px 14px', borderRadius: '20px',
+        border: `0.5px solid ${active ? 'rgba(0,0,0,0.15)' : 'transparent'}`,
+        background: active ? '#fff' : 'transparent',
+        fontSize: '13px', fontWeight: 500,
+        color: active ? '#1a1a18' : '#8a8a84',
+        cursor: 'default', whiteSpace: 'nowrap',
+      }}
+    >
+      {tab.label}
+    </span>
+  )
+}
+
+export default function HiveShell({ engagements = [], onOpenClient = () => {}, setToast = () => {}, onExitBeta = () => {} }) {
+  const openCount = engagements.length
+  return (
+    <div style={{ background: '#fdfdfc', minHeight: '100vh', padding: '1rem 1rem 5rem', fontFamily: 'DM Sans,system-ui,sans-serif' }}>
+      {/* Top row: tab pills left, quiet counter + escape hatch right */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flex: 1, minWidth: 0 }}>
+          {TABS.map(t => <TabPill key={t.key} tab={t} active={t.key === 'board'} />)}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+          <span style={{ fontSize: '12px', color: '#8a8a84', whiteSpace: 'nowrap' }}>Open engagements · {openCount}</span>
+          <button
+            onClick={onExitBeta}
+            style={{
+              border: 'none', background: 'transparent', padding: 0,
+              fontSize: '11px', color: '#b5b3ac', cursor: 'pointer',
+              fontFamily: 'inherit', textDecoration: 'underline',
+              textUnderlineOffset: '2px', whiteSpace: 'nowrap',
+            }}
+          >
+            Back to classic
+          </button>
+        </div>
+      </div>
+
+      <EngagementBoard engagements={engagements} onOpenClient={onOpenClient} setToast={setToast} />
+    </div>
+  )
+}
