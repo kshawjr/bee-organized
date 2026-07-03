@@ -18380,10 +18380,14 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     jobberTeamRoster: selectedLoc.jobberTeamRoster || [],
     jobberTeamRosterSyncedAt: selectedLoc.jobberTeamRosterSyncedAt || null,
     crmStatus:      selectedLoc.crmStatus,
-    sendFromName:   selectedLoc.owner ? `Bee Organized ${selectedLoc.name}` : '',
-    sendFromEmail:  selectedLoc.email || '',
-    replyToEmail:   selectedLoc.email || '',
-    notifEmails:    selectedLoc.email ? [selectedLoc.email] : [],
+    // Prefer the location's configured sender fields (sender_name /
+    // send_from_email / reply_to_email in the DB) so super_admin sees the
+    // same values a franchise owner would. Fall back to the derived default
+    // only when the field is unset.
+    sendFromName:   selectedLoc.sendFromName || (selectedLoc.name ? `Bee Organized ${selectedLoc.name}` : ''),
+    sendFromEmail:  selectedLoc.sendFromEmail || '',
+    replyToEmail:   selectedLoc.replyToEmail || '',
+    notifEmails:    selectedLoc.sendFromEmail ? [selectedLoc.sendFromEmail] : [],
   } : (()=>{
     // Look up from ALL_LOCATIONS by locationId
     const loc = ALL_LOCATIONS.find(l=>l.id===locationId)

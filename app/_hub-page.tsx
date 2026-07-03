@@ -320,7 +320,7 @@ export default async function HubPage({
     const { data: locs, error: locsErr } = await supabaseService
       .from('locations')
       .select(
-        'id, name, address, city, state, zip, phone, email, timezone, reviews_link, calendar_link, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at, corporate_sponsorship_started_at, corporate_sponsorship_ends_at'
+        'id, name, address, city, state, zip, phone, email, timezone, reviews_link, calendar_link, sender_name, send_from_email, reply_to_email, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at, corporate_sponsorship_started_at, corporate_sponsorship_ends_at'
       )
       .order('name', { ascending: true })
 
@@ -429,6 +429,9 @@ export default async function HubPage({
         bookingLink: row.calendar_link || '',
         email: row.email || '',
         timezone: row.timezone || '',
+        sendFromName: row.sender_name || '',
+        sendFromEmail: row.send_from_email || '',
+        replyToEmail: row.reply_to_email || '',
         path: '',
         jobberConnected: !!row.jobber_account_id,
         jobberAccountId: row.jobber_account_id || null,
