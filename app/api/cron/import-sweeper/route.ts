@@ -48,6 +48,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
+  // ─── Resolve origin ───────────────────────────────────────────
+  // Fallback order: INTERNAL_BASE_URL (stable custom domain, set in Vercel
+  // dashboard) → VERCEL_PROJECT_PRODUCTION_URL (Vercel-injected, may be
+  // unset) → req.nextUrl.origin (deployment-specific, SSO-gated — last resort).
+  const origin =
+    process.env.INTERNAL_BASE_URL ||
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : req.nextUrl.origin)
+
+  console.log(
+    '[sweeper] origin=', origin,
+    'PROD_URL=', process.env.VERCEL_PROJECT_PRODUCTION_URL ?? 'unset',
+    'INTERNAL_BASE=', process.env.INTERNAL_BASE_URL ?? 'unset',
+  )
+
   // ─── Find stalled jobs ─────────────────────────────────────────
   const cutoffIso = new Date(Date.now() - STALE_AFTER_MS).toISOString()
   const { data: stalled, error: findErr } = await supabaseService
@@ -69,32 +85,26 @@ export async function GET(req: NextRequest) {
   }
 
   // ─── Re-poke each with the internal-secret header ──────────────
-  // The import route's atomic claim will decide whether to actually spawn a
-  // new segment (fresh claim → no-op, stale/null → drive next segment). We
-  // just kick the door; the route decides.
-  //
-  // MUST use the public production alias — the deployment-specific URL
-  // (req.nextUrl.origin) is Vercel-SSO-gated and returns a 302 to the SSO
-  // login page. Node fetch follows the redirect and lands on the SSO 200
-  // page, which would silently look like `r.ok=true` while never reaching
-  // the import route. VERCEL_PROJECT_PRODUCTION_URL is injected by Vercel
-  // and points at the public alias (e.g. bee-hub-kappa.vercel.app).
-  const origin = process.env.VERCEL_PROJECT_PRODUCTION_URL
-    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-    : req.nextUrl.origin
-  const results: Array<{ job_id: string; location_id: string; ok: boolean; status?: number; error?: string }> = []
+  // redirect: 'manual' so a 302 to the SSO login page is caught as a
+  // failure (status=302) rather than silently followed to a 200 HTML page.
+  const results: Array<{ job_id: string; location_id: string; ok: boolean; status?: number; redirected_to?: string; error?: string }> = []
   await Promise.all(
     jobs.map(async (j: any) => {
+      const url = `${origin}/api/import/jobber-clients?location_id=${encodeURIComponent(j.location_id)}&_continue=1`
       try {
-        console.log('[import-sweeper] continuation URL:', `${origin}/api/import/jobber-clients?location_id=${encodeURIComponent(j.location_id)}&_continue=1`, '| VERCEL_PROJECT_PRODUCTION_URL:', process.env.VERCEL_PROJECT_PRODUCTION_URL ?? '(unset)')
-        const r = await fetch(
-          `${origin}/api/import/jobber-clients?location_id=${encodeURIComponent(j.location_id)}&_continue=1`,
-          {
-            method: 'POST',
-            headers: { 'x-import-continue-secret': secret },
-          },
-        )
-        results.push({ job_id: j.id, location_id: j.location_id, ok: r.ok, status: r.status })
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: { 'x-import-continue-secret': secret },
+          redirect: 'manual',
+        })
+        const ok = r.status >= 200 && r.status < 300
+        if (!ok && r.status >= 300 && r.status < 400) {
+          const loc = r.headers.get('location')
+          console.warn(`[import-sweeper] redirect blocked for ${j.location_id}: ${r.status} → ${loc}`)
+          results.push({ job_id: j.id, location_id: j.location_id, ok: false, status: r.status, redirected_to: loc ?? undefined })
+        } else {
+          results.push({ job_id: j.id, location_id: j.location_id, ok, status: r.status })
+        }
       } catch (err: any) {
         results.push({ job_id: j.id, location_id: j.location_id, ok: false, error: String(err?.message || err) })
       }
