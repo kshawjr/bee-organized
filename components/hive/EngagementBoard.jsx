@@ -68,11 +68,16 @@ function deriveChip(e) {
       const active = jobs.filter(j => !j.completed_at && !(j.status || '').includes('complet'))
       const inProg = active.find(j => j.status === 'in_progress' || j.status === 'active')
       if (inProg) return { label: 'in progress', styleKey: 'in_progress' }
-      const nextStart = active
+      // Only FUTURE starts read as scheduled. Recurring Jobber jobs keep a
+      // stale past scheduled_start (visit cadence, not a booking) — a past
+      // start on an uncompleted job means the work is underway.
+      const starts = active
         .map(j => j.scheduled_start).filter(Boolean)
         .map(d => new Date(d).getTime()).filter(t => !isNaN(t))
-        .sort((a, b) => a - b)[0]
-      if (nextStart) return { label: `scheduled ${fmtShort(nextStart)}`, styleKey: 'scheduled' }
+        .sort((a, b) => a - b)
+      const nextFuture = starts.find(t => t > Date.now())
+      if (nextFuture) return { label: `scheduled ${fmtShort(nextFuture)}`, styleKey: 'scheduled' }
+      if (starts.length > 0) return { label: 'in progress', styleKey: 'in_progress' }
       return { label: 'upcoming', styleKey: 'upcoming' }
     }
     case 'Final Processing': {
