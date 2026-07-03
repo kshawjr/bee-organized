@@ -89,7 +89,7 @@ export const JOBS_QUERY = `
         request { id }
         invoices(first: 10) {
           nodes {
-            id createdAt jobberWebUri
+            id createdAt jobberWebUri invoiceStatus
             amounts { subtotal taxAmount discountAmount total }
           }
         }
@@ -147,7 +147,7 @@ export const SINGLE_JOB_QUERY = `
       client { id }
       invoices(first: 10) {
         nodes {
-          id createdAt jobberWebUri
+          id createdAt jobberWebUri invoiceStatus
           amounts { subtotal taxAmount discountAmount total }
         }
       }
@@ -525,18 +525,28 @@ export async function upsertInvoice(
 ) {
   const jobberInvoiceId = extractJobberId(invoice.id)
   const status = (invoice.invoiceStatus || '').toUpperCase()
+  const isPaid = status === 'PAID'
+  const totalNum = invoice.amounts?.total ? parseFloat(invoice.amounts.total) : null
   const payload: Record<string, any> = {
     job_id, service_request_id, lead_id, location_id,
     jobber_invoice_id: jobberInvoiceId,
     invoice_url: invoice.jobberWebUri || null,
-    status: status === 'PAID' ? 'paid'
+    status: isPaid ? 'paid'
           : status === 'PARTIAL' ? 'partial'
           : status === 'BAD_DEBT' ? 'bad_debt'
           : 'sent',
     subtotal:        invoice.amounts?.subtotal       ? parseFloat(invoice.amounts.subtotal)       : null,
     tax_amount:      invoice.amounts?.taxAmount      ? parseFloat(invoice.amounts.taxAmount)      : null,
     discount_amount: invoice.amounts?.discountAmount ? parseFloat(invoice.amounts.discountAmount) : null,
-    total:           invoice.amounts?.total          ? parseFloat(invoice.amounts.total)          : null,
+    total:           totalNum,
+    // Payment fields (read by people-mapper's invoice mapping). Jobber's
+    // invoice shape here carries no per-payment data or paid timestamp, so
+    // PAID is all-or-nothing: paid = full total, balance 0, and issued date
+    // stands in for paid_at. PARTIAL can't be split without payments data —
+    // leave amounts null rather than guess.
+    paid_amount:   isPaid ? totalNum : null,
+    balance_owing: isPaid ? 0 : totalNum,
+    paid_at:       isPaid ? (invoice.createdAt || null) : null,
     issued_at: invoice.createdAt || null,
     jobber_synced_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),

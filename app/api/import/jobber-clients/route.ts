@@ -644,6 +644,25 @@ export async function POST(req: NextRequest) {
                 for (const inv of (job.invoices?.nodes || [])) {
                   const iRes = await upsertInvoice(inv, jRes.id, reqDbId, leadId, locSlug)
                   iRes.created ? stats.invoices_created++ : stats.invoices_updated++
+                  // Lead roll-up for historical paid invoices — mirrors the
+                  // INVOICE_PAID webhook denorm (paid_amount / balance_owing /
+                  // invoice_paid_at) but deliberately does NOT promote stage
+                  // to Closed Won or touch drips: stage was already inferred
+                  // by determineStage and imported leads are paused. Paid
+                  // invoices predating the import never emit a webhook, so
+                  // this is the only place they can populate the roll-up.
+                  if (iRes.status === 'paid') {
+                    const paidTotal = inv.amounts?.total ? parseFloat(inv.amounts.total) : null
+                    await supabaseService
+                      .from('leads')
+                      .update({
+                        paid_amount: paidTotal,
+                        balance_owing: 0,
+                        invoice_paid_at: inv.createdAt || new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                      })
+                      .eq('id', leadId)
+                  }
                 }
               }
             }
