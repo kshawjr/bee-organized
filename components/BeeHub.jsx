@@ -1910,7 +1910,12 @@ function InvoicePopup({ person, onFinalProcess, onClose, onUpdate }) {
   const [actionInv, setActionInv] = useState(null) // invoice being actioned
   const canFinal = person.stage==='Final Processing' && !person.finalProcessed
   const hasPaidInvoice = invoices.some(i=>i.status==='Paid')
-  const canMoveToFinal = hasPaidInvoice && person.stage==='Job in Progress'
+  // Booked work that hasn't hit invoices yet (same job-status vocabulary as
+  // AccountPanel's In Progress tile). All-invoices-paid doesn't mean the
+  // engagement is done — an active/upcoming job blocks Final Processing.
+  const activeJobs = (person.jobs||[]).filter(j=>!['completed','archived'].includes((j.status||'').toLowerCase()))
+  const bookedNotInvoiced = activeJobs.reduce((s,j)=>s+(j.total||0),0)
+  const canMoveToFinal = hasPaidInvoice && person.stage==='Job in Progress' && activeJobs.length===0
   const total = invoices.reduce((s,i)=>s+i.amount, 0)
   const paid  = invoices.filter(i=>i.status==='Paid').reduce((s,i)=>s+i.amount, 0)
   const outstanding = total - paid
@@ -1938,15 +1943,17 @@ function InvoicePopup({ person, onFinalProcess, onClose, onUpdate }) {
   return (
     <Popup title="Invoices" onClose={onClose}>
       {/* Summary bar */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'6px', marginBottom:'1rem' }}>
+      <div style={{ display:'grid', gridTemplateColumns:bookedNotInvoiced>0?'1fr 1fr 1fr 1fr':'1fr 1fr 1fr', gap:'6px', marginBottom:'1rem' }}>
         {[
           { label:'Total',       value:fmt(total),       color:'#1a2e2b' },
           { label:'Paid',        value:fmt(paid),         color:'#22c55e' },
           { label:'Outstanding', value:fmt(outstanding),  color:outstanding>0?'#f59e0b':'#22c55e' },
+          ...(bookedNotInvoiced>0?[{ label:'Booked', value:fmt(bookedNotInvoiced), color:'#f59e0b', sub:'not yet invoiced' }]:[]),
         ].map(s=>(
-          <div key={s.label} style={{ background:'#f7f5f0', borderRadius:'10px', padding:'10px', textAlign:'center' }}>
+          <div key={s.label} title={s.sub?`${s.label} — ${s.sub}`:undefined} style={{ background:'#f7f5f0', borderRadius:'10px', padding:'10px', textAlign:'center' }}>
             <p style={{ fontSize:'16px', fontWeight:700, color:s.color, fontFamily:'Georgia,serif' }}>{s.value}</p>
             <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'2px' }}>{s.label}</p>
+            {s.sub&&<p style={{ fontSize:'8.5px', color:'#b0a898', marginTop:'1px' }}>{s.sub}</p>}
           </div>
         ))}
       </div>
