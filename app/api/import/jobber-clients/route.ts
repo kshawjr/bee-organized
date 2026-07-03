@@ -163,7 +163,12 @@ export async function POST(req: NextRequest) {
   const url = new URL(req.url)
   const queryLocId = url.searchParams.get('location_id')
   const queryMode  = url.searchParams.get('mode')
-  const selfOrigin = url.origin
+  // Use the public production alias for the self-chain — the deployment
+  // URL (url.origin) is Vercel-SSO-gated and would redirect internal POSTs
+  // to a login page (r.ok=true, but the route never runs).
+  const selfOrigin = process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : url.origin
 
   let body: any = {}
   try { body = await req.json() } catch { /* no body is fine */ }

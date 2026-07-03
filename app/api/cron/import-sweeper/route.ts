@@ -72,7 +72,16 @@ export async function GET(req: NextRequest) {
   // The import route's atomic claim will decide whether to actually spawn a
   // new segment (fresh claim → no-op, stale/null → drive next segment). We
   // just kick the door; the route decides.
-  const origin = req.nextUrl.origin
+  //
+  // MUST use the public production alias — the deployment-specific URL
+  // (req.nextUrl.origin) is Vercel-SSO-gated and returns a 302 to the SSO
+  // login page. Node fetch follows the redirect and lands on the SSO 200
+  // page, which would silently look like `r.ok=true` while never reaching
+  // the import route. VERCEL_PROJECT_PRODUCTION_URL is injected by Vercel
+  // and points at the public alias (e.g. bee-hub-kappa.vercel.app).
+  const origin = process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : req.nextUrl.origin
   const results: Array<{ job_id: string; location_id: string; ok: boolean; status?: number; error?: string }> = []
   await Promise.all(
     jobs.map(async (j: any) => {
