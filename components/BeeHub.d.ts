@@ -168,6 +168,10 @@ interface BeeHubProps {
   initialLookups?: LookupsByCategory
   initialPeople?: any[]
   initialBinPeople?: any[]
+  // HIVE Phase 1 step 4: open engagements for the new EngagementBoard
+  // (dual-read; unused by the legacy board). Rows carry client_name,
+  // repeat_count, and minimal quotes/jobs/invoices for the stage chips.
+  initialEngagements?: any[]
   initialPartners?: any[]
   initialCompanies?: any[]
   // URL routing: server-passed route slug ('clients' / 'reports' / etc.)

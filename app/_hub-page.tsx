@@ -472,6 +472,9 @@ export default async function HubPage({
 
   let initialPeople: any[] = []
   let initialBinPeople: any[] = []
+  // HIVE Phase 1 step 4: open engagements for the new board (dual-read —
+  // additive prop; every leads/stage read below is untouched).
+  let initialEngagements: any[] = []
   {
     // Paginated load — a single .limit(1000) silently truncated locations
     // with >1000 leads (Portland: 1616), so the client-side "Active" count
@@ -626,6 +629,93 @@ export default async function HubPage({
         })
       )
       console.log(`[hub-page] Fetched ${initialPeople.length} leads + joined data for ${hubUser.email}`)
+
+      // ── HIVE Phase 1 step 4: open engagements (dual-read; additive) ──
+      // Same short-page .range() loop as the leads load above — the 1000-row
+      // cap lesson (80ded92/3099875) applies to engagements too. Child rows
+      // for the within-stage chips are reused from the fetches above (they
+      // carry engagement_id since step 1); repeat count is a paginated
+      // client_id sweep over ALL engagements including closed.
+      {
+        const engOpen: any[] = []
+        let engErr: { message: string } | null = null
+        for (let from = 0; ; from += PAGE) {
+          let q = supabaseService
+            .from('engagements')
+            .select('*')
+            .not('stage', 'in', '("Closed Won","Closed Lost")')
+            .order('created_at', { ascending: false })
+            .order('id', { ascending: true })
+            .range(from, from + PAGE - 1)
+          if (!isElevated && hubUser.location_id) {
+            q = q.eq('location_uuid', hubUser.location_id)
+          }
+          const { data, error } = await q
+          if (error) { engErr = error; break }
+          engOpen.push(...(data || []))
+          if ((data || []).length < PAGE) break
+        }
+
+        if (engErr) {
+          console.error('[hub-page] engagements fetch error:', engErr.message)
+        } else if (engOpen.length > 0) {
+          const repeatCounts: Record<string, number> = {}
+          for (let from = 0; ; from += PAGE) {
+            let q = supabaseService
+              .from('engagements')
+              .select('id, client_id')
+              .order('id', { ascending: true })
+              .range(from, from + PAGE - 1)
+            if (!isElevated && hubUser.location_id) {
+              q = q.eq('location_uuid', hubUser.location_id)
+            }
+            const { data, error } = await q
+            if (error) {
+              console.error('[hub-page] engagement repeat-count fetch error:', error.message)
+              break
+            }
+            for (const r of data || []) {
+              repeatCounts[r.client_id] = (repeatCounts[r.client_id] || 0) + 1
+            }
+            if ((data || []).length < PAGE) break
+          }
+
+          const leadNameById: Record<string, string> = {}
+          for (const l of leadsRaw) leadNameById[l.id] = l.name || 'Unknown'
+
+          const byEngagement = <T extends { engagement_id?: string | null }>(rows: T[] | null) => {
+            const out: Record<string, T[]> = {}
+            ;(rows || []).forEach(r => {
+              if (!r.engagement_id) return
+              if (!out[r.engagement_id]) out[r.engagement_id] = []
+              out[r.engagement_id].push(r)
+            })
+            return out
+          }
+          const quotesByEng   = byEngagement(quotesRaw)
+          const jobsByEng     = byEngagement(jobsRaw)
+          const invoicesByEng = byEngagement(invoicesRaw)
+
+          initialEngagements = engOpen.map((e: any) => ({
+            ...e,
+            client_name: leadNameById[e.client_id] || 'Unknown',
+            repeat_count: repeatCounts[e.client_id] || 1,
+            quotes: (quotesByEng[e.id] || []).map((q: any) => ({
+              id: q.id, status: q.status, total: q.total,
+              sent_at: q.sent_at, approved_at: q.approved_at,
+            })),
+            jobs: (jobsByEng[e.id] || []).map((j: any) => ({
+              id: j.id, status: j.status, title: j.title,
+              scheduled_start: j.scheduled_start, completed_at: j.completed_at,
+            })),
+            invoices: (invoicesByEng[e.id] || []).map((i: any) => ({
+              id: i.id, status: i.status, total: i.total,
+              balance_owing: i.balance_owing,
+            })),
+          }))
+          console.log(`[hub-page] Fetched ${initialEngagements.length} open engagements for ${hubUser.email}`)
+        }
+      }
     }
   }
 
@@ -755,6 +845,7 @@ export default async function HubPage({
       initialLookups={initialLookups}
       initialPeople={initialPeople}
       initialBinPeople={initialBinPeople}
+      initialEngagements={initialEngagements}
       initialPartners={initialPartners}
       initialCompanies={initialCompanies}
       currentSubscription={currentSubscription}
