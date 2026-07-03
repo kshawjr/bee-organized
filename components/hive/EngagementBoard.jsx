@@ -27,6 +27,15 @@ import SectionHeader from '@/components/ui/SectionHeader'
 const BOARD_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+// Junk-length Jobber titles ("(L)", "(M)") fall through to the generic
+// fallback — a 3-character title reads as data noise on a card.
+function displayTitle(e) {
+  const t = (e.title || '').trim()
+  if (t.length > 3) return t
+  const d = e.created_at ? new Date(e.created_at) : new Date()
+  return `Engagement – ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+}
 const fmtShort = (d) => {
   if (!d) return null
   const dt = new Date(d)
@@ -54,7 +63,8 @@ function deriveChip(e) {
   switch (e.stage) {
     case 'Request': {
       const age = daysSince(e.created_at)
-      if (age > 21) return { label: `requested · d${age}`, styleKey: 'amber' }
+      // Pre-nurture amber cue applies AT day 21, not after it.
+      if (age >= 21) return { label: `requested · d${age}`, styleKey: 'amber' }
       return { label: age === 0 ? 'requested today' : `requested · d${age}`, styleKey: 'Request' }
     }
     case 'Estimate': {
@@ -99,25 +109,27 @@ function cardValue(e) {
   return quoted > 0 ? fmtMoney(quoted) : null
 }
 
+// Card typography (LOCKED): name 13px/500 near-black, subtitle 11px muted,
+// value 12px/500. 100% sans — no serif inside the board.
 function EngagementCard({ e, onOpen, draggable, onDragStart }) {
   const chip = deriveChip(e)
   const value = cardValue(e)
   return (
     <div draggable={draggable || undefined} onDragStart={onDragStart}>
       <Card onClick={onOpen}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '4px' }}>
-          <p style={{ flex: 1, minWidth: 0, fontSize: '13px', fontWeight: 600, color: '#1a2e2b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '3px' }}>
+          <p style={{ flex: 1, minWidth: 0, fontSize: '13px', fontWeight: 500, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {e.client_name}
           </p>
-          {value && <span style={{ fontSize: '12px', fontWeight: 700, color: '#1a2e2b', flexShrink: 0 }}>{value}</span>}
+          {value && <span style={{ fontSize: '12px', fontWeight: 500, color: '#1a1a18', flexShrink: 0 }}>{value}</span>}
         </div>
-        <p style={{ fontSize: '11px', color: '#8a9e9a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: '7px' }}>
-          {e.title || 'Engagement'}
+        <p style={{ fontSize: '11px', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: '8px' }}>
+          {displayTitle(e)}
         </p>
         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-          {chip && <StatusChip label={chip.label} styleKey={chip.styleKey} size="sm" />}
+          {chip && <StatusChip label={chip.label} styleKey={chip.styleKey} />}
           {e.repeat_count > 1 && (
-            <StatusChip label={`repeat · ${e.repeat_count - 1} prior`} styleKey="repeat" size="sm" />
+            <StatusChip label={`repeat · ${e.repeat_count - 1} prior`} styleKey="repeat" />
           )}
         </div>
       </Card>
@@ -192,13 +204,13 @@ export default function EngagementBoard({ engagements = [], onOpenClient = () =>
         style={{
           width: isMobile ? '100%' : '220px', flexShrink: 0,
           borderRadius: '10px',
-          background: dragOverCol === stage.key ? 'rgba(13,148,136,0.06)' : 'transparent',
-          outline: dragOverCol === stage.key ? '1.5px dashed rgba(13,148,136,0.45)' : 'none',
+          background: dragOverCol === stage.key ? 'rgba(225,245,238,0.5)' : 'transparent',
+          outline: dragOverCol === stage.key ? '1.5px dashed rgba(8,80,65,0.35)' : 'none',
           padding: '2px',
         }}
       >
         {!isMobile && <SectionHeader label={stage.label} count={cards.length} />}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {cards.map(e => (
             <EngagementCard
               key={e.id}
@@ -209,7 +221,7 @@ export default function EngagementBoard({ engagements = [], onOpenClient = () =>
             />
           ))}
           {cards.length === 0 && (
-            <div style={{ padding: '14px', textAlign: 'center', color: '#c8d8d4', fontSize: '12px', border: '1px dashed rgba(0,0,0,0.08)', borderRadius: '10px' }}>
+            <div style={{ padding: '14px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px', border: '0.5px dashed rgba(0,0,0,0.12)', borderRadius: '10px' }}>
               Empty
             </div>
           )}
@@ -234,19 +246,19 @@ export default function EngagementBoard({ engagements = [], onOpenClient = () =>
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
           <button onClick={() => setMobileCol(c => Math.max(0, c - 1))} disabled={mobileCol === 0}
-            style={{ border: 'none', background: 'transparent', fontSize: '18px', color: mobileCol === 0 ? '#c8d8d4' : '#4a5e5a', cursor: 'pointer', padding: '4px 8px' }}>‹</button>
+            style={{ border: 'none', background: 'transparent', fontSize: '18px', color: mobileCol === 0 ? '#c9c7c0' : '#6b6b66', cursor: 'pointer', padding: '4px 8px' }}>‹</button>
           <div style={{ flex: 1, textAlign: 'center' }}>
-            <span style={{ fontSize: '12px', fontWeight: 600, color: '#1a2e2b', textTransform: 'uppercase', letterSpacing: '0.4px' }}>{stage.label}</span>
-            <span style={{ fontSize: '12px', color: '#b0c0bc', marginLeft: '6px' }}>{count}</span>
+            <span style={{ fontSize: '12px', fontWeight: 500, color: '#6b6b66' }}>{stage.label}</span>
+            <span style={{ fontSize: '12px', fontWeight: 400, color: '#b5b3ac', marginLeft: '5px' }}>· {count}</span>
           </div>
           <button onClick={() => setMobileCol(c => Math.min(BOARD_STAGES.length - 1, c + 1))} disabled={mobileCol === BOARD_STAGES.length - 1}
-            style={{ border: 'none', background: 'transparent', fontSize: '18px', color: mobileCol === BOARD_STAGES.length - 1 ? '#c8d8d4' : '#4a5e5a', cursor: 'pointer', padding: '4px 8px' }}>›</button>
+            style={{ border: 'none', background: 'transparent', fontSize: '18px', color: mobileCol === BOARD_STAGES.length - 1 ? '#c9c7c0' : '#6b6b66', cursor: 'pointer', padding: '4px 8px' }}>›</button>
         </div>
         {renderColumn(stage, { droppable: false })}
         <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', marginTop: '12px' }}>
           {BOARD_STAGES.map((s, i) => (
             <button key={s.key} onClick={() => setMobileCol(i)} aria-label={s.label}
-              style={{ width: '7px', height: '7px', borderRadius: '50%', border: 'none', padding: 0, cursor: 'pointer', background: i === mobileCol ? '#1a2e2b' : 'rgba(0,0,0,0.15)' }} />
+              style={{ width: '7px', height: '7px', borderRadius: '50%', border: 'none', padding: 0, cursor: 'pointer', background: i === mobileCol ? '#1a1a18' : 'rgba(0,0,0,0.15)' }} />
           ))}
         </div>
       </div>
@@ -255,7 +267,7 @@ export default function EngagementBoard({ engagements = [], onOpenClient = () =>
 
   return (
     <div style={{ overflowX: 'auto', paddingBottom: '1rem', WebkitOverflowScrolling: 'touch' }}>
-      <div style={{ display: 'flex', gap: '12px', minWidth: 'max-content', alignItems: 'flex-start' }}>
+      <div style={{ display: 'flex', gap: '16px', minWidth: 'max-content', alignItems: 'flex-start' }}>
         {BOARD_STAGES.map(stage => renderColumn(stage, { droppable: true }))}
       </div>
     </div>

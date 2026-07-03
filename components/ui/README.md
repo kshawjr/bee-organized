@@ -1,48 +1,75 @@
 # components/ui — Bee Hub design-system primitives
 
-App-wide presentational primitives (HIVE Phase 1, doc §8.5/§8.6). Props-only:
-no data fetching, no mock constants — consumers pass everything in. Color
-semantics resolve through `CHIP_STYLES` in
-`components/hive/shared/stageConfig.js`, the single stage/status display
-config. Never redeclare stage constants; never import from `BeeHub.jsx`.
+App-wide presentational primitives (HIVE Phase 1, doc §8.5/§8.6), aligned to
+the LOCKED mockup design language. This file is the seed of
+`docs/bee-hub-design-language.md` (step-4 deliverable). Props-only: no data
+fetching, no mock constants. Color semantics resolve through `CHIP_STYLES`
+in `components/hive/shared/stageConfig.js` — the single display config.
+Never redeclare stage constants; never import from `BeeHub.jsx`; never
+import `lib/engagements.ts` from client code (pure constants live in
+`components/hive/shared/stageRank.js` / `betaGate.js`).
 
-Tone/styleKey vocabulary (§8.6): `teal`=new/go · `blue`=in-motion ·
-`amber`=attention/nurture · `red`=money-owed · `purple`=relationship/repeat ·
-`gray`=past/closed. `CHIP_STYLES` also maps every engagement stage, client
-status, and within-stage state (`sent`, `approved`, `changes_requested`,
-`nurturing`, `upcoming`, `scheduled`, `in_progress`, `owing`, `paid`,
-`never_invoiced`, `repeat`) so callers can pass those keys directly.
+## Locked visual values
 
-## StatusChip
-`{ label, styleKey?, icon?, size? }` — colored pill, dark text on light fill.
-`styleKey` is any `CHIP_STYLES` key (unknown → gray). `size`: `'md'`
-(default) or `'sm'`. `icon` renders before the label.
+**Surfaces & cards** — cards are pure `#fff`, border `0.5px solid
+rgba(0,0,0,0.08)` (hairline), radius `10px`, padding `10px 12px`, no
+shadows, no gradients. Board/page surfaces are quiet warm neutrals
+(`#f7f6f3`-ish) or transparent over a near-white page.
 
-## Card
-`{ children, onClick?, highlighted? }` — white card, hairline border, radius
-10. `onClick` makes it interactive (pointer cursor); `highlighted` swaps to a
-teal border + soft shadow.
+**Typography** — 100% sans (app stack); no serif inside Phase 1 surfaces.
+Primary text 13px / weight 500 / near-black `#1a1a18` (never 700).
+Secondary 11px / muted `#8a8a84`. Values 12–13px / weight 500. Section
+labels 12px / weight 500 / `#6b6b66`, sentence case, count after a `·` in
+`#b5b3ac` ("Request · 10").
 
-## Row
-`{ left?, primary, secondary?, right?, onClick? }` — two-line list row.
-`left`/`right` are free slots (avatar, chips, value); `primary`/`secondary`
-ellipsize. Compresses naturally on mobile (slots flex, text truncates).
+**Chips** — 11px / weight 500, padding `2px 8px`, radius `10px`, no
+border. Dark-on-light pairs (exact, do not tweak per-surface):
 
-## FilterChips
+| family | meaning | bg | text |
+|---|---|---|---|
+| teal | new / go / requested | `#E1F5EE` | `#085041` |
+| blue | in-motion (sent / scheduled / in progress / upcoming) | `#E6F1FB` | `#0C447C` |
+| green | approved | `#EAF3DE` | `#27500A` |
+| amber | attention / nurture / never invoiced | `#FAEEDA` | `#633806` |
+| red | money owed | `#FCEBEB` | `#791F1F` |
+| purple | repeat / relationship | `#EEEDFE` | `#3C3489` |
+| gray | past / closed / neutral | `#F1EFE8` | `#444441` |
+
+**Spacing** — 12px between cards, 16px between board columns; generous,
+the layout breathes.
+
+## Primitives
+
+### StatusChip
+`{ label, styleKey?, icon? }` — colored pill per the locked chip anatomy.
+`styleKey` is any `CHIP_STYLES` key (families above, plus every engagement
+stage, client status, and within-stage state: `sent`, `approved`,
+`changes_requested`, `nurturing`, `upcoming`, `scheduled`, `in_progress`,
+`owing`, `paid`, `never_invoiced`, `repeat`). Unknown keys → gray.
+
+### Card
+`{ children, onClick?, highlighted? }` — locked card surface (see above).
+`onClick` makes it interactive; `highlighted` swaps the hairline to teal
+(`rgba(8,80,65,0.35)`) — still no shadow.
+
+### Row
+`{ left?, primary, secondary?, right?, onClick? }` — two-line list row on
+the card surface. `left`/`right` are free slots; `primary`/`secondary`
+ellipsize. Compresses naturally on mobile.
+
+### FilterChips
 `{ items, active, onChange }` — horizontal chip strip;
 `items: [{ key, label, count?, styleKey? }]`. Active chip inverts to ink;
-inactive chips tint by `styleKey` when given. Scrolls horizontally on narrow
-viewports instead of wrapping (§7 mobile rule).
+scrolls horizontally on narrow viewports instead of wrapping.
 
-## MetricCard
+### MetricCard
 `{ label, value, tone? }` — stat card: muted uppercase label, 22px value.
 `tone` tints the value via `CHIP_STYLES` text colors.
 
-## Banner
-`{ icon, text, action?, tone? }` — icon + text strip with optional action
-button; `action: { label, onClick }`. `tone` (default `amber`) tints the
-fill; the action button uses the tone's text color as its background.
+### Banner
+`{ icon, text, action?, tone? }` — icon + text strip on a tinted fill
+(no border); `action: { label, onClick }` renders a solid button in the
+tone's text color. Default tone `amber`.
 
-## SectionHeader
-`{ label, count? }` — muted uppercase section label (`#8a9e9a`,
-letter-spaced) with optional count, per the app's section-label convention.
+### SectionHeader
+`{ label, count? }` — the locked section label ("Request · 10" style).

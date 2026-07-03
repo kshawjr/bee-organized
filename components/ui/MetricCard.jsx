@@ -10,8 +10,8 @@ export default function MetricCard({ label, value, tone = null }) {
   const color = tone ? (CHIP_STYLES[tone] || CHIP_STYLES.gray).text : '#1a2e2b'
   return (
     <div style={{
-      background: 'white',
-      border: '1px solid rgba(0,0,0,0.07)',
+      background: '#fff',
+      border: '0.5px solid rgba(0,0,0,0.08)',
       borderRadius: '12px',
       padding: '14px 16px',
       minWidth: 0,

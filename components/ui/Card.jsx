@@ -1,4 +1,6 @@
-// components/ui/Card.jsx — white card on quiet surface, hairline border.
+// components/ui/Card.jsx — pure white card, hairline border, no shadow.
+// LOCKED (mockup spec): #fff, 0.5px solid rgba(0,0,0,0.08), radius 10px,
+// padding 10px 12px, no shadows, no gradients.
 'use client'
 
 import React from 'react'
@@ -8,13 +10,12 @@ export default function Card({ children, onClick = null, highlighted = false }) 
     <div
       onClick={onClick || undefined}
       style={{
-        background: 'white',
-        border: `1px solid ${highlighted ? 'rgba(13,148,136,0.35)' : 'rgba(0,0,0,0.07)'}`,
+        background: '#fff',
+        border: `0.5px solid ${highlighted ? 'rgba(8,80,65,0.35)' : 'rgba(0,0,0,0.08)'}`,
         borderRadius: '10px',
-        padding: '12px',
+        padding: '10px 12px',
         cursor: onClick ? 'pointer' : 'default',
-        boxShadow: highlighted ? '0 1px 6px rgba(13,148,136,0.12)' : 'none',
-        transition: 'border-color 0.15s, box-shadow 0.15s',
+        transition: 'border-color 0.15s',
       }}
     >
       {children}

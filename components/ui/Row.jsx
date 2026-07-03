@@ -12,8 +12,8 @@ export default function Row({ left = null, primary, secondary = null, right = nu
       style={{
         display: 'flex', alignItems: 'center', gap: '10px',
         padding: '10px 12px',
-        background: 'white',
-        border: '1px solid rgba(0,0,0,0.07)',
+        background: '#fff',
+        border: '0.5px solid rgba(0,0,0,0.08)',
         borderRadius: '10px',
         cursor: onClick ? 'pointer' : 'default',
       }}

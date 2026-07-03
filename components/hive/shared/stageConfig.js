@@ -43,21 +43,23 @@ export const CLIENT_STATUSES = [
   { key: 'Past',       label: 'Past client' },
 ]
 
-// ── chip color semantics (§8.6) ────────────────────────────────
-// teal=new/go · blue=in-motion · amber=attention/nurture ·
-// red=money-owed · purple=relationship/repeat · gray=past/closed.
-// Dark text on light fills, always.
+// ── chip color semantics (§8.6, LOCKED mockup values) ──────────
+// teal=new/go · blue=in-motion · green=approved · amber=attention/
+// nurture · red=money-owed · purple=relationship/repeat ·
+// gray=past/closed. Dark text on light fills, always. These exact
+// pairs are the design language — do not tweak per-surface.
 
-const TEAL   = { bg: 'rgba(13,148,136,0.12)', text: '#0f766e' }
-const BLUE   = { bg: 'rgba(37,99,235,0.10)',  text: '#1d4ed8' }
-const AMBER  = { bg: 'rgba(245,158,11,0.14)', text: '#b45309' }
-const RED    = { bg: 'rgba(220,38,38,0.10)',  text: '#b91c1c' }
-const PURPLE = { bg: 'rgba(139,92,246,0.12)', text: '#6d28d9' }
-const GRAY   = { bg: 'rgba(138,158,154,0.14)', text: '#5c6f6b' }
+const TEAL   = { bg: '#E1F5EE', text: '#085041' }
+const BLUE   = { bg: '#E6F1FB', text: '#0C447C' }
+const GREEN  = { bg: '#EAF3DE', text: '#27500A' }
+const AMBER  = { bg: '#FAEEDA', text: '#633806' }
+const RED    = { bg: '#FCEBEB', text: '#791F1F' }
+const PURPLE = { bg: '#EEEDFE', text: '#3C3489' }
+const GRAY   = { bg: '#F1EFE8', text: '#444441' }
 
 export const CHIP_STYLES = {
   // base families — reach for these when no specific key fits
-  teal: TEAL, blue: BLUE, amber: AMBER, red: RED, purple: PURPLE, gray: GRAY,
+  teal: TEAL, blue: BLUE, green: GREEN, amber: AMBER, red: RED, purple: PURPLE, gray: GRAY,
 
   // engagement stages
   'Request':          TEAL,   // new/go — actively engaging
@@ -76,7 +78,7 @@ export const CHIP_STYLES = {
 
   // within-stage states (card chips)
   sent:              BLUE,    // quote out, no answer yet — neutral default
-  approved:          TEAL,    // quote approved — go
+  approved:          GREEN,   // quote approved
   changes_requested: AMBER,   // quote needs attention
   nurturing:         AMBER,   // quiet-clock chip ("nurturing · dNN")
   upcoming:          BLUE,    // job scheduled ahead

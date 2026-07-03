@@ -13,7 +13,6 @@ export default function Banner({ icon, text, action = null, tone = 'amber' }) {
       display: 'flex', alignItems: 'center', gap: '10px',
       padding: '10px 12px',
       background: s.bg,
-      border: `1px solid ${s.bg.replace(/[\d.]+\)$/, '0.35)')}`,
       borderRadius: '10px',
     }}>
       <span style={{ fontSize: '16px', flexShrink: 0, lineHeight: 1 }}>{icon}</span>
