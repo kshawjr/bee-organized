@@ -66,6 +66,7 @@ import {
   upsertQuote,
   upsertJob,
   upsertInvoice,
+  extractJobberId,
 } from '@/lib/jobber-import'
 
 export const runtime = 'nodejs'
@@ -507,7 +508,7 @@ export async function POST(req: NextRequest) {
         let processed = alreadyWritten.size  // count already-done toward progress
         for (const client of clients) {
           // Skip clients already written in a previous (timed-out) run.
-          if (alreadyWritten.has(client.id)) continue
+          if (alreadyWritten.has(extractJobberId(client.id))) continue
 
           // Stop this invocation once we've written a full batch — the client
           // will re-POST to continue. Prevents mid-record Vercel kill.
