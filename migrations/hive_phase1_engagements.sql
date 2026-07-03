@@ -13,8 +13,10 @@
 
 CREATE TABLE IF NOT EXISTS public.engagements (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- client_id: no ON DELETE action, intentional — engagements block client
+  -- deletion (confirmed 2026-07-03).
   client_id       uuid NOT NULL REFERENCES public.leads(id),
-  location_uuid   uuid NOT NULL,
+  location_uuid   uuid NOT NULL REFERENCES public.locations(id),
   stage           text NOT NULL CHECK (stage IN
                     ('Request','Estimate','Job in Progress',
                      'Final Processing','Closed Won','Closed Lost')),
@@ -90,12 +92,21 @@ CREATE INDEX IF NOT EXISTS idx_jobs_quote
 -- super_admin/admin see all; other hub users see their own location.
 --
 -- CRITICAL cast: hub_users.location_id is TEXT storing the location UUID
--- (see app/api/locations/[id]/jobber-test/route.ts), so the uuid side must
--- be cast — hub_users.location_id = engagements.location_uuid::text.
+-- (verified in prod 2026-07-03: Portland owner's row holds a UUID string),
+-- so the uuid side must be cast —
+-- hub_users.location_id = engagements.location_uuid::text.
 --
 -- Note the app currently accesses all pipeline tables via the service role
 -- (bypasses RLS), so these policies gate future client-side reads only.
 -- Deny-by-default holds for anon either way once RLS is enabled.
+--
+-- KNOWN-LATENT BUG in the live child-table policies (found in pre-flight
+-- 2026-07-03, NOT fixed here): the franchise SELECT policies on
+-- service_requests / quotes / jobs / invoices compare hub_users.location_id
+-- (UUID strings) against those tables' location_id (slugs like
+-- 'loc_portland') — they can never match. Harmless today because the app
+-- reads via service role. Fix by comparing location_uuid::text instead —
+-- scheduled for Phase 1.5 or migration step 6 cleanup (see Phase 1 doc §11).
 
 ALTER TABLE public.engagements ENABLE ROW LEVEL SECURITY;
 
@@ -137,25 +148,21 @@ CREATE POLICY "engagements write"
     )
   );
 
--- ── Pre-flight verification (run these BEFORE/alongside the migration) ──────
--- The live policies on the child tables were created outside the repo, so
--- confirm the pattern above actually matches prod before applying:
+-- ── Pre-flight verification — DONE 2026-07-03 ───────────────────────────────
+-- Results (Kevin, Supabase editor):
+--   1. hub_users.location_id is text holding UUID strings → the ::text
+--      casts above are correct as written.
+--   2. Child-table franchise policies confirmed broken-latent (see
+--      KNOWN-LATENT BUG note above).
+-- Queries kept for re-verification:
 --
---   -- 1. What do the child-table policies look like?
 --   SELECT tablename, policyname, roles, cmd, qual
 --   FROM pg_policies
 --   WHERE tablename IN ('service_requests','quotes','jobs','invoices',
 --                       'touchpoints','leads','companies')
 --   ORDER BY tablename, policyname;
 --
---   -- 2. Confirm hub_users.location_id type + representative value
---   --    (expect: data_type = 'text', values that parse as UUIDs):
 --   SELECT data_type FROM information_schema.columns
 --   WHERE table_schema='public' AND table_name='hub_users'
 --     AND column_name='location_id';
 --   SELECT DISTINCT location_id FROM public.hub_users LIMIT 5;
---
--- If (2) shows slugs (e.g. 'loc_portland') instead of UUID strings, the
--- policy comparisons above will never match — replace them with a join
--- through locations (hub_users.location_id = locations.location_id AND
--- locations.id = engagements.location_uuid) before running.

@@ -195,8 +195,9 @@ leads.stage: ~80 reads (BeeHub 10024–10694 board, 20230–20484 dashboard, 255
 
 ## 11. Open items / checklist
 
-- [ ] introspect-job.mjs on pinned 2025-04-16 (Job.quote) — token refresh pending
+- [ ] introspect-job.mjs on pinned 2025-04-16 (Job.quote) — NON-BLOCKING confirmation; proceeding on fail-loud (decision 2026-07-03: mirror shows Job.quote, nullable column harmless, query addition fails loudly on first fetch)
 - [x] Step-0 dry-run counts (folded into §5)
+- [ ] Fix child-table franchise SELECT policies (service_requests/quotes/jobs/invoices): they compare hub_users.location_id (UUID strings) against slug location_id — can never match. Latent, since the app reads via service role. Fix: compare location_uuid::text — Phase 1.5 or step 6 cleanup
 - [ ] client_status: stored vs derived (build-time)
 - [ ] Contacts rename ("Partners"?) — Phase 1.5
 - [ ] docs/bee-hub-design-language.md (step-4 deliverable)
