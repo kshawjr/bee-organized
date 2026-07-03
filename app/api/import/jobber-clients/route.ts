@@ -181,39 +181,53 @@ export async function POST(req: NextRequest) {
   const locSlug: string = location.location_id
   const locUuid: string = location.id
 
-  // ─── reuse an existing in-flight job for this location ──────
-  // Prevents duplicate concurrent imports (double-click, poller + onboarding
-  // both firing, page reload). A single re-POST should RESUME the running job,
-  // not spawn a rival that fights for the same Jobber rate budget.
-  const { data: existingJob } = await supabaseService
-    .from('import_jobs')
-    .select('id, status, segment_started_at')
-    .eq('location_id', locSlug)
-    .eq('type', 'jobber_clients')
-    .eq('status', 'running')
-    .order('started_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  // ─── atomic location-level claim ─────────────────────────────
+  // Find-or-create the running job for this location, then acquire the claim
+  // via conditional UPDATE (compare-and-swap) so only ONE concurrent caller
+  // wins the right to drive the next segment. Losers get the job id back and
+  // return already_active. The partial UNIQUE index on import_jobs
+  // (idx_import_jobs_one_running) enforces at most one running job per
+  // location — if two callers race the else-branch INSERT, one hits 23505
+  // and falls back to SELECT + claim.
+  const CLAIM_TTL_MS = 90_000
+  const startedAtIso = new Date().toISOString()
+  const claimNowIso = startedAtIso
+  const claimCutoff = new Date(Date.now() - CLAIM_TTL_MS).toISOString()
+
+  const tryClaim = async (id: string): Promise<boolean> => {
+    const { data: claimed } = await supabaseService
+      .from('import_jobs')
+      .update({ location_claim_at: claimNowIso })
+      .eq('id', id)
+      .or(`location_claim_at.is.null,location_claim_at.lt.${claimCutoff}`)
+      .select('id')
+    return !!claimed && claimed.length > 0
+  }
+
+  const findRunning = async () =>
+    supabaseService
+      .from('import_jobs')
+      .select('id, location_claim_at')
+      .eq('location_id', locSlug)
+      .eq('type', 'jobber_clients')
+      .eq('status', 'running')
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+  const { data: existing } = await findRunning()
 
   let jobId: string
-  if (existingJob) {
-    // A job is already running for this location. Only resume it if its
-    // segment mutex is stale (>90s) — meaning the prior segment died and
-    // nothing is actively working it. If the mutex is FRESH, another segment
-    // is genuinely mid-flight; return its id and let the poller keep polling,
-    // do NOT start a rival segment.
-    const mutexAgeMs = existingJob.segment_started_at
-      ? Date.now() - new Date(existingJob.segment_started_at).getTime()
-      : Infinity
-    jobId = existingJob.id
-    if (mutexAgeMs < 90_000) {
-      // Fresh segment already working — just hand back the job id, no new segment.
-      return NextResponse.json({ job_id: jobId, started: true, resumed: false, already_active: true })
+  if (existing) {
+    jobId = existing.id
+    if (!(await tryClaim(jobId))) {
+      // Another caller holds a fresh claim — a segment is genuinely active.
+      return NextResponse.json({ job_id: jobId, started: true, already_active: true })
     }
-    // Stale — fall through to launch a resuming segment against this same jobId.
+    // We won the claim → drive the next segment (resume from location staging).
   } else {
-    // No running job — create a fresh one.
-    const { data: importJob, error: jobErr } = await supabaseService
+    // No running job — try to create one, claimed atomically in the same insert.
+    const { data: created, error: jobErr } = await supabaseService
       .from('import_jobs')
       .insert({
         location_id: locSlug,
@@ -222,14 +236,32 @@ export async function POST(req: NextRequest) {
         phase: 'starting',
         total_records: 0,
         processed_records: 0,
-        started_at: new Date().toISOString(),
+        started_at: startedAtIso,
+        location_claim_at: claimNowIso,
       })
       .select('id')
       .single()
-    if (jobErr || !importJob) {
-      return NextResponse.json({ error: 'failed_to_create_import_job', detail: jobErr?.message }, { status: 500 })
+
+    if (jobErr) {
+      // 23505 = the partial UNIQUE index rejected our INSERT because another
+      // POST won the race and inserted first. Fall back to SELECT + claim.
+      if ((jobErr as any).code === '23505') {
+        const { data: rival } = await findRunning()
+        if (!rival) {
+          return NextResponse.json({ error: 'failed_to_create_import_job', detail: 'race_lost_and_missing' }, { status: 500 })
+        }
+        jobId = rival.id
+        if (!(await tryClaim(jobId))) {
+          return NextResponse.json({ job_id: jobId, started: true, already_active: true })
+        }
+      } else {
+        return NextResponse.json({ error: 'failed_to_create_import_job', detail: jobErr.message }, { status: 500 })
+      }
+    } else if (!created) {
+      return NextResponse.json({ error: 'failed_to_create_import_job', detail: 'no_row_returned' }, { status: 500 })
+    } else {
+      jobId = created.id
     }
-    jobId = importJob.id
   }
 
   // Run the import detached from the request via waitUntil so it survives
@@ -266,10 +298,12 @@ export async function POST(req: NextRequest) {
       // Clear the mutex from any exit path. Idempotent — safe to call more
       // than once. Every return below must call this before returning.
       const releaseMutex = async () => {
+        // Release both the in-run segment mutex AND the atomic location
+        // claim so the next re-POST can acquire and drive the next segment.
         try {
           await supabaseService
             .from('import_jobs')
-            .update({ segment_started_at: null })
+            .update({ segment_started_at: null, location_claim_at: null })
             .eq('id', jobId)
         } catch (err) {
           console.error('[import_jobs mutex release failed]', err)
@@ -288,20 +322,36 @@ export async function POST(req: NextRequest) {
           await updateProgress(jobId, { phase: msg })
         }
 
-        // ─── resumable segmented fetch ────────────────────────────────
-        // Each entity pages into import_staging with the endCursor persisted to
-        // import_jobs.fetch_cursors after every page. If we time out or trip
-        // Jobber's 10k-cost budget, the next invocation resumes cleanly instead
-        // of restarting the whole account-wide fetch.
-        const { data: jobRow } = await supabaseService
-          .from('import_jobs')
+        // ─── resumable segmented fetch (location-keyed) ───────────────
+        // Fetch state lives in import_location_fetch keyed by location, not
+        // by job — so a fresh job for a location inherits whatever entities
+        // a prior job already completed, and stages into the shared
+        // (location_id, entity, node_id) namespace via the unique dedup index.
+        await supabaseService
+          .from('import_location_fetch')
+          .upsert({ location_id: locSlug }, { onConflict: 'location_id', ignoreDuplicates: true })
+        const { data: fetchRow } = await supabaseService
+          .from('import_location_fetch')
           .select('fetch_cursors, fetch_complete')
-          .eq('id', jobId)
+          .eq('location_id', locSlug)
           .single()
-        const cursors: Record<string, string | null> = jobRow?.fetch_cursors || {}
-        const complete: Record<string, boolean> = jobRow?.fetch_complete || {}
+        const cursors: Record<string, string | null> = fetchRow?.fetch_cursors || {}
+        const complete: Record<string, boolean> = fetchRow?.fetch_complete || {}
+
+        const persistCursors = async () =>
+          supabaseService
+            .from('import_location_fetch')
+            .update({ fetch_cursors: cursors, updated_at: new Date().toISOString() })
+            .eq('location_id', locSlug)
+        const persistComplete = async () =>
+          supabaseService
+            .from('import_location_fetch')
+            .update({ fetch_complete: complete, updated_at: new Date().toISOString() })
+            .eq('location_id', locSlug)
 
         const fetchEntityResumable = async (entity: string, query: string) => {
+          // Location-keyed skip: if a prior job already finished this entity
+          // for this location, don't re-fetch — reuse the staged rows.
           if (complete[entity]) return
           let cursor: string | null = cursors[entity] || null
           for (;;) {
@@ -313,24 +363,25 @@ export async function POST(req: NextRequest) {
             const page = res.data?.[entity]
             if (!page) break
             if (page.nodes.length) {
-              // Upsert with dedup: a re-fetched page (crash-in-window recovery
-              // or overlapping segment) is a no-op instead of a double-insert.
-              // onConflict targets the generated node_id column (idx_import_staging_dedup).
+              // Upsert with dedup: crash-in-window recovery, a resuming job,
+              // or a rival segment that briefly overlapped can safely re-stage
+              // the same page — onConflict on (location_id, entity, node_id)
+              // makes duplicates no-ops.
               await supabaseService
                 .from('import_staging')
                 .upsert(
-                  page.nodes.map((n: any) => ({ job_id: jobId, entity, node: n })),
-                  { onConflict: 'job_id,entity,node_id', ignoreDuplicates: true },
+                  page.nodes.map((n: any) => ({ job_id: jobId, location_id: locSlug, entity, node: n })),
+                  { onConflict: 'location_id,entity,node_id', ignoreDuplicates: true },
                 )
             }
             cursor = page.pageInfo.endCursor
             cursors[entity] = cursor
-            await supabaseService.from('import_jobs').update({ fetch_cursors: cursors }).eq('id', jobId)
+            await persistCursors()
             if (!page.pageInfo.hasNextPage) { complete[entity] = true; break }
             if (timeLow()) break   // checkpoint: resume this entity next segment
             if (devMode && entity === 'clients') { complete[entity] = true; break }  // dev-mode first-page cap
           }
-          await supabaseService.from('import_jobs').update({ fetch_complete: complete }).eq('id', jobId)
+          await persistComplete()
         }
 
         await updateProgress(jobId, { phase: 'fetching clients' })
@@ -352,6 +403,9 @@ export async function POST(req: NextRequest) {
         }
 
         // ─── load staged nodes back into memory for the write loop ────
+        // Query by LOCATION, not job — the unique index on
+        // (location_id, entity, node_id) guarantees no duplicates across
+        // however many prior jobs contributed to the staging pool.
         const loadStaged = async (entity: string): Promise<any[]> => {
           const out: any[] = []
           let from = 0
@@ -359,7 +413,7 @@ export async function POST(req: NextRequest) {
             const { data } = await supabaseService
               .from('import_staging')
               .select('node')
-              .eq('job_id', jobId)
+              .eq('location_id', locSlug)
               .eq('entity', entity)
               .range(from, from + 999)
             if (!data?.length) break
@@ -567,11 +621,19 @@ export async function POST(req: NextRequest) {
             : {}),
         })
 
-        // Staging is only useful while the job is running — drop it once we finish.
+        // Staging + per-location fetch state are only useful while an import
+        // is running — drop everything for this LOCATION once we finish so
+        // the next full import starts fresh (Jobber webhooks handle deltas
+        // between imports; this table is a one-shot bulk staging area).
         try {
-          await supabaseService.from('import_staging').delete().eq('job_id', jobId)
+          await supabaseService.from('import_staging').delete().eq('location_id', locSlug)
         } catch (err) {
           console.error('[import_staging cleanup failed]', err)
+        }
+        try {
+          await supabaseService.from('import_location_fetch').delete().eq('location_id', locSlug)
+        } catch (err) {
+          console.error('[import_location_fetch cleanup failed]', err)
         }
         await releaseMutex()
 
