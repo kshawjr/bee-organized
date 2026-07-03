@@ -124,8 +124,18 @@ async function doRefresh(location: any): Promise<string> {
     cache: 'no-store',
   })
 
-  const tokens = await res.json()
-  if (!tokens.access_token) throw new Error('Token refresh failed: ' + JSON.stringify(tokens))
+  // Defensive parse — Jobber returns plain-text bodies for OAuth errors
+  // (e.g. expired refresh token → "The provided authorization grant is
+  // invalid..."). Doing `res.json()` blindly would throw an uncaught
+  // SyntaxError and crash whatever's calling the import. Read the raw text
+  // first, try to JSON-parse, and always surface a clear catchable error.
+  const raw = await res.text()
+  let tokens: any = null
+  try { tokens = JSON.parse(raw) } catch { /* non-JSON error body */ }
+  if (!res.ok || !tokens?.access_token) {
+    const detail = tokens ? JSON.stringify(tokens) : raw.slice(0, 300)
+    throw new Error(`Jobber token refresh failed (${res.status}) for ${location.location_id}: ${detail}`)
+  }
 
   const expiryMs = Date.now() + 55 * 60 * 1000
 

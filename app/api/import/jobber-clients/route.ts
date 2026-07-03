@@ -345,7 +345,6 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        const jobberToken = await getValidJobberToken(location)
         const devMode = mode === 'dev'
 
         // Surfaced to the client when Jobber's rate limit requires a pause.
@@ -371,12 +370,45 @@ export async function POST(req: NextRequest) {
           .single()
         const cursors: Record<string, string | null> = fetchRow?.fetch_cursors || {}
         const complete: Record<string, boolean> = fetchRow?.fetch_complete || {}
+        const allFetchedUpfront = ['clients', 'requests', 'quotes', 'jobs'].every(e => complete[e])
 
-        const persistCursors = async () =>
-          supabaseService
+        // Only refresh the Jobber token if we actually have fetching to do.
+        // Write-only resume segments need zero Jobber calls (data is already
+        // in staging), so we skip the token-refresh path entirely for them.
+        // An expired refresh token — the KC-style crash — now only blocks
+        // fetch-phase segments; the write phase can still finish on staged
+        // data. Wrapped in try/catch so a token error surfaces as a clean
+        // "failed" job with a readable error_message, not an uncaught throw.
+        let jobberToken: string | null = null
+        if (!allFetchedUpfront) {
+          try {
+            jobberToken = await getValidJobberToken(location)
+          } catch (err: any) {
+            await updateProgress(jobId, {
+              status: 'failed',
+              error_message: `Token: ${String(err?.message || err)}`,
+              completed_at: new Date().toISOString(),
+            })
+            await releaseMutex()
+            emit({ error: String(err?.message || err), job_id: jobId })
+            return
+          }
+        }
+
+        const persistCursors = async () => {
+          const nowIso = new Date().toISOString()
+          // Refresh the location_claim_at mutex alongside the cursor write so
+          // the cron sweeper doesn't classify a Jobber-throttled fetch segment
+          // as stale. Every page write bumps both.
+          await supabaseService
             .from('import_location_fetch')
-            .update({ fetch_cursors: cursors, updated_at: new Date().toISOString() })
+            .update({ fetch_cursors: cursors, updated_at: nowIso })
             .eq('location_id', locSlug)
+          await supabaseService
+            .from('import_jobs')
+            .update({ location_claim_at: nowIso })
+            .eq('id', jobId)
+        }
         const persistComplete = async () =>
           supabaseService
             .from('import_location_fetch')
@@ -387,6 +419,9 @@ export async function POST(req: NextRequest) {
           // Location-keyed skip: if a prior job already finished this entity
           // for this location, don't re-fetch — reuse the staged rows.
           if (complete[entity]) return
+          // Defence-in-depth: allFetchedUpfront gates the token fetch; if
+          // control reaches here without a token, something's wrong.
+          if (!jobberToken) throw new Error(`internal: jobberToken not initialized (entity=${entity})`)
           let cursor: string | null = cursors[entity] || null
           for (;;) {
             const vars = cursor ? { after: cursor } : {}
@@ -470,23 +505,47 @@ export async function POST(req: NextRequest) {
         )
         console.log(`[jobber-import] fetched ${clients.length} clients; newest: ${clients[0]?.createdAt ?? 'n/a'}, oldest: ${clients[clients.length - 1]?.createdAt ?? 'n/a'}`)
 
-        // Set total immediately so the UI shows "0 of N" within seconds of the fetch completing.
+        // ─── RESUME SUPPORT ──────────────────────────────────────────
+        // Load jobber_client_ids already written for this location BEFORE
+        // building lookup maps. Filtering to `unwritten` up front means:
+        //   * the map-building loop only indexes children of unwritten clients
+        //     (cheaper on resumes: 216 unwritten out of 1616 → 1400 skipped rows
+        //     don't get iterated during map construction)
+        //   * the write loop iterates only unwritten (no more wasted budget
+        //     scanning-and-skipping the already-done prefix)
+        const { data: existingRows } = await supabaseService
+          .from('leads')
+          .select('jobber_client_id')
+          .eq('location_uuid', locUuid)
+          .not('jobber_client_id', 'is', null)
+        const alreadyWritten = new Set((existingRows || []).map(r => r.jobber_client_id))
+        const unwritten = clients.filter((c: any) => !alreadyWritten.has(extractJobberId(c.id)))
+        console.log(`[jobber-import] ${alreadyWritten.size} already written, ${unwritten.length} unwritten this segment`)
+
+        // Set total_records to the FULL staged count so the "X of Y" UI still
+        // shows overall progress. processed starts at alreadyWritten.size below.
         await updateProgress(jobId, {
           phase: 'writing',
           total_records: clients.length,
         })
 
-        // ─── build lookup maps ──
-        const clientIds = new Set(clients.map((c: any) => c.id))
+        // ─── build lookup maps (unwritten-only) ────────────────────
+        // Keying by unwritten client ids means requests/quotes/jobs for
+        // already-imported clients aren't indexed — saves memory and speeds
+        // up the map-building sweep on resume segments.
+        const unwrittenClientIds = new Set(unwritten.map((c: any) => c.id))
         const reqByClient: Record<string, any[]> = {}
         const quotesByReq: Record<string, any[]> = {}
         const jobsByReq:   Record<string, any[]> = {}
 
         for (const r of requests) {
           const cid = r.client?.id
-          if (cid && clientIds.has(cid)) (reqByClient[cid] ||= []).push(r)
+          if (cid && unwrittenClientIds.has(cid)) (reqByClient[cid] ||= []).push(r)
         }
-        const reqIds = new Set(requests.map((r: any) => r.id))
+        const reqIds = new Set<string>()
+        for (const arr of Object.values(reqByClient)) {
+          for (const r of arr) reqIds.add(r.id)
+        }
         for (const q of quotes) {
           const rid = q.request?.id
           if (rid && reqIds.has(rid)) (quotesByReq[rid] ||= []).push(q)
@@ -497,20 +556,17 @@ export async function POST(req: NextRequest) {
         }
 
         // ─── set _has* flags so determineStage works on flat queries ──
-        for (const r of requests) {
-          const reqJobs = jobsByReq[r.id] || []
-          r._hasQuote      = (quotesByReq[r.id] || []).length > 0
-          r._hasJob        = reqJobs.length > 0
-          r._hasInvoice    = reqJobs.some((j: any) => (j.invoices?.nodes || []).length > 0)
-          r._hasAssessment = !!r.assessment
+        // Decorate only requests we'll actually process (belonging to unwritten
+        // clients). Same output as decorating everything, but skips dead work.
+        for (const arr of Object.values(reqByClient)) {
+          for (const r of arr) {
+            const reqJobs = jobsByReq[r.id] || []
+            r._hasQuote      = (quotesByReq[r.id] || []).length > 0
+            r._hasJob        = reqJobs.length > 0
+            r._hasInvoice    = reqJobs.some((j: any) => (j.invoices?.nodes || []).length > 0)
+            r._hasAssessment = !!r.assessment
+          }
         }
-
-        // ─── upsert phase ──
-        // Write total before the loop so the UI shows "0 of N" immediately.
-        await updateProgress(jobId, {
-          phase: 'writing',
-          total_records: clients.length,
-        })
 
         const stats = {
           leads_created: 0, leads_updated: 0,
@@ -523,29 +579,20 @@ export async function POST(req: NextRequest) {
           errors: [] as string[],
         }
 
-        // ─── RESUME SUPPORT ──────────────────────────────────────────
-        // Load jobber_client_ids already written for this location so a
-        // re-run skips them (idempotent; upsert already dedupes, this just
-        // saves the write cost). Lets a timed-out import continue cheaply.
-        const { data: existingRows } = await supabaseService
-          .from('leads')
-          .select('jobber_client_id')
-          .eq('location_uuid', locUuid)
-          .not('jobber_client_id', 'is', null)
-        const alreadyWritten = new Set((existingRows || []).map(r => r.jobber_client_id))
-
-        // Cap writes per invocation so we never hit the 300s wall mid-record.
+        // Cap writes per invocation so we never hit the maxDuration wall
+        // mid-record. On a fresh 1616-client run this batches; on a resume
+        // with 216 unwritten it finishes in a single segment.
         const WRITE_BATCH_CAP = 400
         let wroteThisRun = 0
         let hitCap = false
 
-        let processed = alreadyWritten.size  // count already-done toward progress
-        for (const client of clients) {
-          // Skip clients already written in a previous (timed-out) run.
-          if (alreadyWritten.has(extractJobberId(client.id))) continue
-
-          // Stop this invocation once we've written a full batch — the client
-          // will re-POST to continue. Prevents mid-record Vercel kill.
+        // processed counts against clients.length (not unwritten.length) so
+        // the UI's X-of-Y bee animation reflects overall progress including
+        // prior segments' work.
+        let processed = alreadyWritten.size
+        for (const client of unwritten) {
+          // Stop this invocation once we've written a full batch — the sweeper
+          // + selfContinue will re-poke to continue. Prevents mid-record kill.
           if (wroteThisRun >= WRITE_BATCH_CAP) { hitCap = true; break }
 
           try {
@@ -583,7 +630,18 @@ export async function POST(req: NextRequest) {
           processed++
           wroteThisRun++
           if (processed % 50 === 0 || processed === clients.length) {
-            await updateProgress(jobId, { processed_records: processed })
+            // Refresh location_claim_at alongside the progress write so the
+            // cron sweeper doesn't classify this segment as stale mid-loop
+            // (a long segment that takes >2 min would otherwise get a rival
+            // POST from the sweeper — the atomic claim rejects it, but this
+            // avoids the wasted invocation entirely).
+            await supabaseService
+              .from('import_jobs')
+              .update({
+                processed_records: processed,
+                location_claim_at: new Date().toISOString(),
+              })
+              .eq('id', jobId)
           }
         }
 
@@ -610,6 +668,13 @@ export async function POST(req: NextRequest) {
         if (lastImportAt) {
           await updateProgress(jobId, { phase: 'incremental' })
           try {
+            // Lazy-fetch the token here: if the segment was write-only
+            // (allFetchedUpfront=true), we skipped the initial token refresh.
+            // The incremental pass needs Jobber, so grab it now — throw
+            // falls into the existing non-fatal catch below.
+            if (!jobberToken) {
+              jobberToken = await getValidJobberToken(location)
+            }
             const recentClients = await fetchAll(
               jobberToken,
               INCREMENTAL_CLIENTS_QUERY,
