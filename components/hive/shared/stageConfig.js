@@ -4,8 +4,12 @@
 // (docs/hive-phase1-engagements.md §2/§8.5/§8.6).
 //
 // Division of authority:
-//   lib/engagements.ts   — server truth: ENGAGEMENT_STAGE_RANK, stage
-//                          derivation, founding rules. Never duplicated.
+//   shared/stageRank.js  — the rank + terminality source. PURE, importable
+//                          from both bundles. NEVER import lib/engagements
+//                          from client code — it drags the Supabase service
+//                          client into the browser bundle (2026-07-03
+//                          incident: "supabaseKey is required" at load).
+//   lib/engagements.ts   — server truth: stage derivation, founding rules.
 //   this file            — display layer: labels, ordering, chip colors.
 //
 // Phase 0 had 5 drifting stage-constant copies + a stale CHECK; the rule
@@ -13,10 +17,11 @@
 // and do not add stage constants anywhere else in components/.
 // ─────────────────────────────────────────────────────────────
 
-import { ENGAGEMENT_STAGE_RANK } from '@/lib/engagements'
+import { ENGAGEMENT_STAGE_RANK, isTerminal } from './stageRank'
 
-// Re-export, not redeclare — lib/engagements.ts is the authority.
+// Re-export, not redeclare — stageRank.js is the authority.
 export const STAGE_RANK = ENGAGEMENT_STAGE_RANK
+export { isTerminal }
 
 // Ordered board/display config. Terminal stages render off the active
 // board (filtered by isTerminal); they exist here for chips and lists.
@@ -28,10 +33,6 @@ export const ENGAGEMENT_STAGES = [
   { key: 'Closed Won',       label: 'Closed Won',       rank: STAGE_RANK['Closed Won'],       terminal: true },
   { key: 'Closed Lost',      label: 'Closed Lost',      rank: STAGE_RANK['Closed Lost'],      terminal: true },
 ]
-
-export function isTerminal(stage) {
-  return stage === 'Closed Won' || stage === 'Closed Lost'
-}
 
 // Client status machine (§2) — Bee Hub's own, fully decoupled from Jobber.
 export const CLIENT_STATUSES = [

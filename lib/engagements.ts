@@ -20,6 +20,7 @@
 
 import { supabaseService } from './supabase-service'
 import { writeSyncLog } from './sync-log'
+import { ENGAGEMENT_STAGE_RANK as RAW_ENGAGEMENT_STAGE_RANK } from '@/components/hive/shared/stageRank'
 
 export type EngagementStage =
   | 'Request'
@@ -33,14 +34,13 @@ export type FoundedBy = 'request' | 'quote' | 'job' | 'manual'
 
 export type EngagementChildTable = 'service_requests' | 'quotes' | 'jobs' | 'invoices'
 
-export const ENGAGEMENT_STAGE_RANK: Record<EngagementStage, number> = {
-  'Request':          0,
-  'Estimate':         1,
-  'Job in Progress':  2,
-  'Final Processing': 3,
-  'Closed Won':       4,
-  'Closed Lost':      4,
-}
+// Rank + terminality live in the PURE module components/hive/shared/
+// stageRank.js so client code (stageConfig.js) never has to import this
+// file — importing lib/engagements.ts client-side pulls the Supabase
+// service client into the browser bundle and crashes at module load
+// (2026-07-03 incident). Re-exported here for server-side consumers.
+export const ENGAGEMENT_STAGE_RANK =
+  RAW_ENGAGEMENT_STAGE_RANK as Record<EngagementStage, number>
 
 // Opening stage per founded_by (§3 rule 6).
 export const OPENING_STAGE: Record<FoundedBy, EngagementStage> = {
