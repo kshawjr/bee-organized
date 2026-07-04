@@ -99,6 +99,43 @@ export function formatAge(t, nowMs = Date.now()) {
 export const relAge = formatAge
 export const formatDayCount = (n) => plural(n, 'Day')
 
+// Adaptive "date · relative" for the Inbox row's age slot — shows both,
+// but ADAPTS so it never reads redundant or useless:
+//   < 24h            → relative only ('45 min ago' / '3 hours ago' —
+//                      the date is today, printing it adds nothing)
+//   1–30d, this year → 'Jun 5 · 29d ago' (compact abbreviated relative)
+//   > 30d, this year → 'Apr 21' (relative past ~a month is low-value)
+//   prior year       → 'Dec 12, 2025' (full date, no relative)
+// Split into parts so the row can style the anchor (--text-secondary)
+// and the '· hint' (--text-muted) separately; formatInboxAge joins them
+// for plain-string consumers and tests. All relative numbers rounded.
+const AGE_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+export function formatInboxAgeParts(created, nowMs = Date.now()) {
+  const t = typeof created === 'number' ? created : (created ? new Date(created).getTime() : 0)
+  if (!t) return { anchor: '—', hint: null }
+  const ms = Math.max(0, nowMs - t)
+  if (ms < 86400000) {
+    const mins = Math.round(ms / 60000)
+    if (mins < 1) return { anchor: 'just now', hint: null }
+    if (mins < 60) return { anchor: `${mins} min ago`, hint: null }
+    // clamp: 23.6h would otherwise round up to '24 hours ago'
+    const hours = Math.min(23, Math.round(ms / 3600000))
+    return { anchor: `${hours} hour${hours === 1 ? '' : 's'} ago`, hint: null }
+  }
+  const d = new Date(t)
+  const dateShort = `${AGE_MONTHS[d.getMonth()]} ${d.getDate()}`
+  if (d.getFullYear() !== new Date(nowMs).getFullYear()) {
+    return { anchor: `${dateShort}, ${d.getFullYear()}`, hint: null }
+  }
+  const days = Math.round(ms / 86400000)
+  if (days <= 30) return { anchor: dateShort, hint: `${Math.max(1, days)}d ago` }
+  return { anchor: dateShort, hint: null }
+}
+export function formatInboxAge(created, nowMs = Date.now()) {
+  const { anchor, hint } = formatInboxAgeParts(created, nowMs)
+  return hint ? `${anchor} · ${hint}` : anchor
+}
+
 // ── engagement filters (shared by board + list, owned by HiveShell) ──
 // Pure predicate so every consumer (both lenses + the shell's counter)
 // agrees by construction.

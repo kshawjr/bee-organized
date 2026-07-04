@@ -163,7 +163,7 @@ describe('secondary-line phone', () => {
     expect(m.host.querySelector('a[href^="tel:"]')).toBeFalsy()
     expect(m.host.textContent).toContain('Sarah Mitchell')
     expect(m.host.textContent).toContain('New') // status chip
-    expect(m.host.textContent).toMatch(/3 Days/) // age far right
+    expect(m.host.textContent).toMatch(/· 3d ago/) // adaptive age, still present
     await m.unmount()
   })
 })

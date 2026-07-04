@@ -27,19 +27,22 @@
 // state. Rides in the beta chunk.
 //
 // Row anatomy (compact layout B + ghost icon actions, direction C):
-// name, then ONE secondary line — status chip · tel: link · age far
-// right. The tel: link DIALS (digits-only href off phone_normalized,
-// formatted phone as the label); the ghost phone ICON logs a touchpoint
-// — two different actions, kept distinct by tooltip + link styling.
+// name, then ONE secondary line — status chip · tel: link. The tel:
+// link DIALS (digits-only href off phone_normalized, formatted phone as
+// the label); the ghost phone ICON logs a touchpoint — two different
+// actions, kept distinct by tooltip + link styling. The age slot is the
+// adaptive 'date · relative' (formatInboxAgeParts) — desktop puts it on
+// the icons' center line in the right cluster; mobile keeps it far
+// right on the secondary line.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { deriveClientStatus } from './shared/clientStatus'
 import { CHIP_STYLES, ACCENT_BLUE } from './shared/stageConfig'
-import { relAge } from './shared/engagementStatus'
+import { formatInboxAgeParts } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
-import { GREEN_FILL, HAIRLINE_BORDER, TEXT_MUTED, TEXT_PRIMARY } from '@/components/ui/tokens'
+import { GREEN_FILL, HAIRLINE_BORDER, TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY } from '@/components/ui/tokens'
 import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock, IconDots } from '@/components/ui/icons'
 import InitialsAvatar from './shared/InitialsAvatar'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty } from './shared/FilterPopover'
@@ -90,6 +93,24 @@ function GhostIconButton({ label, icon: Icon, disabled, onClick }) {
       disabled={disabled} style={ghostBtn} onClick={onClick}>
       <Icon size={17} />
     </button>
+  )
+}
+
+// The row's age slot — adaptive 'date · relative' (formatInboxAgeParts:
+// relative-only under 24h, 'Jun 5 · 29d ago' inside a month, date-only
+// past it, year added for prior years). Anchor in --text-secondary,
+// the '· hint' in --text-muted; ONE nowrap line that truncates
+// tail-first, so the hint drops before the date ever does.
+function AgeInline({ created, nowMs, style = {} }) {
+  const { anchor, hint } = formatInboxAgeParts(created, nowMs)
+  return (
+    <span className="bee-inbox-age" style={{
+      fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      color: `var(--text-secondary, ${TEXT_SECONDARY})`, ...style,
+    }}>
+      {anchor}
+      {hint && <span style={{ color: `var(--text-muted, ${TEXT_MUTED})` }}> · {hint}</span>}
+    </span>
   )
 }
 
@@ -391,9 +412,10 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
               {p.name}
             </p>
             {/* Compact secondary line (layout B) — ONE line: chip, then
-                the tappable number, age pinned far right. The phone
-                truncates before anything wraps; a phoneless lead just
-                shows chip + age. */}
+                the tappable number. The phone truncates before anything
+                wraps. Desktop age lives in the right-side cluster (one
+                center line with the icons); mobile keeps it far right
+                here, where the hint tail truncates before the date. */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px', minWidth: 0 }}>
               <StatusChip label={pill} styleKey={pill === 'New' ? 'New' : 'Attempting'} />
               {phoneLabel && phoneDigits && (
@@ -411,14 +433,20 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{phoneLabel}</span>
                 </a>
               )}
-              <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`, whiteSpace: 'nowrap' }}>
-                {relAge(new Date(p.created || 0).getTime() || 0, nowMs)}
-              </span>
+              {isMobile && <AgeInline created={p.created} nowMs={nowMs} style={{ marginLeft: 'auto', minWidth: 0 }} />}
             </div>
           </div>
           {!isMobile && (
-            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '2px' }} onClick={ev => ev.stopPropagation()}>
-              {actions}
+            /* Alignment fix (direction C): date/relative + icons share
+               ONE align-items:center row, whatever icons the row has —
+               3 on New, ··· alone on linked Attempting. Only the icon
+               sub-cluster swallows clicks; the age text still bubbles
+               to the row like any other text. */
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <AgeInline created={p.created} nowMs={nowMs} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onClick={ev => ev.stopPropagation()}>
+                {actions}
+              </div>
             </div>
           )}
         </div>

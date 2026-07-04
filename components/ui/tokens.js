@@ -11,6 +11,7 @@
 // all consume these two objects so the surfaces stay locked together.
 
 export const TEXT_PRIMARY = '#1a1a18' // near-black — active/primary text
+export const TEXT_SECONDARY = '#6b6b66' // between primary and muted — anchor text in meta lines (same hex as SECTION_LABEL)
 export const TEXT_SUCCESS = '#1D9E75' // won/done green (stage-bar BAR_DONE hue)
 export const TEXT_DANGER = '#791F1F'  // lost/owing red (CHIP_STYLES red text)
 export const TEXT_MUTED = '#8a8a84'   // secondary/detail text — displayTitle lines, ages
@@ -18,6 +19,7 @@ export const TEXT_QUIET = '#b5b3ac'   // quiet meta — '· soon' placeholders, 
 
 export const TEXT_TOKENS = {
   '--text-primary': TEXT_PRIMARY,
+  '--text-secondary': TEXT_SECONDARY,
   '--text-success': TEXT_SUCCESS,
   '--text-danger': TEXT_DANGER,
   '--text-muted': TEXT_MUTED,
