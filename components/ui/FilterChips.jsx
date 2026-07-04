@@ -11,20 +11,24 @@
 //   toggle: { expanded, onToggle, ariaLabel } — a chevron button AFTER
 //     the segment (separate click target: the segment text selects the
 //     filter, the chevron only reveals/hides sub-segments — the List's
-//     Closed ▾ Won/Lost group). Chevron points down collapsed, up
-//     expanded (rotated IconChevronRight, the SortChevrons idiom).
-// Scrolls horizontally on narrow viewports (§7 mobile rule).
+//     Open ▾ stages and Closed ▾ Won/Lost groups). Chevron points down
+//     collapsed, up expanded (rotated IconChevronRight, the SortChevrons
+//     idiom).
+// Scrolls horizontally on narrow viewports (§7 mobile rule) — unless
+// `wrap` is set: rows with BOTH collapse groups expandable (the List)
+// wrap instead, so no expanded segment hides off-screen.
 'use client'
 
 import React from 'react'
 import { SECTION_LABEL, SECTION_COUNT, TEXT_PRIMARY } from './tokens'
 import { IconChevronRight } from './icons'
 
-export default function FilterChips({ items = [], active, onChange }) {
+export default function FilterChips({ items = [], active, onChange, wrap = false }) {
   return (
     <div style={{
-      display: 'flex', flexWrap: 'nowrap', alignItems: 'stretch', gap: '14px', maxWidth: '100%',
-      overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none',
+      display: 'flex', flexWrap: wrap ? 'wrap' : 'nowrap', alignItems: 'stretch',
+      gap: wrap ? '2px 14px' : '14px', maxWidth: '100%',
+      ...(wrap ? {} : { overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }),
       paddingBottom: '2px',
     }}>
       <style>{`

@@ -81,12 +81,16 @@ export default function EngagementList({ engagements = [], closedCount = 0, clos
   // One cache slot per terminal view ({ rows, total }), per active scope.
   const [closedData, setClosedData] = useState({})
   const [loadingClosed, setLoadingClosed] = useState(false)
-  // Won/Lost live behind the Closed chevron. Plain state (NOT persisted)
-  // so a remount/tab-switch resets to collapsed; the derived OR below
-  // force-holds it open while a closed sub-filter is active — the
-  // applied filter can never be hidden, and that also covers the
-  // board→List 'view all' deep link on a fresh mount.
+  // Won/Lost live behind the Closed chevron; the four pipeline stages
+  // live behind Open's — one mechanism, two independent parents (both
+  // may be expanded at once; no accordion). Plain state (NOT persisted)
+  // so a remount/tab-switch resets to collapsed; the derived ORs below
+  // force-hold a group open while one of its sub-filters is active —
+  // the applied filter can never be hidden. For Closed that also covers
+  // the board→List 'view all' deep link on a fresh mount; for Open, a
+  // persisted single-stage filter rehydrating from localStorage.
   const [closedExpandedRaw, setClosedExpanded] = useState(false)
+  const [openExpandedRaw, setOpenExpanded] = useState(false)
   const nowMs = Date.now()
 
   const isMobile = useIsMobile()
@@ -132,17 +136,29 @@ export default function EngagementList({ engagements = [], closedCount = 0, clos
   }
 
   // Sub-filter active → the group stays expanded and the chevron can't
-  // collapse it (you can't hide the currently-applied filter).
-  const subFilterActive = view === 'won' || view === 'lost'
-  const closedExpanded = closedExpandedRaw || subFilterActive
+  // collapse it (you can't hide the currently-applied filter). Open's
+  // sub-filter is a pipeline stage as the ACTIVE chip: exactly one
+  // stage selected while an open view shows (several → the Filters
+  // count carries the state and no chip is active, so no force-hold).
+  const closedSubFilterActive = view === 'won' || view === 'lost'
+  const closedExpanded = closedExpandedRaw || closedSubFilterActive
   const toggleClosedExpanded = () => {
-    if (subFilterActive) return
+    if (closedSubFilterActive) return
     setClosedExpanded(v => !v)
+  }
+  const openSubFilterActive = !CLOSED_VIEWS.includes(view) && filters.stages.length === 1
+  const openExpanded = openExpandedRaw || openSubFilterActive
+  const toggleOpenExpanded = () => {
+    if (openSubFilterActive) return
+    setOpenExpanded(v => !v)
   }
 
   const chips = [
-    { key: 'open', label: 'Open', count: counts.open },
-    ...OPEN_STAGES.map(s => ({ key: s.key, label: CHIP_LABELS[s.key], count: counts[s.key] })),
+    {
+      key: 'open', label: 'Open', count: counts.open,
+      toggle: { expanded: openExpanded, onToggle: toggleOpenExpanded, ariaLabel: 'Toggle pipeline stage breakdown' },
+    },
+    ...(openExpanded ? OPEN_STAGES.map(s => ({ key: s.key, label: CHIP_LABELS[s.key], count: counts[s.key] })) : []),
     { key: 'closed-divider', divider: true },
     {
       key: 'closed', label: 'Closed', count: scopedTotals.closed ?? '…',
@@ -171,6 +187,10 @@ export default function EngagementList({ engagements = [], closedCount = 0, clos
       return
     }
     setView('open')
+    // Entering a stage sub-filter pins the group open for this session
+    // (mirror of the Closed pin above) so stepping back to Open doesn't
+    // yank the stage chips mid-interaction.
+    if (key !== 'open') setOpenExpanded(true)
     setWorkFilters(f => ({ ...f, stages: key === 'open' ? [] : [key] }))
   }
 
@@ -223,7 +243,10 @@ export default function EngagementList({ engagements = [], closedCount = 0, clos
       <SortHeaderStyle />
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <FilterChips items={chips} active={activeChip} onChange={pickChip} />
+          {/* wrap: with BOTH groups expandable this row can hit nine
+              segments — wrapping keeps every revealed chip visible on
+              narrow viewports instead of scrolling off-screen. */}
+          <FilterChips items={chips} active={activeChip} onChange={pickChip} wrap />
         </div>
         {!showingClosed && (
           <EngagementFilters engagements={engagements} filters={filters} setFilters={setWorkFilters} onClear={clearFilters} nowMs={nowMs} />

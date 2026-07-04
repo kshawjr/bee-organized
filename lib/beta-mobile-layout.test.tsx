@@ -90,19 +90,26 @@ describe('beta mobile layout', () => {
     expect(html).toMatch(/font-size:12px[^"]*"[^>]*>Open engagements/)
   })
 
-  it('list + directory chip rows are single-line nowrap scrollers with the filter pill beside them', () => {
+  it('directory chip row is a single-line nowrap scroller with the filter pill beside it', () => {
     setWidth(390)
-    for (const html of [
-      renderToString(<EngagementList engagements={ENGAGEMENTS as any} closedCount={2} />),
-      renderToString(<ClientDirectory people={PEOPLE as any} engagements={ENGAGEMENTS as any} />),
-    ]) {
-      const strip = html.match(/<div style="([^"]*overflow-x:auto[^"]*)">/)
-      expect(strip, 'chip scroll strip missing').toBeTruthy()
-      expect(strip![1]).toContain('flex-wrap:nowrap')
-      expect(html).toMatch(/Filter(s| &(amp;)? sort)/)
-    }
-    // Mobile list = two-line rows, never the desktop sort-header grid.
+    const html = renderToString(<ClientDirectory people={PEOPLE as any} engagements={ENGAGEMENTS as any} />)
+    const strip = html.match(/<div style="([^"]*overflow-x:auto[^"]*)">/)
+    expect(strip, 'chip scroll strip missing').toBeTruthy()
+    expect(strip![1]).toContain('flex-wrap:nowrap')
+    expect(html).toMatch(/Filter(s| &(amp;)? sort)/)
+  })
+
+  it('list chip row WRAPS (both collapse groups can expand at once) — never an off-screen scroller', () => {
+    setWidth(390)
     const list = renderToString(<EngagementList engagements={ENGAGEMENTS as any} closedCount={2} />)
+    // The wrap-mode strip carries the two-axis gap; assert it wraps and
+    // dropped the horizontal scroller.
+    const strip = list.match(/<div style="([^"]*gap:2px 14px[^"]*)">/)
+    expect(strip, 'wrapping chip strip missing').toBeTruthy()
+    expect(strip![1]).toContain('flex-wrap:wrap')
+    expect(strip![1]).not.toContain('overflow-x:auto')
+    expect(list).toMatch(/Filter(s| &(amp;)? sort)/)
+    // Mobile list = two-line rows, never the desktop sort-header grid.
     expect(list).not.toContain('class="bee-sort-header"')
   })
 

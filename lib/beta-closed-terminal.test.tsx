@@ -21,6 +21,7 @@ import EngagementBoard from '@/components/hive/EngagementBoard'
 import EngagementList from '@/components/hive/EngagementList'
 import Card from '@/components/ui/Card'
 import { CLOSED_STAGE_FILTERS, CLOSED_WON, CLOSED_LOST, ENGAGEMENT_STAGES } from '@/components/hive/shared/stageConfig'
+import { ENGAGEMENT_FILTER_DEFAULTS } from '@/components/hive/shared/engagementStatus'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -122,7 +123,7 @@ describe('list filter segments — board typography, no pills, underline active'
       <EngagementList engagements={OPEN_ENGAGEMENTS as any} closedCount={1375} closedWonCount={680} />
     )
     const segs = [...html.matchAll(/<button class="bee-flt-seg"[^>]*style="([^"]*)"/g)].map(m => m[1])
-    expect(segs.length).toBe(6) // Open + 4 stages + Closed (Won/Lost collapsed behind the chevron)
+    expect(segs.length).toBe(2) // Open + Closed (stages and Won/Lost each collapsed behind their chevrons)
     for (const s of segs) {
       expect(s).not.toContain('border-radius:20px')
       expect(s).not.toContain('background:#fff')
@@ -284,6 +285,116 @@ describe('list closed group — Won/Lost behind the chevron', () => {
     await act(async () => {})
     expect(segTexts(seeded).some(t => t.startsWith('Won'))).toBe(true)
     expect((activeSeg(seeded)?.textContent || '')).toMatch(/^Won/)
+  })
+})
+
+describe('list open group — pipeline stages behind the chevron, symmetric with Closed', () => {
+  const OPEN_CHEVRON = '[aria-label="Toggle pipeline stage breakdown"]'
+  const CLOSED_CHEVRON = '[aria-label="Toggle won/lost breakdown"]'
+  const STAGE_LABELS = ['Request', 'Estimate', 'Job', 'Final']
+  const segTexts = (c: Element) => segButtons(c).map(b => b.textContent || '')
+  const stageSegsVisible = (c: Element) => STAGE_LABELS.filter(l => segTexts(c).some(t => t.startsWith(l)))
+  const activeSeg = (c: Element) => segButtons(c).find(b => b.getAttribute('aria-pressed') === 'true')
+
+  // The stage quick-filter is LIFTED state (HiveShell owns + persists
+  // it) — a stateful harness stands in for the shell so chip clicks
+  // round-trip through setWorkFilters like production.
+  function Harness({ initialStages = [] as string[] }) {
+    const [filters, setFilters] = React.useState({ ...ENGAGEMENT_FILTER_DEFAULTS, stages: initialStages })
+    return (
+      <EngagementList
+        engagements={OPEN_ENGAGEMENTS as any} closedCount={1375} closedWonCount={680}
+        workFilters={filters as any} setWorkFilters={setFilters as any}
+        clearWorkFilters={() => setFilters({ ...ENGAGEMENT_FILTER_DEFAULTS })}
+      />
+    )
+  }
+
+  it('collapsed by default: Open + down-chevron render, no stage segments', () => {
+    const container = mount(<Harness />)
+    expect(segTexts(container).some(t => t.startsWith('Open'))).toBe(true)
+    expect(stageSegsVisible(container)).toEqual([])
+    const chevron = container.querySelector(OPEN_CHEVRON)!
+    expect(chevron).toBeTruthy()
+    expect(chevron.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('chevron click reveals the four stages WITHOUT applying any filter — and collapses back', async () => {
+    const container = mount(<Harness />)
+    await fire(container.querySelector(OPEN_CHEVRON)!)
+    expect(stageSegsVisible(container)).toEqual(STAGE_LABELS)
+    expect(container.querySelector(OPEN_CHEVRON)!.getAttribute('aria-expanded')).toBe('true')
+    // Reveal only: no fetch, Open still active, both rows still listed.
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect((activeSeg(container)?.textContent || '')).toMatch(/^Open/)
+    expect(container.textContent).toContain('Rita Request')
+    expect(container.textContent).toContain('Ed Estimate')
+    await fire(container.querySelector(OPEN_CHEVRON)!)
+    expect(stageSegsVisible(container)).toEqual([])
+    expect(container.querySelector(OPEN_CHEVRON)!.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('stage chip filters client-side; clicking the Open TEXT returns to all-open (group stays pinned)', async () => {
+    const container = mount(<Harness />)
+    await fire(container.querySelector(OPEN_CHEVRON)!)
+    await fire(segButtons(container).find(b => (b.textContent || '').startsWith('Request'))!)
+    expect((activeSeg(container)?.textContent || '')).toMatch(/^Request/)
+    expect(container.textContent).toContain('Rita Request')
+    expect(container.textContent).not.toContain('Ed Estimate')
+    expect(fetchMock).not.toHaveBeenCalled() // open narrowing never hits the server
+    // Open text clears the stage filter; the pinned group doesn't yank
+    // the chips mid-interaction (mirror of the Closed pin).
+    await fire(segButtons(container).find(b => (b.textContent || '').startsWith('Open'))!)
+    expect((activeSeg(container)?.textContent || '')).toMatch(/^Open/)
+    expect(container.textContent).toContain('Ed Estimate')
+    expect(stageSegsVisible(container)).toEqual(STAGE_LABELS)
+  })
+
+  it('with a stage active the group is force-expanded and the chevron cannot collapse it', async () => {
+    const container = mount(<Harness initialStages={['Estimate']} />)
+    expect(stageSegsVisible(container)).toEqual(STAGE_LABELS)
+    expect((activeSeg(container)?.textContent || '')).toMatch(/^Estimate/)
+    expect(container.querySelector(OPEN_CHEVRON)!.getAttribute('aria-expanded')).toBe('true')
+    // Collapse attempt is a no-op while the sub-filter is applied.
+    await fire(container.querySelector(OPEN_CHEVRON)!)
+    expect(stageSegsVisible(container)).toEqual(STAGE_LABELS)
+    expect(container.querySelector(OPEN_CHEVRON)!.getAttribute('aria-expanded')).toBe('true')
+    expect((activeSeg(container)?.textContent || '')).toMatch(/^Estimate/)
+  })
+
+  it('remount resets to collapsed — except when a stage sub-filter is active on mount', async () => {
+    const first = mount(<Harness />)
+    await fire(first.querySelector(OPEN_CHEVRON)!)
+    expect(stageSegsVisible(first)).toEqual(STAGE_LABELS)
+    document.body.innerHTML = ''
+    const second = mount(<Harness />)
+    expect(stageSegsVisible(second)).toEqual([])
+    expect(second.querySelector(OPEN_CHEVRON)!.getAttribute('aria-expanded')).toBe('false')
+
+    // Persisted single-stage filter rehydrating on mount → held open.
+    document.body.innerHTML = ''
+    const seeded = mount(<Harness initialStages={['Request']} />)
+    expect(stageSegsVisible(seeded)).toEqual(STAGE_LABELS)
+    expect((activeSeg(seeded)?.textContent || '')).toMatch(/^Request/)
+  })
+
+  it('Open and Closed expand/collapse independently — both may be open, no accordion', async () => {
+    const container = mount(<Harness />)
+    // Expanding Open leaves Closed alone.
+    await fire(container.querySelector(OPEN_CHEVRON)!)
+    expect(container.querySelector(CLOSED_CHEVRON)!.getAttribute('aria-expanded')).toBe('false')
+    expect(segTexts(container).some(t => t.startsWith('Won'))).toBe(false)
+    // Both groups expanded at once.
+    await fire(container.querySelector(CLOSED_CHEVRON)!)
+    expect(stageSegsVisible(container)).toEqual(STAGE_LABELS)
+    expect(segTexts(container).some(t => t.startsWith('Won'))).toBe(true)
+    expect(container.querySelector(OPEN_CHEVRON)!.getAttribute('aria-expanded')).toBe('true')
+    expect(container.querySelector(CLOSED_CHEVRON)!.getAttribute('aria-expanded')).toBe('true')
+    // Collapsing Open leaves Closed expanded.
+    await fire(container.querySelector(OPEN_CHEVRON)!)
+    expect(stageSegsVisible(container)).toEqual([])
+    expect(segTexts(container).some(t => t.startsWith('Won'))).toBe(true)
+    expect(container.querySelector(CLOSED_CHEVRON)!.getAttribute('aria-expanded')).toBe('true')
   })
 })
 
