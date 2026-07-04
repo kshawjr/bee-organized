@@ -473,8 +473,12 @@ export default async function HubPage({
   let initialPeople: any[] = []
   let initialBinPeople: any[] = []
   // HIVE Phase 1 step 4: open engagements for the new board (dual-read —
-  // additive prop; every leads/stage read below is untouched).
+  // additive prop; every leads/stage read below is untouched). The closed
+  // count feeds the List lens's 'Closed · N' chip — count only, the
+  // ~1,400 terminal rows never ship in the page payload (they page in
+  // lazily via GET /api/engagements?closed=1).
   let initialEngagements: any[] = []
+  let initialEngagementsClosedCount = 0
   {
     // Paginated load — a single .limit(1000) silently truncated locations
     // with >1000 leads (Portland: 1616), so the client-side "Active" count
@@ -715,6 +719,19 @@ export default async function HubPage({
           }))
           console.log(`[hub-page] Fetched ${initialEngagements.length} open engagements for ${hubUser.email}`)
         }
+
+        {
+          let cq = supabaseService
+            .from('engagements')
+            .select('id', { count: 'exact', head: true })
+            .in('stage', ['Closed Won', 'Closed Lost'])
+          if (!isElevated && hubUser.location_id) {
+            cq = cq.eq('location_uuid', hubUser.location_id)
+          }
+          const { count, error } = await cq
+          if (error) console.error('[hub-page] closed-engagement count error:', error.message)
+          else initialEngagementsClosedCount = count ?? 0
+        }
       }
     }
   }
@@ -846,6 +863,7 @@ export default async function HubPage({
       initialPeople={initialPeople}
       initialBinPeople={initialBinPeople}
       initialEngagements={initialEngagements}
+      initialEngagementsClosedCount={initialEngagementsClosedCount}
       initialPartners={initialPartners}
       initialCompanies={initialCompanies}
       currentSubscription={currentSubscription}

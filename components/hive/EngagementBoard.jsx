@@ -20,100 +20,21 @@
 
 import React, { useState, useEffect, useRef } from 'react'
 import { ENGAGEMENT_STAGES, STAGE_RANK, isTerminal } from './shared/stageConfig'
+// THE shared status derivation — board cards and list rows consume the
+// same module so the two lenses can never disagree.
+import { deriveStatusChip, displayTitle, engagementValue, fmtMoney } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import Card from '@/components/ui/Card'
 import SectionHeader from '@/components/ui/SectionHeader'
 
 const BOARD_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 
-const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-// Junk-length Jobber titles ("(L)", "(M)") fall through to the generic
-// fallback — a 3-character title reads as data noise on a card.
-function displayTitle(e) {
-  const t = (e.title || '').trim()
-  if (t.length > 3) return t
-  const d = e.created_at ? new Date(e.created_at) : new Date()
-  return `Engagement – ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
-}
-const fmtShort = (d) => {
-  if (!d) return null
-  const dt = new Date(d)
-  if (isNaN(dt)) return null
-  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
-const daysSince = (d) => Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 86400000))
-
-// Within-stage chip derivation (step-4 report contract):
-//   Request          → request age (teal; amber past 21d as pre-nurture cue)
-//   Estimate         → latest quote state; 'sent' is the neutral default
-//                      (bulk-imported quotes rarely carry quoteStatus)
-//   Job in Progress  → active job state / next scheduled date
-//   Final Processing → owing $X (red) | never invoiced (amber) | paid (teal)
-// A live nurture clock (nurture_started_at, step 5) overrides everything
-// with the doc's "nurturing · dNN" chip.
-function deriveChip(e) {
-  if (e.nurture_started_at) {
-    return { label: `nurturing · d${daysSince(e.nurture_started_at)}`, styleKey: 'nurturing' }
-  }
-  const quotes = e.quotes || []
-  const jobs = e.jobs || []
-  const invoices = e.invoices || []
-
-  switch (e.stage) {
-    case 'Request': {
-      const age = daysSince(e.created_at)
-      // Pre-nurture amber cue applies AT day 21, not after it.
-      if (age >= 21) return { label: `requested · d${age}`, styleKey: 'amber' }
-      return { label: age === 0 ? 'requested today' : `requested · d${age}`, styleKey: 'Request' }
-    }
-    case 'Estimate': {
-      if (quotes.some(q => q.status === 'approved')) return { label: 'approved', styleKey: 'approved' }
-      if (quotes.some(q => q.status === 'changes_requested')) return { label: 'changes requested', styleKey: 'changes_requested' }
-      const latest = quotes.reduce((a, q) => Math.max(a, new Date(q.sent_at || 0).getTime()), 0)
-      const when = latest ? fmtShort(latest) : null
-      return { label: when ? `sent ${when}` : 'sent', styleKey: 'sent' }
-    }
-    case 'Job in Progress': {
-      const active = jobs.filter(j => !j.completed_at && !(j.status || '').includes('complet'))
-      const inProg = active.find(j => j.status === 'in_progress' || j.status === 'active')
-      if (inProg) return { label: 'in progress', styleKey: 'in_progress' }
-      // Only FUTURE starts read as scheduled. Recurring Jobber jobs keep a
-      // stale past scheduled_start (visit cadence, not a booking) — a past
-      // start on an uncompleted job means the work is underway.
-      const starts = active
-        .map(j => j.scheduled_start).filter(Boolean)
-        .map(d => new Date(d).getTime()).filter(t => !isNaN(t))
-        .sort((a, b) => a - b)
-      const nextFuture = starts.find(t => t > Date.now())
-      if (nextFuture) return { label: `scheduled ${fmtShort(nextFuture)}`, styleKey: 'scheduled' }
-      if (starts.length > 0) return { label: 'in progress', styleKey: 'in_progress' }
-      return { label: 'upcoming', styleKey: 'upcoming' }
-    }
-    case 'Final Processing': {
-      const owing = Number(e.balance_owing) || 0
-      if (owing > 0) return { label: `owing ${fmtMoney(owing)}`, styleKey: 'owing' }
-      if (invoices.length === 0) return { label: 'never invoiced', styleKey: 'never_invoiced' }
-      return { label: 'paid', styleKey: 'paid' }
-    }
-    default:
-      return null
-  }
-}
-
-// Card value: real money once invoiced, quoted value before that.
-function cardValue(e) {
-  const invoiced = Number(e.total_invoiced) || 0
-  if (invoiced > 0) return fmtMoney(invoiced)
-  const quoted = Math.max(0, ...(e.quotes || []).map(q => Number(q.total) || 0))
-  return quoted > 0 ? fmtMoney(quoted) : null
-}
-
 // Card typography (LOCKED): name 13px/500 near-black, subtitle 11px muted,
 // value 12px/500. 100% sans — no serif inside the board.
 function EngagementCard({ e, onOpen, draggable, onDragStart }) {
-  const chip = deriveChip(e)
-  const value = cardValue(e)
+  const chip = deriveStatusChip(e)
+  const rawValue = engagementValue(e)
+  const value = rawValue != null ? fmtMoney(rawValue) : null
   return (
     <div draggable={draggable || undefined} onDragStart={onDragStart}>
       <Card onClick={onOpen}>

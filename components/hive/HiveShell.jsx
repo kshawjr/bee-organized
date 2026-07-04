@@ -13,18 +13,22 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import EngagementBoard from './EngagementBoard'
+import EngagementList from './EngagementList'
 import EngagementPanel from './EngagementPanel'
 
 const TABS = [
   { key: 'inbox',   label: 'Inbox',   live: false, badge: true },
   { key: 'board',   label: 'Board',   live: true },
-  { key: 'list',    label: 'List',    live: false },
+  { key: 'list',    label: 'List',    live: true },
   { key: 'clients', label: 'Clients', live: false },
 ]
 
-function TabPill({ tab, active }) {
+// The preferred lens (Board/List) sticks across sessions.
+const LENS_LS_KEY = 'bee_hive_beta_lens'
+
+function TabPill({ tab, active, onSelect }) {
   if (!tab.live) {
     return (
       <span
@@ -46,7 +50,8 @@ function TabPill({ tab, active }) {
     )
   }
   return (
-    <span
+    <button
+      onClick={onSelect}
       style={{
         display: 'inline-flex', alignItems: 'center',
         padding: '6px 14px', borderRadius: '20px',
@@ -54,11 +59,12 @@ function TabPill({ tab, active }) {
         background: active ? '#fff' : 'transparent',
         fontSize: '13px', fontWeight: 500,
         color: active ? '#1a1a18' : '#8a8a84',
-        cursor: 'default', whiteSpace: 'nowrap',
+        cursor: active ? 'default' : 'pointer', whiteSpace: 'nowrap',
+        fontFamily: 'inherit',
       }}
     >
       {tab.label}
-    </span>
+    </button>
   )
 }
 
@@ -69,11 +75,20 @@ function TabPill({ tab, active }) {
 // location uuid — the same vocabulary people-mapper documents).
 export default function HiveShell({
   engagements = [],
+  closedCount = 0,
   locFilter = 'all',
   onOpenClient = () => {},
   setToast = () => {},
   onExitBeta = () => {},
 }) {
+  // Board/List lens — default 'board', hydrated from localStorage after
+  // mount (SSR-safe, same pattern as the legacy view toggle).
+  const [lens, setLens] = useState('board')
+  useEffect(() => {
+    try { const v = localStorage.getItem(LENS_LS_KEY); if (v === 'board' || v === 'list') setLens(v) } catch {}
+  }, [])
+  const pickLens = (v) => { setLens(v); try { localStorage.setItem(LENS_LS_KEY, v) } catch {} }
+
   // Engagement panel (card click-through) + patches the panel makes
   // (title rename, stage advance) — applied over the server rows so the
   // board reflects them immediately without a reload.
@@ -94,7 +109,7 @@ export default function HiveShell({
       {/* Top row: tab pills left, quiet counter + escape hatch right */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flex: 1, minWidth: 0 }}>
-          {TABS.map(t => <TabPill key={t.key} tab={t} active={t.key === 'board'} />)}
+          {TABS.map(t => <TabPill key={t.key} tab={t} active={t.key === lens} onSelect={() => pickLens(t.key)} />)}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
           <span style={{ fontSize: '12px', color: '#8a8a84', whiteSpace: 'nowrap' }}>Open engagements · {openCount}</span>
@@ -112,12 +127,22 @@ export default function HiveShell({
         </div>
       </div>
 
-      <EngagementBoard
-        engagements={filtered}
-        onOpenClient={onOpenClient}
-        onOpenEngagement={(e) => setPanelEngagement(e)}
-        setToast={setToast}
-      />
+      {lens === 'list' ? (
+        <EngagementList
+          engagements={filtered}
+          closedCount={closedCount}
+          locFilter={locFilter}
+          onOpenEngagement={(e) => setPanelEngagement(e)}
+          setToast={setToast}
+        />
+      ) : (
+        <EngagementBoard
+          engagements={filtered}
+          onOpenClient={onOpenClient}
+          onOpenEngagement={(e) => setPanelEngagement(e)}
+          setToast={setToast}
+        />
+      )}
 
       {panelEngagement && (
         <EngagementPanel

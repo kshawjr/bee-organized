@@ -172,6 +172,9 @@ interface BeeHubProps {
   // (dual-read; unused by the legacy board). Rows carry client_name,
   // repeat_count, and minimal quotes/jobs/invoices for the stage chips.
   initialEngagements?: any[]
+  // Count of terminal engagements (List lens 'Closed · N' chip) — rows
+  // page in lazily via GET /api/engagements?closed=1.
+  initialEngagementsClosedCount?: number
   initialPartners?: any[]
   initialCompanies?: any[]
   // URL routing: server-passed route slug ('clients' / 'reports' / etc.)
