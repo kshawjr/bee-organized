@@ -18,6 +18,7 @@ import EngagementList from './EngagementList'
 import EngagementPanel from './EngagementPanel'
 import ClientDirectory from './ClientDirectory'
 import InboxScreen from './InboxScreen'
+import ClientProfile from './ClientProfile'
 import { deriveClientStatus } from './shared/clientStatus'
 import { IconInbox, IconLayoutKanban, IconList, IconUsers } from '@/components/ui/icons'
 
@@ -100,11 +101,15 @@ export default function HiveShell({
   }, [])
   const pickLens = (v) => { setLens(v); try { localStorage.setItem(LENS_LS_KEY, v) } catch {} }
 
-  // Engagement panel (card click-through) + patches the panel makes
-  // (title rename, stage advance) — applied over the server rows so the
-  // board reflects them immediately without a reload.
-  const [panelEngagement, setPanelEngagement] = useState(null)
+  // ONE overlay slot: EngagementPanel or ClientProfile — they REPLACE
+  // each other (no stacking): 'View client →' swaps panel→profile;
+  // tapping an engagement card on the profile swaps back. rowPatches
+  // mirror panel changes (title/stage) onto the board without a reload.
+  // overlay: null | { type:'engagement', engagement } | { type:'client', clientId }
+  const [overlay, setOverlay] = useState(null)
   const [rowPatches, setRowPatches] = useState({})
+  const openEngagement = (e) => setOverlay({ type: 'engagement', engagement: e })
+  const openClient = (clientId) => setOverlay({ type: 'client', clientId })
 
   const patched = Object.keys(rowPatches).length === 0
     ? engagements
@@ -155,7 +160,7 @@ export default function HiveShell({
           people={people}
           engagements={patched}
           locFilter={locFilter}
-          onOpenClient={onOpenClient}
+          onOpenClient={openClient}
           onSendToJobber={onSendToJobber}
           setToast={setToast}
         />
@@ -164,32 +169,45 @@ export default function HiveShell({
           people={people}
           engagements={patched}
           locFilter={locFilter}
-          onOpenClient={onOpenClient}
+          onOpenClient={openClient}
         />
       ) : lens === 'list' ? (
         <EngagementList
           engagements={filtered}
           closedCount={closedCount}
           locFilter={locFilter}
-          onOpenEngagement={(e) => setPanelEngagement(e)}
+          onOpenEngagement={openEngagement}
           setToast={setToast}
         />
       ) : (
         <EngagementBoard
           engagements={filtered}
-          onOpenClient={onOpenClient}
-          onOpenEngagement={(e) => setPanelEngagement(e)}
+          onOpenClient={openClient}
+          onOpenEngagement={openEngagement}
           setToast={setToast}
         />
       )}
 
-      {panelEngagement && (
+      {overlay?.type === 'engagement' && (
         <EngagementPanel
-          engagementId={panelEngagement.id}
-          seed={panelEngagement}
-          onClose={() => setPanelEngagement(null)}
-          onOpenClient={(clientId) => { setPanelEngagement(null); onOpenClient(clientId) }}
+          engagementId={overlay.engagement.id}
+          seed={overlay.engagement}
+          onClose={() => setOverlay(null)}
+          onOpenClient={openClient}
           onChanged={(id, patch) => setRowPatches(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))}
+          setToast={setToast}
+        />
+      )}
+      {overlay?.type === 'client' && (
+        <ClientProfile
+          clientId={overlay.clientId}
+          onClose={() => setOverlay(null)}
+          onOpenEngagement={openEngagement}
+          onSendToJobber={(clientId) => {
+            const p = people.find(x => x.id === clientId)
+            if (p) onSendToJobber(p)
+            else setToast({ kind: 'error', msg: 'Client record not loaded — try the classic view' })
+          }}
           setToast={setToast}
         />
       )}

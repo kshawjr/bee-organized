@@ -114,6 +114,16 @@ export const IconLayoutKanban = make(<>
   <path d="M14 4h6v4h-6z" /><path d="M14 12h6v8h-6z" />
 </>)
 
+export const IconMail = make(<>
+  <rect x="3" y="5" width="18" height="14" rx="2" />
+  <path d="M3 7l9 6l9 -6" />
+</>)
+
+export const IconMapPin = make(<>
+  <circle cx="12" cy="11" r="3" />
+  <path d="M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0z" />
+</>)
+
 // Within-stage status → leading icon (mockup chips/status text). One map
 // so board chips and list status text pick identical glyphs.
 const STATUS_ICON = {
