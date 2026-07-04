@@ -15,7 +15,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { ENGAGEMENT_STAGES, STAGE_RANK, isTerminal, stageDisplayLabel, ACCENT_BLUE } from './shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
-import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconExternalLink, IconX, IconCalendar } from '@/components/ui/icons'
+import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconMail, IconExternalLink, IconX, IconCalendar } from '@/components/ui/icons'
 import MetricCard from '@/components/ui/MetricCard'
 import ContactLine from './ContactLine'
 import QuoteBlock from './QuoteBlock'
@@ -30,6 +30,8 @@ const fmtDate = (d) => {
 }
 const initialsOf = (name) =>
   (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?'
+
+const METHOD_LABEL = { call: 'Call', sms: 'Text', email: 'Email', in_person: 'In person', call_prompt: 'Call prompt', system: 'System' }
 
 // Quiet light surface used by the client strip + money cards (mockup).
 const QUIET = '#f7f6f4'
@@ -119,6 +121,8 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [noteText, setNoteText] = useState('')
+  const [buzzOpen, setBuzzOpen] = useState(false)
+  const [buzzDraft, setBuzzDraft] = useState('')
   const [touchOpen, setTouchOpen] = useState(false)
   const [touchMethod, setTouchMethod] = useState('call')
   const [touchNote, setTouchNote] = useState('')
@@ -150,7 +154,7 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
   }, [engagementId])
 
   const eng = data?.engagement ?? seed
-  const children = data?.children ?? { service_requests: [], assessments: [], quotes: [], jobs: [], invoices: [], notes: [] }
+  const children = data?.children ?? { service_requests: [], assessments: [], quotes: [], jobs: [], invoices: [], notes: [], touchpoints: [] }
   const client = data?.client ?? null
 
   async function patchEngagement(body, okMsg) {
@@ -189,8 +193,28 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
     return i >= 0 && i < order.length - 1 ? order[i + 1].key : null
   })()
 
+  // Client-level buzz — posts from the strip's bee drawer. No setBusy:
+  // the composer has no button and must keep focus for rapid entries.
+  async function addBuzz() {
+    const text = buzzDraft.trim()
+    if (!text || !client) return
+    try {
+      const res = await fetch('/api/lead-notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_id: client.id, kind: 'buzz', text }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      setBuzzDraft('')
+      setData(d => d ? { ...d, client: { ...d.client, buzz: [j.note, ...(d.client.buzz || [])] } } : d)
+    } catch (e) {
+      setToast({ kind: 'error', msg: `Buzz failed: ${e.message}` })
+    }
+  }
+
   // Engagement note (kind='job', anchored to THIS engagement). Buzz is
-  // client-level and lives in the strip line + ClientProfile now.
+  // client-level and lives in the strip's bee drawer + ClientProfile.
   async function addEngagementNote() {
     const text = noteText.trim()
     if (!text || !client) return
@@ -227,13 +251,24 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
           engagement_id: engagementId,
         }),
       })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
       setTouchNote(''); setTouchOpen(false)
+      if (j.touchpoint) {
+        setData(d => d ? { ...d, children: { ...d.children, touchpoints: [{ ...j.touchpoint, user_label: 'You' }, ...(d.children.touchpoints || [])] } } : d)
+      }
       setToast({ kind: 'success', msg: 'Touchpoint logged' })
     } catch (e) {
       setToast({ kind: 'error', msg: `Touchpoint failed: ${e.message}` })
     } finally { setBusy(false) }
   }
+
+  // One interleaved activity stream: engagement notes + engagement-scoped
+  // touchpoints, newest first.
+  const activity = [
+    ...(children.notes || []).map(n => ({ t: 'note', ts: n.created_at, ...n })),
+    ...(children.touchpoints || []).map(tp => ({ t: 'touch', ts: tp.occurred_at, ...tp })),
+  ].sort((a, b) => new Date(b.ts) - new Date(a.ts))
 
   // Deep link: latest job → quote → request (whatever Jobber has).
   const jobberHref = (() => {
@@ -310,47 +345,60 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
 
       {/* Client strip — quiet card, no border */}
       {client && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', background: QUIET, borderRadius: '8px' }}>
-          <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#EEEDFE', color: '#3C3489', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 600, flexShrink: 0 }}>
-            {initialsOf(client.name)}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ fontSize: '13px', fontWeight: 500, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{client.name}</span>
-              {/* Client status: 'Active client' is definitionally true here —
-                  the panel opens on OPEN engagements (§2: ≥1 open = Active).
-                  Real stored/derived client_status is a later step-4 item. */}
-              <StatusChip label="Active client" styleKey="Active" />
-            </p>
-            <p style={{ fontSize: '11px', color: '#8a8a84', marginTop: '1px' }}>
-              {client.prior_engagements} prior engagement{client.prior_engagements === 1 ? '' : 's'} · {fmtMoney(client.lifetime_paid)} lifetime
-              {client.other_open > 0 && ` · ${client.other_open} other open`}
-            </p>
-            {/* Buzz rides with the PERSON: identical on every engagement of
-                this client by construction (client-level, latest note). */}
-            <p style={{ fontSize: '11px', color: client.latest_buzz ? '#6b6b66' : '#b5b3ac', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0 }}>
-              <span style={{ flexShrink: 0 }}>🐝</span>
-              {client.latest_buzz ? (
-                <>
-                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{client.latest_buzz.text}</span>
-                  <button onClick={() => onOpenClient(client.id)} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                    All buzz →
-                  </button>
-                </>
-              ) : (
-                <span style={{ whiteSpace: 'nowrap' }}>
-                  No buzz yet ·{' '}
-                  <button onClick={() => onOpenClient(client.id)} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit' }}>
-                    Add →
-                  </button>
+        <div style={{ padding: '10px 12px', background: QUIET, borderRadius: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#EEEDFE', color: '#3C3489', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 600, flexShrink: 0 }}>
+              {initialsOf(client.name)}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ fontSize: '13px', fontWeight: 500, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{client.name}</span>
+                {/* Client status: 'Active client' is definitionally true here —
+                    the panel opens on OPEN engagements (§2: ≥1 open = Active).
+                    Real stored/derived client_status is a later step-4 item. */}
+                <StatusChip label="Active client" styleKey="Active" />
+              </p>
+              <p style={{ fontSize: '11px', color: '#8a8a84', marginTop: '1px' }}>
+                {client.prior_engagements} prior engagement{client.prior_engagements === 1 ? '' : 's'} · {fmtMoney(client.lifetime_paid)} lifetime
+                {client.other_open > 0 && ` · ${client.other_open} other open`}
+              </p>
+              {/* Buzz rides with the PERSON — the bee toggles an inline
+                  drawer (read + add in place, no navigation). Client-level,
+                  identical on every engagement of this client. */}
+              <p onClick={() => setBuzzOpen(v => !v)}
+                style={{ fontSize: '11px', color: (client.buzz || []).length ? '#6b6b66' : '#b5b3ac', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0, cursor: 'pointer', userSelect: 'none' }}>
+                <span style={{ flexShrink: 0 }}>🐝</span>
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {(client.buzz || [])[0]?.text || 'No buzz yet'}
                 </span>
-              )}
-            </p>
-            <ContactLine phone={client.phone} email={client.email} layout={isMobile ? 'stack' : 'inline'} style={{ marginTop: '3px' }} />
+                <span style={{ flexShrink: 0, fontSize: '9px', color: '#b5b3ac' }}>{buzzOpen ? '▾' : '▸'}</span>
+              </p>
+              <ContactLine phone={client.phone} email={client.email} layout={isMobile ? 'stack' : 'inline'} style={{ marginTop: '3px' }} />
+            </div>
+            <button onClick={() => onOpenClient(client.id)} style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', padding: 0, flexShrink: 0 }}>
+              View client →
+            </button>
           </div>
-          <button onClick={() => onOpenClient(client.id)} style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', padding: 0, flexShrink: 0 }}>
-            View client →
-          </button>
+          {buzzOpen && (
+            <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '0.5px solid rgba(0,0,0,0.07)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <input value={buzzDraft} onChange={e => setBuzzDraft(e.target.value)} placeholder="Add buzz…" autoFocus
+                onKeyDown={e => { if (e.key === 'Enter') addBuzz() }}
+                style={{ padding: '7px 10px', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none', background: '#fff' }} />
+              {(client.buzz || []).length > 0 && (
+                <div style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {client.buzz.map(n => (
+                    <p key={n.id} style={{ fontSize: '12px', color: '#1a1a18', lineHeight: 1.4 }}>
+                      🐝 {n.text}
+                      <span style={{ fontSize: '10px', color: '#b5b3ac', marginLeft: '6px', whiteSpace: 'nowrap' }}>{n.user_label || '—'} · {relAge(new Date(n.created_at).getTime())} ago</span>
+                    </p>
+                  ))}
+                </div>
+              )}
+              <button onClick={() => onOpenClient(client.id)} style={{ border: 'none', background: 'transparent', padding: 0, textAlign: 'left', fontSize: '11px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit' }}>
+                All buzz →
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -420,22 +468,34 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
         </div>
       </div>
 
-      {/* Engagement notes — anchored to THIS engagement (kind='job');
-          inline composer, newest-first. Buzz lives with the person above. */}
+      {/* Activity — notes AND touchpoints for THIS engagement, one stream
+          newest-first. The composer posts a note; 'Log touchpoint' below
+          feeds the same stream. Buzz lives with the person above. */}
       <div>
-        <MicroLabel>Notes · this engagement</MicroLabel>
-        <div style={{ display: 'flex', gap: '8px', marginBottom: (children.notes || []).length ? '10px' : 0 }}>
+        <MicroLabel>Activity · this engagement</MicroLabel>
+        <div style={{ display: 'flex', marginBottom: activity.length ? '10px' : 0 }}>
           <input value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Add a note…"
             onKeyDown={e => { if (e.key === 'Enter') addEngagementNote() }}
             style={{ flex: 1, padding: '8px 12px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
-          <button style={{ ...outlineBtn, flex: '0 0 auto', minWidth: 0 }} disabled={busy || !noteText.trim()} onClick={addEngagementNote}>Save</button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          {(children.notes || []).map(n => (
-            <p key={n.id} style={{ fontSize: '12px', color: '#1a1a18', lineHeight: 1.45 }}>
-              {n.text}
+          {activity.map(a => a.t === 'note' ? (
+            <p key={`n-${a.id}`} style={{ fontSize: '12px', color: '#1a1a18', lineHeight: 1.45 }}>
+              {a.text}
               <span style={{ fontSize: '10px', color: '#b5b3ac', marginLeft: '6px', whiteSpace: 'nowrap' }}>
-                {n.user_label || '—'} · {relAge(new Date(n.created_at).getTime())} ago
+                {a.user_label || '—'} · {relAge(new Date(a.ts).getTime())} ago
+              </span>
+            </p>
+          ) : (
+            <p key={`t-${a.id}`} style={{ fontSize: '12px', color: '#1a1a18', lineHeight: 1.45, display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+              <span style={{ color: '#8a8a84', display: 'inline-flex', flexShrink: 0, alignSelf: 'center' }}>
+                {a.method === 'email' ? <IconMail size={12} /> : <IconPhone size={12} />}
+              </span>
+              <span style={{ minWidth: 0 }}>
+                {METHOD_LABEL[a.method] || a.label || 'Reach-out'}{a.notes ? ` — ${a.notes}` : ''}
+                <span style={{ fontSize: '10px', color: '#b5b3ac', marginLeft: '6px', whiteSpace: 'nowrap' }}>
+                  {a.user_label || '—'} · {relAge(new Date(a.ts).getTime())} ago
+                </span>
               </span>
             </p>
           ))}

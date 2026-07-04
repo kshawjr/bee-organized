@@ -46,6 +46,7 @@ const STAGE_ICON = {
   'Job in Progress': IconHammer, 'Final Processing': IconFileInvoice,
 }
 const METHOD_ICON = { call: IconPhone, sms: IconPhone, email: IconMail }
+const METHOD_LABEL = { call: 'Call', sms: 'Text', email: 'Email', in_person: 'In person', call_prompt: 'Call prompt', system: 'System' }
 
 function MicroLabel({ children }) {
   return (
@@ -70,6 +71,7 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
   const [showAllNotes, setShowAllNotes] = useState(false)
   const [showAllTouches, setShowAllTouches] = useState(false)
   const [noteText, setNoteText] = useState('')
+  const [buzzOpen, setBuzzOpen] = useState(true)
   const [touchOpen, setTouchOpen] = useState(false)
   const [touchMethod, setTouchMethod] = useState('call')
   const [touchNote, setTouchNote] = useState('')
@@ -103,6 +105,7 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
   const closed = engagements.filter(e => e.stage === 'Closed Won' || e.stage === 'Closed Lost')
   const buzz = data?.buzz_notes ?? []
   const touches = data?.touchpoints ?? []
+  const engTitleById = Object.fromEntries(engagements.map(e => [e.id, displayTitle(e)]))
 
   const status = c ? deriveClientStatus(
     {
@@ -312,46 +315,67 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
       {/* Buzz notes + Outreach */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '10px' }}>
         <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px' }}>
-          <MicroLabel>Buzz</MicroLabel>
-          {/* Composer lives HERE — buzz is client-level (no engagement_id);
-              the engagement panel's strip line points back to this timeline. */}
-          <div style={{ display: 'flex', gap: '6px', marginBottom: buzz.length ? '10px' : '8px' }}>
-            <input value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Add buzz…"
-              onKeyDown={e => { if (e.key === 'Enter') addBuzzNote() }}
-              style={{ flex: 1, minWidth: 0, padding: '7px 10px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none', background: '#fff' }} />
-            <button disabled={busy || !noteText.trim()} onClick={addBuzzNote}
-              style={{ flexShrink: 0, padding: '7px 12px', borderRadius: '8px', border: '0.5px solid rgba(0,0,0,0.15)', background: '#fff', fontSize: '12px', fontWeight: 500, color: '#1a1a18', cursor: 'pointer', fontFamily: 'inherit' }}>
-              Save
-            </button>
-          </div>
-          <div style={showAllNotes ? { maxHeight: '220px', overflowY: 'auto' } : undefined}>
-            {(showAllNotes ? buzz : buzz.slice(0, 10)).map(n => (
-              <p key={n.id} style={{ fontSize: '12px', color: '#1a1a18', marginBottom: '6px', lineHeight: 1.4 }}>
-                🐝 {n.text}
-                <span style={{ fontSize: '10px', color: '#b5b3ac', marginLeft: '6px', whiteSpace: 'nowrap' }}>{n.user_label || '—'} · {relAge(new Date(n.created_at).getTime(), nowMs)} ago</span>
-              </p>
-            ))}
-          </div>
-          {buzz.length === 0 && <p style={{ fontSize: '11px', color: '#b5b3ac' }}>No buzz yet</p>}
-          {buzz.length > 10 && !showAllNotes && (
-            <button onClick={() => setShowAllNotes(true)} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>Show {buzz.length - 10} more</button>
+          {/* Bee-toggle header (same pattern as the panel's strip drawer) —
+              expanded by default here: it's the person's page. */}
+          <p onClick={() => setBuzzOpen(v => !v)}
+            style={{ fontSize: '11px', fontWeight: 500, color: '#8a8a84', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '8px', cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <span style={{ letterSpacing: 0 }}>🐝</span> Buzz
+            <span style={{ fontSize: '9px', color: '#b5b3ac' }}>{buzzOpen ? '▾' : '▸'}</span>
+          </p>
+          {!buzzOpen && (
+            <p style={{ fontSize: '11px', color: buzz.length ? '#6b6b66' : '#b5b3ac', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {buzz[0]?.text || 'No buzz yet'}
+            </p>
+          )}
+          {buzzOpen && (
+            <>
+              {/* Composer — buzz is client-level (no engagement_id); Enter
+                  posts + clears + keeps focus. */}
+              <div style={{ display: 'flex', marginBottom: buzz.length ? '10px' : '8px' }}>
+                <input value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Add buzz…"
+                  onKeyDown={e => { if (e.key === 'Enter') addBuzzNote() }}
+                  style={{ flex: 1, minWidth: 0, padding: '7px 10px', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none', background: '#fff' }} />
+              </div>
+              <div style={showAllNotes ? { maxHeight: '220px', overflowY: 'auto' } : undefined}>
+                {(showAllNotes ? buzz : buzz.slice(0, 10)).map(n => (
+                  <p key={n.id} style={{ fontSize: '12px', color: '#1a1a18', marginBottom: '6px', lineHeight: 1.4 }}>
+                    🐝 {n.text}
+                    <span style={{ fontSize: '10px', color: '#b5b3ac', marginLeft: '6px', whiteSpace: 'nowrap' }}>{n.user_label || '—'} · {relAge(new Date(n.created_at).getTime(), nowMs)} ago</span>
+                  </p>
+                ))}
+              </div>
+              {buzz.length === 0 && <p style={{ fontSize: '11px', color: '#b5b3ac' }}>No buzz yet</p>}
+              {buzz.length > 10 && !showAllNotes && (
+                <button onClick={() => setShowAllNotes(true)} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>Show {buzz.length - 10} more</button>
+              )}
+            </>
           )}
         </div>
         <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px' }}>
           <MicroLabel>Outreach</MicroLabel>
-          {(showAllTouches ? touches : touches.slice(0, 3)).map(t => {
-            const MIcon = METHOD_ICON[t.method] || IconPhoneOutgoing
-            return (
-              <p key={t.id} style={{ fontSize: '12px', color: '#1a1a18', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ color: '#8a8a84', display: 'inline-flex' }}><MIcon size={12} /></span>
-                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.label}{t.method ? ` (${t.method.replace('_', ' ')})` : ''}</span>
-                <span style={{ fontSize: '10px', color: '#b5b3ac', flexShrink: 0 }}>{relAge(new Date(t.occurred_at).getTime(), nowMs)} ago</span>
-              </p>
-            )
-          })}
+          {/* CLIENT-WIDE rollup: every touchpoint across engagements + the
+              pre-engagement ones (Inbox Log calls). Engagement-tagged
+              entries say what the touch was about; the panel's activity
+              stream owns the per-engagement view. */}
+          <div style={showAllTouches ? { maxHeight: '220px', overflowY: 'auto' } : undefined}>
+            {(showAllTouches ? touches : touches.slice(0, 3)).map(t => {
+              const MIcon = METHOD_ICON[t.method] || IconPhoneOutgoing
+              const what = t.kind === 'reach_out' ? (METHOD_LABEL[t.method] || t.label || 'Reach-out') : (t.label || t.kind)
+              const engTitle = t.engagement_id ? engTitleById[t.engagement_id] : null
+              return (
+                <p key={t.id} style={{ fontSize: '12px', color: '#1a1a18', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ color: '#8a8a84', display: 'inline-flex' }}><MIcon size={12} /></span>
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {what}{engTitle ? <span style={{ color: '#6b6b66' }}> · re: {engTitle}</span> : ''}
+                  </span>
+                  <span style={{ fontSize: '10px', color: '#b5b3ac', flexShrink: 0 }}>{relAge(new Date(t.occurred_at).getTime(), nowMs)} ago</span>
+                </p>
+              )
+            })}
+          </div>
           {touches.length === 0 && <p style={{ fontSize: '11px', color: '#b5b3ac' }}>No outreach logged yet</p>}
           {touches.length > 3 && !showAllTouches && (
-            <button onClick={() => setShowAllTouches(true)} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>Show more</button>
+            <button onClick={() => setShowAllTouches(true)} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>Show {touches.length - 3} more</button>
           )}
         </div>
       </div>

@@ -52,7 +52,7 @@ export async function GET(
   const [contactsRes, engagementsRes, touchesRes, notesRes, locRes] = await Promise.all([
     supabaseService.from('lead_contacts').select('id, name, role, phone, email').eq('lead_id', id).order('created_at', { ascending: true }),
     supabaseService.from('engagements').select('id, title, stage, founded_by, created_at, stage_entered_at, closed_at, closed_reason, nurture_started_at, total_invoiced, total_paid, balance_owing').eq('client_id', id).order('created_at', { ascending: false }),
-    supabaseService.from('touchpoints').select('id, kind, method, label, notes, occurred_at').eq('lead_id', id).order('occurred_at', { ascending: false }).limit(10),
+    supabaseService.from('touchpoints').select('id, kind, method, label, notes, occurred_at, engagement_id').eq('lead_id', id).order('occurred_at', { ascending: false }).limit(50),
     supabaseService.from('lead_notes').select('id, kind, text, user_label, created_at').eq('lead_id', id).eq('kind', 'buzz').order('created_at', { ascending: false }).limit(50),
     supabaseService.from('locations').select('name').eq('id', lead.location_uuid).maybeSingle(),
   ])

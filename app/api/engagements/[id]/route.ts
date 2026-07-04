@@ -66,7 +66,7 @@ export async function GET(
   if ('error' in auth) return auth.error
   const { engagement } = auth
 
-  const [srRes, quotesRes, jobsRes, invoicesRes, clientRes, clientEngsRes, assessRes, notesRes, buzzRes] = await Promise.all([
+  const [srRes, quotesRes, jobsRes, invoicesRes, clientRes, clientEngsRes, assessRes, notesRes, buzzRes, touchRes] = await Promise.all([
     supabaseService.from('service_requests').select('*').eq('engagement_id', id).order('requested_at', { ascending: true, nullsFirst: false }),
     supabaseService.from('quotes').select('*').eq('engagement_id', id).order('sent_at', { ascending: true, nullsFirst: false }),
     supabaseService.from('jobs').select('*').eq('engagement_id', id).order('scheduled_start', { ascending: true, nullsFirst: false }),
@@ -77,9 +77,28 @@ export async function GET(
     // Engagement-scoped notes (kind='job' via the panel composer); newest
     // first. Degrades to [] pre-migration (query errors, data stays null).
     supabaseService.from('lead_notes').select('id, kind, text, user_label, created_at').eq('engagement_id', id).order('created_at', { ascending: false }).limit(50),
-    // Latest client-level buzz for the strip's buzz line.
-    supabaseService.from('lead_notes').select('text, user_label, created_at').eq('lead_id', engagement.client_id).eq('kind', 'buzz').order('created_at', { ascending: false }).limit(1),
+    // Client-level buzz timeline for the strip's bee drawer.
+    supabaseService.from('lead_notes').select('id, text, user_label, created_at').eq('lead_id', engagement.client_id).eq('kind', 'buzz').order('created_at', { ascending: false }).limit(50),
+    // THIS engagement's touchpoints — interleaved with notes in the
+    // panel's activity stream.
+    supabaseService.from('touchpoints').select('id, kind, method, label, notes, occurred_at, user_id').eq('engagement_id', id).order('occurred_at', { ascending: false }).limit(50),
   ])
+
+  // touchpoints carry user_id but no user_label — resolve author names
+  // from hub_users in one shot so the activity stream can say who.
+  const touches = touchRes.data ?? []
+  const authorIds = Array.from(new Set(touches.map(t => t.user_id).filter(Boolean)))
+  let authorById: Record<string, string> = {}
+  if (authorIds.length > 0) {
+    const { data: authors } = await supabaseService
+      .from('hub_users')
+      .select('id, full_name, first_name, last_name')
+      .in('id', authorIds)
+    for (const a of authors ?? []) {
+      authorById[a.id] = a.full_name || [a.first_name, a.last_name].filter(Boolean).join(' ').trim() || '—'
+    }
+  }
+  const touchpoints = touches.map(t => ({ ...t, user_label: t.user_id ? (authorById[t.user_id] ?? null) : null }))
 
   const siblings = clientEngsRes.data ?? []
   const num = (v: any) => (v == null ? 0 : Number(v) || 0)
@@ -97,6 +116,7 @@ export async function GET(
       jobs: jobsRes.data ?? [],
       invoices: invoicesRes.data ?? [],
       notes: notesRes.data ?? [],
+      touchpoints,
     },
     client: {
       id: engagement.client_id,
@@ -104,7 +124,7 @@ export async function GET(
       email: clientRes.data?.email ?? null,
       phone: clientRes.data?.phone ?? null,
       request_details: clientRes.data?.request_details ?? null,
-      latest_buzz: buzzRes.data?.[0] ?? null,
+      buzz: buzzRes.data ?? [],
       lifetime_paid: lifetimePaid,
       prior_engagements: priorCount,
       other_open: otherOpen,
