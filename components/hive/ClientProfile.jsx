@@ -246,8 +246,26 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
             {c.marketing_opt_out ? 'Opted out of marketing' : 'No opt-outs'}
           </p>
           <p style={{ fontSize: '12px', color: '#8a8a84' }}>
-            {c.referred_by_kind ? `Referred via ${String(c.referred_by_kind).replace(/_/g, ' ')}` : (c.source ? `Source: ${String(c.source).toLowerCase()}` : 'Source unknown')}
+            {/* Forward direction — the route resolves referred_by_id to a
+                name (partner or lead per kind); the kind-only fallback
+                covers a dangling id whose row was since deleted. */}
+            {c.referred_by_kind
+              ? `Referred by ${c.referred_by_name || (c.referred_by_kind === 'lead' ? 'a client' : 'a partner')}`
+              : (c.source ? `Source: ${String(c.source).toLowerCase()}` : 'Source unknown')}
           </p>
+          {/* Reverse direction — leads this client referred (kind='lead'
+              rows pointing back here; partners' reverse lists stay in
+              the classic PartnerPanel — the beta has no partner surface). */}
+          {(data.referred_us || []).length > 0 && (
+            <div style={{ marginTop: '2px' }}>
+              <p style={{ fontSize: '11px', fontWeight: 500, color: '#8a8a84', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '3px' }}>
+                Referred us · {data.referred_us.length}
+              </p>
+              {data.referred_us.map(r => (
+                <p key={r.id} style={{ fontSize: '12px', color: '#1a1a18' }}>{r.name}</p>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

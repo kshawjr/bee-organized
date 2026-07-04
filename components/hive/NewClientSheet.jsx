@@ -26,6 +26,8 @@
 //       count + last contact, start-new / open-profile actions.
 //   C — no match: create the PERSON with founding-viable fields only.
 //       The authoritative DB match query re-runs right before the insert.
+//       Source='Referral' opens ReferrerPicker (match-or-create) and the
+//       link rides the POST as referred_by_kind/referred_by_id.
 //   D — matched client has 1+ OPEN engagement: concurrent-engagement
 //       confirm — now gating a REAL second founding (rule 1: a distinct
 //       concurrent row, both stay active), not a cosmetic duplicate.
@@ -45,6 +47,7 @@
 
 import React, { useMemo, useState } from 'react'
 import OverlayShell from './OverlayShell'
+import ReferrerPicker from './ReferrerPicker'
 import useIsMobile from './shared/useIsMobile'
 import { isTerminal } from './shared/stageConfig'
 import { lastActivityTs } from './shared/engagementStatus'
@@ -143,6 +146,11 @@ export default function NewClientSheet({
   const [query, setQuery] = useState('')
   // null = derive from the query; a string = the user took the field over.
   const [form, setForm] = useState({ name: null, email: null, phone: null, source: 'Manual', projectType: 'Client', drip: true })
+  // Referral-source referrer link (frame C) — { id, kind, name } | null.
+  // kind is 'lead' or 'partner' (contacts store as 'partner' too); maps
+  // straight onto leads.referred_by_kind / referred_by_id at POST.
+  const [referrer, setReferrer] = useState(null)
+  const [pickReferrer, setPickReferrer] = useState(false)
   const [pickedId, setPickedId] = useState(null) // multi-match: which B row is active
   const [confirming, setConfirming] = useState(false) // frame D
   const [founded, setFounded] = useState(null) // frame F: { engagement, person }
@@ -266,6 +274,11 @@ export default function NewClientSheet({
         phone: (effPhone || '').trim() || null,
         source: form.source || null,
         project_type: form.projectType || null,
+        // Referrer link rides only on a Referral source WITH a picked
+        // referrer — source='Referral' with none saves nulls (the picker
+        // is skippable, matching Classic; never block founding on it).
+        referred_by_kind: form.source === 'Referral' && referrer ? referrer.kind : null,
+        referred_by_id: form.source === 'Referral' && referrer ? referrer.id : null,
         skip_drip: !form.drip,
       })
       // Frame C stays person-world by design: a genuinely NEW inquiry
@@ -434,7 +447,20 @@ export default function NewClientSheet({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <div>
               <label style={lbl}>Source</label>
-              <select style={inp} value={form.source} onChange={e => set('source', e.target.value)} aria-label="Source">
+              <select
+                style={inp}
+                value={form.source}
+                onChange={e => {
+                  const v = e.target.value
+                  set('source', v)
+                  // Referral is the trigger: open the referrer picker.
+                  // Moving OFF Referral clears any picked referrer so a
+                  // stale link never rides a non-referral source.
+                  if (v === 'Referral') setPickReferrer(true)
+                  else { setReferrer(null); setPickReferrer(false) }
+                }}
+                aria-label="Source"
+              >
                 {withDefault(lookupOptions.sources || [], form.source).map(o => <option key={o} value={o}>{o}</option>)}
               </select>
             </div>
@@ -445,6 +471,47 @@ export default function NewClientSheet({
               </select>
             </div>
           </div>
+
+          {/* Referred by — only on the Referral source. Match-or-create
+              picker (ReferrerPicker): clients (kind='lead', match-only)
+              + partners/contacts (kind='partner', inline-creatable). A
+              picked referrer shows as a clearable chip; skipping is fine
+              — the create saves nulls and founding is never blocked. */}
+          {form.source === 'Referral' && (
+            <div>
+              <label style={lbl}>Referred by · optional</label>
+              {referrer ? (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '7px',
+                  padding: '5px 11px', borderRadius: '10px',
+                  background: GREEN.bg, color: GREEN.text, fontSize: '13px', fontWeight: 500,
+                }}>
+                  <button type="button" onClick={() => setPickReferrer(v => !v)} aria-label="Edit referrer"
+                    style={{ border: 'none', background: 'transparent', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer' }}>
+                    {referrer.name}
+                  </button>
+                  <button type="button" onClick={() => { setReferrer(null); setPickReferrer(true) }} aria-label="Clear referrer"
+                    style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', color: 'inherit', fontSize: '13px', lineHeight: 1 }}>
+                    ×
+                  </button>
+                </span>
+              ) : !pickReferrer && (
+                <button type="button" onClick={() => setPickReferrer(true)}
+                  style={{ ...secondaryBtn, width: 'auto', padding: '6px 12px', fontSize: '12px' }}>
+                  ＋ Add referrer
+                </button>
+              )}
+              {pickReferrer && (
+                <ReferrerPicker
+                  people={scopedPeople}
+                  locationUuid={locationUuid}
+                  selectedId={referrer?.id || null}
+                  onSelect={r => { setReferrer(r); setPickReferrer(false) }}
+                />
+              )}
+            </div>
+          )}
+
           <Toggle on={form.drip} onFlip={() => set('drip', !form.drip)} label="Add to drip sequence" />
 
           {errorMsg && <p style={{ fontSize: '12px', color: '#791F1F', background: '#FCEBEB', padding: '8px 12px', borderRadius: '8px' }}>{errorMsg}</p>}

@@ -49,7 +49,19 @@ export async function GET(
     return NextResponse.json({ error: 'forbidden_wrong_location' }, { status: 403 })
   }
 
-  const [contactsRes, engagementsRes, touchesRes, notesRes, jobNotesRes, locRes] = await Promise.all([
+  // Referrer resolution — referred_by_id is polymorphic on kind:
+  // 'partner' → partners row (contacts included; they share the table),
+  // 'lead' → another leads row. Resolved to a NAME so the profile can
+  // say who, not just "via partner".
+  const referrerQuery = lead.referred_by_kind && lead.referred_by_id
+    ? supabaseService
+        .from(lead.referred_by_kind === 'lead' ? 'leads' : 'partners')
+        .select('id, name')
+        .eq('id', lead.referred_by_id)
+        .maybeSingle()
+    : Promise.resolve({ data: null } as { data: { id: string, name: string } | null })
+
+  const [contactsRes, engagementsRes, touchesRes, notesRes, jobNotesRes, locRes, referrerRes, referredUsRes] = await Promise.all([
     supabaseService.from('lead_contacts').select('id, name, role, phone, email').eq('lead_id', id).order('created_at', { ascending: true }),
     supabaseService.from('engagements').select('id, title, description, stage, founded_by, created_at, stage_entered_at, closed_at, closed_reason, nurture_started_at, total_invoiced, total_paid, balance_owing').eq('client_id', id).order('created_at', { ascending: false }),
     supabaseService.from('touchpoints').select('id, kind, method, label, notes, occurred_at, engagement_id, user_id').eq('lead_id', id).order('occurred_at', { ascending: false }).limit(50),
@@ -58,6 +70,10 @@ export async function GET(
     // PersonCard's notes stream. Engagement notes live on the engagement.
     supabaseService.from('lead_notes').select('id, kind, text, user_label, created_at').eq('lead_id', id).eq('kind', 'job').is('engagement_id', null).order('created_at', { ascending: false }).limit(50),
     supabaseService.from('locations').select('name').eq('id', lead.location_uuid).maybeSingle(),
+    referrerQuery,
+    // Reverse direction — leads THIS client referred (kind='lead' rows
+    // pointing back here). Junk exclusion via .not(is,true) — NULL stays.
+    supabaseService.from('leads').select('id, name, created_at').eq('referred_by_kind', 'lead').eq('referred_by_id', id).not('is_junk', 'is', true).order('created_at', { ascending: false }).range(0, 49),
   ])
 
   // touchpoints carry user_id but no user_label — resolve author names
@@ -115,7 +131,12 @@ export async function GET(
   const owing = open.reduce((s, e) => s + num(e.balance_owing), 0)
 
   return NextResponse.json({
-    client: { ...lead, location_name: locRes.data?.name ?? null },
+    client: {
+      ...lead,
+      location_name: locRes.data?.name ?? null,
+      referred_by_name: referrerRes.data?.name ?? null,
+    },
+    referred_us: referredUsRes.data ?? [],
     contacts: contactsRes.data ?? [],
     engagements: withChildren,
     touchpoints,
