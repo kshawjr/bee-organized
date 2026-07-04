@@ -13,7 +13,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { ENGAGEMENT_STAGES, STAGE_RANK, CHIP_STYLES } from './shared/stageConfig'
+import { ENGAGEMENT_STAGES, STAGE_RANK, CHIP_STYLES, stageDisplayLabel } from './shared/stageConfig'
 import { deriveStatusChip, displayTitle, engagementValue, fmtMoney, lastActivityTs, relAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import FilterChips from '@/components/ui/FilterChips'
@@ -166,7 +166,7 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
                     <span style={{ fontSize: '12px', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayTitle(e)}</span>
                     <StatusText chip={chip} size={12} />
                   </span>
-                  <StatusChip label={e.stage} styleKey={e.stage} />
+                  <StatusChip label={stageDisplayLabel(e.stage)} styleKey={e.stage} />
                 </div>
               </div>
             )
@@ -176,7 +176,7 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
               style={{ display: 'grid', gridTemplateColumns: GRID, gap: '12px', alignItems: 'center', padding: '15px 16px', borderBottom: '0.5px solid rgba(0,0,0,0.08)', cursor: 'pointer', opacity: muted ? 0.6 : 1 }}>
               <ClientCell e={e} nowMs={nowMs} />
               <span style={{ fontSize: '13px', color: '#6b6b66', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayTitle(e)}</span>
-              <span><StatusChip label={e.stage} styleKey={e.stage} /></span>
+              <span><StatusChip label={stageDisplayLabel(e.stage)} styleKey={e.stage} /></span>
               <StatusText chip={chip} size={12} />
               <span style={{ fontSize: '14px', fontWeight: 600, color: value ? '#1a1a18' : '#b5b3ac', textAlign: 'right' }}>{value || '—'}</span>
               <span style={{ fontSize: '13px', color: '#8a8a84', textAlign: 'right' }}>{activity}</span>

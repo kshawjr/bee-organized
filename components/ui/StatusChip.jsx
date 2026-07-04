@@ -9,6 +9,11 @@ import React from 'react'
 import { CHIP_STYLES } from '@/components/hive/shared/stageConfig'
 
 export default function StatusChip({ label, styleKey = 'gray', icon = null }) {
+  // Silent fallthrough to gray hid a class of mapping bugs — warn loudly
+  // in dev when a styleKey misses the single source.
+  if (process.env.NODE_ENV !== 'production' && styleKey && !CHIP_STYLES[styleKey]) {
+    console.warn('[StatusChip] unknown styleKey — falling back to gray:', styleKey, '(label:', label, ')')
+  }
   const s = CHIP_STYLES[styleKey] || CHIP_STYLES.gray
   return (
     <span style={{

@@ -13,7 +13,7 @@
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react'
-import { ENGAGEMENT_STAGES, STAGE_RANK, isTerminal } from './shared/stageConfig'
+import { ENGAGEMENT_STAGES, STAGE_RANK, isTerminal, stageDisplayLabel } from './shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
 import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconExternalLink, IconX } from '@/components/ui/icons'
 import MetricCard from '@/components/ui/MetricCard'
@@ -71,7 +71,7 @@ function StageBar({ stage }) {
           )
         })}
       </div>
-      {lost && <p style={{ fontSize: '11px', color: '#791F1F', marginTop: '4px' }}>Closed Lost</p>}
+      {lost && <p style={{ fontSize: '11px', color: '#791F1F', marginTop: '4px' }}>Closed lost</p>}
     </div>
   )
 }
@@ -289,7 +289,7 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
               </h2>
             )}
             <span style={{ flexShrink: 0 }}>
-              <StatusChip label={eng.stage} styleKey={eng.stage} />
+              <StatusChip label={stageDisplayLabel(eng.stage)} styleKey={eng.stage} />
             </span>
           </div>
           <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '4px' }}>
@@ -417,9 +417,9 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
           <button
             style={{ width: '100%', marginTop: '10px', padding: '10px 12px', borderRadius: '8px', border: 'none', background: '#1a1a18', color: '#fff', fontSize: '13px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}
             disabled={busy}
-            onClick={() => patchEngagement({ stage: nextStage }, `Moved to ${nextStage}`)}
+            onClick={() => patchEngagement({ stage: nextStage }, `Moved to ${stageDisplayLabel(nextStage)}`)}
           >
-            Advance to {nextStage} →
+            Advance to {stageDisplayLabel(nextStage)} →
           </button>
         )}
       </div>

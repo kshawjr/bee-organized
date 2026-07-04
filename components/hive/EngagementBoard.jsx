@@ -133,7 +133,7 @@ export default function EngagementBoard({ engagements = [], onOpenClient = () =>
           padding: '2px',
         }}
       >
-        {!isMobile && <SectionHeader label={stage.label} count={cards.length} />}
+        {!isMobile && <SectionHeader label={stage.displayLabel} count={cards.length} />}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {cards.map(e => (
             <EngagementCard
@@ -172,7 +172,7 @@ export default function EngagementBoard({ engagements = [], onOpenClient = () =>
           <button onClick={() => setMobileCol(c => Math.max(0, c - 1))} disabled={mobileCol === 0}
             style={{ border: 'none', background: 'transparent', fontSize: '18px', color: mobileCol === 0 ? '#c9c7c0' : '#6b6b66', cursor: 'pointer', padding: '4px 8px' }}><IconChevronRight size={16} style={{ transform: 'rotate(180deg)' }} /></button>
           <div style={{ flex: 1, textAlign: 'center' }}>
-            <span style={{ fontSize: '12px', fontWeight: 500, color: '#6b6b66' }}>{stage.label}</span>
+            <span style={{ fontSize: '12px', fontWeight: 500, color: '#6b6b66' }}>{stage.displayLabel}</span>
             <span style={{ fontSize: '12px', fontWeight: 400, color: '#b5b3ac', marginLeft: '5px' }}>· {count}</span>
           </div>
           <button onClick={() => setMobileCol(c => Math.min(BOARD_STAGES.length - 1, c + 1))} disabled={mobileCol === BOARD_STAGES.length - 1}

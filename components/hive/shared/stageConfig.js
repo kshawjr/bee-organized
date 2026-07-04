@@ -25,14 +25,22 @@ export { isTerminal }
 
 // Ordered board/display config. Terminal stages render off the active
 // board (filtered by isTerminal); they exist here for chips and lists.
+// `key` is the CANONICAL stage string (DB rows + CHECK constraint —
+// never change it); `displayLabel` is the sentence-case mockup label.
+// UI consumes displayLabel / stageDisplayLabel(), never the raw key.
 export const ENGAGEMENT_STAGES = [
-  { key: 'Request',          label: 'Request',          rank: STAGE_RANK['Request'],          terminal: false },
-  { key: 'Estimate',         label: 'Estimate',         rank: STAGE_RANK['Estimate'],         terminal: false },
-  { key: 'Job in Progress',  label: 'Job in Progress',  rank: STAGE_RANK['Job in Progress'],  terminal: false },
-  { key: 'Final Processing', label: 'Final Processing', rank: STAGE_RANK['Final Processing'], terminal: false },
-  { key: 'Closed Won',       label: 'Closed Won',       rank: STAGE_RANK['Closed Won'],       terminal: true },
-  { key: 'Closed Lost',      label: 'Closed Lost',      rank: STAGE_RANK['Closed Lost'],      terminal: true },
+  { key: 'Request',          label: 'Request',          displayLabel: 'Request',          rank: STAGE_RANK['Request'],          terminal: false },
+  { key: 'Estimate',         label: 'Estimate',         displayLabel: 'Estimate',         rank: STAGE_RANK['Estimate'],         terminal: false },
+  { key: 'Job in Progress',  label: 'Job in Progress',  displayLabel: 'Job in progress',  rank: STAGE_RANK['Job in Progress'],  terminal: false },
+  { key: 'Final Processing', label: 'Final Processing', displayLabel: 'Final processing', rank: STAGE_RANK['Final Processing'], terminal: false },
+  { key: 'Closed Won',       label: 'Closed Won',       displayLabel: 'Closed won',       rank: STAGE_RANK['Closed Won'],       terminal: true },
+  { key: 'Closed Lost',      label: 'Closed Lost',      displayLabel: 'Closed lost',      rank: STAGE_RANK['Closed Lost'],      terminal: true },
 ]
+
+const DISPLAY_LABELS = Object.fromEntries(ENGAGEMENT_STAGES.map(s => [s.key, s.displayLabel]))
+export function stageDisplayLabel(stageKey) {
+  return DISPLAY_LABELS[stageKey] || stageKey
+}
 
 // Client status machine (§2) — Bee Hub's own, fully decoupled from Jobber.
 export const CLIENT_STATUSES = [
@@ -73,12 +81,17 @@ export const CHIP_STYLES = {
   'Closed Won':       GRAY,   // closed
   'Closed Lost':      GRAY,   // closed
 
-  // client statuses
-  'New':        TEAL,
-  'Attempting': BLUE,
-  'Nurturing':  AMBER,
-  'Active':     PURPLE,  // relationship family (locked directory mockup)
-  'Past':       GRAY,
+  // client statuses — BOTH vocabularies resolve (status keys AND display
+  // labels), so no call site can silently miss into the gray fallback.
+  'New':             TEAL,
+  'Attempting':      BLUE,
+  'Nurturing':       AMBER,
+  'Active':          PURPLE,  // relationship family (locked directory mockup)
+  'Past':            GRAY,
+  'Active client':   PURPLE,
+  'Past client':     GRAY,
+  'no_contact':      QUIET_GRAY,
+  'No contact info': QUIET_GRAY,
 
   // within-stage states (card chips)
   sent:              BLUE,    // quote out, no answer yet — neutral default
