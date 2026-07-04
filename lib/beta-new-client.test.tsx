@@ -184,8 +184,8 @@ describe('clientMatch — the authoritative match read', () => {
 
   it('builds .or() ONLY from keys that exist — never null/empty keys', () => {
     expect(buildLeadMatchOr({ email: 'a@b.com', phone: '' })).toBe('email.eq."a@b.com"')
-    expect(buildLeadMatchOr({ email: '', phone: '(561) 555-0199' })).toBe('phone.eq."5615550199"')
-    expect(buildLeadMatchOr({ email: ' A@B.com ', phone: '561-555-0199' })).toBe('email.eq."a@b.com",phone.eq."5615550199"')
+    expect(buildLeadMatchOr({ email: '', phone: '(561) 555-0199' })).toBe('phone_normalized.eq."5615550199"')
+    expect(buildLeadMatchOr({ email: ' A@B.com ', phone: '561-555-0199' })).toBe('email.eq."a@b.com",phone_normalized.eq."5615550199"')
     expect(buildLeadMatchOr({})).toBeNull()
     expect(String(buildLeadMatchOr({ email: 'a@b.com' }))).not.toContain('null')
   })
@@ -197,7 +197,7 @@ describe('clientMatch — the authoritative match read', () => {
     expect(q.calls.eq || []).toEqual([]) // no .eq('is_junk', false), no stray filters
     expect(q.calls.range).toEqual([[0, 999]]) // 1000-row silent-truncation habit
     expect(q.calls.select[0][0]).toContain('id') // explicit columns, not bare
-    expect(q.calls.or[0][0]).toBe('email.eq."a@b.com",phone.eq."5615550199"')
+    expect(q.calls.or[0][0]).toBe('email.eq."a@b.com",phone_normalized.eq."5615550199"')
   })
 
   it('short-circuits to [] with no usable key — the query never runs', async () => {

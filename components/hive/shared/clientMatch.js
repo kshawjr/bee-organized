@@ -14,13 +14,16 @@
 //                        Takes the supabase client as an ARG (never
 //                        imports one — this module stays pure per §8.5).
 //
-// PHONE-STORAGE NOTE (2026-07-04 introspection): leads.phone is mixed
-// free-text — ~2/3 of rows store bare digits, ~1/3 store formatted
-// ("###-###-####" etc.). There is no phone_normalized column, so the
-// DB-side phone.eq can only hit the digits-only rows; the formatted
-// third is covered by matchPeople's JS normalization over the loaded
-// set. A phone_normalized column + backfill closes that gap — tracked,
-// not built here.
+// PHONE-STORAGE NOTE (2026-07-04, updated same day post-migration):
+// leads.phone is mixed free-text — bare digits, formatted
+// ("###-###-####"), some with inline text ("3039949176 (stuart)").
+// leads.phone_normalized now exists: a GENERATED digits-only column,
+// indexed — the DB-side gate matches phone_normalized.eq and covers
+// every storage shape; never match raw phone DB-side. Because the
+// column is generated, NEVER include phone_normalized in an insert or
+// update payload — Postgres computes it and an explicit write errors.
+// matchPeople() still normalizes in JS: the loaded people prop carries
+// raw phone.
 //
 // Standing bug patterns applied (do not "simplify" these away):
 //   - .or() built ONLY from keys that exist — never email.eq.null or
@@ -91,14 +94,16 @@ export function matchPeople(people, query) {
 
 // The .or() filter string for the authoritative DB gate — built ONLY
 // from keys that actually exist. Returns null when there is no usable
-// key (never emit email.eq.null / phone.eq.). Values are quoted so a
-// stray comma or paren can't break the PostgREST filter grammar.
+// key (never emit email.eq.null / phone_normalized.eq.). Values are
+// quoted so a stray comma or paren can't break the PostgREST filter
+// grammar. Phone matches against phone_normalized (generated,
+// digits-only) so every storage shape of leads.phone is covered.
 export function buildLeadMatchOr({ email, phone } = {}) {
   const parts = []
   const e = normalizeEmail(email)
   const d = normalizePhone(phone)
   if (e) parts.push(`email.eq."${e.replace(/"/g, '')}"`)
-  if (d) parts.push(`phone.eq."${d}"`)
+  if (d) parts.push(`phone_normalized.eq."${d}"`)
   return parts.length ? parts.join(',') : null
 }
 
@@ -111,7 +116,7 @@ export async function queryLeadMatches(supabase, { email, phone, locationUuid } 
   if (!orFilter) return []
   let q = supabase
     .from('leads')
-    .select('id, name, email, phone, is_junk, location_uuid, created_at')
+    .select('id, name, email, phone, phone_normalized, address, city, state, zip, project_type, stage, is_junk, location_uuid, created_at')
     .or(orFilter)
     .not('is_junk', 'is', true)
     .range(0, 999)
@@ -119,4 +124,43 @@ export async function queryLeadMatches(supabase, { email, phone, locationUuid } 
   const { data, error } = await q
   if (error) throw new Error(error.message || 'lead match query failed')
   return data || []
+}
+
+// Confidence-tier evaluation for the NO-HUMAN-PRESENT intake path
+// (webform). `rows` are queryLeadMatches() results (they carry
+// phone_normalized). Tiers:
+//   solid       — a strong key (email or phone_normalized) resolves to
+//                 EXACTLY ONE lead → safe to auto-merge.
+//   in_question — a strong key matches more than one lead, OR the two
+//                 keys point at different leads (conflicting signal).
+//                 Never auto-merge; the caller creates + flags.
+//   none        — no strong-key hit. Name matching is the CALLER's
+//                 follow-up and can only ever reach in_question.
+export function classifyLeadMatches(rows, { email, phone } = {}) {
+  const e = normalizeEmail(email)
+  const d = normalizePhone(phone)
+  const emailIds = new Set()
+  const phoneIds = new Set()
+  const byId = new Map()
+  for (const r of rows || []) {
+    if (!r?.id) continue
+    byId.set(r.id, r)
+    // Re-verify per key: guards against a NULL/empty stored value ever
+    // reading as a hit, and attributes WHICH key matched.
+    if (e && normalizeEmail(r.email) === e) emailIds.add(r.id)
+    if (d && (r.phone_normalized || '') === d) phoneIds.add(r.id)
+  }
+  const union = new Set([...emailIds, ...phoneIds])
+  if (union.size === 0) return { tier: 'none' }
+  if (emailIds.size > 1 || phoneIds.size > 1) {
+    return { tier: 'in_question', matchIds: [...union], reason: 'strong_key_multiple' }
+  }
+  if (union.size > 1) {
+    return { tier: 'in_question', matchIds: [...union], reason: 'conflicting_keys' }
+  }
+  const id = [...union][0]
+  const matchedOn = emailIds.has(id)
+    ? (phoneIds.has(id) ? 'email+phone' : 'email')
+    : 'phone'
+  return { tier: 'solid', match: byId.get(id), matchedOn }
 }
