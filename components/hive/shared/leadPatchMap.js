@@ -19,6 +19,7 @@ const LEAD_COL_TO_PERSON_FIELD = {
   referred_by_kind: 'referredByKind',
   referred_by_id: 'referredBy',
   request_details: 'jobDetail',
+  snoozed_until: 'snoozeUntil', // Timeline's un-snooze → Inbox reflects live
 }
 
 export function leadColsToPersonFields(cols) {

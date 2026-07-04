@@ -248,6 +248,24 @@ export async function PATCH(
     return NextResponse.json({ error: updateError.message }, { status: 500 })
   }
 
+  // Stage-change trail — mirrors the leads-PATCH auto-log so the unified
+  // timeline can show engagement moves. GOING FORWARD ONLY: there is no
+  // stage-history table, so moves made before this landed are
+  // unrecoverable — never backfill. Insert failure is non-fatal (the
+  // stage change itself already committed).
+  if (stageChanged) {
+    const { hubUser } = auth
+    await supabaseService.from('touchpoints').insert({
+      lead_id: engagement.client_id,
+      location_uuid: engagement.location_uuid,
+      engagement_id: id,
+      kind: 'stage_change',
+      label: `Stage: ${engagement.stage} → ${patch.stage}`,
+      user_id: hubUser.id,
+      occurred_at: nowIso,
+    })
+  }
+
   // Close-out trail (doc §4/§5): log every terminal close to sync_log —
   // a Lost close on a client with ZERO other open engagements is the
   // moment they conceptually enter the nurture pool; step 5's activation

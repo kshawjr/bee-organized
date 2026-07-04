@@ -33,6 +33,7 @@ import EditableDesc from './EditableDesc'
 import BuzzDrawer from './BuzzDrawer'
 import OverlayShell from './OverlayShell'
 import ReferrerField from './shared/ReferrerField'
+import Timeline from './shared/Timeline'
 import useIsMobile from './shared/useIsMobile'
 
 const QUIET = '#f7f6f4'
@@ -396,6 +397,19 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             <button onClick={() => setShowAllTouches(true)} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>Show {touches.length - 3} more</button>
           )}
         </div>
+      </div>
+
+      {/* Timeline — the shared unified stream (upcoming + history),
+          lead-level: every engagement's records + drips + scheduled
+          sends in one rail. */}
+      <div>
+        <MicroLabel>Timeline</MicroLabel>
+        <Timeline
+          leadId={c.id}
+          locationUuid={c.location_uuid}
+          setToast={setToast}
+          onLeadPatched={onLeadPatched}
+        />
       </div>
 
       {/* Actions */}

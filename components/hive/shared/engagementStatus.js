@@ -136,6 +136,39 @@ export function formatInboxAge(created, nowMs = Date.now()) {
   return hint ? `${anchor} · ${hint}` : anchor
 }
 
+// The FUTURE mirror of formatInboxAgeParts — same adaptive tiers, phrased
+// forward ('in 45 min' / 'Jul 9 · in 5d') so the timeline's upcoming rows
+// read consistent with the Inbox's past rows:
+//   < 24h ahead        → relative only ('in 45 min' / 'in 3 hours')
+//   1–30d, this year   → 'Jul 9 · in 5d'
+//   > 30d, this year   → 'Aug 21' (relative past ~a month is low-value)
+//   later year         → 'Jan 12, 2027' (full date, no relative)
+export function formatInboxFutureParts(when, nowMs = Date.now()) {
+  const t = typeof when === 'number' ? when : (when ? new Date(when).getTime() : 0)
+  if (!t) return { anchor: '—', hint: null }
+  const ms = Math.max(0, t - nowMs)
+  if (ms < 86400000) {
+    const mins = Math.round(ms / 60000)
+    if (mins < 1) return { anchor: 'now', hint: null }
+    if (mins < 60) return { anchor: `in ${mins} min`, hint: null }
+    // clamp: 23.6h would otherwise round up to 'in 24 hours'
+    const hours = Math.min(23, Math.round(ms / 3600000))
+    return { anchor: `in ${hours} hour${hours === 1 ? '' : 's'}`, hint: null }
+  }
+  const d = new Date(t)
+  const dateShort = `${AGE_MONTHS[d.getMonth()]} ${d.getDate()}`
+  if (d.getFullYear() !== new Date(nowMs).getFullYear()) {
+    return { anchor: `${dateShort}, ${d.getFullYear()}`, hint: null }
+  }
+  const days = Math.round(ms / 86400000)
+  if (days <= 30) return { anchor: dateShort, hint: `in ${Math.max(1, days)}d` }
+  return { anchor: dateShort, hint: null }
+}
+export function formatInboxFuture(when, nowMs = Date.now()) {
+  const { anchor, hint } = formatInboxFutureParts(when, nowMs)
+  return hint ? `${anchor} · ${hint}` : anchor
+}
+
 // ── engagement filters (shared by board + list, owned by HiveShell) ──
 // Pure predicate so every consumer (both lenses + the shell's counter)
 // agrees by construction.

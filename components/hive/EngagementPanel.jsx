@@ -23,6 +23,7 @@ import NotesStream from './NotesStream'
 import OverlayShell from './OverlayShell'
 import MetaSelect from './MetaSelect'
 import ReferrerField from './shared/ReferrerField'
+import Timeline from './shared/Timeline'
 import { fmtTime } from './shared/engagementStatus'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
@@ -543,6 +544,22 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           outreach-scoping ruling stands). The composer posts a note;
           'Log touchpoint' below feeds the same stream. */}
       <NotesStream label="Notes · this engagement" items={activity} onPost={addEngagementNote} />
+
+      {/* Timeline — the shared unified stream, scoped to THIS engagement:
+          engagement-tagged rows filter to it, lead-level rows (drips,
+          snooze, scheduled sends) always show. */}
+      {client && eng && (
+        <div>
+          <MicroLabel>Timeline</MicroLabel>
+          <Timeline
+            leadId={client.id}
+            engagementId={engagementId}
+            locationUuid={eng.location_uuid}
+            setToast={setToast}
+            onLeadPatched={onLeadPatched}
+          />
+        </div>
+      )}
 
       {/* Money strip */}
       {eng && (

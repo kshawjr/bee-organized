@@ -26,6 +26,7 @@ import NotesStream from './NotesStream'
 import EditableDesc from './EditableDesc'
 import MetaSelect from './MetaSelect'
 import ReferrerField from './shared/ReferrerField'
+import Timeline from './shared/Timeline'
 import StatusChip from '@/components/ui/StatusChip'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
 import { fmtMoney } from './shared/engagementStatus'
@@ -258,6 +259,19 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
 
       {/* Notes — the SAME shared stream as the panel's */}
       <NotesStream label="Notes · this person" items={stream} onPost={addNote} nowMs={nowMs} />
+
+      {/* Timeline — the shared unified stream (upcoming + history). */}
+      {c && (
+        <div>
+          <MicroLabel>Timeline</MicroLabel>
+          <Timeline
+            leadId={person.id}
+            locationUuid={c.location_uuid}
+            setToast={setToast}
+            onLeadPatched={onLeadPatched}
+          />
+        </div>
+      )}
 
       {/* Actions — same button idiom as the panel's */}
       <div>
