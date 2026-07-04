@@ -22,6 +22,7 @@ import { deriveClientStatus } from './shared/clientStatus'
 import { relAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock } from '@/components/ui/icons'
+import ContactLine from './ContactLine'
 
 const TEAL_DARK = '#085041', TEAL_BG = '#E1F5EE'
 const BLUE_DARK = '#0C447C', BLUE_BG = '#E6F1FB'
@@ -163,11 +164,18 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
             </p>
           </div>
           {!isMobile && (
+            <ContactLine layout="inline" phone={p.phone} email={p.email}
+              style={{ flexShrink: 1, minWidth: 0, maxWidth: '340px', margin: '0 4px' }} />
+          )}
+          {!isMobile && (
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '8px' }} onClick={ev => ev.stopPropagation()}>
               {actions}
             </div>
           )}
         </div>
+        {isMobile && (
+          <ContactLine phone={p.phone} email={p.email} style={{ marginTop: '8px', paddingLeft: '44px' }} />
+        )}
         {isMobile && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }} onClick={ev => ev.stopPropagation()}>
             {actions}

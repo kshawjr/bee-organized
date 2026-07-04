@@ -27,7 +27,6 @@ import StatusChip from '@/components/ui/StatusChip'
 import Card from '@/components/ui/Card'
 import SectionHeader from '@/components/ui/SectionHeader'
 import { statusIconFor, IconChevronRight } from '@/components/ui/icons'
-import ContactLine from './ContactLine'
 
 const BOARD_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 
@@ -46,10 +45,9 @@ function EngagementCard({ e, onOpen, draggable, onDragStart }) {
           </p>
           {value && <span style={{ fontSize: '12px', fontWeight: 500, color: '#1a1a18', flexShrink: 0 }}>{value}</span>}
         </div>
-        <p style={{ fontSize: '11px', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: (e.client_phone || e.client_email) ? '3px' : '8px' }}>
+        <p style={{ fontSize: '11px', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: '8px' }}>
           {displayTitle(e)}
         </p>
-        <ContactLine phone={e.client_phone} email={e.client_email} style={{ marginBottom: '8px' }} />
         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
           {chip && <StatusChip label={chip.label} styleKey={chip.styleKey} icon={statusIconFor(chip.styleKey)} />}
           {e.repeat_count > 1 && (
