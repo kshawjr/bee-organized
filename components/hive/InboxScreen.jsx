@@ -23,8 +23,6 @@ import { relAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock } from '@/components/ui/icons'
 import ContactLine from './ContactLine'
-import EditableDesc from './EditableDesc'
-import BuzzDrawer from './BuzzDrawer'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
 
@@ -67,17 +65,12 @@ const sendBtn = {
   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
 }
 
-export default function InboxScreen({ people = [], engagements = [], locFilter = 'all', onOpenClient = () => {}, onSendToJobber = () => {}, setToast = () => {} }) {
+export default function InboxScreen({ people = [], engagements = [], locFilter = 'all', onOpenPerson = () => {}, onSendToJobber = () => {}, setToast = () => {} }) {
   const [busyId, setBusyId] = useState(null)
   // Local session overrides: a logged call moves the row to Attempting
   // immediately (the real touchpoint is written; derivation catches up
   // on next load).
   const [loggedIds, setLoggedIds] = useState(() => new Set())
-  const [descEdits, setDescEdits] = useState({})
-  // Buzz: one row's drawer open at a time; posted notes prepend locally
-  // (the people array is owned by the shell).
-  const [openBuzzId, setOpenBuzzId] = useState(null)
-  const [buzzAdds, setBuzzAdds] = useState({})
   const [sortRaw, setSort] = useStoredState('bee_hive_inbox_sort', { key: 'newest' })
   const inboxSort = INBOX_SORTS.some(o => o.key === sortRaw.key) ? sortRaw.key : 'newest'
   const [filters, setFilters, clearFilters] = useStoredState('bee_hive_inbox_filters', INBOX_FILTER_DEFAULTS)
@@ -162,48 +155,13 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     .filter(t => t.type === 'reach_out')
     .map(t => new Date(t.occurred_at || 0).getTime() || 0))
 
-  const detailNew = (p) =>
-    [(p.source || 'inquiry').toLowerCase(), `${relAge(new Date(p.created || 0).getTime(), nowMs)} ago`].join(' · ')
-
-  // Description (leads.request_details → people-mapper's jobDetail): the
-  // quote block under the identity cluster, editable in place. descEdits
-  // holds optimistic overrides — the people array is owned by the shell.
-  const leadDesc = (p) => (descEdits[p.id] !== undefined ? descEdits[p.id] : (p.jobDetail || ''))
-  async function saveDesc(p, text) {
-    const prev = leadDesc(p)
-    setDescEdits(m => ({ ...m, [p.id]: text }))
-    try {
-      const res = await fetch(`/api/leads/${p.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_details: text || null }),
-      })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
-      setToast({ kind: 'success', msg: 'Description saved' })
-    } catch (e) {
-      setDescEdits(m => ({ ...m, [p.id]: prev }))
-      setToast({ kind: 'error', msg: `Save failed: ${e.message}` })
-    }
-  }
-  // people-mapper's buzzNotes carry {id, text, user, created_at} — the
-  // drawer wants user_label; session posts prepend via buzzAdds.
-  const buzzOf = (p) => [
-    ...(buzzAdds[p.id] || []),
-    ...(p.buzzNotes || []).map(n => ({ id: n.id, text: n.text, user_label: n.user, created_at: n.created_at })),
-  ]
-  async function postBuzz(p, text) {
-    try {
-      const res = await fetch('/api/lead-notes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lead_id: p.id, kind: 'buzz', text }),
-      })
-      const j = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      setBuzzAdds(m => ({ ...m, [p.id]: [j.note, ...(m[p.id] || [])] }))
-    } catch (e) {
-      setToast({ kind: 'error', msg: `Buzz failed: ${e.message}` })
-    }
+  // Scan-clean rows: the webform snippet is DISPLAY-ONLY here (muted, in
+  // the detail line) — authoring lives on the PersonCard a click opens.
+  const detailNew = (p) => {
+    const bits = [(p.source || 'inquiry').toLowerCase(), `${relAge(new Date(p.created || 0).getTime(), nowMs)} ago`]
+    const snippet = (p.jobDetail || '').trim()
+    if (snippet) bits.push(`“${snippet.length > 60 ? snippet.slice(0, 57) + '…' : snippet}”`)
+    return bits.join(' · ')
   }
 
   const detailWorking = (p) => {
@@ -237,7 +195,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       </>
     )
     return (
-      <div className="bee-inbox-row" onClick={() => onOpenClient(p.id)}
+      <div className="bee-inbox-row" onClick={() => onOpenPerson(p)}
         style={{ padding: isMobile ? '12px 14px' : '13px 16px', borderBottom: '0.5px solid rgba(0,0,0,0.08)', cursor: 'pointer' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: family.bg, color: family.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 600, flexShrink: 0 }}>
@@ -251,23 +209,10 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
             <p style={{ fontSize: '11px', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>
               {pill === 'New' ? detailNew(p) : detailWorking(p)}
             </p>
-            {/* Identity cluster: name → detail → contact → description →
-                buzz (one card-like block; the action button stays cleanly
-                right). Rows are proto-engagements: the dashed add-slot
-                authors the description that arrives at founding. */}
+            {/* Identity cluster: name → detail → contact (one card-like
+                block; the action button stays cleanly right). Clicking
+                the row opens the PersonCard — the panel-shaped record. */}
             {!isMobile && <ContactLine phone={p.phone} email={p.email} style={{ marginTop: '3px' }} />}
-            {!isMobile && <EditableDesc text={leadDesc(p)} showEmpty onSave={t => saveDesc(p, t)} style={{ marginTop: '6px' }} />}
-            {!isMobile && (
-              <div style={{ marginTop: '6px' }}>
-                <BuzzDrawer
-                  notes={buzzOf(p)}
-                  open={openBuzzId === p.id}
-                  onToggle={() => setOpenBuzzId(cur => (cur === p.id ? null : p.id))}
-                  onPost={t => postBuzz(p, t)}
-                  nowMs={nowMs}
-                />
-              </div>
-            )}
           </div>
           {!isMobile && (
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '8px' }} onClick={ev => ev.stopPropagation()}>
@@ -277,18 +222,6 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
         </div>
         {isMobile && (
           <ContactLine phone={p.phone} email={p.email} style={{ marginTop: '8px', paddingLeft: '44px' }} />
-        )}
-        {isMobile && (
-          <div style={{ marginTop: '6px', paddingLeft: '44px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <EditableDesc text={leadDesc(p)} showEmpty onSave={t => saveDesc(p, t)} />
-            <BuzzDrawer
-              notes={buzzOf(p)}
-              open={openBuzzId === p.id}
-              onToggle={() => setOpenBuzzId(cur => (cur === p.id ? null : p.id))}
-              onPost={t => postBuzz(p, t)}
-              nowMs={nowMs}
-            />
-          </div>
         )}
         {isMobile && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }} onClick={ev => ev.stopPropagation()}>

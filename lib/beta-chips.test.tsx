@@ -12,6 +12,7 @@ import EngagementList from '@/components/hive/EngagementList'
 import EngagementPanel from '@/components/hive/EngagementPanel'
 import ClientDirectory from '@/components/hive/ClientDirectory'
 import InboxScreen from '@/components/hive/InboxScreen'
+import PersonCard from '@/components/hive/PersonCard'
 import { fmtTime, fmtShortTime } from '@/components/hive/shared/engagementStatus'
 
 const now = Date.now()
@@ -79,6 +80,7 @@ function renderAll() {
   ))
   html.push(renderToString(<ClientDirectory people={PEOPLE as any} engagements={ENGAGEMENTS as any} />))
   html.push(renderToString(<InboxScreen people={PEOPLE as any} engagements={ENGAGEMENTS as any} />))
+  html.push(renderToString(<PersonCard person={PEOPLE[0] as any} onClose={() => {}} />))
   return html.join('\n')
 }
 

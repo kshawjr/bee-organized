@@ -19,6 +19,7 @@ import EngagementPanel from './EngagementPanel'
 import ClientDirectory from './ClientDirectory'
 import InboxScreen from './InboxScreen'
 import ClientProfile from './ClientProfile'
+import PersonCard from './PersonCard'
 import { deriveClientStatus } from './shared/clientStatus'
 import { isTerminal } from './shared/stageConfig'
 import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount } from './shared/engagementStatus'
@@ -109,6 +110,7 @@ export default function HiveShell({
   // tapping an engagement card on the profile swaps back. rowPatches
   // mirror panel changes (title/stage) onto the board without a reload.
   // overlay: null | { type:'engagement', engagement } | { type:'client', clientId }
+  //        | { type:'person', person }  ← pre-engagement card (Inbox rows)
   const [overlay, setOverlay] = useState(null)
   const [rowPatches, setRowPatches] = useState({})
 
@@ -118,6 +120,7 @@ export default function HiveShell({
   const [workFilters, setWorkFilters, clearWorkFilters] = useStoredState('bee_hive_list_filters', ENGAGEMENT_FILTER_DEFAULTS)
   const openEngagement = (e) => setOverlay({ type: 'engagement', engagement: e })
   const openClient = (clientId) => setOverlay({ type: 'client', clientId })
+  const openPerson = (person) => setOverlay({ type: 'person', person })
 
   const patched = Object.keys(rowPatches).length === 0
     ? engagements
@@ -173,7 +176,7 @@ export default function HiveShell({
           people={people}
           engagements={patched}
           locFilter={locFilter}
-          onOpenClient={openClient}
+          onOpenPerson={openPerson}
           onSendToJobber={onSendToJobber}
           setToast={setToast}
         />
@@ -214,6 +217,14 @@ export default function HiveShell({
           onClose={() => setOverlay(null)}
           onOpenClient={openClient}
           onChanged={(id, patch) => setRowPatches(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))}
+          setToast={setToast}
+        />
+      )}
+      {overlay?.type === 'person' && (
+        <PersonCard
+          person={overlay.person}
+          onClose={() => setOverlay(null)}
+          onSendToJobber={onSendToJobber}
           setToast={setToast}
         />
       )}

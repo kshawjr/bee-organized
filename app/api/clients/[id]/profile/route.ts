@@ -49,13 +49,32 @@ export async function GET(
     return NextResponse.json({ error: 'forbidden_wrong_location' }, { status: 403 })
   }
 
-  const [contactsRes, engagementsRes, touchesRes, notesRes, locRes] = await Promise.all([
+  const [contactsRes, engagementsRes, touchesRes, notesRes, jobNotesRes, locRes] = await Promise.all([
     supabaseService.from('lead_contacts').select('id, name, role, phone, email').eq('lead_id', id).order('created_at', { ascending: true }),
     supabaseService.from('engagements').select('id, title, description, stage, founded_by, created_at, stage_entered_at, closed_at, closed_reason, nurture_started_at, total_invoiced, total_paid, balance_owing').eq('client_id', id).order('created_at', { ascending: false }),
-    supabaseService.from('touchpoints').select('id, kind, method, label, notes, occurred_at, engagement_id').eq('lead_id', id).order('occurred_at', { ascending: false }).limit(50),
+    supabaseService.from('touchpoints').select('id, kind, method, label, notes, occurred_at, engagement_id, user_id').eq('lead_id', id).order('occurred_at', { ascending: false }).limit(50),
     supabaseService.from('lead_notes').select('id, kind, text, user_label, created_at').eq('lead_id', id).eq('kind', 'buzz').order('created_at', { ascending: false }).limit(50),
+    // CLIENT-level notes (kind='job', no engagement) — the pre-engagement
+    // PersonCard's notes stream. Engagement notes live on the engagement.
+    supabaseService.from('lead_notes').select('id, kind, text, user_label, created_at').eq('lead_id', id).eq('kind', 'job').is('engagement_id', null).order('created_at', { ascending: false }).limit(50),
     supabaseService.from('locations').select('name').eq('id', lead.location_uuid).maybeSingle(),
   ])
+
+  // touchpoints carry user_id but no user_label — resolve author names
+  // (same as the engagement GET) so note/touch streams can say who.
+  const touchRows = touchesRes.data ?? []
+  const authorIds = Array.from(new Set(touchRows.map(t => t.user_id).filter(Boolean)))
+  const authorById: Record<string, string> = {}
+  if (authorIds.length > 0) {
+    const { data: authors } = await supabaseService
+      .from('hub_users')
+      .select('id, full_name, first_name, last_name')
+      .in('id', authorIds)
+    for (const a of authors ?? []) {
+      authorById[a.id] = a.full_name || [a.first_name, a.last_name].filter(Boolean).join(' ').trim() || '—'
+    }
+  }
+  const touchpoints = touchRows.map(t => ({ ...t, user_label: t.user_id ? (authorById[t.user_id] ?? null) : null }))
 
   const engagements = engagementsRes.data ?? []
   const openIds = engagements.filter(e => isOpen(e.stage)).map(e => e.id)
@@ -99,8 +118,9 @@ export async function GET(
     client: { ...lead, location_name: locRes.data?.name ?? null },
     contacts: contactsRes.data ?? [],
     engagements: withChildren,
-    touchpoints: touchesRes.data ?? [],
+    touchpoints,
     buzz_notes: notesRes.data ?? [],
+    job_notes: jobNotesRes.data ?? [],
     aggregates: {
       lifetime_paid: lifetimePaid,
       open_pipeline: openPipeline,

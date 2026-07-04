@@ -1,0 +1,48 @@
+// components/hive/OverlayShell.jsx
+// ─────────────────────────────────────────────────────────────
+// THE overlay container: desktop centered modal (740px, r16, close X) /
+// mobile bottom sheet (drag handle + swipe-down dismiss). Extracted from
+// EngagementPanel/ClientProfile so PersonCard and any future overlay
+// render the identical chrome. Beta chunk only.
+// ─────────────────────────────────────────────────────────────
+'use client'
+
+import React, { useRef } from 'react'
+import { IconX } from '@/components/ui/icons'
+
+export default function OverlayShell({ isMobile, onClose, children }) {
+  const touchY = useRef(null)
+  if (isMobile) {
+    return (
+      <div style={{ position: 'fixed', inset: 0, zIndex: 10005, display: 'flex', alignItems: 'flex-end', background: 'rgba(26,26,24,0.35)' }} onClick={onClose}>
+        <div onClick={e => e.stopPropagation()}
+          style={{ background: '#fff', width: '100%', maxHeight: '88vh', overflowY: 'auto', borderRadius: '20px 20px 0 0', boxShadow: '0 -8px 40px rgba(26,26,24,0.2)' }}>
+          <div
+            onTouchStart={e => { touchY.current = e.touches[0].clientY }}
+            onTouchEnd={e => {
+              if (touchY.current == null) return
+              const dy = e.changedTouches[0].clientY - touchY.current
+              touchY.current = null
+              if (dy > 60) onClose()
+            }}
+            style={{ padding: '10px 0 8px', cursor: 'grab' }}
+          >
+            <div style={{ width: '36px', height: '4px', background: 'rgba(0,0,0,0.15)', borderRadius: '2px', margin: '0 auto' }} />
+          </div>
+          {children}
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 10005, background: 'rgba(26,26,24,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ width: '100%', maxWidth: '740px', maxHeight: '88vh', overflowY: 'auto', background: '#fff', borderRadius: '16px', boxShadow: '0 24px 80px rgba(26,26,24,0.25)' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '14px 16px 4px' }}>
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: '#b5b3ac', cursor: 'pointer', lineHeight: 1, padding: '2px 4px' }}><IconX size={16} /></button>
+        </div>
+        {children}
+      </div>
+    </div>
+  )
+}

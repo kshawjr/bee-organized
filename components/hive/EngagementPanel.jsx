@@ -12,14 +12,15 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 import { ENGAGEMENT_STAGES, STAGE_RANK, isTerminal, stageDisplayLabel, ACCENT_BLUE } from './shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
-import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconMail, IconExternalLink, IconX, IconCalendar } from '@/components/ui/icons'
+import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconExternalLink, IconCalendar } from '@/components/ui/icons'
 import MetricCard from '@/components/ui/MetricCard'
-import ContactLine from './ContactLine'
-import BuzzDrawer from './BuzzDrawer'
-import { fmtTime, relAge } from './shared/engagementStatus'
+import ClientStrip from './ClientStrip'
+import NotesStream from './NotesStream'
+import OverlayShell from './OverlayShell'
+import { fmtTime } from './shared/engagementStatus'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
 const fmtDate = (d) => {
@@ -28,10 +29,6 @@ const fmtDate = (d) => {
   if (isNaN(dt)) return null
   return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
-const initialsOf = (name) =>
-  (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?'
-
-const METHOD_LABEL = { call: 'Call', sms: 'Text', email: 'Email', in_person: 'In person', call_prompt: 'Call prompt', system: 'System' }
 
 // Quiet light surface used by the client strip + money cards (mockup).
 const QUIET = '#f7f6f4'
@@ -126,7 +123,6 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
   const [descEditing, setDescEditing] = useState(false)
   const [descDraft, setDescDraft] = useState('')
   const [descExpanded, setDescExpanded] = useState(false)
-  const [noteText, setNoteText] = useState('')
   const [buzzOpen, setBuzzOpen] = useState(false)
   const [touchOpen, setTouchOpen] = useState(false)
   const [touchMethod, setTouchMethod] = useState('call')
@@ -136,7 +132,6 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
   const [closeAs, setCloseAs] = useState('Closed Lost')
   const [closeReason, setCloseReason] = useState('lost_no_response')
   const [closeNote, setCloseNote] = useState('')
-  const touchY = useRef(null)
 
   // SSR-safe mobile detection (BeeHub pattern).
   const [windowWidth, setWindowWidth] = useState(0)
@@ -223,12 +218,11 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
     }
   }
 
-  // Engagement note (kind='job', anchored to THIS engagement). Buzz is
-  // client-level and lives in the strip's bee drawer + ClientProfile.
-  async function addEngagementNote() {
-    const text = noteText.trim()
+  // Engagement note (kind='job', anchored to THIS engagement) — posted
+  // from the shared NotesStream composer. Buzz is client-level and lives
+  // in the strip's bee drawer + ClientProfile.
+  async function addEngagementNote(text) {
     if (!text || !client) return
-    setBusy(true)
     try {
       const res = await fetch('/api/lead-notes', {
         method: 'POST',
@@ -237,12 +231,10 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
       })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      setNoteText('')
       setData(d => d ? { ...d, children: { ...d.children, notes: [j.note, ...(d.children.notes || [])] } } : d)
-      setToast({ kind: 'success', msg: 'Note added' })
     } catch (e) {
       setToast({ kind: 'error', msg: `Note failed: ${e.message}` })
-    } finally { setBusy(false) }
+    }
   }
 
   async function logTouchpoint() {
@@ -410,44 +402,28 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
         </div>
       )}
 
-      {/* Client strip — quiet card, no border */}
+      {/* Client strip — the shared person-block (avatar + meta + buzz
+          drawer + contact). 'Active client' is definitionally true here —
+          the panel opens on OPEN engagements (§2: ≥1 open = Active). */}
       {client && (
-        <div style={{ padding: '10px 12px', background: QUIET, borderRadius: '8px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#EEEDFE', color: '#3C3489', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 600, flexShrink: 0 }}>
-              {initialsOf(client.name)}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ fontSize: '13px', fontWeight: 500, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{client.name}</span>
-                {/* Client status: 'Active client' is definitionally true here —
-                    the panel opens on OPEN engagements (§2: ≥1 open = Active).
-                    Real stored/derived client_status is a later step-4 item. */}
-                <StatusChip label="Active client" styleKey="Active" />
-              </p>
-              <p style={{ fontSize: '11px', color: '#8a8a84', marginTop: '1px' }}>
-                {client.prior_engagements} prior engagement{client.prior_engagements === 1 ? '' : 's'} · {fmtMoney(client.lifetime_paid)} lifetime
-                {client.other_open > 0 && ` · ${client.other_open} other open`}
-              </p>
-              {/* Buzz rides with the PERSON — the shared bee drawer (read +
-                  add in place, no navigation). Client-level, identical on
-                  every engagement of this client. */}
-              <div style={{ marginTop: '3px' }}>
-                <BuzzDrawer
-                  notes={client.buzz || []}
-                  open={buzzOpen}
-                  onToggle={() => setBuzzOpen(v => !v)}
-                  onPost={addBuzz}
-                  onAllBuzz={() => onOpenClient(client.id)}
-                />
-              </div>
-              <ContactLine phone={client.phone} email={client.email} layout={isMobile ? 'stack' : 'inline'} style={{ marginTop: '3px' }} />
-            </div>
+        <ClientStrip
+          name={client.name}
+          chip={{ label: 'Active client', styleKey: 'Active' }}
+          meta={`${client.prior_engagements} prior engagement${client.prior_engagements === 1 ? '' : 's'} · ${fmtMoney(client.lifetime_paid)} lifetime${client.other_open > 0 ? ` · ${client.other_open} other open` : ''}`}
+          phone={client.phone}
+          email={client.email}
+          buzz={client.buzz || []}
+          buzzOpen={buzzOpen}
+          onToggleBuzz={() => setBuzzOpen(v => !v)}
+          onPostBuzz={addBuzz}
+          onAllBuzz={() => onOpenClient(client.id)}
+          isMobile={isMobile}
+          action={
             <button onClick={() => onOpenClient(client.id)} style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', padding: 0, flexShrink: 0 }}>
               View client →
             </button>
-          </div>
-        </div>
+          }
+        />
       )}
 
       {/* Stage progress */}
@@ -511,40 +487,10 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
         </div>
       </div>
 
-      {/* Notes — notes AND touchpoints for THIS engagement, one merged
-          stream newest-first (outreach-scoping ruling stands; touchpoints
-          keep their method-icon anatomy). The composer posts a note;
+      {/* Notes — the shared stream (notes + touchpoints interleaved;
+          outreach-scoping ruling stands). The composer posts a note;
           'Log touchpoint' below feeds the same stream. */}
-      <div>
-        <MicroLabel>Notes · this engagement</MicroLabel>
-        <div style={{ display: 'flex', marginBottom: activity.length ? '10px' : 0 }}>
-          <input value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Add a note…"
-            onKeyDown={e => { if (e.key === 'Enter') addEngagementNote() }}
-            style={{ flex: 1, padding: '8px 12px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          {activity.map(a => a.t === 'note' ? (
-            <p key={`n-${a.id}`} style={{ fontSize: '12px', color: '#1a1a18', lineHeight: 1.45 }}>
-              {a.text}
-              <span style={{ fontSize: '10px', color: '#b5b3ac', marginLeft: '6px', whiteSpace: 'nowrap' }}>
-                {a.user_label || '—'} · {relAge(new Date(a.ts).getTime())} ago
-              </span>
-            </p>
-          ) : (
-            <p key={`t-${a.id}`} style={{ fontSize: '12px', color: '#1a1a18', lineHeight: 1.45, display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-              <span style={{ color: '#8a8a84', display: 'inline-flex', flexShrink: 0, alignSelf: 'center' }}>
-                {a.method === 'email' ? <IconMail size={12} /> : <IconPhone size={12} />}
-              </span>
-              <span style={{ minWidth: 0 }}>
-                {METHOD_LABEL[a.method] || a.label || 'Reach-out'}{a.notes ? ` — ${a.notes}` : ''}
-                <span style={{ fontSize: '10px', color: '#b5b3ac', marginLeft: '6px', whiteSpace: 'nowrap' }}>
-                  {a.user_label || '—'} · {relAge(new Date(a.ts).getTime())} ago
-                </span>
-              </span>
-            </p>
-          ))}
-        </div>
-      </div>
+      <NotesStream label="Notes · this engagement" items={activity} onPost={addEngagementNote} />
 
       {/* Money strip */}
       {eng && (
@@ -654,42 +600,5 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
     </div>
   )
 
-  // ── containers: desktop centered modal / mobile bottom sheet ──────
-  if (isMobile) {
-    return (
-      <div style={{ position: 'fixed', inset: 0, zIndex: 10005, display: 'flex', alignItems: 'flex-end', background: 'rgba(26,26,24,0.35)' }} onClick={onClose}>
-        <div
-          onClick={e => e.stopPropagation()}
-          style={{ background: '#fff', width: '100%', maxHeight: '88vh', overflowY: 'auto', borderRadius: '20px 20px 0 0', boxShadow: '0 -8px 40px rgba(26,26,24,0.2)' }}
-        >
-          <div
-            onTouchStart={e => { touchY.current = e.touches[0].clientY }}
-            onTouchEnd={e => {
-              if (touchY.current == null) return
-              const dy = e.changedTouches[0].clientY - touchY.current
-              touchY.current = null
-              if (dy > 60) onClose()
-            }}
-            style={{ padding: '10px 0 8px', cursor: 'grab' }}
-          >
-            <div style={{ width: '36px', height: '4px', background: 'rgba(0,0,0,0.15)', borderRadius: '2px', margin: '0 auto' }} />
-          </div>
-          {body}
-        </div>
-      </div>
-    )
-  }
-  return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 10005, background: 'rgba(26,26,24,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }} onClick={onClose}>
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{ width: '100%', maxWidth: '740px', maxHeight: '88vh', overflowY: 'auto', background: '#fff', borderRadius: '16px', boxShadow: '0 24px 80px rgba(26,26,24,0.25)' }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '14px 16px 4px' }}>
-          <button onClick={onClose} style={{ border: 'none', background: 'transparent', fontSize: '18px', color: '#b5b3ac', cursor: 'pointer', lineHeight: 1, padding: '2px 4px' }}><IconX size={16} /></button>
-        </div>
-        {body}
-      </div>
-    </div>
-  )
+  return <OverlayShell isMobile={isMobile} onClose={onClose}>{body}</OverlayShell>
 }

@@ -17,7 +17,7 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 import { CHIP_STYLES, stageDisplayLabel, ACCENT_BLUE } from './shared/stageConfig'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
 import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, relAge } from './shared/engagementStatus'
@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/icons'
 import EditableDesc from './EditableDesc'
 import BuzzDrawer from './BuzzDrawer'
+import OverlayShell from './OverlayShell'
 
 const QUIET = '#f7f6f4'
 const SEND_GREEN = '#0F6E56'
@@ -75,7 +76,6 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
   const [touchMethod, setTouchMethod] = useState('call')
   const [touchNote, setTouchNote] = useState('')
   const [busy, setBusy] = useState(false)
-  const touchY = useRef(null)
   const nowMs = Date.now()
 
   const [windowWidth, setWindowWidth] = useState(0)
@@ -433,37 +433,5 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
     </p>
   )
 
-  if (isMobile) {
-    return (
-      <div style={{ position: 'fixed', inset: 0, zIndex: 10005, display: 'flex', alignItems: 'flex-end', background: 'rgba(26,26,24,0.35)' }} onClick={onClose}>
-        <div onClick={e => e.stopPropagation()}
-          style={{ background: '#fff', width: '100%', maxHeight: '88vh', overflowY: 'auto', borderRadius: '20px 20px 0 0', boxShadow: '0 -8px 40px rgba(26,26,24,0.2)' }}>
-          <div
-            onTouchStart={e => { touchY.current = e.touches[0].clientY }}
-            onTouchEnd={e => {
-              if (touchY.current == null) return
-              const dy = e.changedTouches[0].clientY - touchY.current
-              touchY.current = null
-              if (dy > 60) onClose()
-            }}
-            style={{ padding: '10px 0 8px', cursor: 'grab' }}
-          >
-            <div style={{ width: '36px', height: '4px', background: 'rgba(0,0,0,0.15)', borderRadius: '2px', margin: '0 auto' }} />
-          </div>
-          {loading}{errBlock}{body}
-        </div>
-      </div>
-    )
-  }
-  return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 10005, background: 'rgba(26,26,24,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()}
-        style={{ width: '100%', maxWidth: '740px', maxHeight: '88vh', overflowY: 'auto', background: '#fff', borderRadius: '16px', boxShadow: '0 24px 80px rgba(26,26,24,0.25)' }}>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '14px 16px 4px' }}>
-          <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: '#b5b3ac', cursor: 'pointer', lineHeight: 1, padding: '2px 4px' }}><IconX size={16} /></button>
-        </div>
-        {loading}{errBlock}{body}
-      </div>
-    </div>
-  )
+  return <OverlayShell isMobile={isMobile} onClose={onClose}>{loading}{errBlock}{body}</OverlayShell>
 }
