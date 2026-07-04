@@ -11,6 +11,11 @@ import { canSeeBetaBoard } from "@/components/hive/shared/betaGate"
 // Rule recorded in docs/hive-phase1-engagements.md §8.5. HiveShell owns
 // the board (and future beta screens) inside that one chunk.
 const HiveShell = dynamic(() => import("@/components/hive/HiveShell"), { ssr: false, loading: () => null })
+// Sidebar-bottom identity + scope control (replaces the top super-admin
+// strip + footer location switcher + footer avatar/sign-out block).
+// Beta-chunk module like HiveShell — receives identity/scope/handlers
+// as props passed DOWN; it never reaches into this file's state.
+const IdentityScopeControl = dynamic(() => import("@/components/hive/IdentityScopeControl"), { ssr: false, loading: () => null })
 import {
   DEFAULT_TIER_PRICES,
   getSubscriptionDisplay,
@@ -31330,57 +31335,18 @@ if (Array.isArray(initialPeople)) return
       : []),
   ]
 
-  // Heights — demo bar only renders for super_admin AND only on desktop. On
-  // mobile the super_admin "View as / Exit" controls live inside
-  // MobileProfileMenu instead, freeing 32px of vertical real estate.
-  const DEMO_BAR_H  = (role === 'super_admin' && !isMobile) ? 32 : 0
+  // Heights — the old top demo/super-admin strip is GONE (its identity,
+  // View-as, and badge moved into the sidebar-bottom IdentityScopeControl);
+  // the 32px it held is reclaimed by the content below.
   // Location banner is MOBILE-ONLY since the picker moved to the sidebar
   // footer on desktop (sidebar doesn't exist on mobile, so the banner stays
-  // there). Same desktop/mobile split pattern as DEMO_BAR_H above — every
-  // TOTAL_TOP-derived offset collapses automatically on desktop.
+  // there). Every TOTAL_TOP-derived offset collapses automatically on desktop.
   const LOC_BAR_H   = (isElevated && isMobile) ? 36 : 0
   // MobileTopBar (hamburger + profile) only shows on mobile and pushes everything
   // below it down by 48px. TOTAL_TOP threads through every sticky/padding calc.
   const MOBILE_NAV_H = isMobile ? 48 : 0
-  const TOTAL_TOP   = DEMO_BAR_H + LOC_BAR_H + MOBILE_NAV_H
+  const TOTAL_TOP   = LOC_BAR_H + MOBILE_NAV_H
 
-  // ── Demo role switcher bar (top) ───────────────────────────────────────────
-  // Only renders for super_admin — real franchise owners and corporate users
-  // should never see "Kevin Shaw / View as" controls.
-  const DemoBar = () => {
-    if (role !== 'super_admin') return null
-    if (isMobile) return null
-    return (
-    <div style={{ position:'fixed', top:0, left:0, right:0, background:'#0a0a0a', borderBottom:'1px solid rgba(255,255,255,0.08)', zIndex:10001, display:'flex', flexDirection:'column' }}>
-      <div style={{ height:'32px', display:'flex', alignItems:'center', padding:'0 10px', gap:'6px' }}>
-        {/* Me - Kevin Shaw super admin */}
-        <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
-          <div style={{ width:'20px', height:'20px', borderRadius:'50%', background:'linear-gradient(135deg,#d4a046,#b07a20)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'9px', fontWeight:700, color:'white' }}>KS</div>
-          <span style={{ fontSize:'10px', fontWeight:600, color:'white' }}>Kevin Shaw</span>
-          <span style={{ fontSize:'9px', color:'rgba(212,160,70,0.7)', background:'rgba(212,160,70,0.1)', padding:'1px 6px', borderRadius:'4px' }}>Super Admin</span>
-        </div>
-
-        <div style={{ flex:1 }} />
-
-        {/* View as user control */}
-        {viewAsUser ? (
-          <div style={{ display:'flex', alignItems:'center', gap:'4px', marginLeft:'auto', flexShrink:0 }}>
-            <span style={{ fontSize:'9px', fontWeight:700, color:FRANCHISE_ROLES.find(r=>r.key===viewAsUser.role)?.color||'#818cf8', background:'rgba(255,255,255,0.08)', padding:'2px 7px', borderRadius:'4px', maxWidth:'80px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-              👁 {viewAsUser.name.split(' ')[0]}
-            </span>
-            <button onClick={()=>setViewAsTarget(true)} style={{ padding:'3px 8px', borderRadius:'4px', border:'1px solid rgba(255,255,255,0.15)', background:'transparent', cursor:'pointer', fontFamily:'inherit', fontSize:'9px', color:'rgba(255,255,255,0.5)', flexShrink:0 }}>Switch</button>
-            <button onClick={()=>{ setViewAsUser(null); setRole('super_admin'); setLocFilter('all') }} style={{ padding:'3px 8px', borderRadius:'4px', border:'none', background:'rgba(239,68,68,0.2)', cursor:'pointer', fontFamily:'inherit', fontSize:'9px', color:'#fca5a5', flexShrink:0 }}>Exit</button>
-          </div>
-        ) : (
-          <button onClick={()=>{ setRole('franchise'); setViewAsTarget(true) }} style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:'4px', padding:'3px 9px', borderRadius:'5px', border:'1px solid rgba(168,201,196,0.25)', background:'transparent', cursor:'pointer', fontFamily:'inherit', fontSize:'9px', color:'rgba(168,201,196,0.7)', flexShrink:0 }}>
-            👁 View as
-          </button>
-        )}
-
-      </div>
-    </div>
-    )
-  }
   // ── Location banner (MOBILE-ONLY) ──────────────────────────────────────────
   // Desktop elevated users pick locations from the sidebar footer control;
   // mobile keeps this banner (no sidebar exists below 768px).
@@ -31388,7 +31354,7 @@ if (Array.isArray(initialPeople)) return
     if (!isElevated || !isMobile) return null
     const sc = selectedLoc ? (CRM_STATUS_CONF[locStatuses[selectedLoc.id]||selectedLoc.crmStatus]) : null
     return (
-      <div className="bee-loc-banner" style={{ position:'fixed', top:`${DEMO_BAR_H}px`, left:0, right:0, height:'36px', background:'#0f1f1c', borderBottom:'1px solid rgba(168,201,196,0.12)', zIndex:10000, display:'flex', alignItems:'center', padding:'0 12px', gap:'8px' }}>
+      <div className="bee-loc-banner" style={{ position:'fixed', top:0, left:0, right:0, height:'36px', background:'#0f1f1c', borderBottom:'1px solid rgba(168,201,196,0.12)', zIndex:10000, display:'flex', alignItems:'center', padding:'0 12px', gap:'8px' }}>
         <span style={{ fontSize:'11px', color:'rgba(168,201,196,0.5)' }}>📍</span>
         <button onClick={()=>setShowLocPicker(!showLocPicker)} style={{ flex:1, display:'flex', alignItems:'center', gap:'6px', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', textAlign:'left', padding:0 }}>
           <span style={{ fontSize:'12px', fontWeight:600, color:selectedLoc?'white':'rgba(168,201,196,0.8)' }}>
@@ -31406,10 +31372,10 @@ if (Array.isArray(initialPeople)) return
 
   // ── Mobile top bar (hamburger + brand + profile) ───────────────────────────
   // Renders only below 768px (via .bee-mobile-topbar CSS class). Sits directly
-  // below the DemoBar + LocBanner stack. Provides the entry points to the
-  // hamburger drawer (left) and the profile menu (right).
+  // below the LocBanner. Provides the entry points to the hamburger drawer
+  // (left) and the profile menu (right).
   const MobileTopBar = () => {
-    const tbTop = DEMO_BAR_H + LOC_BAR_H
+    const tbTop = LOC_BAR_H
     const profileName = viewAsUser?.name || currentUser?.name || 'Kevin Shaw'
     const profileInitials = viewAsUser?.initials || (profileName ? getInitials(profileName) : 'KS')
     const screenTitle = (() => {
@@ -31552,7 +31518,7 @@ if (Array.isArray(initialPeople)) return
       : role === 'franchise' && franchiseRole === 'manager' ? 'Hive Manager'
       : role === 'franchise' && franchiseRole === 'viewer'  ? 'Honey Watcher'
       : ''
-    const menuTop = DEMO_BAR_H + LOC_BAR_H + 48 + 4
+    const menuTop = LOC_BAR_H + 48 + 4
     return (
       <>
         <div onClick={()=>setShowMobileProfile(false)} style={{ position:'fixed', inset:0, zIndex:9001, background:'transparent' }} />
@@ -31828,7 +31794,6 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     <PartnersContext.Provider value={partnersCtxValue}>
     <CompaniesContext.Provider value={companiesCtxValue}>
     <div>
-      <DemoBar />
       <LocBanner />
       <MobileTopBar />
       <MobileNavDrawer />
@@ -31886,12 +31851,14 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
       {showFeedback && <FeedbackModal onClose={() => setShowFeedback(false)} />}
       <LocPickerDropdown />
 
-      {/* Sidebar nav - desktop only */}
-      <div className="bee-sidebar" style={{ position:'fixed', top:0, left:0, bottom:0, width:'220px', background:'#1a2e2b', flexDirection:'column', zIndex:99, borderRight:'1px solid rgba(168,201,196,0.1)', overflowY:'auto' }}>
-        {/* Spacer to push below demo bar + loc banner */}
-        <div style={{ height:`${TOTAL_TOP}px`, flexShrink:0 }} />
+      {/* Sidebar nav - desktop only. The column itself no longer scrolls —
+          the NAV LIST is the scroll region (flex:1 + overflowY:auto below),
+          so everything after it (search + identity/scope control) is a
+          PINNED footer that stays visible however tall the board gets, and
+          the identity popover isn't clipped by a scrolling ancestor. */}
+      <div className="bee-sidebar" style={{ position:'fixed', top:0, left:0, bottom:0, width:'220px', background:'#1a2e2b', flexDirection:'column', zIndex:99, borderRight:'1px solid rgba(168,201,196,0.1)' }}>
         {/* Logo */}
-        <div style={{ padding:'20px 20px 16px', borderBottom:'1px solid rgba(168,201,196,0.08)' }}>
+        <div style={{ padding:'20px 20px 16px', borderBottom:'1px solid rgba(168,201,196,0.08)', flexShrink:0 }}>
           <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
             <span style={{ fontSize:'22px' }}>🐝</span>
             <div style={{ flex:1, minWidth:0 }}>
@@ -31901,8 +31868,8 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             <HelpIconButton onOpenGuide={openGuide} onOpenManual={()=>{ dismissGuideHint(); setShowManual(true) }} onOpenFeedback={()=>{ dismissGuideHint(); setShowFeedback(true) }} onOpen={dismissGuideHint} title="Help" />
           </div>
         </div>
-        {/* Nav items */}
-        <div style={{ flex:1, padding:'12px 10px', display:'flex', flexDirection:'column', gap:'2px' }}>
+        {/* Nav items — THE scroll region; footer below stays pinned */}
+        <div style={{ flex:1, minHeight:0, overflowY:'auto', padding:'12px 10px', display:'flex', flexDirection:'column', gap:'2px' }}>
           {navItems.map(item=>{
             const isOnboardingState = effectiveCrmStatus==='onboarding'
             // Franchise sub-role gating
@@ -31926,66 +31893,54 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             )
           })}
         </div>
-        {/* Search button in sidebar */}
-        <div style={{ padding:'8px 10px', borderTop:'1px solid rgba(168,201,196,0.08)' }}>
+        {/* Search button in sidebar (pinned footer starts here) */}
+        <div style={{ padding:'8px 10px', borderTop:'1px solid rgba(168,201,196,0.08)', flexShrink:0 }}>
           <button onClick={()=>setShowGlobalSearch(true)} style={{ width:'100%', padding:'9px 12px', background:'rgba(168,201,196,0.08)', border:'1px solid rgba(168,201,196,0.15)', borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'8px', color:'rgba(168,201,196,0.6)', fontSize:'12px' }}>
             <span style={{ fontSize:'14px' }}>🔍</span>
             <span style={{ flex:1, textAlign:'left' }}>Search…</span>
             <span style={{ fontSize:'10px', background:'rgba(168,201,196,0.12)', padding:'1px 5px', borderRadius:'4px', color:'rgba(168,201,196,0.4)' }}>⌘K</span>
           </button>
         </div>
-        {/* Location picker — elevated roles only. Relocated from the old
-            top-bar LocBanner (which is now mobile-only). A quiet context
-            setter in the footer idiom: same muted fill as the Search
-            button, one line, ellipsized. Same locFilter state + picker
-            sheet as before — zero behavior change. */}
-        {isElevated && (() => {
-          const sc = selectedLoc ? CRM_STATUS_CONF[locStatuses[selectedLoc.id]||selectedLoc.crmStatus] : null
-          return (
-            <div style={{ padding:'8px 10px', borderTop:'1px solid rgba(168,201,196,0.08)' }}>
-              <button onClick={()=>setShowLocPicker(!showLocPicker)} style={{ width:'100%', padding:'8px 12px', background:'rgba(168,201,196,0.08)', border:'1px solid rgba(168,201,196,0.15)', borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'8px', textAlign:'left' }}>
-                <span style={{ fontSize:'12px', flexShrink:0 }}>📍</span>
-                <span style={{ flex:1, minWidth:0, fontSize:'12px', fontWeight:600, color:selectedLoc?'white':'rgba(168,201,196,0.7)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                  {selectedLoc ? `${selectedLoc.name}, ${selectedLoc.state}` : 'All Locations'}
-                </span>
-                {selectedLoc&&sc&&<span style={{ fontSize:'10px', padding:'1px 5px', borderRadius:'10px', background:sc.bg, color:sc.color, fontWeight:600, flexShrink:0 }}>{sc.icon}</span>}
-                {locFilter!=='all'&&(
-                  <span onClick={(e)=>{ e.stopPropagation(); setLocFilter('all') }} title="Back to all locations" style={{ fontSize:'10px', color:'rgba(168,201,196,0.6)', background:'rgba(168,201,196,0.1)', borderRadius:'6px', padding:'2px 6px', flexShrink:0, cursor:'pointer' }}>×</span>
-                )}
-                <span style={{ fontSize:'9px', color:'rgba(168,201,196,0.4)', flexShrink:0 }}>▼</span>
-              </button>
-            </div>
-          )
-        })()}
-        {/* User info at bottom */}
+        {/* Identity + scope control — PINNED sidebar footer. The merge of
+            the old top super-admin strip (View as / name / badge), the
+            footer location switcher, and the footer avatar/sign-out block.
+            All props passed DOWN (§8.5); the handlers are the SAME code
+            paths those three controls called — relocated, not forked. */}
         {(() => {
-          const sidebarName = viewAsUser?.name || currentUser?.name || 'Kevin Shaw'
-          const sidebarInitials = viewAsUser?.initials || (sidebarName ? getInitials(sidebarName) : 'KS')
-          const sidebarRoleLabel = viewAsUser
-            ? (FRANCHISE_ROLES.find(r => r.key === viewAsUser.role)?.label || 'Corporate')
-            : role === 'super_admin' ? 'Super Admin'
-            : role === 'corporate'   ? 'Corporate'
-            : role === 'franchise' && franchiseRole === 'owner'   ? 'Zee Bee'
-            : role === 'franchise' && franchiseRole === 'manager' ? 'Hive Manager'
-            : role === 'franchise' && franchiseRole === 'viewer'  ? 'Honey Watcher'
+          const isRealSuperAdmin = (initialRole ?? 'super_admin') === 'super_admin'
+          const realName = currentUser?.name || 'Kevin Shaw'
+          const realRoleLabel = isRealSuperAdmin ? 'Super Admin'
+            : role === 'corporate' ? 'Corporate'
+            : franchiseRole === 'owner'   ? 'Zee Bee'
+            : franchiseRole === 'manager' ? 'Hive Manager'
+            : franchiseRole === 'light'   ? 'Worker Bee'
+            : franchiseRole === 'readonly' ? 'Honey Watcher'
             : ''
+          const locationLabel = locFilter === 'all'
+            ? 'All locations'
+            : selectedLoc ? `${selectedLoc.name}, ${selectedLoc.state}`
+            : currentLocation?.name || 'Your location'
           return (
-            <div style={{ padding:'14px 16px', borderTop:'1px solid rgba(168,201,196,0.08)' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-                <div style={{ width:'32px', height:'32px', borderRadius:'50%', background:'linear-gradient(135deg,#d4a046,#b07a20)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'11px', fontWeight:700, color:'white', flexShrink:0 }}>
-                  {sidebarInitials}
-                </div>
-                <div style={{ minWidth:0, flex:1 }}>
-                  <p style={{ fontSize:'12px', fontWeight:600, color:'white', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sidebarName}</p>
-                  {sidebarRoleLabel && (
-                    <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.5)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sidebarRoleLabel}</p>
-                  )}
-                </div>
-              </div>
-              <a href="/api/auth/signout"
-                style={{ display:'block', marginTop:'10px', padding:'7px 10px', background:'rgba(168,201,196,0.08)', border:'1px solid rgba(168,201,196,0.15)', borderRadius:'8px', textAlign:'center', fontSize:'11px', fontWeight:600, color:'rgba(168,201,196,0.85)', textDecoration:'none', fontFamily:'inherit' }}>
-                Sign Out
-              </a>
+            <div style={{ padding:'10px', borderTop:'1px solid rgba(168,201,196,0.08)', flexShrink:0 }}>
+              <IdentityScopeControl
+                name={realName}
+                email={currentUser?.email || ''}
+                initials={getInitials(realName)}
+                roleLabel={realRoleLabel}
+                roleBadgeTint={isRealSuperAdmin ? 'warning' : 'accent'}
+                isSuperAdmin={isRealSuperAdmin}
+                viewingAs={viewAsUser ? {
+                  name: viewAsUser.name,
+                  roleLabel: FRANCHISE_ROLES.find(r => r.key === viewAsUser.role)?.label || 'Corporate',
+                } : null}
+                locationLabel={locationLabel}
+                locationCount={(initialLocations || ALL_LOCATIONS).length}
+                canSwitchLocation={isElevated}
+                onOpenViewAs={()=>{ if (!viewAsUser) setRole('franchise'); setViewAsTarget(true) }}
+                onExitViewAs={()=>{ setViewAsUser(null); setRole('super_admin'); setLocFilter('all') }}
+                onOpenLocationPicker={()=>setShowLocPicker(true)}
+                signOutHref="/api/auth/signout"
+              />
             </div>
           )
         })()}
