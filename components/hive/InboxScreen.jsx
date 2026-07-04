@@ -111,7 +111,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     .map(t => new Date(t.occurred_at || 0).getTime() || 0))
 
   const detailNew = (p) => {
-    const bits = [p.source || 'inquiry', `${relAge(new Date(p.created || 0).getTime(), nowMs)} ago`]
+    const bits = [(p.source || 'inquiry').toLowerCase(), `${relAge(new Date(p.created || 0).getTime(), nowMs)} ago`]
     const snippet = (p.requestDetails || p.desc || '').trim()
     if (snippet) bits.push(`“${snippet.length > 60 ? snippet.slice(0, 57) + '…' : snippet}”`)
     return bits.join(' · ')
@@ -127,7 +127,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     const canSend = !p.jobberRef
     const actions = sent ? (
       <span style={{ fontSize: '12px', color: SEND_GREEN, fontWeight: 500, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-        <IconCheck size={13} /> sent — engagement will appear on the board
+        <IconCheck size={13} /> Sent — engagement will appear on the board
       </span>
     ) : (
       <>
@@ -143,7 +143,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
             <IconSend size={13} style={{ marginRight: '5px' }} />Send to Jobber
           </button>
         )}
-        <span title="Coming soon" style={{ fontSize: '11px', color: '#c9c7c0', cursor: 'default', whiteSpace: 'nowrap' }}><IconClock size={11} style={{ marginRight: '3px' }} />snooze · soon</span>
+        <span title="Coming soon" style={{ fontSize: '11px', color: '#c9c7c0', cursor: 'default', whiteSpace: 'nowrap' }}><IconClock size={11} style={{ marginRight: '3px' }} />Snooze · soon</span>
       </>
     )
     return (
@@ -185,7 +185,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
 
       {fresh.length === 0 && working.length === 0 ? (
         <div style={{ padding: '36px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px', border: '0.5px dashed rgba(0,0,0,0.12)', borderRadius: '12px' }}>
-          new inquiries land here
+          New inquiries land here
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
@@ -197,7 +197,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
               </div>
             ) : (
               <div style={{ padding: '20px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px', border: '0.5px dashed rgba(0,0,0,0.12)', borderRadius: '12px' }}>
-                new inquiries land here
+                New inquiries land here
               </div>
             )}
           </div>
@@ -210,7 +210,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
               </div>
             ) : (
               <div style={{ padding: '20px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px', border: '0.5px dashed rgba(0,0,0,0.12)', borderRadius: '12px' }}>
-                leads you’ve reached out to appear here — log a call or email from any client
+                Leads you’ve reached out to appear here — log a call or email from any client
               </div>
             )}
           </div>

@@ -73,13 +73,18 @@ export const CHIP_STYLES = {
   teal: TEAL, blue: BLUE, green: GREEN, amber: AMBER, red: RED, purple: PURPLE, gray: GRAY,
   quiet: QUIET_GRAY,
 
-  // engagement stages
+  // engagement stages — BOTH vocabularies resolve (canonical DB keys AND
+  // sentence-case displayLabels), same no-silent-miss rule as statuses.
   'Request':          TEAL,   // new/go — actively engaging
   'Estimate':         BLUE,   // in-motion — quoting phase
   'Job in Progress':  BLUE,   // in-motion — work happening
-  'Final Processing': RED,    // money-owed — loose end
+  'Final Processing': AMBER,  // attention — loose end to chase
   'Closed Won':       GRAY,   // closed
   'Closed Lost':      GRAY,   // closed
+  'Job in progress':  BLUE,
+  'Final processing': AMBER,
+  'Closed won':       GRAY,
+  'Closed lost':      GRAY,
 
   // client statuses — BOTH vocabularies resolve (status keys AND display
   // labels), so no call site can silently miss into the gray fallback.
