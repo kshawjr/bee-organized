@@ -112,6 +112,8 @@ describe('beta mobile layout', () => {
     expect(html).toContain('border-radius:20px 20px 0 0')
     expect(html).toContain('overscroll-behavior:contain')
     expect(html).toContain('-webkit-overflow-scrolling:touch')
+    // Header close affordance rides every sheet (aria-labelled X).
+    expect(html).toMatch(/<button[^>]*aria-label="Close"[^>]*class="bee-sheet-close"|<button[^>]*class="bee-sheet-close"[^>]*aria-label="Close"/)
   })
 
   // iOS sheet geometry (the 2026-07-04 offscreen-header root cause): a vh
