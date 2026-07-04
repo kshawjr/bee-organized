@@ -71,6 +71,10 @@ const PATCHABLE_FIELDS = new Set([
   'marketing_opt_out',
   'request_details',
   'paused',
+  // Inbox soft-dismiss (migrations/leads_inbox_dismissed_at.sql). Inbox-
+  // scoped only: the drip lifecycle deliberately does not know this
+  // column — dismiss means "handled in my inbox", not "stop nurturing".
+  'inbox_dismissed_at',
 ])
 
 export async function GET(

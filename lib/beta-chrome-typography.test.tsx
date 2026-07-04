@@ -166,13 +166,18 @@ describe('displayTitle secondary text — one color token, sizes stay per densit
 })
 
 describe("'· soon' placeholders — one quiet gray on both tabs", () => {
-  it('Inbox Snooze rides var(--text-quiet)', () => {
+  it('Inbox Snooze placeholder is GONE — replaced by the real ··· overflow', () => {
+    // Snooze shipped (beta-inbox-actions): the '· soon' span must not
+    // come back, and the overflow trigger rides the hairline token like
+    // every other row button.
     const html = renderToString(
       <InboxScreen people={[newPerson()] as any} engagements={[]} />
     )
-    const snooze = html.match(/title="Coming soon" style="([^"]*)"/)
-    expect(snooze).toBeTruthy()
-    expect(snooze![1]).toContain(`var(--text-quiet, ${TEXT_QUIET})`)
+    expect(html).not.toContain('Snooze · soon')
+    expect(html).not.toContain('title="Coming soon"')
+    const trigger = html.match(/aria-label="More actions"[^>]*style="([^"]*)"/)
+    expect(trigger).toBeTruthy()
+    expect(trigger![1]).toContain('var(--hairline-border')
   })
 
   it('Clients Activate-drips rides the same var(--text-quiet)', () => {

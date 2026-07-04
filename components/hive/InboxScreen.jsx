@@ -5,8 +5,19 @@
 // people NOT yet in work-world. Send to Jobber is the one door across
 // (§7) — it REUSES the app's existing SendToJobberPopup confirm flow
 // (mounted by the beta branch in BeeHub scope; this screen only asks
-// for it via onSendToJobber). No new write paths: 'Log call' posts the
-// existing /api/touchpoints reach_out; snooze needs storage → 'soon'.
+// for it via onSendToJobber). 'Log call' posts the existing
+// /api/touchpoints reach_out.
+//
+// Soft row actions (the ··· overflow): Snooze / Dismiss / Mark as junk.
+// All three are Inbox-scoped removals riding EXISTING write paths
+// (PATCH /api/leads/:id) plus session-local Sets for optimistic
+// removal — the Sets also defend against the Supabase Realtime
+// refetch re-inserting the person ~1s after the PATCH. Deliberate
+// asymmetry: junk stops active drips (drip-lifecycle's is_junk
+// branch); dismiss does NOT — dismiss = "handled in my inbox", not
+// "stop nurturing", and the drip lifecycle never learns the
+// inbox_dismissed_at column. deriveClientStatus is blind to all
+// three, so the directory keeps reading the truth.
 //
 // Send gating mirrors the existing PersonPanel philosophy: hidden for
 // clients already linked to Jobber (person.jobberRef — imported clients
@@ -22,7 +33,7 @@ import { deriveClientStatus } from './shared/clientStatus'
 import { CHIP_STYLES } from './shared/stageConfig'
 import { relAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
-import { GREEN_FILL, TEXT_QUIET, HAIRLINE_BORDER } from '@/components/ui/tokens'
+import { GREEN_FILL, HAIRLINE_BORDER } from '@/components/ui/tokens'
 import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock } from '@/components/ui/icons'
 import ContactLine from './ContactLine'
 import InitialsAvatar from './shared/InitialsAvatar'
@@ -66,12 +77,40 @@ const sendBtn = {
   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
 }
 
+// One row of the ··· overflow menu. stopPropagation keeps the click off
+// the row (PersonCard) and off the document outside-click closer.
+function MenuRow({ label, danger, disabled, onPick }) {
+  return (
+    <button disabled={disabled}
+      onClick={(ev) => { ev.stopPropagation(); onPick() }}
+      onMouseEnter={(ev) => { ev.currentTarget.style.background = '#f7f6f4' }}
+      onMouseLeave={(ev) => { ev.currentTarget.style.background = 'transparent' }}
+      style={{
+        display: 'flex', alignItems: 'center', gap: '7px', width: '100%',
+        padding: '8px 10px', border: 'none', background: 'transparent',
+        borderRadius: '7px', fontSize: '13px', fontWeight: 500,
+        fontFamily: 'inherit', color: danger ? '#b42318' : '#1a1a18',
+        cursor: 'pointer', textAlign: 'left', whiteSpace: 'nowrap',
+      }}>
+      {label}
+    </button>
+  )
+}
+
 export default function InboxScreen({ people = [], engagements = [], locFilter = 'all', onOpenPerson = () => {}, onSendToJobber = () => {}, setToast = () => {} }) {
   const [busyId, setBusyId] = useState(null)
   // Local session overrides: a logged call moves the row to Attempting
   // immediately (the real touchpoint is written; derivation catches up
   // on next load).
   const [loggedIds, setLoggedIds] = useState(() => new Set())
+  // Soft-removal Sets, one per action (all mirror loggedIds): the row
+  // leaves the worklist instantly, and a Realtime re-insert of the same
+  // person can't bring it back this session even if the refetched row
+  // races ahead of the PATCH landing.
+  const [junkedIds, setJunkedIds] = useState(() => new Set())
+  const [snoozedIds, setSnoozedIds] = useState(() => new Set())
+  const [dismissedIds, setDismissedIds] = useState(() => new Set())
+  const [menuFor, setMenuFor] = useState(null) // row id whose ··· menu is open
   const [sortRaw, setSort] = useStoredState('bee_hive_inbox_sort', { key: 'newest' })
   const inboxSort = INBOX_SORTS.some(o => o.key === sortRaw.key) ? sortRaw.key : 'newest'
   const [filters, setFilters, clearFilters] = useStoredState('bee_hive_inbox_filters', INBOX_FILTER_DEFAULTS)
@@ -79,6 +118,15 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
   const nowMs = Date.now()
 
   const isMobile = useIsMobile()
+
+  // Any click that bubbles to the document closes the open ··· menu.
+  // The trigger + menu items stopPropagation, so only outside clicks land.
+  useEffect(() => {
+    if (!menuFor) return
+    const close = () => setMenuFor(null)
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [menuFor])
 
   const scoped = useMemo(() => (
     locFilter === 'all' ? people : people.filter(p => p.locationId === locFilter)
@@ -112,6 +160,13 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
   const { fresh, working } = useMemo(() => {
     const fresh = [], working = []
     for (const p of scoped) {
+      // Soft removals — session Set OR the DB-backed field (rows arriving
+      // already junked/snoozed/dismissed, incl. Realtime refetches). These
+      // are Inbox-scoped ONLY: deriveClientStatus stays blind to them, so
+      // the same person still reads New/Attempting in the directory.
+      if (p.isJunk || junkedIds.has(p.id)) continue
+      if (snoozedIds.has(p.id) || (p.snoozeUntil && new Date(p.snoozeUntil).getTime() > nowMs)) continue
+      if (p.inboxDismissedAt || dismissedIds.has(p.id)) continue
       if (!passesInboxFilters(p)) continue
       const status = deriveClientStatus(p, openClientIds, nowMs)
       if (status === 'New') (loggedIds.has(p.id) ? working : fresh).push(p)
@@ -125,7 +180,118 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     fresh.sort(cmp)
     working.sort(cmp)
     return { fresh, working }
-  }, [scoped, openClientIds, loggedIds, filters, inboxSort]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scoped, openClientIds, loggedIds, junkedIds, snoozedIds, dismissedIds, filters, inboxSort]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function patchLead(id, patch) {
+    const res = await fetch(`/api/leads/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
+  }
+
+  const addTo = (setter, id) => setter(prev => new Set(prev).add(id))
+  const dropFrom = (setter, id) => setter(prev => { const n = new Set(prev); n.delete(id); return n })
+
+  // InlineToast (BeeHub scope) renders {msg} verbatim, so a React node
+  // rides through untouched — the Undo button lives inside the toast.
+  // The undo window is the host's toast auto-dismiss (~3s).
+  const undoToast = (text, onUndo) => ({
+    kind: 'success',
+    msg: (
+      <span>
+        {text} ·{' '}
+        <button onClick={onUndo}
+          style={{ background: 'none', border: 'none', padding: 0, color: '#fff', font: 'inherit', textDecoration: 'underline', cursor: 'pointer' }}>
+          Undo
+        </button>
+      </span>
+    ),
+  })
+
+  async function markJunk(p) {
+    setBusyId(p.id)
+    try {
+      // Existing soft-delete write path; server-side this trips the drip
+      // lifecycle's is_junk branch (stop active drips + cancel stage
+      // emails) — desired for junk, and exactly what dismiss must NOT do.
+      await patchLead(p.id, { is_junk: true })
+      addTo(setJunkedIds, p.id)
+      setToast(undoToast('Marked as junk', async () => {
+        try {
+          await patchLead(p.id, { is_junk: false })
+          dropFrom(setJunkedIds, p.id)
+          setToast({ kind: 'success', msg: `${p.name} restored` })
+        } catch (e) {
+          setToast({ kind: 'error', msg: `Undo failed: ${e.message}` })
+        }
+      }))
+    } catch (e) {
+      setToast({ kind: 'error', msg: `Junk failed: ${e.message}` })
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function snoozeLead(p, days) {
+    // Date-only string — Classic compares snoozeUntil in the YYYY-MM-DD
+    // vocabulary (snoozedToday, wake-up banner). Deliberately NO stage
+    // write: Classic's snooze→Nurturing coupling lives in ITS SnoozePopup
+    // call site, not in the column, so writing only snoozed_until can't
+    // trip it.
+    const until = new Date(nowMs + days * 86400000)
+    const iso = until.toISOString().slice(0, 10)
+    const human = until.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    setBusyId(p.id)
+    try {
+      await patchLead(p.id, { snoozed_until: iso })
+      addTo(setSnoozedIds, p.id)
+      setToast(undoToast(`Snoozed until ${human}`, async () => {
+        try {
+          await patchLead(p.id, { snoozed_until: null })
+          dropFrom(setSnoozedIds, p.id)
+          setToast({ kind: 'success', msg: `${p.name} restored` })
+        } catch (e) {
+          setToast({ kind: 'error', msg: `Undo failed: ${e.message}` })
+        }
+      }))
+    } catch (e) {
+      setToast({ kind: 'error', msg: `Snooze failed: ${e.message}` })
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function dismissLead(p) {
+    setBusyId(p.id)
+    try {
+      await patchLead(p.id, { inbox_dismissed_at: new Date().toISOString() })
+      addTo(setDismissedIds, p.id)
+      // Audit trail survives the row leaving the worklist — mirror the
+      // resurrection log (system touchpoint, no human author). Fire-and-
+      // forget like that path: the dismissal itself already landed.
+      fetch('/api/touchpoints', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_id: p.id, kind: 'system', method: 'system', label: 'Dismissed from Inbox — nurturing continues' }),
+      }).then(r => { if (!r.ok) console.warn('Failed to log dismiss touchpoint') })
+        .catch(() => console.warn('Failed to log dismiss touchpoint'))
+      setToast(undoToast('Dismissed', async () => {
+        try {
+          await patchLead(p.id, { inbox_dismissed_at: null })
+          dropFrom(setDismissedIds, p.id)
+          setToast({ kind: 'success', msg: `${p.name} restored` })
+        } catch (e) {
+          setToast({ kind: 'error', msg: `Undo failed: ${e.message}` })
+        }
+      }))
+    } catch (e) {
+      setToast({ kind: 'error', msg: `Dismiss failed: ${e.message}` })
+    } finally {
+      setBusyId(null)
+    }
+  }
 
   async function logCall(p) {
     setBusyId(p.id)
@@ -185,7 +351,36 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
             <IconSend size={13} style={{ marginRight: '5px' }} />Send to Jobber
           </button>
         )}
-        <span title="Coming soon" style={{ fontSize: '11px', color: `var(--text-quiet, ${TEXT_QUIET})`, cursor: 'default', whiteSpace: 'nowrap' }}><IconClock size={11} style={{ marginRight: '3px' }} />Snooze · soon</span>
+        {/* Soft actions live behind ··· — Send stays the one inline
+            primary; four inline buttons per row would drown it. */}
+        <div style={{ position: 'relative', ...(isMobile ? { width: '100%' } : {}) }}>
+          <button aria-label="More actions" title="More actions"
+            style={{ ...hairlineBtn, padding: '6px 10px', fontWeight: 700, letterSpacing: '1px', ...(isMobile ? { width: '100%' } : {}) }}
+            disabled={busyId === p.id}
+            onClick={(ev) => { ev.stopPropagation(); setMenuFor(menuFor === p.id ? null : p.id) }}>
+            ···
+          </button>
+          {menuFor === p.id && (
+            <div onClick={(ev) => ev.stopPropagation()}
+              style={{
+                position: 'absolute', top: 'calc(100% + 4px)', right: 0,
+                ...(isMobile ? { left: 0 } : { minWidth: '210px' }),
+                zIndex: 80, background: '#fff',
+                border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`,
+                borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.14)',
+                padding: '4px',
+              }}>
+              <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); snoozeLead(p, 1) }}
+                label={<><IconClock size={13} />Snooze until tomorrow</>} />
+              <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); snoozeLead(p, 7) }}
+                label={<><IconClock size={13} />Snooze until next week</>} />
+              <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); dismissLead(p) }}
+                label={<><IconCheck size={13} />Dismiss</>} />
+              <MenuRow danger disabled={busyId === p.id} onPick={() => { setMenuFor(null); markJunk(p) }}
+                label="Mark as junk" />
+            </div>
+          )}
+        </div>
       </>
     )
     return (

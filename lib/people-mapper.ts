@@ -42,6 +42,9 @@ type LeadRow = {
   snoozed_note: string | null
   marketing_opt_out: boolean | null
   paused: boolean | null
+  // Optional — column lands via migrations/leads_inbox_dismissed_at.sql;
+  // rows read before the migration simply map to null.
+  inbox_dismissed_at?: string | null
   drip_last_send_status: string | null
   drip_last_send_at: string | null
   drip_last_send_step: number | null
@@ -293,6 +296,9 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     snoozeNote: row.snoozed_note || '',
     marketingOptOut: !!row.marketing_opt_out,
     paused: !!row.paused,
+    // Inbox-scoped soft removal — the Inbox worklist skips these rows;
+    // deriveClientStatus stays blind to it (directory keeps the truth).
+    inboxDismissedAt: row.inbox_dismissed_at || null,
     // Last drip-step send outcome — surfaced in PersonPanel so silent
     // failures (missing sender config / Resend errors) are visible.
     dripLastSendStatus: row.drip_last_send_status || null,
