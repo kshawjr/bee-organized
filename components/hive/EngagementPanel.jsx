@@ -18,7 +18,6 @@ import StatusChip from '@/components/ui/StatusChip'
 import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconMail, IconExternalLink, IconX, IconCalendar } from '@/components/ui/icons'
 import MetricCard from '@/components/ui/MetricCard'
 import ContactLine from './ContactLine'
-import QuoteBlock from './QuoteBlock'
 import { fmtTime, relAge } from './shared/engagementStatus'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
@@ -93,24 +92,27 @@ function MicroLabel({ children }) {
 // One RECORDS timeline row (mockup anatomy): leading family-colored glyph,
 // primary 13px, secondary 11px muted, trailing state — green ✓ for done,
 // colored status word otherwise. Current-stage row = stronger hairline.
-function RecordRow({ icon, iconColor, primary, secondary, state, current }) {
+function RecordRow({ icon, iconColor, primary, secondary, state, current, sub }) {
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: '10px',
       padding: '10px 12px', background: '#fff',
       border: `0.5px solid ${current ? 'rgba(0,0,0,0.22)' : 'rgba(0,0,0,0.08)'}`,
       borderRadius: '8px',
     }}>
-      <span style={{ fontSize: '13px', flexShrink: 0, width: '18px', textAlign: 'center', color: iconColor, lineHeight: 1 }}>{icon}</span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ fontSize: '13px', fontWeight: 500, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{primary}</p>
-        {secondary && <p style={{ fontSize: '11px', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{secondary}</p>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <span style={{ fontSize: '13px', flexShrink: 0, width: '18px', textAlign: 'center', color: iconColor, lineHeight: 1 }}>{icon}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontSize: '13px', fontWeight: 500, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{primary}</p>
+          {secondary && <p style={{ fontSize: '11px', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{secondary}</p>}
+        </div>
+        {state && (
+          <span style={{ flexShrink: 0, fontSize: state.check ? '14px' : '12px', fontWeight: 500, color: state.color, whiteSpace: 'nowrap' }}>
+            {state.check ? <IconCheck size={14} /> : state.label}
+          </span>
+        )}
       </div>
-      {state && (
-        <span style={{ flexShrink: 0, fontSize: state.check ? '14px' : '12px', fontWeight: 500, color: state.color, whiteSpace: 'nowrap' }}>
-          {state.check ? <IconCheck size={14} /> : state.label}
-        </span>
-      )}
+      {/* Nested sub-block (mockup): indented past the icon, inside the card. */}
+      {sub && <div style={{ marginTop: '8px', marginLeft: '28px' }}>{sub}</div>}
     </div>
   )
 }
@@ -122,6 +124,7 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
   const [titleDraft, setTitleDraft] = useState('')
   const [descEditing, setDescEditing] = useState(false)
   const [descDraft, setDescDraft] = useState('')
+  const [descExpanded, setDescExpanded] = useState(false)
   const [noteText, setNoteText] = useState('')
   const [buzzOpen, setBuzzOpen] = useState(false)
   const [buzzDraft, setBuzzDraft] = useState('')
@@ -272,6 +275,63 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
     } finally { setBusy(false) }
   }
 
+  // Description block (mockup): the engagement's own editable field,
+  // rendered NESTED under the founding Request row — indented italic
+  // quiet sub-block — or standalone at the top of RECORDS when the
+  // engagement has no request row (quote/job/manual foundings).
+  const descBlock = () => {
+    if (!eng) return null
+    if (descEditing) {
+      return (
+        <textarea
+          autoFocus
+          value={descDraft}
+          onChange={e => setDescDraft(e.target.value)}
+          onBlur={saveDescription}
+          onKeyDown={e => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') saveDescription()
+            if (e.key === 'Escape') setDescEditing(false)
+          }}
+          rows={3}
+          maxLength={2000}
+          placeholder="Describe the work…"
+          style={{ width: '100%', padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '6px', fontSize: '12px', lineHeight: 1.45, color: '#1a1a18', fontFamily: 'inherit', outline: 'none', resize: 'vertical', boxSizing: 'border-box' }}
+        />
+      )
+    }
+    const text = (eng.description || '').trim()
+    if (!text) {
+      return (
+        <button onClick={() => { setDescDraft(''); setDescEditing(true) }}
+          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', border: '0.5px dashed rgba(0,0,0,0.15)', borderRadius: '6px', background: 'transparent', fontSize: '12px', color: '#b5b3ac', cursor: 'text', fontFamily: 'inherit' }}>
+          Add a description…
+        </button>
+      )
+    }
+    const clampLikely = text.length > 120 || text.includes('\n')
+    return (
+      <div onClick={() => { setDescDraft(eng.description || ''); setDescEditing(true) }}
+        title="Click to edit description"
+        style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', cursor: 'text', background: QUIET, borderRadius: '6px', padding: '8px 10px' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{
+            fontSize: '12px', fontStyle: 'italic', color: '#6b6b66', lineHeight: 1.45, whiteSpace: 'pre-wrap',
+            ...(descExpanded ? {} : { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }),
+          }}>
+            {text}
+          </p>
+          {clampLikely && !descExpanded && (
+            <button onClick={(e) => { e.stopPropagation(); setDescExpanded(true) }}
+              style={{ border: 'none', background: 'transparent', padding: 0, marginTop: '2px', fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
+              Show more
+            </button>
+          )}
+        </div>
+        <span style={{ fontSize: '11px', color: '#c9c7c0', flexShrink: 0 }}>✎</span>
+      </div>
+    )
+  }
+
   // One interleaved activity stream: engagement notes + engagement-scoped
   // touchpoints, newest first.
   const activity = [
@@ -352,41 +412,6 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
         </div>
       )}
 
-      {/* Description — what this engagement IS. First-class editable field
-          (seeded from the founding request's webform text when present). */}
-      {eng && (
-        descEditing ? (
-          <textarea
-            autoFocus
-            value={descDraft}
-            onChange={e => setDescDraft(e.target.value)}
-            onBlur={saveDescription}
-            onKeyDown={e => {
-              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') saveDescription()
-              if (e.key === 'Escape') setDescEditing(false)
-            }}
-            rows={3}
-            maxLength={2000}
-            placeholder="Describe the work…"
-            style={{ width: '100%', padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', lineHeight: 1.45, color: '#1a1a18', fontFamily: 'inherit', outline: 'none', resize: 'vertical', boxSizing: 'border-box' }}
-          />
-        ) : (eng.description || '').trim() ? (
-          <div onClick={() => { setDescDraft(eng.description || ''); setDescEditing(true) }}
-            title="Click to edit description"
-            style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', cursor: 'text' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <QuoteBlock text={eng.description} />
-            </div>
-            <span style={{ fontSize: '11px', color: '#c9c7c0', flexShrink: 0, paddingTop: '4px' }}>✎</span>
-          </div>
-        ) : (
-          <button onClick={() => { setDescDraft(''); setDescEditing(true) }}
-            style={{ textAlign: 'left', padding: '7px 10px', border: '0.5px dashed rgba(0,0,0,0.15)', borderRadius: '8px', background: 'transparent', fontSize: '12px', color: '#b5b3ac', cursor: 'text', fontFamily: 'inherit' }}>
-            Add a description…
-          </button>
-        )
-      )}
-
       {/* Client strip — quiet card, no border */}
       {client && (
         <div style={{ padding: '10px 12px', background: QUIET, borderRadius: '8px' }}>
@@ -453,11 +478,15 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
       <div>
         <MicroLabel>Records</MicroLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {children.service_requests.map(sr => (
+          {/* No request row (quote/job/manual foundings): the description
+              leads RECORDS standalone instead of nesting. */}
+          {eng && children.service_requests.length === 0 && data && descBlock()}
+          {children.service_requests.map((sr, i) => (
             <RecordRow key={sr.id} icon={<IconInbox size={15} />} iconColor="#085041" current={currentType === 'request'}
               primary={`Request · ${fmtDate(sr.requested_at || sr.created_at) || '—'}`}
               secondary={sr.source ? `source: ${sr.source}` : null}
               state={currentType === 'request' ? { label: 'active', color: BAR_CURRENT } : DONE}
+              sub={i === 0 ? descBlock() : null}
             />
           ))}
           {(children.assessments || []).map(a => {
@@ -503,11 +532,12 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
         </div>
       </div>
 
-      {/* Activity — notes AND touchpoints for THIS engagement, one stream
-          newest-first. The composer posts a note; 'Log touchpoint' below
-          feeds the same stream. Buzz lives with the person above. */}
+      {/* Notes — notes AND touchpoints for THIS engagement, one merged
+          stream newest-first (outreach-scoping ruling stands; touchpoints
+          keep their method-icon anatomy). The composer posts a note;
+          'Log touchpoint' below feeds the same stream. */}
       <div>
-        <MicroLabel>Activity · this engagement</MicroLabel>
+        <MicroLabel>Notes · this engagement</MicroLabel>
         <div style={{ display: 'flex', marginBottom: activity.length ? '10px' : 0 }}>
           <input value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Add a note…"
             onKeyDown={e => { if (e.key === 'Enter') addEngagementNote() }}
