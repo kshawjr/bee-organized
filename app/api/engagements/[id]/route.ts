@@ -66,14 +66,19 @@ export async function GET(
   if ('error' in auth) return auth.error
   const { engagement } = auth
 
-  const [srRes, quotesRes, jobsRes, invoicesRes, clientRes, clientEngsRes, assessRes] = await Promise.all([
+  const [srRes, quotesRes, jobsRes, invoicesRes, clientRes, clientEngsRes, assessRes, notesRes, buzzRes] = await Promise.all([
     supabaseService.from('service_requests').select('*').eq('engagement_id', id).order('requested_at', { ascending: true, nullsFirst: false }),
     supabaseService.from('quotes').select('*').eq('engagement_id', id).order('sent_at', { ascending: true, nullsFirst: false }),
     supabaseService.from('jobs').select('*').eq('engagement_id', id).order('scheduled_start', { ascending: true, nullsFirst: false }),
     supabaseService.from('invoices').select('*').eq('engagement_id', id).order('issued_at', { ascending: true, nullsFirst: false }),
-    supabaseService.from('leads').select('id, name, email, phone').eq('id', engagement.client_id).maybeSingle(),
+    supabaseService.from('leads').select('id, name, email, phone, request_details').eq('id', engagement.client_id).maybeSingle(),
     supabaseService.from('engagements').select('id, stage, total_paid').eq('client_id', engagement.client_id),
     supabaseService.from('assessments').select('*').eq('engagement_id', id).order('scheduled_at', { ascending: true, nullsFirst: false }),
+    // Engagement-scoped notes (kind='job' via the panel composer); newest
+    // first. Degrades to [] pre-migration (query errors, data stays null).
+    supabaseService.from('lead_notes').select('id, kind, text, user_label, created_at').eq('engagement_id', id).order('created_at', { ascending: false }).limit(50),
+    // Latest client-level buzz for the strip's buzz line.
+    supabaseService.from('lead_notes').select('text, user_label, created_at').eq('lead_id', engagement.client_id).eq('kind', 'buzz').order('created_at', { ascending: false }).limit(1),
   ])
 
   const siblings = clientEngsRes.data ?? []
@@ -91,12 +96,15 @@ export async function GET(
       quotes: quotesRes.data ?? [],
       jobs: jobsRes.data ?? [],
       invoices: invoicesRes.data ?? [],
+      notes: notesRes.data ?? [],
     },
     client: {
       id: engagement.client_id,
       name: clientRes.data?.name ?? 'Unknown',
       email: clientRes.data?.email ?? null,
       phone: clientRes.data?.phone ?? null,
+      request_details: clientRes.data?.request_details ?? null,
+      latest_buzz: buzzRes.data?.[0] ?? null,
       lifetime_paid: lifetimePaid,
       prior_engagements: priorCount,
       other_open: otherOpen,

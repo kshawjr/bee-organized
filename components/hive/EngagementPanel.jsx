@@ -18,7 +18,8 @@ import StatusChip from '@/components/ui/StatusChip'
 import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconExternalLink, IconX, IconCalendar } from '@/components/ui/icons'
 import MetricCard from '@/components/ui/MetricCard'
 import ContactLine from './ContactLine'
-import { fmtTime } from './shared/engagementStatus'
+import QuoteBlock from './QuoteBlock'
+import { fmtTime, relAge } from './shared/engagementStatus'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
 const fmtDate = (d) => {
@@ -117,7 +118,6 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
   const [loadErr, setLoadErr] = useState(null)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
-  const [noteOpen, setNoteOpen] = useState(false)
   const [noteText, setNoteText] = useState('')
   const [touchOpen, setTouchOpen] = useState(false)
   const [touchMethod, setTouchMethod] = useState('call')
@@ -150,7 +150,7 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
   }, [engagementId])
 
   const eng = data?.engagement ?? seed
-  const children = data?.children ?? { service_requests: [], assessments: [], quotes: [], jobs: [], invoices: [] }
+  const children = data?.children ?? { service_requests: [], assessments: [], quotes: [], jobs: [], invoices: [], notes: [] }
   const client = data?.client ?? null
 
   async function patchEngagement(body, okMsg) {
@@ -189,7 +189,9 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
     return i >= 0 && i < order.length - 1 ? order[i + 1].key : null
   })()
 
-  async function addBuzzNote() {
+  // Engagement note (kind='job', anchored to THIS engagement). Buzz is
+  // client-level and lives in the strip line + ClientProfile now.
+  async function addEngagementNote() {
     const text = noteText.trim()
     if (!text || !client) return
     setBusy(true)
@@ -197,11 +199,13 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
       const res = await fetch('/api/lead-notes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lead_id: client.id, kind: 'buzz', text }),
+        body: JSON.stringify({ lead_id: client.id, kind: 'job', text, engagement_id: engagementId }),
       })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
-      setNoteText(''); setNoteOpen(false)
-      setToast({ kind: 'success', msg: 'Buzz note added' })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      setNoteText('')
+      setData(d => d ? { ...d, children: { ...d.children, notes: [j.note, ...(d.children.notes || [])] } } : d)
+      setToast({ kind: 'success', msg: 'Note added' })
     } catch (e) {
       setToast({ kind: 'error', msg: `Note failed: ${e.message}` })
     } finally { setBusy(false) }
@@ -322,6 +326,26 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
               {client.prior_engagements} prior engagement{client.prior_engagements === 1 ? '' : 's'} · {fmtMoney(client.lifetime_paid)} lifetime
               {client.other_open > 0 && ` · ${client.other_open} other open`}
             </p>
+            {/* Buzz rides with the PERSON: identical on every engagement of
+                this client by construction (client-level, latest note). */}
+            <p style={{ fontSize: '11px', color: client.latest_buzz ? '#6b6b66' : '#b5b3ac', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0 }}>
+              <span style={{ flexShrink: 0 }}>🐝</span>
+              {client.latest_buzz ? (
+                <>
+                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{client.latest_buzz.text}</span>
+                  <button onClick={() => onOpenClient(client.id)} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                    All buzz →
+                  </button>
+                </>
+              ) : (
+                <span style={{ whiteSpace: 'nowrap' }}>
+                  No buzz yet ·{' '}
+                  <button onClick={() => onOpenClient(client.id)} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit' }}>
+                    Add →
+                  </button>
+                </span>
+              )}
+            </p>
             <ContactLine phone={client.phone} email={client.email} layout={isMobile ? 'stack' : 'inline'} style={{ marginTop: '3px' }} />
           </div>
           <button onClick={() => onOpenClient(client.id)} style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', padding: 0, flexShrink: 0 }}>
@@ -337,13 +361,22 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
       <div>
         <MicroLabel>Records</MicroLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {children.service_requests.map(sr => (
-            <RecordRow key={sr.id} icon={<IconInbox size={15} />} iconColor="#085041" current={currentType === 'request'}
-              primary={`Request · ${fmtDate(sr.requested_at || sr.created_at) || '—'}`}
-              secondary={sr.source ? `source: ${sr.source}` : null}
-              state={currentType === 'request' ? { label: 'active', color: BAR_CURRENT } : DONE}
-            />
-          ))}
+          {children.service_requests.map((sr, i) => {
+            // Webform text: the SR's own notes, else (founding request only)
+            // the client's request_details — the column the webform intake
+            // writes (leads.request_details).
+            const desc = (sr.notes || '').trim() || (i === 0 ? (client?.request_details || '').trim() : '')
+            return (
+              <React.Fragment key={sr.id}>
+                <RecordRow icon={<IconInbox size={15} />} iconColor="#085041" current={currentType === 'request'}
+                  primary={`Request · ${fmtDate(sr.requested_at || sr.created_at) || '—'}`}
+                  secondary={sr.source ? `source: ${sr.source}` : null}
+                  state={currentType === 'request' ? { label: 'active', color: BAR_CURRENT } : DONE}
+                />
+                {desc && <QuoteBlock text={desc} indent={40} />}
+              </React.Fragment>
+            )
+          })}
           {(children.assessments || []).map(a => {
             const done = !!a.completed_at || a.status === 'completed'
             const future = new Date(a.scheduled_at || 0).getTime() > Date.now()
@@ -387,6 +420,28 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
         </div>
       </div>
 
+      {/* Engagement notes — anchored to THIS engagement (kind='job');
+          inline composer, newest-first. Buzz lives with the person above. */}
+      <div>
+        <MicroLabel>Notes · this engagement</MicroLabel>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: (children.notes || []).length ? '10px' : 0 }}>
+          <input value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Add a note…"
+            onKeyDown={e => { if (e.key === 'Enter') addEngagementNote() }}
+            style={{ flex: 1, padding: '8px 12px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
+          <button style={{ ...outlineBtn, flex: '0 0 auto', minWidth: 0 }} disabled={busy || !noteText.trim()} onClick={addEngagementNote}>Save</button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          {(children.notes || []).map(n => (
+            <p key={n.id} style={{ fontSize: '12px', color: '#1a1a18', lineHeight: 1.45 }}>
+              {n.text}
+              <span style={{ fontSize: '10px', color: '#b5b3ac', marginLeft: '6px', whiteSpace: 'nowrap' }}>
+                {n.user_label || '—'} · {relAge(new Date(n.created_at).getTime())} ago
+              </span>
+            </p>
+          ))}
+        </div>
+      </div>
+
       {/* Money strip */}
       {eng && (
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: '8px' }}>
@@ -400,22 +455,13 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
       <div>
         <MicroLabel>Actions</MicroLabel>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button style={outlineBtn} disabled={busy} onClick={() => { setNoteOpen(v => !v); setTouchOpen(false) }}>🐝 Add buzz note</button>
-          <button style={outlineBtn} disabled={busy} onClick={() => { setTouchOpen(v => !v); setNoteOpen(false) }}><IconPhone size={14} style={{ marginRight: '5px' }} /> Log touchpoint</button>
+          <button style={outlineBtn} disabled={busy} onClick={() => setTouchOpen(v => !v)}><IconPhone size={14} style={{ marginRight: '5px' }} /> Log touchpoint</button>
           {jobberHref ? (
             <a href={jobberHref} target="_blank" rel="noreferrer" style={{ ...outlineBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><IconExternalLink size={14} style={{ marginRight: '5px' }} /> Open in Jobber</a>
           ) : (
             <span title="No Jobber record yet" style={{ ...outlineBtn, color: '#c9c7c0', cursor: 'default', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><IconExternalLink size={14} style={{ marginRight: '5px' }} /> Open in Jobber</span>
           )}
         </div>
-        {noteOpen && (
-          <div style={{ marginTop: '10px', display: 'flex', gap: '8px' }}>
-            <input value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Buzz note…" autoFocus
-              onKeyDown={e => { if (e.key === 'Enter') addBuzzNote() }}
-              style={{ flex: 1, padding: '8px 12px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
-            <button style={{ ...outlineBtn, flex: '0 0 auto', minWidth: 0 }} disabled={busy || !noteText.trim()} onClick={addBuzzNote}>Save</button>
-          </div>
-        )}
         {touchOpen && (
           <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <select value={touchMethod} onChange={e => setTouchMethod(e.target.value)}

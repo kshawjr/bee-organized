@@ -57,6 +57,7 @@ export async function POST(req: Request) {
   const kind = body.kind as string | undefined
   const text = body.text as string | undefined
   const bodyUserLabel = body.user_label as string | undefined
+  const engagement_id = body.engagement_id as string | undefined
 
   // Validate
   if (!lead_id || typeof lead_id !== 'string') {
@@ -93,6 +94,22 @@ export async function POST(req: Request) {
     }
   }
 
+  // Optional engagement anchor (kind='job' engagement notes) — must be a
+  // real engagement belonging to THIS lead, or the note is rejected.
+  if (engagement_id !== undefined) {
+    if (typeof engagement_id !== 'string' || !engagement_id) {
+      return NextResponse.json({ error: 'invalid_engagement_id' }, { status: 400 })
+    }
+    const { data: eng } = await supabaseService
+      .from('engagements')
+      .select('id, client_id')
+      .eq('id', engagement_id)
+      .maybeSingle()
+    if (!eng || eng.client_id !== lead_id) {
+      return NextResponse.json({ error: 'engagement_not_on_lead' }, { status: 400 })
+    }
+  }
+
   // Resolve user_label
   let userLabel: string
   if (kind === 'system') {
@@ -118,6 +135,7 @@ export async function POST(req: Request) {
       text: text.trim(),
       user_id: kind === 'system' ? null : hubUser.id,
       user_label: userLabel,
+      ...(engagement_id ? { engagement_id } : {}),
     })
     .select('*')
     .single()

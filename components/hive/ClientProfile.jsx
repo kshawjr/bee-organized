@@ -27,6 +27,7 @@ import {
   IconPhone, IconMail, IconMapPin, IconPlayerPause, IconExternalLink, IconSend,
   IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPhoneOutgoing,
 } from '@/components/ui/icons'
+import QuoteBlock from './QuoteBlock'
 
 const QUIET = '#f7f6f4'
 const SEND_GREEN = '#0F6E56'
@@ -68,7 +69,6 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
   const [showClosed, setShowClosed] = useState(false)
   const [showAllNotes, setShowAllNotes] = useState(false)
   const [showAllTouches, setShowAllTouches] = useState(false)
-  const [noteOpen, setNoteOpen] = useState(false)
   const [noteText, setNoteText] = useState('')
   const [touchOpen, setTouchOpen] = useState(false)
   const [touchMethod, setTouchMethod] = useState('call')
@@ -134,9 +134,10 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lead_id: c.id, kind: 'buzz', text }),
       })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
-      setNoteText(''); setNoteOpen(false)
-      setData(d => d ? { ...d, buzz_notes: [{ id: `tmp-${Date.now()}`, kind: 'buzz', text, created_at: new Date().toISOString() }, ...d.buzz_notes] } : d)
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      setNoteText('')
+      setData(d => d ? { ...d, buzz_notes: [j.note, ...d.buzz_notes] } : d)
       setToast({ kind: 'success', msg: 'Buzz note added' })
     } catch (e) { setToast({ kind: 'error', msg: `Note failed: ${e.message}` }) }
     finally { setBusy(false) }
@@ -240,6 +241,16 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
         </div>
       </div>
 
+      {/* Request details — the webform text, for pre-Jobber people whose
+          request hasn't become an SR record yet (same block as the panel's
+          Request row). */}
+      {!jobberLinked && (c.request_details || '').trim() && (
+        <div>
+          <MicroLabel>Request details</MicroLabel>
+          <QuoteBlock text={c.request_details} />
+        </div>
+      )}
+
       {/* Engagements */}
       <div>
         <MicroLabel>Engagements · {agg?.total_count ?? engagements.length} · {agg?.open_count ?? open.length} open</MicroLabel>
@@ -301,16 +312,29 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
       {/* Buzz notes + Outreach */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '10px' }}>
         <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px' }}>
-          <MicroLabel>Buzz notes</MicroLabel>
-          {(showAllNotes ? buzz : buzz.slice(0, 3)).map(n => (
-            <p key={n.id} style={{ fontSize: '12px', color: '#1a1a18', marginBottom: '6px', lineHeight: 1.4 }}>
-              🐝 {n.text}
-              <span style={{ fontSize: '10px', color: '#b5b3ac', marginLeft: '6px' }}>{relAge(new Date(n.created_at).getTime(), nowMs)} ago</span>
-            </p>
-          ))}
-          {buzz.length === 0 && <p style={{ fontSize: '11px', color: '#b5b3ac' }}>No buzz notes yet</p>}
-          {buzz.length > 3 && !showAllNotes && (
-            <button onClick={() => setShowAllNotes(true)} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>Show more</button>
+          <MicroLabel>Buzz</MicroLabel>
+          {/* Composer lives HERE — buzz is client-level (no engagement_id);
+              the engagement panel's strip line points back to this timeline. */}
+          <div style={{ display: 'flex', gap: '6px', marginBottom: buzz.length ? '10px' : '8px' }}>
+            <input value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Add buzz…"
+              onKeyDown={e => { if (e.key === 'Enter') addBuzzNote() }}
+              style={{ flex: 1, minWidth: 0, padding: '7px 10px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none', background: '#fff' }} />
+            <button disabled={busy || !noteText.trim()} onClick={addBuzzNote}
+              style={{ flexShrink: 0, padding: '7px 12px', borderRadius: '8px', border: '0.5px solid rgba(0,0,0,0.15)', background: '#fff', fontSize: '12px', fontWeight: 500, color: '#1a1a18', cursor: 'pointer', fontFamily: 'inherit' }}>
+              Save
+            </button>
+          </div>
+          <div style={showAllNotes ? { maxHeight: '220px', overflowY: 'auto' } : undefined}>
+            {(showAllNotes ? buzz : buzz.slice(0, 10)).map(n => (
+              <p key={n.id} style={{ fontSize: '12px', color: '#1a1a18', marginBottom: '6px', lineHeight: 1.4 }}>
+                🐝 {n.text}
+                <span style={{ fontSize: '10px', color: '#b5b3ac', marginLeft: '6px', whiteSpace: 'nowrap' }}>{n.user_label || '—'} · {relAge(new Date(n.created_at).getTime(), nowMs)} ago</span>
+              </p>
+            ))}
+          </div>
+          {buzz.length === 0 && <p style={{ fontSize: '11px', color: '#b5b3ac' }}>No buzz yet</p>}
+          {buzz.length > 10 && !showAllNotes && (
+            <button onClick={() => setShowAllNotes(true)} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>Show {buzz.length - 10} more</button>
           )}
         </div>
         <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px' }}>
@@ -336,8 +360,7 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
       <div>
         <MicroLabel>Actions</MicroLabel>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button style={outlineBtn} disabled={busy} onClick={() => { setNoteOpen(v => !v); setTouchOpen(false) }}>🐝 Add buzz note</button>
-          <button style={outlineBtn} disabled={busy} onClick={() => { setTouchOpen(v => !v); setNoteOpen(false) }}>
+          <button style={outlineBtn} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
             <IconPhone size={14} style={{ marginRight: '5px' }} /> Log touchpoint
           </button>
           {jobberLinked ? (
@@ -362,14 +385,6 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
             )
           )}
         </div>
-        {noteOpen && (
-          <div style={{ marginTop: '10px', display: 'flex', gap: '8px' }}>
-            <input value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Buzz note…" autoFocus
-              onKeyDown={e => { if (e.key === 'Enter') addBuzzNote() }}
-              style={{ flex: 1, padding: '8px 12px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
-            <button style={{ ...outlineBtn, flex: '0 0 auto', minWidth: 0 }} disabled={busy || !noteText.trim()} onClick={addBuzzNote}>Save</button>
-          </div>
-        )}
         {touchOpen && (
           <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <select value={touchMethod} onChange={e => setTouchMethod(e.target.value)}
