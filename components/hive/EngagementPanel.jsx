@@ -118,7 +118,7 @@ function RecordRow({ icon, iconColor, primary, secondary, state, current, sub })
   )
 }
 
-export default function EngagementPanel({ engagementId, seed = null, people = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onLeadPatched = () => {}, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
+export default function EngagementPanel({ engagementId, seed = null, people = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -446,6 +446,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                 people={people}
                 onApply={fields => setData(d => d ? { ...d, client: { ...d.client, ...fields } } : d)}
                 onSaved={cols => onLeadPatched(client.id, cols)}
+                onPartnerCreated={onPartnerCreated}
                 setToast={setToast}
               />
             </div>

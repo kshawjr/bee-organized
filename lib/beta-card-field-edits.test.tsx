@@ -240,6 +240,18 @@ describe('PersonCard — field edits', () => {
     await unmount()
   })
 
+  it('inline-create from the card hands the CONFIRMED partner row up onPartnerCreated (the Classic seam)', async () => {
+    const onPartnerCreated = vi.fn()
+    const { host, unmount } = await mountPersonCard({ onPartnerCreated })
+    await click(host.querySelector('button[aria-label="Add referrer"]')!)
+    await flush()
+    await type(host.querySelector('input[aria-label="Search referrers"]')!, 'New Neighbor')
+    await click(buttonContaining(host, 'as contact')!)
+    expect(onPartnerCreated).toHaveBeenCalledTimes(1)
+    expect(onPartnerCreated.mock.calls[0][0]).toMatchObject({ id: 'pt-new-1', type: 'contact', name: 'New Neighbor' })
+    await unmount()
+  })
+
   it("the coupling doesn't re-lock: Source clears to None AFTER a referrer set it, referrer stays", async () => {
     const { host, unmount } = await mountPersonCard()
     await click(host.querySelector('button[aria-label="Add referrer"]')!)

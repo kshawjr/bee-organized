@@ -137,6 +137,7 @@ export default function NewClientSheet({
   onClose = () => {},
   onCreated = () => {},
   onFounded = () => {},
+  onPartnerCreated = () => {},
   onOpenClient = () => {},
   onOpenEngagement = () => {},
   onSendToJobber = null,
@@ -507,6 +508,8 @@ export default function NewClientSheet({
                   locationUuid={locationUuid}
                   selectedId={referrer?.id || null}
                   onSelect={r => { setReferrer(r); setPickReferrer(false) }}
+                  onPartnerCreated={onPartnerCreated}
+                  setToast={setToast}
                 />
               )}
             </div>

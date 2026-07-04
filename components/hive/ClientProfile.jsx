@@ -69,7 +69,7 @@ const outlineBtn = {
   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', textAlign: 'center',
 }
 
-export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {} }) {
+export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {} }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [showContacts, setShowContacts] = useState(false)
@@ -260,6 +260,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             people={people}
             onApply={fields => setData(d => d ? { ...d, client: { ...d.client, ...fields } } : d)}
             onSaved={cols => onLeadPatched(c.id, cols)}
+            onPartnerCreated={onPartnerCreated}
             setToast={setToast}
           />
           {/* Reverse direction — leads this client referred (kind='lead'

@@ -36,6 +36,7 @@ export default function ReferrerField({
   people = [],        // the shell's (unscoped) people list
   onApply = () => {}, // (fields) => merge into the surface's client state
   onSaved = () => {}, // (colPatch) => propagation after a confirmed PATCH
+  onPartnerCreated = () => {}, // confirmed inline-created partner row → Classic seam
   setToast = () => {},
 }) {
   const [picking, setPicking] = useState(false)
@@ -120,6 +121,8 @@ export default function ReferrerField({
           locationUuid={locationUuid}
           selectedId={lead.referred_by_id || null}
           onSelect={save}
+          onPartnerCreated={onPartnerCreated}
+          setToast={setToast}
         />
       )}
     </div>

@@ -29,6 +29,8 @@ import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import NewClientSheet from '@/components/hive/NewClientSheet'
 import ClientProfile from '@/components/hive/ClientProfile'
+import { mergePartnerRow } from '@/lib/crm'
+import { readFileSync } from 'node:fs'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -63,16 +65,19 @@ let createdBodies: any[] = []
 let partnerPosts: any[] = []
 let patchBodies: any[] = []
 let profilePayload: any = null
+let partnerPostFail = false
 const installFetch = () => {
   createdBodies = []
   partnerPosts = []
   patchBodies = []
+  partnerPostFail = false
   const mock = vi.fn(async (url: any, opts: any = {}) => {
     const u = String(url)
     if (u.includes('/api/partners') && opts.method === 'POST') {
+      if (partnerPostFail) return jsonRes({ error: 'forbidden' }, 403)
       const body = JSON.parse(opts.body)
       partnerPosts.push(body)
-      return jsonRes({ id: `pt-new-${partnerPosts.length}`, name: body.name, type: body.type, isDeleted: false }, 201)
+      return jsonRes({ id: `pt-new-${partnerPosts.length}`, name: body.name, type: body.type, locationId: body.location_id, isDeleted: false }, 201)
     }
     if (u.includes('/api/partners')) return jsonRes(PARTNER_ROWS)
     if (u.includes('/api/leads/') && opts.method === 'PATCH') {
@@ -387,3 +392,88 @@ describe('ClientProfile — referrer add/edit/clear on an existing lead', () => 
     await unmount()
   })
 })
+
+// ── onPartnerCreated seam (Classic visibility for beta creates) ─────
+describe('onPartnerCreated seam', () => {
+  it('NewClientSheet inline-create hands the CONFIRMED row up (real id/type/location, not a stub)', async () => {
+    const onPartnerCreated = vi.fn()
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[person()]} locFilter="loc-uuid-1" currentUserId="user-1" lookupOptions={LOOKUPS}
+        onClose={() => {}} onCreated={() => {}} onPartnerCreated={onPartnerCreated} />
+    )
+    await type(host.querySelector('input[aria-label="Search clients"]')!, 'Fresh Person')
+    await selectValue(host.querySelector('select[aria-label="Source"]')!, 'Referral')
+    await flush()
+    await type(host.querySelector('input[aria-label="Search referrers"]')!, 'New Pro')
+    await click(buttonContaining(host, 'as partner')!)
+    expect(onPartnerCreated).toHaveBeenCalledTimes(1)
+    // The POST response verbatim — id/type/locationId from the server.
+    expect(onPartnerCreated.mock.calls[0][0]).toMatchObject({
+      id: 'pt-new-1', type: 'partner', locationId: 'loc-uuid-1', name: 'New Pro',
+    })
+    await unmount()
+  })
+
+  it('create failure surfaces a toast AND a visible inline error — never a silent no-op', async () => {
+    const onPartnerCreated = vi.fn()
+    const setToast = vi.fn()
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[person()]} locFilter="loc-uuid-1" currentUserId="user-1" lookupOptions={LOOKUPS}
+        onClose={() => {}} onCreated={() => {}} onPartnerCreated={onPartnerCreated} setToast={setToast} />
+    )
+    await type(host.querySelector('input[aria-label="Search clients"]')!, 'Fresh Person')
+    await selectValue(host.querySelector('select[aria-label="Source"]')!, 'Referral')
+    await flush()
+    partnerPostFail = true
+    await type(host.querySelector('input[aria-label="Search referrers"]')!, 'Doomed')
+    await click(buttonContaining(host, 'as contact')!)
+    expect(onPartnerCreated).not.toHaveBeenCalled() // no phantom rows on failure
+    expect(setToast).toHaveBeenCalledWith(expect.objectContaining({ kind: 'error', msg: expect.stringContaining('contact') }))
+    expect(host.textContent).toContain('Create failed')
+    await unmount()
+  })
+
+  it('§8.5: the picker/field reach Classic ONLY via the callback — no PartnersContext/BeeHub imports', () => {
+    for (const f of ['components/hive/ReferrerPicker.jsx', 'components/hive/shared/ReferrerField.jsx']) {
+      const src = readFileSync(f, 'utf8')
+      // Imports only — comments may (and do) mention the rule by name.
+      const importLines = src.split('\n').filter(l => /^\s*import\b/.test(l)).join('\n')
+      expect(importLines, f).not.toContain('PartnersContext')
+      expect(importLines, f).not.toContain('BeeHub')
+      expect(src, f).not.toContain('useContext') // no ambient state at all
+      expect(src).toContain('onPartnerCreated')
+    }
+  })
+})
+
+// ── mergePartnerRow — BeeHub's state-only merge (the seam's Classic half)
+describe('mergePartnerRow', () => {
+  const existing = [{ id: 'pt-1', name: 'Karen Partner', type: 'partner', locationId: 'loc-uuid-1' }]
+
+  it('prepends a confirmed row; dedups by id; ignores rows without an id', () => {
+    const row = { id: 'pt-new-1', name: 'New Pro', type: 'partner', locationId: 'loc-uuid-1' }
+    const merged = mergePartnerRow(existing, row)
+    expect(merged.map(p => p.id)).toEqual(['pt-new-1', 'pt-1'])
+    expect(mergePartnerRow(merged, row)).toBe(merged) // idempotent — no duplicate
+    expect(mergePartnerRow(existing, { name: 'no id' })).toBe(existing)
+    expect(mergePartnerRow(existing, null)).toBe(existing)
+  })
+
+  it("lands in the correct Classic tab pool: type 'partner' → Partners, 'contact' → Contacts (PartnersScreen's exact filters)", () => {
+    const merged = mergePartnerRow(
+      mergePartnerRow(existing, { id: 'pt-new-1', name: 'New Pro', type: 'partner', locationId: 'loc-uuid-1' }),
+      { id: 'ct-new-1', name: 'New Neighbor', type: 'contact', locationId: 'loc-uuid-1' },
+    )
+    // PartnersScreen: locFilter scoping + isDeleted + the type split.
+    const locFilter = 'loc-uuid-1'
+    const allPartners = (locFilter === 'all' ? merged : merged.filter((p: any) => p.locationId === locFilter)).filter((p: any) => !p.isDeleted)
+    const partnerPool = allPartners.filter((p: any) => p.type !== 'contact')
+    const contactPool = allPartners.filter((p: any) => p.type === 'contact')
+    expect(partnerPool.map((p: any) => p.name)).toEqual(['New Pro', 'Karen Partner'])
+    expect(contactPool.map((p: any) => p.name)).toEqual(['New Neighbor'])
+    // And a location-scoped view elsewhere hides it — correct scoping.
+    const otherLoc = merged.filter((p: any) => p.locationId === 'loc-uuid-2')
+    expect(otherLoc).toEqual([])
+  })
+})
+

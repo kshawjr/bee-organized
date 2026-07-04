@@ -28,6 +28,7 @@ import {
   prorateToNextRenewal,
 } from "@/lib/subscription-math"
 import { importEstimateLine } from "@/lib/import-estimate"
+import { mergePartnerRow } from "@/lib/crm"
 
 // Reviews-link URL validation. Used by onboarding location step + Settings
 // "Google Reviews" row. Required field — owners must enter a real review URL
@@ -10087,6 +10088,9 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
   // the user's own location).
   const hiveCurrentUserCtx = useContext(CurrentUserContext)
   const hiveCurrentLocationCtx = useContext(CurrentLocationContext)
+  // Partners CRM mutators for the onPartnerCreated seam — the beta
+  // referrer picker's inline create hands its confirmed row up here.
+  const hivePartnersCtx = useContext(PartnersContext)
   // Render the location pill on every card for elevated users — they want to
   // see where each lead came from even when filtered to a single location.
   const showLocation = isElevated
@@ -10327,6 +10331,11 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
           // referrer) so Inbox rows + filters reflect it without a reload.
           // State-only merge — the card already persisted via the API.
           onPersonPatched={(id, fields)=>{ setPeople(prev => prev.map(x => x.id === id ? { ...x, ...fields } : x)) }}
+          // Partner-create seam (same direction rule): the beta referrer
+          // picker's inline create hands its CONFIRMED /api/partners row up;
+          // merge it into the same partners state PartnersScreen reads so it
+          // shows in Classic's Partners/Contacts tabs without a reload.
+          onPartnerCreated={(row)=>{ hivePartnersCtx?.mergePartner?.(row) }}
           setToast={setToast}
           onExitBeta={()=>{ setView('kanban'); try{localStorage.setItem('bee_hive_view','kanban')}catch(e){} }}
           onOpenClient={(clientId)=>{
@@ -31220,6 +31229,13 @@ if (Array.isArray(initialPeople)) return
     const local = { ...obj, locationId: location_id || obj?.locationId }
     setPartners(prev => [local, ...prev]); return local
   }
+  // State-only merge for a partner row persisted OUTSIDE this context —
+  // the onPartnerCreated seam (beta ReferrerPicker's inline create, which
+  // can't call addPartner under §8.5). The row is the CONFIRMED POST
+  // response, never an optimistic stub; dedup + prepend via mergePartnerRow.
+  function mergePartner(row) {
+    setPartners(prev => mergePartnerRow(prev, row))
+  }
   function updatePartner(updated) {
     setPartners(prev => prev.map(p => p.id === updated.id ? updated : p))
     if (isUuidStr(updated?.id)) {
@@ -31273,7 +31289,7 @@ if (Array.isArray(initialPeople)) return
     setCompanies(prev => prev.filter(c => c.id !== id))
     setPartners(prev => prev.map(p => p.companyId === id ? { ...p, companyId:null, company:'' } : p))
   }
-  const partnersCtxValue = { partners, addPartner, updatePartner, deletePartner, restorePartner, purgePartner }
+  const partnersCtxValue = { partners, addPartner, mergePartner, updatePartner, deletePartner, restorePartner, purgePartner }
   const companiesCtxValue = { companies, addCompany, updateCompany, deleteCompany }
 
   // For franchise users, use their location's status

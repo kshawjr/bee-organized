@@ -54,7 +54,7 @@ const outlineBtn = {
   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', textAlign: 'center',
 }
 
-export default function PersonCard({ person, people = [], onClose, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
+export default function PersonCard({ person, people = [], onClose, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [buzzOpen, setBuzzOpen] = useState(false)
@@ -221,6 +221,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
               people={people}
               onApply={fields => setData(d => d ? { ...d, client: { ...d.client, ...fields } } : d)}
               onSaved={cols => onLeadPatched(person.id, cols)}
+              onPartnerCreated={onPartnerCreated}
               setToast={setToast}
             />
           </div>

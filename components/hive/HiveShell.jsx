@@ -114,6 +114,11 @@ export default function HiveShell({
   // Person-shaped patch UP so Inbox rows / filters / reopened cards
   // reflect it without a reload.
   onPersonPatched = null,
+  // The partner-create seam — same direction rule: ReferrerPicker's
+  // inline create hands its CONFIRMED /api/partners row up so Classic's
+  // partners state (PartnersScreen) shows it without a reload. The
+  // picker never touches PartnersContext (§8.5).
+  onPartnerCreated = null,
   setToast = () => {},
   onExitBeta = () => {},
 }) {
@@ -353,6 +358,7 @@ export default function HiveShell({
       {newClientOpen && (
         <NewClientSheet
           people={people}
+          onPartnerCreated={onPartnerCreated}
           engagements={filtered}
           locFilter={locFilter}
           currentLocationUuid={currentLocationUuid}
@@ -393,6 +399,7 @@ export default function HiveShell({
           onOpenClient={openClient}
           onChanged={(id, patch) => setRowPatches(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))}
           onLeadPatched={handleLeadPatched}
+          onPartnerCreated={onPartnerCreated}
           onSendToJobber={(clientId, opts) => {
             // Founded-not-sent send (engagement-scoped): resolve the person
             // the popup needs — same lookup as ClientProfile below.
@@ -413,6 +420,7 @@ export default function HiveShell({
           onSendToJobber={onSendToJobber}
           setToast={setToast}
           onLeadPatched={handleLeadPatched}
+          onPartnerCreated={onPartnerCreated}
           lookupOptions={lookupOptions}
         />
       )}
@@ -424,6 +432,7 @@ export default function HiveShell({
           onClose={() => setOverlay(null)}
           onOpenEngagement={openEngagement}
           onLeadPatched={handleLeadPatched}
+          onPartnerCreated={onPartnerCreated}
           onSendToJobber={(clientId) => {
             const p = people.find(x => x.id === clientId)
             if (p) onSendToJobber(p)

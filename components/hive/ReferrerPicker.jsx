@@ -45,6 +45,12 @@ export default function ReferrerPicker({
   locationUuid = null,
   selectedId = null,
   onSelect = () => {},
+  // Partner-create seam (§8.5): this picker can't call PartnersContext,
+  // so after a CONFIRMED POST /api/partners it hands the returned row up
+  // this callback chain (surface → HiveShell → BeeHub merges into the
+  // partners state Classic's PartnersScreen reads). Mirrors onPersonCreated.
+  onPartnerCreated = () => {},
+  setToast = () => {},
 }) {
   const [search, setSearch] = useState('')
   const [partnerRows, setPartnerRows] = useState(null) // null = loading
@@ -106,10 +112,17 @@ export default function ReferrerPicker({
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok || !json?.id) throw new Error(json?.error || `HTTP ${res.status}`)
+      // Confirmed row (real id/type/location, never a stub) → the Classic
+      // seam, so the new partner/contact shows in PartnersScreen too.
+      onPartnerCreated(json)
       // Both types store as kind='partner' — the split lives in partners.type.
       onSelect({ id: json.id, kind: 'partner', name: json.name })
     } catch (e) {
-      setCreateErr(String(e?.message || e))
+      const msg = String(e?.message || e)
+      setCreateErr(msg)
+      // Also toast — the inline line alone was easy to miss, making a
+      // failed create look like it silently did nothing.
+      setToast({ kind: 'error', msg: `Couldn't create ${type}: ${msg}` })
     } finally {
       setCreating(null)
     }
@@ -165,7 +178,11 @@ export default function ReferrerPicker({
             ))}
           </>
         )}
-        {createErr && <p style={{ fontSize: '11px', color: '#791F1F', padding: '6px 10px' }}>Create failed: {createErr}</p>}
+        {createErr && (
+          <p style={{ fontSize: '12px', color: '#791F1F', background: '#FCEBEB', padding: '8px 12px', borderRadius: '8px', margin: '6px 2px 2px' }}>
+            Create failed: {createErr}
+          </p>
+        )}
       </div>
     </div>
   )

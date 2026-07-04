@@ -176,3 +176,15 @@ export function canWriteLocation(caller: Caller, targetLocationId: string) {
       (caller.role === 'owner' || caller.role === 'manager'))
   )
 }
+
+// ─── State-only merge for confirmed partner rows ────────────────────────────
+// Backs the onPartnerCreated seam: a partner/contact created OUTSIDE
+// PartnersContext (the beta ReferrerPicker's inline create — §8.5 forbids it
+// calling addPartner) hands its CONFIRMED row up, and BeeHub merges it into
+// the same partners state PartnersScreen reads. Dedup by id (a row created
+// through addPartner is already present); prepend to match addPartner's
+// ordering. Pure — no fetch, the caller already persisted.
+export function mergePartnerRow(prev: any[], row: any): any[] {
+  if (!row?.id) return prev
+  return prev.some((p) => p?.id === row.id) ? prev : [row, ...prev]
+}
