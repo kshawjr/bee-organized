@@ -20,6 +20,7 @@ import Banner from '@/components/ui/Banner'
 import { IconPlayerPause } from '@/components/ui/icons'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortSelect, FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
+import AlphaRail from './shared/AlphaRail'
 
 const DIR_SORTS = [
   { key: 'name', label: 'Name A–Z' },
@@ -89,6 +90,7 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
   const dirSort = DIR_SORTS.some(o => o.key === sortRaw.key) ? sortRaw.key : 'name'
   const [filters, setFilters, clearFilters] = useStoredState('bee_hive_clients_filters', DIR_FILTER_DEFAULTS)
   const [fltOpen, setFltOpen] = useState(false)
+  const [pendingJump, setPendingJump] = useState(null)
   const nowMs = Date.now()
 
   // SSR-safe mobile detection (BeeHub pattern).
@@ -167,6 +169,34 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
     })
     .sort(sortCmp)
   const rows = visible.slice(0, cap)
+  const railSeen = new Set()
+
+  // A–Z rail: letters present in the FULL filtered set; jumping to a
+  // letter beyond the render cap extends the cap first (never a jump
+  // into nothing); jumping while not name-sorted switches the sort.
+  const railLetters = useMemo(() => {
+    const set = new Set()
+    for (const { p } of visible) {
+      const L = (p.name || '').trim().charAt(0).toUpperCase()
+      if (L >= 'A' && L <= 'Z') set.add(L)
+    }
+    return set
+  }, [visible])
+
+  const pickLetter = (L, opts = {}) => {
+    if (dirSort !== 'name') setSort({ key: 'name' })
+    setPendingJump({ L, live: !!opts.live })
+  }
+  useEffect(() => {
+    if (!pendingJump) return
+    if (dirSort !== 'name') return // wait for the sort switch to land
+    const idx = visible.findIndex(({ p }) => (p.name || '').trim().charAt(0).toUpperCase() === pendingJump.L)
+    if (idx === -1) { setPendingJump(null); return }
+    if (idx >= cap) { setCap(Math.ceil((idx + 1) / PAGE) * PAGE); return } // effect re-runs post-expand
+    const el = document.getElementById(`dir-${pendingJump.L}`)
+    if (el) el.scrollIntoView({ behavior: pendingJump.live ? 'auto' : 'smooth', block: 'start' })
+    setPendingJump(null)
+  }) // eslint-disable-line react-hooks/exhaustive-deps
 
   const chips = [
     { key: 'all', label: 'All', count: counts.all },
@@ -252,14 +282,18 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
         }}
       />
 
-      <div style={{ background: '#fff', border: '0.5px solid rgba(0,0,0,0.08)', borderRadius: '12px', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-start' }}>
+      <div style={{ flex: 1, minWidth: 0, background: '#fff', border: '0.5px solid rgba(0,0,0,0.08)', borderRadius: '12px', overflow: 'hidden' }}>
+        {(() => { railSeen.clear(); return null })()}
         {rows.map(({ p, status }) => {
           const meta = CLIENT_STATUS_META[status]
           const fam = CHIP_STYLES[meta.styleKey] || CHIP_STYLES.gray
           const openEngs = openByClient.get(p.id) || []
           const detail = detailLine(p, status, openEngs, nowMs)
+          const rowLetter = (p.name || '').trim().charAt(0).toUpperCase()
+          const anchorId = rowLetter >= 'A' && rowLetter <= 'Z' && !railSeen.has(rowLetter) ? (railSeen.add(rowLetter), `dir-${rowLetter}`) : undefined
           return (
-            <div key={p.id} className="bee-dir-row" onClick={() => onOpenClient(p.id)}
+            <div key={p.id} id={anchorId} className="bee-dir-row" onClick={() => onOpenClient(p.id)}
               style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: isMobile ? '12px 14px' : '13px 16px', borderBottom: '0.5px solid rgba(0,0,0,0.08)', cursor: 'pointer' }}>
               <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: fam.bg, color: fam.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 600, flexShrink: 0 }}>
                 {initialsOf(p.name)}
@@ -284,6 +318,8 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
             </div>
           )
         )}
+      </div>
+      <AlphaRail present={railLetters} idPrefix="dir" sortedByName={dirSort === 'name'} onPick={pickLetter} />
       </div>
 
       {visible.length > cap && (

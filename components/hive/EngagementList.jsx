@@ -25,6 +25,7 @@ import EngagementFilters from './EngagementFilters'
 import { ENGAGEMENT_FILTER_DEFAULTS, engagementFilterCount, passesEngagementFilters } from './shared/engagementStatus'
 import { SortChevrons, SortHeaderStyle, FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
+import AlphaRail from './shared/AlphaRail'
 
 const OPEN_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 const CHIP_LABELS = { 'Request': 'Request', 'Estimate': 'Estimate', 'Job in Progress': 'Job', 'Final Processing': 'Final' }
@@ -76,6 +77,7 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
   const [closedRows, setClosedRows] = useState(null)   // per active scope
   const [closedTotal, setClosedTotal] = useState(null) // scoped total once known
   const [loadingClosed, setLoadingClosed] = useState(false)
+  const [pendingJump, setPendingJump] = useState(null)
   const nowMs = Date.now()
 
   // SSR-safe mobile detection (BeeHub pattern).
@@ -161,6 +163,30 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
     ? sortRows(closedRows || [])
     : sortRows(engagements.filter(e => passesEngagementFilters(e, filters, nowMs)))
 
+  // A–Z rail over CLIENT names; jumping while not client-A–Z-sorted
+  // switches the sort first (one gesture, no dead rail).
+  const railSeen = new Set()
+  const railLetters = (() => {
+    const set = new Set()
+    for (const e of rows) {
+      const L = (e.client_name || '').trim().charAt(0).toUpperCase()
+      if (L >= 'A' && L <= 'Z') set.add(L)
+    }
+    return set
+  })()
+  const nameSorted = sort.col === 'client' && sort.dir === 'asc'
+  const pickLetter = (L, opts = {}) => {
+    if (!nameSorted) setSort({ col: 'client', dir: 'asc' })
+    setPendingJump({ L, live: !!opts.live })
+  }
+  useEffect(() => {
+    if (!pendingJump) return
+    if (!(sort.col === 'client' && sort.dir === 'asc')) return // wait for sort switch
+    const el = document.getElementById(`englist-${pendingJump.L}`)
+    if (el) el.scrollIntoView({ behavior: pendingJump.live ? 'auto' : 'smooth', block: 'start' })
+    setPendingJump(null)
+  }) // eslint-disable-line react-hooks/exhaustive-deps
+
   const clickSort = (col) => {
     setSort(s => s.col === col
       ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' }
@@ -182,8 +208,9 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
         )}
       </div>
 
-      {/* White hairline card; table edge-to-edge inside */}
-      <div style={{ background: '#fff', border: '0.5px solid rgba(0,0,0,0.08)', borderRadius: '12px', overflow: 'hidden' }}>
+      {/* White hairline card; table edge-to-edge inside + A–Z rail */}
+      <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-start' }}>
+      <div style={{ flex: 1, minWidth: 0, background: '#fff', border: '0.5px solid rgba(0,0,0,0.08)', borderRadius: '12px', overflow: 'hidden' }}>
         {!isMobile && rows.length > 0 && (
           <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: '12px', padding: '12px 16px', alignItems: 'baseline', borderBottom: '0.5px solid rgba(0,0,0,0.08)' }}>
             {[['client', 'Client', 'left'], ['engagement', 'Engagement', 'left'], ['stage', 'Stage', 'left'], ['status', 'Status', 'left'], ['value', 'Value', 'right'], ['activity', 'Activity', 'right']].map(([col, label, align]) => (
@@ -201,10 +228,12 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
           const value = rawValue != null ? fmtMoney(rawValue) : null
           const activity = relAge(lastActivityTs(e), nowMs)
           const muted = showingClosed
+          const rowLetter = (e.client_name || '').trim().charAt(0).toUpperCase()
+          const anchorId = rowLetter >= 'A' && rowLetter <= 'Z' && !railSeen.has(rowLetter) ? (railSeen.add(rowLetter), `englist-${rowLetter}`) : undefined
           if (isMobile) {
             // Locked two-line compression, same tokens: name+value / title · status + stage chip.
             return (
-              <div key={e.id} className="bee-englist-row" onClick={() => onOpenEngagement(e)}
+              <div key={e.id} id={anchorId} className="bee-englist-row" onClick={() => onOpenEngagement(e)}
                 style={{ padding: '13px 14px', borderBottom: '0.5px solid rgba(0,0,0,0.08)', cursor: 'pointer', opacity: muted ? 0.6 : 1 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '4px' }}>
                   <div style={{ flex: 1, minWidth: 0 }}><ClientCell e={e} nowMs={nowMs} /></div>
@@ -221,7 +250,7 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
             )
           }
           return (
-            <div key={e.id} className="bee-englist-row" onClick={() => onOpenEngagement(e)}
+            <div key={e.id} id={anchorId} className="bee-englist-row" onClick={() => onOpenEngagement(e)}
               style={{ display: 'grid', gridTemplateColumns: GRID, gap: '12px', alignItems: 'center', padding: '15px 16px', borderBottom: '0.5px solid rgba(0,0,0,0.08)', cursor: 'pointer', opacity: muted ? 0.6 : 1 }}>
               <ClientCell e={e} nowMs={nowMs} />
               <span style={{ fontSize: '13px', color: '#6b6b66', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayTitle(e)}</span>
@@ -245,6 +274,8 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
         {loadingClosed && (
           <div style={{ padding: '24px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px' }}>Loading closed engagements…</div>
         )}
+      </div>
+      <AlphaRail present={railLetters} idPrefix="englist" sortedByName={nameSorted} onPick={pickLetter} />
       </div>
 
       {showingClosed && closedRows && closedTotal != null && closedRows.length < closedTotal && !loadingClosed && (

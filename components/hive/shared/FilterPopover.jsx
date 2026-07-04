@@ -11,7 +11,7 @@
 //                   Clear all (the d710247 rule, on every surface)
 'use client'
 
-import React from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { IconChevronRight } from '@/components/ui/icons'
 
 export function FilterButton({ count = 0, open, onToggle }) {
@@ -90,15 +90,79 @@ export function SortHeaderStyle() {
   return <style>{`.bee-sort-header { cursor: pointer } .bee-sort-header:hover { color: #1a1a18 !important; background: #f7f6f4 }`}</style>
 }
 
+// Modern quiet sort control: hairline pill trigger + custom popover menu
+// (check glyph on the active option, hover tint, click-outside + Escape
+// close, arrow/Enter keyboard nav, 120ms fade-slide open).
 export function SortSelect({ value, onChange, options }) {
+  const [open, setOpen] = useState(false)
+  const [focusIdx, setFocusIdx] = useState(-1)
+  const rootRef = useRef(null)
+  const triggerRef = useRef(null)
+  const itemRefs = useRef([])
+  const active = options.find(o => o.key === value) || options[0]
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (ev) => { if (rootRef.current && !rootRef.current.contains(ev.target)) setOpen(false) }
+    const onKey = (ev) => { if (ev.key === 'Escape') { setOpen(false); triggerRef.current?.focus() } }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey) }
+  }, [open])
+
+  useEffect(() => {
+    if (open && focusIdx >= 0) itemRefs.current[focusIdx]?.focus()
+  }, [open, focusIdx])
+
+  const openMenu = () => {
+    setOpen(true)
+    setFocusIdx(Math.max(0, options.findIndex(o => o.key === value)))
+  }
+
+  const onTriggerKey = (ev) => {
+    if (ev.key === 'ArrowDown' || ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openMenu() }
+  }
+  const onItemKey = (ev, i) => {
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); setFocusIdx((i + 1) % options.length) }
+    else if (ev.key === 'ArrowUp') { ev.preventDefault(); setFocusIdx((i - 1 + options.length) % options.length) }
+    else if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onChange(options[i].key); setOpen(false); triggerRef.current?.focus() }
+  }
+
   return (
-    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#8a8a84', whiteSpace: 'nowrap' }}>
-      Sort
-      <select value={value} onChange={e => onChange(e.target.value)}
-        style={{ padding: '4px 8px', borderRadius: '8px', border: '0.5px solid rgba(0,0,0,0.15)', background: '#fff', fontSize: '12px', color: '#1a1a18', fontFamily: 'inherit', cursor: 'pointer' }}>
-        {options.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
-      </select>
-    </label>
+    <div ref={rootRef} style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}>
+      <style>{`@keyframes beeSortIn { from { opacity: 0; transform: translateY(-2px) } to { opacity: 1; transform: translateY(0) } }`}</style>
+      <button
+        ref={triggerRef}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => (open ? setOpen(false) : openMenu())}
+        onKeyDown={onTriggerKey}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '5px 12px', borderRadius: '20px', border: '0.5px solid rgba(0,0,0,0.15)', background: open ? '#fff' : 'transparent', fontSize: '12px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}
+      >
+        Sort: <span style={{ color: '#1a1a18', fontWeight: 500 }}>{active.label}</span>
+        <IconChevronRight size={10} style={{ transform: open ? 'rotate(-90deg)' : 'rotate(90deg)', color: '#8a8a84' }} />
+      </button>
+      {open && (
+        <div role="listbox" style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 50, minWidth: '190px', background: '#fff', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '10px', boxShadow: '0 8px 30px rgba(26,26,24,0.12)', padding: '4px', animation: 'beeSortIn 120ms ease-out' }}>
+          <style>{`.bee-sort-item:hover { background: #f7f6f4 }`}</style>
+          {options.map((o, i) => (
+            <button
+              key={o.key}
+              ref={el => { itemRefs.current[i] = el }}
+              role="option"
+              aria-selected={o.key === value}
+              className="bee-sort-item"
+              onClick={() => { onChange(o.key); setOpen(false) }}
+              onKeyDown={(ev) => onItemKey(ev, i)}
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '7px 10px', borderRadius: '8px', border: 'none', background: 'transparent', fontSize: '12px', color: o.key === value ? '#1a1a18' : '#6b6b66', fontWeight: o.key === value ? 500 : 400, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}
+            >
+              <span style={{ width: '14px', display: 'inline-flex', justifyContent: 'center', color: '#1D9E75' }}>{o.key === value ? '✓' : ''}</span>
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
