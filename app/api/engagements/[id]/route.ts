@@ -148,9 +148,10 @@ export async function PATCH(
 
   const stage = body?.stage as EngagementStage | undefined
   const titleRaw = body?.title as unknown
+  const descriptionRaw = body?.description as unknown
 
-  if (stage === undefined && titleRaw === undefined) {
-    return NextResponse.json({ error: 'nothing_to_update', accepts: ['stage', 'title'] }, { status: 400 })
+  if (stage === undefined && titleRaw === undefined && descriptionRaw === undefined) {
+    return NextResponse.json({ error: 'nothing_to_update', accepts: ['stage', 'title', 'description'] }, { status: 400 })
   }
 
   const nowIso = new Date().toISOString()
@@ -162,6 +163,14 @@ export async function PATCH(
       return NextResponse.json({ error: 'invalid_title' }, { status: 400 })
     }
     patch.title = titleRaw.trim().slice(0, 200)
+  }
+
+  // Description: editable anytime; empty string clears (→ null).
+  if (descriptionRaw !== undefined) {
+    if (typeof descriptionRaw !== 'string') {
+      return NextResponse.json({ error: 'invalid_description' }, { status: 400 })
+    }
+    patch.description = descriptionRaw.trim().slice(0, 2000) || null
   }
 
   if (stage !== undefined) {
@@ -241,6 +250,7 @@ export async function PATCH(
     stage: stageChanged ? stage : engagement.stage,
     prev_stage: engagement.stage,
     title: patch.title ?? engagement.title,
-    changed: stageChanged || patch.title !== undefined,
+    description: patch.description !== undefined ? patch.description : engagement.description,
+    changed: stageChanged || patch.title !== undefined || patch.description !== undefined,
   })
 }

@@ -120,6 +120,8 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
   const [loadErr, setLoadErr] = useState(null)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
+  const [descEditing, setDescEditing] = useState(false)
+  const [descDraft, setDescDraft] = useState('')
   const [noteText, setNoteText] = useState('')
   const [buzzOpen, setBuzzOpen] = useState(false)
   const [buzzDraft, setBuzzDraft] = useState('')
@@ -167,7 +169,7 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
       })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      setData(d => d ? { ...d, engagement: { ...d.engagement, ...(body.title ? { title: j.title } : {}), ...(body.stage ? { stage: j.stage } : {}) } } : d)
+      setData(d => d ? { ...d, engagement: { ...d.engagement, ...(body.title ? { title: j.title } : {}), ...(body.stage ? { stage: j.stage } : {}), ...(body.description !== undefined ? { description: j.description ?? null } : {}) } } : d)
       onChanged(engagementId, { ...(body.title ? { title: j.title } : {}), ...(body.stage ? { stage: j.stage } : {}) })
       if (okMsg) setToast({ kind: 'success', msg: okMsg })
       return true
@@ -184,6 +186,13 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
     setEditingTitle(false)
     if (!t || t === (eng?.title || '')) return
     await patchEngagement({ title: t })
+  }
+
+  async function saveDescription() {
+    const t = descDraft.trim().slice(0, 2000)
+    setDescEditing(false)
+    if (t === (eng?.description || '').trim()) return
+    await patchEngagement({ description: t })
   }
 
   const nextStage = (() => {
@@ -343,6 +352,41 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
         </div>
       )}
 
+      {/* Description — what this engagement IS. First-class editable field
+          (seeded from the founding request's webform text when present). */}
+      {eng && (
+        descEditing ? (
+          <textarea
+            autoFocus
+            value={descDraft}
+            onChange={e => setDescDraft(e.target.value)}
+            onBlur={saveDescription}
+            onKeyDown={e => {
+              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') saveDescription()
+              if (e.key === 'Escape') setDescEditing(false)
+            }}
+            rows={3}
+            maxLength={2000}
+            placeholder="Describe the work…"
+            style={{ width: '100%', padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', lineHeight: 1.45, color: '#1a1a18', fontFamily: 'inherit', outline: 'none', resize: 'vertical', boxSizing: 'border-box' }}
+          />
+        ) : (eng.description || '').trim() ? (
+          <div onClick={() => { setDescDraft(eng.description || ''); setDescEditing(true) }}
+            title="Click to edit description"
+            style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', cursor: 'text' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <QuoteBlock text={eng.description} />
+            </div>
+            <span style={{ fontSize: '11px', color: '#c9c7c0', flexShrink: 0, paddingTop: '4px' }}>✎</span>
+          </div>
+        ) : (
+          <button onClick={() => { setDescDraft(''); setDescEditing(true) }}
+            style={{ textAlign: 'left', padding: '7px 10px', border: '0.5px dashed rgba(0,0,0,0.15)', borderRadius: '8px', background: 'transparent', fontSize: '12px', color: '#b5b3ac', cursor: 'text', fontFamily: 'inherit' }}>
+            Add a description…
+          </button>
+        )
+      )}
+
       {/* Client strip — quiet card, no border */}
       {client && (
         <div style={{ padding: '10px 12px', background: QUIET, borderRadius: '8px' }}>
@@ -409,22 +453,13 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
       <div>
         <MicroLabel>Records</MicroLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {children.service_requests.map((sr, i) => {
-            // Webform text: the SR's own notes, else (founding request only)
-            // the client's request_details — the column the webform intake
-            // writes (leads.request_details).
-            const desc = (sr.notes || '').trim() || (i === 0 ? (client?.request_details || '').trim() : '')
-            return (
-              <React.Fragment key={sr.id}>
-                <RecordRow icon={<IconInbox size={15} />} iconColor="#085041" current={currentType === 'request'}
-                  primary={`Request · ${fmtDate(sr.requested_at || sr.created_at) || '—'}`}
-                  secondary={sr.source ? `source: ${sr.source}` : null}
-                  state={currentType === 'request' ? { label: 'active', color: BAR_CURRENT } : DONE}
-                />
-                {desc && <QuoteBlock text={desc} indent={40} />}
-              </React.Fragment>
-            )
-          })}
+          {children.service_requests.map(sr => (
+            <RecordRow key={sr.id} icon={<IconInbox size={15} />} iconColor="#085041" current={currentType === 'request'}
+              primary={`Request · ${fmtDate(sr.requested_at || sr.created_at) || '—'}`}
+              secondary={sr.source ? `source: ${sr.source}` : null}
+              state={currentType === 'request' ? { label: 'active', color: BAR_CURRENT } : DONE}
+            />
+          ))}
           {(children.assessments || []).map(a => {
             const done = !!a.completed_at || a.status === 'completed'
             const future = new Date(a.scheduled_at || 0).getTime() > Date.now()

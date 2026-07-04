@@ -23,7 +23,7 @@ export default function QuoteBlock({ text, indent = 0 }) {
         {t}
       </p>
       {clampLikely && !expanded && (
-        <button onClick={() => setExpanded(true)}
+        <button onClick={(e) => { e.stopPropagation(); setExpanded(true) }}
           style={{ border: 'none', background: 'transparent', padding: 0, marginTop: '2px', fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
           Show more
         </button>

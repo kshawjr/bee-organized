@@ -169,18 +169,24 @@ export async function foundEngagement(params: {
   const { clientId, foundedBy, foundingChildTable, foundingChildId } = params
 
   // Idempotency: founding child already linked → return its engagement.
-  const { data: childRow, error: childErr } = await supabaseService
+  // SRs also carry their notes: request foundings seed the engagement's
+  // description from the founding request's text (see below).
+  // (plain-string select: the ternary defeats supabase-js's literal-type
+  // parser, so the row comes back untyped — accessed via `any` below.)
+  const childSelect: string = foundingChildTable === 'service_requests' ? 'id, engagement_id, notes' : 'id, engagement_id'
+  const { data: childRowRaw, error: childErr } = await supabaseService
     .from(foundingChildTable)
-    .select('id, engagement_id')
+    .select(childSelect)
     .eq('id', foundingChildId)
     .maybeSingle()
+  const childRow = childRowRaw as { id: string; engagement_id: string | null; notes?: string | null } | null
   if (childErr) return { error: `founding child read: ${childErr.message}` }
   if (!childRow) return { error: `founding child not found: ${foundingChildTable}/${foundingChildId}` }
   if (childRow.engagement_id) return { id: childRow.engagement_id, created: false }
 
   const { data: lead, error: leadErr } = await supabaseService
     .from('leads')
-    .select('id, location_uuid, location_id, name')
+    .select('id, location_uuid, location_id, name, request_details')
     .eq('id', clientId)
     .maybeSingle()
   if (leadErr || !lead) return { error: `lead read: ${leadErr?.message || 'not found'}` }
@@ -193,6 +199,12 @@ export async function foundEngagement(params: {
 
   const nowIso = new Date().toISOString()
   const stage = params.stage ?? OPENING_STAGE[foundedBy]
+  // Request foundings arrive pre-described: the founding SR's own notes,
+  // else the lead's webform text (leads.request_details — temporally
+  // correct at founding time). Manual/quote/job foundings start blank.
+  const description = foundedBy === 'request'
+    ? (((childRow as any).notes || '').trim() || (lead.request_details || '').trim() || null)
+    : null
   const { data: created, error: insErr } = await supabaseService
     .from('engagements')
     .insert({
@@ -201,6 +213,7 @@ export async function foundEngagement(params: {
       stage,
       founded_by: foundedBy,
       title: params.title?.trim() || fallbackTitle(),
+      ...(description ? { description } : {}),
       stage_entered_at: nowIso,
       created_at: nowIso,
       updated_at: nowIso,

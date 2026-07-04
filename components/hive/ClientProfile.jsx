@@ -271,6 +271,11 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
                   <p style={{ fontSize: '13px', fontWeight: 500, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {displayTitle(e)}{value != null ? ` · ${fmtMoney(value)}` : ''}
                   </p>
+                  {(e.description || '').trim() && (
+                    <p style={{ fontSize: '11px', color: '#8a8a84', marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {e.description.trim().split('\n')[0]}
+                    </p>
+                  )}
                   {chip && <p style={{ fontSize: '11px', fontWeight: 500, color: statusColor, marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{chip.label}</p>}
                 </div>
                 <span style={{ flexShrink: 0 }}><StatusChip label={stageDisplayLabel(e.stage)} styleKey={e.stage} /></span>

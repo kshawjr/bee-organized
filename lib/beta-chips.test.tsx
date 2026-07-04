@@ -43,7 +43,7 @@ const ENGAGEMENTS = [
   eng({ stage: 'Request', assessments: [{ id: 'a1', scheduled_at: daysAheadAt(2, 19, 0), status: 'scheduled', completed_at: null }] }),
   eng({ stage: 'Request', created_at: daysAgo(25) }), // amber pre-nurture
   eng({ stage: 'Estimate', quotes: [{ id: 'q1', status: 'sent', total: 500, sent_at: daysAgo(2) }] }),
-  eng({ stage: 'Estimate', quotes: [{ id: 'q2', status: 'approved', total: 900 }], repeat_count: 3 }),
+  eng({ stage: 'Estimate', quotes: [{ id: 'q2', status: 'approved', total: 900 }], repeat_count: 3, description: 'Kitchen + garage reorganization after the move — donation runs included.' }),
   eng({ stage: 'Job in Progress', jobs: [{ id: 'j1', status: 'upcoming', scheduled_start: new Date(now + 5 * 86400000).toISOString() }] }),
   eng({ stage: 'Final Processing', total_invoiced: 600, balance_owing: 620, invoices: [{ id: 'i1', status: 'sent', total: 620 }] }),
   eng({ stage: 'Final Processing', jobs: [{ id: 'j2', status: 'completed', completed_at: daysAgo(1) }] }), // never invoiced
