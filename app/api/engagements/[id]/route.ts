@@ -71,7 +71,7 @@ export async function GET(
     supabaseService.from('quotes').select('*').eq('engagement_id', id).order('sent_at', { ascending: true, nullsFirst: false }),
     supabaseService.from('jobs').select('*').eq('engagement_id', id).order('scheduled_start', { ascending: true, nullsFirst: false }),
     supabaseService.from('invoices').select('*').eq('engagement_id', id).order('issued_at', { ascending: true, nullsFirst: false }),
-    supabaseService.from('leads').select('id, name, email, phone, request_details, source').eq('id', engagement.client_id).maybeSingle(),
+    supabaseService.from('leads').select('id, name, email, phone, request_details, source, referred_by_kind, referred_by_id').eq('id', engagement.client_id).maybeSingle(),
     supabaseService.from('engagements').select('id, stage, total_paid').eq('client_id', engagement.client_id),
     supabaseService.from('assessments').select('*').eq('engagement_id', id).order('scheduled_at', { ascending: true, nullsFirst: false }),
     // Engagement-scoped notes (kind='job' via the panel composer); newest
@@ -100,6 +100,20 @@ export async function GET(
   }
   const touchpoints = touches.map(t => ({ ...t, user_label: t.user_id ? (authorById[t.user_id] ?? null) : null }))
 
+  // Referrer name resolution — same polymorphic lookup as the profile
+  // route: kind 'partner' → partners row (contacts share the table),
+  // kind 'lead' → another leads row. The panel's ReferrerField shows who.
+  let referredByName: string | null = null
+  const clientLead = clientRes.data
+  if (clientLead?.referred_by_kind && clientLead?.referred_by_id) {
+    const { data: ref } = await supabaseService
+      .from(clientLead.referred_by_kind === 'lead' ? 'leads' : 'partners')
+      .select('name')
+      .eq('id', clientLead.referred_by_id)
+      .maybeSingle()
+    referredByName = ref?.name ?? null
+  }
+
   const siblings = clientEngsRes.data ?? []
   const num = (v: any) => (v == null ? 0 : Number(v) || 0)
   const lifetimePaid = siblings.reduce((s, e) => s + num(e.total_paid), 0)
@@ -125,6 +139,9 @@ export async function GET(
       phone: clientRes.data?.phone ?? null,
       request_details: clientRes.data?.request_details ?? null,
       source: clientRes.data?.source ?? null,
+      referred_by_kind: clientRes.data?.referred_by_kind ?? null,
+      referred_by_id: clientRes.data?.referred_by_id ?? null,
+      referred_by_name: referredByName,
       buzz: buzzRes.data ?? [],
       lifetime_paid: lifetimePaid,
       prior_engagements: priorCount,
@@ -177,11 +194,12 @@ export async function PATCH(
 
   // Project type: a label from the admin lookups list (category
   // 'project_types') — stored as text, matching the leads convention.
+  // Explicit null clears (the meta row's None option); empty string too.
   if (projectTypeRaw !== undefined) {
-    if (typeof projectTypeRaw !== 'string') {
+    if (projectTypeRaw !== null && typeof projectTypeRaw !== 'string') {
       return NextResponse.json({ error: 'invalid_project_type' }, { status: 400 })
     }
-    patch.project_type = projectTypeRaw.trim().slice(0, 100) || null
+    patch.project_type = projectTypeRaw === null ? null : (projectTypeRaw.trim().slice(0, 100) || null)
   }
 
   if (stage !== undefined) {

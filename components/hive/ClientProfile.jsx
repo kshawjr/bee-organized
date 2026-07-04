@@ -11,15 +11,15 @@
 // here swaps back. Two taps loop, zero modal piles.
 //
 // READ-mostly: buzz note + touchpoint + referrer add/edit/clear use the
-// existing write paths (client-level; referrer via PATCH /api/leads with
-// the source='Referral' coupling on set — see saveReferrer);
-// contact editing stays in the classic view tonight;
+// existing write paths (client-level; referrer via the shared
+// ReferrerField — PATCH /api/leads with the source='Referral' coupling
+// on set); contact editing stays in the classic view tonight;
 // 'Activate drips' is step 5's. Send to Jobber reuses the existing
 // popup via the same gate as the Inbox (!jobber link). Beta chunk.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect } from 'react'
 import { CHIP_STYLES, stageDisplayLabel, ACCENT_BLUE } from './shared/stageConfig'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
 import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, relAge } from './shared/engagementStatus'
@@ -32,7 +32,7 @@ import {
 import EditableDesc from './EditableDesc'
 import BuzzDrawer from './BuzzDrawer'
 import OverlayShell from './OverlayShell'
-import ReferrerPicker from './ReferrerPicker'
+import ReferrerField from './shared/ReferrerField'
 import useIsMobile from './shared/useIsMobile'
 
 const QUIET = '#f7f6f4'
@@ -69,10 +69,9 @@ const outlineBtn = {
   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', textAlign: 'center',
 }
 
-export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {} }) {
+export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {} }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
-  const [pickReferrer, setPickReferrer] = useState(false)
   const [showContacts, setShowContacts] = useState(false)
   const [showClosed, setShowClosed] = useState(false)
   const [showAllTouches, setShowAllTouches] = useState(false)
@@ -153,57 +152,6 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
       setToast({ kind: 'success', msg: 'Description saved' })
     } catch (e) {
       setData(d => d ? { ...d, client: { ...d.client, request_details: prev } } : d)
-      setToast({ kind: 'error', msg: `Save failed: ${e.message}` })
-    }
-  }
-
-  // Clients universe for the referrer picker — the shell's people prop
-  // scoped to THIS client's location, self excluded (no self-referral).
-  // Junk exclusion happens inside ReferrerPicker.
-  const referrerPeople = useMemo(() => {
-    if (!c) return []
-    return (people || []).filter(p => p.id !== c.id && p.locationId === c.location_uuid)
-  }, [people, c]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Set/replace the referrer — same optimistic+revert idiom as
-  // saveReqDetails. Setting ALSO corrects source to 'Referral' (Classic's
-  // coupling): a retroactively-referred lead shouldn't keep saying
-  // Webform/Jobber under a "Referred by X" line.
-  async function saveReferrer(r) {
-    if (!c) return
-    const prev = { referred_by_kind: c.referred_by_kind, referred_by_id: c.referred_by_id, referred_by_name: c.referred_by_name, source: c.source }
-    setData(d => d ? { ...d, client: { ...d.client, referred_by_kind: r.kind, referred_by_id: r.id, referred_by_name: r.name, source: 'Referral' } } : d)
-    try {
-      const res = await fetch(`/api/leads/${c.id}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ referred_by_kind: r.kind, referred_by_id: r.id, source: 'Referral' }),
-      })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
-      setToast({ kind: 'success', msg: `Referrer saved — ${r.name}` })
-    } catch (e) {
-      setData(d => d ? { ...d, client: { ...d.client, ...prev } } : d)
-      setToast({ kind: 'error', msg: `Save failed: ${e.message}` })
-    }
-  }
-
-  // Clear is ASYMMETRIC on purpose: it nulls the referrer fields but does
-  // NOT revert source away from 'Referral' — the lead may still be
-  // referral-sourced, and guessing a replacement source would be wrong
-  // more often than right.
-  async function clearReferrer() {
-    if (!c) return
-    const prev = { referred_by_kind: c.referred_by_kind, referred_by_id: c.referred_by_id, referred_by_name: c.referred_by_name }
-    setData(d => d ? { ...d, client: { ...d.client, referred_by_kind: null, referred_by_id: null, referred_by_name: null } } : d)
-    setPickReferrer(false)
-    try {
-      const res = await fetch(`/api/leads/${c.id}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ referred_by_kind: null, referred_by_id: null }),
-      })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
-      setToast({ kind: 'success', msg: 'Referrer removed' })
-    } catch (e) {
-      setData(d => d ? { ...d, client: { ...d.client, ...prev } } : d)
       setToast({ kind: 'error', msg: `Save failed: ${e.message}` })
     }
   }
@@ -300,40 +248,20 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
           <p style={{ fontSize: '12px', color: c.marketing_opt_out ? '#791F1F' : '#8a8a84' }}>
             {c.marketing_opt_out ? 'Opted out of marketing' : 'No opt-outs'}
           </p>
-          <div style={{ fontSize: '12px', color: '#8a8a84' }}>
-            {/* Forward direction — the route resolves referred_by_id to a
-                name (partner or lead per kind); the kind-only fallback
-                covers a dangling id whose row was since deleted. The line
-                is the EDIT affordance: tap to open the picker, × clears. */}
-            {c.referred_by_kind ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
-                <button type="button" aria-label="Edit referrer" onClick={() => setPickReferrer(v => !v)}
-                  style={{ border: 'none', background: 'transparent', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer', borderBottom: '1px dashed rgba(0,0,0,0.2)' }}>
-                  Referred by {c.referred_by_name || (c.referred_by_kind === 'lead' ? 'a client' : 'a partner')}
-                </button>
-                <button type="button" aria-label="Clear referrer" onClick={clearReferrer}
-                  style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', color: '#b5b3ac', fontSize: '13px', lineHeight: 1 }}>
-                  ×
-                </button>
-              </span>
-            ) : (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                <span>{c.source ? `Source: ${String(c.source).toLowerCase()}` : 'Source unknown'}</span>
-                <button type="button" aria-label="Add referrer" onClick={() => setPickReferrer(v => !v)}
-                  style={{ border: 'none', background: 'transparent', padding: 0, font: 'inherit', cursor: 'pointer', color: '#8a8a84', borderBottom: '1px dashed rgba(0,0,0,0.2)' }}>
-                  ＋ Add referrer
-                </button>
-              </span>
-            )}
-            {pickReferrer && (
-              <ReferrerPicker
-                people={referrerPeople}
-                locationUuid={c.location_uuid}
-                selectedId={c.referred_by_id || null}
-                onSelect={r => { setPickReferrer(false); saveReferrer(r) }}
-              />
-            )}
-          </div>
+          {/* Source line stays display-only here (no meta row on the
+              profile); the ReferrerField below is the shared edit
+              affordance (same one PersonCard + EngagementPanel render). */}
+          <p style={{ fontSize: '12px', color: '#8a8a84' }}>
+            {c.source ? `Source: ${String(c.source).toLowerCase()}` : 'Source unknown'}
+          </p>
+          <ReferrerField
+            lead={c}
+            locationUuid={c.location_uuid}
+            people={people}
+            onApply={fields => setData(d => d ? { ...d, client: { ...d.client, ...fields } } : d)}
+            onSaved={cols => onLeadPatched(c.id, cols)}
+            setToast={setToast}
+          />
           {/* Reverse direction — leads this client referred (kind='lead'
               rows pointing back here; partners' reverse lists stay in
               the classic PartnerPanel — the beta has no partner surface). */}

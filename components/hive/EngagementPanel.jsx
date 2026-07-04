@@ -22,6 +22,7 @@ import ClientStrip from './ClientStrip'
 import NotesStream from './NotesStream'
 import OverlayShell from './OverlayShell'
 import MetaSelect from './MetaSelect'
+import ReferrerField from './shared/ReferrerField'
 import { fmtTime } from './shared/engagementStatus'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
@@ -117,7 +118,7 @@ function RecordRow({ icon, iconColor, primary, secondary, state, current, sub })
   )
 }
 
-export default function EngagementPanel({ engagementId, seed = null, onClose, onOpenClient = () => {}, onChanged = () => {}, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
+export default function EngagementPanel({ engagementId, seed = null, people = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onLeadPatched = () => {}, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -182,6 +183,7 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
 
   // Source is LEAD-level (marketing attribution belongs to the person's
   // arrival) — saves through the lead PATCH, not the engagement's.
+  // label may be null — None clears the field.
   async function saveSource(label) {
     if (!client) return
     const prev = client.source ?? null
@@ -192,6 +194,9 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
         body: JSON.stringify({ source: label }),
       })
       if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
+      // Propagate to the shell's people state — the Inbox row / filters
+      // read the lead's source from there.
+      onLeadPatched(client.id, { source: label })
     } catch (e) {
       setData(d => d ? { ...d, client: { ...d.client, source: prev } } : d)
       setToast({ kind: 'error', msg: `Save failed: ${e.message}` })
@@ -430,6 +435,21 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
             <MetaSelect label="Source" value={client?.source || null} options={lookupOptions.sources} onPick={saveSource} />
             <MetaSelect label="Type" value={eng.project_type || null} options={lookupOptions.projectTypes} onPick={(v) => patchEngagement({ project_type: v })} />
           </div>
+          {/* Referrer — LEAD-level like Source: the shared field PATCHes
+              the lead's referred_by columns (client.id), never an
+              engagement field. */}
+          {client && (
+            <div style={{ marginTop: '8px' }}>
+              <ReferrerField
+                lead={client}
+                locationUuid={eng.location_uuid}
+                people={people}
+                onApply={fields => setData(d => d ? { ...d, client: { ...d.client, ...fields } } : d)}
+                onSaved={cols => onLeadPatched(client.id, cols)}
+                setToast={setToast}
+              />
+            </div>
+          )}
         </div>
       )}
 

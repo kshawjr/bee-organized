@@ -10322,6 +10322,11 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
           // /api/leads insert; we merge it into people-state here so the
           // Inbox "New" row appears without a reload.
           onPersonCreated={(person)=>{ setPeople(prev => prev.some(x=>x.id===person.id) ? prev : [person, ...prev]) }}
+          // People-PATCH seam (same direction rule): the shell hands up
+          // Person-shaped field patches after a card edit (source/type/
+          // referrer) so Inbox rows + filters reflect it without a reload.
+          // State-only merge — the card already persisted via the API.
+          onPersonPatched={(id, fields)=>{ setPeople(prev => prev.map(x => x.id === id ? { ...x, ...fields } : x)) }}
           setToast={setToast}
           onExitBeta={()=>{ setView('kanban'); try{localStorage.setItem('bee_hive_view','kanban')}catch(e){} }}
           onOpenClient={(clientId)=>{

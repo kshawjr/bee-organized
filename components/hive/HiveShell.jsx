@@ -22,6 +22,7 @@ import ClientProfile from './ClientProfile'
 import PersonCard from './PersonCard'
 import NewClientSheet from './NewClientSheet'
 import { mapLeadToPerson } from '@/lib/people-mapper'
+import { leadColsToPersonFields } from './shared/leadPatchMap'
 import { deriveClientStatus } from './shared/clientStatus'
 import { isTerminal } from './shared/stageConfig'
 import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount } from './shared/engagementStatus'
@@ -108,6 +109,11 @@ export default function HiveShell({
   // callback DOWN; after a confirmed create the shell hands the mapped
   // person UP through it. The shell never reaches into BeeHub state.
   onPersonCreated = null,
+  // The people-PATCH seam — same direction rule, for edits: after a card
+  // saves a lead field (source/type/referrer), the shell hands the
+  // Person-shaped patch UP so Inbox rows / filters / reopened cards
+  // reflect it without a reload.
+  onPersonPatched = null,
   setToast = () => {},
   onExitBeta = () => {},
 }) {
@@ -168,6 +174,15 @@ export default function HiveShell({
   const openEngagement = (e) => setOverlay({ type: 'engagement', engagement: e })
   const openClient = (clientId) => setOverlay({ type: 'client', clientId })
   const openPerson = (person) => setOverlay({ type: 'person', person })
+
+  // Cards emit lead-COLUMN patches after a confirmed PATCH; translate to
+  // Person-shape fields and hand UP (onPersonPatched merges into BeeHub's
+  // people state). Unknown columns are dropped by the translator.
+  const handleLeadPatched = (leadId, cols) => {
+    if (!onPersonPatched) return
+    const fields = leadColsToPersonFields(cols)
+    if (Object.keys(fields).length > 0) onPersonPatched(leadId, fields)
+  }
 
   const allEngagements = sessionEngagements.length === 0
     ? engagements
@@ -373,9 +388,11 @@ export default function HiveShell({
           key={overlay.engagement.id}
           engagementId={overlay.engagement.id}
           seed={overlay.engagement}
+          people={people}
           onClose={() => setOverlay(null)}
           onOpenClient={openClient}
           onChanged={(id, patch) => setRowPatches(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))}
+          onLeadPatched={handleLeadPatched}
           onSendToJobber={(clientId, opts) => {
             // Founded-not-sent send (engagement-scoped): resolve the person
             // the popup needs — same lookup as ClientProfile below.
@@ -391,9 +408,11 @@ export default function HiveShell({
         <PersonCard
           key={overlay.person.id}
           person={overlay.person}
+          people={people}
           onClose={() => setOverlay(null)}
           onSendToJobber={onSendToJobber}
           setToast={setToast}
+          onLeadPatched={handleLeadPatched}
           lookupOptions={lookupOptions}
         />
       )}
@@ -404,6 +423,7 @@ export default function HiveShell({
           people={people}
           onClose={() => setOverlay(null)}
           onOpenEngagement={openEngagement}
+          onLeadPatched={handleLeadPatched}
           onSendToJobber={(clientId) => {
             const p = people.find(x => x.id === clientId)
             if (p) onSendToJobber(p)

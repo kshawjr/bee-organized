@@ -40,6 +40,16 @@ export default function MetaSelect({ label, value, options = [], onPick }) {
           <div className="bee-meta-pop" onClick={e => e.stopPropagation()}
             style={{ position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 10010, width: '210px', overflowY: 'auto', background: '#fff', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '10px', boxShadow: '0 8px 30px rgba(26,26,24,0.12)', padding: '8px 12px' }}>
             <style>{`.bee-meta-item:hover { background:#f7f6f4 } .bee-meta-pop { max-height: 46vh; max-height: 46dvh; }`}</style>
+            {/* None pinned first — every meta field must be clearable; a
+                lead can legitimately have no source/type, and trapping the
+                user in a value once picked fabricates data. onPick(null)
+                → the caller PATCHes the column to null. */}
+            <button className="bee-meta-item"
+              onClick={() => { setOpen(false); if (value != null) onPick(null) }}
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '6px 8px', margin: '0 -8px', borderRadius: '8px', border: 'none', background: 'transparent', fontSize: '12px', color: value == null ? '#1a1a18' : '#b5b3ac', fontWeight: value == null ? 500 : 400, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', fontStyle: 'italic' }}>
+              <span style={{ width: '14px', display: 'inline-flex', justifyContent: 'center', color: '#1D9E75', flexShrink: 0 }}>{value == null ? '✓' : ''}</span>
+              None
+            </button>
             {options.map(o => (
               <button key={o} className="bee-meta-item"
                 onClick={() => { setOpen(false); if (o !== value) onPick(o) }}

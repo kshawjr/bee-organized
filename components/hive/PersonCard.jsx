@@ -25,6 +25,7 @@ import ClientStrip from './ClientStrip'
 import NotesStream from './NotesStream'
 import EditableDesc from './EditableDesc'
 import MetaSelect from './MetaSelect'
+import ReferrerField from './shared/ReferrerField'
 import StatusChip from '@/components/ui/StatusChip'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
 import { fmtMoney } from './shared/engagementStatus'
@@ -53,7 +54,7 @@ const outlineBtn = {
   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', textAlign: 'center',
 }
 
-export default function PersonCard({ person, onClose, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
+export default function PersonCard({ person, people = [], onClose, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [buzzOpen, setBuzzOpen] = useState(false)
@@ -115,7 +116,7 @@ export default function PersonCard({ person, onClose, onSendToJobber = null, set
 
   // Source + project type both live on the LEAD pre-founding; project
   // type seeds engagements.project_type at request-founding (same chain
-  // as description).
+  // as description). label may be null — None clears the field.
   async function saveLeadField(field, label) {
     const prev = c?.[field] ?? null
     setData(d => d ? { ...d, client: { ...d.client, [field]: label } } : d)
@@ -125,6 +126,9 @@ export default function PersonCard({ person, onClose, onSendToJobber = null, set
         body: JSON.stringify({ [field]: label }),
       })
       if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
+      // Propagate to the shell's people state so the Inbox row / filters
+      // reflect the change without a reload.
+      onLeadPatched(person.id, { [field]: label })
     } catch (e) {
       setData(d => d ? { ...d, client: { ...d.client, [field]: prev } } : d)
       setToast({ kind: 'error', msg: `Save failed: ${e.message}` })
@@ -170,6 +174,11 @@ export default function PersonCard({ person, onClose, onSendToJobber = null, set
     ...touches.map(tp => ({ t: 'touch', ts: tp.occurred_at, ...tp })),
   ]
 
+  // Once the profile row is loaded it is authoritative INCLUDING null —
+  // the old `c?.source ?? person.source` fallback resurrected the stale
+  // prop whenever the loaded (or None-cleared) value was null.
+  const effSource = data ? (c?.source ?? null) : (person.source ?? null)
+
   const metaLine = (agg?.total_count ?? 0) > 0
     ? `${agg.total_count} prior engagement${agg.total_count === 1 ? '' : 's'} · ${fmtMoney(agg.lifetime_paid || 0)} lifetime`
     : 'No engagements yet'
@@ -195,14 +204,27 @@ export default function PersonCard({ person, onClose, onSendToJobber = null, set
           )}
         </div>
         <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '4px' }}>
-          Prospect · inquired {fmtDate(person.created) || '—'} · via {((c?.source ?? person.source) || 'unknown').toLowerCase()}
+          Prospect · inquired {fmtDate(person.created) || '—'} · via {(effSource || 'unknown').toLowerCase()}
         </p>
         {/* Meta row — same spot as the panel's; both fields live on the
             lead pre-founding (type seeds the engagement at founding). */}
         <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
-          <MetaSelect label="Source" value={(c?.source ?? person.source) || null} options={lookupOptions.sources} onPick={(v) => saveLeadField('source', v)} />
+          <MetaSelect label="Source" value={effSource} options={lookupOptions.sources} onPick={(v) => saveLeadField('source', v)} />
           <MetaSelect label="Type" value={c?.project_type || null} options={lookupOptions.projectTypes} onPick={(v) => saveLeadField('project_type', v)} />
         </div>
+        {/* Referrer — the shared field (lead-level, same as the profile). */}
+        {c && (
+          <div style={{ marginTop: '8px' }}>
+            <ReferrerField
+              lead={c}
+              locationUuid={c.location_uuid}
+              people={people}
+              onApply={fields => setData(d => d ? { ...d, client: { ...d.client, ...fields } } : d)}
+              onSaved={cols => onLeadPatched(person.id, cols)}
+              setToast={setToast}
+            />
+          </div>
+        )}
       </div>
 
       {/* Client strip — the SAME shared component as the panel's */}
