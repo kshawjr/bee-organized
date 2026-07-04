@@ -15,38 +15,22 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useEffect, useRef, useMemo } from 'react'
+import React, { useState, useEffect } from 'react'
 import { ENGAGEMENT_STAGES, STAGE_RANK, CHIP_STYLES, stageDisplayLabel } from './shared/stageConfig'
 import { deriveStatusChip, displayTitle, engagementValue, fmtMoney, lastActivityTs, relAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import FilterChips from '@/components/ui/FilterChips'
-import { statusIconFor, IconChevronRight } from '@/components/ui/icons'
+import { statusIconFor } from '@/components/ui/icons'
+import EngagementFilters from './EngagementFilters'
+import { ENGAGEMENT_FILTER_DEFAULTS, engagementFilterCount, passesEngagementFilters } from './shared/engagementStatus'
+import { SortChevrons, SortHeaderStyle, FilteredEmpty } from './shared/FilterPopover'
+import { useStoredState } from './shared/useStoredControls'
 
 const OPEN_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 const CHIP_LABELS = { 'Request': 'Request', 'Estimate': 'Estimate', 'Job in Progress': 'Job', 'Final Processing': 'Final' }
 const PAGE = 200
 const SORT_LS_KEY = 'bee_hive_list_sort'
-const FILTERS_LS_KEY = 'bee_hive_list_filters'
-
-const DEFAULT_FILTERS = {
-  stages: [],        // [] = all open stages; chips sync to length-1 selections
-  statuses: [],      // within-stage styleKeys
-  min: '', max: '',  // value range ($)
-  age: null,         // quiet: null | 7 | 30 | 90
-  owing: false,
-  repeat: false,
-  fresh: false,      // new clients only: first engagement, <30d
-  foundedBy: [],     // request | quote | job | manual
-}
-
-// Display labels for the status multi-select (keys = deriveStatusChip
-// styleKeys actually present in the loaded rows — dead options never show).
-const STATUS_LABELS = {
-  'Request': 'requested', amber: 'requested (stale)',
-  sent: 'sent', approved: 'approved', changes_requested: 'changes requested',
-  scheduled: 'scheduled', in_progress: 'in progress', upcoming: 'upcoming',
-  owing: 'owing', never_invoiced: 'never invoiced', paid: 'paid', nurturing: 'nurturing',
-}
+const SORT_COLS = ['default', 'client', 'engagement', 'stage', 'status', 'value', 'activity']
 
 // Desktop grid: CLIENT | ENGAGEMENT | STAGE | STATUS | VALUE | ACTIVITY
 const GRID = 'minmax(150px,1.2fr) minmax(140px,1.4fr) 130px minmax(150px,1.2fr) 90px 70px'
@@ -84,54 +68,15 @@ function ClientCell({ e, nowMs }) {
   )
 }
 
-function MicroLabel({ children }) {
-  return (
-    <p style={{ fontSize: '10px', fontWeight: 500, color: '#8a8a84', letterSpacing: '0.6px', textTransform: 'uppercase' }}>
-      {children}
-    </p>
-  )
-}
-
-function CheckRow({ label, checked, onToggle }) {
-  return (
-    <button onClick={onToggle}
-      style={{ display: 'flex', alignItems: 'center', gap: '8px', border: 'none', background: 'transparent', padding: 0, fontSize: '12px', color: checked ? '#1a1a18' : '#8a8a84', fontWeight: checked ? 500 : 400, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-      <span style={{ width: '14px', height: '14px', borderRadius: '4px', border: `0.5px solid ${checked ? '#1a1a18' : 'rgba(0,0,0,0.25)'}`, background: checked ? '#1a1a18' : '#fff', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', flexShrink: 0 }}>{checked ? '✓' : ''}</span>
-      {label}
-    </button>
-  )
-}
-
-export default function EngagementList({ engagements = [], closedCount = 0, locFilter = 'all', onOpenEngagement = () => {}, setToast = () => {} }) {
+export default function EngagementList({ engagements = [], closedCount = 0, locFilter = 'all', workFilters = ENGAGEMENT_FILTER_DEFAULTS, setWorkFilters = () => {}, clearWorkFilters = () => {}, onOpenEngagement = () => {}, setToast = () => {} }) {
   const [view, setView] = useState('open')             // 'open' | 'closed'
-  const [sort, setSort] = useState({ col: 'default', dir: 'desc' })
-  const [filters, setFilters] = useState(DEFAULT_FILTERS)
-  const [fltOpen, setFltOpen] = useState(false)
+  const [sortRaw, setSort, ] = useStoredState(SORT_LS_KEY, { col: 'default', dir: 'desc' })
+  const sort = SORT_COLS.includes(sortRaw.col) && ['asc', 'desc'].includes(sortRaw.dir) ? sortRaw : { col: 'default', dir: 'desc' }
+  const filters = workFilters
   const [closedRows, setClosedRows] = useState(null)   // per active scope
   const [closedTotal, setClosedTotal] = useState(null) // scoped total once known
   const [loadingClosed, setLoadingClosed] = useState(false)
-  const hydrated = useRef(false)
   const nowMs = Date.now()
-
-  // SSR-safe persistence hydration (bee_hive_beta_lens pattern), then
-  // write-through on every change — but never before hydration finishes.
-  useEffect(() => {
-    try {
-      const s = JSON.parse(localStorage.getItem(SORT_LS_KEY) || 'null')
-      if (s && ['default', 'client', 'value', 'activity'].includes(s.col) && ['asc', 'desc'].includes(s.dir)) setSort(s)
-      const f = JSON.parse(localStorage.getItem(FILTERS_LS_KEY) || 'null')
-      if (f && typeof f === 'object') setFilters({ ...DEFAULT_FILTERS, ...f })
-    } catch {}
-    hydrated.current = true
-  }, [])
-  useEffect(() => {
-    if (!hydrated.current) return
-    try { localStorage.setItem(SORT_LS_KEY, JSON.stringify(sort)) } catch {}
-  }, [sort])
-  useEffect(() => {
-    if (!hydrated.current) return
-    try { localStorage.setItem(FILTERS_LS_KEY, JSON.stringify(filters)) } catch {}
-  }, [filters])
 
   // SSR-safe mobile detection (BeeHub pattern).
   const [windowWidth, setWindowWidth] = useState(0)
@@ -163,8 +108,11 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
     }
   }
 
-  const counts = { open: engagements.length }
-  for (const s of OPEN_STAGES) counts[s.key] = engagements.filter(e => e.stage === s.key).length
+  // Chip counts reconcile with visible rows: base = rows passing every
+  // filter EXCEPT the stage dimension, so a chip click predicts its count.
+  const chipBase = engagements.filter(e => passesEngagementFilters(e, filters, nowMs, { ignoreStages: true }))
+  const counts = { open: chipBase.length }
+  for (const s of OPEN_STAGES) counts[s.key] = chipBase.filter(e => e.stage === s.key).length
   const scopedClosedCount = closedTotal ?? (locFilter === 'all' ? closedCount : null)
 
   const chips = [
@@ -187,56 +135,20 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
       return
     }
     setView('open')
-    setFilters(f => ({ ...f, stages: key === 'open' ? [] : [key] }))
+    setWorkFilters(f => ({ ...f, stages: key === 'open' ? [] : [key] }))
   }
 
   const showingClosed = view === 'closed'
-
-  // Status options: only what's actually present in the loaded set.
-  const statusOptions = useMemo(() => {
-    const present = new Set()
-    for (const e of engagements) {
-      const k = deriveStatusChip(e, { nowMs })?.styleKey
-      if (k && STATUS_LABELS[k]) present.add(k)
-    }
-    return Object.keys(STATUS_LABELS).filter(k => present.has(k))
-  }, [engagements]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const activeFilterCount =
-    (filters.stages.length ? 1 : 0) + (filters.statuses.length ? 1 : 0) +
-    (filters.min ? 1 : 0) + (filters.max ? 1 : 0) + (filters.age ? 1 : 0) +
-    (filters.owing ? 1 : 0) + (filters.repeat ? 1 : 0) + (filters.fresh ? 1 : 0) +
-    (filters.foundedBy.length ? 1 : 0)
-  const clearFilters = () => {
-    setFilters(DEFAULT_FILTERS)
-    try { localStorage.removeItem(FILTERS_LS_KEY) } catch {}
-  }
-  const toggleIn = (key, value) => setFilters(f => ({
-    ...f,
-    [key]: f[key].includes(value) ? f[key].filter(v => v !== value) : [...f[key], value],
-  }))
-
-  const passesFilters = (e) => {
-    if (filters.stages.length && !filters.stages.includes(e.stage)) return false
-    if (filters.statuses.length) {
-      const k = deriveStatusChip(e, { nowMs })?.styleKey
-      if (!k || !filters.statuses.includes(k)) return false
-    }
-    const v = engagementValue(e) ?? 0
-    if (filters.min && v < Number(filters.min)) return false
-    if (filters.max && v > Number(filters.max)) return false
-    if (filters.age && (nowMs - lastActivityTs(e)) < filters.age * 86400000) return false
-    if (filters.owing && !(Number(e.balance_owing) > 0)) return false
-    if (filters.repeat && !(e.repeat_count > 1)) return false
-    if (filters.fresh && !(e.repeat_count === 1 && (nowMs - new Date(e.created_at).getTime()) < 30 * 86400000)) return false
-    if (filters.foundedBy.length && !filters.foundedBy.includes(e.founded_by)) return false
-    return true
-  }
+  const activeFilterCount = engagementFilterCount(filters)
+  const clearFilters = clearWorkFilters
 
   const sortRows = (arr) => {
     const sorted = arr.slice()
     const dir = sort.dir === 'asc' ? 1 : -1
     if (sort.col === 'client') sorted.sort((a, b) => dir * (a.client_name || '').localeCompare(b.client_name || ''))
+    else if (sort.col === 'engagement') sorted.sort((a, b) => dir * displayTitle(a).localeCompare(displayTitle(b)))
+    else if (sort.col === 'stage') sorted.sort((a, b) => dir * ((STAGE_RANK[a.stage] ?? 0) - (STAGE_RANK[b.stage] ?? 0)))
+    else if (sort.col === 'status') sorted.sort((a, b) => dir * String(deriveStatusChip(a, { nowMs })?.styleKey || '').localeCompare(String(deriveStatusChip(b, { nowMs })?.styleKey || '')))
     else if (sort.col === 'value') sorted.sort((a, b) => dir * ((engagementValue(a) ?? 0) - (engagementValue(b) ?? 0)))
     else if (sort.col === 'activity') sorted.sort((a, b) => dir * (lastActivityTs(a) - lastActivityTs(b)))
     else sorted.sort((a, b) =>
@@ -247,92 +159,26 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
 
   const rows = showingClosed
     ? sortRows(closedRows || [])
-    : sortRows(engagements.filter(passesFilters))
+    : sortRows(engagements.filter(e => passesEngagementFilters(e, filters, nowMs)))
 
   const clickSort = (col) => {
     setSort(s => s.col === col
       ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' }
-      : { col, dir: col === 'client' ? 'asc' : 'desc' })
+      : { col, dir: ['client', 'engagement'].includes(col) ? 'asc' : 'desc' })
   }
-  const SortChevron = ({ col }) => sort.col !== col ? null : (
-    <IconChevronRight size={10} style={{ transform: sort.dir === 'asc' ? 'rotate(-90deg)' : 'rotate(90deg)', marginLeft: '3px' }} />
-  )
 
   const headerCell = { fontSize: '11px', fontWeight: 500, color: '#9a988f', letterSpacing: '0.6px', textTransform: 'uppercase' }
 
   return (
     <div>
       <style>{`.bee-englist-row:hover { background:#f7f6f4 } .bee-englist-row:last-child { border-bottom:none !important }`}</style>
+      <SortHeaderStyle />
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <FilterChips items={chips} active={activeChip} onChange={pickChip} />
         </div>
         {!showingClosed && (
-          <div style={{ position: 'relative', flexShrink: 0 }}>
-            <button onClick={() => setFltOpen(v => !v)}
-              style={{ padding: '5px 12px', borderRadius: '20px', border: '0.5px solid rgba(0,0,0,0.15)', background: fltOpen || activeFilterCount > 0 ? '#fff' : 'transparent', fontSize: '12px', fontWeight: activeFilterCount > 0 ? 500 : 400, color: activeFilterCount > 0 ? '#1a1a18' : '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
-              Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''}
-            </button>
-            {fltOpen && (
-              <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 50, width: '260px', maxHeight: '62vh', overflowY: 'auto', background: '#fff', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '10px', boxShadow: '0 8px 30px rgba(26,26,24,0.12)', padding: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <MicroLabel>Stage</MicroLabel>
-                  {OPEN_STAGES.map(s => (
-                    <CheckRow key={s.key} label={s.displayLabel} checked={filters.stages.includes(s.key)} onToggle={() => toggleIn('stages', s.key)} />
-                  ))}
-                </div>
-                {statusOptions.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <MicroLabel>Status</MicroLabel>
-                    {statusOptions.map(k => (
-                      <CheckRow key={k} label={STATUS_LABELS[k]} checked={filters.statuses.includes(k)} onToggle={() => toggleIn('statuses', k)} />
-                    ))}
-                  </div>
-                )}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <MicroLabel>Value</MicroLabel>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#8a8a84' }}>
-                    $
-                    <input type="number" min="0" placeholder="min" value={filters.min} onChange={e => setFilters(f => ({ ...f, min: e.target.value }))}
-                      style={{ flex: 1, minWidth: 0, padding: '5px 8px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
-                    –
-                    <input type="number" min="0" placeholder="max" value={filters.max} onChange={e => setFilters(f => ({ ...f, max: e.target.value }))}
-                      style={{ flex: 1, minWidth: 0, padding: '5px 8px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
-                  </div>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <MicroLabel>Activity</MicroLabel>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#8a8a84' }}>
-                    Quiet
-                    {[7, 30, 90].map(d => (
-                      <button key={d} onClick={() => setFilters(f => ({ ...f, age: f.age === d ? null : d }))}
-                        style={{ padding: '3px 10px', borderRadius: '20px', border: `0.5px solid ${filters.age === d ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.12)'}`, background: filters.age === d ? '#fff' : 'transparent', fontSize: '11px', fontWeight: filters.age === d ? 500 : 400, color: filters.age === d ? '#1a1a18' : '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
-                        &gt;{d}d
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <MicroLabel>More</MicroLabel>
-                  <CheckRow label="Has owing" checked={filters.owing} onToggle={() => setFilters(f => ({ ...f, owing: !f.owing }))} />
-                  <CheckRow label="Repeat clients only" checked={filters.repeat} onToggle={() => setFilters(f => ({ ...f, repeat: !f.repeat }))} />
-                  <CheckRow label="New clients only" checked={filters.fresh} onToggle={() => setFilters(f => ({ ...f, fresh: !f.fresh }))} />
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <MicroLabel>Founded by</MicroLabel>
-                  {['request', 'quote', 'job', 'manual'].map(k => (
-                    <CheckRow key={k} label={k} checked={filters.foundedBy.includes(k)} onToggle={() => toggleIn('foundedBy', k)} />
-                  ))}
-                </div>
-                {activeFilterCount > 0 && (
-                  <button onClick={clearFilters}
-                    style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
-                    Clear all
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
+          <EngagementFilters engagements={engagements} filters={filters} setFilters={setWorkFilters} onClear={clearFilters} nowMs={nowMs} />
         )}
       </div>
 
@@ -340,12 +186,12 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
       <div style={{ background: '#fff', border: '0.5px solid rgba(0,0,0,0.08)', borderRadius: '12px', overflow: 'hidden' }}>
         {!isMobile && rows.length > 0 && (
           <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: '12px', padding: '12px 16px', alignItems: 'baseline', borderBottom: '0.5px solid rgba(0,0,0,0.08)' }}>
-            <button onClick={() => clickSort('client')} style={{ ...headerCell, border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', display: 'inline-flex', alignItems: 'center' }}>Client<SortChevron col="client" /></button>
-            <span style={headerCell}>Engagement</span>
-            <span style={headerCell}>Stage</span>
-            <span style={headerCell}>Status</span>
-            <button onClick={() => clickSort('value')} style={{ ...headerCell, border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', fontFamily: 'inherit', justifyContent: 'flex-end', display: 'inline-flex', alignItems: 'center' }}>Value<SortChevron col="value" /></button>
-            <button onClick={() => clickSort('activity')} style={{ ...headerCell, border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', fontFamily: 'inherit', justifyContent: 'flex-end', display: 'inline-flex', alignItems: 'center' }}>Activity<SortChevron col="activity" /></button>
+            {[['client', 'Client', 'left'], ['engagement', 'Engagement', 'left'], ['stage', 'Stage', 'left'], ['status', 'Status', 'left'], ['value', 'Value', 'right'], ['activity', 'Activity', 'right']].map(([col, label, align]) => (
+              <button key={col} className="bee-sort-header" onClick={() => clickSort(col)}
+                style={{ ...headerCell, border: 'none', background: 'transparent', padding: '2px 4px', margin: '-2px -4px', borderRadius: '6px', fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', justifyContent: align === 'right' ? 'flex-end' : 'flex-start' }}>
+                {label}<SortChevrons active={sort.col === col} dir={sort.dir} />
+              </button>
+            ))}
           </div>
         )}
 
@@ -392,14 +238,7 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
             {showingClosed
               ? 'No closed engagements in this view'
               : activeFilterCount > 0
-                ? (
-                  <>
-                    No engagements match the active filters (Filters · {activeFilterCount}).{' '}
-                    <button onClick={clearFilters} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '12px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
-                      Clear all
-                    </button>
-                  </>
-                )
+                ? <FilteredEmpty count={activeFilterCount} onClear={clearFilters} noun="engagements" />
                 : 'Nothing here — engagements land as requests come in'}
           </div>
         )}

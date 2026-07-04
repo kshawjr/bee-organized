@@ -23,6 +23,18 @@ import { relAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock } from '@/components/ui/icons'
 import ContactLine from './ContactLine'
+import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortSelect, FilteredEmpty } from './shared/FilterPopover'
+import { useStoredState } from './shared/useStoredControls'
+
+const INBOX_SORTS = [
+  { key: 'newest', label: 'Newest first' },
+  { key: 'oldest', label: 'Oldest first' },
+  { key: 'last_touch', label: 'Last touch' },
+  { key: 'name', label: 'Name A–Z' },
+]
+const INBOX_FILTER_DEFAULTS = { sources: [], hasPhone: false, hasEmail: false, touchBand: null, age: null }
+const inboxFilterCount = (f) =>
+  (f.sources.length ? 1 : 0) + (f.hasPhone ? 1 : 0) + (f.hasEmail ? 1 : 0) + (f.touchBand ? 1 : 0) + (f.age ? 1 : 0)
 
 const TEAL_DARK = '#085041', TEAL_BG = '#E1F5EE'
 const BLUE_DARK = '#0C447C', BLUE_BG = '#E6F1FB'
@@ -59,6 +71,10 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
   // immediately (the real touchpoint is written; derivation catches up
   // on next load).
   const [loggedIds, setLoggedIds] = useState(() => new Set())
+  const [sortRaw, setSort] = useStoredState('bee_hive_inbox_sort', { key: 'newest' })
+  const inboxSort = INBOX_SORTS.some(o => o.key === sortRaw.key) ? sortRaw.key : 'newest'
+  const [filters, setFilters, clearFilters] = useStoredState('bee_hive_inbox_filters', INBOX_FILTER_DEFAULTS)
+  const [fltOpen, setFltOpen] = useState(false)
   const nowMs = Date.now()
 
   const [windowWidth, setWindowWidth] = useState(0)
@@ -76,18 +92,46 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
 
   const openClientIds = useMemo(() => new Set(engagements.map(e => e.client_id)), [engagements])
 
+  const reachCount = (p) => (p.outreachTimeline || []).filter(t => t.type === 'reach_out').length + (loggedIds.has(p.id) ? 1 : 0)
+  const lastReach = (p) => Math.max(0, ...(p.outreachTimeline || []).filter(t => t.type === 'reach_out').map(t => new Date(t.occurred_at || 0).getTime() || 0), loggedIds.has(p.id) ? nowMs : 0)
+
+  const passesInboxFilters = (p) => {
+    if (filters.sources.length && !filters.sources.includes((p.source || '').toLowerCase() || 'unknown')) return false
+    if (filters.hasPhone && !(p.phone || '').trim()) return false
+    if (filters.hasEmail && !(p.email || '').trim()) return false
+    if (filters.touchBand) {
+      const n = reachCount(p)
+      if (filters.touchBand === '0' && n !== 0) return false
+      if (filters.touchBand === '1-2' && !(n >= 1 && n <= 2)) return false
+      if (filters.touchBand === '3+' && n < 3) return false
+    }
+    if (filters.age && (nowMs - (new Date(p.created || 0).getTime() || 0)) < filters.age * 86400000) return false
+    return true
+  }
+
+  const sourceOptions = useMemo(() => {
+    const present = new Set()
+    for (const p of scoped) present.add((p.source || '').toLowerCase() || 'unknown')
+    return [...present].sort()
+  }, [scoped])
+
   const { fresh, working } = useMemo(() => {
     const fresh = [], working = []
     for (const p of scoped) {
+      if (!passesInboxFilters(p)) continue
       const status = deriveClientStatus(p, openClientIds, nowMs)
       if (status === 'New') (loggedIds.has(p.id) ? working : fresh).push(p)
       else if (status === 'Attempting') working.push(p)
     }
     const created = (p) => new Date(p.created || 0).getTime() || 0
-    fresh.sort((a, b) => created(b) - created(a))
-    working.sort((a, b) => created(b) - created(a))
+    const cmp = inboxSort === 'oldest' ? (a, b) => created(a) - created(b)
+      : inboxSort === 'name' ? (a, b) => (a.name || '').localeCompare(b.name || '')
+      : inboxSort === 'last_touch' ? (a, b) => lastReach(b) - lastReach(a)
+      : (a, b) => created(b) - created(a)
+    fresh.sort(cmp)
+    working.sort(cmp)
     return { fresh, working }
-  }, [scoped, openClientIds, loggedIds]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scoped, openClientIds, loggedIds, filters, inboxSort]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function logCall(p) {
     setBusyId(p.id)
@@ -191,10 +235,45 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     <div>
       <style>{`.bee-inbox-row:hover { background:#f7f6f4 } .bee-inbox-row:last-child { border-bottom:none !important }`}</style>
 
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', marginBottom: '12px' }}>
+        <SortSelect value={inboxSort} onChange={(v) => setSort({ key: v })} options={INBOX_SORTS} />
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+          <FilterButton count={inboxFilterCount(filters)} open={fltOpen} onToggle={() => setFltOpen(v => !v)} />
+          <FilterPopover open={fltOpen} count={inboxFilterCount(filters)} onClear={clearFilters}>
+            {sourceOptions.length > 0 && (
+              <FilterSection label="Source">
+                {sourceOptions.map(k => (
+                  <CheckRow key={k} label={k} checked={filters.sources.includes(k)}
+                    onToggle={() => setFilters(f => ({ ...f, sources: f.sources.includes(k) ? f.sources.filter(v => v !== k) : [...f.sources, k] }))} />
+                ))}
+              </FilterSection>
+            )}
+            <FilterSection label="Contact">
+              <CheckRow label="Has phone" checked={filters.hasPhone} onToggle={() => setFilters(f => ({ ...f, hasPhone: !f.hasPhone }))} />
+              <CheckRow label="Has email" checked={filters.hasEmail} onToggle={() => setFilters(f => ({ ...f, hasEmail: !f.hasEmail }))} />
+            </FilterSection>
+            <FilterSection label="Touchpoints">
+              <TogglePills value={filters.touchBand}
+                options={[{ key: '0', label: '0' }, { key: '1-2', label: '1–2' }, { key: '3+', label: '3+' }]}
+                onChange={(v) => setFilters(f => ({ ...f, touchBand: v }))} />
+            </FilterSection>
+            <FilterSection label="Age">
+              <TogglePills prefix="Older than" value={filters.age}
+                options={[{ key: 7, label: '>7d' }, { key: 14, label: '>14d' }]}
+                onChange={(v) => setFilters(f => ({ ...f, age: v }))} />
+            </FilterSection>
+          </FilterPopover>
+        </div>
+      </div>
+
       {fresh.length === 0 && working.length === 0 ? (
+        inboxFilterCount(filters) > 0 ? (
+          <FilteredEmpty count={inboxFilterCount(filters)} onClear={clearFilters} noun="inbox leads" />
+        ) : (
         <div style={{ padding: '36px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px', border: '0.5px dashed rgba(0,0,0,0.12)', borderRadius: '12px' }}>
           New inquiries land here
         </div>
+        )
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
           <div>

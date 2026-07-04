@@ -21,6 +21,8 @@ import InboxScreen from './InboxScreen'
 import ClientProfile from './ClientProfile'
 import { deriveClientStatus } from './shared/clientStatus'
 import { isTerminal } from './shared/stageConfig'
+import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount } from './shared/engagementStatus'
+import { useStoredState } from './shared/useStoredControls'
 import { IconInbox, IconLayoutKanban, IconList, IconUsers } from '@/components/ui/icons'
 
 const TABS = [
@@ -109,6 +111,11 @@ export default function HiveShell({
   // overlay: null | { type:'engagement', engagement } | { type:'client', clientId }
   const [overlay, setOverlay] = useState(null)
   const [rowPatches, setRowPatches] = useState({})
+
+  // Work-lens filters (board + list share ONE set — Kevin's call: switch
+  // lenses mid-triage, keep the subset). Owned HERE so both lenses and
+  // the open-count derive from a single instance; persisted per user.
+  const [workFilters, setWorkFilters, clearWorkFilters] = useStoredState('bee_hive_list_filters', ENGAGEMENT_FILTER_DEFAULTS)
   const openEngagement = (e) => setOverlay({ type: 'engagement', engagement: e })
   const openClient = (clientId) => setOverlay({ type: 'client', clientId })
 
@@ -120,9 +127,11 @@ export default function HiveShell({
     ? patched
     : patched.filter(e => e.location_uuid === locFilter)
   // Rows closed THIS SESSION (via the panel's close-out) carry a terminal
-  // rowPatch — they leave the count and every open-set consumer.
+  // rowPatch — they leave the count and every open-set consumer. The
+  // counter reflects the ACTIVE work filters (F: counts reconcile).
   const openFiltered = filtered.filter(e => !isTerminal(e.stage))
-  const openCount = openFiltered.length
+  const nowMs = Date.now()
+  const openCount = openFiltered.filter(e => passesEngagementFilters(e, workFilters, nowMs)).length
 
   // Inbox badge: New + Attempting in the current location scope.
   const inboxCount = useMemo(() => {
@@ -144,7 +153,7 @@ export default function HiveShell({
           {TABS.map(t => <TabPill key={t.key} tab={t} active={t.key === lens} onSelect={() => pickLens(t.key)} badgeCount={t.badge ? inboxCount : null} />)}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
-          <span style={{ fontSize: '12px', color: '#8a8a84', whiteSpace: 'nowrap' }}>Open engagements · {openCount}</span>
+          <span style={{ fontSize: '12px', color: '#8a8a84', whiteSpace: 'nowrap' }}>Open engagements · {openCount}{engagementFilterCount(workFilters) > 0 ? ` of ${openFiltered.length}` : ''}</span>
           <button
             onClick={onExitBeta}
             style={{
@@ -180,12 +189,18 @@ export default function HiveShell({
           engagements={filtered}
           closedCount={closedCount}
           locFilter={locFilter}
+          workFilters={workFilters}
+          setWorkFilters={setWorkFilters}
+          clearWorkFilters={clearWorkFilters}
           onOpenEngagement={openEngagement}
           setToast={setToast}
         />
       ) : (
         <EngagementBoard
           engagements={filtered}
+          workFilters={workFilters}
+          setWorkFilters={setWorkFilters}
+          clearWorkFilters={clearWorkFilters}
           onOpenClient={openClient}
           onOpenEngagement={openEngagement}
           setToast={setToast}

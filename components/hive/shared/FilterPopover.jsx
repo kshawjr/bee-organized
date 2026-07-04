@@ -1,0 +1,115 @@
+// components/hive/shared/FilterPopover.jsx — THE control idiom, defined
+// once for every beta surface:
+//   FilterButton  — the 'Filters · N' pill
+//   FilterPopover — positioned card (sections + Clear all at the bottom)
+//   FilterSection / CheckRow / TogglePills — section building blocks
+//   SortChevrons  — discoverable sort marker: muted chevron PAIR at rest,
+//                   dark single chevron + direction when active
+//   SortHeaderStyle — hover tint for sortable headers (.bee-sort-header)
+//   SortSelect    — the quiet 'Sort' select for board/inbox/directory
+//   FilteredEmpty — zero-match safety: names the active count + inline
+//                   Clear all (the d710247 rule, on every surface)
+'use client'
+
+import React from 'react'
+import { IconChevronRight } from '@/components/ui/icons'
+
+export function FilterButton({ count = 0, open, onToggle }) {
+  return (
+    <button onClick={onToggle}
+      style={{ padding: '5px 12px', borderRadius: '20px', border: '0.5px solid rgba(0,0,0,0.15)', background: open || count > 0 ? '#fff' : 'transparent', fontSize: '12px', fontWeight: count > 0 ? 500 : 400, color: count > 0 ? '#1a1a18' : '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+      Filters{count > 0 ? ` · ${count}` : ''}
+    </button>
+  )
+}
+
+export function FilterPopover({ open, count = 0, onClear, children, width = 260 }) {
+  if (!open) return null
+  return (
+    <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 50, width: `${width}px`, maxHeight: '62vh', overflowY: 'auto', background: '#fff', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '10px', boxShadow: '0 8px 30px rgba(26,26,24,0.12)', padding: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      {children}
+      {count > 0 && (
+        <button onClick={onClear}
+          style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
+          Clear all
+        </button>
+      )}
+    </div>
+  )
+}
+
+export function FilterSection({ label, children }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      <p style={{ fontSize: '10px', fontWeight: 500, color: '#8a8a84', letterSpacing: '0.6px', textTransform: 'uppercase' }}>{label}</p>
+      {children}
+    </div>
+  )
+}
+
+export function CheckRow({ label, checked, onToggle }) {
+  return (
+    <button onClick={onToggle}
+      style={{ display: 'flex', alignItems: 'center', gap: '8px', border: 'none', background: 'transparent', padding: 0, fontSize: '12px', color: checked ? '#1a1a18' : '#8a8a84', fontWeight: checked ? 500 : 400, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+      <span style={{ width: '14px', height: '14px', borderRadius: '4px', border: `0.5px solid ${checked ? '#1a1a18' : 'rgba(0,0,0,0.25)'}`, background: checked ? '#1a1a18' : '#fff', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', flexShrink: 0 }}>{checked ? '✓' : ''}</span>
+      {label}
+    </button>
+  )
+}
+
+// Single-select pill row (null = off). options: [{ key, label }]
+export function TogglePills({ options, value, onChange, prefix = null }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#8a8a84', flexWrap: 'wrap' }}>
+      {prefix}
+      {options.map(o => (
+        <button key={o.key} onClick={() => onChange(value === o.key ? null : o.key)}
+          style={{ padding: '3px 10px', borderRadius: '20px', border: `0.5px solid ${value === o.key ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.12)'}`, background: value === o.key ? '#fff' : 'transparent', fontSize: '11px', fontWeight: value === o.key ? 500 : 400, color: value === o.key ? '#1a1a18' : '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// Discoverable sort marker (A2 idiom): rest = muted chevron pair, active
+// = dark chevron pointing the direction.
+export function SortChevrons({ active, dir }) {
+  if (!active) {
+    return (
+      <span style={{ display: 'inline-flex', flexDirection: 'column', marginLeft: '3px', color: '#c9c7c0', lineHeight: 0 }}>
+        <IconChevronRight size={8} style={{ transform: 'rotate(-90deg)', marginBottom: '-3px' }} />
+        <IconChevronRight size={8} style={{ transform: 'rotate(90deg)' }} />
+      </span>
+    )
+  }
+  return <IconChevronRight size={10} style={{ transform: dir === 'asc' ? 'rotate(-90deg)' : 'rotate(90deg)', marginLeft: '3px', color: '#1a1a18' }} />
+}
+
+export function SortHeaderStyle() {
+  return <style>{`.bee-sort-header { cursor: pointer } .bee-sort-header:hover { color: #1a1a18 !important; background: #f7f6f4 }`}</style>
+}
+
+export function SortSelect({ value, onChange, options }) {
+  return (
+    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#8a8a84', whiteSpace: 'nowrap' }}>
+      Sort
+      <select value={value} onChange={e => onChange(e.target.value)}
+        style={{ padding: '4px 8px', borderRadius: '8px', border: '0.5px solid rgba(0,0,0,0.15)', background: '#fff', fontSize: '12px', color: '#1a1a18', fontFamily: 'inherit', cursor: 'pointer' }}>
+        {options.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+      </select>
+    </label>
+  )
+}
+
+// Zero-match safety: never a silently empty surface.
+export function FilteredEmpty({ count, onClear, noun = 'rows' }) {
+  return (
+    <div style={{ padding: '32px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px' }}>
+      No {noun} match the active filters (Filters · {count}).{' '}
+      <button onClick={onClear} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '12px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
+        Clear all
+      </button>
+    </div>
+  )
+}

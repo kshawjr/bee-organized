@@ -18,6 +18,18 @@ import StatusChip from '@/components/ui/StatusChip'
 import FilterChips from '@/components/ui/FilterChips'
 import Banner from '@/components/ui/Banner'
 import { IconPlayerPause } from '@/components/ui/icons'
+import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortSelect, FilteredEmpty } from './shared/FilterPopover'
+import { useStoredState } from './shared/useStoredControls'
+
+const DIR_SORTS = [
+  { key: 'name', label: 'Name A–Z' },
+  { key: 'lifetime', label: 'Lifetime value' },
+  { key: 'recent', label: 'Most recent activity' },
+  { key: 'quiet', label: 'Longest quiet' },
+]
+const DIR_FILTER_DEFAULTS = { statuses: [], hasOpen: false, minLifetime: '', drips: null, hideNoContact: false }
+const dirFilterCount = (f) =>
+  (f.statuses.length ? 1 : 0) + (f.hasOpen ? 1 : 0) + (f.minLifetime ? 1 : 0) + (f.drips ? 1 : 0) + (f.hideNoContact ? 1 : 0)
 
 const PAGE = 100
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -71,9 +83,12 @@ function detailLine(person, status, openEngs, nowMs) {
 }
 
 export default function ClientDirectory({ people = [], engagements = [], locFilter = 'all', onOpenClient = () => {} }) {
-  const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [cap, setCap] = useState(PAGE)
+  const [sortRaw, setSort] = useStoredState('bee_hive_clients_sort', { key: 'name' })
+  const dirSort = DIR_SORTS.some(o => o.key === sortRaw.key) ? sortRaw.key : 'name'
+  const [filters, setFilters, clearFilters] = useStoredState('bee_hive_clients_filters', DIR_FILTER_DEFAULTS)
+  const [fltOpen, setFltOpen] = useState(false)
   const nowMs = Date.now()
 
   // SSR-safe mobile detection (BeeHub pattern).
@@ -86,7 +101,7 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
   }, [])
   const isMobile = windowWidth > 0 && windowWidth < 768
 
-  useEffect(() => { setCap(PAGE) }, [filter, search, locFilter])
+  useEffect(() => { setCap(PAGE) }, [filters, search, locFilter, dirSort])
 
   const scoped = useMemo(() => (
     locFilter === 'all' ? people : people.filter(p => p.locationId === locFilter)
@@ -109,25 +124,48 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
     status: deriveClientStatus(p, openClientIds, nowMs),
   })), [scoped, openClientIds]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const lastActivityOf = (p) => Math.max(
+    new Date(p.created || 0).getTime() || 0,
+    ...(p.outreachTimeline || []).map(t => new Date(t.occurred_at || 0).getTime() || 0),
+  )
+
+  const passesDirFilters = ({ p, status }, { ignoreStatuses = false } = {}) => {
+    if (!ignoreStatuses && filters.statuses.length && !filters.statuses.includes(status)) return false
+    if (filters.hideNoContact && status === 'no_contact') return false
+    if (filters.hasOpen && !openClientIds.has(p.id)) return false
+    if (filters.minLifetime && (Number(p.paidAmount) || 0) < Number(filters.minLifetime)) return false
+    if (filters.drips === 'paused' && !p.paused) return false
+    if (filters.drips === 'active' && p.paused) return false
+    return true
+  }
+
   const counts = useMemo(() => {
-    const c = { all: classified.length }
+    const base = classified.filter(cs => passesDirFilters(cs, { ignoreStatuses: true }))
+    const c = { all: base.length }
     for (const k of CLIENT_STATUS_ORDER) c[k] = 0
-    for (const { status } of classified) c[status]++
+    for (const { status } of base) c[status]++
     return c
-  }, [classified])
+  }, [classified, filters]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const pausedNurturing = useMemo(
     () => classified.filter(({ p, status }) => status === 'Nurturing' && p.paused).length,
     [classified])
 
   const q = search.trim().toLowerCase()
-  const visible = classified.filter(({ p, status }) => {
-    if (filter !== 'all' && status !== filter) return false
-    if (!q) return true
-    return (p.name || '').toLowerCase().includes(q)
-      || (p.email || '').toLowerCase().includes(q)
-      || (p.phone || '').toLowerCase().includes(q)
-  })
+  const sortCmp = dirSort === 'lifetime' ? (a, b) => (Number(b.p.paidAmount) || 0) - (Number(a.p.paidAmount) || 0)
+    : dirSort === 'recent' ? (a, b) => lastActivityOf(b.p) - lastActivityOf(a.p)
+    : dirSort === 'quiet' ? (a, b) => lastActivityOf(a.p) - lastActivityOf(b.p)
+    : (a, b) => (a.p.name || '').localeCompare(b.p.name || '')
+  // Filter → search → SORT → cap, so 'top 100 by lifetime' is truthful.
+  const visible = classified
+    .filter(cs => passesDirFilters(cs))
+    .filter(({ p }) => {
+      if (!q) return true
+      return (p.name || '').toLowerCase().includes(q)
+        || (p.email || '').toLowerCase().includes(q)
+        || (p.phone || '').toLowerCase().includes(q)
+    })
+    .sort(sortCmp)
   const rows = visible.slice(0, cap)
 
   const chips = [
@@ -139,13 +177,49 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
       muted: k === 'no_contact',
     })),
   ]
+  const activeChip = filters.statuses.length === 1 ? filters.statuses[0]
+    : filters.statuses.length === 0 ? 'all'
+    : '__multi__'
+  const pickChip = (key) => setFilters(f => ({ ...f, statuses: key === 'all' ? [] : [key] }))
 
   return (
     <div>
       <style>{`.bee-dir-row:hover { background:#f7f6f4 } .bee-dir-row:last-child { border-bottom:none !important }`}</style>
 
-      <div style={{ marginBottom: '10px' }}>
-        <FilterChips items={chips} active={filter} onChange={setFilter} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <FilterChips items={chips} active={activeChip} onChange={pickChip} />
+        </div>
+        <SortSelect value={dirSort} onChange={(v) => setSort({ key: v })} options={DIR_SORTS} />
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+          <FilterButton count={dirFilterCount(filters)} open={fltOpen} onToggle={() => setFltOpen(v => !v)} />
+          <FilterPopover open={fltOpen} count={dirFilterCount(filters)} onClear={clearFilters}>
+            <FilterSection label="Status">
+              {CLIENT_STATUS_ORDER.map(k => (
+                <CheckRow key={k} label={CLIENT_STATUS_META[k].label} checked={filters.statuses.includes(k)}
+                  onToggle={() => setFilters(f => ({ ...f, statuses: f.statuses.includes(k) ? f.statuses.filter(v => v !== k) : [...f.statuses, k] }))} />
+              ))}
+            </FilterSection>
+            <FilterSection label="Engagements">
+              <CheckRow label="Has open engagement" checked={filters.hasOpen} onToggle={() => setFilters(f => ({ ...f, hasOpen: !f.hasOpen }))} />
+            </FilterSection>
+            <FilterSection label="Lifetime value">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#8a8a84' }}>
+                Min $
+                <input type="number" min="0" value={filters.minLifetime} onChange={e => setFilters(f => ({ ...f, minLifetime: e.target.value }))}
+                  style={{ flex: 1, minWidth: 0, padding: '5px 8px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
+              </div>
+            </FilterSection>
+            <FilterSection label="Drips">
+              <TogglePills value={filters.drips}
+                options={[{ key: 'paused', label: 'Paused' }, { key: 'active', label: 'Active' }]}
+                onChange={(v) => setFilters(f => ({ ...f, drips: v }))} />
+            </FilterSection>
+            <FilterSection label="Visibility">
+              <CheckRow label="Hide no-contact-info" checked={filters.hideNoContact} onToggle={() => setFilters(f => ({ ...f, hideNoContact: !f.hideNoContact }))} />
+            </FilterSection>
+          </FilterPopover>
+        </div>
       </div>
 
       {pausedNurturing > 0 && (
@@ -161,7 +235,7 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
                 </span>
               </>
             }
-            action={{ label: 'Review nurture pool', onClick: () => setFilter('Nurturing') }}
+            action={{ label: 'Review nurture pool', onClick: () => setFilters(f => ({ ...f, statuses: ['Nurturing'] })) }}
           />
         </div>
       )}
@@ -202,9 +276,13 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
         })}
 
         {rows.length === 0 && (
-          <div style={{ padding: '32px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px' }}>
-            {q ? 'No clients match that search' : 'No clients in this view'}
-          </div>
+          dirFilterCount(filters) > 0 && !q ? (
+            <FilteredEmpty count={dirFilterCount(filters)} onClear={clearFilters} noun="clients" />
+          ) : (
+            <div style={{ padding: '32px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px' }}>
+              {q ? 'No clients match that search' : 'No clients in this view'}
+            </div>
+          )
         )}
       </div>
 

@@ -71,6 +71,45 @@ export function relAge(t, nowMs = Date.now()) {
   return `${Math.floor(hours / 24)}d`
 }
 
+// ── engagement filters (shared by board + list, owned by HiveShell) ──
+// Pure predicate so every consumer (both lenses + the shell's counter)
+// agrees by construction.
+
+export const ENGAGEMENT_FILTER_DEFAULTS = {
+  stages: [],        // [] = all open stages
+  statuses: [],      // within-stage styleKeys
+  min: '', max: '',  // value range ($)
+  age: null,         // quiet: null | 7 | 30 | 90
+  owing: false,
+  repeat: false,
+  fresh: false,      // new clients only: first engagement, <30d
+  foundedBy: [],     // request | quote | job | manual
+}
+
+export function engagementFilterCount(f) {
+  return (f.stages.length ? 1 : 0) + (f.statuses.length ? 1 : 0) +
+    (f.min ? 1 : 0) + (f.max ? 1 : 0) + (f.age ? 1 : 0) +
+    (f.owing ? 1 : 0) + (f.repeat ? 1 : 0) + (f.fresh ? 1 : 0) +
+    (f.foundedBy.length ? 1 : 0)
+}
+
+export function passesEngagementFilters(e, f, nowMs = Date.now(), { ignoreStages = false } = {}) {
+  if (!ignoreStages && f.stages.length && !f.stages.includes(e.stage)) return false
+  if (f.statuses.length) {
+    const k = deriveStatusChip(e, { nowMs })?.styleKey
+    if (!k || !f.statuses.includes(k)) return false
+  }
+  const v = engagementValue(e) ?? 0
+  if (f.min && v < Number(f.min)) return false
+  if (f.max && v > Number(f.max)) return false
+  if (f.age && (nowMs - lastActivityTs(e)) < f.age * 86400000) return false
+  if (f.owing && !(Number(e.balance_owing) > 0)) return false
+  if (f.repeat && !(e.repeat_count > 1)) return false
+  if (f.fresh && !(e.repeat_count === 1 && (nowMs - new Date(e.created_at).getTime()) < 30 * 86400000)) return false
+  if (f.foundedBy.length && !f.foundedBy.includes(e.founded_by)) return false
+  return true
+}
+
 // Within-stage status chip (THE derivation — board cards + list rows):
 //   Request          → request age (teal; amber at day >= 21 as pre-nurture cue)
 //   Estimate         → latest quote state; 'sent' is the neutral default

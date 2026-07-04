@@ -27,6 +27,18 @@ import StatusChip from '@/components/ui/StatusChip'
 import Card from '@/components/ui/Card'
 import SectionHeader from '@/components/ui/SectionHeader'
 import { statusIconFor, IconChevronRight } from '@/components/ui/icons'
+import EngagementFilters from './EngagementFilters'
+import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount, lastActivityTs, engagementValue as engValueOf } from './shared/engagementStatus'
+import { SortSelect, FilteredEmpty } from './shared/FilterPopover'
+import { useStoredState } from './shared/useStoredControls'
+
+const BOARD_SORTS = [
+  { key: 'newest', label: 'Newest activity' },
+  { key: 'oldest', label: 'Oldest activity' },
+  { key: 'value_desc', label: 'Highest value' },
+  { key: 'value_asc', label: 'Lowest value' },
+  { key: 'client', label: 'Client A–Z' },
+]
 
 const BOARD_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 
@@ -59,7 +71,7 @@ function EngagementCard({ e, onOpen, draggable, onDragStart }) {
   )
 }
 
-export default function EngagementBoard({ engagements = [], onOpenClient = () => {}, onOpenEngagement = null, setToast = () => {} }) {
+export default function EngagementBoard({ engagements = [], workFilters = ENGAGEMENT_FILTER_DEFAULTS, setWorkFilters = () => {}, clearWorkFilters = () => {}, onOpenClient = () => {}, onOpenEngagement = null, setToast = () => {} }) {
   // Local rows for optimistic drag moves; resync when the server prop changes.
   const [rows, setRows] = useState(engagements)
   useEffect(() => { setRows(engagements) }, [engagements])
@@ -80,7 +92,23 @@ export default function EngagementBoard({ engagements = [], onOpenClient = () =>
   const dragId = useRef(null)
   const touchX = useRef(null)
 
-  const byStage = (key) => rows.filter(e => e.stage === key && !isTerminal(e.stage))
+  // Within-column ordering (persisted separately from the list's sort).
+  const [boardSortRaw, setBoardSort] = useStoredState('bee_hive_board_sort', { key: 'newest' })
+  const boardSort = BOARD_SORTS.some(o => o.key === boardSortRaw.key) ? boardSortRaw.key : 'newest'
+  const nowMs = Date.now()
+  const filterCount = engagementFilterCount(workFilters)
+  const visibleRows = rows.filter(e => !isTerminal(e.stage) && passesEngagementFilters(e, workFilters, nowMs))
+
+  const orderColumn = (arr) => {
+    const sorted = arr.slice()
+    if (boardSort === 'oldest') sorted.sort((a, b) => lastActivityTs(a) - lastActivityTs(b))
+    else if (boardSort === 'value_desc') sorted.sort((a, b) => (engValueOf(b) ?? 0) - (engValueOf(a) ?? 0))
+    else if (boardSort === 'value_asc') sorted.sort((a, b) => (engValueOf(a) ?? 0) - (engValueOf(b) ?? 0))
+    else if (boardSort === 'client') sorted.sort((a, b) => (a.client_name || '').localeCompare(b.client_name || ''))
+    else sorted.sort((a, b) => lastActivityTs(b) - lastActivityTs(a)) // newest
+    return sorted
+  }
+  const byStage = (key) => orderColumn(visibleRows.filter(e => e.stage === key))
 
   async function moveStage(id, targetStage) {
     const row = rows.find(r => r.id === id)
@@ -158,6 +186,11 @@ export default function EngagementBoard({ engagements = [], onOpenClient = () =>
     const stage = BOARD_STAGES[mobileCol]
     const count = byStage(stage.key).length
     return (
+      <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', marginBottom: '10px' }}>
+        <SortSelect value={boardSort} onChange={(v) => setBoardSort({ key: v })} options={BOARD_SORTS} />
+        <EngagementFilters engagements={rows.filter(e => !isTerminal(e.stage))} filters={workFilters} setFilters={setWorkFilters} onClear={clearWorkFilters} nowMs={nowMs} />
+      </div>
       <div
         onTouchStart={(ev) => { touchX.current = ev.touches[0].clientX }}
         onTouchEnd={(ev) => {
@@ -186,14 +219,29 @@ export default function EngagementBoard({ engagements = [], onOpenClient = () =>
           ))}
         </div>
       </div>
+      </div>
     )
   }
 
+  const controls = (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', marginBottom: '12px' }}>
+      <SortSelect value={boardSort} onChange={(v) => setBoardSort({ key: v })} options={BOARD_SORTS} />
+      <EngagementFilters engagements={rows.filter(e => !isTerminal(e.stage))} filters={workFilters} setFilters={setWorkFilters} onClear={clearWorkFilters} nowMs={nowMs} />
+    </div>
+  )
+
   return (
-    <div style={{ overflowX: 'auto', paddingBottom: '1rem', WebkitOverflowScrolling: 'touch' }}>
-      <div style={{ display: 'flex', gap: '16px', minWidth: 'max-content', alignItems: 'flex-start' }}>
-        {BOARD_STAGES.map(stage => renderColumn(stage, { droppable: true }))}
-      </div>
+    <div>
+      {controls}
+      {visibleRows.length === 0 && filterCount > 0 ? (
+        <FilteredEmpty count={filterCount} onClear={clearWorkFilters} noun="engagements" />
+      ) : (
+        <div style={{ overflowX: 'auto', paddingBottom: '1rem', WebkitOverflowScrolling: 'touch' }}>
+          <div style={{ display: 'flex', gap: '16px', minWidth: 'max-content', alignItems: 'flex-start' }}>
+            {BOARD_STAGES.map(stage => renderColumn(stage, { droppable: true }))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
