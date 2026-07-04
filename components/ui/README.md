@@ -58,9 +58,12 @@ the card surface. `left`/`right` are free slots; `primary`/`secondary`
 ellipsize. Compresses naturally on mobile.
 
 ### FilterChips
-`{ items, active, onChange }` — horizontal chip strip;
-`items: [{ key, label, count?, styleKey? }]`. Active chip inverts to ink;
-scrolls horizontally on narrow viewports instead of wrapping.
+`{ items, active, onChange }` — quiet horizontal chip strip;
+`items: [{ key, label, count?, muted? }]`. Active chip is a white
+hairline-bordered pill with a weight-500 label ('Open · 7' — count after
+a middot in muted gray); inactive chips are borderless muted text;
+`muted: true` renders extra-quiet. Scrolls horizontally on narrow
+viewports instead of wrapping.
 
 ### MetricCard
 `{ label, value, tone? }` — stat card: muted uppercase label, 22px value.
