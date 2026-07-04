@@ -12,9 +12,15 @@ import EngagementList from '@/components/hive/EngagementList'
 import EngagementPanel from '@/components/hive/EngagementPanel'
 import ClientDirectory from '@/components/hive/ClientDirectory'
 import InboxScreen from '@/components/hive/InboxScreen'
+import { fmtTime, fmtShortTime } from '@/components/hive/shared/engagementStatus'
 
 const now = Date.now()
 const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString()
+// Future timestamp at an explicit LOCAL wall-clock time, stored as UTC ISO
+// (mirrors prod scheduled_at) — proves fmtTime renders the local zone back.
+const daysAheadAt = (n: number, h: number, m: number) => {
+  const d = new Date(now + n * 86400000); d.setHours(h, m, 0, 0); return d.toISOString()
+}
 
 const eng = (over: any = {}) => ({
   id: `e-${Math.random().toString(36).slice(2, 8)}`,
@@ -34,7 +40,7 @@ const eng = (over: any = {}) => ({
 
 const ENGAGEMENTS = [
   eng({ stage: 'Request' }),
-  eng({ stage: 'Request', assessments: [{ id: 'a1', scheduled_at: new Date(now + 2 * 86400000).toISOString(), status: 'scheduled', completed_at: null }] }),
+  eng({ stage: 'Request', assessments: [{ id: 'a1', scheduled_at: daysAheadAt(2, 19, 0), status: 'scheduled', completed_at: null }] }),
   eng({ stage: 'Request', created_at: daysAgo(25) }), // amber pre-nurture
   eng({ stage: 'Estimate', quotes: [{ id: 'q1', status: 'sent', total: 500, sent_at: daysAgo(2) }] }),
   eng({ stage: 'Estimate', quotes: [{ id: 'q2', status: 'approved', total: 900 }], repeat_count: 3 }),
@@ -91,5 +97,20 @@ describe('beta chips', () => {
 
     const chipWarns = warns.filter(a => String(a[0]).includes('[StatusChip]'))
     expect(chipWarns, `unknown styleKeys: ${JSON.stringify(chipWarns)}`).toEqual([])
+
+    // The assessment chip carries the LOCAL wall-clock time (fixture is
+    // local 7pm stored as UTC ISO — a UTC-rendering bug would show a
+    // shifted hour here and fail).
+    expect(html).toContain(`Assessment · ${fmtShortTime(daysAheadAt(2, 19, 0))}`)
+    expect(html).toContain(', 7pm')
+  })
+
+  it('fmtTime: compact local time, minutes only when non-zero, lowercase am/pm', () => {
+    const at = (h: number, m: number) => { const d = new Date(now); d.setHours(h, m, 0, 0); return d.toISOString() }
+    expect(fmtTime(at(19, 0))).toBe('7pm')
+    expect(fmtTime(at(10, 30))).toBe('10:30am')
+    expect(fmtTime(at(12, 5))).toBe('12:05pm')
+    expect(fmtTime(at(0, 0))).toBe('12am')
+    expect(fmtTime(null)).toBe(null)
   })
 })

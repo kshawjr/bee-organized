@@ -18,6 +18,7 @@ import StatusChip from '@/components/ui/StatusChip'
 import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconExternalLink, IconX, IconCalendar } from '@/components/ui/icons'
 import MetricCard from '@/components/ui/MetricCard'
 import ContactLine from './ContactLine'
+import { fmtTime } from './shared/engagementStatus'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
 const fmtDate = (d) => {
@@ -348,7 +349,7 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
             const future = new Date(a.scheduled_at || 0).getTime() > Date.now()
             return (
               <RecordRow key={a.id} icon={<IconCalendar size={15} />} iconColor="#0C447C" current={false}
-                primary={`Assessment · ${fmtDate(a.scheduled_at) || '—'}`}
+                primary={`Assessment · ${[fmtDate(a.scheduled_at), fmtTime(a.scheduled_at)].filter(Boolean).join(', ') || '—'}`}
                 secondary={done && a.completed_at ? `completed ${fmtDate(a.completed_at)}` : null}
                 state={done ? DONE : { label: 'Scheduled', color: future ? BAR_CURRENT : '#8a8a84' }}
               />

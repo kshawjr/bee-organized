@@ -16,6 +16,28 @@ export const fmtShort = (d) => {
   return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+// Compact local wall-clock time: '7pm' / '10:30am' — minutes only when
+// non-zero, lowercase am/pm. scheduled_at is stored UTC; local getters
+// render the viewer's zone (beta chunk is ssr:false, so no server/client
+// mismatch). THE time treatment for chips + panel timeline.
+export const fmtTime = (d) => {
+  if (!d) return null
+  const dt = new Date(d)
+  if (isNaN(dt)) return null
+  const h24 = dt.getHours(), m = dt.getMinutes()
+  const ap = h24 >= 12 ? 'pm' : 'am'
+  const h = h24 % 12 || 12
+  return m ? `${h}:${String(m).padStart(2, '0')}${ap}` : `${h}${ap}`
+}
+
+// 'Jul 6, 7pm' — compact date+time for chips.
+export const fmtShortTime = (d) => {
+  const date = fmtShort(d)
+  if (!date) return null
+  const time = fmtTime(d)
+  return time ? `${date}, ${time}` : date
+}
+
 const ts = (v) => {
   if (!v) return 0
   const t = new Date(v).getTime()
@@ -149,7 +171,7 @@ export function deriveStatusChip(e, opts = {}) {
         .filter(a => !a.completed_at)
         .map(a => ts(a.scheduled_at)).filter(t => t > nowMs)
         .sort((a, b) => a - b)[0]
-      if (nextAssess) return { label: `Assessment · ${fmtShort(nextAssess)}`, styleKey: 'scheduled' }
+      if (nextAssess) return { label: `Assessment · ${fmtShortTime(nextAssess)}`, styleKey: 'scheduled' }
       const age = daysSince(e.created_at, nowMs)
       if (age >= 21) return { label: `Requested · ${formatDayCount(age)}`, styleKey: 'amber' }
       return { label: age === 0 ? 'Requested Today' : `Requested · ${formatDayCount(age)}`, styleKey: 'Request' }
