@@ -8,7 +8,7 @@
 import React, { useState, useMemo } from 'react'
 import { ENGAGEMENT_STAGES } from './shared/stageConfig'
 import { deriveStatusChip, engagementFilterCount } from './shared/engagementStatus'
-import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills } from './shared/FilterPopover'
+import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows } from './shared/FilterPopover'
 
 const OPEN_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 
@@ -21,7 +21,7 @@ export const STATUS_LABELS = {
   owing: 'owing', never_invoiced: 'never invoiced', paid: 'paid', nurturing: 'nurturing',
 }
 
-export default function EngagementFilters({ engagements = [], filters, setFilters, onClear, nowMs = Date.now() }) {
+export default function EngagementFilters({ engagements = [], filters, setFilters, onClear, nowMs = Date.now(), sortValue = null, sortOptions = null, onSortChange = null }) {
   const [open, setOpen] = useState(false)
   const count = engagementFilterCount(filters)
 
@@ -41,8 +41,13 @@ export default function EngagementFilters({ engagements = [], filters, setFilter
 
   return (
     <div style={{ position: 'relative', flexShrink: 0 }}>
-      <FilterButton count={count} open={open} onToggle={() => setOpen(v => !v)} />
+      <FilterButton count={count} open={open} onToggle={() => setOpen(v => !v)} label={sortOptions ? 'Filter & sort' : 'Filters'} />
       <FilterPopover open={open} count={count} onClear={onClear}>
+        {sortOptions && (
+          <FilterSection label="Sort">
+            <SortRows value={sortValue} onChange={onSortChange} options={sortOptions} />
+          </FilterSection>
+        )}
         <FilterSection label="Stage">
           {OPEN_STAGES.map(s => (
             <CheckRow key={s.key} label={s.displayLabel} checked={filters.stages.includes(s.key)} onToggle={() => toggleIn('stages', s.key)} />

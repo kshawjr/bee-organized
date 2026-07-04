@@ -29,7 +29,7 @@ import SectionHeader from '@/components/ui/SectionHeader'
 import { statusIconFor, IconChevronRight } from '@/components/ui/icons'
 import EngagementFilters from './EngagementFilters'
 import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount, lastActivityTs, engagementValue as engValueOf } from './shared/engagementStatus'
-import { SortSelect, FilteredEmpty } from './shared/FilterPopover'
+import { FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
 
 const BOARD_SORTS = [
@@ -188,8 +188,8 @@ export default function EngagementBoard({ engagements = [], workFilters = ENGAGE
     return (
       <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', marginBottom: '10px' }}>
-        <SortSelect value={boardSort} onChange={(v) => setBoardSort({ key: v })} options={BOARD_SORTS} />
-        <EngagementFilters engagements={rows.filter(e => !isTerminal(e.stage))} filters={workFilters} setFilters={setWorkFilters} onClear={clearWorkFilters} nowMs={nowMs} />
+        <EngagementFilters engagements={rows.filter(e => !isTerminal(e.stage))} filters={workFilters} setFilters={setWorkFilters} onClear={clearWorkFilters} nowMs={nowMs}
+          sortValue={boardSort} sortOptions={BOARD_SORTS} onSortChange={(v) => setBoardSort({ key: v })} />
       </div>
       <div
         onTouchStart={(ev) => { touchX.current = ev.touches[0].clientX }}
@@ -225,8 +225,8 @@ export default function EngagementBoard({ engagements = [], workFilters = ENGAGE
 
   const controls = (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', marginBottom: '12px' }}>
-      <SortSelect value={boardSort} onChange={(v) => setBoardSort({ key: v })} options={BOARD_SORTS} />
-      <EngagementFilters engagements={rows.filter(e => !isTerminal(e.stage))} filters={workFilters} setFilters={setWorkFilters} onClear={clearWorkFilters} nowMs={nowMs} />
+      <EngagementFilters engagements={rows.filter(e => !isTerminal(e.stage))} filters={workFilters} setFilters={setWorkFilters} onClear={clearWorkFilters} nowMs={nowMs}
+        sortValue={boardSort} sortOptions={BOARD_SORTS} onSortChange={(v) => setBoardSort({ key: v })} />
     </div>
   )
 

@@ -23,7 +23,7 @@ import { relAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock } from '@/components/ui/icons'
 import ContactLine from './ContactLine'
-import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortSelect, FilteredEmpty } from './shared/FilterPopover'
+import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
 
 const INBOX_SORTS = [
@@ -206,11 +206,10 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
             <p style={{ fontSize: '11px', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>
               {pill === 'New' ? detailNew(p) : detailWorking(p)}
             </p>
+            {/* Identity cluster: name → detail → contact (one card-like
+                block; the action button stays cleanly right). */}
+            {!isMobile && <ContactLine phone={p.phone} email={p.email} style={{ marginTop: '3px' }} />}
           </div>
-          {!isMobile && (
-            <ContactLine layout="inline" phone={p.phone} email={p.email}
-              style={{ flexShrink: 1, minWidth: 0, maxWidth: '340px', margin: '0 4px' }} />
-          )}
           {!isMobile && (
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '8px' }} onClick={ev => ev.stopPropagation()}>
               {actions}
@@ -236,10 +235,12 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       <style>{`.bee-inbox-row:hover { background:#f7f6f4 } .bee-inbox-row:last-child { border-bottom:none !important }`}</style>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', marginBottom: '12px' }}>
-        <SortSelect value={inboxSort} onChange={(v) => setSort({ key: v })} options={INBOX_SORTS} />
         <div style={{ position: 'relative', flexShrink: 0 }}>
-          <FilterButton count={inboxFilterCount(filters)} open={fltOpen} onToggle={() => setFltOpen(v => !v)} />
+          <FilterButton count={inboxFilterCount(filters)} open={fltOpen} onToggle={() => setFltOpen(v => !v)} label="Filter & sort" />
           <FilterPopover open={fltOpen} count={inboxFilterCount(filters)} onClear={clearFilters}>
+            <FilterSection label="Sort">
+              <SortRows value={inboxSort} onChange={(v) => setSort({ key: v })} options={INBOX_SORTS} />
+            </FilterSection>
             {sourceOptions.length > 0 && (
               <FilterSection label="Source">
                 {sourceOptions.map(k => (
