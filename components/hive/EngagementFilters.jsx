@@ -15,10 +15,10 @@ const OPEN_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 // Display labels for status options (keys = deriveStatusChip styleKeys
 // actually present in the loaded rows — dead options never show).
 export const STATUS_LABELS = {
-  'Request': 'requested', amber: 'requested (stale)',
-  sent: 'sent', approved: 'approved', changes_requested: 'changes requested',
-  scheduled: 'scheduled', in_progress: 'in progress', upcoming: 'upcoming',
-  owing: 'owing', never_invoiced: 'never invoiced', paid: 'paid', nurturing: 'nurturing',
+  'Request': 'Requested', amber: 'Requested (Stale)',
+  sent: 'Sent', approved: 'Approved', changes_requested: 'Changes Requested',
+  scheduled: 'Scheduled', in_progress: 'In Progress', upcoming: 'Upcoming',
+  owing: 'Owes', never_invoiced: 'Never Invoiced', paid: 'Paid', nurturing: 'Nurturing',
 }
 
 export default function EngagementFilters({ engagements = [], filters, setFilters, onClear, nowMs = Date.now(), sortValue = null, sortOptions = null, onSortChange = null }) {

@@ -52,31 +52,31 @@ function detailLine(person, status, openEngs, nowMs) {
   switch (status) {
     case 'Active': {
       const n = openEngs.length
-      const base = `${n} open engagement${n === 1 ? '' : 's'}`
-      return paid > 0 ? `${base} · ${fmtMoney(paid)} paid` : base
+      const base = `${n} Open Engagement${n === 1 ? '' : 's'}`
+      return paid > 0 ? `${base} · ${fmtMoney(paid)} Paid` : base
     }
     case 'Past': {
       const last = Math.max(0, ...openEngs.map(e => lastActivityTs(e)), person.created ? new Date(person.created).getTime() : 0)
-      return `${fmtMoney(paid)} paid · last activity ${relAge(last, nowMs)} ago`
+      return `${fmtMoney(paid)} Paid · Last Activity ${relAge(last, nowMs)} ago`
     }
     case 'Nurturing': {
       const when = monthYear(person.created)
-      const bits = [when ? `inquired ${when}` : 'imported', 'never booked']
-      if (person.paused) bits.push('drips paused')
+      const bits = [when ? `Inquired ${when}` : 'Imported', 'Never Booked']
+      if (person.paused) bits.push('Drips Paused')
       return bits.join(' · ')
     }
     case 'Attempting': {
       const lastReach = Math.max(0, ...(person.outreachTimeline || [])
         .filter(t => t.type === 'reach_out')
         .map(t => new Date(t.occurred_at || 0).getTime() || 0))
-      return lastReach ? `last reach-out ${relAge(lastReach, nowMs)} ago` : 'being worked'
+      return lastReach ? `Last Reach-Out ${relAge(lastReach, nowMs)} ago` : 'Being Worked'
     }
     case 'New': {
       const when = monthYear(person.created)
-      return when ? `inquired ${when} · not yet contacted` : 'new inquiry'
+      return when ? `Inquired ${when} · Not Yet Contacted` : 'New Inquiry'
     }
     case 'no_contact':
-      return 'no contact info'
+      return 'No Contact Info'
     default:
       return null
   }

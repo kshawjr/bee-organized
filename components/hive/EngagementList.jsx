@@ -33,17 +33,14 @@ const SORT_LS_KEY = 'bee_hive_list_sort'
 const SORT_COLS = ['default', 'client', 'engagement', 'stage', 'status', 'value', 'activity']
 
 // Desktop grid: CLIENT | ENGAGEMENT | STAGE | STATUS | VALUE | ACTIVITY
-const GRID = 'minmax(150px,1.2fr) minmax(140px,1.4fr) 130px minmax(150px,1.2fr) 90px 70px'
+// VALUE gets right padding + ACTIVITY got wider (spelled-out ages) so
+// the two right-aligned columns breathe instead of crowding.
+const GRID = 'minmax(150px,1.2fr) minmax(140px,1.4fr) 130px minmax(150px,1.2fr) 90px 96px'
 
 function statusFragment(chip) {
   if (!chip) return null
   const color = (CHIP_STYLES[chip.styleKey] || CHIP_STYLES.gray).text
-  let label = chip.label
-  if (chip.styleKey === 'owing') {
-    const m = label.match(/^owing\s+(\$[\d,]+)$/)
-    if (m) label = `${m[1]} owing`
-  }
-  return { color, label, icon: chip.styleKey === 'gray' ? null : statusIconFor(chip.styleKey) }
+  return { color, label: chip.label, icon: chip.styleKey === 'gray' ? null : statusIconFor(chip.styleKey) }
 }
 
 function StatusText({ chip, size = 12 }) {
@@ -227,7 +224,7 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
               <span style={{ fontSize: '13px', color: '#6b6b66', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayTitle(e)}</span>
               <span><StatusChip label={stageDisplayLabel(e.stage)} styleKey={e.stage} /></span>
               <StatusText chip={chip} size={12} />
-              <span style={{ fontSize: '14px', fontWeight: 600, color: value ? '#1a1a18' : '#b5b3ac', textAlign: 'right' }}>{value || '—'}</span>
+              <span style={{ fontSize: '14px', fontWeight: 600, color: value ? '#1a1a18' : '#b5b3ac', textAlign: 'right', paddingRight: '10px' }}>{value || '—'}</span>
               <span style={{ fontSize: '13px', color: '#8a8a84', textAlign: 'right' }}>{activity}</span>
             </div>
           )

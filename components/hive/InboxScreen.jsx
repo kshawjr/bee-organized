@@ -278,7 +278,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
           <div>
-            <SectionLabel glyph={<IconSparkles size={13} />} color={TEAL_DARK} label="New" count={fresh.length} hint="no contact yet" />
+            <SectionLabel glyph={<IconSparkles size={13} />} color={TEAL_DARK} label="New" count={fresh.length} hint="No Contact Yet" />
             {fresh.length > 0 ? (
               <div style={cardStyle}>
                 {fresh.map(p => <Row key={p.id} p={p} family={{ bg: TEAL_BG, text: TEAL_DARK }} pill="New" />)}
@@ -291,7 +291,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
           </div>
 
           <div>
-            <SectionLabel glyph={<IconPhoneOutgoing size={13} />} color={BLUE_DARK} label="Attempting" count={working.length} hint="working the lead" />
+            <SectionLabel glyph={<IconPhoneOutgoing size={13} />} color={BLUE_DARK} label="Attempting" count={working.length} hint="Working the Lead" />
             {working.length > 0 ? (
               <div style={cardStyle}>
                 {working.map(p => <Row key={p.id} p={p} family={{ bg: BLUE_BG, text: BLUE_DARK }} pill="Attempting" />)}

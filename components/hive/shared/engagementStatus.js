@@ -61,15 +61,21 @@ export function lastActivityTs(e) {
   return ts(e.stage_entered_at) || ts(e.updated_at) || ts(e.created_at)
 }
 
-// Relative age for the ACTIVITY column: 42m / 2h / 3d / 42d.
-export function relAge(t, nowMs = Date.now()) {
+// Spelled-out age (LOCKED idiom update 2026-07-04): '5 Minutes' /
+// '2 Hours' / '42 Days', singular-correct. ONE formatter for board day
+// counters, list ACTIVITY, inbox last-touch, directory detail lines —
+// no per-surface drift. relAge keeps its name so consumers inherit.
+const plural = (n, unit) => `${n} ${unit}${n === 1 ? '' : 's'}`
+export function formatAge(t, nowMs = Date.now()) {
   if (!t) return '—'
   const mins = Math.max(0, Math.floor((nowMs - t) / 60000))
-  if (mins < 60) return `${mins}m`
+  if (mins < 60) return plural(mins, 'Minute')
   const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h`
-  return `${Math.floor(hours / 24)}d`
+  if (hours < 24) return plural(hours, 'Hour')
+  return plural(Math.floor(hours / 24), 'Day')
 }
+export const relAge = formatAge
+export const formatDayCount = (n) => plural(n, 'Day')
 
 // ── engagement filters (shared by board + list, owned by HiveShell) ──
 // Pure predicate so every consumer (both lenses + the shell's counter)
@@ -126,7 +132,7 @@ export function deriveStatusChip(e, opts = {}) {
 
   if (e.nurture_started_at) {
     const d = daysSince(e.nurture_started_at, nowMs)
-    return { label: longForm ? `nurturing · day ${d} of 90` : `nurturing · d${d}`, styleKey: 'nurturing' }
+    return { label: longForm ? `Nurturing · Day ${d} of 90` : `Nurturing · ${formatDayCount(d)}`, styleKey: 'nurturing' }
   }
   const quotes = e.quotes || []
   const jobs = e.jobs || []
@@ -135,38 +141,39 @@ export function deriveStatusChip(e, opts = {}) {
   switch (e.stage) {
     case 'Request': {
       const age = daysSince(e.created_at, nowMs)
-      if (age >= 21) return { label: `requested · d${age}`, styleKey: 'amber' }
-      return { label: age === 0 ? 'requested today' : `requested · d${age}`, styleKey: 'Request' }
+      if (age >= 21) return { label: `Requested · ${formatDayCount(age)}`, styleKey: 'amber' }
+      return { label: age === 0 ? 'Requested Today' : `Requested · ${formatDayCount(age)}`, styleKey: 'Request' }
     }
     case 'Estimate': {
-      if (quotes.some(q => q.status === 'approved')) return { label: 'approved', styleKey: 'approved' }
-      if (quotes.some(q => q.status === 'changes_requested')) return { label: 'changes requested', styleKey: 'changes_requested' }
+      if (quotes.some(q => q.status === 'approved')) return { label: 'Approved', styleKey: 'approved' }
+      if (quotes.some(q => q.status === 'changes_requested')) return { label: 'Changes Requested', styleKey: 'changes_requested' }
       const latest = quotes.reduce((a, q) => Math.max(a, ts(q.sent_at)), 0)
       const when = latest ? fmtShort(latest) : null
-      return { label: when ? `sent ${when}` : 'sent', styleKey: 'sent' }
+      return { label: when ? `Sent ${when}` : 'Sent', styleKey: 'sent' }
     }
     case 'Job in Progress': {
       const active = jobs.filter(j => !j.completed_at && !(j.status || '').includes('complet'))
       const inProg = active.find(j => j.status === 'in_progress' || j.status === 'active')
-      if (inProg) return { label: 'in progress', styleKey: 'in_progress' }
+      if (inProg) return { label: 'In Progress', styleKey: 'in_progress' }
       const starts = active
         .map(j => ts(j.scheduled_start)).filter(t => t > 0)
         .sort((a, b) => a - b)
       const nextFuture = starts.find(t => t > nowMs)
-      if (nextFuture) return { label: `scheduled ${fmtShort(nextFuture)}`, styleKey: 'scheduled' }
-      if (starts.length > 0) return { label: 'in progress', styleKey: 'in_progress' }
-      return { label: 'upcoming', styleKey: 'upcoming' }
+      if (nextFuture) return { label: `Scheduled ${fmtShort(nextFuture)}`, styleKey: 'scheduled' }
+      if (starts.length > 0) return { label: 'In Progress', styleKey: 'in_progress' }
+      return { label: 'Upcoming', styleKey: 'upcoming' }
     }
     case 'Final Processing': {
       const owing = Number(e.balance_owing) || 0
-      if (owing > 0) return { label: `owing ${fmtMoney(owing)}`, styleKey: 'owing' }
-      if (invoices.length === 0) return { label: 'never invoiced', styleKey: 'never_invoiced' }
-      return { label: 'paid', styleKey: 'paid' }
+      if (owing > 0) return { label: `Owes ${fmtMoney(owing)}`, styleKey: 'owing' }
+      if (invoices.length === 0) return { label: 'Never Invoiced', styleKey: 'never_invoiced' }
+      return { label: 'Paid', styleKey: 'paid' }
     }
     case 'Closed Won':
     case 'Closed Lost': {
-      const r = (e.closed_reason || '').replace(/_/g, ' ')
-      return { label: r || e.stage.toLowerCase(), styleKey: 'gray' }
+      const raw = (e.closed_reason || '').replace(/_/g, ' ')
+      const label = raw ? raw.replace(/\b\w/g, c => c.toUpperCase()).replace(/ (On|Of|The|With) /g, m => m.toLowerCase()) : e.stage
+      return { label, styleKey: 'gray' }
     }
     default:
       return null

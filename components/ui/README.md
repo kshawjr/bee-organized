@@ -53,6 +53,15 @@ border. Dark-on-light pairs (exact, do not tweak per-surface):
 **Spacing** — 12px between cards, 16px between board columns; generous,
 the layout breathes.
 
+**Copy idiom (updated 2026-07-04)** — status texts, chip labels, and
+detail-line phrases are Title Case with small words lowered ('Requested
+Today', 'Never Invoiced', 'Owes $620', 'Working the Lead', 'Inquired Apr
+2024 · Never Booked · Drips Paused'); ages are spelled out and
+singular-correct via the shared `formatAge`/`formatDayCount`
+(`2 Hours`, `1 Day`, `42 Days` — never `2h`/`d42`); 'ago' stays
+lowercase. Buttons and letterspaced micro-labels keep their existing
+rules (sentence-case buttons, uppercase-by-transform section labels).
+
 ## Primitives
 
 ### StatusChip
