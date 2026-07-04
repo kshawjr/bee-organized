@@ -18,7 +18,8 @@
 
 import React, { useState, useEffect } from 'react'
 import { ENGAGEMENT_STAGES, STAGE_RANK, CHIP_STYLES, stageDisplayLabel } from './shared/stageConfig'
-import { SECTION_LABEL, TEXT_SUCCESS, TEXT_DANGER } from '@/components/ui/tokens'
+import { SECTION_LABEL, TEXT_SUCCESS, TEXT_DANGER, TEXT_MUTED } from '@/components/ui/tokens'
+import LoadMore from './shared/LoadMore'
 import { deriveStatusChip, displayTitle, engagementValue, fmtMoney, lastActivityTs, relAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import FilterChips from '@/components/ui/FilterChips'
@@ -236,7 +237,7 @@ export default function EngagementList({ engagements = [], closedCount = 0, clos
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
-                    <span style={{ fontSize: '12px', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayTitle(e)}</span>
+                    <span style={{ fontSize: '12px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayTitle(e)}</span>
                     <StatusText chip={chip} size={12} />
                   </span>
                   <StatusChip label={stageDisplayLabel(e.stage)} styleKey={e.stage} />
@@ -248,7 +249,9 @@ export default function EngagementList({ engagements = [], closedCount = 0, clos
             <div key={e.id} className="bee-englist-row" onClick={() => onOpenEngagement(e)}
               style={{ display: 'grid', gridTemplateColumns: GRID, gap: '12px', alignItems: 'center', padding: '15px 16px', borderBottom: '0.5px solid rgba(0,0,0,0.08)', cursor: 'pointer', opacity: muted ? 0.6 : 1 }}>
               <ClientCell e={e} nowMs={nowMs} />
-              <span style={{ fontSize: '13px', color: '#6b6b66', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayTitle(e)}</span>
+              {/* displayTitle secondary text: 13px stays (table density) —
+                  the COLOR is the unified token, same as board + mobile. */}
+              <span style={{ fontSize: '13px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayTitle(e)}</span>
               <span><StatusChip label={stageDisplayLabel(e.stage)} styleKey={e.stage} /></span>
               <StatusText chip={chip} size={12} />
               <span style={{ fontSize: '14px', fontWeight: 600, color: value ? '#1a1a18' : '#b5b3ac', textAlign: 'right', paddingRight: '10px' }}>{value || '—'}</span>
@@ -272,10 +275,8 @@ export default function EngagementList({ engagements = [], closedCount = 0, clos
       </div>
 
       {showingClosed && closedData[view] && closedData[view].total != null && closedData[view].rows.length < closedData[view].total && !loadingClosed && (
-        <button onClick={() => fetchClosed(view, closedData[view].rows.length)}
-          style={{ width: '100%', marginTop: '10px', padding: '9px', background: 'transparent', border: '0.5px dashed rgba(0,0,0,0.15)', borderRadius: '10px', fontSize: '12px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
-          Load {Math.min(PAGE, closedData[view].total - closedData[view].rows.length)} more of {closedData[view].total - closedData[view].rows.length}
-        </button>
+        <LoadMore pageSize={PAGE} remaining={closedData[view].total - closedData[view].rows.length}
+          onClick={() => fetchClosed(view, closedData[view].rows.length)} />
       )}
     </div>
   )

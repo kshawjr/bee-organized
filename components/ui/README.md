@@ -20,10 +20,14 @@ buttons radius `8px`; modal radius `16px`; pills/tabs radius `20px`.
 **Closed color vocabulary** — every color on a beta surface resolves to:
 the `CHIP_STYLES` families (below, plus `quiet` `#F5F4EF`/`#b5b3ac`),
 the neutrals `#fdfdfc` / `#f7f6f4` / `#fff` / `#1a1a18` / `#6b6b66` /
-`#8a8a84` / `#9a988f` / `#b5b3ac` / `#c9c7c0`, hairlines
-`rgba(0,0,0,0.08–0.22)`, scrims `rgba(26,26,24,…)`, the send primary
-`#0F6E56`, the stage bar `#1D9E75` / `#378ADD` / `#ECEAE4`, and accent
-blue `#378ADD` for links. Anything else is a bug — grep before pushing.
+`#8a8a84` (`TEXT_MUTED`) / `#b5b3ac` (`TEXT_QUIET`) / `#c9c7c0`,
+hairlines `rgba(0,0,0,0.08)` for cards/dividers and
+`rgba(0,0,0,0.15)` (`HAIRLINE_BORDER`, `--hairline-border`) for buttons
+and inputs, scrims `rgba(26,26,24,…)`, the brand-green 3-stop scale
+`#0F6E56` (`GREEN_FILL`) / `#085041` (`GREEN_TEXT`) / `#1D9E75`
+(`TEXT_SUCCESS`), the stage bar `#1D9E75` / `#378ADD` / `#ECEAE4`, and
+accent blue `#378ADD` for links. Named values live in `ui/tokens.js`.
+Anything else is a bug — grep before pushing.
 
 **Icons** — `components/ui/icons.jsx`: inline Tabler Icons (MIT),
 stroke-based, `currentColor`, default 16px (`size` prop; 14px in tab

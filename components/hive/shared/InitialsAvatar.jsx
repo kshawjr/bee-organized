@@ -1,0 +1,18 @@
+// components/hive/shared/InitialsAvatar.jsx — the 32px initials circle
+// shared by Inbox rows and the Clients directory rows. One anatomy
+// (32px, 11px/600, full circle) so the two surfaces can't drift; the
+// color pair comes in as props (a CHIP_STYLES family — bg + text).
+'use client'
+
+import React from 'react'
+
+const initialsOf = (name) =>
+  (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?'
+
+export default function InitialsAvatar({ name, bg, text }) {
+  return (
+    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: bg, color: text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 600, flexShrink: 0 }}>
+      {initialsOf(name)}
+    </div>
+  )
+}

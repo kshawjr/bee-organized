@@ -9,6 +9,7 @@ import React, { useState, useMemo } from 'react'
 import { ENGAGEMENT_STAGES } from './shared/stageConfig'
 import { deriveStatusChip, engagementFilterCount } from './shared/engagementStatus'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows } from './shared/FilterPopover'
+import { HAIRLINE_BORDER } from '@/components/ui/tokens'
 
 const OPEN_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 
@@ -64,10 +65,10 @@ export default function EngagementFilters({ engagements = [], filters, setFilter
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#8a8a84' }}>
             $
             <input type="number" min="0" placeholder="min" value={filters.min} onChange={e => setFilters(f => ({ ...f, min: e.target.value }))}
-              style={{ flex: 1, minWidth: 0, padding: '5px 8px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
+              style={{ flex: 1, minWidth: 0, padding: '5px 8px', border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
             –
             <input type="number" min="0" placeholder="max" value={filters.max} onChange={e => setFilters(f => ({ ...f, max: e.target.value }))}
-              style={{ flex: 1, minWidth: 0, padding: '5px 8px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
+              style={{ flex: 1, minWidth: 0, padding: '5px 8px', border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
           </div>
         </FilterSection>
         <FilterSection label="Activity">

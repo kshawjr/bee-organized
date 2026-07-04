@@ -7,19 +7,33 @@
 //                   dark single chevron + direction when active
 //   SortHeaderStyle — hover tint for sortable headers (.bee-sort-header)
 //   SortRows      — sort options as the combined popover's top section
+//   ClearAllButton — THE 'Clear all' rendering (12px muted underline),
+//                   shared by the popover footer + FilteredEmpty
 //   FilteredEmpty — zero-match safety: names the active count + inline
 //                   Clear all (the d710247 rule, on every surface)
 'use client'
 
 import React from 'react'
 import { IconChevronRight } from '@/components/ui/icons'
+import { HAIRLINE_BORDER, TEXT_SUCCESS, TEXT_MUTED } from '@/components/ui/tokens'
+
+// ONE 'Clear all' rendering (12px, muted, underlined) — the popover
+// footer and FilteredEmpty both consume THIS so the two can't split.
+export function ClearAllButton({ onClick, style = {} }) {
+  return (
+    <button className="bee-clear-all" onClick={onClick}
+      style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '12px', color: `var(--text-muted, ${TEXT_MUTED})`, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline', textUnderlineOffset: '2px', ...style }}>
+      Clear all
+    </button>
+  )
+}
 
 // Pill sized EXACTLY like the FilterChips idiom it sits beside: 12px
 // type, 5px 12px padding, radius 20 — visual siblings, no oversize.
 export function FilterButton({ count = 0, open, onToggle, label = 'Filters' }) {
   return (
     <button onClick={onToggle}
-      style={{ padding: '5px 12px', borderRadius: '20px', border: '0.5px solid rgba(0,0,0,0.15)', background: open || count > 0 ? '#fff' : 'transparent', fontSize: '12px', fontWeight: count > 0 ? 500 : 400, color: count > 0 ? '#1a1a18' : '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', lineHeight: 'inherit' }}>
+      style={{ padding: '5px 12px', borderRadius: '20px', border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, background: open || count > 0 ? '#fff' : 'transparent', fontSize: '12px', fontWeight: count > 0 ? 500 : 400, color: count > 0 ? '#1a1a18' : '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', lineHeight: 'inherit' }}>
       {label}{count > 0 ? ` · ${count}` : ''}
     </button>
   )
@@ -35,7 +49,7 @@ export function SortRows({ value, onChange, options }) {
       {options.map(o => (
         <button key={o.key} className="bee-sort-item" onClick={() => onChange(o.key)}
           style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '6px 8px', margin: '0 -8px', borderRadius: '8px', border: 'none', background: 'transparent', fontSize: '12px', color: o.key === value ? '#1a1a18' : '#6b6b66', fontWeight: o.key === value ? 500 : 400, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-          <span style={{ width: '14px', display: 'inline-flex', justifyContent: 'center', color: '#1D9E75', flexShrink: 0 }}>{o.key === value ? '✓' : ''}</span>
+          <span style={{ width: '14px', display: 'inline-flex', justifyContent: 'center', color: `var(--text-success, ${TEXT_SUCCESS})`, flexShrink: 0 }}>{o.key === value ? '✓' : ''}</span>
           {o.label}
         </button>
       ))}
@@ -52,12 +66,7 @@ export function FilterPopover({ open, count = 0, onClear, children, width = 260 
     <div className="bee-filter-pop" style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 50, width: `${width}px`, overflowY: 'auto', background: '#fff', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '10px', boxShadow: '0 8px 30px rgba(26,26,24,0.12)', padding: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
       <style>{`.bee-filter-pop { max-height: 62vh; max-height: 62dvh; }`}</style>
       {children}
-      {count > 0 && (
-        <button onClick={onClear}
-          style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
-          Clear all
-        </button>
-      )}
+      {count > 0 && <ClearAllButton onClick={onClear} style={{ textAlign: 'left' }} />}
     </div>
   )
 }
@@ -119,9 +128,7 @@ export function FilteredEmpty({ count, onClear, noun = 'rows' }) {
   return (
     <div style={{ padding: '32px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px' }}>
       No {noun} match the active filters (Filters · {count}).{' '}
-      <button onClick={onClear} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '12px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
-        Clear all
-      </button>
+      <ClearAllButton onClick={onClear} />
     </div>
   )
 }

@@ -19,6 +19,9 @@ import FilterChips from '@/components/ui/FilterChips'
 import Banner from '@/components/ui/Banner'
 import { IconPlayerPause } from '@/components/ui/icons'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty } from './shared/FilterPopover'
+import { HAIRLINE_BORDER, TEXT_QUIET } from '@/components/ui/tokens'
+import InitialsAvatar from './shared/InitialsAvatar'
+import LoadMore from './shared/LoadMore'
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
 
@@ -34,9 +37,6 @@ const dirFilterCount = (f) =>
 
 const PAGE = 100
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-
-const initialsOf = (name) =>
-  (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?'
 
 const monthYear = (iso) => {
   if (!iso) return null
@@ -201,7 +201,7 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#8a8a84' }}>
                 Min $
                 <input type="number" min="0" value={filters.minLifetime} onChange={e => setFilters(f => ({ ...f, minLifetime: e.target.value }))}
-                  style={{ flex: 1, minWidth: 0, padding: '5px 8px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
+                  style={{ flex: 1, minWidth: 0, padding: '5px 8px', border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
               </div>
             </FilterSection>
             <FilterSection label="Drips">
@@ -224,7 +224,7 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
             text={
               <>
                 {pausedNurturing} of your nurturing clients came from the import with marketing paused.{' '}
-                <span title="Coming with drip activation (step 5)" style={{ fontSize: '11px', color: '#b5b3ac', cursor: 'default' }}>
+                <span title="Coming with drip activation (step 5)" style={{ fontSize: '11px', color: `var(--text-quiet, ${TEXT_QUIET})`, cursor: 'default' }}>
                   Activate drips · soon
                 </span>
               </>
@@ -241,7 +241,7 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
         style={{
           width: '100%', boxSizing: 'border-box', marginBottom: '12px',
           padding: '9px 14px', borderRadius: '8px',
-          border: '0.5px solid rgba(0,0,0,0.12)', background: '#fff',
+          border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, background: '#fff',
           fontSize: '13px', fontFamily: 'inherit', color: '#1a1a18', outline: 'none',
         }}
       />
@@ -255,9 +255,7 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
           return (
             <div key={p.id} className="bee-dir-row" onClick={() => onOpenClient(p.id)}
               style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: isMobile ? '12px 14px' : '13px 16px', borderBottom: '0.5px solid rgba(0,0,0,0.08)', cursor: 'pointer' }}>
-              <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: fam.bg, color: fam.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 600, flexShrink: 0 }}>
-                {initialsOf(p.name)}
-              </div>
+              <InitialsAvatar name={p.name} bg={fam.bg} text={fam.text} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <p style={{ fontSize: '14px', fontWeight: 600, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
                 {detail && <p style={{ fontSize: '11px', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>{detail}</p>}
@@ -281,10 +279,7 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
       </div>
 
       {visible.length > cap && (
-        <button onClick={() => setCap(c => c + PAGE)}
-          style={{ width: '100%', marginTop: '10px', padding: '9px', background: 'transparent', border: '0.5px dashed rgba(0,0,0,0.15)', borderRadius: '10px', fontSize: '12px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
-          Load {Math.min(PAGE, visible.length - cap)} more of {visible.length - cap}
-        </button>
+        <LoadMore pageSize={PAGE} remaining={visible.length - cap} onClick={() => setCap(c => c + PAGE)} />
       )}
     </div>
   )

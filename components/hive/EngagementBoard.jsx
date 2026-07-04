@@ -20,7 +20,7 @@
 
 import React, { useState, useEffect, useRef } from 'react'
 import { ENGAGEMENT_STAGES, STAGE_RANK, isTerminal, CLOSED_WON, CLOSED_LOST } from './shared/stageConfig'
-import { SECTION_LABEL, SECTION_COUNT, TEXT_SUCCESS, TEXT_DANGER } from '@/components/ui/tokens'
+import { SECTION_LABEL, SECTION_COUNT, TEXT_SUCCESS, TEXT_DANGER, TEXT_MUTED } from '@/components/ui/tokens'
 import FilterChips from '@/components/ui/FilterChips'
 // THE shared status derivation — board cards and list rows consume the
 // same module so the two lenses can never disagree.
@@ -68,7 +68,7 @@ function EngagementCard({ e, onOpen, draggable, onDragStart, accent = null }) {
           </p>
           {value && <span style={{ fontSize: '12px', fontWeight: 500, color: '#1a1a18', flexShrink: 0 }}>{value}</span>}
         </div>
-        <p style={{ fontSize: '11px', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: '8px' }}>
+        <p style={{ fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: '8px' }}>
           {displayTitle(e)}
         </p>
         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
@@ -328,9 +328,8 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
           <button onClick={() => setMobileCol(c => Math.max(0, c - 1))} disabled={mobileCol === 0}
             style={{ border: 'none', background: 'transparent', fontSize: '18px', color: mobileCol === 0 ? '#c9c7c0' : '#6b6b66', cursor: 'pointer', padding: '4px 8px' }}><IconChevronRight size={16} style={{ transform: 'rotate(180deg)' }} /></button>
-          <div style={{ flex: 1, textAlign: 'center' }}>
-            <span style={{ fontSize: '12px', fontWeight: 500, color: '#6b6b66' }}>{stage.displayLabel}</span>
-            <span style={{ fontSize: '12px', fontWeight: 400, color: '#b5b3ac', marginLeft: '5px' }}>· {count}</span>
+          <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+            <SectionHeader label={stage.displayLabel} count={count} style={{ marginBottom: 0 }} />
           </div>
           <button onClick={() => setMobileCol(c => Math.min(BOARD_STAGES.length - 1, c + 1))} disabled={mobileCol === BOARD_STAGES.length - 1}
             style={{ border: 'none', background: 'transparent', fontSize: '18px', color: mobileCol === BOARD_STAGES.length - 1 ? '#c9c7c0' : '#6b6b66', cursor: 'pointer', padding: '4px 8px' }}><IconChevronRight size={16} /></button>

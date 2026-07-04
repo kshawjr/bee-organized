@@ -28,7 +28,8 @@ import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCo
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
 import { IconInbox, IconLayoutKanban, IconList, IconUsers, IconPlus } from '@/components/ui/icons'
-import { TEXT_TOKENS } from '@/components/ui/tokens'
+import { TEXT_TOKENS, BORDER_TOKENS, HAIRLINE_BORDER } from '@/components/ui/tokens'
+import { CHIP_STYLES } from './shared/stageConfig'
 
 const TABS = [
   { key: 'inbox',   label: 'Inbox',   live: true, badge: true, Icon: IconInbox },
@@ -67,7 +68,7 @@ function TabPill({ tab, active, onSelect, badgeCount = null }) {
       style={{
         display: 'inline-flex', alignItems: 'center', gap: '6px',
         padding: '6px 14px', borderRadius: '20px',
-        border: `0.5px solid ${active ? 'rgba(0,0,0,0.15)' : 'transparent'}`,
+        border: `0.5px solid ${active ? `var(--hairline-border, ${HAIRLINE_BORDER})` : 'transparent'}`,
         background: active ? '#fff' : 'transparent',
         fontSize: '13px', fontWeight: 500,
         color: active ? '#1a1a18' : '#8a8a84',
@@ -78,7 +79,9 @@ function TabPill({ tab, active, onSelect, badgeCount = null }) {
       {tab.Icon && <tab.Icon size={14} />}
       {tab.label}
       {tab.badge && badgeCount != null && badgeCount > 0 && (
-        <span style={{ marginLeft: '6px', padding: '0 6px', borderRadius: '8px', background: '#E1F5EE', color: '#085041', fontSize: '10px', fontWeight: 600, lineHeight: 1.6 }}>
+        // Badge metrics are its own role (10px/600 count pill); the COLOR
+        // pair is the one CHIP_STYLES teal — the same pair StatusChip uses.
+        <span style={{ marginLeft: '6px', padding: '0 6px', borderRadius: '8px', background: CHIP_STYLES.teal.bg, color: CHIP_STYLES.teal.text, fontSize: '10px', fontWeight: 600, lineHeight: 1.6 }}>
           {badgeCount}
         </span>
       )}
@@ -225,7 +228,7 @@ export default function HiveShell({
   return (
     // min-height fills the VISIBLE viewport (dvh where supported — iOS
     // vh is the large viewport; vh kept as the old-browser fallback).
-    <div className="bee-hive-root" style={{ ...TEXT_TOKENS, background: '#fdfdfc', padding: '1rem 1rem 5rem', fontFamily: 'DM Sans,system-ui,sans-serif' }}>
+    <div className="bee-hive-root" style={{ ...TEXT_TOKENS, ...BORDER_TOKENS, background: '#fdfdfc', padding: '1rem 1rem 5rem', fontFamily: 'DM Sans,system-ui,sans-serif' }}>
       <style>{`.bee-hive-root { min-height: 100vh; min-height: 100dvh; }`}</style>
       {isMobile ? (
         /* Mobile chrome STACKS (nothing may overlap at 320–430px):

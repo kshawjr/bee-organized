@@ -8,9 +8,12 @@
 import React from 'react'
 import { SECTION_LABEL, SECTION_COUNT } from './tokens'
 
-export default function SectionHeader({ label, count = null }) {
+// `style` merges onto the container — layout-only overrides for hosts
+// with their own spacing (the board's mobile pager passes marginBottom 0);
+// the TYPE values are not overridable, they come from the tokens.
+export default function SectionHeader({ label, count = null, style = {} }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: '8px' }}>
+    <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: '8px', ...style }}>
       <span style={SECTION_LABEL}>
         {label}
       </span>

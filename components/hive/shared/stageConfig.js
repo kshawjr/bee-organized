@@ -18,6 +18,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { ENGAGEMENT_STAGE_RANK, isTerminal } from './stageRank'
+import { GREEN_TEXT } from '@/components/ui/tokens'
 
 // Re-export, not redeclare — stageRank.js is the authority.
 export const STAGE_RANK = ENGAGEMENT_STAGE_RANK
@@ -71,7 +72,9 @@ export const CLIENT_STATUSES = [
 // gray=past/closed. Dark text on light fills, always. These exact
 // pairs are the design language — do not tweak per-surface.
 
-const TEAL   = { bg: '#E1F5EE', text: '#085041' }
+// Teal's text stop = GREEN_TEXT (ui/tokens) — the dark stop of the brand-
+// green 3-stop scale; the unread badge and StatusChip resolve to THIS pair.
+const TEAL   = { bg: '#E1F5EE', text: GREEN_TEXT }
 const BLUE   = { bg: '#E6F1FB', text: '#0C447C' }
 const GREEN  = { bg: '#EAF3DE', text: '#27500A' }
 const AMBER  = { bg: '#FAEEDA', text: '#633806' }

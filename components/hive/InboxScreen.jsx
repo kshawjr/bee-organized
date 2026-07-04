@@ -19,10 +19,13 @@
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { deriveClientStatus } from './shared/clientStatus'
+import { CHIP_STYLES } from './shared/stageConfig'
 import { relAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
+import { GREEN_FILL, TEXT_QUIET, HAIRLINE_BORDER } from '@/components/ui/tokens'
 import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock } from '@/components/ui/icons'
 import ContactLine from './ContactLine'
+import InitialsAvatar from './shared/InitialsAvatar'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
@@ -37,12 +40,9 @@ const INBOX_FILTER_DEFAULTS = { sources: [], hasPhone: false, hasEmail: false, t
 const inboxFilterCount = (f) =>
   (f.sources.length ? 1 : 0) + (f.hasPhone ? 1 : 0) + (f.hasEmail ? 1 : 0) + (f.touchBand ? 1 : 0) + (f.age ? 1 : 0)
 
-const TEAL_DARK = '#085041', TEAL_BG = '#E1F5EE'
-const BLUE_DARK = '#0C447C', BLUE_BG = '#E6F1FB'
-const SEND_GREEN = '#0F6E56'
-
-const initialsOf = (name) =>
-  (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?'
+// Section color families ride the CHIP_STYLES pairs (teal = New, blue =
+// Attempting) — the same one pair the chips and unread badge resolve to.
+const TEAL = CHIP_STYLES.teal, BLUE = CHIP_STYLES.blue
 
 const freshlySent = (p) => /^(REQ|JOB)-/.test(p.jobberRef || '')
 
@@ -56,13 +56,13 @@ function SectionLabel({ glyph, color, label, count, hint }) {
 }
 
 const hairlineBtn = {
-  padding: '6px 12px', borderRadius: '8px', border: '0.5px solid rgba(0,0,0,0.15)',
+  padding: '6px 12px', borderRadius: '8px', border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`,
   background: '#fff', fontSize: '13px', fontWeight: 500, color: '#1a1a18',
   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
 }
 const sendBtn = {
   padding: '6px 14px', borderRadius: '8px', border: 'none',
-  background: SEND_GREEN, color: '#fff', fontSize: '13px', fontWeight: 500,
+  background: GREEN_FILL, color: '#fff', fontSize: '13px', fontWeight: 500,
   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
 }
 
@@ -168,7 +168,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     const sent = freshlySent(p)
     const canSend = !p.jobberRef
     const actions = sent ? (
-      <span style={{ fontSize: '12px', color: SEND_GREEN, fontWeight: 500, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+      <span style={{ fontSize: '12px', color: GREEN_FILL, fontWeight: 500, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
         <IconCheck size={13} /> Sent — engagement will appear on the board
       </span>
     ) : (
@@ -185,16 +185,14 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
             <IconSend size={13} style={{ marginRight: '5px' }} />Send to Jobber
           </button>
         )}
-        <span title="Coming soon" style={{ fontSize: '11px', color: '#c9c7c0', cursor: 'default', whiteSpace: 'nowrap' }}><IconClock size={11} style={{ marginRight: '3px' }} />Snooze · soon</span>
+        <span title="Coming soon" style={{ fontSize: '11px', color: `var(--text-quiet, ${TEXT_QUIET})`, cursor: 'default', whiteSpace: 'nowrap' }}><IconClock size={11} style={{ marginRight: '3px' }} />Snooze · soon</span>
       </>
     )
     return (
       <div className="bee-inbox-row" onClick={() => onOpenPerson(p)}
         style={{ padding: isMobile ? '12px 14px' : '13px 16px', borderBottom: '0.5px solid rgba(0,0,0,0.08)', cursor: 'pointer' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: family.bg, color: family.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 600, flexShrink: 0 }}>
-            {initialsOf(p.name)}
-          </div>
+          <InitialsAvatar name={p.name} bg={family.bg} text={family.text} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <p style={{ fontSize: '14px', fontWeight: 600, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
@@ -276,10 +274,10 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
           <div>
-            <SectionLabel glyph={<IconSparkles size={13} />} color={TEAL_DARK} label="New" count={fresh.length} hint="No Contact Yet" />
+            <SectionLabel glyph={<IconSparkles size={13} />} color={TEAL.text} label="New" count={fresh.length} hint="No Contact Yet" />
             {fresh.length > 0 ? (
               <div style={cardStyle}>
-                {fresh.map(p => <Row key={p.id} p={p} family={{ bg: TEAL_BG, text: TEAL_DARK }} pill="New" />)}
+                {fresh.map(p => <Row key={p.id} p={p} family={TEAL} pill="New" />)}
               </div>
             ) : (
               <div style={{ padding: '20px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px', border: '0.5px dashed rgba(0,0,0,0.12)', borderRadius: '12px' }}>
@@ -289,10 +287,10 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
           </div>
 
           <div>
-            <SectionLabel glyph={<IconPhoneOutgoing size={13} />} color={BLUE_DARK} label="Attempting" count={working.length} hint="Working the Lead" />
+            <SectionLabel glyph={<IconPhoneOutgoing size={13} />} color={BLUE.text} label="Attempting" count={working.length} hint="Working the Lead" />
             {working.length > 0 ? (
               <div style={cardStyle}>
-                {working.map(p => <Row key={p.id} p={p} family={{ bg: BLUE_BG, text: BLUE_DARK }} pill="Attempting" />)}
+                {working.map(p => <Row key={p.id} p={p} family={BLUE} pill="Attempting" />)}
               </div>
             ) : (
               <div style={{ padding: '20px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px', border: '0.5px dashed rgba(0,0,0,0.12)', borderRadius: '12px' }}>

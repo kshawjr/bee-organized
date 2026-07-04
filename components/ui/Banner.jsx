@@ -7,6 +7,7 @@
 
 import React from 'react'
 import { CHIP_STYLES } from '@/components/hive/shared/stageConfig'
+import { HAIRLINE_BORDER } from './tokens'
 
 export default function Banner({ icon, text, action = null, tone = 'amber' }) {
   const s = CHIP_STYLES[tone] || CHIP_STYLES.amber
@@ -26,7 +27,7 @@ export default function Banner({ icon, text, action = null, tone = 'amber' }) {
             flexShrink: 0,
             padding: '6px 12px',
             borderRadius: '8px',
-            border: '0.5px solid rgba(0,0,0,0.12)',
+            border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`,
             background: '#fff', color: '#1a1a18',
             fontSize: '13px', fontWeight: 500,
             fontFamily: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap',
