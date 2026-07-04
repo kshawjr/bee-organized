@@ -18,6 +18,7 @@ import StatusChip from '@/components/ui/StatusChip'
 import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconMail, IconExternalLink, IconX, IconCalendar } from '@/components/ui/icons'
 import MetricCard from '@/components/ui/MetricCard'
 import ContactLine from './ContactLine'
+import BuzzDrawer from './BuzzDrawer'
 import { fmtTime, relAge } from './shared/engagementStatus'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
@@ -127,7 +128,6 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
   const [descExpanded, setDescExpanded] = useState(false)
   const [noteText, setNoteText] = useState('')
   const [buzzOpen, setBuzzOpen] = useState(false)
-  const [buzzDraft, setBuzzDraft] = useState('')
   const [touchOpen, setTouchOpen] = useState(false)
   const [touchMethod, setTouchMethod] = useState('call')
   const [touchNote, setTouchNote] = useState('')
@@ -205,10 +205,9 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
     return i >= 0 && i < order.length - 1 ? order[i + 1].key : null
   })()
 
-  // Client-level buzz — posts from the strip's bee drawer. No setBusy:
-  // the composer has no button and must keep focus for rapid entries.
-  async function addBuzz() {
-    const text = buzzDraft.trim()
+  // Client-level buzz — posted from the shared bee drawer (it owns the
+  // draft; we own the notes array + optimistic prepend).
+  async function addBuzz(text) {
     if (!text || !client) return
     try {
       const res = await fetch('/api/lead-notes', {
@@ -218,7 +217,6 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
       })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      setBuzzDraft('')
       setData(d => d ? { ...d, client: { ...d.client, buzz: [j.note, ...(d.client.buzz || [])] } } : d)
     } catch (e) {
       setToast({ kind: 'error', msg: `Buzz failed: ${e.message}` })
@@ -431,43 +429,24 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
                 {client.prior_engagements} prior engagement{client.prior_engagements === 1 ? '' : 's'} · {fmtMoney(client.lifetime_paid)} lifetime
                 {client.other_open > 0 && ` · ${client.other_open} other open`}
               </p>
-              {/* Buzz rides with the PERSON — the bee toggles an inline
-                  drawer (read + add in place, no navigation). Client-level,
-                  identical on every engagement of this client. */}
-              <p onClick={() => setBuzzOpen(v => !v)}
-                style={{ fontSize: '11px', color: (client.buzz || []).length ? '#6b6b66' : '#b5b3ac', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0, cursor: 'pointer', userSelect: 'none' }}>
-                <span style={{ flexShrink: 0 }}>🐝</span>
-                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {(client.buzz || [])[0]?.text || 'No buzz yet'}
-                </span>
-                <span style={{ flexShrink: 0, fontSize: '9px', color: '#b5b3ac' }}>{buzzOpen ? '▾' : '▸'}</span>
-              </p>
+              {/* Buzz rides with the PERSON — the shared bee drawer (read +
+                  add in place, no navigation). Client-level, identical on
+                  every engagement of this client. */}
+              <div style={{ marginTop: '3px' }}>
+                <BuzzDrawer
+                  notes={client.buzz || []}
+                  open={buzzOpen}
+                  onToggle={() => setBuzzOpen(v => !v)}
+                  onPost={addBuzz}
+                  onAllBuzz={() => onOpenClient(client.id)}
+                />
+              </div>
               <ContactLine phone={client.phone} email={client.email} layout={isMobile ? 'stack' : 'inline'} style={{ marginTop: '3px' }} />
             </div>
             <button onClick={() => onOpenClient(client.id)} style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', padding: 0, flexShrink: 0 }}>
               View client →
             </button>
           </div>
-          {buzzOpen && (
-            <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '0.5px solid rgba(0,0,0,0.07)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <input value={buzzDraft} onChange={e => setBuzzDraft(e.target.value)} placeholder="Add buzz…" autoFocus
-                onKeyDown={e => { if (e.key === 'Enter') addBuzz() }}
-                style={{ padding: '7px 10px', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none', background: '#fff' }} />
-              {(client.buzz || []).length > 0 && (
-                <div style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  {client.buzz.map(n => (
-                    <p key={n.id} style={{ fontSize: '12px', color: '#1a1a18', lineHeight: 1.4 }}>
-                      🐝 {n.text}
-                      <span style={{ fontSize: '10px', color: '#b5b3ac', marginLeft: '6px', whiteSpace: 'nowrap' }}>{n.user_label || '—'} · {relAge(new Date(n.created_at).getTime())} ago</span>
-                    </p>
-                  ))}
-                </div>
-              )}
-              <button onClick={() => onOpenClient(client.id)} style={{ border: 'none', background: 'transparent', padding: 0, textAlign: 'left', fontSize: '11px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit' }}>
-                All buzz →
-              </button>
-            </div>
-          )}
         </div>
       )}
 

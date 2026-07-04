@@ -28,6 +28,7 @@ import {
   IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPhoneOutgoing,
 } from '@/components/ui/icons'
 import EditableDesc from './EditableDesc'
+import BuzzDrawer from './BuzzDrawer'
 
 const QUIET = '#f7f6f4'
 const SEND_GREEN = '#0F6E56'
@@ -68,9 +69,7 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
   const [loadErr, setLoadErr] = useState(null)
   const [showContacts, setShowContacts] = useState(false)
   const [showClosed, setShowClosed] = useState(false)
-  const [showAllNotes, setShowAllNotes] = useState(false)
   const [showAllTouches, setShowAllTouches] = useState(false)
-  const [noteText, setNoteText] = useState('')
   const [buzzOpen, setBuzzOpen] = useState(true)
   const [touchOpen, setTouchOpen] = useState(false)
   const [touchMethod, setTouchMethod] = useState('call')
@@ -128,10 +127,10 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
     return null
   })()
 
-  async function addBuzzNote() {
-    const text = noteText.trim()
+  // Posted from the shared bee drawer (it owns the draft; we own the
+  // notes array + optimistic prepend).
+  async function addBuzzNote(text) {
     if (!text || !c) return
-    setBusy(true)
     try {
       const res = await fetch('/api/lead-notes', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -139,11 +138,8 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
       })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      setNoteText('')
       setData(d => d ? { ...d, buzz_notes: [j.note, ...d.buzz_notes] } : d)
-      setToast({ kind: 'success', msg: 'Buzz note added' })
     } catch (e) { setToast({ kind: 'error', msg: `Note failed: ${e.message}` }) }
-    finally { setBusy(false) }
   }
 
   async function saveReqDetails(text) {
@@ -339,41 +335,17 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
       {/* Buzz notes + Outreach */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '10px' }}>
         <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px' }}>
-          {/* Bee-toggle header (same pattern as the panel's strip drawer) —
-              expanded by default here: it's the person's page. */}
-          <p onClick={() => setBuzzOpen(v => !v)}
-            style={{ fontSize: '11px', fontWeight: 500, color: '#8a8a84', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '8px', cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <span style={{ letterSpacing: 0 }}>🐝</span> Buzz
-            <span style={{ fontSize: '9px', color: '#b5b3ac' }}>{buzzOpen ? '▾' : '▸'}</span>
-          </p>
-          {!buzzOpen && (
-            <p style={{ fontSize: '11px', color: buzz.length ? '#6b6b66' : '#b5b3ac', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {buzz[0]?.text || 'No buzz yet'}
-            </p>
-          )}
-          {buzzOpen && (
-            <>
-              {/* Composer — buzz is client-level (no engagement_id); Enter
-                  posts + clears + keeps focus. */}
-              <div style={{ display: 'flex', marginBottom: buzz.length ? '10px' : '8px' }}>
-                <input value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Add buzz…"
-                  onKeyDown={e => { if (e.key === 'Enter') addBuzzNote() }}
-                  style={{ flex: 1, minWidth: 0, padding: '7px 10px', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none', background: '#fff' }} />
-              </div>
-              <div style={showAllNotes ? { maxHeight: '220px', overflowY: 'auto' } : undefined}>
-                {(showAllNotes ? buzz : buzz.slice(0, 10)).map(n => (
-                  <p key={n.id} style={{ fontSize: '12px', color: '#1a1a18', marginBottom: '6px', lineHeight: 1.4 }}>
-                    🐝 {n.text}
-                    <span style={{ fontSize: '10px', color: '#b5b3ac', marginLeft: '6px', whiteSpace: 'nowrap' }}>{n.user_label || '—'} · {relAge(new Date(n.created_at).getTime(), nowMs)} ago</span>
-                  </p>
-                ))}
-              </div>
-              {buzz.length === 0 && <p style={{ fontSize: '11px', color: '#b5b3ac' }}>No buzz yet</p>}
-              {buzz.length > 10 && !showAllNotes && (
-                <button onClick={() => setShowAllNotes(true)} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>Show {buzz.length - 10} more</button>
-              )}
-            </>
-          )}
+          {/* The SAME shared bee drawer as the panel strip + inbox rows —
+              header variant, expanded by default (it's the person's page). */}
+          <BuzzDrawer
+            header
+            notes={buzz}
+            open={buzzOpen}
+            onToggle={() => setBuzzOpen(v => !v)}
+            onPost={addBuzzNote}
+            showMoreCap={10}
+            nowMs={nowMs}
+          />
         </div>
         <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px' }}>
           <MicroLabel>Outreach</MicroLabel>

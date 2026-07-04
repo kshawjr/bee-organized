@@ -24,6 +24,7 @@ import StatusChip from '@/components/ui/StatusChip'
 import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock } from '@/components/ui/icons'
 import ContactLine from './ContactLine'
 import EditableDesc from './EditableDesc'
+import BuzzDrawer from './BuzzDrawer'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
 
@@ -73,6 +74,10 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
   // on next load).
   const [loggedIds, setLoggedIds] = useState(() => new Set())
   const [descEdits, setDescEdits] = useState({})
+  // Buzz: one row's drawer open at a time; posted notes prepend locally
+  // (the people array is owned by the shell).
+  const [openBuzzId, setOpenBuzzId] = useState(null)
+  const [buzzAdds, setBuzzAdds] = useState({})
   const [sortRaw, setSort] = useStoredState('bee_hive_inbox_sort', { key: 'newest' })
   const inboxSort = INBOX_SORTS.some(o => o.key === sortRaw.key) ? sortRaw.key : 'newest'
   const [filters, setFilters, clearFilters] = useStoredState('bee_hive_inbox_filters', INBOX_FILTER_DEFAULTS)
@@ -180,6 +185,27 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       setToast({ kind: 'error', msg: `Save failed: ${e.message}` })
     }
   }
+  // people-mapper's buzzNotes carry {id, text, user, created_at} — the
+  // drawer wants user_label; session posts prepend via buzzAdds.
+  const buzzOf = (p) => [
+    ...(buzzAdds[p.id] || []),
+    ...(p.buzzNotes || []).map(n => ({ id: n.id, text: n.text, user_label: n.user, created_at: n.created_at })),
+  ]
+  async function postBuzz(p, text) {
+    try {
+      const res = await fetch('/api/lead-notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_id: p.id, kind: 'buzz', text }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      setBuzzAdds(m => ({ ...m, [p.id]: [j.note, ...(m[p.id] || [])] }))
+    } catch (e) {
+      setToast({ kind: 'error', msg: `Buzz failed: ${e.message}` })
+    }
+  }
+
   const detailWorking = (p) => {
     const reaches = (p.outreachTimeline || []).filter(t => t.type === 'reach_out').length + (loggedIds.has(p.id) ? 1 : 0)
     const last = loggedIds.has(p.id) ? nowMs : lastReachOut(p)
@@ -225,11 +251,23 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
             <p style={{ fontSize: '11px', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>
               {pill === 'New' ? detailNew(p) : detailWorking(p)}
             </p>
-            {/* Identity cluster: name → detail → contact → description
-                (one card-like block; the action button stays cleanly
-                right). No dashed add-slot here — rows stay scannable. */}
+            {/* Identity cluster: name → detail → contact → description →
+                buzz (one card-like block; the action button stays cleanly
+                right). Rows are proto-engagements: the dashed add-slot
+                authors the description that arrives at founding. */}
             {!isMobile && <ContactLine phone={p.phone} email={p.email} style={{ marginTop: '3px' }} />}
-            {!isMobile && <EditableDesc text={leadDesc(p)} onSave={t => saveDesc(p, t)} style={{ marginTop: '6px' }} />}
+            {!isMobile && <EditableDesc text={leadDesc(p)} showEmpty onSave={t => saveDesc(p, t)} style={{ marginTop: '6px' }} />}
+            {!isMobile && (
+              <div style={{ marginTop: '6px' }}>
+                <BuzzDrawer
+                  notes={buzzOf(p)}
+                  open={openBuzzId === p.id}
+                  onToggle={() => setOpenBuzzId(cur => (cur === p.id ? null : p.id))}
+                  onPost={t => postBuzz(p, t)}
+                  nowMs={nowMs}
+                />
+              </div>
+            )}
           </div>
           {!isMobile && (
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '8px' }} onClick={ev => ev.stopPropagation()}>
@@ -241,8 +279,15 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
           <ContactLine phone={p.phone} email={p.email} style={{ marginTop: '8px', paddingLeft: '44px' }} />
         )}
         {isMobile && (
-          <div style={{ marginTop: '6px', paddingLeft: '44px' }}>
-            <EditableDesc text={leadDesc(p)} onSave={t => saveDesc(p, t)} />
+          <div style={{ marginTop: '6px', paddingLeft: '44px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <EditableDesc text={leadDesc(p)} showEmpty onSave={t => saveDesc(p, t)} />
+            <BuzzDrawer
+              notes={buzzOf(p)}
+              open={openBuzzId === p.id}
+              onToggle={() => setOpenBuzzId(cur => (cur === p.id ? null : p.id))}
+              onPost={t => postBuzz(p, t)}
+              nowMs={nowMs}
+            />
           </div>
         )}
         {isMobile && (

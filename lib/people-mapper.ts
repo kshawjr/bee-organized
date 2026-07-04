@@ -125,6 +125,7 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     id: n.id,
     text: n.text,
     ts: fmtCreatedShort(n.created_at),
+    created_at: n.created_at, // raw — the beta BuzzDrawer ages it live
     user: n.user_label || 'Unknown',
   }))
   const jobNotes = allNotes.filter(n => n.kind === 'job').map(n => ({
