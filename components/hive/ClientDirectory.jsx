@@ -20,6 +20,7 @@ import Banner from '@/components/ui/Banner'
 import { IconPlayerPause } from '@/components/ui/icons'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
+import useIsMobile from './shared/useIsMobile'
 
 const DIR_SORTS = [
   { key: 'name', label: 'Name A–Z' },
@@ -91,15 +92,7 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
   const [fltOpen, setFltOpen] = useState(false)
   const nowMs = Date.now()
 
-  // SSR-safe mobile detection (BeeHub pattern).
-  const [windowWidth, setWindowWidth] = useState(0)
-  useEffect(() => {
-    const check = () => setWindowWidth(window.innerWidth)
-    check()
-    window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
-  }, [])
-  const isMobile = windowWidth > 0 && windowWidth < 768
+  const isMobile = useIsMobile()
 
   useEffect(() => { setCap(PAGE) }, [filters, search, locFilter, dirSort])
 

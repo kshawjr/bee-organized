@@ -25,6 +25,7 @@ import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconCl
 import ContactLine from './ContactLine'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
+import useIsMobile from './shared/useIsMobile'
 
 const INBOX_SORTS = [
   { key: 'newest', label: 'Newest first' },
@@ -77,14 +78,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
   const [fltOpen, setFltOpen] = useState(false)
   const nowMs = Date.now()
 
-  const [windowWidth, setWindowWidth] = useState(0)
-  useEffect(() => {
-    const check = () => setWindowWidth(window.innerWidth)
-    check()
-    window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
-  }, [])
-  const isMobile = windowWidth > 0 && windowWidth < 768
+  const isMobile = useIsMobile()
 
   const scoped = useMemo(() => (
     locFilter === 'all' ? people : people.filter(p => p.locationId === locFilter)

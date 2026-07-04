@@ -31,6 +31,7 @@ import EngagementFilters from './EngagementFilters'
 import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount, lastActivityTs, engagementValue as engValueOf } from './shared/engagementStatus'
 import { FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
+import useIsMobile from './shared/useIsMobile'
 
 const BOARD_SORTS = [
   { key: 'newest', label: 'Newest activity' },
@@ -76,16 +77,7 @@ export default function EngagementBoard({ engagements = [], workFilters = ENGAGE
   const [rows, setRows] = useState(engagements)
   useEffect(() => { setRows(engagements) }, [engagements])
 
-  // SSR-safe mobile detection (same pattern as BeeHub.jsx:5042 — width 0 on
-  // SSR and first client render, so both sides agree and hydration is clean).
-  const [windowWidth, setWindowWidth] = useState(0)
-  useEffect(() => {
-    const check = () => setWindowWidth(window.innerWidth)
-    check()
-    window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
-  }, [])
-  const isMobile = windowWidth > 0 && windowWidth < 768
+  const isMobile = useIsMobile()
 
   const [mobileCol, setMobileCol] = useState(0)
   const [dragOverCol, setDragOverCol] = useState(null)

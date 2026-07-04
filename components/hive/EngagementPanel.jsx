@@ -13,6 +13,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
+import useIsMobile from './shared/useIsMobile'
 import { ENGAGEMENT_STAGES, STAGE_RANK, isTerminal, stageDisplayLabel, ACCENT_BLUE } from './shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
 import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconExternalLink, IconCalendar } from '@/components/ui/icons'
@@ -134,15 +135,7 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
   const [closeReason, setCloseReason] = useState('lost_no_response')
   const [closeNote, setCloseNote] = useState('')
 
-  // SSR-safe mobile detection (BeeHub pattern).
-  const [windowWidth, setWindowWidth] = useState(0)
-  useEffect(() => {
-    const check = () => setWindowWidth(window.innerWidth)
-    check()
-    window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
-  }, [])
-  const isMobile = windowWidth > 0 && windowWidth < 768
+  const isMobile = useIsMobile()
 
   useEffect(() => {
     let dead = false

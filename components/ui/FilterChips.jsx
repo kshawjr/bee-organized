@@ -11,8 +11,8 @@ import React from 'react'
 export default function FilterChips({ items = [], active, onChange }) {
   return (
     <div style={{
-      display: 'flex', gap: '4px', overflowX: 'auto',
-      WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none',
+      display: 'flex', flexWrap: 'nowrap', gap: '4px', maxWidth: '100%',
+      overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none',
       paddingBottom: '2px',
     }}>
       {items.map(({ key, label, count, muted }) => {

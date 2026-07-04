@@ -24,6 +24,7 @@ import { deriveClientStatus } from './shared/clientStatus'
 import { isTerminal } from './shared/stageConfig'
 import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount } from './shared/engagementStatus'
 import { useStoredState } from './shared/useStoredControls'
+import useIsMobile from './shared/useIsMobile'
 import { IconInbox, IconLayoutKanban, IconList, IconUsers } from '@/components/ui/icons'
 
 const TABS = [
@@ -100,6 +101,7 @@ export default function HiveShell({
   // Board/List/Clients lens — default 'board', hydrated from localStorage
   // after mount (SSR-safe, same pattern as the legacy view toggle).
   const [lens, setLens] = useState('board')
+  const isMobile = useIsMobile()
   useEffect(() => {
     try { const v = localStorage.getItem(LENS_LS_KEY); if (['board', 'list', 'clients', 'inbox'].includes(v)) setLens(v) } catch {}
   }, [])
@@ -165,28 +167,54 @@ export default function HiveShell({
     return n
   }, [people, locFilter, openFiltered])
 
+  const tabPills = TABS.map(t => <TabPill key={t.key} tab={t} active={t.key === lens} onSelect={() => pickLens(t.key)} badgeCount={t.badge ? inboxCount : null} />)
+  const counterEl = (
+    <span style={{ fontSize: isMobile ? '11px' : '12px', color: '#8a8a84', whiteSpace: 'nowrap' }}>
+      Open engagements · {openCount}{engagementFilterCount(workFilters) > 0 ? ` of ${openFiltered.length}` : ''}
+    </span>
+  )
+  const exitEl = (
+    <button
+      onClick={onExitBeta}
+      style={{
+        border: 'none', background: 'transparent', padding: 0,
+        fontSize: '11px', color: '#b5b3ac', cursor: 'pointer',
+        fontFamily: 'inherit', textDecoration: 'underline',
+        textUnderlineOffset: '2px', whiteSpace: 'nowrap',
+      }}
+    >
+      Back to classic
+    </button>
+  )
+
   return (
     <div style={{ background: '#fdfdfc', minHeight: '100vh', padding: '1rem 1rem 5rem', fontFamily: 'DM Sans,system-ui,sans-serif' }}>
-      {/* Top row: tab pills left, quiet counter + escape hatch right */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flex: 1, minWidth: 0 }}>
-          {TABS.map(t => <TabPill key={t.key} tab={t} active={t.key === lens} onSelect={() => pickLens(t.key)} badgeCount={t.badge ? inboxCount : null} />)}
+      {isMobile ? (
+        /* Mobile chrome STACKS (nothing may overlap at 320–430px):
+           row 1 = the four tab pills on ONE nowrap line, scrolling
+           horizontally if tight; row 2 = compact meta line, counter
+           left + escape hatch right, both 11px quiet. */
+        <div style={{ marginBottom: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2px', overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', paddingBottom: '2px' }}>
+            {tabPills}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginTop: '6px', padding: '0 4px' }}>
+            {counterEl}
+            {exitEl}
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
-          <span style={{ fontSize: '12px', color: '#8a8a84', whiteSpace: 'nowrap' }}>Open engagements · {openCount}{engagementFilterCount(workFilters) > 0 ? ` of ${openFiltered.length}` : ''}</span>
-          <button
-            onClick={onExitBeta}
-            style={{
-              border: 'none', background: 'transparent', padding: 0,
-              fontSize: '11px', color: '#b5b3ac', cursor: 'pointer',
-              fontFamily: 'inherit', textDecoration: 'underline',
-              textUnderlineOffset: '2px', whiteSpace: 'nowrap',
-            }}
-          >
-            Back to classic
-          </button>
+      ) : (
+        /* Desktop top row: tab pills left, quiet counter + escape hatch right */
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flex: 1, minWidth: 0, overflowX: 'auto', scrollbarWidth: 'none' }}>
+            {tabPills}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+            {counterEl}
+            {exitEl}
+          </div>
         </div>
-      </div>
+      )}
 
       {lens === 'inbox' ? (
         <InboxScreen
@@ -227,8 +255,11 @@ export default function HiveShell({
         />
       )}
 
+      {/* keys: any record change remounts the overlay, so OverlayShell's
+          mount reset (scrollTop 0 + body lock) covers every open/swap */}
       {overlay?.type === 'engagement' && (
         <EngagementPanel
+          key={overlay.engagement.id}
           engagementId={overlay.engagement.id}
           seed={overlay.engagement}
           onClose={() => setOverlay(null)}
@@ -240,6 +271,7 @@ export default function HiveShell({
       )}
       {overlay?.type === 'person' && (
         <PersonCard
+          key={overlay.person.id}
           person={overlay.person}
           onClose={() => setOverlay(null)}
           onSendToJobber={onSendToJobber}
@@ -249,6 +281,7 @@ export default function HiveShell({
       )}
       {overlay?.type === 'client' && (
         <ClientProfile
+          key={overlay.clientId}
           clientId={overlay.clientId}
           onClose={() => setOverlay(null)}
           onOpenEngagement={openEngagement}
