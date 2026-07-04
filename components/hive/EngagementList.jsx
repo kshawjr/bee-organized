@@ -25,6 +25,7 @@ import EngagementFilters from './EngagementFilters'
 import { ENGAGEMENT_FILTER_DEFAULTS, engagementFilterCount, passesEngagementFilters } from './shared/engagementStatus'
 import { SortChevrons, SortHeaderStyle, FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
+import useIsMobile from './shared/useIsMobile'
 
 const OPEN_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 const CHIP_LABELS = { 'Request': 'Request', 'Estimate': 'Estimate', 'Job in Progress': 'Job', 'Final Processing': 'Final' }
@@ -75,15 +76,7 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
   const [loadingClosed, setLoadingClosed] = useState(false)
   const nowMs = Date.now()
 
-  // SSR-safe mobile detection (BeeHub pattern).
-  const [windowWidth, setWindowWidth] = useState(0)
-  useEffect(() => {
-    const check = () => setWindowWidth(window.innerWidth)
-    check()
-    window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
-  }, [])
-  const isMobile = windowWidth > 0 && windowWidth < 768
+  const isMobile = useIsMobile()
 
   // Closed cache is per location scope — reset when the switcher moves.
   useEffect(() => { setClosedRows(null); setClosedTotal(null); if (view === 'closed') setView('open') }, [locFilter]) // eslint-disable-line react-hooks/exhaustive-deps

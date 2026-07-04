@@ -30,6 +30,7 @@ import {
 import EditableDesc from './EditableDesc'
 import BuzzDrawer from './BuzzDrawer'
 import OverlayShell from './OverlayShell'
+import useIsMobile from './shared/useIsMobile'
 
 const QUIET = '#f7f6f4'
 const SEND_GREEN = '#0F6E56'
@@ -78,14 +79,7 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
   const [busy, setBusy] = useState(false)
   const nowMs = Date.now()
 
-  const [windowWidth, setWindowWidth] = useState(0)
-  useEffect(() => {
-    const check = () => setWindowWidth(window.innerWidth)
-    check()
-    window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
-  }, [])
-  const isMobile = windowWidth > 0 && windowWidth < 768
+  const isMobile = useIsMobile()
 
   useEffect(() => {
     let dead = false

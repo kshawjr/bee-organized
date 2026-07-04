@@ -20,6 +20,7 @@
 
 import React, { useState, useEffect } from 'react'
 import OverlayShell from './OverlayShell'
+import useIsMobile from './shared/useIsMobile'
 import ClientStrip from './ClientStrip'
 import NotesStream from './NotesStream'
 import EditableDesc from './EditableDesc'
@@ -62,14 +63,7 @@ export default function PersonCard({ person, onClose, onSendToJobber = null, set
   const [busy, setBusy] = useState(false)
   const nowMs = Date.now()
 
-  const [windowWidth, setWindowWidth] = useState(0)
-  useEffect(() => {
-    const check = () => setWindowWidth(window.innerWidth)
-    check()
-    window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
-  }, [])
-  const isMobile = windowWidth > 0 && windowWidth < 768
+  const isMobile = useIsMobile()
 
   useEffect(() => {
     let dead = false
