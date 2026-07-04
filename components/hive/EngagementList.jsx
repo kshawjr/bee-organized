@@ -81,6 +81,12 @@ export default function EngagementList({ engagements = [], closedCount = 0, clos
   // One cache slot per terminal view ({ rows, total }), per active scope.
   const [closedData, setClosedData] = useState({})
   const [loadingClosed, setLoadingClosed] = useState(false)
+  // Won/Lost live behind the Closed chevron. Plain state (NOT persisted)
+  // so a remount/tab-switch resets to collapsed; the derived OR below
+  // force-holds it open while a closed sub-filter is active — the
+  // applied filter can never be hidden, and that also covers the
+  // board→List 'view all' deep link on a fresh mount.
+  const [closedExpandedRaw, setClosedExpanded] = useState(false)
   const nowMs = Date.now()
 
   const isMobile = useIsMobile()
@@ -125,13 +131,27 @@ export default function EngagementList({ engagements = [], closedCount = 0, clos
     lost: closedData.lost?.total ?? (locFilter === 'all' ? Math.max(0, closedCount - closedWonCount) : null),
   }
 
+  // Sub-filter active → the group stays expanded and the chevron can't
+  // collapse it (you can't hide the currently-applied filter).
+  const subFilterActive = view === 'won' || view === 'lost'
+  const closedExpanded = closedExpandedRaw || subFilterActive
+  const toggleClosedExpanded = () => {
+    if (subFilterActive) return
+    setClosedExpanded(v => !v)
+  }
+
   const chips = [
     { key: 'open', label: 'Open', count: counts.open },
     ...OPEN_STAGES.map(s => ({ key: s.key, label: CHIP_LABELS[s.key], count: counts[s.key] })),
     { key: 'closed-divider', divider: true },
-    { key: 'closed', label: 'Closed', count: scopedTotals.closed ?? '…' },
-    { key: 'won', label: 'Won', count: scopedTotals.won ?? '…', color: `var(--text-success, ${TEXT_SUCCESS})` },
-    { key: 'lost', label: 'Lost', count: scopedTotals.lost ?? '…', color: `var(--text-danger, ${TEXT_DANGER})` },
+    {
+      key: 'closed', label: 'Closed', count: scopedTotals.closed ?? '…',
+      toggle: { expanded: closedExpanded, onToggle: toggleClosedExpanded, ariaLabel: 'Toggle won/lost breakdown' },
+    },
+    ...(closedExpanded ? [
+      { key: 'won', label: 'Won', count: scopedTotals.won ?? '…', color: `var(--text-success, ${TEXT_SUCCESS})` },
+      { key: 'lost', label: 'Lost', count: scopedTotals.lost ?? '…', color: `var(--text-danger, ${TEXT_DANGER})` },
+    ] : []),
   ]
   // Chips reflect the popover's stage state: exactly one stage selected →
   // that chip; none → 'Open'; several → no chip highlights (multi shows
@@ -143,6 +163,9 @@ export default function EngagementList({ engagements = [], closedCount = 0, clos
 
   function pickChip(key) {
     if (CLOSED_VIEWS.includes(key)) {
+      // Entering a sub-filter pins the group open for this session so
+      // stepping back to Closed doesn't yank Won/Lost mid-interaction.
+      if (key !== 'closed') setClosedExpanded(true)
       setView(key)
       if (!closedData[key] && !loadingClosed) fetchClosed(key, 0)
       return

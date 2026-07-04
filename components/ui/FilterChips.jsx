@@ -8,11 +8,17 @@
 //   muted: true   — extra-quiet label (e.g. 'No contact info')
 //   color: '...'  — semantic label color (e.g. Won green / Lost red)
 //   divider: true — thin vertical rule between segment groups
+//   toggle: { expanded, onToggle, ariaLabel } — a chevron button AFTER
+//     the segment (separate click target: the segment text selects the
+//     filter, the chevron only reveals/hides sub-segments — the List's
+//     Closed ▾ Won/Lost group). Chevron points down collapsed, up
+//     expanded (rotated IconChevronRight, the SortChevrons idiom).
 // Scrolls horizontally on narrow viewports (§7 mobile rule).
 'use client'
 
 import React from 'react'
 import { SECTION_LABEL, SECTION_COUNT, TEXT_PRIMARY } from './tokens'
+import { IconChevronRight } from './icons'
 
 export default function FilterChips({ items = [], active, onChange }) {
   return (
@@ -25,15 +31,16 @@ export default function FilterChips({ items = [], active, onChange }) {
         .bee-flt-seg { border-bottom: 2px solid transparent }
         .bee-flt-seg:hover { border-bottom-color: rgba(0,0,0,0.18) }
       `}</style>
-      {items.map(({ key, label, count, muted, color, divider }) => {
+      {items.map(({ key, label, count, muted, color, divider, toggle }) => {
         if (divider) {
           return <span key={key} aria-hidden="true" style={{ width: '1px', alignSelf: 'stretch', background: 'rgba(0,0,0,0.12)', flexShrink: 0, margin: '2px 0' }} />
         }
         const isActive = key === active
-        return (
+        const seg = (
           <button
-            key={key}
+            key={toggle ? undefined : key}
             className="bee-flt-seg"
+            aria-pressed={isActive}
             onClick={() => onChange(key)}
             style={{
               flexShrink: 0,
@@ -51,6 +58,24 @@ export default function FilterChips({ items = [], active, onChange }) {
               <span style={{ ...SECTION_COUNT, marginLeft: '5px', ...(muted ? { color: '#c9c7c0' } : {}) }}>· {count}</span>
             )}
           </button>
+        )
+        if (!toggle) return seg
+        return (
+          <span key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+            {seg}
+            <button
+              onClick={toggle.onToggle}
+              aria-label={toggle.ariaLabel}
+              aria-expanded={!!toggle.expanded}
+              style={{
+                border: 'none', background: 'transparent', padding: '3px 2px 5px',
+                display: 'inline-flex', alignItems: 'center', cursor: 'pointer',
+                color: SECTION_LABEL.color, fontFamily: 'inherit', flexShrink: 0,
+              }}
+            >
+              <IconChevronRight size={12} style={{ transform: toggle.expanded ? 'rotate(-90deg)' : 'rotate(90deg)' }} />
+            </button>
+          </span>
         )
       })}
     </div>
