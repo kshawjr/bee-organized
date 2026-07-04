@@ -25,10 +25,15 @@
 import React, { useRef, useEffect } from 'react'
 import { IconX } from '@/components/ui/icons'
 
+// .bee-sheet-close: the X shares the 44px handle row — absolute right so
+// the handle stays dead-center; 44×44 hit target (glyph stays 16px) kept
+// inside the row so the invisible hit area never covers the title/chip
+// content below; right offset respects the notch in landscape.
 const GeometryStyle = () => (
   <style>{`
     .bee-sheet { max-height: 90vh; max-height: 90dvh; padding-bottom: env(safe-area-inset-bottom, 0px); }
     .bee-overlay-modal { max-height: 88vh; max-height: 88dvh; }
+    .bee-sheet-close { position: absolute; top: 0; right: env(safe-area-inset-right, 0px); width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; padding: 0; border: none; background: transparent; color: #b5b3ac; cursor: pointer; }
   `}</style>
 )
 
@@ -57,9 +62,10 @@ export default function OverlayShell({ isMobile, onClose, children }) {
               touchY.current = null
               if (dy > 60) onClose()
             }}
-            style={{ padding: '10px 0 8px', cursor: 'grab' }}
+            style={{ position: 'relative', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'grab' }}
           >
-            <div style={{ width: '36px', height: '4px', background: 'rgba(0,0,0,0.15)', borderRadius: '2px', margin: '0 auto' }} />
+            <div style={{ width: '36px', height: '4px', background: 'rgba(0,0,0,0.15)', borderRadius: '2px' }} />
+            <button onClick={onClose} aria-label="Close" className="bee-sheet-close"><IconX size={16} /></button>
           </div>
           {children}
         </div>
