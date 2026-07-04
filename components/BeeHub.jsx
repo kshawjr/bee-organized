@@ -10079,6 +10079,11 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
   useEffect(() => {
     try { const v = localStorage.getItem('bee_hive_view'); if (v && (v !== 'engagements' || newBoardAllowed)) setView(v) } catch {}
   }, [])
+  // Beta Inbox → Send to Jobber: reuses the EXISTING SendToJobberPopup
+  // confirm flow (module scope in this file — the beta chunk can't and
+  // shouldn't import it). Hook lives here, unconditionally, above the
+  // beta early return (rules of hooks).
+  const [betaSendPerson, setBetaSendPerson] = useState(null)
   const [selected, setSelected] = useState(initialSelected)
   const [viewingCard, setViewingCard] = useState(null)
 
@@ -10297,7 +10302,24 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
             if (p) setSelected(p)
             else setToast({ kind:'error', msg:'Client record not loaded — try the classic board' })
           }}
+          onSendToJobber={(p)=>setBetaSendPerson(p)}
         />
+        {/* The EXISTING send-to-jobber confirm flow, mounted for the beta
+            Inbox. onDone mirrors PersonPanel's handleSendToJobber: merge
+            the patch and persist via updatePerson; the popup's own steps
+            are the confirmation (what will be created, for whom). */}
+        {betaSendPerson&&(
+          <SendToJobberPopup
+            person={betaSendPerson}
+            onDone={(patch)=>{
+              updatePerson({ ...betaSendPerson, ...patch }, patch)
+              setSelected(null)
+              setBetaSendPerson(null)
+              setToast({ kind:'success', msg:`${betaSendPerson.name} sent to Jobber` })
+            }}
+            onClose={()=>setBetaSendPerson(null)}
+          />
+        )}
         {selected&&(()=>{
           const idx = sorted.findIndex(p=>p.id===selected.id)
           return <PersonPanel person={selected} onClose={()=>setSelected(null)} onUpdate={updatePerson} onMarkJunk={markJunk} onResurrect={()=>{ resurrectPerson(selected.id); setSelected(null) }} onAddFollowUp={onAddFollowUp} onViewCard={(p)=>setViewingCard(p)} allPeople={allPeople}

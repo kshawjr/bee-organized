@@ -13,14 +13,16 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import EngagementBoard from './EngagementBoard'
 import EngagementList from './EngagementList'
 import EngagementPanel from './EngagementPanel'
 import ClientDirectory from './ClientDirectory'
+import InboxScreen from './InboxScreen'
+import { deriveClientStatus } from './shared/clientStatus'
 
 const TABS = [
-  { key: 'inbox',   label: 'Inbox',   live: false, badge: true },
+  { key: 'inbox',   label: 'Inbox',   live: true, badge: true },
   { key: 'board',   label: 'Board',   live: true },
   { key: 'list',    label: 'List',    live: true },
   { key: 'clients', label: 'Clients', live: true },
@@ -29,7 +31,7 @@ const TABS = [
 // The preferred lens (Board/List) sticks across sessions.
 const LENS_LS_KEY = 'bee_hive_beta_lens'
 
-function TabPill({ tab, active, onSelect }) {
+function TabPill({ tab, active, onSelect, badgeCount = null }) {
   if (!tab.live) {
     return (
       <span
@@ -65,6 +67,11 @@ function TabPill({ tab, active, onSelect }) {
       }}
     >
       {tab.label}
+      {tab.badge && badgeCount != null && badgeCount > 0 && (
+        <span style={{ marginLeft: '6px', padding: '0 6px', borderRadius: '8px', background: '#E1F5EE', color: '#085041', fontSize: '10px', fontWeight: 600, lineHeight: 1.6 }}>
+          {badgeCount}
+        </span>
+      )}
     </button>
   )
 }
@@ -80,6 +87,7 @@ export default function HiveShell({
   people = [],
   locFilter = 'all',
   onOpenClient = () => {},
+  onSendToJobber = () => {},
   setToast = () => {},
   onExitBeta = () => {},
 }) {
@@ -87,7 +95,7 @@ export default function HiveShell({
   // after mount (SSR-safe, same pattern as the legacy view toggle).
   const [lens, setLens] = useState('board')
   useEffect(() => {
-    try { const v = localStorage.getItem(LENS_LS_KEY); if (v === 'board' || v === 'list' || v === 'clients') setLens(v) } catch {}
+    try { const v = localStorage.getItem(LENS_LS_KEY); if (['board', 'list', 'clients', 'inbox'].includes(v)) setLens(v) } catch {}
   }, [])
   const pickLens = (v) => { setLens(v); try { localStorage.setItem(LENS_LS_KEY, v) } catch {} }
 
@@ -106,12 +114,24 @@ export default function HiveShell({
     : patched.filter(e => e.location_uuid === locFilter)
   const openCount = filtered.length
 
+  // Inbox badge: New + Attempting in the current location scope.
+  const inboxCount = useMemo(() => {
+    const scopedPeople = locFilter === 'all' ? people : people.filter(p => p.locationId === locFilter)
+    const openIds = new Set(filtered.map(e => e.client_id))
+    let n = 0
+    for (const p of scopedPeople) {
+      const s = deriveClientStatus(p, openIds)
+      if (s === 'New' || s === 'Attempting') n++
+    }
+    return n
+  }, [people, locFilter, filtered])
+
   return (
     <div style={{ background: '#fdfdfc', minHeight: '100vh', padding: '1rem 1rem 5rem', fontFamily: 'DM Sans,system-ui,sans-serif' }}>
       {/* Top row: tab pills left, quiet counter + escape hatch right */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flex: 1, minWidth: 0 }}>
-          {TABS.map(t => <TabPill key={t.key} tab={t} active={t.key === lens} onSelect={() => pickLens(t.key)} />)}
+          {TABS.map(t => <TabPill key={t.key} tab={t} active={t.key === lens} onSelect={() => pickLens(t.key)} badgeCount={t.badge ? inboxCount : null} />)}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
           <span style={{ fontSize: '12px', color: '#8a8a84', whiteSpace: 'nowrap' }}>Open engagements · {openCount}</span>
@@ -129,7 +149,16 @@ export default function HiveShell({
         </div>
       </div>
 
-      {lens === 'clients' ? (
+      {lens === 'inbox' ? (
+        <InboxScreen
+          people={people}
+          engagements={patched}
+          locFilter={locFilter}
+          onOpenClient={onOpenClient}
+          onSendToJobber={onSendToJobber}
+          setToast={setToast}
+        />
+      ) : lens === 'clients' ? (
         <ClientDirectory
           people={people}
           engagements={patched}
