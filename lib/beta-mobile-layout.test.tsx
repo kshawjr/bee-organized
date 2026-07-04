@@ -15,6 +15,8 @@ import HiveShell from '@/components/hive/HiveShell'
 import EngagementList from '@/components/hive/EngagementList'
 import ClientDirectory from '@/components/hive/ClientDirectory'
 import PersonCard from '@/components/hive/PersonCard'
+import OverlayShell from '@/components/hive/OverlayShell'
+import { FilterPopover } from '@/components/hive/shared/FilterPopover'
 
 const now = Date.now()
 const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString()
@@ -110,5 +112,44 @@ describe('beta mobile layout', () => {
     expect(html).toContain('border-radius:20px 20px 0 0')
     expect(html).toContain('overscroll-behavior:contain')
     expect(html).toContain('-webkit-overflow-scrolling:touch')
+  })
+
+  // iOS sheet geometry (the 2026-07-04 offscreen-header root cause): a vh
+  // maxHeight resolves against iOS's LARGE viewport while the bottom
+  // anchor sits at the VISIBLE bottom — the sheet's height cap must come
+  // from the .bee-sheet class (vh fallback + dvh override + safe-area
+  // padding), never from an inline vh value.
+  it('sheet + modal height caps are dvh-based classes, never inline vh', () => {
+    setWidth(390)
+    const sheetHtml = renderToString(
+      <OverlayShell isMobile onClose={() => {}}><div style={{ height: '2000px' }} /></OverlayShell>
+    )
+    const sheetTag = sheetHtml.match(/<div[^>]*class="bee-sheet"[^>]*>/)
+    expect(sheetTag, 'sheet must carry the bee-sheet class').toBeTruthy()
+    expect(sheetTag![0]).not.toMatch(/\d(vh|vw|dvh)/)
+    expect(sheetHtml).toContain('.bee-sheet { max-height: 90vh; max-height: 90dvh; padding-bottom: env(safe-area-inset-bottom, 0px); }')
+
+    const modalHtml = renderToString(
+      <OverlayShell isMobile={false} onClose={() => {}}><div /></OverlayShell>
+    )
+    expect(modalHtml).toMatch(/<div[^>]*class="bee-overlay-modal"/)
+    expect(modalHtml).toContain('.bee-overlay-modal { max-height: 88vh; max-height: 88dvh; }')
+  })
+
+  it('no beta surface sizes itself with inline viewport units (dvh pairs live in style blocks)', () => {
+    setWidth(390)
+    const rendered = [
+      renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />),
+      renderToString(<EngagementList engagements={ENGAGEMENTS as any} closedCount={2} />),
+      renderToString(<ClientDirectory people={PEOPLE as any} engagements={ENGAGEMENTS as any} />),
+      renderToString(<PersonCard person={PEOPLE[0] as any} onClose={() => {}} />),
+      renderToString(<FilterPopover open count={0} onClear={() => {}}>x</FilterPopover>),
+    ].join('\n')
+    const offenders = [...rendered.matchAll(/style="([^"]*)"/g)]
+      .map(m => m[1])
+      .filter(s => /\d(vh|vw)/.test(s))
+    expect(offenders, `inline viewport units found: ${JSON.stringify(offenders)}`).toEqual([])
+    // FilterPopover carries its own dvh-capped class.
+    expect(rendered).toContain('.bee-filter-pop { max-height: 62vh; max-height: 62dvh; }')
   })
 })

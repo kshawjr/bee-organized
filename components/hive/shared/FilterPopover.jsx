@@ -46,7 +46,11 @@ export function SortRows({ value, onChange, options }) {
 export function FilterPopover({ open, count = 0, onClear, children, width = 260 }) {
   if (!open) return null
   return (
-    <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 50, width: `${width}px`, maxHeight: '62vh', overflowY: 'auto', background: '#fff', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '10px', boxShadow: '0 8px 30px rgba(26,26,24,0.12)', padding: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+    // Height cap in dvh (vh fallback) — iOS vh is the large viewport, so
+    // a vh-capped popover could run past the visible bottom (OverlayShell
+    // has the full story).
+    <div className="bee-filter-pop" style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 50, width: `${width}px`, overflowY: 'auto', background: '#fff', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '10px', boxShadow: '0 8px 30px rgba(26,26,24,0.12)', padding: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <style>{`.bee-filter-pop { max-height: 62vh; max-height: 62dvh; }`}</style>
       {children}
       {count > 0 && (
         <button onClick={onClear}

@@ -188,7 +188,10 @@ export default function HiveShell({
   )
 
   return (
-    <div style={{ background: '#fdfdfc', minHeight: '100vh', padding: '1rem 1rem 5rem', fontFamily: 'DM Sans,system-ui,sans-serif' }}>
+    // min-height fills the VISIBLE viewport (dvh where supported — iOS
+    // vh is the large viewport; vh kept as the old-browser fallback).
+    <div className="bee-hive-root" style={{ background: '#fdfdfc', padding: '1rem 1rem 5rem', fontFamily: 'DM Sans,system-ui,sans-serif' }}>
+      <style>{`.bee-hive-root { min-height: 100vh; min-height: 100dvh; }`}</style>
       {isMobile ? (
         /* Mobile chrome STACKS (nothing may overlap at 320–430px):
            row 1 = the four tab pills on ONE nowrap line, scrolling

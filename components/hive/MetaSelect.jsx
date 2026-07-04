@@ -37,9 +37,9 @@ export default function MetaSelect({ label, value, options = [], onPick }) {
       {open && (
         <>
           <div onClick={e => { e.stopPropagation(); setOpen(false) }} style={{ position: 'fixed', inset: 0, zIndex: 10009 }} />
-          <div onClick={e => e.stopPropagation()}
-            style={{ position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 10010, width: '210px', maxHeight: '46vh', overflowY: 'auto', background: '#fff', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '10px', boxShadow: '0 8px 30px rgba(26,26,24,0.12)', padding: '8px 12px' }}>
-            <style>{`.bee-meta-item:hover { background:#f7f6f4 }`}</style>
+          <div className="bee-meta-pop" onClick={e => e.stopPropagation()}
+            style={{ position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 10010, width: '210px', overflowY: 'auto', background: '#fff', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '10px', boxShadow: '0 8px 30px rgba(26,26,24,0.12)', padding: '8px 12px' }}>
+            <style>{`.bee-meta-item:hover { background:#f7f6f4 } .bee-meta-pop { max-height: 46vh; max-height: 46dvh; }`}</style>
             {options.map(o => (
               <button key={o} className="bee-meta-item"
                 onClick={() => { setOpen(false); if (o !== value) onPick(o) }}
