@@ -17,12 +17,13 @@ import React, { useState, useEffect } from 'react'
 import EngagementBoard from './EngagementBoard'
 import EngagementList from './EngagementList'
 import EngagementPanel from './EngagementPanel'
+import ClientDirectory from './ClientDirectory'
 
 const TABS = [
   { key: 'inbox',   label: 'Inbox',   live: false, badge: true },
   { key: 'board',   label: 'Board',   live: true },
   { key: 'list',    label: 'List',    live: true },
-  { key: 'clients', label: 'Clients', live: false },
+  { key: 'clients', label: 'Clients', live: true },
 ]
 
 // The preferred lens (Board/List) sticks across sessions.
@@ -76,16 +77,17 @@ function TabPill({ tab, active, onSelect }) {
 export default function HiveShell({
   engagements = [],
   closedCount = 0,
+  people = [],
   locFilter = 'all',
   onOpenClient = () => {},
   setToast = () => {},
   onExitBeta = () => {},
 }) {
-  // Board/List lens — default 'board', hydrated from localStorage after
-  // mount (SSR-safe, same pattern as the legacy view toggle).
+  // Board/List/Clients lens — default 'board', hydrated from localStorage
+  // after mount (SSR-safe, same pattern as the legacy view toggle).
   const [lens, setLens] = useState('board')
   useEffect(() => {
-    try { const v = localStorage.getItem(LENS_LS_KEY); if (v === 'board' || v === 'list') setLens(v) } catch {}
+    try { const v = localStorage.getItem(LENS_LS_KEY); if (v === 'board' || v === 'list' || v === 'clients') setLens(v) } catch {}
   }, [])
   const pickLens = (v) => { setLens(v); try { localStorage.setItem(LENS_LS_KEY, v) } catch {} }
 
@@ -127,7 +129,14 @@ export default function HiveShell({
         </div>
       </div>
 
-      {lens === 'list' ? (
+      {lens === 'clients' ? (
+        <ClientDirectory
+          people={people}
+          engagements={patched}
+          locFilter={locFilter}
+          onOpenClient={onOpenClient}
+        />
+      ) : lens === 'list' ? (
         <EngagementList
           engagements={filtered}
           closedCount={closedCount}
