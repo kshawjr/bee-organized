@@ -17,6 +17,7 @@ import { ENGAGEMENT_STAGES, STAGE_RANK, isTerminal, stageDisplayLabel } from './
 import StatusChip from '@/components/ui/StatusChip'
 import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconExternalLink, IconX } from '@/components/ui/icons'
 import MetricCard from '@/components/ui/MetricCard'
+import ContactLine from './ContactLine'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
 const fmtDate = (d) => {
@@ -316,6 +317,7 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
               {client.prior_engagements} prior engagement{client.prior_engagements === 1 ? '' : 's'} · {fmtMoney(client.lifetime_paid)} lifetime
               {client.other_open > 0 && ` · ${client.other_open} other open`}
             </p>
+            <ContactLine phone={client.phone} email={client.email} style={{ marginTop: '3px' }} />
           </div>
           <button onClick={() => onOpenClient(client.id)} style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 500, color: BAR_CURRENT, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', padding: 0, flexShrink: 0 }}>
             View client →

@@ -56,19 +56,24 @@ export async function GET(req: Request) {
   const { data: rows, count, error } = await q
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // Join client names for this page in one query.
+  // Join client name + contact for this page in one query.
   const clientIds = Array.from(new Set((rows ?? []).map(r => r.client_id).filter(Boolean)))
-  const nameById: Record<string, string> = {}
+  const infoById: Record<string, { name: string; phone: string | null; email: string | null }> = {}
   if (clientIds.length > 0) {
     const { data: leads } = await supabaseService
       .from('leads')
-      .select('id, name')
+      .select('id, name, phone, email')
       .in('id', clientIds)
-    for (const l of leads ?? []) nameById[l.id] = l.name || 'Unknown'
+    for (const l of leads ?? []) infoById[l.id] = { name: l.name || 'Unknown', phone: l.phone || null, email: l.email || null }
   }
 
   return NextResponse.json({
-    rows: (rows ?? []).map(r => ({ ...r, client_name: nameById[r.client_id] || 'Unknown' })),
+    rows: (rows ?? []).map(r => ({
+      ...r,
+      client_name: infoById[r.client_id]?.name || 'Unknown',
+      client_phone: infoById[r.client_id]?.phone ?? null,
+      client_email: infoById[r.client_id]?.email ?? null,
+    })),
     total: count ?? 0,
     offset,
     limit,

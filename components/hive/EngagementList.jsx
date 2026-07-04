@@ -18,6 +18,7 @@ import { deriveStatusChip, displayTitle, engagementValue, fmtMoney, lastActivity
 import StatusChip from '@/components/ui/StatusChip'
 import FilterChips from '@/components/ui/FilterChips'
 import { statusIconFor } from '@/components/ui/icons'
+import ContactLine from './ContactLine'
 
 const OPEN_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 const CHIP_LABELS = { 'Request': 'Request', 'Estimate': 'Estimate', 'Job in Progress': 'Job', 'Final Processing': 'Final' }
@@ -52,13 +53,16 @@ function StatusText({ chip, size = 12 }) {
   )
 }
 
-function ClientCell({ e, nowMs }) {
+function ClientCell({ e, nowMs, showContact = false }) {
   const isNew = e.repeat_count === 1 && (nowMs - new Date(e.created_at).getTime()) < 30 * 86400000
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-      <span style={{ fontSize: '14px', fontWeight: 600, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.client_name}</span>
-      {e.repeat_count > 1 && <StatusChip label="repeat" styleKey="repeat" />}
-      {isNew && <StatusChip label="new" styleKey="teal" />}
+    <div style={{ minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+        <span style={{ fontSize: '14px', fontWeight: 600, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.client_name}</span>
+        {e.repeat_count > 1 && <StatusChip label="repeat" styleKey="repeat" />}
+        {isNew && <StatusChip label="new" styleKey="teal" />}
+      </div>
+      {showContact && <ContactLine phone={e.client_phone} email={e.client_email} style={{ marginTop: '2px' }} />}
     </div>
   )
 }
@@ -174,7 +178,7 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
           return (
             <div key={e.id} className="bee-englist-row" onClick={() => onOpenEngagement(e)}
               style={{ display: 'grid', gridTemplateColumns: GRID, gap: '12px', alignItems: 'center', padding: '15px 16px', borderBottom: '0.5px solid rgba(0,0,0,0.08)', cursor: 'pointer', opacity: muted ? 0.6 : 1 }}>
-              <ClientCell e={e} nowMs={nowMs} />
+              <ClientCell e={e} nowMs={nowMs} showContact />
               <span style={{ fontSize: '13px', color: '#6b6b66', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayTitle(e)}</span>
               <span><StatusChip label={stageDisplayLabel(e.stage)} styleKey={e.stage} /></span>
               <StatusText chip={chip} size={12} />

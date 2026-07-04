@@ -684,8 +684,8 @@ export default async function HubPage({
             if ((data || []).length < PAGE) break
           }
 
-          const leadNameById: Record<string, string> = {}
-          for (const l of leadsRaw) leadNameById[l.id] = l.name || 'Unknown'
+          const leadInfoById: Record<string, { name: string; phone: string | null; email: string | null }> = {}
+          for (const l of leadsRaw) leadInfoById[l.id] = { name: l.name || 'Unknown', phone: l.phone || null, email: l.email || null }
 
           const byEngagement = <T extends { engagement_id?: string | null }>(rows: T[] | null) => {
             const out: Record<string, T[]> = {}
@@ -702,7 +702,9 @@ export default async function HubPage({
 
           initialEngagements = engOpen.map((e: any) => ({
             ...e,
-            client_name: leadNameById[e.client_id] || 'Unknown',
+            client_name: leadInfoById[e.client_id]?.name || 'Unknown',
+            client_phone: leadInfoById[e.client_id]?.phone ?? null,
+            client_email: leadInfoById[e.client_id]?.email ?? null,
             repeat_count: repeatCounts[e.client_id] || 1,
             quotes: (quotesByEng[e.id] || []).map((q: any) => ({
               id: q.id, status: q.status, total: q.total,
