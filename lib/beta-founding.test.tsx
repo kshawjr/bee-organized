@@ -217,7 +217,8 @@ describe('canSend — surgical unlock, not a blanket removal', () => {
       <InboxScreen people={[linked]} engagements={[]} locFilter="all" />
     )
     expect(host.textContent).toContain('Sarah Mitchell')
-    expect(buttonContaining(host, 'Send to Jobber')).toBeFalsy()
+    // Ghost icon trigger — icon-only, so the gate reads off aria-label.
+    expect(host.querySelector('button[aria-label="Send to Jobber"]')).toBeFalsy()
     await unmount()
   })
 
@@ -226,7 +227,7 @@ describe('canSend — surgical unlock, not a blanket removal', () => {
     const { host, unmount } = await mount(
       <InboxScreen people={[fresh]} engagements={[]} locFilter="all" />
     )
-    expect(buttonContaining(host, 'Send to Jobber')).toBeTruthy()
+    expect(host.querySelector('button[aria-label="Send to Jobber"]')).toBeTruthy()
     await unmount()
   })
 })

@@ -155,6 +155,12 @@ export const IconEye = make(<>
   <path d="M22 12c-2.667 4.667 -6 7 -10 7s-7.333 -2.333 -10 -7c2.667 -4.667 6 -7 10 -7s7.333 2.333 10 7" />
 </>)
 
+export const IconDots = make(<>
+  <circle cx="5" cy="12" r="1" />
+  <circle cx="12" cy="12" r="1" />
+  <circle cx="19" cy="12" r="1" />
+</>)
+
 export const IconLogout = make(<>
   <path d="M14 8v-2a2 2 0 0 0 -2 -2h-7a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2 -2v-2" />
   <path d="M9 12h12l-3 -3" />

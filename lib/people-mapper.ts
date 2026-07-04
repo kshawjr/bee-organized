@@ -14,6 +14,8 @@ type LeadRow = {
   last_name: string | null
   email: string | null
   phone: string | null
+  // GENERATED digits-only column — read-only here; NEVER in a write payload.
+  phone_normalized?: string | null
   address: string | null
   city: string | null
   state: string | null
@@ -249,6 +251,8 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     locationId: row.location_uuid || row.location_id, // UUID matches BeeHub's locFilter
     name: row.name || [row.first_name, row.last_name].filter(Boolean).join(' ').trim() || '(unnamed)',
     phone: row.phone || '',
+    // Digits-only tel: key (generated column). Display keeps `phone`.
+    phoneNormalized: row.phone_normalized || null,
     email: row.email || '',
     address: finalAddresses[0]?.value || row.address || '',
     addresses: finalAddresses,

@@ -108,8 +108,13 @@ const inbox = (people: any[], over: any = {}) => (
   <InboxScreen people={people} engagements={[]} locFilter="all" setToast={setToast} {...over} />
 )
 
+// The ··· trigger is a ghost icon button now — no text; find it by its
+// aria-label (the icon-only affordance contract).
+const moreButton = (host: Element) =>
+  host.querySelector('button[aria-label="More"]') as HTMLButtonElement | null
+
 const openMenuAnd = async (host: Element, label: string) => {
-  await click(buttonByText(host, '···')!)
+  await click(moreButton(host)!)
   await click(buttonByText(host, label)!)
 }
 
@@ -282,7 +287,7 @@ describe('row interaction', () => {
     const onOpenPerson = vi.fn()
     const m = await mount(inbox([p], { onOpenPerson }))
 
-    await click(buttonByText(m.host, '···')!)
+    await click(moreButton(m.host)!)
     expect(onOpenPerson).not.toHaveBeenCalled()
 
     await click(m.host.querySelector('.bee-inbox-row')!)

@@ -168,16 +168,17 @@ describe('displayTitle secondary text — one color token, sizes stay per densit
 describe("'· soon' placeholders — one quiet gray on both tabs", () => {
   it('Inbox Snooze placeholder is GONE — replaced by the real ··· overflow', () => {
     // Snooze shipped (beta-inbox-actions): the '· soon' span must not
-    // come back, and the overflow trigger rides the hairline token like
-    // every other row button.
+    // come back. The overflow trigger is a GHOST icon button now (row
+    // restyle, direction C) — muted glyph, no hairline pill.
     const html = renderToString(
       <InboxScreen people={[newPerson()] as any} engagements={[]} />
     )
     expect(html).not.toContain('Snooze · soon')
     expect(html).not.toContain('title="Coming soon"')
-    const trigger = html.match(/aria-label="More actions"[^>]*style="([^"]*)"/)
+    const trigger = html.match(/aria-label="More"[^>]*style="([^"]*)"/)
     expect(trigger).toBeTruthy()
-    expect(trigger![1]).toContain('var(--hairline-border')
+    expect(trigger![1]).toContain(`var(--text-muted, ${TEXT_MUTED})`)
+    expect(trigger![1]).not.toContain('var(--hairline-border')
   })
 
   it('Clients Activate-drips rides the same var(--text-quiet)', () => {
@@ -220,14 +221,18 @@ describe('interactive hairline — buttons and inputs share --hairline-border', 
   })
 })
 
-describe('teal pair + green fill — routed, not repeated', () => {
-  it('Inbox section families and send button resolve to CHIP_STYLES.teal / GREEN_FILL', () => {
+describe('teal pair + ghost actions — routed, not repeated', () => {
+  it('Inbox section families stay teal; Send to Jobber is a ghost icon, not a green pill', () => {
     const html = renderToString(<InboxScreen people={[newPerson()] as any} engagements={[]} />)
     // New section label + avatar in the one teal pair
     expect(html).toContain(CHIP_STYLES.teal.text)
     expect(html).toContain(CHIP_STYLES.teal.bg)
-    // Send to Jobber solid fill = the scale's fill stop
-    expect(html).toContain(`background:${GREEN_FILL}`)
+    // Row restyle (direction C): the send trigger is a borderless muted
+    // icon — the solid GREEN_FILL pill must not come back.
+    const send = html.match(/aria-label="Send to Jobber"[^>]*style="([^"]*)"/)
+    expect(send).toBeTruthy()
+    expect(send![1]).toContain(`var(--text-muted, ${TEXT_MUTED})`)
+    expect(html).not.toContain(`background:${GREEN_FILL}`)
   })
 })
 
@@ -258,7 +263,7 @@ describe('shared structural components — one markup, affordances intact', () =
 
   it('Inbox Log call button still posts the touchpoint', async () => {
     const container = mount(<InboxScreen people={[newPerson()] as any} engagements={[]} />)
-    const logBtn = [...container.querySelectorAll('button')].find(b => (b.textContent || '').includes('Log call'))!
+    const logBtn = container.querySelector('button[aria-label="Log call"]')!
     expect(logBtn).toBeTruthy()
     await fire(logBtn)
     expect(fetchMock).toHaveBeenCalled()

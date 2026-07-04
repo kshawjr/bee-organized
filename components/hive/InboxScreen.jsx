@@ -25,17 +25,22 @@
 // A fresh send this session flips jobberRef to 'REQ-…'/'JOB-…' (the
 // popup's onDone patch) — that prefix drives the optimistic 'sent' row
 // state. Rides in the beta chunk.
+//
+// Row anatomy (compact layout B + ghost icon actions, direction C):
+// name, then ONE secondary line — status chip · tel: link · age far
+// right. The tel: link DIALS (digits-only href off phone_normalized,
+// formatted phone as the label); the ghost phone ICON logs a touchpoint
+// — two different actions, kept distinct by tooltip + link styling.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { deriveClientStatus } from './shared/clientStatus'
-import { CHIP_STYLES } from './shared/stageConfig'
+import { CHIP_STYLES, ACCENT_BLUE } from './shared/stageConfig'
 import { relAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
-import { GREEN_FILL, HAIRLINE_BORDER } from '@/components/ui/tokens'
-import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock } from '@/components/ui/icons'
-import ContactLine from './ContactLine'
+import { GREEN_FILL, HAIRLINE_BORDER, TEXT_MUTED, TEXT_PRIMARY } from '@/components/ui/tokens'
+import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock, IconDots } from '@/components/ui/icons'
 import InitialsAvatar from './shared/InitialsAvatar'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
@@ -66,15 +71,26 @@ function SectionLabel({ glyph, color, label, count, hint }) {
   )
 }
 
-const hairlineBtn = {
-  padding: '6px 12px', borderRadius: '8px', border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`,
-  background: '#fff', fontSize: '13px', fontWeight: 500, color: '#1a1a18',
-  cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+// Ghost icon actions (direction C): borderless, no pill background —
+// a muted 17px glyph in a 32px tap target that darkens on hover (the
+// .bee-ghost-btn rule). Icon-only, so every trigger carries aria-label
+// + title; the ··· overflow CONTENTS are unchanged from the soft-actions
+// commit — this restyles only the visible triggers.
+const ghostBtn = {
+  width: '32px', height: '32px', padding: 0,
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  border: 'none', background: 'transparent', borderRadius: '8px',
+  color: `var(--text-muted, ${TEXT_MUTED})`,
+  cursor: 'pointer', fontFamily: 'inherit',
 }
-const sendBtn = {
-  padding: '6px 14px', borderRadius: '8px', border: 'none',
-  background: GREEN_FILL, color: '#fff', fontSize: '13px', fontWeight: 500,
-  cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+
+function GhostIconButton({ label, icon: Icon, disabled, onClick }) {
+  return (
+    <button className="bee-ghost-btn" aria-label={label} title={label}
+      disabled={disabled} style={ghostBtn} onClick={onClick}>
+      <Icon size={17} />
+    </button>
+  )
 }
 
 // One row of the ··· overflow menu. stopPropagation keeps the click off
@@ -311,60 +327,42 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     }
   }
 
-  const lastReachOut = (p) => Math.max(0, ...(p.outreachTimeline || [])
-    .filter(t => t.type === 'reach_out')
-    .map(t => new Date(t.occurred_at || 0).getTime() || 0))
-
-  // Scan-clean rows: the webform snippet is DISPLAY-ONLY here (muted, in
-  // the detail line) — authoring lives on the PersonCard a click opens.
-  const detailNew = (p) => {
-    const bits = [(p.source || 'inquiry').toLowerCase(), `${relAge(new Date(p.created || 0).getTime(), nowMs)} ago`]
-    const snippet = (p.jobDetail || '').trim()
-    if (snippet) bits.push(`“${snippet.length > 60 ? snippet.slice(0, 57) + '…' : snippet}”`)
-    return bits.join(' · ')
-  }
-
-  const detailWorking = (p) => {
-    const reaches = (p.outreachTimeline || []).filter(t => t.type === 'reach_out').length + (loggedIds.has(p.id) ? 1 : 0)
-    const last = loggedIds.has(p.id) ? nowMs : lastReachOut(p)
-    return `${reaches} touchpoint${reaches === 1 ? '' : 's'}${last ? ` · last touch ${relAge(last, nowMs)} ago` : ''}`
-  }
-
   function Row({ p, family, pill }) {
     const sent = freshlySent(p)
     const canSend = !p.jobberRef
+    // tel: dials on the digits-only key — phone_normalized when the row
+    // carries it, else a client-side strip of the formatted value. The
+    // formatted `phone` stays the visible label.
+    const phoneLabel = (p.phone || '').trim()
+    const phoneDigits = p.phoneNormalized || phoneLabel.replace(/\D/g, '')
     const actions = sent ? (
       <span style={{ fontSize: '12px', color: GREEN_FILL, fontWeight: 500, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
         <IconCheck size={13} /> Sent — engagement will appear on the board
       </span>
     ) : (
       <>
+        {/* Ghost cluster — Log call RECORDS a touchpoint (the tel: link
+            in the secondary line is the one that dials). */}
         {pill === 'New' && (
-          <button style={hairlineBtn} disabled={busyId === p.id}
-            onClick={(ev) => { ev.stopPropagation(); logCall(p) }}>
-            <IconPhone size={13} style={{ marginRight: '5px' }} />Log call
-          </button>
+          <GhostIconButton label="Log call" icon={IconPhone} disabled={busyId === p.id}
+            onClick={(ev) => { ev.stopPropagation(); logCall(p) }} />
         )}
         {canSend && (
-          <button style={{ ...sendBtn, ...(isMobile ? { width: '100%' } : {}) }} disabled={busyId === p.id}
-            onClick={(ev) => { ev.stopPropagation(); onSendToJobber(p) }}>
-            <IconSend size={13} style={{ marginRight: '5px' }} />Send to Jobber
-          </button>
+          <GhostIconButton label="Send to Jobber" icon={IconSend} disabled={busyId === p.id}
+            onClick={(ev) => { ev.stopPropagation(); onSendToJobber(p) }} />
         )}
-        {/* Soft actions live behind ··· — Send stays the one inline
-            primary; four inline buttons per row would drown it. */}
-        <div style={{ position: 'relative', ...(isMobile ? { width: '100%' } : {}) }}>
-          <button aria-label="More actions" title="More actions"
-            style={{ ...hairlineBtn, padding: '6px 10px', fontWeight: 700, letterSpacing: '1px', ...(isMobile ? { width: '100%' } : {}) }}
-            disabled={busyId === p.id}
-            onClick={(ev) => { ev.stopPropagation(); setMenuFor(menuFor === p.id ? null : p.id) }}>
-            ···
-          </button>
+        {/* Soft actions stay behind ··· — same overflow menu, only the
+            trigger restyled. */}
+        <div style={{ position: 'relative' }}>
+          <GhostIconButton label="More" icon={IconDots} disabled={busyId === p.id}
+            onClick={(ev) => { ev.stopPropagation(); setMenuFor(menuFor === p.id ? null : p.id) }} />
           {menuFor === p.id && (
             <div onClick={(ev) => ev.stopPropagation()}
               style={{
-                position: 'absolute', top: 'calc(100% + 4px)', right: 0,
-                ...(isMobile ? { left: 0 } : { minWidth: '210px' }),
+                position: 'absolute', top: 'calc(100% + 4px)', minWidth: '210px',
+                // Mobile: the trigger sits left-of-center, so the menu
+                // grows rightward; desktop hugs the right edge as before.
+                ...(isMobile ? { left: 0 } : { right: 0 }),
                 zIndex: 80, background: '#fff',
                 border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`,
                 borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.14)',
@@ -389,29 +387,43 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <InitialsAvatar name={p.name} bg={family.bg} text={family.text} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ fontSize: '14px', fontWeight: 600, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+            <p style={{ fontSize: '14px', fontWeight: 600, color: `var(--text-primary, ${TEXT_PRIMARY})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {p.name}
+            </p>
+            {/* Compact secondary line (layout B) — ONE line: chip, then
+                the tappable number, age pinned far right. The phone
+                truncates before anything wraps; a phoneless lead just
+                shows chip + age. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px', minWidth: 0 }}>
               <StatusChip label={pill} styleKey={pill === 'New' ? 'New' : 'Attempting'} />
-            </p>
-            <p style={{ fontSize: '11px', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>
-              {pill === 'New' ? detailNew(p) : detailWorking(p)}
-            </p>
-            {/* Identity cluster: name → detail → contact (one card-like
-                block; the action button stays cleanly right). Clicking
-                the row opens the PersonCard — the panel-shaped record. */}
-            {!isMobile && <ContactLine phone={p.phone} email={p.email} style={{ marginTop: '3px' }} />}
+              {phoneLabel && phoneDigits && (
+                <a className="bee-inbox-tel" href={`tel:${phoneDigits}`}
+                  onClick={(ev) => ev.stopPropagation()}
+                  style={{
+                    color: ACCENT_BLUE, textDecoration: 'none', fontSize: '11px',
+                    display: 'inline-flex', alignItems: 'center', gap: '4px',
+                    minWidth: 0, overflow: 'hidden',
+                    // Expanded hit area (comfortable mobile tap) without
+                    // growing the one-line layout.
+                    padding: '7px 4px', margin: '-7px -4px',
+                  }}>
+                  <span style={{ color: `var(--text-muted, ${TEXT_MUTED})`, display: 'inline-flex', flexShrink: 0 }}><IconPhone size={11} /></span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{phoneLabel}</span>
+                </a>
+              )}
+              <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`, whiteSpace: 'nowrap' }}>
+                {relAge(new Date(p.created || 0).getTime() || 0, nowMs)}
+              </span>
+            </div>
           </div>
           {!isMobile && (
-            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '8px' }} onClick={ev => ev.stopPropagation()}>
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '2px' }} onClick={ev => ev.stopPropagation()}>
               {actions}
             </div>
           )}
         </div>
         {isMobile && (
-          <ContactLine phone={p.phone} email={p.email} style={{ marginTop: '8px', paddingLeft: '44px' }} />
-        )}
-        {isMobile && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }} onClick={ev => ev.stopPropagation()}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2px', marginTop: '6px', paddingLeft: '37px' }} onClick={ev => ev.stopPropagation()}>
             {actions}
           </div>
         )}
@@ -423,7 +435,13 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
 
   return (
     <div>
-      <style>{`.bee-inbox-row:hover { background:#f7f6f4 } .bee-inbox-row:last-child { border-bottom:none !important }`}</style>
+      <style>{`
+        .bee-inbox-row:hover { background:#f7f6f4 }
+        .bee-inbox-row:last-child { border-bottom:none !important }
+        .bee-ghost-btn:hover:not(:disabled) { color: var(--text-primary, ${TEXT_PRIMARY}) !important }
+        .bee-ghost-btn:disabled { opacity:.45; cursor:default }
+        .bee-inbox-tel:hover { text-decoration:underline !important; text-underline-offset:2px }
+      `}</style>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', marginBottom: '12px' }}>
         <div style={{ position: 'relative', flexShrink: 0 }}>
