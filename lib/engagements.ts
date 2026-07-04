@@ -32,7 +32,7 @@ export type EngagementStage =
 
 export type FoundedBy = 'request' | 'quote' | 'job' | 'manual'
 
-export type EngagementChildTable = 'service_requests' | 'quotes' | 'jobs' | 'invoices'
+export type EngagementChildTable = 'service_requests' | 'quotes' | 'jobs' | 'invoices' | 'assessments'
 
 // Rank + terminality live in the PURE module components/hive/shared/
 // stageRank.js so client code (stageConfig.js) never has to import this

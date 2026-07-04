@@ -62,19 +62,20 @@ export async function GET(
 
   // Minimal children for OPEN engagements only — same shape the board rows
   // carry, so the profile's engagement cards reuse deriveStatusChip.
-  let quotesByEng: Record<string, any[]> = {}, jobsByEng: Record<string, any[]> = {}, invoicesByEng: Record<string, any[]> = {}
+  let quotesByEng: Record<string, any[]> = {}, jobsByEng: Record<string, any[]> = {}, invoicesByEng: Record<string, any[]> = {}, assessByEng: Record<string, any[]> = {}
   if (openIds.length > 0) {
-    const [q, j, inv] = await Promise.all([
+    const [q, j, inv, ass] = await Promise.all([
       supabaseService.from('quotes').select('id, engagement_id, status, total, sent_at, approved_at').in('engagement_id', openIds),
       supabaseService.from('jobs').select('id, engagement_id, status, title, scheduled_start, completed_at').in('engagement_id', openIds),
       supabaseService.from('invoices').select('id, engagement_id, status, total, balance_owing').in('engagement_id', openIds),
+      supabaseService.from('assessments').select('id, engagement_id, scheduled_at, status, completed_at').in('engagement_id', openIds),
     ])
     const group = (rows: any[] | null) => {
       const out: Record<string, any[]> = {}
       for (const r of rows ?? []) (out[r.engagement_id] ??= []).push(r)
       return out
     }
-    quotesByEng = group(q.data); jobsByEng = group(j.data); invoicesByEng = group(inv.data)
+    quotesByEng = group(q.data); jobsByEng = group(j.data); invoicesByEng = group(inv.data); assessByEng = group(ass.data)
   }
 
   const withChildren = engagements.map(e => ({
@@ -82,6 +83,7 @@ export async function GET(
     quotes: quotesByEng[e.id] ?? [],
     jobs: jobsByEng[e.id] ?? [],
     invoices: invoicesByEng[e.id] ?? [],
+    assessments: assessByEng[e.id] ?? [],
   }))
 
   const engValue = (e: any) => {

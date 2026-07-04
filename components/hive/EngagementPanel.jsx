@@ -15,7 +15,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { ENGAGEMENT_STAGES, STAGE_RANK, isTerminal, stageDisplayLabel, ACCENT_BLUE } from './shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
-import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconExternalLink, IconX } from '@/components/ui/icons'
+import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconExternalLink, IconX, IconCalendar } from '@/components/ui/icons'
 import MetricCard from '@/components/ui/MetricCard'
 import ContactLine from './ContactLine'
 
@@ -149,7 +149,7 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
   }, [engagementId])
 
   const eng = data?.engagement ?? seed
-  const children = data?.children ?? { service_requests: [], quotes: [], jobs: [], invoices: [] }
+  const children = data?.children ?? { service_requests: [], assessments: [], quotes: [], jobs: [], invoices: [] }
   const client = data?.client ?? null
 
   async function patchEngagement(body, okMsg) {
@@ -343,6 +343,17 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
               state={currentType === 'request' ? { label: 'active', color: BAR_CURRENT } : DONE}
             />
           ))}
+          {(children.assessments || []).map(a => {
+            const done = !!a.completed_at || a.status === 'completed'
+            const future = new Date(a.scheduled_at || 0).getTime() > Date.now()
+            return (
+              <RecordRow key={a.id} icon={<IconCalendar size={15} />} iconColor="#0C447C" current={false}
+                primary={`Assessment · ${fmtDate(a.scheduled_at) || '—'}`}
+                secondary={done && a.completed_at ? `completed ${fmtDate(a.completed_at)}` : null}
+                state={done ? DONE : { label: 'Scheduled', color: future ? BAR_CURRENT : '#8a8a84' }}
+              />
+            )
+          })}
           {children.quotes.map(q => (
             <RecordRow key={q.id} icon={<IconFileText size={15} />} iconColor="#0C447C" current={currentType === 'quote'}
               primary={`Quote · ${fmtMoney(q.total)}`}

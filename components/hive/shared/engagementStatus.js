@@ -140,6 +140,16 @@ export function deriveStatusChip(e, opts = {}) {
 
   switch (e.stage) {
     case 'Request': {
+      // A scheduled FUTURE assessment outranks the request-age chip —
+      // the next concrete step is on the calendar. A past-dated
+      // assessment that never resolved falls back to the age chip (the
+      // data can't distinguish held-awaiting-quote from no-show, so
+      // 'Missed?' would accuse; the age amber surfaces staleness anyway).
+      const nextAssess = (e.assessments || [])
+        .filter(a => !a.completed_at)
+        .map(a => ts(a.scheduled_at)).filter(t => t > nowMs)
+        .sort((a, b) => a - b)[0]
+      if (nextAssess) return { label: `Assessment · ${fmtShort(nextAssess)}`, styleKey: 'scheduled' }
       const age = daysSince(e.created_at, nowMs)
       if (age >= 21) return { label: `Requested · ${formatDayCount(age)}`, styleKey: 'amber' }
       return { label: age === 0 ? 'Requested Today' : `Requested · ${formatDayCount(age)}`, styleKey: 'Request' }

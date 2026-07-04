@@ -227,15 +227,22 @@ async function fetchAndUpsertRequest(
     { promoteLead: false },
   )
 
+  let assessmentDbId: string | null = null
   if (reqRec.assessment?.startAt) {
-    await upsertAssessment(reqRec, sr.id, lead.id, ctx.location.location_id)
+    const aRes = await upsertAssessment(reqRec, sr.id, lead.id, ctx.location.location_id)
+    assessmentDbId = aRes?.id ?? null
   }
 
   // Dual-write (step 3): rule 1 — every request founds an engagement.
   // Sits here (not just REQUEST_CREATE) so the quote/job/invoice
-  // fallback ingests also found. Additive: failures log, never bubble.
+  // fallback ingests also found. Assessments attach alongside (no
+  // ASSESSMENT_CREATE/UPDATE webhook topics exist — they ride in on
+  // REQUEST fetches). Additive: failures log, never bubble.
   try {
-    await ensureEngagementForServiceRequest(sr.id, lead.id)
+    const ens = await ensureEngagementForServiceRequest(sr.id, lead.id)
+    if (ens?.id && assessmentDbId) {
+      await attachToEngagement('assessments', assessmentDbId, ens.id)
+    }
   } catch (err: any) {
     console.error('[engagements] request founding failed (webhook)', err?.message || err)
   }

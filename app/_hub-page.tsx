@@ -696,9 +696,10 @@ export default async function HubPage({
             })
             return out
           }
-          const quotesByEng   = byEngagement(quotesRaw)
-          const jobsByEng     = byEngagement(jobsRaw)
-          const invoicesByEng = byEngagement(invoicesRaw)
+          const quotesByEng      = byEngagement(quotesRaw)
+          const jobsByEng        = byEngagement(jobsRaw)
+          const invoicesByEng    = byEngagement(invoicesRaw)
+          const assessmentsByEng = byEngagement(assessmentsRaw)
 
           initialEngagements = engOpen.map((e: any) => ({
             ...e,
@@ -717,6 +718,9 @@ export default async function HubPage({
             invoices: (invoicesByEng[e.id] || []).map((i: any) => ({
               id: i.id, status: i.status, total: i.total,
               balance_owing: i.balance_owing,
+            })),
+            assessments: (assessmentsByEng[e.id] || []).map((a: any) => ({
+              id: a.id, scheduled_at: a.scheduled_at, status: a.status, completed_at: a.completed_at,
             })),
           }))
           console.log(`[hub-page] Fetched ${initialEngagements.length} open engagements for ${hubUser.email}`)

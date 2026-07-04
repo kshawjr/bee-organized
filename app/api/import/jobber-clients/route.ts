@@ -644,11 +644,13 @@ export async function POST(req: NextRequest) {
               stats.requests_by_stage[reqResult.stage] = (stats.requests_by_stage[reqResult.stage] || 0) + 1
               const reqDbId = reqResult.id
 
+              // Child DB ids for the engagement pass below (step-3 dual-write).
+              const engAssessmentIds: string[] = []
               if (request.assessment?.startAt) {
                 const aRes = await upsertAssessment(request, reqDbId, leadId, locSlug)
                 aRes.created ? stats.assessments_created++ : stats.assessments_updated++
+                engAssessmentIds.push(aRes.id)
               }
-              // Child DB ids for the engagement pass below (step-3 dual-write).
               const engQuoteIds: string[] = []
               const engJobIds: string[] = []
               const engInvoiceIds: string[] = []
@@ -699,6 +701,7 @@ export async function POST(req: NextRequest) {
                 const ens = await ensureEngagementForServiceRequest(reqDbId, leadId, { title: engJobTitle })
                 if (ens) {
                   if (ens.created) stats.engagements_founded++
+                  for (const aid of engAssessmentIds) await attachToEngagement('assessments', aid, ens.id)
                   for (const qid of engQuoteIds) await attachToEngagement('quotes', qid, ens.id)
                   for (const jid of engJobIds) await attachToEngagement('jobs', jid, ens.id)
                   for (const iid of engInvoiceIds) await attachToEngagement('invoices', iid, ens.id)

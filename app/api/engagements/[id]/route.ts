@@ -66,13 +66,14 @@ export async function GET(
   if ('error' in auth) return auth.error
   const { engagement } = auth
 
-  const [srRes, quotesRes, jobsRes, invoicesRes, clientRes, clientEngsRes] = await Promise.all([
+  const [srRes, quotesRes, jobsRes, invoicesRes, clientRes, clientEngsRes, assessRes] = await Promise.all([
     supabaseService.from('service_requests').select('*').eq('engagement_id', id).order('requested_at', { ascending: true, nullsFirst: false }),
     supabaseService.from('quotes').select('*').eq('engagement_id', id).order('sent_at', { ascending: true, nullsFirst: false }),
     supabaseService.from('jobs').select('*').eq('engagement_id', id).order('scheduled_start', { ascending: true, nullsFirst: false }),
     supabaseService.from('invoices').select('*').eq('engagement_id', id).order('issued_at', { ascending: true, nullsFirst: false }),
     supabaseService.from('leads').select('id, name, email, phone').eq('id', engagement.client_id).maybeSingle(),
     supabaseService.from('engagements').select('id, stage, total_paid').eq('client_id', engagement.client_id),
+    supabaseService.from('assessments').select('*').eq('engagement_id', id).order('scheduled_at', { ascending: true, nullsFirst: false }),
   ])
 
   const siblings = clientEngsRes.data ?? []
@@ -86,6 +87,7 @@ export async function GET(
     engagement,
     children: {
       service_requests: srRes.data ?? [],
+      assessments: assessRes.data ?? [],
       quotes: quotesRes.data ?? [],
       jobs: jobsRes.data ?? [],
       invoices: invoicesRes.data ?? [],
