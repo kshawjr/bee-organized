@@ -15,6 +15,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { ENGAGEMENT_STAGES, STAGE_RANK, isTerminal } from './shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
+import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconExternalLink, IconX } from '@/components/ui/icons'
 import MetricCard from '@/components/ui/MetricCard'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
@@ -102,7 +103,7 @@ function RecordRow({ icon, iconColor, primary, secondary, state, current }) {
       </div>
       {state && (
         <span style={{ flexShrink: 0, fontSize: state.check ? '14px' : '12px', fontWeight: 500, color: state.color, whiteSpace: 'nowrap' }}>
-          {state.check ? '✓' : state.label}
+          {state.check ? <IconCheck size={14} /> : state.label}
         </span>
       )}
     </div>
@@ -330,28 +331,28 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
         <MicroLabel>Records</MicroLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {children.service_requests.map(sr => (
-            <RecordRow key={sr.id} icon="📥" iconColor="#085041" current={currentType === 'request'}
+            <RecordRow key={sr.id} icon={<IconInbox size={15} />} iconColor="#085041" current={currentType === 'request'}
               primary={`Request · ${fmtDate(sr.requested_at || sr.created_at) || '—'}`}
               secondary={sr.source ? `source: ${sr.source}` : null}
               state={currentType === 'request' ? { label: 'active', color: BAR_CURRENT } : DONE}
             />
           ))}
           {children.quotes.map(q => (
-            <RecordRow key={q.id} icon="📄" iconColor="#0C447C" current={currentType === 'quote'}
+            <RecordRow key={q.id} icon={<IconFileText size={15} />} iconColor="#0C447C" current={currentType === 'quote'}
               primary={`Quote · ${fmtMoney(q.total)}`}
               secondary={[q.sent_at && `sent ${fmtDate(q.sent_at)}`, q.approved_at && `approved ${fmtDate(q.approved_at)}`].filter(Boolean).join(' · ') || null}
               state={quoteState(q)}
             />
           ))}
           {children.jobs.map(j => (
-            <RecordRow key={j.id} icon="🔨" iconColor="#0C447C" current={currentType === 'job'}
+            <RecordRow key={j.id} icon={<IconHammer size={15} />} iconColor="#0C447C" current={currentType === 'job'}
               primary={`Job · ${j.title || 'Untitled'}${j.total != null ? ` · ${fmtMoney(j.total)}` : ''}`}
               secondary={[j.scheduled_start && `scheduled ${fmtDate(j.scheduled_start)}`, j.completed_at && `completed ${fmtDate(j.completed_at)}`].filter(Boolean).join(' · ') || null}
               state={jobState(j)}
             />
           ))}
           {children.invoices.map(inv => (
-            <RecordRow key={inv.id} icon="🧾" iconColor="#791F1F" current={currentType === 'invoice'}
+            <RecordRow key={inv.id} icon={<IconFileInvoice size={15} />} iconColor="#791F1F" current={currentType === 'invoice'}
               primary={`Invoice · ${fmtMoney(inv.total)}`}
               secondary={[inv.issued_at && `issued ${fmtDate(inv.issued_at)}`, inv.paid_at && `paid ${fmtDate(inv.paid_at)}`].filter(Boolean).join(' · ') || null}
               state={invoiceState(inv)}
@@ -359,7 +360,7 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
           ))}
           {children.jobs.length > 0 && children.invoices.length === 0 && (
             <div style={{ padding: '10px 12px', border: '0.5px dashed rgba(0,0,0,0.18)', borderRadius: '8px', fontSize: '11px', color: '#b5b3ac' }}>
-              🧾 Invoice — created in Jobber when the job completes
+              <IconFileInvoice size={13} style={{ marginRight: '6px', verticalAlign: '-2px' }} /> Invoice — created in Jobber when the job completes
             </div>
           )}
           {!data && !loadErr && (
@@ -382,11 +383,11 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
         <MicroLabel>Actions</MicroLabel>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button style={outlineBtn} disabled={busy} onClick={() => { setNoteOpen(v => !v); setTouchOpen(false) }}>🐝 Add buzz note</button>
-          <button style={outlineBtn} disabled={busy} onClick={() => { setTouchOpen(v => !v); setNoteOpen(false) }}>📞 Log touchpoint</button>
+          <button style={outlineBtn} disabled={busy} onClick={() => { setTouchOpen(v => !v); setNoteOpen(false) }}><IconPhone size={14} style={{ marginRight: '5px' }} /> Log touchpoint</button>
           {jobberHref ? (
-            <a href={jobberHref} target="_blank" rel="noreferrer" style={{ ...outlineBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>⚡ Open in Jobber</a>
+            <a href={jobberHref} target="_blank" rel="noreferrer" style={{ ...outlineBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><IconExternalLink size={14} style={{ marginRight: '5px' }} /> Open in Jobber</a>
           ) : (
-            <span title="No Jobber record yet" style={{ ...outlineBtn, color: '#c9c7c0', cursor: 'default', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>⚡ Open in Jobber</span>
+            <span title="No Jobber record yet" style={{ ...outlineBtn, color: '#c9c7c0', cursor: 'default', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><IconExternalLink size={14} style={{ marginRight: '5px' }} /> Open in Jobber</span>
           )}
         </div>
         {noteOpen && (
@@ -457,7 +458,7 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
         style={{ width: '100%', maxWidth: '740px', maxHeight: '88vh', overflowY: 'auto', background: '#fff', borderRadius: '16px', boxShadow: '0 24px 80px rgba(26,26,24,0.25)' }}
       >
         <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '14px 16px 4px' }}>
-          <button onClick={onClose} style={{ border: 'none', background: 'transparent', fontSize: '18px', color: '#b5b3ac', cursor: 'pointer', lineHeight: 1, padding: '2px 4px' }}>×</button>
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', fontSize: '18px', color: '#b5b3ac', cursor: 'pointer', lineHeight: 1, padding: '2px 4px' }}><IconX size={16} /></button>
         </div>
         {body}
       </div>

@@ -20,11 +20,11 @@ export default function Row({ left = null, primary, secondary = null, right = nu
     >
       {left && <div style={{ flexShrink: 0 }}>{left}</div>}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ fontSize: '13px', fontWeight: 600, color: '#1a2e2b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <p style={{ fontSize: '13px', fontWeight: 600, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {primary}
         </p>
         {secondary && (
-          <p style={{ fontSize: '11px', color: '#8a9e9a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <p style={{ fontSize: '11px', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {secondary}
           </p>
         )}

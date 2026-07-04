@@ -5,11 +5,10 @@
 // is on, this REPLACES the legacy Clients content area entirely (the
 // legacy header/tabs/search are hidden, not restyled).
 //
-// Board is the only live tab; Inbox/List/Clients are disabled 'soon'
-// placeholders until their screens land. Lives inside the beta dynamic
-// chunk — BeeHub dynamic-imports THIS module (ssr:false) and this
-// module imports EngagementBoard statically, so all beta code stays
-// out of the main bundle (§8.5 bundle-isolation rules).
+// All four tabs are live (Tabler-style icons from ui/icons). Lives
+// inside the beta dynamic chunk — BeeHub dynamic-imports THIS module
+// (ssr:false) and this module statically owns every beta screen, so all
+// beta code stays out of the main bundle (§8.5 bundle-isolation rules).
 // ─────────────────────────────────────────────────────────────
 'use client'
 
@@ -20,12 +19,13 @@ import EngagementPanel from './EngagementPanel'
 import ClientDirectory from './ClientDirectory'
 import InboxScreen from './InboxScreen'
 import { deriveClientStatus } from './shared/clientStatus'
+import { IconInbox, IconLayoutKanban, IconList, IconUsers } from '@/components/ui/icons'
 
 const TABS = [
-  { key: 'inbox',   label: 'Inbox',   live: true, badge: true },
-  { key: 'board',   label: 'Board',   live: true },
-  { key: 'list',    label: 'List',    live: true },
-  { key: 'clients', label: 'Clients', live: true },
+  { key: 'inbox',   label: 'Inbox',   live: true, badge: true, Icon: IconInbox },
+  { key: 'board',   label: 'Board',   live: true, Icon: IconLayoutKanban },
+  { key: 'list',    label: 'List',    live: true, Icon: IconList },
+  { key: 'clients', label: 'Clients', live: true, Icon: IconUsers },
 ]
 
 // The preferred lens (Board/List) sticks across sessions.
@@ -56,7 +56,7 @@ function TabPill({ tab, active, onSelect, badgeCount = null }) {
     <button
       onClick={onSelect}
       style={{
-        display: 'inline-flex', alignItems: 'center',
+        display: 'inline-flex', alignItems: 'center', gap: '6px',
         padding: '6px 14px', borderRadius: '20px',
         border: `0.5px solid ${active ? 'rgba(0,0,0,0.15)' : 'transparent'}`,
         background: active ? '#fff' : 'transparent',
@@ -66,6 +66,7 @@ function TabPill({ tab, active, onSelect, badgeCount = null }) {
         fontFamily: 'inherit',
       }}
     >
+      {tab.Icon && <tab.Icon size={14} />}
       {tab.label}
       {tab.badge && badgeCount != null && badgeCount > 0 && (
         <span style={{ marginLeft: '6px', padding: '0 6px', borderRadius: '8px', background: '#E1F5EE', color: '#085041', fontSize: '10px', fontWeight: 600, lineHeight: 1.6 }}>

@@ -17,6 +17,7 @@ import { fmtMoney, relAge, lastActivityTs } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import FilterChips from '@/components/ui/FilterChips'
 import Banner from '@/components/ui/Banner'
+import { IconPlayerPause } from '@/components/ui/icons'
 
 const PAGE = 100
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -150,7 +151,7 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
       {pausedNurturing > 0 && (
         <div style={{ marginBottom: '12px' }}>
           <Banner
-            icon="⏸"
+            icon={<IconPlayerPause size={14} />}
             tone="amber"
             text={
               <>

@@ -21,6 +21,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { deriveClientStatus } from './shared/clientStatus'
 import { relAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
+import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock } from '@/components/ui/icons'
 
 const TEAL_DARK = '#085041', TEAL_BG = '#E1F5EE'
 const BLUE_DARK = '#0C447C', BLUE_BG = '#E6F1FB'
@@ -125,24 +126,24 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     const sent = freshlySent(p)
     const canSend = !p.jobberRef
     const actions = sent ? (
-      <span style={{ fontSize: '12px', color: SEND_GREEN, fontWeight: 500, whiteSpace: 'nowrap' }}>
-        ✓ sent — engagement will appear on the board
+      <span style={{ fontSize: '12px', color: SEND_GREEN, fontWeight: 500, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+        <IconCheck size={13} /> sent — engagement will appear on the board
       </span>
     ) : (
       <>
         {pill === 'New' && (
           <button style={hairlineBtn} disabled={busyId === p.id}
             onClick={(ev) => { ev.stopPropagation(); logCall(p) }}>
-            Log call
+            <IconPhone size={13} style={{ marginRight: '5px' }} />Log call
           </button>
         )}
         {canSend && (
           <button style={{ ...sendBtn, ...(isMobile ? { width: '100%' } : {}) }} disabled={busyId === p.id}
             onClick={(ev) => { ev.stopPropagation(); onSendToJobber(p) }}>
-            Send to Jobber
+            <IconSend size={13} style={{ marginRight: '5px' }} />Send to Jobber
           </button>
         )}
-        <span title="Coming soon" style={{ fontSize: '11px', color: '#c9c7c0', cursor: 'default', whiteSpace: 'nowrap' }}>snooze · soon</span>
+        <span title="Coming soon" style={{ fontSize: '11px', color: '#c9c7c0', cursor: 'default', whiteSpace: 'nowrap' }}><IconClock size={11} style={{ marginRight: '3px' }} />snooze · soon</span>
       </>
     )
     return (
@@ -189,7 +190,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
           <div>
-            <SectionLabel glyph="✦" color={TEAL_DARK} label="New" count={fresh.length} hint="no contact yet" />
+            <SectionLabel glyph={<IconSparkles size={13} />} color={TEAL_DARK} label="New" count={fresh.length} hint="no contact yet" />
             {fresh.length > 0 ? (
               <div style={cardStyle}>
                 {fresh.map(p => <Row key={p.id} p={p} family={{ bg: TEAL_BG, text: TEAL_DARK }} pill="New" />)}
@@ -202,7 +203,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
           </div>
 
           <div>
-            <SectionLabel glyph="✆" color={BLUE_DARK} label="Attempting" count={working.length} hint="working the lead" />
+            <SectionLabel glyph={<IconPhoneOutgoing size={13} />} color={BLUE_DARK} label="Attempting" count={working.length} hint="working the lead" />
             {working.length > 0 ? (
               <div style={cardStyle}>
                 {working.map(p => <Row key={p.id} p={p} family={{ bg: BLUE_BG, text: BLUE_DARK }} pill="Attempting" />)}

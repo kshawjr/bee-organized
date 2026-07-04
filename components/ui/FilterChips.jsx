@@ -34,7 +34,7 @@ export default function FilterChips({ items = [], active, onChange }) {
           >
             {label}
             {count != null && (
-              <span style={{ marginLeft: '4px', color: isActive ? '#8a8a84' : (muted ? '#d5d3cc' : '#b5b3ac'), fontWeight: 400 }}>· {count}</span>
+              <span style={{ marginLeft: '4px', color: isActive ? '#8a8a84' : (muted ? '#c9c7c0' : '#b5b3ac'), fontWeight: 400 }}>· {count}</span>
             )}
           </button>
         )

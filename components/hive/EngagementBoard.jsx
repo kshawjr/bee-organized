@@ -26,6 +26,7 @@ import { deriveStatusChip, displayTitle, engagementValue, fmtMoney } from './sha
 import StatusChip from '@/components/ui/StatusChip'
 import Card from '@/components/ui/Card'
 import SectionHeader from '@/components/ui/SectionHeader'
+import { statusIconFor, IconChevronRight } from '@/components/ui/icons'
 
 const BOARD_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 
@@ -48,7 +49,7 @@ function EngagementCard({ e, onOpen, draggable, onDragStart }) {
           {displayTitle(e)}
         </p>
         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-          {chip && <StatusChip label={chip.label} styleKey={chip.styleKey} />}
+          {chip && <StatusChip label={chip.label} styleKey={chip.styleKey} icon={statusIconFor(chip.styleKey)} />}
           {e.repeat_count > 1 && (
             <StatusChip label={`repeat · ${e.repeat_count - 1} prior`} styleKey="repeat" />
           )}
@@ -169,13 +170,13 @@ export default function EngagementBoard({ engagements = [], onOpenClient = () =>
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
           <button onClick={() => setMobileCol(c => Math.max(0, c - 1))} disabled={mobileCol === 0}
-            style={{ border: 'none', background: 'transparent', fontSize: '18px', color: mobileCol === 0 ? '#c9c7c0' : '#6b6b66', cursor: 'pointer', padding: '4px 8px' }}>‹</button>
+            style={{ border: 'none', background: 'transparent', fontSize: '18px', color: mobileCol === 0 ? '#c9c7c0' : '#6b6b66', cursor: 'pointer', padding: '4px 8px' }}><IconChevronRight size={16} style={{ transform: 'rotate(180deg)' }} /></button>
           <div style={{ flex: 1, textAlign: 'center' }}>
             <span style={{ fontSize: '12px', fontWeight: 500, color: '#6b6b66' }}>{stage.label}</span>
             <span style={{ fontSize: '12px', fontWeight: 400, color: '#b5b3ac', marginLeft: '5px' }}>· {count}</span>
           </div>
           <button onClick={() => setMobileCol(c => Math.min(BOARD_STAGES.length - 1, c + 1))} disabled={mobileCol === BOARD_STAGES.length - 1}
-            style={{ border: 'none', background: 'transparent', fontSize: '18px', color: mobileCol === BOARD_STAGES.length - 1 ? '#c9c7c0' : '#6b6b66', cursor: 'pointer', padding: '4px 8px' }}>›</button>
+            style={{ border: 'none', background: 'transparent', fontSize: '18px', color: mobileCol === BOARD_STAGES.length - 1 ? '#c9c7c0' : '#6b6b66', cursor: 'pointer', padding: '4px 8px' }}><IconChevronRight size={16} /></button>
         </div>
         {renderColumn(stage, { droppable: false })}
         <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', marginTop: '12px' }}>

@@ -17,6 +17,7 @@ import { ENGAGEMENT_STAGES, STAGE_RANK, CHIP_STYLES } from './shared/stageConfig
 import { deriveStatusChip, displayTitle, engagementValue, fmtMoney, lastActivityTs, relAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import FilterChips from '@/components/ui/FilterChips'
+import { statusIconFor } from '@/components/ui/icons'
 
 const OPEN_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 const CHIP_LABELS = { 'Request': 'Request', 'Estimate': 'Estimate', 'Job in Progress': 'Job', 'Final Processing': 'Final' }
@@ -26,28 +27,26 @@ const PAGE = 200
 const GRID = 'minmax(150px,1.2fr) minmax(140px,1.4fr) 130px minmax(150px,1.2fr) 90px 70px'
 
 // STATUS renders as colored text (mockup), not a chip: family text color
-// + a leading glyph — ✓ for done-ish states, ● for live ones, none for
-// money amounts ('$620 owing') and passive grays.
+// + the shared leading icon (send/check/clock/calendar/cash/file-invoice
+// via statusIconFor — same map the board chips use). Money amounts
+// reorder to '$620 owing'; passive grays render iconless.
 function statusFragment(chip) {
   if (!chip) return null
   const color = (CHIP_STYLES[chip.styleKey] || CHIP_STYLES.gray).text
   let label = chip.label
-  let glyph = '●'
-  if (chip.styleKey === 'approved' || chip.styleKey === 'paid') glyph = '✓'
-  else if (chip.styleKey === 'owing') {
-    glyph = ''
+  if (chip.styleKey === 'owing') {
     const m = label.match(/^owing\s+(\$[\d,]+)$/)
     if (m) label = `${m[1]} owing`
-  } else if (chip.styleKey === 'gray') glyph = ''
-  return { color, label, glyph }
+  }
+  return { color, label, icon: chip.styleKey === 'gray' ? null : statusIconFor(chip.styleKey) }
 }
 
 function StatusText({ chip, size = 12 }) {
   const f = statusFragment(chip)
   if (!f) return null
   return (
-    <span style={{ fontSize: `${size}px`, fontWeight: 500, color: f.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-      {f.glyph && <span style={{ fontSize: `${size - 3}px`, marginRight: '4px', verticalAlign: '1px' }}>{f.glyph}</span>}
+    <span style={{ fontSize: `${size}px`, fontWeight: 500, color: f.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+      {f.icon}
       {f.label}
     </span>
   )

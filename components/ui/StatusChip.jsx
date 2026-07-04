@@ -19,7 +19,7 @@ export default function StatusChip({ label, styleKey = 'gray', icon = null }) {
       fontSize: '11px', fontWeight: 500,
       lineHeight: 1.5, whiteSpace: 'nowrap',
     }}>
-      {icon && <span style={{ fontSize: '10px', lineHeight: 1 }}>{icon}</span>}
+      {icon && <span style={{ display: 'inline-flex', alignItems: 'center', lineHeight: 1 }}>{icon}</span>}
       {label}
     </span>
   )

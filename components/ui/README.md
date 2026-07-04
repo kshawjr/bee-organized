@@ -13,8 +13,23 @@ import `lib/engagements.ts` from client code (pure constants live in
 
 **Surfaces & cards** — cards are pure `#fff`, border `0.5px solid
 rgba(0,0,0,0.08)` (hairline), radius `10px`, padding `10px 12px`, no
-shadows, no gradients. Board/page surfaces are quiet warm neutrals
-(`#f7f6f3`-ish) or transparent over a near-white page.
+shadows, no gradients. Page surface `#fdfdfc`; quiet fills (client
+strip, metric cards) `#f7f6f4`; table/section cards radius `12px`;
+buttons radius `8px`; modal radius `16px`; pills/tabs radius `20px`.
+
+**Closed color vocabulary** — every color on a beta surface resolves to:
+the `CHIP_STYLES` families (below, plus `quiet` `#F5F4EF`/`#b5b3ac`),
+the neutrals `#fdfdfc` / `#f7f6f4` / `#fff` / `#1a1a18` / `#6b6b66` /
+`#8a8a84` / `#9a988f` / `#b5b3ac` / `#c9c7c0`, hairlines
+`rgba(0,0,0,0.08–0.22)`, scrims `rgba(26,26,24,…)`, the send primary
+`#0F6E56`, the stage bar `#1D9E75` / `#378ADD` / `#ECEAE4`, and accent
+blue `#378ADD` for links. Anything else is a bug — grep before pushing.
+
+**Icons** — `components/ui/icons.jsx`: inline Tabler Icons (MIT),
+stroke-based, `currentColor`, default 16px (`size` prop; 14px in tab
+pills, 13px in buttons, 11px in chips via `statusIconFor(styleKey)` —
+the shared within-stage-status → icon map used by board chips and list
+status text). No emoji glyphs on beta surfaces; no icon npm dependency.
 
 **Typography** — 100% sans (app stack); no serif inside Phase 1 surfaces.
 Primary text 13px / weight 500 / near-black `#1a1a18` (never 700).
