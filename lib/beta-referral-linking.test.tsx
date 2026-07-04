@@ -17,6 +17,12 @@
 //     a partner referrer and a lead referrer (not just "via partner")
 //   - reverse display: "Referred us" lists the people this client
 //     referred
+//   - EDIT surface (existing leads): Add referrer / edit / clear from
+//     the profile's Marketing card — set PATCHes kind+id AND
+//     source='Referral' (the coupling); clear nulls both fields and
+//     does NOT touch source (the asymmetry); client referrers write
+//     kind='lead'; inline-create works from the profile; the client
+//     never appears as their own referrer
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -55,10 +61,12 @@ const jsonRes = (body: any, status = 200) => ({
 })
 let createdBodies: any[] = []
 let partnerPosts: any[] = []
+let patchBodies: any[] = []
 let profilePayload: any = null
 const installFetch = () => {
   createdBodies = []
   partnerPosts = []
+  patchBodies = []
   const mock = vi.fn(async (url: any, opts: any = {}) => {
     const u = String(url)
     if (u.includes('/api/partners') && opts.method === 'POST') {
@@ -67,6 +75,10 @@ const installFetch = () => {
       return jsonRes({ id: `pt-new-${partnerPosts.length}`, name: body.name, type: body.type, isDeleted: false }, 201)
     }
     if (u.includes('/api/partners')) return jsonRes(PARTNER_ROWS)
+    if (u.includes('/api/leads/') && opts.method === 'PATCH') {
+      patchBodies.push(JSON.parse(opts.body))
+      return jsonRes({ ok: true })
+    }
     if (u.includes('/api/leads') && opts.method === 'POST') {
       const body = JSON.parse(opts.body)
       createdBodies.push(body)
@@ -297,6 +309,81 @@ describe('ClientProfile — referral display', () => {
     const { host, unmount } = await mount(<ClientProfile clientId="lead-1" onClose={() => {}} />)
     await flush()
     expect(host.textContent).not.toContain('Referred us')
+    await unmount()
+  })
+})
+
+// ── ClientProfile edit surface (existing leads) ────────────
+const mountProfile = async (clientOver: any = {}, people: any[] = []) => {
+  profilePayload = profileWith(clientOver)
+  const mounted = await mount(<ClientProfile clientId="lead-1" people={people} onClose={() => {}} />)
+  await flush()
+  return mounted
+}
+
+describe('ClientProfile — referrer add/edit/clear on an existing lead', () => {
+  it("no referrer: 'Add referrer' opens the picker; picking a partner PATCHes kind+id AND source='Referral'; the line updates", async () => {
+    const sarah = person()
+    const { host, unmount } = await mountProfile({ source: 'webform' }, [sarah])
+    expect(host.textContent).toContain('Source: webform')
+    await click(host.querySelector('button[aria-label="Add referrer"]')!)
+    await flush() // partners fetch
+    expect(host.querySelector('input[aria-label="Search referrers"]')).toBeTruthy()
+    await click(buttonContaining(host, 'Karen Partner')!)
+    // Exact body — the source coupling must ride the SAME patch.
+    expect(patchBodies).toEqual([{ referred_by_kind: 'partner', referred_by_id: 'pt-1', source: 'Referral' }])
+    expect(host.textContent).toContain('Referred by Karen Partner')
+    expect(host.querySelector('input[aria-label="Search referrers"]')).toBeFalsy() // picker closed
+    await unmount()
+  })
+
+  it("existing referrer: edit swaps to a CLIENT referrer — PATCH kind='lead' + the lead id", async () => {
+    const sarah = person()
+    const { host, unmount } = await mountProfile(
+      { referred_by_kind: 'partner', referred_by_id: 'pt-1', referred_by_name: 'Karen Partner' },
+      [sarah],
+    )
+    await click(host.querySelector('button[aria-label="Edit referrer"]')!)
+    await flush()
+    await click(buttonContaining(host, 'Sarah Mitchell')!)
+    expect(patchBodies).toEqual([{ referred_by_kind: 'lead', referred_by_id: sarah.id, source: 'Referral' }])
+    expect(host.textContent).toContain('Referred by Sarah Mitchell')
+    await unmount()
+  })
+
+  it('clear nulls BOTH fields and does NOT revert source (the asymmetry)', async () => {
+    const { host, unmount } = await mountProfile(
+      { source: 'Referral', referred_by_kind: 'partner', referred_by_id: 'pt-1', referred_by_name: 'Karen Partner' },
+    )
+    await click(host.querySelector('button[aria-label="Clear referrer"]')!)
+    // Exact body — no source key may appear in the clear patch.
+    expect(patchBodies).toEqual([{ referred_by_kind: null, referred_by_id: null }])
+    expect(host.textContent).not.toContain('Referred by')
+    expect(host.textContent).toContain('Source: referral') // untouched
+    await unmount()
+  })
+
+  it("inline-create works from the profile too: contact → POST /api/partners then PATCH kind='partner'", async () => {
+    const { host, unmount } = await mountProfile({ source: 'webform' })
+    await click(host.querySelector('button[aria-label="Add referrer"]')!)
+    await flush()
+    await type(host.querySelector('input[aria-label="Search referrers"]')!, 'New Neighbor')
+    await click(buttonContaining(host, 'as contact')!)
+    expect(partnerPosts).toEqual([{ name: 'New Neighbor', type: 'contact', location_id: 'loc-uuid-1' }])
+    expect(patchBodies).toEqual([{ referred_by_kind: 'partner', referred_by_id: 'pt-new-1', source: 'Referral' }])
+    expect(host.textContent).toContain('Referred by New Neighbor')
+    await unmount()
+  })
+
+  it('the client never appears as their own referrer option', async () => {
+    const self = person({ id: 'lead-1', name: 'Dana Client' })
+    const other = person({ name: 'Other Person' })
+    const { host, unmount } = await mountProfile({ source: 'webform' }, [self, other])
+    await click(host.querySelector('button[aria-label="Add referrer"]')!)
+    await flush()
+    const rowButtons = [...host.querySelectorAll('button')].filter(b => (b.textContent || '').includes('Dana Client'))
+    expect(rowButtons).toHaveLength(0)
+    expect(buttonContaining(host, 'Other Person')).toBeTruthy()
     await unmount()
   })
 })

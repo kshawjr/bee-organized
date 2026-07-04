@@ -401,6 +401,7 @@ export default function HiveShell({
         <ClientProfile
           key={overlay.clientId}
           clientId={overlay.clientId}
+          people={people}
           onClose={() => setOverlay(null)}
           onOpenEngagement={openEngagement}
           onSendToJobber={(clientId) => {
