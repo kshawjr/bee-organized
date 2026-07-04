@@ -71,7 +71,7 @@ export async function GET(
     supabaseService.from('quotes').select('*').eq('engagement_id', id).order('sent_at', { ascending: true, nullsFirst: false }),
     supabaseService.from('jobs').select('*').eq('engagement_id', id).order('scheduled_start', { ascending: true, nullsFirst: false }),
     supabaseService.from('invoices').select('*').eq('engagement_id', id).order('issued_at', { ascending: true, nullsFirst: false }),
-    supabaseService.from('leads').select('id, name, email, phone, request_details').eq('id', engagement.client_id).maybeSingle(),
+    supabaseService.from('leads').select('id, name, email, phone, request_details, source').eq('id', engagement.client_id).maybeSingle(),
     supabaseService.from('engagements').select('id, stage, total_paid').eq('client_id', engagement.client_id),
     supabaseService.from('assessments').select('*').eq('engagement_id', id).order('scheduled_at', { ascending: true, nullsFirst: false }),
     // Engagement-scoped notes (kind='job' via the panel composer); newest
@@ -124,6 +124,7 @@ export async function GET(
       email: clientRes.data?.email ?? null,
       phone: clientRes.data?.phone ?? null,
       request_details: clientRes.data?.request_details ?? null,
+      source: clientRes.data?.source ?? null,
       buzz: buzzRes.data ?? [],
       lifetime_paid: lifetimePaid,
       prior_engagements: priorCount,
@@ -149,9 +150,10 @@ export async function PATCH(
   const stage = body?.stage as EngagementStage | undefined
   const titleRaw = body?.title as unknown
   const descriptionRaw = body?.description as unknown
+  const projectTypeRaw = body?.project_type as unknown
 
-  if (stage === undefined && titleRaw === undefined && descriptionRaw === undefined) {
-    return NextResponse.json({ error: 'nothing_to_update', accepts: ['stage', 'title', 'description'] }, { status: 400 })
+  if (stage === undefined && titleRaw === undefined && descriptionRaw === undefined && projectTypeRaw === undefined) {
+    return NextResponse.json({ error: 'nothing_to_update', accepts: ['stage', 'title', 'description', 'project_type'] }, { status: 400 })
   }
 
   const nowIso = new Date().toISOString()
@@ -171,6 +173,15 @@ export async function PATCH(
       return NextResponse.json({ error: 'invalid_description' }, { status: 400 })
     }
     patch.description = descriptionRaw.trim().slice(0, 2000) || null
+  }
+
+  // Project type: a label from the admin lookups list (category
+  // 'project_types') — stored as text, matching the leads convention.
+  if (projectTypeRaw !== undefined) {
+    if (typeof projectTypeRaw !== 'string') {
+      return NextResponse.json({ error: 'invalid_project_type' }, { status: 400 })
+    }
+    patch.project_type = projectTypeRaw.trim().slice(0, 100) || null
   }
 
   if (stage !== undefined) {
@@ -251,6 +262,7 @@ export async function PATCH(
     prev_stage: engagement.stage,
     title: patch.title ?? engagement.title,
     description: patch.description !== undefined ? patch.description : engagement.description,
-    changed: stageChanged || patch.title !== undefined || patch.description !== undefined,
+    project_type: patch.project_type !== undefined ? patch.project_type : engagement.project_type,
+    changed: stageChanged || patch.title !== undefined || patch.description !== undefined || patch.project_type !== undefined,
   })
 }

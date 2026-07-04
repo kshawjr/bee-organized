@@ -114,6 +114,23 @@ export default function HiveShell({
   const [overlay, setOverlay] = useState(null)
   const [rowPatches, setRowPatches] = useState({})
 
+  // Admin-managed option lists (lookups: global, super-admin curated) —
+  // fetched ONCE per shell mount and threaded to PersonCard +
+  // EngagementPanel (lighter than per-card fetches).
+  const [lookupOptions, setLookupOptions] = useState({ sources: [], projectTypes: [] })
+  useEffect(() => {
+    let dead = false
+    fetch('/api/lookups')
+      .then(r => r.json())
+      .then(j => {
+        if (dead) return
+        const by = (cat) => (j.lookups || []).filter(l => l.category === cat).map(l => l.label)
+        setLookupOptions({ sources: by('lead_sources'), projectTypes: by('project_types') })
+      })
+      .catch(() => {})
+    return () => { dead = true }
+  }, [])
+
   // Work-lens filters (board + list share ONE set — Kevin's call: switch
   // lenses mid-triage, keep the subset). Owned HERE so both lenses and
   // the open-count derive from a single instance; persisted per user.
@@ -218,6 +235,7 @@ export default function HiveShell({
           onOpenClient={openClient}
           onChanged={(id, patch) => setRowPatches(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))}
           setToast={setToast}
+          lookupOptions={lookupOptions}
         />
       )}
       {overlay?.type === 'person' && (
@@ -226,6 +244,7 @@ export default function HiveShell({
           onClose={() => setOverlay(null)}
           onSendToJobber={onSendToJobber}
           setToast={setToast}
+          lookupOptions={lookupOptions}
         />
       )}
       {overlay?.type === 'client' && (

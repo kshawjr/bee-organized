@@ -20,6 +20,7 @@ import MetricCard from '@/components/ui/MetricCard'
 import ClientStrip from './ClientStrip'
 import NotesStream from './NotesStream'
 import OverlayShell from './OverlayShell'
+import MetaSelect from './MetaSelect'
 import { fmtTime } from './shared/engagementStatus'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
@@ -115,7 +116,7 @@ function RecordRow({ icon, iconColor, primary, secondary, state, current, sub })
   )
 }
 
-export default function EngagementPanel({ engagementId, seed = null, onClose, onOpenClient = () => {}, onChanged = () => {}, setToast = () => {} }) {
+export default function EngagementPanel({ engagementId, seed = null, onClose, onOpenClient = () => {}, onChanged = () => {}, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -167,7 +168,7 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
       })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      setData(d => d ? { ...d, engagement: { ...d.engagement, ...(body.title ? { title: j.title } : {}), ...(body.stage ? { stage: j.stage } : {}), ...(body.description !== undefined ? { description: j.description ?? null } : {}) } } : d)
+      setData(d => d ? { ...d, engagement: { ...d.engagement, ...(body.title ? { title: j.title } : {}), ...(body.stage ? { stage: j.stage } : {}), ...(body.description !== undefined ? { description: j.description ?? null } : {}), ...(body.project_type !== undefined ? { project_type: j.project_type ?? null } : {}) } } : d)
       onChanged(engagementId, { ...(body.title ? { title: j.title } : {}), ...(body.stage ? { stage: j.stage } : {}) })
       if (okMsg) setToast({ kind: 'success', msg: okMsg })
       return true
@@ -184,6 +185,24 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
     setEditingTitle(false)
     if (!t || t === (eng?.title || '')) return
     await patchEngagement({ title: t })
+  }
+
+  // Source is LEAD-level (marketing attribution belongs to the person's
+  // arrival) — saves through the lead PATCH, not the engagement's.
+  async function saveSource(label) {
+    if (!client) return
+    const prev = client.source ?? null
+    setData(d => d ? { ...d, client: { ...d.client, source: label } } : d)
+    try {
+      const res = await fetch(`/api/leads/${client.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: label }),
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
+    } catch (e) {
+      setData(d => d ? { ...d, client: { ...d.client, source: prev } } : d)
+      setToast({ kind: 'error', msg: `Save failed: ${e.message}` })
+    }
   }
 
   async function saveDescription() {
@@ -399,6 +418,12 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
           <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '4px' }}>
             Engagement · opened {fmtDate(eng.created_at) || '—'} · founded by {eng.founded_by}
           </p>
+          {/* Meta row — admin-driven vocabularies. Source rides the LEAD;
+              Type rides THIS engagement (seeded at founding). */}
+          <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+            <MetaSelect label="Source" value={client?.source || null} options={lookupOptions.sources} onPick={saveSource} />
+            <MetaSelect label="Type" value={eng.project_type || null} options={lookupOptions.projectTypes} onPick={(v) => patchEngagement({ project_type: v })} />
+          </div>
         </div>
       )}
 

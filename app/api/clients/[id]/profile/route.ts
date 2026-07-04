@@ -39,7 +39,7 @@ export async function GET(
 
   const { data: lead, error: leadError } = await supabaseService
     .from('leads')
-    .select('id, name, first_name, last_name, email, phone, address, city, state, zip, created_at, source, paused, marketing_opt_out, referred_by_kind, referred_by_id, jobber_client_id, location_uuid, location_id, paid_amount, request_details')
+    .select('id, name, first_name, last_name, email, phone, address, city, state, zip, created_at, source, paused, marketing_opt_out, referred_by_kind, referred_by_id, jobber_client_id, location_uuid, location_id, paid_amount, request_details, project_type')
     .eq('id', id)
     .maybeSingle()
   if (leadError || !lead) {

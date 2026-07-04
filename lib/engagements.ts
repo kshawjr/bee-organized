@@ -186,7 +186,7 @@ export async function foundEngagement(params: {
 
   const { data: lead, error: leadErr } = await supabaseService
     .from('leads')
-    .select('id, location_uuid, location_id, name, request_details')
+    .select('id, location_uuid, location_id, name, request_details, project_type')
     .eq('id', clientId)
     .maybeSingle()
   if (leadErr || !lead) return { error: `lead read: ${leadErr?.message || 'not found'}` }
@@ -205,6 +205,10 @@ export async function foundEngagement(params: {
   const description = foundedBy === 'request'
     ? (((childRow as any).notes || '').trim() || (lead.request_details || '').trim() || null)
     : null
+  // Project type seeds the same way: authored on the lead pre-founding
+  // (PersonCard), carried onto the work at request-founding. Quote/job
+  // foundings skip it — the lead's type may describe earlier work.
+  const projectType = foundedBy === 'request' ? ((lead.project_type || '').trim() || null) : null
   const { data: created, error: insErr } = await supabaseService
     .from('engagements')
     .insert({
@@ -214,6 +218,7 @@ export async function foundEngagement(params: {
       founded_by: foundedBy,
       title: params.title?.trim() || fallbackTitle(),
       ...(description ? { description } : {}),
+      ...(projectType ? { project_type: projectType } : {}),
       stage_entered_at: nowIso,
       created_at: nowIso,
       updated_at: nowIso,

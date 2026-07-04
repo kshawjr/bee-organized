@@ -23,6 +23,7 @@ import OverlayShell from './OverlayShell'
 import ClientStrip from './ClientStrip'
 import NotesStream from './NotesStream'
 import EditableDesc from './EditableDesc'
+import MetaSelect from './MetaSelect'
 import StatusChip from '@/components/ui/StatusChip'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
 import { fmtMoney } from './shared/engagementStatus'
@@ -51,7 +52,7 @@ const outlineBtn = {
   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', textAlign: 'center',
 }
 
-export default function PersonCard({ person, onClose, onSendToJobber = null, setToast = () => {} }) {
+export default function PersonCard({ person, onClose, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [buzzOpen, setBuzzOpen] = useState(false)
@@ -118,6 +119,24 @@ export default function PersonCard({ person, onClose, onSendToJobber = null, set
     } catch (e) { setToast({ kind: 'error', msg: `Note failed: ${e.message}` }) }
   }
 
+  // Source + project type both live on the LEAD pre-founding; project
+  // type seeds engagements.project_type at request-founding (same chain
+  // as description).
+  async function saveLeadField(field, label) {
+    const prev = c?.[field] ?? null
+    setData(d => d ? { ...d, client: { ...d.client, [field]: label } } : d)
+    try {
+      const res = await fetch(`/api/leads/${person.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: label }),
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
+    } catch (e) {
+      setData(d => d ? { ...d, client: { ...d.client, [field]: prev } } : d)
+      setToast({ kind: 'error', msg: `Save failed: ${e.message}` })
+    }
+  }
+
   async function saveDesc(text) {
     const prev = c?.request_details ?? null
     setData(d => d ? { ...d, client: { ...d.client, request_details: text || null } } : d)
@@ -182,8 +201,14 @@ export default function PersonCard({ person, onClose, onSendToJobber = null, set
           )}
         </div>
         <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '4px' }}>
-          Prospect · inquired {fmtDate(person.created) || '—'} · via {(person.source || 'unknown').toLowerCase()}
+          Prospect · inquired {fmtDate(person.created) || '—'} · via {((c?.source ?? person.source) || 'unknown').toLowerCase()}
         </p>
+        {/* Meta row — same spot as the panel's; both fields live on the
+            lead pre-founding (type seeds the engagement at founding). */}
+        <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+          <MetaSelect label="Source" value={(c?.source ?? person.source) || null} options={lookupOptions.sources} onPick={(v) => saveLeadField('source', v)} />
+          <MetaSelect label="Type" value={c?.project_type || null} options={lookupOptions.projectTypes} onPick={(v) => saveLeadField('project_type', v)} />
+        </div>
       </div>
 
       {/* Client strip — the SAME shared component as the panel's */}
