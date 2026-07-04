@@ -6,9 +6,11 @@
 // Extracted from EngagementPanel so the pre-engagement PersonCard's
 // 'NOTES · this person' is the identical component. Beta chunk.
 //
-// items: [{ t:'note', id, ts, text, user_label }
-//         | { t:'touch', id, ts, method, label, notes, user_label }]
-// pre-merged by the host; rendered newest-first by ts here.
+// items: [{ t:'note', id, ts, text, user_label, tag? }
+//         | { t:'touch', id, ts, method, label, notes, user_label, tag? }]
+// pre-merged by the host; rendered newest-first by ts here. Optional
+// `tag` renders '· re: <tag>' — the client-wide slice on ClientProfile
+// marks engagement-scoped items with the engagement's title.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
@@ -41,6 +43,7 @@ export default function NotesStream({ label, items = [], onPost, placeholder = '
         {sorted.map(a => a.t === 'note' ? (
           <p key={`n-${a.id}`} style={{ fontSize: '12px', color: '#1a1a18', lineHeight: 1.45 }}>
             {a.text}
+            {a.tag && <span style={{ fontSize: '11px', color: '#6b6b66' }}> · re: {a.tag}</span>}
             <span style={{ fontSize: '10px', color: '#b5b3ac', marginLeft: '6px', whiteSpace: 'nowrap' }}>
               {a.user_label || '—'} · {relAge(new Date(a.ts).getTime(), nowMs)} ago
             </span>
@@ -52,6 +55,7 @@ export default function NotesStream({ label, items = [], onPost, placeholder = '
             </span>
             <span style={{ minWidth: 0 }}>
               {METHOD_LABEL[a.method] || a.label || 'Reach-out'}{a.notes ? ` — ${a.notes}` : ''}
+              {a.tag && <span style={{ fontSize: '11px', color: '#6b6b66' }}> · re: {a.tag}</span>}
               <span style={{ fontSize: '10px', color: '#b5b3ac', marginLeft: '6px', whiteSpace: 'nowrap' }}>
                 {a.user_label || '—'} · {relAge(new Date(a.ts).getTime(), nowMs)} ago
               </span>

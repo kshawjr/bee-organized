@@ -1,47 +1,52 @@
 // components/hive/ClientProfile.jsx
 // ─────────────────────────────────────────────────────────────
-// HIVE Phase 1 step 4 — the person card (approved client-card mockup),
-// replacing PersonPanel INSIDE THE BETA ONLY (the legacy PersonPanel is
-// untouched and remains the classic view's panel). Fetches
-// GET /api/clients/:id/profile on open.
+// The CLIENT-level card (fullest of the three) — tabbed layout
+// (approved): compact header → tabs (Overview / Timeline / Files) →
+// content. Fetches GET /api/clients/:id/profile on open.
+//
+// Overview: pinned buzz (client-level — the SAME note every engagement
+// panel inherits) → money tiles → key facts (contact + display-only
+// source line + shared ReferrerField + referred-us) → request details
+// (pre-Jobber only) → engagements list (open tappable → swaps to
+// EngagementPanel; closed capped at 2) → recent activity (client-WIDE
+// slice: kind='job' notes — INCLUDING client-level ones posted on
+// PersonCard, the old inventory gap — + touchpoints, engagement-scoped
+// items tagged '· re: <title>') + composer → quiet actions.
 //
 // Overlay model: HiveShell holds ONE overlay slot — ClientProfile and
-// EngagementPanel REPLACE each other (no stacking): 'View client →' on
-// the engagement panel swaps to this card; tapping an engagement card
-// here swaps back. Two taps loop, zero modal piles.
+// EngagementPanel REPLACE each other (no stacking); two taps loop,
+// zero modal piles.
 //
-// READ-mostly: buzz note + touchpoint + referrer add/edit/clear use the
-// existing write paths (client-level; referrer via the shared
-// ReferrerField — PATCH /api/leads with the source='Referral' coupling
-// on set); contact editing stays in the classic view tonight;
-// 'Activate drips' is step 5's. Send to Jobber reuses the existing
-// popup via the same gate as the Inbox (!jobber link). Beta chunk.
+// Source stays display-only here (no meta pill — deliberate); the
+// ReferrerField is the shared edit affordance. Beta chunk.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
 import React, { useState, useEffect } from 'react'
 import { CHIP_STYLES, stageDisplayLabel, ACCENT_BLUE } from './shared/stageConfig'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
-import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, relAge } from './shared/engagementStatus'
+import { deriveStatusChip, engagementValue, displayTitle, fmtMoney } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import MetricCard from '@/components/ui/MetricCard'
 import {
   IconPhone, IconMail, IconMapPin, IconPlayerPause, IconExternalLink, IconSend,
-  IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPhoneOutgoing,
+  IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPlus, IconPaperclip,
 } from '@/components/ui/icons'
 import EditableDesc from './EditableDesc'
-import BuzzDrawer from './BuzzDrawer'
 import OverlayShell from './OverlayShell'
 import ReferrerField from './shared/ReferrerField'
 import Timeline from './shared/Timeline'
+import CardTabs from './shared/CardTabs'
+import PinnedBuzz from './shared/PinnedBuzz'
+import InitialsAvatar from './shared/InitialsAvatar'
+import NotesStream from './NotesStream'
+import { MicroLabel, quietBtn, CardMenu, undoToast } from './shared/cardKit'
+import { GREEN_TEXT } from '@/components/ui/tokens'
 import useIsMobile from './shared/useIsMobile'
 
 const QUIET = '#f7f6f4'
-const SEND_GREEN = '#0F6E56'
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
-const initialsOf = (name) =>
-  (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?'
 const monthYear = (iso) => {
   if (!iso) return null
   const d = new Date(iso)
@@ -52,31 +57,13 @@ const STAGE_ICON = {
   'Request': IconInbox, 'Estimate': IconFileText,
   'Job in Progress': IconHammer, 'Final Processing': IconFileInvoice,
 }
-const METHOD_ICON = { call: IconPhone, sms: IconPhone, email: IconMail }
-const METHOD_LABEL = { call: 'Call', sms: 'Text', email: 'Email', in_person: 'In person', call_prompt: 'Call prompt', system: 'System' }
-
-function MicroLabel({ children }) {
-  return (
-    <p style={{ fontSize: '11px', fontWeight: 500, color: '#8a8a84', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '8px' }}>
-      {children}
-    </p>
-  )
-}
-
-const outlineBtn = {
-  flex: 1, minWidth: '140px',
-  padding: '9px 12px', borderRadius: '8px', border: '0.5px solid rgba(0,0,0,0.15)',
-  background: '#fff', fontSize: '13px', fontWeight: 500, color: '#1a1a18',
-  cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', textAlign: 'center',
-}
 
 export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {} }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
+  const [tab, setTab] = useState('overview')
   const [showContacts, setShowContacts] = useState(false)
   const [showClosed, setShowClosed] = useState(false)
-  const [showAllTouches, setShowAllTouches] = useState(false)
-  const [buzzOpen, setBuzzOpen] = useState(true)
   const [touchOpen, setTouchOpen] = useState(false)
   const [touchMethod, setTouchMethod] = useState('call')
   const [touchNote, setTouchNote] = useState('')
@@ -102,6 +89,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   const closed = engagements.filter(e => e.stage === 'Closed Won' || e.stage === 'Closed Lost')
   const buzz = data?.buzz_notes ?? []
   const touches = data?.touchpoints ?? []
+  const jobNotes = data?.job_notes ?? []
   const engTitleById = Object.fromEntries(engagements.map(e => [e.id, displayTitle(e)]))
 
   const status = c ? deriveClientStatus(
@@ -125,8 +113,16 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
     return null
   })()
 
-  // Posted from the shared bee drawer (it owns the draft; we own the
-  // notes array + optimistic prepend).
+  async function patchLead(patch) {
+    const res = await fetch(`/api/leads/${c.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
+  }
+
+  // Posted from the pinned buzz band (append-only; it owns the draft,
+  // we own the notes array + optimistic prepend).
   async function addBuzzNote(text) {
     if (!text || !c) return
     try {
@@ -140,16 +136,27 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
     } catch (e) { setToast({ kind: 'error', msg: `Note failed: ${e.message}` }) }
   }
 
+  // Client-level note (kind='job', no engagement_id) — the same write
+  // PersonCard's composer uses; both cards read the same rows now.
+  async function addNote(text) {
+    if (!text || !c) return
+    try {
+      const res = await fetch('/api/lead-notes', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_id: c.id, kind: 'job', text }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      setData(d => d ? { ...d, job_notes: [j.note, ...(d.job_notes || [])] } : d)
+    } catch (e) { setToast({ kind: 'error', msg: `Note failed: ${e.message}` }) }
+  }
+
   async function saveReqDetails(text) {
     if (!c) return
     const prev = c.request_details
     setData(d => d ? { ...d, client: { ...d.client, request_details: text || null } } : d)
     try {
-      const res = await fetch(`/api/leads/${c.id}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_details: text || null }),
-      })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
+      await patchLead({ request_details: text || null })
       setToast({ kind: 'success', msg: 'Description saved' })
     } catch (e) {
       setData(d => d ? { ...d, client: { ...d.client, request_details: prev } } : d)
@@ -173,6 +180,39 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
     finally { setBusy(false) }
   }
 
+  // Manual founding — POST /api/engagements (founded_by='manual'), then
+  // swap straight to the new engagement's panel (same overlay slot).
+  async function newEngagement() {
+    if (!c) return
+    setBusy(true)
+    try {
+      const res = await fetch('/api/engagements', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: c.id }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      setToast({ kind: 'success', msg: 'Engagement created' })
+      if (j.engagement) onOpenEngagement(j.engagement)
+    } catch (e) { setToast({ kind: 'error', msg: `Create failed: ${e.message}` }) }
+    finally { setBusy(false) }
+  }
+
+  async function markJunk() {
+    if (!c) return
+    try {
+      await patchLead({ is_junk: true })
+      onLeadPatched(c.id, { is_junk: true })
+      setToast(undoToast('Marked as junk', async () => {
+        try {
+          await patchLead({ is_junk: false })
+          onLeadPatched(c.id, { is_junk: false })
+          setToast({ kind: 'success', msg: `${c.name} restored` })
+        } catch (e) { setToast({ kind: 'error', msg: `Undo failed: ${e.message}` }) }
+      }))
+    } catch (e) { setToast({ kind: 'error', msg: `Junk failed: ${e.message}` }) }
+  }
+
   const contactRow = (Icon, value, href, missingLabel) => value ? (
     <p style={{ fontSize: '12px', color: '#1a1a18', display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
       <span style={{ color: '#8a8a84', display: 'inline-flex' }}><Icon size={13} /></span>
@@ -193,98 +233,89 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
 
   const closedVisible = showClosed ? closed : closed.slice(0, 2)
 
-  const body = c && (
-    <div style={{ padding: isMobile ? '0 16px 28px' : '0 24px 24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      <style>{`.bee-contact-link:hover { text-decoration: underline !important; text-underline-offset: 2px }`}</style>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: fam.bg, color: fam.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 600, flexShrink: 0 }}>
-          {initialsOf(c.name)}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: '16px', fontWeight: 500, color: '#1a1a18', display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
-            {statusMeta && <StatusChip label={statusMeta.label} styleKey={statusMeta.styleKey} />}
-          </p>
-          <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '2px' }}>
-            {fmtMoney(agg?.lifetime_paid || 0)} lifetime · client since {monthYear(c.created_at) || '—'}{c.location_name ? ` · ${c.location_name}` : ''}
-          </p>
-        </div>
+  // Client-WIDE recent slice — job notes (client-level + engagement-
+  // scoped, the latter tagged) + touchpoints (tagged when scoped).
+  const stream = [
+    ...jobNotes.map(n => ({ t: 'note', ts: n.created_at, tag: n.engagement_id ? engTitleById[n.engagement_id] : null, ...n })),
+    ...touches.map(tp => ({ t: 'touch', ts: tp.occurred_at, tag: tp.engagement_id ? engTitleById[tp.engagement_id] : null, ...tp })),
+  ].sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 8)
+
+  const overview = c && (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+      {/* Pinned buzz — the client's standing note; the SAME rows show on
+          this client's EngagementPanel(s). */}
+      <PinnedBuzz notes={buzz} onPost={addBuzzNote} emptyLabel="Add a note about this client" nowMs={nowMs} />
+
+      {/* Money tiles */}
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: '8px' }}>
+        <MetricCard label="Lifetime paid" value={fmtMoney(agg?.lifetime_paid || 0)} />
+        <MetricCard label="Open pipeline" value={fmtMoney(agg?.open_pipeline || 0)} />
+        <MetricCard label="Owing" value={fmtMoney(agg?.owing || 0)} tone={(agg?.owing || 0) > 0 ? 'red' : null} />
       </div>
 
-      {/* Contact + Marketing */}
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '10px' }}>
-        <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
-          <MicroLabel>Contact</MicroLabel>
-          {contactRow(IconPhone, c.phone, c.phone ? `tel:${c.phone}` : null, 'add phone')}
-          {contactRow(IconMail, c.email, c.email ? `mailto:${c.email}` : null, 'add email')}
-          {contactRow(IconMapPin, address, null, 'add address')}
-          {(data.contacts || []).length > 0 && (
-            <button onClick={() => setShowContacts(v => !v)} style={{ border: 'none', background: 'transparent', padding: 0, textAlign: 'left', fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
-              +{data.contacts.length} contact{data.contacts.length === 1 ? '' : 's'}: {data.contacts[0].name}{data.contacts[0].role ? ` (${data.contacts[0].role})` : ''}{data.contacts.length > 1 ? ' …' : ''}
-            </button>
-          )}
-          {showContacts && data.contacts.map(ct => (
-            <p key={ct.id} style={{ fontSize: '11px', color: '#6b6b66', paddingLeft: '20px' }}>
-              {ct.name}{ct.role ? ` (${ct.role})` : ''}{ct.phone ? ` · ${ct.phone}` : ''}{ct.email ? ` · ${ct.email}` : ''}
+      {/* Key facts — contact + marketing state; Source stays display-only
+          on this surface (deliberate: the ReferrerField below is the edit
+          affordance, shared with the other two cards). */}
+      <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+        <MicroLabel>Key facts</MicroLabel>
+        {contactRow(IconPhone, c.phone, c.phone ? `tel:${c.phone}` : null, 'add phone')}
+        {contactRow(IconMail, c.email, c.email ? `mailto:${c.email}` : null, 'add email')}
+        {contactRow(IconMapPin, address, null, 'add address')}
+        {(data.contacts || []).length > 0 && (
+          <button onClick={() => setShowContacts(v => !v)} style={{ border: 'none', background: 'transparent', padding: 0, textAlign: 'left', fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
+            +{data.contacts.length} contact{data.contacts.length === 1 ? '' : 's'}: {data.contacts[0].name}{data.contacts[0].role ? ` (${data.contacts[0].role})` : ''}{data.contacts.length > 1 ? ' …' : ''}
+          </button>
+        )}
+        {showContacts && data.contacts.map(ct => (
+          <p key={ct.id} style={{ fontSize: '11px', color: '#6b6b66', paddingLeft: '20px' }}>
+            {ct.name}{ct.role ? ` (${ct.role})` : ''}{ct.phone ? ` · ${ct.phone}` : ''}{ct.email ? ` · ${ct.email}` : ''}
+          </p>
+        ))}
+        {jobberLinked && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <StatusChip label="Jobber linked" styleKey="teal" />
+            {jobberHref && (
+              <a className="bee-contact-link" href={jobberHref} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: ACCENT_BLUE, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                <IconExternalLink size={11} /> open
+              </a>
+            )}
+          </span>
+        )}
+        <p style={{ fontSize: '12px', color: c.paused ? '#633806' : '#085041', display: 'flex', alignItems: 'center', gap: '7px' }}>
+          <IconPlayerPause size={13} /> {c.paused ? 'Drips paused' : 'Drips active'}
+        </p>
+        {c.marketing_opt_out && (
+          <p style={{ fontSize: '12px', color: '#791F1F' }}>Opted out of marketing</p>
+        )}
+        <p style={{ fontSize: '12px', color: '#8a8a84' }}>
+          {c.source ? `Source: ${String(c.source).toLowerCase()}` : 'Source unknown'}
+        </p>
+        <ReferrerField
+          lead={c}
+          locationUuid={c.location_uuid}
+          people={people}
+          onApply={fields => setData(d => d ? { ...d, client: { ...d.client, ...fields } } : d)}
+          onSaved={cols => onLeadPatched(c.id, cols)}
+          onPartnerCreated={onPartnerCreated}
+          setToast={setToast}
+        />
+        {/* Reverse direction — leads this client referred. */}
+        {(data.referred_us || []).length > 0 && (
+          <div style={{ marginTop: '2px' }}>
+            <p style={{ fontSize: '11px', fontWeight: 500, color: '#8a8a84', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '3px' }}>
+              Referred us · {data.referred_us.length}
             </p>
-          ))}
-          {jobberLinked && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
-              <StatusChip label="Jobber linked" styleKey="teal" />
-              {jobberHref && (
-                <a className="bee-contact-link" href={jobberHref} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: ACCENT_BLUE, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                  <IconExternalLink size={11} /> open
-                </a>
-              )}
-            </span>
-          )}
-        </div>
-        <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
-          <MicroLabel>Marketing</MicroLabel>
-          <p style={{ fontSize: '12px', color: c.paused ? '#633806' : '#085041', display: 'flex', alignItems: 'center', gap: '7px' }}>
-            <IconPlayerPause size={13} /> {c.paused ? 'Drips paused' : 'Drips active'}
-            <span title="Coming with drip activation (step 5)" style={{ fontSize: '11px', color: '#b5b3ac', cursor: 'default' }}>Activate · soon</span>
-          </p>
-          <p style={{ fontSize: '12px', color: c.marketing_opt_out ? '#791F1F' : '#8a8a84' }}>
-            {c.marketing_opt_out ? 'Opted out of marketing' : 'No opt-outs'}
-          </p>
-          {/* Source line stays display-only here (no meta row on the
-              profile); the ReferrerField below is the shared edit
-              affordance (same one PersonCard + EngagementPanel render). */}
-          <p style={{ fontSize: '12px', color: '#8a8a84' }}>
-            {c.source ? `Source: ${String(c.source).toLowerCase()}` : 'Source unknown'}
-          </p>
-          <ReferrerField
-            lead={c}
-            locationUuid={c.location_uuid}
-            people={people}
-            onApply={fields => setData(d => d ? { ...d, client: { ...d.client, ...fields } } : d)}
-            onSaved={cols => onLeadPatched(c.id, cols)}
-            onPartnerCreated={onPartnerCreated}
-            setToast={setToast}
-          />
-          {/* Reverse direction — leads this client referred (kind='lead'
-              rows pointing back here; partners' reverse lists stay in
-              the classic PartnerPanel — the beta has no partner surface). */}
-          {(data.referred_us || []).length > 0 && (
-            <div style={{ marginTop: '2px' }}>
-              <p style={{ fontSize: '11px', fontWeight: 500, color: '#8a8a84', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '3px' }}>
-                Referred us · {data.referred_us.length}
-              </p>
-              {data.referred_us.map(r => (
-                <p key={r.id} style={{ fontSize: '12px', color: '#1a1a18' }}>{r.name}</p>
-              ))}
-            </div>
-          )}
-        </div>
+            {data.referred_us.map(r => (
+              <p key={r.id} style={{ fontSize: '12px', color: '#1a1a18' }}>{r.name}</p>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Request details — the pre-engagement description (the SAME field
-          the Inbox edits and foundEngagement seeds from), for pre-Jobber
-          people whose request hasn't founded an engagement yet. Editable;
-          the dashed add-slot shows here (detail context, unlike the
-          scannable Inbox list). */}
+      {/* Request details — pre-Jobber people whose request hasn't founded
+          an engagement yet (the SAME field the Inbox edits and
+          foundEngagement seeds from). No client-level job description
+          exists — each engagement owns its own. */}
       {!jobberLinked && (
         <div>
           <MicroLabel>Request details</MicroLabel>
@@ -348,98 +379,41 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         </div>
       </div>
 
-      {/* Money tiles */}
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: '8px' }}>
-        <MetricCard label="Lifetime paid" value={fmtMoney(agg?.lifetime_paid || 0)} />
-        <MetricCard label="Open pipeline" value={fmtMoney(agg?.open_pipeline || 0)} />
-        <MetricCard label="Owing" value={fmtMoney(agg?.owing || 0)} tone={(agg?.owing || 0) > 0 ? 'red' : null} />
-      </div>
+      {/* Recent activity — client-wide quick-glance slice + composer;
+          the exhaustive merged stream is the Timeline tab. */}
+      <NotesStream label="Recent activity" items={stream} onPost={addNote} nowMs={nowMs} />
 
-      {/* Buzz notes + Outreach */}
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '10px' }}>
-        <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px' }}>
-          {/* The SAME shared bee drawer as the panel strip + inbox rows —
-              header variant, expanded by default (it's the person's page). */}
-          <BuzzDrawer
-            header
-            notes={buzz}
-            open={buzzOpen}
-            onToggle={() => setBuzzOpen(v => !v)}
-            onPost={addBuzzNote}
-            showMoreCap={10}
-            nowMs={nowMs}
-          />
-        </div>
-        <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px' }}>
-          <MicroLabel>Outreach</MicroLabel>
-          {/* CLIENT-WIDE rollup: every touchpoint across engagements + the
-              pre-engagement ones (Inbox Log calls). Engagement-tagged
-              entries say what the touch was about; the panel's activity
-              stream owns the per-engagement view. */}
-          <div style={showAllTouches ? { maxHeight: '220px', overflowY: 'auto' } : undefined}>
-            {(showAllTouches ? touches : touches.slice(0, 3)).map(t => {
-              const MIcon = METHOD_ICON[t.method] || IconPhoneOutgoing
-              const what = t.kind === 'reach_out' ? (METHOD_LABEL[t.method] || t.label || 'Reach-out') : (t.label || t.kind)
-              const engTitle = t.engagement_id ? engTitleById[t.engagement_id] : null
-              return (
-                <p key={t.id} style={{ fontSize: '12px', color: '#1a1a18', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ color: '#8a8a84', display: 'inline-flex' }}><MIcon size={12} /></span>
-                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {what}{engTitle ? <span style={{ color: '#6b6b66' }}> · re: {engTitle}</span> : ''}
-                  </span>
-                  <span style={{ fontSize: '10px', color: '#b5b3ac', flexShrink: 0 }}>{relAge(new Date(t.occurred_at).getTime(), nowMs)} ago</span>
-                </p>
-              )
-            })}
-          </div>
-          {touches.length === 0 && <p style={{ fontSize: '11px', color: '#b5b3ac' }}>No outreach logged yet</p>}
-          {touches.length > 3 && !showAllTouches && (
-            <button onClick={() => setShowAllTouches(true)} style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>Show {touches.length - 3} more</button>
-          )}
-        </div>
-      </div>
-
-      {/* Timeline — the shared unified stream (upcoming + history),
-          lead-level: every engagement's records + drips + scheduled
-          sends in one rail. */}
+      {/* Quiet actions */}
       <div>
-        <MicroLabel>Timeline</MicroLabel>
-        <Timeline
-          leadId={c.id}
-          locationUuid={c.location_uuid}
-          setToast={setToast}
-          onLeadPatched={onLeadPatched}
-        />
-      </div>
-
-      {/* Actions */}
-      <div>
-        <MicroLabel>Actions</MicroLabel>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button style={outlineBtn} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
-            <IconPhone size={14} style={{ marginRight: '5px' }} /> Log touchpoint
+          {c.phone && (
+            <a href={`tel:${c.phone}`} style={quietBtn()}>
+              <IconPhone size={14} /> Call
+            </a>
+          )}
+          <button style={quietBtn()} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
+            Log touchpoint
           </button>
           {jobberLinked ? (
             jobberHref ? (
-              <a href={jobberHref} target="_blank" rel="noreferrer" style={{ ...outlineBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                <IconExternalLink size={14} style={{ marginRight: '5px' }} /> Open in Jobber
+              <a href={jobberHref} target="_blank" rel="noreferrer" style={quietBtn()}>
+                <IconExternalLink size={14} /> Open in Jobber
               </a>
             ) : (
-              <span title="No Jobber record link available" style={{ ...outlineBtn, color: '#c9c7c0', cursor: 'default', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                <IconExternalLink size={14} style={{ marginRight: '5px' }} /> Open in Jobber
+              <span title="No Jobber record link available" style={{ ...quietBtn(), color: '#c9c7c0', cursor: 'default' }}>
+                <IconExternalLink size={14} /> Open in Jobber
               </span>
             )
           ) : (
             onSendToJobber && (
-              <button
-                style={{ ...outlineBtn, background: SEND_GREEN, color: '#fff', border: 'none' }}
-                disabled={busy}
-                onClick={() => onSendToJobber(c.id)}
-              >
-                <IconSend size={14} style={{ marginRight: '5px' }} /> Send to Jobber
+              <button style={quietBtn(GREEN_TEXT)} disabled={busy} onClick={() => onSendToJobber(c.id)}>
+                <IconSend size={14} /> Send to Jobber
               </button>
             )
           )}
+          <button style={quietBtn()} disabled={busy} onClick={newEngagement}>
+            <IconPlus size={14} /> New engagement
+          </button>
         </div>
         {touchOpen && (
           <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -453,10 +427,56 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             <input value={touchNote} onChange={e => setTouchNote(e.target.value)} placeholder="Notes (optional)…"
               onKeyDown={e => { if (e.key === 'Enter') logTouchpoint() }}
               style={{ flex: 1, minWidth: '140px', padding: '8px 12px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
-            <button style={{ ...outlineBtn, flex: '0 0 auto', minWidth: 0 }} disabled={busy} onClick={logTouchpoint}>Log</button>
+            <button style={{ ...quietBtn(), minHeight: 0 }} disabled={busy} onClick={logTouchpoint}>Log</button>
           </div>
         )}
       </div>
+    </div>
+  )
+
+  const filesTab = (
+    <div style={{ padding: '18px 12px', border: '0.5px dashed rgba(0,0,0,0.15)', borderRadius: '8px', textAlign: 'center' }}>
+      <p style={{ fontSize: '12px', color: '#b5b3ac', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+        <IconPaperclip size={14} /> No files yet — quotes, photos, and attachments will land here
+      </p>
+    </div>
+  )
+
+  const body = c && (
+    <div style={{ padding: isMobile ? '0 16px 28px' : '0 24px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      <style>{`.bee-contact-link:hover { text-decoration: underline !important; text-underline-offset: 2px }`}</style>
+
+      {/* Header — compact: tinted avatar + name + chip + subtitle + ··· */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <InitialsAvatar name={c.name} bg={fam.bg} text={fam.text} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontSize: '16px', fontWeight: 500, color: '#1a1a18', display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+            {statusMeta && <StatusChip label={statusMeta.label} styleKey={statusMeta.styleKey} />}
+          </p>
+          <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '2px' }}>
+            {fmtMoney(agg?.lifetime_paid || 0)} lifetime · client since {monthYear(c.created_at) || '—'}{c.location_name ? ` · ${c.location_name}` : ''}
+          </p>
+        </div>
+        <CardMenu items={[{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]} />
+      </div>
+
+      <CardTabs
+        tabs={[{ key: 'overview', label: 'Overview' }, { key: 'timeline', label: 'Timeline' }, { key: 'files', label: 'Files' }]}
+        active={tab}
+        onChange={setTab}
+      />
+
+      {tab === 'overview' && overview}
+      {tab === 'timeline' && (
+        <Timeline
+          leadId={c.id}
+          locationUuid={c.location_uuid}
+          setToast={setToast}
+          onLeadPatched={onLeadPatched}
+        />
+      )}
+      {tab === 'files' && filesTab}
     </div>
   )
 

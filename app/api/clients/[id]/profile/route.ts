@@ -66,9 +66,11 @@ export async function GET(
     supabaseService.from('engagements').select('id, title, description, stage, founded_by, created_at, stage_entered_at, closed_at, closed_reason, nurture_started_at, total_invoiced, total_paid, balance_owing').eq('client_id', id).order('created_at', { ascending: false }),
     supabaseService.from('touchpoints').select('id, kind, method, label, notes, occurred_at, engagement_id, user_id').eq('lead_id', id).order('occurred_at', { ascending: false }).limit(50),
     supabaseService.from('lead_notes').select('id, kind, text, user_label, created_at').eq('lead_id', id).eq('kind', 'buzz').order('created_at', { ascending: false }).limit(50),
-    // CLIENT-level notes (kind='job', no engagement) — the pre-engagement
-    // PersonCard's notes stream. Engagement notes live on the engagement.
-    supabaseService.from('lead_notes').select('id, kind, text, user_label, created_at').eq('lead_id', id).eq('kind', 'job').is('engagement_id', null).order('created_at', { ascending: false }).limit(50),
+    // ALL kind='job' notes with engagement_id — ClientProfile's
+    // client-WIDE activity slice tags engagement-scoped ones
+    // '· re: <title>'; PersonCard filters to engagement_id IS NULL
+    // (client-level only) client-side.
+    supabaseService.from('lead_notes').select('id, kind, text, user_label, created_at, engagement_id').eq('lead_id', id).eq('kind', 'job').order('created_at', { ascending: false }).limit(50),
     supabaseService.from('locations').select('name').eq('id', lead.location_uuid).maybeSingle(),
     referrerQuery,
     // Reverse direction — leads THIS client referred (kind='lead' rows

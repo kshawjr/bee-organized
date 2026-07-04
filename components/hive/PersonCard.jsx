@@ -1,19 +1,23 @@
 // components/hive/PersonCard.jsx
 // ─────────────────────────────────────────────────────────────
-// The PRE-ENGAGEMENT record card — what an Inbox row opens. Mirrors the
-// EngagementPanel's anatomy exactly, minus what doesn't exist yet, built
-// from the SAME shared sections (OverlayShell, ClientStrip + BuzzDrawer,
-// EditableDesc, NotesStream):
-//   header (name + client-status chip, 'Prospect · inquired…' subtitle)
-//   → client strip (contact + buzz drawer)
-//   → RECORDS (editable description standalone — the panel's
-//     no-request-row variant — + a dashed 'Request · created when sent
-//     to Jobber' promise slot)
-//   → NOTES · this person (client-level kind='job' notes + touchpoints)
-//   → actions (Log touchpoint + Send to Jobber).
-// The description saves to leads.request_details and seeds
-// engagements.description at founding (proven chain); notes/touchpoints
-// stay on the client — engagement notes start fresh on the engagement.
+// The PRE-ENGAGEMENT record card — what an Inbox row opens. Tabbed
+// layout (approved): compact header (status-tinted avatar + name +
+// chip + subtitle + ··· menu) → tabs → content.
+//
+// Tabs: Overview (default) / Timeline. NO Files tab — nothing to file
+// pre-founding. Tab switching is a post-streaming JS stepper: only the
+// active tab's content renders (never display:none).
+//
+// Overview (lean, pre-engagement): pinned buzz (lead-level — carries
+// forward at founding) → key facts (tappable phone/email, Source/Type
+// MetaSelects, shared ReferrerField) → 'What they want'
+// (leads.request_details, EditableDesc — seeds engagements.description
+// at founding, proven chain) → recent activity (SHORT slice of
+// CLIENT-level kind='job' notes + touchpoints — real-dated only; the
+// full merged stream w/ drip projections lives in the Timeline tab) +
+// composer → quiet actions (Call / Log / Send to Jobber).
+// NO money, NO engagements list, NO stage bar — none exist yet.
+//
 // Fetches GET /api/clients/:id/profile. Beta chunk only.
 // ─────────────────────────────────────────────────────────────
 'use client'
@@ -21,18 +25,21 @@
 import React, { useState, useEffect } from 'react'
 import OverlayShell from './OverlayShell'
 import useIsMobile from './shared/useIsMobile'
-import ClientStrip from './ClientStrip'
 import NotesStream from './NotesStream'
 import EditableDesc from './EditableDesc'
 import MetaSelect from './MetaSelect'
 import ReferrerField from './shared/ReferrerField'
 import Timeline from './shared/Timeline'
+import CardTabs from './shared/CardTabs'
+import PinnedBuzz from './shared/PinnedBuzz'
+import InitialsAvatar from './shared/InitialsAvatar'
+import { MicroLabel, quietBtn, CardMenu, undoToast } from './shared/cardKit'
 import StatusChip from '@/components/ui/StatusChip'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
-import { fmtMoney } from './shared/engagementStatus'
-import { IconInbox, IconPhone, IconSend } from '@/components/ui/icons'
+import { CHIP_STYLES, ACCENT_BLUE } from './shared/stageConfig'
+import { GREEN_TEXT } from '@/components/ui/tokens'
+import { IconPhone, IconMail, IconSend } from '@/components/ui/icons'
 
-const SEND_GREEN = '#0F6E56'
 const fmtDate = (d) => {
   if (!d) return null
   const dt = new Date(d)
@@ -40,25 +47,10 @@ const fmtDate = (d) => {
   return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-function MicroLabel({ children }) {
-  return (
-    <p style={{ fontSize: '11px', fontWeight: 500, color: '#8a8a84', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '8px' }}>
-      {children}
-    </p>
-  )
-}
-
-const outlineBtn = {
-  flex: 1, minWidth: '150px',
-  padding: '9px 12px', borderRadius: '8px', border: '0.5px solid rgba(0,0,0,0.15)',
-  background: '#fff', fontSize: '13px', fontWeight: 500, color: '#1a1a18',
-  cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', textAlign: 'center',
-}
-
 export default function PersonCard({ person, people = [], onClose, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
-  const [buzzOpen, setBuzzOpen] = useState(false)
+  const [tab, setTab] = useState('overview')
   const [touchOpen, setTouchOpen] = useState(false)
   const [touchMethod, setTouchMethod] = useState('call')
   const [touchNote, setTouchNote] = useState('')
@@ -78,16 +70,26 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
   }, [person.id])
 
   const c = data?.client
-  const agg = data?.aggregates
   const buzz = data?.buzz_notes ?? []
-  const jobNotes = data?.job_notes ?? []
+  // The profile route returns ALL kind='job' notes; this card's slice is
+  // CLIENT-level only (engagement notes live with their engagement).
+  const jobNotes = (data?.job_notes ?? []).filter(n => !n.engagement_id)
   const touches = data?.touchpoints ?? []
 
-  // Same derivation the Inbox row used → same chip.
+  // Same derivation the Inbox row used → same chip + avatar tint.
   const status = deriveClientStatus(person, new Set(), nowMs)
   const statusMeta = CLIENT_STATUS_META[status] || null
+  const fam = statusMeta ? (CHIP_STYLES[statusMeta.styleKey] || CHIP_STYLES.gray) : CHIP_STYLES.gray
 
   const canSend = !person.jobberRef && !c?.jobber_client_id
+
+  async function patchLead(patch) {
+    const res = await fetch(`/api/leads/${person.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
+  }
 
   async function addBuzz(text) {
     try {
@@ -102,7 +104,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
   }
 
   // Client-level note: kind='job', NO engagement_id — stays with the
-  // person; engagement notes start fresh on the engagement at founding.
+  // person; engagement notes start fresh on the engagement.
   async function addNote(text) {
     try {
       const res = await fetch('/api/lead-notes', {
@@ -122,11 +124,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
     const prev = c?.[field] ?? null
     setData(d => d ? { ...d, client: { ...d.client, [field]: label } } : d)
     try {
-      const res = await fetch(`/api/leads/${person.id}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [field]: label }),
-      })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
+      await patchLead({ [field]: label })
       // Propagate to the shell's people state so the Inbox row / filters
       // reflect the change without a reload.
       onLeadPatched(person.id, { [field]: label })
@@ -140,11 +138,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
     const prev = c?.request_details ?? null
     setData(d => d ? { ...d, client: { ...d.client, request_details: text || null } } : d)
     try {
-      const res = await fetch(`/api/leads/${person.id}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_details: text || null }),
-      })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
+      await patchLead({ request_details: text || null })
       setToast({ kind: 'success', msg: 'Description saved' })
     } catch (e) {
       setData(d => d ? { ...d, client: { ...d.client, request_details: prev } } : d)
@@ -170,120 +164,101 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
     finally { setBusy(false) }
   }
 
+  // ··· menu — destructive/secondary lives here, not inline. Junk is
+  // the existing soft-delete write path (server-side it also stops
+  // drips + cancels stage emails); undo via the toast.
+  async function markJunk() {
+    try {
+      await patchLead({ is_junk: true })
+      onLeadPatched(person.id, { is_junk: true })
+      setToast(undoToast('Marked as junk', async () => {
+        try {
+          await patchLead({ is_junk: false })
+          onLeadPatched(person.id, { is_junk: false })
+          setToast({ kind: 'success', msg: `${person.name} restored` })
+        } catch (e) { setToast({ kind: 'error', msg: `Undo failed: ${e.message}` }) }
+      }))
+    } catch (e) { setToast({ kind: 'error', msg: `Junk failed: ${e.message}` }) }
+  }
+
+  // SHORT recent slice — real-dated notes + touchpoints only (drip
+  // projections stay in the Timeline tab, not the at-a-glance view).
   const stream = [
     ...jobNotes.map(n => ({ t: 'note', ts: n.created_at, ...n })),
     ...touches.map(tp => ({ t: 'touch', ts: tp.occurred_at, ...tp })),
-  ]
+  ].sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 8)
 
   // Once the profile row is loaded it is authoritative INCLUDING null —
   // the old `c?.source ?? person.source` fallback resurrected the stale
   // prop whenever the loaded (or None-cleared) value was null.
   const effSource = data ? (c?.source ?? null) : (person.source ?? null)
 
-  const metaLine = (agg?.total_count ?? 0) > 0
-    ? `${agg.total_count} prior engagement${agg.total_count === 1 ? '' : 's'} · ${fmtMoney(agg.lifetime_paid || 0)} lifetime`
-    : 'No engagements yet'
-
-  const body = (
-    <div style={{ padding: isMobile ? '0 16px 28px' : '0 24px 24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      {loadErr && (
-        <p style={{ fontSize: '12px', color: '#791F1F', background: '#FCEBEB', padding: '8px 12px', borderRadius: '8px' }}>
-          Couldn’t load person: {loadErr}
-        </p>
+  const contactRow = (Icon, value, href) => value ? (
+    <p style={{ fontSize: '12px', color: '#1a1a18', display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
+      <span style={{ color: '#8a8a84', display: 'inline-flex' }}><Icon size={13} /></span>
+      {href ? (
+        <a href={href} style={{ color: ACCENT_BLUE, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</a>
+      ) : (
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
       )}
+    </p>
+  ) : null
 
-      {/* Header — same idiom as the panel's title + stage chip */}
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <h2 style={{ flex: 1, minWidth: 0, fontSize: '16px', fontWeight: 500, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {person.name}
-          </h2>
-          {statusMeta && (
-            <span style={{ flexShrink: 0 }}>
-              <StatusChip label={statusMeta.label} styleKey={statusMeta.styleKey} />
-            </span>
-          )}
-        </div>
-        <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '4px' }}>
-          Prospect · inquired {fmtDate(person.created) || '—'} · via {(effSource || 'unknown').toLowerCase()}
-        </p>
-        {/* Meta row — same spot as the panel's; both fields live on the
-            lead pre-founding (type seeds the engagement at founding). */}
-        <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+  const overview = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+      {/* Pinned buzz — lead-level; carries forward at founding. */}
+      <PinnedBuzz notes={buzz} onPost={addBuzz} emptyLabel="Add a note about this client" nowMs={nowMs} />
+
+      {/* Key facts */}
+      <div style={{ background: '#f7f6f4', borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <MicroLabel>Key facts</MicroLabel>
+        {contactRow(IconPhone, person.phone, person.phone ? `tel:${person.phone}` : null)}
+        {contactRow(IconMail, person.email, person.email ? `mailto:${person.email}` : null)}
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <MetaSelect label="Source" value={effSource} options={lookupOptions.sources} onPick={(v) => saveLeadField('source', v)} />
           <MetaSelect label="Type" value={c?.project_type || null} options={lookupOptions.projectTypes} onPick={(v) => saveLeadField('project_type', v)} />
         </div>
         {/* Referrer — the shared field (lead-level, same as the profile). */}
         {c && (
-          <div style={{ marginTop: '8px' }}>
-            <ReferrerField
-              lead={c}
-              locationUuid={c.location_uuid}
-              people={people}
-              onApply={fields => setData(d => d ? { ...d, client: { ...d.client, ...fields } } : d)}
-              onSaved={cols => onLeadPatched(person.id, cols)}
-              onPartnerCreated={onPartnerCreated}
-              setToast={setToast}
-            />
-          </div>
+          <ReferrerField
+            lead={c}
+            locationUuid={c.location_uuid}
+            people={people}
+            onApply={fields => setData(d => d ? { ...d, client: { ...d.client, ...fields } } : d)}
+            onSaved={cols => onLeadPatched(person.id, cols)}
+            onPartnerCreated={onPartnerCreated}
+            setToast={setToast}
+          />
         )}
       </div>
 
-      {/* Client strip — the SAME shared component as the panel's */}
-      <ClientStrip
-        name={person.name}
-        meta={metaLine}
-        phone={person.phone}
-        email={person.email}
-        buzz={buzz}
-        buzzOpen={buzzOpen}
-        onToggleBuzz={() => setBuzzOpen(v => !v)}
-        onPostBuzz={addBuzz}
-        isMobile={isMobile}
-      />
-
-      {/* Records — description standalone (the panel's no-request-row
-          variant) + the dashed slot founding will fill */}
+      {/* What they want — request_details, seeds the engagement at founding */}
       <div>
-        <MicroLabel>Records</MicroLabel>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {data && <EditableDesc text={c?.request_details} showEmpty onSave={saveDesc} placeholder="Describe the request…" />}
-          <div style={{ padding: '10px 12px', border: '0.5px dashed rgba(0,0,0,0.18)', borderRadius: '8px', fontSize: '11px', color: '#b5b3ac' }}>
-            <IconInbox size={13} style={{ marginRight: '6px', verticalAlign: '-2px' }} /> Request — created when sent to Jobber
-          </div>
-          {!data && !loadErr && (
-            <div style={{ padding: '14px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px' }}>Loading…</div>
-          )}
-        </div>
+        <MicroLabel>What they want</MicroLabel>
+        {data
+          ? <EditableDesc text={c?.request_details} showEmpty onSave={saveDesc} placeholder="Describe the request…" />
+          : !loadErr && <div style={{ padding: '14px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px' }}>Loading…</div>}
       </div>
 
-      {/* Notes — the SAME shared stream as the panel's */}
-      <NotesStream label="Notes · this person" items={stream} onPost={addNote} nowMs={nowMs} />
+      {/* Recent activity — quick-glance slice + composer; the exhaustive
+          merged stream (incl. future) is the Timeline tab. */}
+      <NotesStream label="Recent activity" items={stream} onPost={addNote} nowMs={nowMs} />
 
-      {/* Timeline — the shared unified stream (upcoming + history). */}
-      {c && (
-        <div>
-          <MicroLabel>Timeline</MicroLabel>
-          <Timeline
-            leadId={person.id}
-            locationUuid={c.location_uuid}
-            setToast={setToast}
-            onLeadPatched={onLeadPatched}
-          />
-        </div>
-      )}
-
-      {/* Actions — same button idiom as the panel's */}
+      {/* Quiet actions — hairline, no fills; Send is the one restrained
+          accent (the founding door). */}
       <div>
-        <MicroLabel>Actions</MicroLabel>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button style={outlineBtn} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
-            <IconPhone size={14} style={{ marginRight: '5px' }} /> Log touchpoint
+          {person.phone && (
+            <a href={`tel:${person.phone}`} style={quietBtn()}>
+              <IconPhone size={14} /> Call
+            </a>
+          )}
+          <button style={quietBtn()} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
+            Log touchpoint
           </button>
           {canSend && onSendToJobber && (
-            <button style={{ ...outlineBtn, background: SEND_GREEN, color: '#fff', border: 'none' }} disabled={busy}
-              onClick={() => onSendToJobber(person)}>
-              <IconSend size={14} style={{ marginRight: '5px' }} /> Send to Jobber
+            <button style={quietBtn(GREEN_TEXT)} disabled={busy} onClick={() => onSendToJobber(person)}>
+              <IconSend size={14} /> Send to Jobber
             </button>
           )}
         </div>
@@ -299,10 +274,58 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
             <input value={touchNote} onChange={e => setTouchNote(e.target.value)} placeholder="Notes (optional)…"
               onKeyDown={e => { if (e.key === 'Enter') logTouchpoint() }}
               style={{ flex: 1, minWidth: '140px', padding: '8px 12px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
-            <button style={{ ...outlineBtn, flex: '0 0 auto', minWidth: 0 }} disabled={busy} onClick={logTouchpoint}>Log</button>
+            <button style={{ ...quietBtn(), minHeight: 0 }} disabled={busy} onClick={logTouchpoint}>Log</button>
           </div>
         )}
       </div>
+    </div>
+  )
+
+  const body = (
+    <div style={{ padding: isMobile ? '0 16px 28px' : '0 24px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      {loadErr && (
+        <p style={{ fontSize: '12px', color: '#791F1F', background: '#FCEBEB', padding: '8px 12px', borderRadius: '8px' }}>
+          Couldn’t load person: {loadErr}
+        </p>
+      )}
+
+      {/* Header — compact: tinted avatar + name + chip + subtitle + ··· */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <InitialsAvatar name={person.name} bg={fam.bg} text={fam.text} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <h2 style={{ minWidth: 0, fontSize: '16px', fontWeight: 500, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {person.name}
+            </h2>
+            {statusMeta && (
+              <span style={{ flexShrink: 0 }}>
+                <StatusChip label={statusMeta.label} styleKey={statusMeta.styleKey} />
+              </span>
+            )}
+          </div>
+          <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '2px' }}>
+            Prospect · inquired {fmtDate(person.created) || '—'} · via {(effSource || 'unknown').toLowerCase()}
+          </p>
+        </div>
+        <CardMenu items={[{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]} />
+      </div>
+
+      {/* Tabs — Overview default; NO Files pre-founding. */}
+      <CardTabs
+        tabs={[{ key: 'overview', label: 'Overview' }, { key: 'timeline', label: 'Timeline' }]}
+        active={tab}
+        onChange={setTab}
+      />
+
+      {tab === 'overview' && overview}
+      {tab === 'timeline' && (
+        <Timeline
+          leadId={person.id}
+          locationUuid={c?.location_uuid}
+          setToast={setToast}
+          onLeadPatched={onLeadPatched}
+        />
+      )}
     </div>
   )
 

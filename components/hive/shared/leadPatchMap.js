@@ -20,6 +20,7 @@ const LEAD_COL_TO_PERSON_FIELD = {
   referred_by_id: 'referredBy',
   request_details: 'jobDetail',
   snoozed_until: 'snoozeUntil', // Timeline's un-snooze → Inbox reflects live
+  is_junk: 'isJunk',            // card ··· menu junk → Inbox row drops live
 }
 
 export function leadColsToPersonFields(cols) {

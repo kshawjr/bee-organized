@@ -29,7 +29,7 @@ import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCo
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
 import { IconInbox, IconLayoutKanban, IconList, IconUsers, IconPlus } from '@/components/ui/icons'
-import { TEXT_TOKENS, BORDER_TOKENS, HAIRLINE_BORDER } from '@/components/ui/tokens'
+import { TEXT_TOKENS, BORDER_TOKENS, WARNING_TOKENS, HAIRLINE_BORDER } from '@/components/ui/tokens'
 import { CHIP_STYLES } from './shared/stageConfig'
 
 const TABS = [
@@ -258,7 +258,7 @@ export default function HiveShell({
   return (
     // min-height fills the VISIBLE viewport (dvh where supported — iOS
     // vh is the large viewport; vh kept as the old-browser fallback).
-    <div className="bee-hive-root" style={{ ...TEXT_TOKENS, ...BORDER_TOKENS, background: '#fdfdfc', padding: '1rem 1rem 5rem', fontFamily: 'DM Sans,system-ui,sans-serif' }}>
+    <div className="bee-hive-root" style={{ ...TEXT_TOKENS, ...BORDER_TOKENS, ...WARNING_TOKENS, background: '#fdfdfc', padding: '1rem 1rem 5rem', fontFamily: 'DM Sans,system-ui,sans-serif' }}>
       <style>{`.bee-hive-root { min-height: 100vh; min-height: 100dvh; }`}</style>
       {isMobile ? (
         /* Mobile chrome STACKS (nothing may overlap at 320–430px):

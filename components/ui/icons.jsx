@@ -167,6 +167,21 @@ export const IconLogout = make(<>
   <path d="M18 15l3 -3" />
 </>)
 
+export const IconPin = make(<>
+  <path d="M9 4v6l-2 4v2h10v-2l-2 -4v-6" />
+  <path d="M12 16v5" />
+  <path d="M9 4h6" />
+</>)
+
+export const IconPencil = make(<>
+  <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+  <path d="M13.5 6.5l4 4" />
+</>)
+
+export const IconPaperclip = make(
+  <path d="M15 7l-6.5 6.5a1.5 1.5 0 0 0 3 3l6.5 -6.5a3 3 0 0 0 -6 -6l-6.5 6.5a4.5 4.5 0 0 0 9 9l6.5 -6.5" />
+)
+
 // Within-stage status → leading icon (mockup chips/status text). One map
 // so board chips and list status text pick identical glyphs.
 const STATUS_ICON = {

@@ -35,6 +35,17 @@ export const BORDER_TOKENS = {
   '--hairline-border': HAIRLINE_BORDER,
 }
 
+// Warning tint — the design-language amber pair (CHIP_STYLES.amber hues):
+// soft band fill + dark amber text. Used by the pinned-buzz band on the
+// lead-detail cards; understated by design (no border, no saturation).
+export const WARNING_BG = '#FAEEDA'
+export const WARNING_TEXT = '#633806'
+
+export const WARNING_TOKENS = {
+  '--bg-warning': WARNING_BG,
+  '--text-warning': WARNING_TEXT,
+}
+
 // Brand-green 3-stop scale — three DELIBERATE stops, not drift:
 //   GREEN_FILL   — solid fills (the Send to Jobber button)
 //   GREEN_TEXT   — dark text on light teal (the CHIP_STYLES teal pair, badges)
