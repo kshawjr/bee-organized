@@ -18,7 +18,7 @@
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react'
-import { CHIP_STYLES, stageDisplayLabel } from './shared/stageConfig'
+import { CHIP_STYLES, stageDisplayLabel, ACCENT_BLUE } from './shared/stageConfig'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
 import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, relAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
@@ -162,7 +162,7 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
     <p style={{ fontSize: '12px', color: '#1a1a18', display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
       <span style={{ color: '#8a8a84', display: 'inline-flex' }}><Icon size={13} /></span>
       {href ? (
-        <a href={href} style={{ color: '#1a1a18', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</a>
+        <a className="bee-contact-link" href={href} style={{ color: ACCENT_BLUE, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</a>
       ) : (
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
       )}
@@ -180,6 +180,7 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
 
   const body = c && (
     <div style={{ padding: isMobile ? '0 16px 28px' : '0 24px 24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+      <style>{`.bee-contact-link:hover { text-decoration: underline !important; text-underline-offset: 2px }`}</style>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: fam.bg, color: fam.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 600, flexShrink: 0 }}>
@@ -217,7 +218,7 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
               <StatusChip label="Jobber linked" styleKey="teal" />
               {jobberHref && (
-                <a href={jobberHref} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: '#378ADD', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                <a className="bee-contact-link" href={jobberHref} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: ACCENT_BLUE, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                   <IconExternalLink size={11} /> open
                 </a>
               )}

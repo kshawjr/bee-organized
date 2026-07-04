@@ -68,6 +68,10 @@ const GRAY   = { bg: '#F1EFE8', text: '#444441' }
 // Extra-quiet ghost for de-emphasized states (No-contact-info etc.).
 const QUIET_GRAY = { bg: '#F5F4EF', text: '#b5b3ac' }
 
+// THE accent for links ('View client →', tel:/mailto: values, deep
+// links). Same hue as the stage bar's current segment — one blue.
+export const ACCENT_BLUE = '#378ADD'
+
 export const CHIP_STYLES = {
   // base families — reach for these when no specific key fits
   teal: TEAL, blue: BLUE, green: GREEN, amber: AMBER, red: RED, purple: PURPLE, gray: GRAY,
