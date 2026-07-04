@@ -27,6 +27,7 @@ import {
   daysUntilNextRenewal,
   prorateToNextRenewal,
 } from "@/lib/subscription-math"
+import { importEstimateLine } from "@/lib/import-estimate"
 
 // Reviews-link URL validation. Used by onboarding location step + Settings
 // "Google Reviews" row. Required field — owners must enter a real review URL
@@ -62,7 +63,8 @@ function validateReviewsLink(raw) {
 // ImportStepContent) read locationId from here instead of being prop-drilled
 // through DashboardScreen → OnboardingScreen → StepContent.
 // Value shape: { id, email, name, role, locationId } or null.
-const CurrentUserContext = createContext(null)
+// Exported for tests (beta-import-estimate mounts ImportStepContent).
+export const CurrentUserContext = createContext(null)
 
 // Real franchise location data from Supabase, populated for franchise owner
 // sign-ins (currentLocation prop). Null for super_admin / corporate (they
@@ -12192,7 +12194,7 @@ function importEtaText(samplesRef, lastProgressRef, status) {
   return 'Almost done…'
 }
 
-function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAdvanceFromStep }) {
+export function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAdvanceFromStep }) {
   const currentUser = useContext(CurrentUserContext)
   const locationId  = currentUser?.locationId || null
 
@@ -12201,6 +12203,7 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
   const [summary, setSummary] = useState(null)   // initial POST response
   const [error,   setError]   = useState(null)   // network or HTTP error
   const [checkingActive, setCheckingActive] = useState(true) // mount check for in-flight job
+  const [clientCount, setClientCount] = useState(null)       // pre-flight estimate (null = unknown → static line)
   const continuingRef = useRef(false)            // dedupe in-flight re-POSTs
   const etaSamplesRef   = useRef([])             // rolling {t, n} samples for ETA
   const lastProgressRef = useRef(null)           // {t, n} at last processed_records increase
@@ -12215,7 +12218,10 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
       try {
         const r = await fetch('/api/import/active?location_id=' + encodeURIComponent(locationId))
         if (r.ok) {
-          const { job } = await r.json()
+          const { job, client_count } = await r.json()
+          // Pre-flight estimate input — null/absent falls back to the
+          // static line in importEstimateLine; never blocks importing.
+          if (!cancelled && typeof client_count === 'number') setClientCount(client_count)
           if (!cancelled && job && job.status === 'running') {
             setStatus(job)
             setJobId(job.id)
@@ -12474,6 +12480,9 @@ function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboarding, onAd
         style={{ width:'100%', padding:'11px', background: locationId ? '#1a2e2b' : '#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color: locationId ? 'white' : '#9ca3af', cursor: locationId ? 'pointer' : 'not-allowed' }}>
         Start Import
       </button>
+      <p style={{ fontSize:'11px', color:'#8a9e9a', textAlign:'center', lineHeight:1.5 }}>
+        {importEstimateLine(clientCount)}
+      </p>
       <button onClick={()=>{ markDone('import'); setActiveStepOpen(null) }}
         style={{ width:'100%', padding:'9px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>
         Skip for now
@@ -16768,7 +16777,7 @@ function JobberConnectionCard({ settings, updateLocation }) {
 // a read-only "Initial import completed [date]" label and the manual button
 // is hidden. Ongoing data flows via Jobber webhooks (re-running the bulk
 // import would create duplicates in tables without UNIQUE on jobber_*_id).
-function ClientImportCard({ isJobberConnected, locationId, initialImportCompletedAt }) {
+export function ClientImportCard({ isJobberConnected, locationId, initialImportCompletedAt }) {
   const router = useRouter()
   const [importState, setImportState] = useState('idle') // idle | running | complete | error
   const [jobId, setJobId]             = useState(null)
@@ -16777,6 +16786,7 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
   const [error, setError]             = useState(null)
   const [skipped, setSkipped]         = useState(false)  // session-only collapse
   const [checkingActive, setCheckingActive] = useState(true) // mount check for in-flight job
+  const [clientCount, setClientCount] = useState(null)       // pre-flight estimate (null = unknown → static line)
   const continuingRef                 = useRef(false)    // dedupe in-flight re-POSTs
   const etaSamplesRef                 = useRef([])       // rolling {t, n} samples for ETA
   const lastProgressRef               = useRef(null)     // {t, n} at last processed_records increase
@@ -16791,7 +16801,10 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
       try {
         const r = await fetch('/api/import/active?location_id=' + encodeURIComponent(locationId))
         if (r.ok) {
-          const { job } = await r.json()
+          const { job, client_count } = await r.json()
+          // Pre-flight estimate input — null/absent falls back to the
+          // static line in importEstimateLine; never blocks importing.
+          if (!cancelled && typeof client_count === 'number') setClientCount(client_count)
           if (!cancelled && job && job.status === 'running') {
             setStatus(job)
             setJobId(job.id)
@@ -16910,6 +16923,7 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
         <div>
           <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Client Import</p>
           <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Skipped — tap to import when ready</p>
+          <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px', lineHeight:1.45 }}>{importEstimateLine(clientCount)}</p>
         </div>
       </div>
       <button onClick={()=>setSkipped(false)}
@@ -16982,6 +16996,11 @@ function ClientImportCard({ isJobberConnected, locationId, initialImportComplete
             {importState === 'complete' && `${summary?.total_clients ?? status?.processed_records ?? 0} clients imported`}
             {importState === 'error' && (error || 'Import failed')}
           </p>
+          {importState === 'idle' && (
+            <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px', lineHeight:1.45 }}>
+              {importEstimateLine(clientCount)}
+            </p>
+          )}
           {etaText && (
             <p style={{ fontSize:'10px', color:'#b0c0bc' }}>{etaText}</p>
           )}

@@ -8,6 +8,13 @@
 // same flex lookup as /api/import/jobber-clients. Returns { job: row | null }
 // where row has the same fields the status route returns.
 //
+// When no job is running, the response also carries client_count — a cheap
+// { clients { totalCount } } Jobber query — so the import prompts can show
+// a pre-flight time estimate before the user clicks Start. Best-effort:
+// any failure (no token, throttle, schema without totalCount) yields
+// client_count: null and the UI falls back to a static line. A failed
+// count must never block importing.
+//
 // Auth pattern mirrors /api/import/status/[jobId]:
 //   - must be signed in (401 otherwise)
 //   - must have a hub_users profile (403 otherwise)
@@ -16,6 +23,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseService } from '@/lib/supabase-service'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { getValidJobberToken, jobberQuery } from '@/lib/jobber'
 
 export const runtime = 'nodejs'
 
@@ -38,10 +46,12 @@ export async function GET(req: NextRequest) {
   if (!input) return NextResponse.json({ error: 'location_id required' }, { status: 400 })
 
   // ─── resolve location (UUID or slug → row) ──
+  // Full row: getValidJobberToken (count fetch below) needs the token +
+  // expiry columns, same as the import route's lookupLocation.
   const field = UUID_RE.test(input) ? 'id' : 'location_id'
   const { data: location } = await supabaseService
     .from('locations')
-    .select('id, location_id')
+    .select('*')
     .eq(field, input)
     .maybeSingle()
   if (!location) return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
@@ -64,7 +74,25 @@ export async function GET(req: NextRequest) {
     .limit(1)
     .maybeSingle()
 
-  if (!job) return NextResponse.json({ job: null })
+  if (!job) {
+    // Pre-flight count for the import prompt's time estimate. One cheap
+    // GraphQL request (no nodes selected — trivial complexity cost).
+    // NOTE: not yet verified that our Jobber API version exposes
+    // clients.totalCount — hence the blanket try/catch: any error or
+    // unexpected shape degrades to null, never a failed response.
+    let clientCount: number | null = null
+    if (location.jobber_access_token) {
+      try {
+        const token = await getValidJobberToken(location)
+        const res = await jobberQuery(token, '{ clients { totalCount } }')
+        const n = res?.data?.clients?.totalCount
+        if (typeof n === 'number' && Number.isFinite(n)) clientCount = n
+      } catch (err: any) {
+        console.warn('[import-active] client count fetch failed (non-fatal):', err?.message || err)
+      }
+    }
+    return NextResponse.json({ job: null, client_count: clientCount })
+  }
 
   // Strip location_id from response — internal field, not for the UI.
   const { location_id: _omit, ...rest } = job
