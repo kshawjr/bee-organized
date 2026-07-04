@@ -63,5 +63,5 @@ export const CLIENT_STATUS_META = {
   Nurturing:  { label: 'Nurturing',       styleKey: 'Nurturing' },
   Active:     { label: 'Active',          styleKey: 'Active' },
   Past:       { label: 'Past client',     styleKey: 'Past' },
-  no_contact: { label: 'No contact info', styleKey: 'gray' },
+  no_contact: { label: 'No contact info', styleKey: 'quiet' },
 }

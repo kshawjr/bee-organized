@@ -57,9 +57,13 @@ const RED    = { bg: '#FCEBEB', text: '#791F1F' }
 const PURPLE = { bg: '#EEEDFE', text: '#3C3489' }
 const GRAY   = { bg: '#F1EFE8', text: '#444441' }
 
+// Extra-quiet ghost for de-emphasized states (No-contact-info etc.).
+const QUIET_GRAY = { bg: '#F5F4EF', text: '#b5b3ac' }
+
 export const CHIP_STYLES = {
   // base families — reach for these when no specific key fits
   teal: TEAL, blue: BLUE, green: GREEN, amber: AMBER, red: RED, purple: PURPLE, gray: GRAY,
+  quiet: QUIET_GRAY,
 
   // engagement stages
   'Request':          TEAL,   // new/go — actively engaging
@@ -73,7 +77,7 @@ export const CHIP_STYLES = {
   'New':        TEAL,
   'Attempting': BLUE,
   'Nurturing':  AMBER,
-  'Active':     TEAL,
+  'Active':     PURPLE,  // relationship family (locked directory mockup)
   'Past':       GRAY,
 
   // within-stage states (card chips)

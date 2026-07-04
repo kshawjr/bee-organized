@@ -70,9 +70,10 @@ viewports instead of wrapping.
 `tone` tints the value via `CHIP_STYLES` text colors.
 
 ### Banner
-`{ icon, text, action?, tone? }` — icon + text strip on a tinted fill
-(no border); `action: { label, onClick }` renders a solid button in the
-tone's text color. Default tone `amber`.
+`{ icon, text, action?, tone? }` — tinted notice strip, radius 8, no
+border; icon + single-line 12px text in the tone's dark text color;
+`action: { label, onClick }` renders a compact white hairline button
+(13px) right-aligned. Default tone `amber`.
 
 ### SectionHeader
 `{ label, count? }` — the locked section label ("Request · 10" style).

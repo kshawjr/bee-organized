@@ -155,8 +155,8 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
             text={
               <>
                 {pausedNurturing} of your nurturing clients came from the import with marketing paused.{' '}
-                <span title="Coming with drip activation (step 5)" style={{ color: '#b5b3ac', cursor: 'default' }}>
-                  Activate drips — soon
+                <span title="Coming with drip activation (step 5)" style={{ fontSize: '11px', color: '#b5b3ac', cursor: 'default' }}>
+                  Activate drips · soon
                 </span>
               </>
             }
@@ -171,7 +171,7 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
         placeholder="Search name, email, phone…"
         style={{
           width: '100%', boxSizing: 'border-box', marginBottom: '12px',
-          padding: '9px 14px', borderRadius: '10px',
+          padding: '9px 14px', borderRadius: '8px',
           border: '0.5px solid rgba(0,0,0,0.12)', background: '#fff',
           fontSize: '13px', fontFamily: 'inherit', color: '#1a1a18', outline: 'none',
         }}
@@ -186,7 +186,7 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
           return (
             <div key={p.id} className="bee-dir-row" onClick={() => onOpenClient(p.id)}
               style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: isMobile ? '12px 14px' : '13px 16px', borderBottom: '0.5px solid rgba(0,0,0,0.08)', cursor: 'pointer' }}>
-              <div style={{ width: '30px', height: '30px', borderRadius: '50%', background: fam.bg, color: fam.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 600, flexShrink: 0 }}>
+              <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: fam.bg, color: fam.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 600, flexShrink: 0 }}>
                 {initialsOf(p.name)}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
