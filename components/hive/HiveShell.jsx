@@ -128,6 +128,13 @@ export default function HiveShell({
   //        | { type:'person', person }  ← pre-engagement card (Inbox rows)
   const [overlay, setOverlay] = useState(null)
   const [rowPatches, setRowPatches] = useState({})
+  // Engagements founded THIS SESSION (NewClientSheet frames B/D — the
+  // decoupled manual founding). Merged ahead of the server-hydrated set
+  // so the founded row shows on the Board in Request without a reload,
+  // and the person derives Active everywhere (openClientIds consumers).
+  // Same real-row rule as onPersonCreated: only confirmed API returns
+  // land here, never optimistic stubs.
+  const [sessionEngagements, setSessionEngagements] = useState([])
   // Manual add-client sheet ("New"). The FAB must not stay live behind
   // ANY open sheet, so both overlay slots feed one flag.
   const [newClientOpen, setNewClientOpen] = useState(false)
@@ -162,9 +169,12 @@ export default function HiveShell({
   const openClient = (clientId) => setOverlay({ type: 'client', clientId })
   const openPerson = (person) => setOverlay({ type: 'person', person })
 
-  const patched = Object.keys(rowPatches).length === 0
+  const allEngagements = sessionEngagements.length === 0
     ? engagements
-    : engagements.map(e => (rowPatches[e.id] ? { ...e, ...rowPatches[e.id] } : e))
+    : [...sessionEngagements.filter(s => !engagements.some(e => e.id === s.id)), ...engagements]
+  const patched = Object.keys(rowPatches).length === 0
+    ? allEngagements
+    : allEngagements.map(e => (rowPatches[e.id] ? { ...e, ...rowPatches[e.id] } : e))
 
   const filtered = locFilter === 'all'
     ? patched
@@ -337,6 +347,13 @@ export default function HiveShell({
           onClose={() => setNewClientOpen(false)}
           onOpenClient={(clientId) => { setNewClientOpen(false); openClient(clientId) }}
           onOpenEngagement={(e) => { setNewClientOpen(false); openEngagement(e) }}
+          onSendToJobber={onSendToJobber}
+          onFounded={(engRow) => {
+            // CONFIRMED founding only — the real returned engagement row
+            // (board shape) merges into the session set; the sheet stays
+            // open on frame F for the send-or-keep-local next step.
+            setSessionEngagements(prev => prev.some(x => x.id === engRow.id) ? prev : [engRow, ...prev])
+          }}
           onCreated={(leadRow) => {
             // CONFIRMED insert only — map the real returned row (never an
             // optimistic stub), hand it up through onPersonCreated so the
@@ -359,6 +376,13 @@ export default function HiveShell({
           onClose={() => setOverlay(null)}
           onOpenClient={openClient}
           onChanged={(id, patch) => setRowPatches(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))}
+          onSendToJobber={(clientId, opts) => {
+            // Founded-not-sent send (engagement-scoped): resolve the person
+            // the popup needs — same lookup as ClientProfile below.
+            const p = people.find(x => x.id === clientId)
+            if (p) onSendToJobber(p, opts)
+            else setToast({ kind: 'error', msg: 'Client record not loaded — try the classic view' })
+          }}
           setToast={setToast}
           lookupOptions={lookupOptions}
         />

@@ -262,6 +262,61 @@ export async function foundEngagement(params: {
   return { id: created.id, created: true }
 }
 
+// Manual founding (§3 rule 6, founded_by='manual') — the decoupled
+// local write behind "Start new engagement" on a returning client.
+// UNLIKE foundEngagement there is no founding child row and therefore
+// no child-anchored idempotency: every call is a NEW engagement, which
+// is exactly rule 1 (a second engagement is a distinct concurrent row,
+// never a reuse). Send to Jobber is a separate, optional next step —
+// the send route links the resulting service request back here via
+// engagement_id, so the webhook's ensureEngagementForServiceRequest
+// sees an already-founded SR and never founds a duplicate.
+//
+// Returns the full inserted row so callers can confirm the founding
+// from the real write (never an optimistic stub) and merge it into
+// board state in the shape _hub-page ships.
+export async function foundManualEngagement(params: {
+  clientId: string
+  title?: string | null
+  note?: string
+}): Promise<{ engagement: Record<string, any>; created: true } | { error: string }> {
+  const { clientId } = params
+
+  const { data: lead, error: leadErr } = await supabaseService
+    .from('leads')
+    .select('id, location_uuid, location_id, name, is_junk')
+    .eq('id', clientId)
+    .maybeSingle()
+  if (leadErr || !lead) return { error: `lead read: ${leadErr?.message || 'not found'}` }
+  if (!lead.location_uuid) return { error: `lead ${clientId} has no location_uuid` }
+  if (lead.is_junk === true) return { error: `lead ${clientId} is in the recycle bin` }
+
+  const nowIso = new Date().toISOString()
+  const { data: created, error: insErr } = await supabaseService
+    .from('engagements')
+    .insert({
+      client_id: clientId,
+      location_uuid: lead.location_uuid,
+      stage: OPENING_STAGE.manual,
+      founded_by: 'manual',
+      title: params.title?.trim() || fallbackTitle(),
+      stage_entered_at: nowIso,
+      created_at: nowIso,
+      updated_at: nowIso,
+    })
+    .select('*')
+    .single()
+  if (insErr || !created) return { error: `engagement insert: ${insErr?.message || 'no row'}` }
+
+  await logFounding({
+    locationSlug: lead.location_id,
+    engagementId: created.id,
+    foundedBy: 'manual',
+    note: params.note || `manual founding for lead "${lead.name || clientId}" at stage ${OPENING_STAGE.manual}`,
+  })
+  return { engagement: created, created: true }
+}
+
 // ── attachment ────────────────────────────────────────────────────
 
 // Sets engagement_id if null. No-op when already set to the same

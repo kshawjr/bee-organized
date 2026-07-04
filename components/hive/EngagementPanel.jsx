@@ -16,7 +16,7 @@ import React, { useState, useEffect } from 'react'
 import useIsMobile from './shared/useIsMobile'
 import { ENGAGEMENT_STAGES, STAGE_RANK, isTerminal, stageDisplayLabel, ACCENT_BLUE } from './shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
-import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconExternalLink, IconCalendar } from '@/components/ui/icons'
+import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconExternalLink, IconCalendar, IconSend } from '@/components/ui/icons'
 import MetricCard from '@/components/ui/MetricCard'
 import ClientStrip from './ClientStrip'
 import NotesStream from './NotesStream'
@@ -117,7 +117,7 @@ function RecordRow({ icon, iconColor, primary, secondary, state, current, sub })
   )
 }
 
-export default function EngagementPanel({ engagementId, seed = null, onClose, onOpenClient = () => {}, onChanged = () => {}, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
+export default function EngagementPanel({ engagementId, seed = null, onClose, onOpenClient = () => {}, onChanged = () => {}, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -347,6 +347,19 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
     return jobs[jobs.length - 1]?.job_url || quotes[quotes.length - 1]?.quote_url || srs[srs.length - 1]?.request_url || null
   })()
 
+  // Founded-but-not-sent (the decoupled-founding case, typically
+  // founded_by='manual'): the engagement has NO work records at all —
+  // no request/quote/job/invoice, so nothing Jobber-side. That exact
+  // case gets a Send to Jobber action; the send carries engagementId so
+  // the resulting request attaches HERE (never a second engagement, and
+  // never a second leads row — the send targets the existing lead).
+  // Deliberately narrow: any child row means Jobber (or an import)
+  // already owns records for this cycle and the send offer disappears.
+  const canSendToJobber = !!onSendToJobber && !!data && eng && !isTerminal(eng.stage) &&
+    children.service_requests.length === 0 && children.quotes.length === 0 &&
+    children.jobs.length === 0 && children.invoices.length === 0 &&
+    (children.assessments || []).length === 0
+
   const currentType = eng
     ? (eng.stage === 'Request' ? 'request' : eng.stage === 'Estimate' ? 'quote' : eng.stage === 'Job in Progress' ? 'job' : 'invoice')
     : null
@@ -524,6 +537,11 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
         <MicroLabel>Actions</MicroLabel>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button style={outlineBtn} disabled={busy} onClick={() => setTouchOpen(v => !v)}><IconPhone size={14} style={{ marginRight: '5px' }} /> Log touchpoint</button>
+          {canSendToJobber && client && (
+            <button style={outlineBtn} disabled={busy} onClick={() => onSendToJobber(client.id, { engagementId })}>
+              <IconSend size={14} style={{ marginRight: '5px' }} /> Send to Jobber
+            </button>
+          )}
           {jobberHref ? (
             <a href={jobberHref} target="_blank" rel="noreferrer" style={{ ...outlineBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><IconExternalLink size={14} style={{ marginRight: '5px' }} /> Open in Jobber</a>
           ) : (

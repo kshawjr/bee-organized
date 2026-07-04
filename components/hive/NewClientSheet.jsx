@@ -5,28 +5,41 @@
 // no imports from BeeHub). Renders through OverlayShell so it inherits
 // the dvh sheet geometry, scroll reset, body lock, and header X.
 //
-// DOCTRINE (locked): "New" creates a PERSON, not an engagement. The
-// lookup is a HARD gate — frame A always comes before any create (the
-// anti-dupe). Send to Jobber remains the only door from people-world to
-// work-world; every button here that says "engagement" creates the
-// person-world row (POST /api/leads, stage New → Inbox) and founding
-// happens at Send to Jobber, exactly like the classic returning-client
-// path.
+// DOCTRINE (updated 2026-07-04 — founding decoupled from Send): "New"
+// creates a PERSON for a genuinely new inquiry (frame C), and the lookup
+// is a HARD gate — frame A always comes before any create (the
+// anti-dupe). For a RETURNING client (frames B/D) the primary action is
+// a REAL local founding: POST /api/engagements founds a new engagement
+// UNDER THE EXISTING LEAD (founded_by='manual', lib/engagements.ts).
+// Send to Jobber is the optional NEXT step (frame F) — push now, or keep
+// the engagement local (cash/off-Jobber work) and send later from the
+// engagement. The old returning-client path — minting a duplicate leads
+// row via POST /api/leads and letting the webhook found asynchronously —
+// is RETIRED: it stranded duplicates in the Inbox and 400'd at send on
+// leads_jobber_client_id_location_idx (which stays — it's the guardrail;
+// founding from the existing lead routes around it).
 //
 // Frames (routed by the lookup, all downstream of the search field):
 //   A — search input. Matches as you type against the loaded people
 //       prop (see shared/clientMatch.js for the phone-storage story).
 //   B — match found: returning client, matched-on line, open-engagement
 //       count + last contact, start-new / open-profile actions.
-//   C — no match: create with founding-viable fields only. The
-//       authoritative DB match query re-runs right before the insert.
+//   C — no match: create the PERSON with founding-viable fields only.
+//       The authoritative DB match query re-runs right before the insert.
 //   D — matched client has 1+ OPEN engagement: concurrent-engagement
-//       confirm before creating another row (skipped at zero).
+//       confirm — now gating a REAL second founding (rule 1: a distinct
+//       concurrent row, both stay active), not a cosmetic duplicate.
+//   F — founded: confirmed from the real returned engagement row; offers
+//       Send to Jobber (push) or Keep local for now (send available
+//       later). The person derives Active (open engagement) and the
+//       engagement shows on the Board in Request — the founded-not-sent
+//       signal; no new status exists for it.
 //
-// The people-merge seam: on a CONFIRMED insert this calls onCreated
-// with the REAL returned row (never an optimistic stub — phantom Inbox
-// rows). HiveShell maps it and hands it UP through the onPersonCreated
-// callback BeeHub passed DOWN — this module never reaches into BeeHub.
+// The merge seams: frame C hands the REAL returned lead row up through
+// onCreated (never an optimistic stub — phantom Inbox rows); frames B/D
+// hand the REAL returned engagement row up through onFounded so the
+// board shows it without a reload. This module never reaches into
+// BeeHub (§8.5).
 // ─────────────────────────────────────────────────────────────
 'use client'
 
@@ -37,7 +50,7 @@ import { isTerminal } from './shared/stageConfig'
 import { lastActivityTs } from './shared/engagementStatus'
 import { matchPeople, normalizeEmail, normalizePhone, queryLeadMatches, maskEmail, maskPhone } from './shared/clientMatch'
 import { createClient } from '@/lib/supabase'
-import { IconSearch, IconPlus, IconUserCheck, IconSparkles, IconAlertTriangle } from '@/components/ui/icons'
+import { IconSearch, IconPlus, IconUserCheck, IconSparkles, IconAlertTriangle, IconCheck, IconSend } from '@/components/ui/icons'
 
 const ACCENT = '#0F6E56' // the beta action green (SEND_GREEN family)
 const AMBER = { bg: '#FAEEDA', text: '#633806' } // warning tint (design language)
@@ -120,8 +133,10 @@ export default function NewClientSheet({
   lookupOptions = { sources: [], projectTypes: [] },
   onClose = () => {},
   onCreated = () => {},
+  onFounded = () => {},
   onOpenClient = () => {},
   onOpenEngagement = () => {},
+  onSendToJobber = null,
   setToast = () => {},
 }) {
   const isMobile = useIsMobile()
@@ -130,6 +145,7 @@ export default function NewClientSheet({
   const [form, setForm] = useState({ name: null, email: null, phone: null, source: 'Manual', projectType: 'Client', drip: true })
   const [pickedId, setPickedId] = useState(null) // multi-match: which B row is active
   const [confirming, setConfirming] = useState(false) // frame D
+  const [founded, setFounded] = useState(null) // frame F: { engagement, person }
   const [dbMatch, setDbMatch] = useState(null) // pre-insert gate hit not in the loaded set
   const [busy, setBusy] = useState(false)
   const [errorMsg, setErrorMsg] = useState(null)
@@ -150,7 +166,7 @@ export default function NewClientSheet({
   const qDigits = q.replace(/\D/g, '')
   const searched = q.includes('@') ? q.length >= 3 : (qDigits.length >= 7 || q.length >= 2)
 
-  const frame = confirming ? 'D' : match ? 'B' : (searched && !dbMatch) ? 'C' : 'A'
+  const frame = founded ? 'F' : confirming ? 'D' : match ? 'B' : (searched && !dbMatch) ? 'C' : 'A'
 
   // Frame B/D derived facts — session rowPatches already applied upstream.
   const openEngs = useMemo(() => {
@@ -252,9 +268,10 @@ export default function NewClientSheet({
         project_type: form.projectType || null,
         skip_drip: !form.drip,
       })
-      // FOUNDING SEAM: person-world row created; when founded_by='manual'
-      // becomes real, the engagement create slots in here — nothing above
-      // assumes Send to Jobber is the only exit.
+      // Frame C stays person-world by design: a genuinely NEW inquiry
+      // lands in the Inbox as a person (doctrine above). Manual founding
+      // (founded_by='manual', now real) belongs to the returning-client
+      // frames B/D — see foundEngagementFor.
       onCreated(lead)
     } catch (e) {
       setErrorMsg(String(e?.message || e))
@@ -263,27 +280,33 @@ export default function NewClientSheet({
     }
   }
 
-  // Frame B/D "start engagement" — a new person-world row for the
-  // returning client (classic addExistingToHive semantics). Founding
-  // still happens at Send to Jobber (see FOUNDING SEAM above).
-  async function createReturning(m) {
+  // Frame B/D "start engagement" — the REAL founding write, decoupled
+  // from Send to Jobber: POST /api/engagements founds a NEW engagement
+  // under the EXISTING lead's id (founded_by='manual'). Never POST
+  // /api/leads here — the retired duplicate-row path minted a second
+  // leads row that 400'd at send on leads_jobber_client_id_location_idx
+  // and stranded the duplicate in the Inbox. Each call is a distinct
+  // concurrent engagement (rule 1) — frame D's confirm gates creation,
+  // it never reuses the open one.
+  async function foundEngagementFor(m) {
     if (busy) return
     setErrorMsg(null)
-    if (!locationUuid) { setErrorMsg('No location context — refresh and try again.'); return }
     setBusy(true)
     try {
-      const p = m.person
-      const parts = (p.name || '').split(/\s+/).filter(Boolean)
-      const lead = await postLead({
-        name: p.name || p.email || p.phone || 'Unknown',
-        first_name: parts[0] || null,
-        last_name: parts.slice(1).join(' ') || null,
-        email: (p.email || '').trim() || null,
-        phone: (p.phone || '').trim() || null,
-        source: p.source || null,
-        project_type: p.project || null,
+      const res = await fetch('/api/engagements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: m.person.id }),
       })
-      onCreated(lead)
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || !json?.engagement) throw new Error(json?.error || `HTTP ${res.status}`)
+      // Confirmed from the REAL returned row (never an optimistic stub) —
+      // hand it up so the board shows it without a reload, then offer the
+      // next step (frame F).
+      onFounded(json.engagement, m.person)
+      setConfirming(false)
+      setFounded({ engagement: json.engagement, person: m.person })
+      setToast({ kind: 'success', msg: `Engagement started for ${m.person.name || 'client'}` })
     } catch (e) {
       setErrorMsg(String(e?.message || e))
       setConfirming(false)
@@ -294,7 +317,7 @@ export default function NewClientSheet({
 
   const startEngagement = (m) => {
     if (openEngs.length > 0) setConfirming(true)
-    else createReturning(m)
+    else foundEngagementFor(m)
   }
 
   const activeMatch = dbMatch || match
@@ -307,7 +330,7 @@ export default function NewClientSheet({
         <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '4px' }}>Search first so you don't create a duplicate.</p>
       </div>
 
-      {frame !== 'D' && (
+      {frame !== 'D' && frame !== 'F' && (
         <div>
           <div style={{ position: 'relative' }}>
             <span style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', color: '#8a8a84', display: 'inline-flex' }}>
@@ -329,7 +352,7 @@ export default function NewClientSheet({
       )}
 
       {/* Frame B — returning client */}
-      {(frame === 'B' || dbMatch) && activeMatch && !confirming && (
+      {(frame === 'B' || dbMatch) && activeMatch && !confirming && !founded && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div><Badge tint={AMBER} icon={<IconUserCheck size={13} />} label="Returning client" /></div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -445,11 +468,36 @@ export default function NewClientSheet({
           </p>
           {errorMsg && <p style={{ fontSize: '12px', color: '#791F1F', background: '#FCEBEB', padding: '8px 12px', borderRadius: '8px' }}>{errorMsg}</p>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <button style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => createReturning(activeMatch)}>
+            <button style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => foundEngagementFor(activeMatch)}>
               Start another engagement
             </button>
             <button style={secondaryBtn} onClick={() => (openEngs[0] ? onOpenEngagement(openEngs[0]) : setConfirming(false))}>
               Open existing instead
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Frame F — founded; Send is the optional next step. The board
+          already shows the engagement (onFounded fired on the confirmed
+          write); the person derives Active. 'Keep local' is a real exit:
+          cash/off-Jobber work stays a full engagement with no Jobber
+          link, send available later from the engagement panel. */}
+      {frame === 'F' && founded && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div><Badge tint={GREEN} icon={<IconCheck size={13} />} label="Engagement started" /></div>
+          <p style={{ fontSize: '13px', color: '#444441', lineHeight: 1.5 }}>
+            {founded.person.name}&rsquo;s new engagement is on the board in Request.
+            Send it to Jobber now, or keep it local — you can send any time from the engagement.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {onSendToJobber && (
+              <button style={primaryBtn} onClick={() => { onSendToJobber(founded.person, { engagementId: founded.engagement.id }); onClose() }}>
+                <IconSend size={14} /> Send to Jobber
+              </button>
+            )}
+            <button style={onSendToJobber ? secondaryBtn : primaryBtn} onClick={onClose}>
+              Keep local for now
             </button>
           </div>
         </div>

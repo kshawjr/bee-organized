@@ -2076,7 +2076,11 @@ function InvoicePopup({ person, onFinalProcess, onClose, onUpdate }) {
 }
 
 // ─── Send to Jobber Popup ─────────────────────────────────────────────────────
-function SendToJobberPopup({ person, onDone, onClose }) {
+// engagementId (optional): a send on an already-FOUNDED engagement (the
+// beta shell's decoupled manual founding). Rides the POST body as
+// engagement_id so the server links the new Jobber request to that
+// engagement instead of letting the webhook found a second one.
+function SendToJobberPopup({ person, engagementId = null, onDone, onClose }) {
   const [step, setStep] = useState(person.jobberClient?'history':'action')
   const [action, setAction] = useState(null)
   const [includeAssessment, setIncludeAssessment] = useState(!!person.assessment)
@@ -2155,6 +2159,7 @@ function SendToJobberPopup({ person, onDone, onClose }) {
         : 'job_direct'
 
     const body = { creation_type: creationType }
+    if (engagementId) body.engagement_id = engagementId
     if (hasAssessment) {
       const iso = buildScheduledIso()
       if (!iso) { setErrorMsg('Pick a date for the assessment'); return }
@@ -10092,7 +10097,9 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
   // Beta Inbox → Send to Jobber: reuses the EXISTING SendToJobberPopup
   // confirm flow (module scope in this file — the beta chunk can't and
   // shouldn't import it). Hook lives here, unconditionally, above the
-  // beta early return (rules of hooks).
+  // beta early return (rules of hooks). Holds { person, engagementId } —
+  // engagementId non-null when the send rides a founded engagement (the
+  // decoupled-founding next step), null for plain people-world sends.
   const [betaSendPerson, setBetaSendPerson] = useState(null)
   const [selected, setSelected] = useState(initialSelected)
   const [viewingCard, setViewingCard] = useState(null)
@@ -10320,20 +10327,24 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
             if (p) setSelected(p)
             else setToast({ kind:'error', msg:'Client record not loaded — try the classic board' })
           }}
-          onSendToJobber={(p)=>setBetaSendPerson(p)}
+          onSendToJobber={(p, opts)=>setBetaSendPerson({ person: p, engagementId: opts?.engagementId || null })}
         />
         {/* The EXISTING send-to-jobber confirm flow, mounted for the beta
             Inbox. onDone mirrors PersonPanel's handleSendToJobber: merge
             the patch and persist via updatePerson; the popup's own steps
-            are the confirmation (what will be created, for whom). */}
+            are the confirmation (what will be created, for whom).
+            engagementId rides through when the send is the founded-
+            engagement next step (frames B/D founding → frame F, or the
+            panel's founded-not-sent action). */}
         {betaSendPerson&&(
           <SendToJobberPopup
-            person={betaSendPerson}
+            person={betaSendPerson.person}
+            engagementId={betaSendPerson.engagementId}
             onDone={(patch)=>{
-              updatePerson({ ...betaSendPerson, ...patch }, patch)
+              updatePerson({ ...betaSendPerson.person, ...patch }, patch)
               setSelected(null)
               setBetaSendPerson(null)
-              setToast({ kind:'success', msg:`${betaSendPerson.name} sent to Jobber` })
+              setToast({ kind:'success', msg:`${betaSendPerson.person.name} sent to Jobber` })
             }}
             onClose={()=>setBetaSendPerson(null)}
           />

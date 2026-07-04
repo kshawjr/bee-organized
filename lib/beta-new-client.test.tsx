@@ -7,6 +7,8 @@
 //   - the match read carries .not('is_junk','is',true) + .range(0,999)
 //     and never a bare .select()
 //   - the create POST path (POST /api/leads, confirmed row → onCreated)
+//   - frame B/D on a RETURNING client found an engagement under the
+//     EXISTING lead (POST /api/engagements) — never a second leads row
 //   - frame D fires ONLY when the match has 1+ open engagement
 //   - copy: frame A/C/D headings + primary button labels (copy drift)
 //   - FAB hidden while a sheet is open
@@ -54,11 +56,36 @@ const jsonRes = (body: any, status = 200) => ({
   json: async () => body,
 })
 let createdBodies: any[] = []
+let foundedBodies: any[] = []
 const installFetch = () => {
   createdBodies = []
+  foundedBodies = []
   const mock = vi.fn(async (url: any, opts: any = {}) => {
     const u = String(url)
     if (u.includes('/api/lookups')) return jsonRes({ lookups: [] })
+    // Manual founding (decoupled from Send to Jobber) — returns the real
+    // engagement row in board shape, like POST /api/engagements does.
+    if (u.includes('/api/engagements') && opts.method === 'POST') {
+      const body = JSON.parse(opts.body)
+      foundedBodies.push(body)
+      return jsonRes({
+        engagement: {
+          id: `eng-founded-${foundedBodies.length}`,
+          client_id: body.client_id,
+          client_name: 'Sarah Mitchell',
+          client_phone: null,
+          client_email: 'sarah@email.com',
+          location_uuid: 'loc-uuid-1',
+          stage: 'Request',
+          founded_by: 'manual',
+          title: 'Engagement – Jul 2026',
+          created_at: new Date(now).toISOString(),
+          stage_entered_at: new Date(now).toISOString(),
+          repeat_count: foundedBodies.length,
+          quotes: [], jobs: [], invoices: [], assessments: [],
+        },
+      }, 201)
+    }
     if (u.includes('/api/leads') && opts.method === 'POST') {
       const body = JSON.parse(opts.body)
       createdBodies.push(body)
@@ -246,7 +273,7 @@ describe('NewClientSheet frames', () => {
     await unmount()
   })
 
-  it('frame D fires ONLY when the match has 1+ open engagement', async () => {
+  it('frame D fires ONLY when the match has 1+ open engagement — and its confirm gates a REAL second founding', async () => {
     const p = person({ id: 'p1' })
     // 1+ open → confirm frame with the locked copy
     const withOpen = await mount(
@@ -254,18 +281,20 @@ describe('NewClientSheet frames', () => {
     )
     await type(withOpen.host.querySelector('input[aria-label="Search clients"]')!, 'sarah@email.com')
     await click([...withOpen.host.querySelectorAll('button')].find(b => (b.textContent || '').includes('Start new engagement'))!)
-    expect(createdBodies, 'must NOT create before confirm').toHaveLength(0)
+    expect(foundedBodies, 'must NOT found before confirm').toHaveLength(0)
     expect(withOpen.host.textContent).toContain('This client has an open engagement')
     expect(withOpen.host.textContent).toContain('creates a second, concurrent engagement — both stay active.')
     expect(buttonByText(withOpen.host, 'Start another engagement')).toBeTruthy()
     expect(buttonByText(withOpen.host, 'Open existing instead')).toBeTruthy()
-    // Default action = start another → the person-world create fires
+    // Confirm → a REAL second engagement founds under the EXISTING lead:
+    // POST /api/engagements, never the retired duplicate-leads-row path.
     await click(buttonByText(withOpen.host, 'Start another engagement')!)
-    expect(createdBodies).toHaveLength(1)
-    expect(createdBodies[0].name).toBe('Sarah Mitchell')
+    expect(foundedBodies).toHaveLength(1)
+    expect(foundedBodies[0].client_id).toBe('p1')
+    expect(createdBodies, 'must NEVER POST /api/leads for a returning client').toHaveLength(0)
     await withOpen.unmount()
 
-    // zero open → D skipped entirely, create fires straight away
+    // zero open → D skipped entirely, founding fires straight away
     installFetch()
     const noOpen = await mount(
       <NewClientSheet people={[p]} engagements={[]} locFilter="loc-uuid-1" onClose={() => {}} />
@@ -273,7 +302,9 @@ describe('NewClientSheet frames', () => {
     await type(noOpen.host.querySelector('input[aria-label="Search clients"]')!, 'sarah@email.com')
     await click([...noOpen.host.querySelectorAll('button')].find(b => (b.textContent || '').includes('Start new engagement'))!)
     expect(noOpen.host.textContent).not.toContain('This client has an open engagement')
-    expect(createdBodies).toHaveLength(1)
+    expect(foundedBodies).toHaveLength(1)
+    expect(foundedBodies[0].client_id).toBe('p1')
+    expect(createdBodies).toHaveLength(0)
     await noOpen.unmount()
   })
 })

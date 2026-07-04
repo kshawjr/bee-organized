@@ -24,6 +24,15 @@
 //
 // Returns the IDs created on success, or { success:false, error, stage }
 // on failure so the popup can surface where things broke.
+//
+// engagement_id (optional body field): a send on an already-FOUNDED
+// engagement (founded_by='manual', decoupled founding). When present the
+// route pre-writes the local service_requests row for the new Jobber
+// request and attaches it to that engagement — so the REQUEST_CREATE
+// webhook's ensureEngagementForServiceRequest finds the SR already
+// founded and never mints a second engagement for the same work cycle.
+// Sends WITHOUT engagement_id are untouched: no local SR write, the
+// webhook founds under rule 1 exactly as before.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { formatInTimeZone } from 'date-fns-tz'
@@ -32,6 +41,8 @@ import { supabaseService } from '@/lib/supabase-service'
 import { jobberGraphQL, jobberMutation } from '@/lib/jobber'
 import { writeSyncLog } from '@/lib/sync-log'
 import { requireIanaTimezone } from '@/lib/drip-time'
+import { upsertServiceRequest } from '@/lib/jobber-import'
+import { attachToEngagement } from '@/lib/engagements'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -211,7 +222,7 @@ const PROPERTY_CREATE_MUTATION = /* GraphQL */ `
 const REQUEST_CREATE_MUTATION = /* GraphQL */ `
   mutation RequestCreate($input: RequestCreateInput!) {
     requestCreate(input: $input) {
-      request { id title client { id } property { id } }
+      request { id title createdAt jobberWebUri client { id } property { id } }
       userErrors { message path }
     }
   }
@@ -307,6 +318,13 @@ export async function POST(
     }
   }
 
+  // Optional founded-engagement link (decoupled founding). Validated
+  // against the lead below, before any Jobber mutation fires.
+  const engagementId: string | null =
+    typeof body.engagement_id === 'string' && body.engagement_id.trim()
+      ? body.engagement_id.trim()
+      : null
+
   // Address is only mandatory for in-person assessments. request_only and
   // virtual assessments proceed without a property — mirrors the Deluge
   // reference, which skipped property creation when street1 was empty.
@@ -335,6 +353,24 @@ export async function POST(
 
   const locationSlug: string = lead.location_id
   if (!locationSlug) return fail('lookup', 'lead_has_no_location', 400)
+
+  // engagement_id must be THIS lead's open engagement — fail fast, before
+  // any Jobber write. A mismatched id would silently attach the new
+  // request to someone else's work cycle.
+  if (engagementId) {
+    const { data: eng } = await supabaseService
+      .from('engagements')
+      .select('id, client_id, stage')
+      .eq('id', engagementId)
+      .maybeSingle()
+    if (!eng) return fail('validation', 'engagement_not_found', 400)
+    if (eng.client_id !== leadId) {
+      return fail('validation', 'engagement_belongs_to_different_client', 400)
+    }
+    if (eng.stage === 'Closed Won' || eng.stage === 'Closed Lost') {
+      return fail('validation', 'engagement_already_closed', 400)
+    }
+  }
 
   const { data: location } = await supabaseService
     .from('locations')
@@ -525,9 +561,34 @@ export async function POST(
     if (reqCreate.userErrors?.length) {
       return fail('request_create', reqCreate.userErrors[0].message)
     }
-    jobberRequestGlobalId = reqCreate.data?.requestCreate?.request?.id || null
+    const requestRec = reqCreate.data?.requestCreate?.request || null
+    jobberRequestGlobalId = requestRec?.id || null
     if (!jobberRequestGlobalId) {
       return fail('request_create', 'request_create_returned_no_id')
+    }
+
+    // Founded-engagement link: pre-write the local SR row for the new
+    // Jobber request and attach it to the founded engagement NOW, so the
+    // REQUEST_CREATE webhook (which upserts by jobber_request_id and only
+    // founds when the SR has no engagement_id) attaches idempotently
+    // instead of founding a second engagement. promoteLead=false — the
+    // webhook path owns leads.stage promotion, exactly as before.
+    // Non-fatal: the Jobber side already succeeded; a failed local link
+    // degrades to the old webhook-founds behavior and is logged.
+    if (engagementId) {
+      try {
+        const sr = await upsertServiceRequest(
+          requestRec,
+          leadId,
+          locationSlug,
+          { promoteLead: false },
+        )
+        await attachToEngagement('service_requests', sr.id, engagementId)
+      } catch (err: any) {
+        console.error('[send-to-jobber] founded-engagement SR link failed', {
+          leadId, engagementId, error: err?.message || String(err),
+        })
+      }
     }
 
     if (creation_type === 'request_with_assessment') {
@@ -631,8 +692,11 @@ export async function POST(
     // succeeded by this point — the request/property/assessment are real and
     // orphaned from a Bee Hub lead. Surface as 400 with the owner lead so
     // the user can navigate there instead of seeing a raw Postgres error.
-    // Long-term fix: drop the unique constraint (a returning customer with a
-    // new inquiry is a legitimate second lead).
+    // The index STAYS (decision 2026-07-04): it is the guardrail against
+    // duplicate Jobber-linked leads. The returning-client flow routes
+    // AROUND it — decoupled founding (POST /api/engagements) creates the
+    // new engagement under the EXISTING lead, so no second row is ever
+    // written and this branch is only reachable from legacy duplicates.
     const isClientIdDup =
       writeErr.code === '23505' &&
       (writeErr.message?.includes('leads_jobber_client_id_location_idx') ||
@@ -686,7 +750,8 @@ export async function POST(
       `Send-to-Jobber (${typeLabel}); match=${matchStatus}; ` +
       `client=${jobberClientId}` +
       (jobberRequestId    ? `; request=${jobberRequestId}`    : '') +
-      (jobberAssessmentId ? `; assessment=${jobberAssessmentId}` : ''),
+      (jobberAssessmentId ? `; assessment=${jobberAssessmentId}` : '') +
+      (engagementId       ? `; engagement=${engagementId}`    : ''),
   })
 
   return NextResponse.json({
