@@ -3,8 +3,9 @@
 // HIVE Phase 1 step 4 — the flat list lens on engagements (doc §7,
 // LOCKED list mockup). Same rows the board shows (locFilter applied
 // upstream in HiveShell), same shared status derivation, same panel on
-// row click. 'Closed' is lazy: only a server count ships up-front; the
-// rows page in on demand via GET /api/engagements?closed=1.
+// row click. 'Closed'/'Won'/'Lost' are lazy: only server counts ship
+// up-front; rows page in on demand via GET /api/engagements?closed=1
+// (&stage=won|lost for the narrowed views).
 //
 // Controls: sortable CLIENT/VALUE/ACTIVITY headers + a full-dimension
 // Filters popover (stage multi, status multi derived from the loaded
@@ -17,6 +18,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { ENGAGEMENT_STAGES, STAGE_RANK, CHIP_STYLES, stageDisplayLabel } from './shared/stageConfig'
+import { SECTION_LABEL, TEXT_SUCCESS, TEXT_DANGER } from '@/components/ui/tokens'
 import { deriveStatusChip, displayTitle, engagementValue, fmtMoney, lastActivityTs, relAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import FilterChips from '@/components/ui/FilterChips'
@@ -29,6 +31,10 @@ import useIsMobile from './shared/useIsMobile'
 
 const OPEN_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 const CHIP_LABELS = { 'Request': 'Request', 'Estimate': 'Estimate', 'Job in Progress': 'Job', 'Final Processing': 'Final' }
+// Terminal views: 'closed' = both stages; 'won'/'lost' narrow server-side
+// (GET /api/engagements?closed=1&stage=won|lost — the route binds these
+// keys to the audited stage strings via CLOSED_STAGE_FILTERS).
+const CLOSED_VIEWS = ['closed', 'won', 'lost']
 const PAGE = 200
 const SORT_LS_KEY = 'bee_hive_list_sort'
 const SORT_COLS = ['default', 'client', 'engagement', 'stage', 'status', 'value', 'activity']
@@ -66,31 +72,37 @@ function ClientCell({ e, nowMs }) {
   )
 }
 
-export default function EngagementList({ engagements = [], closedCount = 0, locFilter = 'all', workFilters = ENGAGEMENT_FILTER_DEFAULTS, setWorkFilters = () => {}, clearWorkFilters = () => {}, onOpenEngagement = () => {}, setToast = () => {} }) {
-  const [view, setView] = useState('open')             // 'open' | 'closed'
+export default function EngagementList({ engagements = [], closedCount = 0, closedWonCount = 0, locFilter = 'all', workFilters = ENGAGEMENT_FILTER_DEFAULTS, setWorkFilters = () => {}, clearWorkFilters = () => {}, onOpenEngagement = () => {}, setToast = () => {}, initialView = null, onInitialViewConsumed = () => {} }) {
+  const [view, setView] = useState('open')             // 'open' | 'closed' | 'won' | 'lost'
   const [sortRaw, setSort, ] = useStoredState(SORT_LS_KEY, { col: 'default', dir: 'desc' })
   const sort = SORT_COLS.includes(sortRaw.col) && ['asc', 'desc'].includes(sortRaw.dir) ? sortRaw : { col: 'default', dir: 'desc' }
   const filters = workFilters
-  const [closedRows, setClosedRows] = useState(null)   // per active scope
-  const [closedTotal, setClosedTotal] = useState(null) // scoped total once known
+  // One cache slot per terminal view ({ rows, total }), per active scope.
+  const [closedData, setClosedData] = useState({})
   const [loadingClosed, setLoadingClosed] = useState(false)
   const nowMs = Date.now()
 
   const isMobile = useIsMobile()
 
   // Closed cache is per location scope — reset when the switcher moves.
-  useEffect(() => { setClosedRows(null); setClosedTotal(null); if (view === 'closed') setView('open') }, [locFilter]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setClosedData({}); if (CLOSED_VIEWS.includes(view)) setView('open') }, [locFilter]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function fetchClosed(offset = 0) {
+  async function fetchClosed(viewKey, offset = 0) {
     setLoadingClosed(true)
     try {
       const params = new URLSearchParams({ closed: '1', offset: String(offset), limit: String(PAGE) })
+      if (viewKey !== 'closed') params.set('stage', viewKey)
       if (locFilter !== 'all') params.set('location_uuid', locFilter)
       const res = await fetch(`/api/engagements?${params}`)
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      setClosedRows(prev => offset === 0 ? j.rows : [...(prev || []), ...j.rows])
-      setClosedTotal(j.total ?? null)
+      setClosedData(prev => ({
+        ...prev,
+        [viewKey]: {
+          rows: offset === 0 ? j.rows : [...(prev[viewKey]?.rows || []), ...j.rows],
+          total: j.total ?? null,
+        },
+      }))
     } catch (e) {
       setToast({ kind: 'error', msg: `Closed engagements failed to load: ${e.message}` })
     } finally {
@@ -103,32 +115,51 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
   const chipBase = engagements.filter(e => passesEngagementFilters(e, filters, nowMs, { ignoreStages: true }))
   const counts = { open: chipBase.length }
   for (const s of OPEN_STAGES) counts[s.key] = chipBase.filter(e => e.stage === s.key).length
-  const scopedClosedCount = closedTotal ?? (locFilter === 'all' ? closedCount : null)
+  // Scoped terminal counts: server totals once fetched; the shipped
+  // all-locations counts before that (lost = closed − won); '…' when a
+  // location scope is active and nothing is fetched yet.
+  const scopedTotals = {
+    closed: closedData.closed?.total ?? (locFilter === 'all' ? closedCount : null),
+    won: closedData.won?.total ?? (locFilter === 'all' ? closedWonCount : null),
+    lost: closedData.lost?.total ?? (locFilter === 'all' ? Math.max(0, closedCount - closedWonCount) : null),
+  }
 
   const chips = [
     { key: 'open', label: 'Open', count: counts.open },
     ...OPEN_STAGES.map(s => ({ key: s.key, label: CHIP_LABELS[s.key], count: counts[s.key] })),
-    { key: 'closed', label: 'Closed', count: scopedClosedCount ?? '…', muted: true },
+    { key: 'closed-divider', divider: true },
+    { key: 'closed', label: 'Closed', count: scopedTotals.closed ?? '…' },
+    { key: 'won', label: 'Won', count: scopedTotals.won ?? '…', color: `var(--text-success, ${TEXT_SUCCESS})` },
+    { key: 'lost', label: 'Lost', count: scopedTotals.lost ?? '…', color: `var(--text-danger, ${TEXT_DANGER})` },
   ]
   // Chips reflect the popover's stage state: exactly one stage selected →
   // that chip; none → 'Open'; several → no chip highlights (multi shows
   // on the Filters count instead).
-  const activeChip = view === 'closed' ? 'closed'
+  const activeChip = CLOSED_VIEWS.includes(view) ? view
     : filters.stages.length === 1 ? filters.stages[0]
     : filters.stages.length === 0 ? 'open'
     : '__multi__'
 
   function pickChip(key) {
-    if (key === 'closed') {
-      setView('closed')
-      if (closedRows === null && !loadingClosed) fetchClosed(0)
+    if (CLOSED_VIEWS.includes(key)) {
+      setView(key)
+      if (!closedData[key] && !loadingClosed) fetchClosed(key, 0)
       return
     }
     setView('open')
     setWorkFilters(f => ({ ...f, stages: key === 'open' ? [] : [key] }))
   }
 
-  const showingClosed = view === 'closed'
+  // Board→List deep link: consume the one-shot initialView seed on mount
+  // (declared AFTER the locFilter reset so mount order can't clobber it).
+  useEffect(() => {
+    if (initialView && CLOSED_VIEWS.includes(initialView)) {
+      pickChip(initialView)
+      onInitialViewConsumed()
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const showingClosed = CLOSED_VIEWS.includes(view)
   const activeFilterCount = engagementFilterCount(filters)
   const clearFilters = clearWorkFilters
 
@@ -148,7 +179,7 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
   }
 
   const rows = showingClosed
-    ? sortRows(closedRows || [])
+    ? sortRows(closedData[view]?.rows || [])
     : sortRows(engagements.filter(e => passesEngagementFilters(e, filters, nowMs)))
 
   const clickSort = (col) => {
@@ -157,7 +188,10 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
       : { col, dir: ['client', 'engagement'].includes(col) ? 'asc' : 'desc' })
   }
 
-  const headerCell = { fontSize: '11px', fontWeight: 500, color: '#9a988f', letterSpacing: '0.6px', textTransform: 'uppercase' }
+  // Column headers ride the board's SECTION_LABEL treatment (12px/500
+  // #6b6b66, sentence case) — no uppercase, no letter-spacing; the sort
+  // carets and handlers are unchanged.
+  const headerCell = { ...SECTION_LABEL }
 
   return (
     <div>
@@ -237,10 +271,10 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
         )}
       </div>
 
-      {showingClosed && closedRows && closedTotal != null && closedRows.length < closedTotal && !loadingClosed && (
-        <button onClick={() => fetchClosed(closedRows.length)}
+      {showingClosed && closedData[view] && closedData[view].total != null && closedData[view].rows.length < closedData[view].total && !loadingClosed && (
+        <button onClick={() => fetchClosed(view, closedData[view].rows.length)}
           style={{ width: '100%', marginTop: '10px', padding: '9px', background: 'transparent', border: '0.5px dashed rgba(0,0,0,0.15)', borderRadius: '10px', fontSize: '12px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
-          Load {Math.min(PAGE, closedTotal - closedRows.length)} more of {closedTotal - closedRows.length}
+          Load {Math.min(PAGE, closedData[view].total - closedData[view].rows.length)} more of {closedData[view].total - closedData[view].rows.length}
         </button>
       )}
     </div>

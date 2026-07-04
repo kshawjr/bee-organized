@@ -479,6 +479,7 @@ export default async function HubPage({
   // lazily via GET /api/engagements?closed=1).
   let initialEngagements: any[] = []
   let initialEngagementsClosedCount = 0
+  let initialEngagementsClosedWonCount = 0
   {
     // Paginated load — a single .limit(1000) silently truncated locations
     // with >1000 leads (Portland: 1616), so the client-side "Active" count
@@ -738,6 +739,20 @@ export default async function HubPage({
           if (error) console.error('[hub-page] closed-engagement count error:', error.message)
           else initialEngagementsClosedCount = count ?? 0
         }
+
+        // Won split for the List's Won/Lost filter chips (lost = closed − won).
+        {
+          let wq = supabaseService
+            .from('engagements')
+            .select('id', { count: 'exact', head: true })
+            .eq('stage', 'Closed Won')
+          if (!isElevated && hubUser.location_id) {
+            wq = wq.eq('location_uuid', hubUser.location_id)
+          }
+          const { count, error } = await wq
+          if (error) console.error('[hub-page] closed-won count error:', error.message)
+          else initialEngagementsClosedWonCount = count ?? 0
+        }
       }
     }
   }
@@ -870,6 +885,7 @@ export default async function HubPage({
       initialBinPeople={initialBinPeople}
       initialEngagements={initialEngagements}
       initialEngagementsClosedCount={initialEngagementsClosedCount}
+      initialEngagementsClosedWonCount={initialEngagementsClosedWonCount}
       initialPartners={initialPartners}
       initialCompanies={initialCompanies}
       currentSubscription={currentSubscription}

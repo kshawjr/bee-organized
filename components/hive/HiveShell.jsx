@@ -28,6 +28,7 @@ import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCo
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
 import { IconInbox, IconLayoutKanban, IconList, IconUsers, IconPlus } from '@/components/ui/icons'
+import { TEXT_TOKENS } from '@/components/ui/tokens'
 
 const TABS = [
   { key: 'inbox',   label: 'Inbox',   live: true, badge: true, Icon: IconInbox },
@@ -93,6 +94,7 @@ function TabPill({ tab, active, onSelect, badgeCount = null }) {
 export default function HiveShell({
   engagements = [],
   closedCount = 0,
+  closedWonCount = 0,
   people = [],
   locFilter = 'all',
   currentLocationUuid = null,
@@ -149,6 +151,10 @@ export default function HiveShell({
   // lenses mid-triage, keep the subset). Owned HERE so both lenses and
   // the open-count derive from a single instance; persisted per user.
   const [workFilters, setWorkFilters, clearWorkFilters] = useStoredState('bee_hive_list_filters', ENGAGEMENT_FILTER_DEFAULTS)
+  // Board→List deep link ("view all in List" on the closed rail): a
+  // one-shot seed the List consumes on mount, then hands back null.
+  const [listInitialView, setListInitialView] = useState(null)
+  const viewClosedInList = () => { setListInitialView('closed'); pickLens('list') }
   const openEngagement = (e) => setOverlay({ type: 'engagement', engagement: e })
   const openClient = (clientId) => setOverlay({ type: 'client', clientId })
   const openPerson = (person) => setOverlay({ type: 'person', person })
@@ -219,7 +225,7 @@ export default function HiveShell({
   return (
     // min-height fills the VISIBLE viewport (dvh where supported — iOS
     // vh is the large viewport; vh kept as the old-browser fallback).
-    <div className="bee-hive-root" style={{ background: '#fdfdfc', padding: '1rem 1rem 5rem', fontFamily: 'DM Sans,system-ui,sans-serif' }}>
+    <div className="bee-hive-root" style={{ ...TEXT_TOKENS, background: '#fdfdfc', padding: '1rem 1rem 5rem', fontFamily: 'DM Sans,system-ui,sans-serif' }}>
       <style>{`.bee-hive-root { min-height: 100vh; min-height: 100dvh; }`}</style>
       {isMobile ? (
         /* Mobile chrome STACKS (nothing may overlap at 320–430px):
@@ -269,21 +275,27 @@ export default function HiveShell({
         <EngagementList
           engagements={filtered}
           closedCount={closedCount}
+          closedWonCount={closedWonCount}
           locFilter={locFilter}
           workFilters={workFilters}
           setWorkFilters={setWorkFilters}
           clearWorkFilters={clearWorkFilters}
           onOpenEngagement={openEngagement}
           setToast={setToast}
+          initialView={listInitialView}
+          onInitialViewConsumed={() => setListInitialView(null)}
         />
       ) : (
         <EngagementBoard
           engagements={filtered}
+          closedCount={closedCount}
+          locFilter={locFilter}
           workFilters={workFilters}
           setWorkFilters={setWorkFilters}
           clearWorkFilters={clearWorkFilters}
           onOpenClient={openClient}
           onOpenEngagement={openEngagement}
+          onViewClosedInList={viewClosedInList}
           setToast={setToast}
         />
       )}

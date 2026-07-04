@@ -10067,7 +10067,7 @@ async function patchLeadAPI(leadId, patch) {
   }
 }
 
-function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, newBoardAllowed=false }) {
+function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false }) {
   if (!people) return null
   const allPeople = locFilter==='all' ? people : people.filter(p=>p.locationId===locFilter)
   // Real hub_users roster (LocationUsersContext) drives the "Assigned To"
@@ -10303,6 +10303,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
         <HiveShell
           engagements={engagements}
           closedCount={engagementsClosedCount}
+          closedWonCount={engagementsClosedWonCount}
           people={people}
           locFilter={locFilter}
           currentLocationUuid={locFilter!=='all' ? locFilter : (hiveCurrentLocationCtx?.id || hiveCurrentUserCtx?.locationId || null)}
@@ -20429,7 +20430,7 @@ function SlimCoOwnerOnboarding({ locationId, locationName, profile, topOffset=0,
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, newBoardAllowed=false }) {
+function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
@@ -20654,7 +20655,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     // allow browsing but read-only during grace
   }
 
-  if (activeNav==='hive') return <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} locations={locations} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} setToast={setToast} engagements={engagements} newBoardAllowed={newBoardAllowed} engagementsClosedCount={engagementsClosedCount} />{toast && <InlineToast {...toast} />}</>
+  if (activeNav==='hive') return <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} locations={locations} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} setToast={setToast} engagements={engagements} newBoardAllowed={newBoardAllowed} engagementsClosedCount={engagementsClosedCount} engagementsClosedWonCount={engagementsClosedWonCount} />{toast && <InlineToast {...toast} />}</>
 
   if (activeNav==='schedule') return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'5rem' }}>
@@ -30865,6 +30866,7 @@ export default function App({
   initialBinPeople,          // server-rendered is_junk=true leads (Recycle Bin)
   initialEngagements,        // Phase 1 step 4: open engagements for the new board (dual-read; super_admin-flagged)
   initialEngagementsClosedCount, // Phase 1 step 4: 'Closed · N' chip count (List lens; rows page in lazily)
+  initialEngagementsClosedWonCount, // won share of the closed count (Won/Lost chips; lost = closed − won)
   initialPartners,           // server-rendered partners+contacts (Supabase partners table); replaces PARTNERS_DATA mock
   initialCompanies,          // server-rendered companies (Supabase companies table); replaces COMPANIES_DATA mock
   currentSubscription,
@@ -31700,7 +31702,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     )
     if (activeNav==='hive') return (
       <div style={pageStyle}>
-        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} />
+        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} />
         {toast && <InlineToast {...toast} />}
       </div>
     )
@@ -31753,6 +31755,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           followUps={followUps}
           engagements={Array.isArray(initialEngagements)?initialEngagements:[]}
           engagementsClosedCount={Number(initialEngagementsClosedCount)||0}
+          engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0}
           newBoardAllowed={canSeeBetaBoard(role)}
           onCompleteOnboarding={()=>{
             // Real franchise owners have franchiseLoc=null (no selectedLoc,

@@ -1,6 +1,6 @@
 // app/api/engagements/route.ts
 //
-// GET /api/engagements?closed=1[&location_uuid=][&offset=][&limit=]
+// GET /api/engagements?closed=1[&stage=won|lost][&location_uuid=][&offset=][&limit=]
 //
 // Collection endpoint for the EngagementList's lazy 'Closed' page — the
 // initial page load deliberately ships only OPEN engagements plus a
@@ -16,6 +16,9 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+// PURE zero-import module (§8.5) — safe from the server route; ONE
+// source for the terminal stage strings ('Closed Won' / 'Closed Lost').
+import { CLOSED_STAGE_FILTERS } from '@/components/hive/shared/stageConfig'
 
 export async function GET(req: Request) {
   const supabase = await createServerSupabaseClient()
@@ -38,6 +41,14 @@ export async function GET(req: Request) {
   const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0)
   const limit = Math.min(500, Math.max(1, parseInt(url.searchParams.get('limit') || '200', 10) || 200))
 
+  // Optional won/lost narrowing — vocabulary lives in stageConfig, the
+  // audited stage strings, never inline literals.
+  const stageParam = url.searchParams.get('stage') || 'closed'
+  const stages = (CLOSED_STAGE_FILTERS as Record<string, string[]>)[stageParam]
+  if (!stages) {
+    return NextResponse.json({ error: 'unsupported_stage', hint: 'stage must be won or lost' }, { status: 400 })
+  }
+
   // Scope: owners locked to their location; elevated may pass one.
   const requestedLoc = url.searchParams.get('location_uuid')
   const scopeLoc = isAdmin(hubUser.role)
@@ -47,7 +58,7 @@ export async function GET(req: Request) {
   let q = supabaseService
     .from('engagements')
     .select('*', { count: 'exact' })
-    .in('stage', ['Closed Won', 'Closed Lost'])
+    .in('stage', stages)
     .order('closed_at', { ascending: false, nullsFirst: false })
     .order('id', { ascending: true })
     .range(offset, offset + limit - 1)

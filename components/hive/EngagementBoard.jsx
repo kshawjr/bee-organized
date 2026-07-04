@@ -19,7 +19,9 @@
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react'
-import { ENGAGEMENT_STAGES, STAGE_RANK, isTerminal } from './shared/stageConfig'
+import { ENGAGEMENT_STAGES, STAGE_RANK, isTerminal, CLOSED_WON, CLOSED_LOST } from './shared/stageConfig'
+import { SECTION_LABEL, SECTION_COUNT, TEXT_SUCCESS, TEXT_DANGER } from '@/components/ui/tokens'
+import FilterChips from '@/components/ui/FilterChips'
 // THE shared status derivation — board cards and list rows consume the
 // same module so the two lenses can never disagree.
 import { deriveStatusChip, displayTitle, engagementValue, fmtMoney } from './shared/engagementStatus'
@@ -43,15 +45,23 @@ const BOARD_SORTS = [
 
 const BOARD_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 
+// Closed rail (5th column, desktop): the board only ever loads a RECENT
+// WINDOW of closed engagements — there are ~1,375 terminal rows and the
+// board is a working surface, not the archive (that's the List). The
+// window rides GET /api/engagements?closed=1&limit=40 (explicit .range()
+// server-side — never a bare .select(), the 1000-row silent-truncation
+// gotcha). The All/Won/Lost toggle filters THIS window in memory only.
+const CLOSED_WINDOW = 40
+
 // Card typography (LOCKED): name 13px/500 near-black, subtitle 11px muted,
 // value 12px/500. 100% sans — no serif inside the board.
-function EngagementCard({ e, onOpen, draggable, onDragStart }) {
+function EngagementCard({ e, onOpen, draggable, onDragStart, accent = null }) {
   const chip = deriveStatusChip(e)
   const rawValue = engagementValue(e)
   const value = rawValue != null ? fmtMoney(rawValue) : null
   return (
     <div draggable={draggable || undefined} onDragStart={onDragStart}>
-      <Card onClick={onOpen}>
+      <Card onClick={onOpen} accent={accent}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '3px' }}>
           <p style={{ flex: 1, minWidth: 0, fontSize: '13px', fontWeight: 500, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {e.client_name}
@@ -72,7 +82,7 @@ function EngagementCard({ e, onOpen, draggable, onDragStart }) {
   )
 }
 
-export default function EngagementBoard({ engagements = [], workFilters = ENGAGEMENT_FILTER_DEFAULTS, setWorkFilters = () => {}, clearWorkFilters = () => {}, onOpenClient = () => {}, onOpenEngagement = null, setToast = () => {} }) {
+export default function EngagementBoard({ engagements = [], closedCount = 0, locFilter = 'all', workFilters = ENGAGEMENT_FILTER_DEFAULTS, setWorkFilters = () => {}, clearWorkFilters = () => {}, onOpenClient = () => {}, onOpenEngagement = null, onViewClosedInList = () => {}, setToast = () => {} }) {
   // Local rows for optimistic drag moves; resync when the server prop changes.
   const [rows, setRows] = useState(engagements)
   useEffect(() => { setRows(engagements) }, [engagements])
@@ -83,6 +93,38 @@ export default function EngagementBoard({ engagements = [], workFilters = ENGAGE
   const [dragOverCol, setDragOverCol] = useState(null)
   const dragId = useRef(null)
   const touchX = useRef(null)
+
+  // Closed rail state — collapsed by default every mount (it's an
+  // archive peek, not a pinned lens). Data is fetched ONCE on first
+  // expand; the All/Won/Lost toggle never refetches.
+  const [closedOpen, setClosedOpen] = useState(false)
+  const [closedSeg, setClosedSeg] = useState('all')     // 'all' | 'won' | 'lost'
+  const [closedData, setClosedData] = useState(null)    // { rows, total } — recent window only
+  const [closedLoading, setClosedLoading] = useState(false)
+
+  async function fetchClosedWindow() {
+    setClosedLoading(true)
+    try {
+      const params = new URLSearchParams({ closed: '1', offset: '0', limit: String(CLOSED_WINDOW) })
+      if (locFilter !== 'all') params.set('location_uuid', locFilter)
+      const res = await fetch(`/api/engagements?${params}`)
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      setClosedData({ rows: j.rows || [], total: j.total ?? null })
+    } catch (err) {
+      setToast({ kind: 'error', msg: `Closed engagements failed to load: ${err.message}` })
+    } finally {
+      setClosedLoading(false)
+    }
+  }
+
+  // Window is per location scope — drop it when the switcher moves.
+  useEffect(() => { setClosedData(null); setClosedSeg('all') }, [locFilter])
+
+  function expandClosed() {
+    setClosedOpen(true)
+    if (!closedData && !closedLoading) fetchClosedWindow()
+  }
 
   // Within-column ordering (persisted separately from the list's sort).
   const [boardSortRaw, setBoardSort] = useStoredState('bee_hive_board_sort', { key: 'newest' })
@@ -174,6 +216,96 @@ export default function EngagementBoard({ engagements = [], workFilters = ENGAGE
     )
   }
 
+  // ── Closed rail (desktop 5th column) ─────────────────────────
+  // Collapsed: thin vertical rail, quieter than the pipeline columns.
+  // Expanded: header + All/Won/Lost toggle over the loaded window, cards
+  // with a won/lost left-edge cue, and the List hand-off for the archive.
+  const scopedClosedTotal = closedData?.total ?? (locFilter === 'all' ? closedCount : null)
+  const renderClosedRail = () => {
+    if (!closedOpen) {
+      return (
+        <button
+          key="closed-rail"
+          onClick={expandClosed}
+          aria-label="Expand closed engagements"
+          style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px',
+            width: '34px', minHeight: '200px', padding: '12px 0', flexShrink: 0,
+            border: '0.5px solid rgba(0,0,0,0.08)', borderRadius: '10px',
+            background: 'transparent', cursor: 'pointer', fontFamily: 'inherit',
+          }}
+        >
+          <IconChevronRight size={12} style={{ transform: 'rotate(180deg)', color: '#b5b3ac' }} />
+          <span style={{ writingMode: 'vertical-rl', ...SECTION_LABEL, color: '#8a8a84' }}>
+            Closed<span style={SECTION_COUNT}> · {scopedClosedTotal ?? '…'}</span>
+          </span>
+        </button>
+      )
+    }
+    const windowRows = closedData?.rows || []
+    const segRows = closedSeg === 'won' ? windowRows.filter(e => e.stage === CLOSED_WON)
+      : closedSeg === 'lost' ? windowRows.filter(e => e.stage === CLOSED_LOST)
+      : windowRows
+    return (
+      <div key="closed-rail" style={{ width: '220px', flexShrink: 0, padding: '2px' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '8px' }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline' }}>
+            <span style={SECTION_LABEL}>Closed</span>
+            <span style={{ ...SECTION_COUNT, marginLeft: '5px' }}>· {scopedClosedTotal ?? '…'}</span>
+          </div>
+          <button
+            onClick={() => setClosedOpen(false)}
+            aria-label="Collapse to pipeline"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', border: 'none', background: 'transparent', padding: 0, ...SECTION_COUNT, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}
+          >
+            <IconChevronRight size={10} />
+            Pipeline
+          </button>
+        </div>
+        <div style={{ marginBottom: '8px' }}>
+          <FilterChips
+            items={[
+              { key: 'all', label: 'All' },
+              { key: 'won', label: 'Won', color: `var(--text-success, ${TEXT_SUCCESS})` },
+              { key: 'lost', label: 'Lost', color: `var(--text-danger, ${TEXT_DANGER})` },
+            ]}
+            active={closedSeg}
+            onChange={setClosedSeg}
+          />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {segRows.map(e => (
+            <EngagementCard
+              key={e.id}
+              e={e}
+              onOpen={() => openCard(e)}
+              accent={e.stage === CLOSED_WON ? `var(--text-success, ${TEXT_SUCCESS})` : `var(--text-danger, ${TEXT_DANGER})`}
+            />
+          ))}
+          {closedLoading && (
+            <div style={{ padding: '14px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px' }}>Loading…</div>
+          )}
+          {!closedLoading && segRows.length === 0 && (
+            <div style={{ padding: '14px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px', border: '0.5px dashed rgba(0,0,0,0.12)', borderRadius: '10px' }}>
+              Empty
+            </div>
+          )}
+          {!closedLoading && closedData && closedData.total != null && closedData.rows.length < closedData.total && (
+            <div style={{ fontSize: '11px', color: '#b5b3ac', padding: '2px 2px 8px' }}>
+              Showing {closedData.rows.length} most recent ·{' '}
+              <button
+                onClick={onViewClosedInList}
+                style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline', textUnderlineOffset: '2px' }}
+              >
+                view all in List
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   if (isMobile) {
     const stage = BOARD_STAGES[mobileCol]
     const count = byStage(stage.key).length
@@ -231,6 +363,7 @@ export default function EngagementBoard({ engagements = [], workFilters = ENGAGE
         <div style={{ overflowX: 'auto', paddingBottom: '1rem', WebkitOverflowScrolling: 'touch' }}>
           <div style={{ display: 'flex', gap: '16px', minWidth: 'max-content', alignItems: 'flex-start' }}>
             {BOARD_STAGES.map(stage => renderColumn(stage, { droppable: true }))}
+            {renderClosedRail()}
           </div>
         </div>
       )}

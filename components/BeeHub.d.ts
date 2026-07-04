@@ -175,6 +175,8 @@ interface BeeHubProps {
   // Count of terminal engagements (List lens 'Closed · N' chip) — rows
   // page in lazily via GET /api/engagements?closed=1.
   initialEngagementsClosedCount?: number
+  // Won share of the closed count (List Won/Lost chips; lost = closed − won)
+  initialEngagementsClosedWonCount?: number
   initialPartners?: any[]
   initialCompanies?: any[]
   // URL routing: server-passed route slug ('clients' / 'reports' / etc.)

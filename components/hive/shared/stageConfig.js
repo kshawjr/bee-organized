@@ -42,6 +42,20 @@ export function stageDisplayLabel(stageKey) {
   return DISPLAY_LABELS[stageKey] || stageKey
 }
 
+// Terminal stage vocabulary — audited against prod 2026-07-04: the two
+// terminal values in engagements.stage are EXACTLY 'Closed Won' (680)
+// and 'Closed Lost' (695). closed_reason is NOT won/lost-symmetric
+// ('won' vs 'stale_on_import') — never bind won/lost logic to it; the
+// stage string is the one truth. Consumed by the closed API route, the
+// list won/lost filters, and the board's closed rail.
+export const CLOSED_WON = 'Closed Won'
+export const CLOSED_LOST = 'Closed Lost'
+export const CLOSED_STAGE_FILTERS = {
+  closed: [CLOSED_WON, CLOSED_LOST],
+  won: [CLOSED_WON],
+  lost: [CLOSED_LOST],
+}
+
 // Client status machine (§2) — Bee Hub's own, fully decoupled from Jobber.
 export const CLIENT_STATUSES = [
   { key: 'New',        label: 'New' },
