@@ -20,6 +20,7 @@ import ClientDirectory from './ClientDirectory'
 import InboxScreen from './InboxScreen'
 import ClientProfile from './ClientProfile'
 import { deriveClientStatus } from './shared/clientStatus'
+import { isTerminal } from './shared/stageConfig'
 import { IconInbox, IconLayoutKanban, IconList, IconUsers } from '@/components/ui/icons'
 
 const TABS = [
@@ -118,19 +119,22 @@ export default function HiveShell({
   const filtered = locFilter === 'all'
     ? patched
     : patched.filter(e => e.location_uuid === locFilter)
-  const openCount = filtered.length
+  // Rows closed THIS SESSION (via the panel's close-out) carry a terminal
+  // rowPatch — they leave the count and every open-set consumer.
+  const openFiltered = filtered.filter(e => !isTerminal(e.stage))
+  const openCount = openFiltered.length
 
   // Inbox badge: New + Attempting in the current location scope.
   const inboxCount = useMemo(() => {
     const scopedPeople = locFilter === 'all' ? people : people.filter(p => p.locationId === locFilter)
-    const openIds = new Set(filtered.map(e => e.client_id))
+    const openIds = new Set(openFiltered.map(e => e.client_id))
     let n = 0
     for (const p of scopedPeople) {
       const s = deriveClientStatus(p, openIds)
       if (s === 'New' || s === 'Attempting') n++
     }
     return n
-  }, [people, locFilter, filtered])
+  }, [people, locFilter, openFiltered])
 
   return (
     <div style={{ background: '#fdfdfc', minHeight: '100vh', padding: '1rem 1rem 5rem', fontFamily: 'DM Sans,system-ui,sans-serif' }}>

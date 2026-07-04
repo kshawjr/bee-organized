@@ -122,6 +122,10 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
   const [touchMethod, setTouchMethod] = useState('call')
   const [touchNote, setTouchNote] = useState('')
   const [busy, setBusy] = useState(false)
+  const [closeOpen, setCloseOpen] = useState(false)
+  const [closeAs, setCloseAs] = useState('Closed Lost')
+  const [closeReason, setCloseReason] = useState('lost_no_response')
+  const [closeNote, setCloseNote] = useState('')
   const touchY = useRef(null)
 
   // SSR-safe mobile detection (BeeHub pattern).
@@ -424,6 +428,66 @@ export default function EngagementPanel({ engagementId, seed = null, onClose, on
             Advance to {stageDisplayLabel(nextStage)} →
           </button>
         )}
+        {/* Close-out (doc §4): quiet affordance — closing is legitimate,
+            not alarming. Inline confirm, never a second modal. */}
+        {eng && !isTerminal(eng.stage) && !closeOpen && (
+          <button onClick={() => setCloseOpen(true)}
+            style={{ display: 'block', margin: '10px auto 0', border: 'none', background: 'transparent', fontSize: '11px', color: '#b5b3ac', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
+            Close engagement
+          </button>
+        )}
+        {closeOpen && eng && (() => {
+          const invoices = children.invoices || []
+          const settled = invoices.length === 0 || invoices.every(i => i.status === 'paid' || Number(i.balance_owing) === 0)
+          const confirmClose = async () => {
+            const bodyPatch = closeAs === 'Closed Won'
+              ? { stage: 'Closed Won', closed_reason: 'won', closed_note: closeNote.trim() || undefined }
+              : { stage: 'Closed Lost', closed_reason: closeReason, closed_note: closeNote.trim() || undefined }
+            const ok = await patchEngagement(bodyPatch, `Closed as ${closeAs === 'Closed Won' ? 'won' : 'lost'}`)
+            if (ok) setTimeout(onClose, 900)
+          }
+          const segBtn = (key, label, disabled, why) => (
+            <button key={key} disabled={disabled} title={disabled ? why : undefined}
+              onClick={() => { setCloseAs(key) }}
+              style={{ flex: 1, padding: '7px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 500, fontFamily: 'inherit', cursor: disabled ? 'default' : 'pointer',
+                border: `0.5px solid ${closeAs === key && !disabled ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.12)'}`,
+                background: closeAs === key && !disabled ? '#fff' : 'transparent',
+                color: disabled ? '#c9c7c0' : (closeAs === key ? '#1a1a18' : '#8a8a84') }}>
+              {label}
+            </button>
+          )
+          return (
+            <div style={{ marginTop: '12px', padding: '12px', background: '#f7f6f4', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <p style={{ fontSize: '11px', fontWeight: 500, color: '#8a8a84', letterSpacing: '0.6px', textTransform: 'uppercase' }}>Close as</p>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {segBtn('Closed Lost', 'Lost', false)}
+                {segBtn('Closed Won', 'Won', !settled, 'Invoices still owing — settle them in Jobber first (or close as lost / written off)')}
+              </div>
+              {closeAs === 'Closed Lost' && (
+                <select value={closeReason} onChange={e => setCloseReason(e.target.value)}
+                  style={{ padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', background: '#fff' }}>
+                  <option value="lost_no_response">No response</option>
+                  <option value="lost_competitor">Went with someone else</option>
+                  <option value="lost_not_fit">Not a fit</option>
+                  <option value="written_off">Written off</option>
+                  <option value="lost_other">Other</option>
+                </select>
+              )}
+              <input value={closeNote} onChange={e => setCloseNote(e.target.value)} placeholder="Note (optional)…"
+                style={{ padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none', background: '#fff' }} />
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                <button onClick={() => setCloseOpen(false)} disabled={busy}
+                  style={{ padding: '7px 12px', borderRadius: '8px', border: 'none', background: 'transparent', fontSize: '12px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
+                  Cancel
+                </button>
+                <button onClick={confirmClose} disabled={busy || (closeAs === 'Closed Won' && !settled)}
+                  style={{ padding: '7px 14px', borderRadius: '8px', border: 'none', background: '#1a1a18', color: '#fff', fontSize: '12px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  Close as {closeAs === 'Closed Won' ? 'won' : 'lost'}
+                </button>
+              </div>
+            </div>
+          )
+        })()}
       </div>
     </div>
   )

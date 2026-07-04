@@ -17,7 +17,7 @@ import { ENGAGEMENT_STAGES, STAGE_RANK, CHIP_STYLES, stageDisplayLabel } from '.
 import { deriveStatusChip, displayTitle, engagementValue, fmtMoney, lastActivityTs, relAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import FilterChips from '@/components/ui/FilterChips'
-import { statusIconFor } from '@/components/ui/icons'
+import { statusIconFor, IconChevronRight } from '@/components/ui/icons'
 
 const OPEN_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 const CHIP_LABELS = { 'Request': 'Request', 'Estimate': 'Estimate', 'Job in Progress': 'Job', 'Final Processing': 'Final' }
@@ -65,6 +65,16 @@ function ClientCell({ e, nowMs }) {
 
 export default function EngagementList({ engagements = [], closedCount = 0, locFilter = 'all', onOpenEngagement = () => {}, setToast = () => {} }) {
   const [filter, setFilter] = useState('open')
+  // Column sort: default = stage rank then activity desc. Clicking
+  // CLIENT/VALUE/ACTIVITY toggles that column asc/desc.
+  const [sortCol, setSortCol] = useState('default')
+  const [sortDir, setSortDir] = useState('desc')
+  // Power filters (beta tool, client-side over the loaded set).
+  const [fltOpen, setFltOpen] = useState(false)
+  const [fltMinValue, setFltMinValue] = useState('')
+  const [fltAge, setFltAge] = useState(null)      // null | 7 | 30
+  const [fltOwing, setFltOwing] = useState(false)
+  const [fltRepeat, setFltRepeat] = useState(false)
   const [closedRows, setClosedRows] = useState(null)   // per active scope
   const [closedTotal, setClosedTotal] = useState(null) // scoped total once known
   const [loadingClosed, setLoadingClosed] = useState(false)
@@ -111,13 +121,40 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
   ]
 
   const showingClosed = filter === 'closed'
+  const activeFilterCount = (fltMinValue ? 1 : 0) + (fltAge ? 1 : 0) + (fltOwing ? 1 : 0) + (fltRepeat ? 1 : 0)
+  const clearFilters = () => { setFltMinValue(''); setFltAge(null); setFltOwing(false); setFltRepeat(false) }
+
+  const passesFilters = (e) => {
+    if (fltMinValue && (engagementValue(e) ?? 0) < Number(fltMinValue)) return false
+    if (fltAge && (nowMs - lastActivityTs(e)) < fltAge * 86400000) return false
+    if (fltOwing && !(Number(e.balance_owing) > 0)) return false
+    if (fltRepeat && !(e.repeat_count > 1)) return false
+    return true
+  }
+
+  const sortRows = (arr) => {
+    const sorted = arr.slice()
+    const dir = sortDir === 'asc' ? 1 : -1
+    if (sortCol === 'client') sorted.sort((a, b) => dir * (a.client_name || '').localeCompare(b.client_name || ''))
+    else if (sortCol === 'value') sorted.sort((a, b) => dir * ((engagementValue(a) ?? 0) - (engagementValue(b) ?? 0)))
+    else if (sortCol === 'activity') sorted.sort((a, b) => dir * (lastActivityTs(a) - lastActivityTs(b)))
+    else sorted.sort((a, b) =>
+      (STAGE_RANK[a.stage] ?? 0) - (STAGE_RANK[b.stage] ?? 0) ||
+      lastActivityTs(b) - lastActivityTs(a))
+    return sorted
+  }
+
   const rows = showingClosed
-    ? (closedRows || [])
-    : (filter === 'open' ? engagements : engagements.filter(e => e.stage === filter))
-        .slice()
-        .sort((a, b) =>
-          (STAGE_RANK[a.stage] ?? 0) - (STAGE_RANK[b.stage] ?? 0) ||
-          lastActivityTs(b) - lastActivityTs(a))
+    ? sortRows(closedRows || [])
+    : sortRows((filter === 'open' ? engagements : engagements.filter(e => e.stage === filter)).filter(passesFilters))
+
+  const clickSort = (col) => {
+    if (sortCol === col) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortCol(col); setSortDir(col === 'client' ? 'asc' : 'desc') }
+  }
+  const SortChevron = ({ col }) => sortCol !== col ? null : (
+    <IconChevronRight size={10} style={{ transform: sortDir === 'asc' ? 'rotate(-90deg)' : 'rotate(90deg)', marginLeft: '3px' }} />
+  )
 
   function pickFilter(key) {
     setFilter(key)
@@ -129,20 +166,61 @@ export default function EngagementList({ engagements = [], closedCount = 0, locF
   return (
     <div>
       <style>{`.bee-englist-row:hover { background:#f7f6f4 } .bee-englist-row:last-child { border-bottom:none !important }`}</style>
-      <div style={{ marginBottom: '12px' }}>
-        <FilterChips items={chips} active={filter} onChange={pickFilter} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <FilterChips items={chips} active={filter} onChange={pickFilter} />
+        </div>
+        {!showingClosed && (
+          <div style={{ position: 'relative', flexShrink: 0 }}>
+            <button onClick={() => setFltOpen(v => !v)}
+              style={{ padding: '5px 12px', borderRadius: '20px', border: '0.5px solid rgba(0,0,0,0.15)', background: fltOpen || activeFilterCount > 0 ? '#fff' : 'transparent', fontSize: '12px', fontWeight: activeFilterCount > 0 ? 500 : 400, color: activeFilterCount > 0 ? '#1a1a18' : '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+              Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''}
+            </button>
+            {fltOpen && (
+              <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 50, width: '230px', background: '#fff', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '10px', boxShadow: '0 8px 30px rgba(26,26,24,0.12)', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <label style={{ fontSize: '11px', color: '#8a8a84', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  Min value $
+                  <input type="number" min="0" value={fltMinValue} onChange={e => setFltMinValue(e.target.value)}
+                    style={{ flex: 1, minWidth: 0, padding: '5px 8px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#8a8a84' }}>
+                  Quiet
+                  {[7, 30].map(d => (
+                    <button key={d} onClick={() => setFltAge(a => (a === d ? null : d))}
+                      style={{ padding: '3px 10px', borderRadius: '20px', border: `0.5px solid ${fltAge === d ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.12)'}`, background: fltAge === d ? '#fff' : 'transparent', fontSize: '11px', fontWeight: fltAge === d ? 500 : 400, color: fltAge === d ? '#1a1a18' : '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
+                      &gt;{d}d
+                    </button>
+                  ))}
+                </div>
+                {[['Has owing', fltOwing, setFltOwing], ['Repeat clients only', fltRepeat, setFltRepeat]].map(([label, val, set]) => (
+                  <button key={label} onClick={() => set(v => !v)}
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', border: 'none', background: 'transparent', padding: 0, fontSize: '12px', color: val ? '#1a1a18' : '#8a8a84', fontWeight: val ? 500 : 400, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+                    <span style={{ width: '14px', height: '14px', borderRadius: '4px', border: `0.5px solid ${val ? '#1a1a18' : 'rgba(0,0,0,0.25)'}`, background: val ? '#1a1a18' : '#fff', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', flexShrink: 0 }}>{val ? '✓' : ''}</span>
+                    {label}
+                  </button>
+                ))}
+                {activeFilterCount > 0 && (
+                  <button onClick={clearFilters}
+                    style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
+                    Clear all
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* White hairline card; table edge-to-edge inside */}
       <div style={{ background: '#fff', border: '0.5px solid rgba(0,0,0,0.08)', borderRadius: '12px', overflow: 'hidden' }}>
         {!isMobile && rows.length > 0 && (
           <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: '12px', padding: '12px 16px', alignItems: 'baseline', borderBottom: '0.5px solid rgba(0,0,0,0.08)' }}>
-            <span style={headerCell}>Client</span>
+            <button onClick={() => clickSort('client')} style={{ ...headerCell, border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', display: 'inline-flex', alignItems: 'center' }}>Client<SortChevron col="client" /></button>
             <span style={headerCell}>Engagement</span>
             <span style={headerCell}>Stage</span>
             <span style={headerCell}>Status</span>
-            <span style={{ ...headerCell, textAlign: 'right' }}>Value</span>
-            <span style={{ ...headerCell, textAlign: 'right' }}>Activity</span>
+            <button onClick={() => clickSort('value')} style={{ ...headerCell, border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', fontFamily: 'inherit', justifyContent: 'flex-end', display: 'inline-flex', alignItems: 'center' }}>Value<SortChevron col="value" /></button>
+            <button onClick={() => clickSort('activity')} style={{ ...headerCell, border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', fontFamily: 'inherit', justifyContent: 'flex-end', display: 'inline-flex', alignItems: 'center' }}>Activity<SortChevron col="activity" /></button>
           </div>
         )}
 

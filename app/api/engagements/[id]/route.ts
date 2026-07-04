@@ -20,7 +20,12 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { writeSyncLog } from '@/lib/sync-log'
 import { ENGAGEMENT_STAGE_RANK, type EngagementStage } from '@/lib/engagements'
+
+// Close-out vocabulary (doc §4). 'won' is the only Won reason; the rest
+// are the Lost picker's options.
+const CLOSE_REASONS = ['lost_no_response', 'lost_competitor', 'lost_not_fit', 'written_off', 'lost_other', 'won'] as const
 
 async function authAndLoad(id: string) {
   const supabase = await createServerSupabaseClient()
@@ -138,8 +143,13 @@ export async function PATCH(
     }
     const currentRank = ENGAGEMENT_STAGE_RANK[engagement.stage as EngagementStage] ?? 0
     const newRank = ENGAGEMENT_STAGE_RANK[stage]
+    const targetTerminal = stage === 'Closed Won' || stage === 'Closed Lost'
+    const currentTerminal = engagement.stage === 'Closed Won' || engagement.stage === 'Closed Lost'
     if (stage !== engagement.stage) {
-      if (newRank <= currentRank) {
+      // Terminal moves are ALWAYS allowed from any OPEN stage (closing is
+      // not 'backward'); terminal→terminal stays rejected. Non-terminal
+      // moves keep the forward-only rank rule.
+      if (currentTerminal || (!targetTerminal && newRank <= currentRank)) {
         return NextResponse.json(
           { error: 'backward_move_rejected', current: engagement.stage, requested: stage },
           { status: 409 },
@@ -147,9 +157,16 @@ export async function PATCH(
       }
       patch.stage = stage
       patch.stage_entered_at = nowIso
-      if (stage === 'Closed Won' || stage === 'Closed Lost') {
+      if (targetTerminal) {
         patch.closed_at = nowIso
-        if (stage === 'Closed Won') patch.closed_reason = 'won'
+        const reasonRaw = body?.closed_reason
+        const reason = typeof reasonRaw === 'string' && (CLOSE_REASONS as readonly string[]).includes(reasonRaw)
+          ? reasonRaw
+          : (stage === 'Closed Won' ? 'won' : 'lost_other')
+        patch.closed_reason = reason
+        if (typeof body?.closed_note === 'string' && body.closed_note.trim()) {
+          patch.closed_note = body.closed_note.trim().slice(0, 500)
+        }
       }
       stageChanged = true
     }
@@ -161,6 +178,32 @@ export async function PATCH(
     .eq('id', id)
   if (updateError) {
     return NextResponse.json({ error: updateError.message }, { status: 500 })
+  }
+
+  // Close-out trail (doc §4/§5): log every terminal close to sync_log —
+  // a Lost close on a client with ZERO other open engagements is the
+  // moment they conceptually enter the nurture pool; step 5's activation
+  // work reads this trail. Fire-and-forget (writeSyncLog swallows errors).
+  if (stageChanged && (patch.stage === 'Closed Won' || patch.stage === 'Closed Lost')) {
+    const [{ data: clientLead }, { count: otherOpen }] = await Promise.all([
+      supabaseService.from('leads').select('location_id, name').eq('id', engagement.client_id).maybeSingle(),
+      supabaseService.from('engagements').select('id', { count: 'exact', head: true })
+        .eq('client_id', engagement.client_id)
+        .not('stage', 'in', '("Closed Won","Closed Lost")')
+        .neq('id', id),
+    ])
+    const entersNurture = patch.stage === 'Closed Lost' && (otherOpen ?? 0) === 0
+    await writeSyncLog({
+      location_id: clientLead?.location_id || 'unknown',
+      entity_id: id,
+      entity_type: 'engagement',
+      status: 'success',
+      message:
+        `[engagement:close] ${patch.stage} reason=${patch.closed_reason}` +
+        (patch.closed_note ? ` note="${patch.closed_note}"` : '') +
+        ` — client "${clientLead?.name || engagement.client_id}" has ${otherOpen ?? 0} other open engagement(s)` +
+        (entersNurture ? ' → enters nurture pool (step-5 trail)' : ''),
+    })
   }
 
   return NextResponse.json({
