@@ -27,7 +27,7 @@ import {
   IconPhone, IconMail, IconMapPin, IconPlayerPause, IconExternalLink, IconSend,
   IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPhoneOutgoing,
 } from '@/components/ui/icons'
-import QuoteBlock from './QuoteBlock'
+import EditableDesc from './EditableDesc'
 
 const QUIET = '#f7f6f4'
 const SEND_GREEN = '#0F6E56'
@@ -146,6 +146,23 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
     finally { setBusy(false) }
   }
 
+  async function saveReqDetails(text) {
+    if (!c) return
+    const prev = c.request_details
+    setData(d => d ? { ...d, client: { ...d.client, request_details: text || null } } : d)
+    try {
+      const res = await fetch(`/api/leads/${c.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_details: text || null }),
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
+      setToast({ kind: 'success', msg: 'Description saved' })
+    } catch (e) {
+      setData(d => d ? { ...d, client: { ...d.client, request_details: prev } } : d)
+      setToast({ kind: 'error', msg: `Save failed: ${e.message}` })
+    }
+  }
+
   async function logTouchpoint() {
     if (!c) return
     setBusy(true)
@@ -244,13 +261,15 @@ export default function ClientProfile({ clientId, onClose, onOpenEngagement = ()
         </div>
       </div>
 
-      {/* Request details — the webform text, for pre-Jobber people whose
-          request hasn't become an SR record yet (same block as the panel's
-          Request row). */}
-      {!jobberLinked && (c.request_details || '').trim() && (
+      {/* Request details — the pre-engagement description (the SAME field
+          the Inbox edits and foundEngagement seeds from), for pre-Jobber
+          people whose request hasn't founded an engagement yet. Editable;
+          the dashed add-slot shows here (detail context, unlike the
+          scannable Inbox list). */}
+      {!jobberLinked && (
         <div>
           <MicroLabel>Request details</MicroLabel>
-          <QuoteBlock text={c.request_details} />
+          <EditableDesc text={c.request_details} showEmpty onSave={saveReqDetails} />
         </div>
       )}
 

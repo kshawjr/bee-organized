@@ -62,7 +62,7 @@ const person = (over: any = {}) => ({
 })
 
 const PEOPLE = [
-  person(), // New
+  person({ jobDetail: 'Need help with the garage before the baby arrives — boxes everywhere, donation run wanted.' }), // New, with webform text
   person({ outreachTimeline: [{ type: 'reach_out', occurred_at: daysAgo(2) }] }), // Attempting
   person({ created: daysAgo(200), paused: true }), // Nurturing
   person({ id: 'c1' }), // Active (open engagement)

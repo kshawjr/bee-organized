@@ -23,6 +23,7 @@ import { relAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock } from '@/components/ui/icons'
 import ContactLine from './ContactLine'
+import EditableDesc from './EditableDesc'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
 
@@ -71,6 +72,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
   // immediately (the real touchpoint is written; derivation catches up
   // on next load).
   const [loggedIds, setLoggedIds] = useState(() => new Set())
+  const [descEdits, setDescEdits] = useState({})
   const [sortRaw, setSort] = useStoredState('bee_hive_inbox_sort', { key: 'newest' })
   const inboxSort = INBOX_SORTS.some(o => o.key === sortRaw.key) ? sortRaw.key : 'newest'
   const [filters, setFilters, clearFilters] = useStoredState('bee_hive_inbox_filters', INBOX_FILTER_DEFAULTS)
@@ -155,11 +157,28 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     .filter(t => t.type === 'reach_out')
     .map(t => new Date(t.occurred_at || 0).getTime() || 0))
 
-  const detailNew = (p) => {
-    const bits = [(p.source || 'inquiry').toLowerCase(), `${relAge(new Date(p.created || 0).getTime(), nowMs)} ago`]
-    const snippet = (p.requestDetails || p.desc || '').trim()
-    if (snippet) bits.push(`“${snippet.length > 60 ? snippet.slice(0, 57) + '…' : snippet}”`)
-    return bits.join(' · ')
+  const detailNew = (p) =>
+    [(p.source || 'inquiry').toLowerCase(), `${relAge(new Date(p.created || 0).getTime(), nowMs)} ago`].join(' · ')
+
+  // Description (leads.request_details → people-mapper's jobDetail): the
+  // quote block under the identity cluster, editable in place. descEdits
+  // holds optimistic overrides — the people array is owned by the shell.
+  const leadDesc = (p) => (descEdits[p.id] !== undefined ? descEdits[p.id] : (p.jobDetail || ''))
+  async function saveDesc(p, text) {
+    const prev = leadDesc(p)
+    setDescEdits(m => ({ ...m, [p.id]: text }))
+    try {
+      const res = await fetch(`/api/leads/${p.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_details: text || null }),
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
+      setToast({ kind: 'success', msg: 'Description saved' })
+    } catch (e) {
+      setDescEdits(m => ({ ...m, [p.id]: prev }))
+      setToast({ kind: 'error', msg: `Save failed: ${e.message}` })
+    }
   }
   const detailWorking = (p) => {
     const reaches = (p.outreachTimeline || []).filter(t => t.type === 'reach_out').length + (loggedIds.has(p.id) ? 1 : 0)
@@ -206,9 +225,11 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
             <p style={{ fontSize: '11px', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>
               {pill === 'New' ? detailNew(p) : detailWorking(p)}
             </p>
-            {/* Identity cluster: name → detail → contact (one card-like
-                block; the action button stays cleanly right). */}
+            {/* Identity cluster: name → detail → contact → description
+                (one card-like block; the action button stays cleanly
+                right). No dashed add-slot here — rows stay scannable. */}
             {!isMobile && <ContactLine phone={p.phone} email={p.email} style={{ marginTop: '3px' }} />}
+            {!isMobile && <EditableDesc text={leadDesc(p)} onSave={t => saveDesc(p, t)} style={{ marginTop: '6px' }} />}
           </div>
           {!isMobile && (
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '8px' }} onClick={ev => ev.stopPropagation()}>
@@ -218,6 +239,11 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
         </div>
         {isMobile && (
           <ContactLine phone={p.phone} email={p.email} style={{ marginTop: '8px', paddingLeft: '44px' }} />
+        )}
+        {isMobile && (
+          <div style={{ marginTop: '6px', paddingLeft: '44px' }}>
+            <EditableDesc text={leadDesc(p)} onSave={t => saveDesc(p, t)} />
+          </div>
         )}
         {isMobile && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }} onClick={ev => ev.stopPropagation()}>
