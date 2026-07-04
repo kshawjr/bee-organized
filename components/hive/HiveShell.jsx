@@ -20,12 +20,14 @@ import ClientDirectory from './ClientDirectory'
 import InboxScreen from './InboxScreen'
 import ClientProfile from './ClientProfile'
 import PersonCard from './PersonCard'
+import NewClientSheet from './NewClientSheet'
+import { mapLeadToPerson } from '@/lib/people-mapper'
 import { deriveClientStatus } from './shared/clientStatus'
 import { isTerminal } from './shared/stageConfig'
 import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount } from './shared/engagementStatus'
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
-import { IconInbox, IconLayoutKanban, IconList, IconUsers } from '@/components/ui/icons'
+import { IconInbox, IconLayoutKanban, IconList, IconUsers, IconPlus } from '@/components/ui/icons'
 
 const TABS = [
   { key: 'inbox',   label: 'Inbox',   live: true, badge: true, Icon: IconInbox },
@@ -93,8 +95,14 @@ export default function HiveShell({
   closedCount = 0,
   people = [],
   locFilter = 'all',
+  currentLocationUuid = null,
+  currentUserId = null,
   onOpenClient = () => {},
   onSendToJobber = () => {},
+  // The people-merge seam (§8.5 direction rule): BeeHub passes this
+  // callback DOWN; after a confirmed create the shell hands the mapped
+  // person UP through it. The shell never reaches into BeeHub state.
+  onPersonCreated = null,
   setToast = () => {},
   onExitBeta = () => {},
 }) {
@@ -115,6 +123,10 @@ export default function HiveShell({
   //        | { type:'person', person }  ← pre-engagement card (Inbox rows)
   const [overlay, setOverlay] = useState(null)
   const [rowPatches, setRowPatches] = useState({})
+  // Manual add-client sheet ("New"). The FAB must not stay live behind
+  // ANY open sheet, so both overlay slots feed one flag.
+  const [newClientOpen, setNewClientOpen] = useState(false)
+  const anySheetOpen = overlay != null || newClientOpen
 
   // Admin-managed option lists (lookups: global, super-admin curated) —
   // fetched ONCE per shell mount and threaded to PersonCard +
@@ -168,6 +180,23 @@ export default function HiveShell({
   }, [people, locFilter, openFiltered])
 
   const tabPills = TABS.map(t => <TabPill key={t.key} tab={t} active={t.key === lens} onSelect={() => pickLens(t.key)} badgeCount={t.badge ? inboxCount : null} />)
+  // Desktop "New" pill — the ONE solid chrome element, visible from all
+  // four tabs, left of the counter. Mobile gets the FAB instead.
+  const newPillEl = (
+    <button
+      onClick={() => setNewClientOpen(true)}
+      aria-label="New client"
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: '6px',
+        height: '34px', padding: '0 14px', borderRadius: '20px',
+        border: 'none', background: '#1a1a18', color: '#fff',
+        fontSize: '13px', fontWeight: 500, cursor: 'pointer',
+        fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0,
+      }}
+    >
+      <IconPlus size={14} /> New
+    </button>
+  )
   const counterEl = (
     <span style={{ fontSize: isMobile ? '11px' : '12px', color: '#8a8a84', whiteSpace: 'nowrap' }}>
       Open engagements · {openCount}{engagementFilterCount(workFilters) > 0 ? ` of ${openFiltered.length}` : ''}
@@ -213,6 +242,7 @@ export default function HiveShell({
             {tabPills}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+            {newPillEl}
             {counterEl}
             {exitEl}
           </div>
@@ -255,6 +285,52 @@ export default function HiveShell({
           onOpenClient={openClient}
           onOpenEngagement={openEngagement}
           setToast={setToast}
+        />
+      )}
+
+      {/* Mobile FAB — classic FAB position (bottom-right, safe-area
+          aware). Hidden whenever any sheet is open so it isn't live
+          behind the sheet's actions row. */}
+      {isMobile && !anySheetOpen && (
+        <button
+          onClick={() => setNewClientOpen(true)}
+          aria-label="New client"
+          style={{
+            position: 'fixed',
+            right: 'calc(16px + env(safe-area-inset-right, 0px))',
+            bottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
+            width: '52px', height: '52px', borderRadius: '50%',
+            border: 'none', background: '#1a1a18', color: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 4px 16px rgba(26,26,24,0.3)', cursor: 'pointer',
+            zIndex: 10000,
+          }}
+        >
+          <IconPlus size={24} />
+        </button>
+      )}
+
+      {newClientOpen && (
+        <NewClientSheet
+          people={people}
+          engagements={filtered}
+          locFilter={locFilter}
+          currentLocationUuid={currentLocationUuid}
+          currentUserId={currentUserId}
+          lookupOptions={lookupOptions}
+          setToast={setToast}
+          onClose={() => setNewClientOpen(false)}
+          onOpenClient={(clientId) => { setNewClientOpen(false); openClient(clientId) }}
+          onOpenEngagement={(e) => { setNewClientOpen(false); openEngagement(e) }}
+          onCreated={(leadRow) => {
+            // CONFIRMED insert only — map the real returned row (never an
+            // optimistic stub), hand it up through onPersonCreated so the
+            // Inbox "New" row appears without a reload, then open the card.
+            const person = mapLeadToPerson(leadRow, {})
+            if (onPersonCreated) onPersonCreated(person)
+            setNewClientOpen(false)
+            setOverlay({ type: 'person', person })
+          }}
         />
       )}
 

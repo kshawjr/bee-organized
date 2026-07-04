@@ -10070,6 +10070,11 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
   // For super_admin viewing 'all', the context holds every location's users,
   // so the filter shows the union across locations.
   const hiveUsers = useContext(LocationUsersContext) || USERS_DATA
+  // Location + user context for the beta shell's NewClientSheet — same
+  // resolution chain NewLeadModal uses (kanban filter → location ctx →
+  // the user's own location).
+  const hiveCurrentUserCtx = useContext(CurrentUserContext)
+  const hiveCurrentLocationCtx = useContext(CurrentLocationContext)
   // Render the location pill on every card for elevated users — they want to
   // see where each lead came from even when filtered to a single location.
   const showLocation = isElevated
@@ -10295,6 +10300,13 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
           closedCount={engagementsClosedCount}
           people={people}
           locFilter={locFilter}
+          currentLocationUuid={locFilter!=='all' ? locFilter : (hiveCurrentLocationCtx?.id || hiveCurrentUserCtx?.locationId || null)}
+          currentUserId={hiveCurrentUserCtx?.id || null}
+          // People-merge seam (BeeHub → HiveShell onPersonCreated, passed
+          // DOWN): the shell hands the mapped person up after a confirmed
+          // /api/leads insert; we merge it into people-state here so the
+          // Inbox "New" row appears without a reload.
+          onPersonCreated={(person)=>{ setPeople(prev => prev.some(x=>x.id===person.id) ? prev : [person, ...prev]) }}
           setToast={setToast}
           onExitBeta={()=>{ setView('kanban'); try{localStorage.setItem('bee_hive_view','kanban')}catch(e){} }}
           onOpenClient={(clientId)=>{

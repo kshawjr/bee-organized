@@ -124,6 +124,27 @@ export const IconMapPin = make(<>
   <path d="M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0z" />
 </>)
 
+export const IconSearch = make(<>
+  <circle cx="10" cy="10" r="7" />
+  <path d="M21 21l-6 -6" />
+</>)
+
+export const IconPlus = make(<>
+  <path d="M12 5l0 14" /><path d="M5 12l14 0" />
+</>)
+
+export const IconUserCheck = make(<>
+  <circle cx="12" cy="7" r="4" />
+  <path d="M6 21v-2a4 4 0 0 1 4 -4h4" />
+  <path d="M15 19l2 2l4 -4" />
+</>)
+
+export const IconAlertTriangle = make(<>
+  <path d="M12 9v4" />
+  <path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z" />
+  <path d="M12 16h.01" />
+</>)
+
 // Within-stage status → leading icon (mockup chips/status text). One map
 // so board chips and list status text pick identical glyphs.
 const STATUS_ICON = {
