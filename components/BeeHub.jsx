@@ -28262,7 +28262,23 @@ function ConversionsDueTab({ onOpenLocation = () => {} }) {
 }
 
 // Admin-area "Feedback" tab — org-wide triage list + detail modal.
-function AdminFeedbackScreen({ onPendingCountChange = () => {} }) {
+function AdminFeedbackScreen({
+  onPendingCountChange = () => {},
+  // VIEW-AS DATA SCOPING IS PER-SURFACE: "view as" swaps displayed
+  // role/name only — API calls still ride the REAL session, so when a
+  // super_admin impersonates an owner this screen's fetch takes the
+  // route's elevated branch and returns ORG-WIDE feedback (over-exposes
+  // to the impersonator; real owner sessions are hard-scoped server-side
+  // and unaffected). The franchise mount passes the impersonated
+  // locationId and /api/admin/feedback already honors ?location_id= for
+  // elevated callers. Any other view-as screen that reads role-scoped
+  // data needs the same explicit-scope treatment — there is no global fix.
+  locationId = null,
+  // Composer affordance (opens the existing FeedbackModal). Passed by the
+  // franchise feedback mount; the elevated admin mounts omit it — triage
+  // there stays read-only and submitters use the Help "?" menu.
+  onReportFeedback = null,
+}) {
   const [items, setItems]       = useState([])
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState(null)
@@ -28276,7 +28292,10 @@ function AdminFeedbackScreen({ onPendingCountChange = () => {} }) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/admin/feedback')
+      const url = locationId
+        ? `/api/admin/feedback?location_id=${encodeURIComponent(locationId)}`
+        : '/api/admin/feedback'
+      const res = await fetch(url)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       setItems(Array.isArray(data.items) ? data.items : [])
@@ -28287,7 +28306,7 @@ function AdminFeedbackScreen({ onPendingCountChange = () => {} }) {
     }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [locationId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     onPendingCountChange(items.filter(i => i.status === 'submitted').length)
@@ -28334,6 +28353,15 @@ function AdminFeedbackScreen({ onPendingCountChange = () => {} }) {
           {locOptions.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
         </select>
         <input value={userQuery} onChange={e => setUserQuery(e.target.value)} placeholder="Search by user name/email" style={{ ...selStyle, cursor:'text', flex:'1 1 180px', minWidth:'150px' }} />
+        {onReportFeedback && (
+          <button
+            onClick={onReportFeedback}
+            aria-label="Report a bug or suggest a feature"
+            style={{ ...selStyle, marginLeft:'auto', fontWeight:600, whiteSpace:'nowrap' }}
+          >
+            🐛 Report a bug / suggest a feature
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -31769,9 +31797,17 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     // /api/admin/feedback, which the server auto-scopes to the caller's
     // location_id for owner/manager — so this view only ever shows their own
     // location's feedback. Elevated users use the Admin screen's Feedback tab.
+    // Under view-as the session is still the super_admin (elevated →
+    // org-wide), so pass the IMPERSONATED owner's location for parity with
+    // what they'd really see; the route honors ?location_id= for elevated
+    // callers and ignores it for real owners (hard-scoped anyway).
+    // onReportFeedback surfaces the composer here (franchise mount only).
     if (activeNav==='feedback') return (
       <div style={pageStyle}>
-        <AdminFeedbackScreen />
+        <AdminFeedbackScreen
+          locationId={viewAsUser?.locationId || null}
+          onReportFeedback={() => setShowFeedback(true)}
+        />
       </div>
     )
     return (
