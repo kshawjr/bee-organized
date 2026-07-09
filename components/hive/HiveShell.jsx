@@ -132,7 +132,7 @@ export default function HiveShell({
   const pickLens = (v) => { setLens(v); try { localStorage.setItem(LENS_LS_KEY, v) } catch {} }
 
   // ONE overlay slot: EngagementPanel or ClientProfile — they REPLACE
-  // each other (no stacking): 'View client →' swaps panel→profile;
+  // each other (no stacking): 'View profile' swaps panel→profile;
   // tapping an engagement card on the profile swaps back. rowPatches
   // mirror panel changes (title/stage) onto the board without a reload.
   // overlay: null | { type:'engagement', engagement } | { type:'client', clientId }

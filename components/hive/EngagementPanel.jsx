@@ -1,12 +1,15 @@
 // components/hive/EngagementPanel.jsx
 // ─────────────────────────────────────────────────────────────
 // The ONE-DEAL work card — the board's click-through. Tabbed layout
-// (approved): compact header (stage-tinted avatar + inline-rename title
-// + stage chip + client line [name + View client → — whose engagement
-// this is, immediately visible on open; the ONE place the name renders]
-// + founding subtitle + ··· menu) → VITALS STRIP (Stage / Value /
-// Last touch / Next — the four-cell deal-health row, visible on every
-// tab) → tabs (Overview / Timeline / Files) → content. Fetches
+// (approved): compact header, Option B hierarchy — the CLIENT NAME is
+// the headline (the primary fact; the ONE place the name renders) +
+// stage chip + ··· menu, with a quiet subtitle underneath ('View
+// profile' accent link → onOpenClient, then 'opened {full date} ·
+// founded by {…}'). The auto-generated engagement title is NOT
+// rendered (noise — the date lives in the subtitle). → VITALS STRIP
+// (Stage / Value / Last touch / Next — the four-cell deal-health row,
+// visible on every tab, compact dates) → tabs (Overview / Timeline /
+// Files) → content. Fetches
 // GET /api/engagements/:id on open (board rows stay lightweight;
 // `seed` renders the shell synchronously).
 //
@@ -47,7 +50,7 @@ import CardTabs from './shared/CardTabs'
 import PinnedBuzz from './shared/PinnedBuzz'
 import InitialsAvatar from './shared/InitialsAvatar'
 import { MicroLabel, quietBtn, CardMenu, ActionRow, actionBtn } from './shared/cardKit'
-import { fmtTime, engagementValue } from './shared/engagementStatus'
+import { fmtTime, engagementValue, formatFullDate } from './shared/engagementStatus'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
 const fmtDate = (d) => {
@@ -93,8 +96,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
-  const [editingTitle, setEditingTitle] = useState(false)
-  const [titleDraft, setTitleDraft] = useState('')
   const [descEditing, setDescEditing] = useState(false)
   const [descDraft, setDescDraft] = useState('')
   const [descExpanded, setDescExpanded] = useState(false)
@@ -144,13 +145,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     } finally {
       setBusy(false)
     }
-  }
-
-  async function saveTitle() {
-    const t = titleDraft.trim()
-    setEditingTitle(false)
-    if (!t || t === (eng?.title || '')) return
-    await patchEngagement({ title: t })
   }
 
   // Source is LEAD-level (marketing attribution belongs to the person's
@@ -422,7 +416,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
       {closeConfirm}
 
       {/* Key facts — contact + the shared editable meta (the client
-          NAME + View client → moved up to the header client line). */}
+          NAME is the header headline; View profile lives up there). */}
       {client && eng && (
         <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <MicroLabel>Key facts</MicroLabel>
@@ -602,48 +596,35 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
         </p>
       )}
 
-      {/* Header — stage-tinted avatar + inline-rename title + chip +
-          founding subtitle + ··· */}
+      {/* Header (Option B) — the CLIENT NAME is the headline (whose
+          deal this is — the primary fact, the ONE place the name
+          renders) + stage chip + ···; the auto-generated engagement
+          title is NOT rendered. Quiet subtitle: 'View profile' accent
+          link (same onOpenClient swap as the old View client →) +
+          full-format opened date + founded-by. */}
       {eng && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <InitialsAvatar name={client?.name || eng.title || '?'} bg={stageFam.bg} text={stageFam.text} />
+          <InitialsAvatar name={client?.name || eng.client_name || '?'} bg={stageFam.bg} text={stageFam.text} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {editingTitle ? (
-                <input
-                  autoFocus
-                  value={titleDraft}
-                  onChange={e => setTitleDraft(e.target.value)}
-                  onBlur={saveTitle}
-                  onKeyDown={e => { if (e.key === 'Enter') saveTitle(); if (e.key === 'Escape') setEditingTitle(false) }}
-                  style={{ flex: 1, minWidth: 0, fontSize: '16px', fontWeight: 500, color: '#1a1a18', border: 'none', borderBottom: '1px solid rgba(0,0,0,0.2)', outline: 'none', fontFamily: 'inherit', background: 'transparent', padding: '0 0 2px' }}
-                />
-              ) : (
-                <h2
-                  onClick={() => { setTitleDraft(eng.title || ''); setEditingTitle(true) }}
-                  title="Click to rename"
-                  style={{ flex: 1, minWidth: 0, fontSize: '16px', fontWeight: 500, color: '#1a1a18', cursor: 'text', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                >
-                  {eng.title || 'Engagement'} <span style={{ fontSize: '11px', color: '#c9c7c0' }}>✎</span>
-                </h2>
-              )}
+              <h2 style={{ flex: 1, minWidth: 0, fontSize: '19px', fontWeight: 600, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {client?.name || eng.client_name || 'Client'}
+              </h2>
               <span style={{ flexShrink: 0 }}>
                 <StatusChip label={stageDisplayLabel(eng.stage)} styleKey={eng.stage} />
               </span>
             </div>
-            {/* Whose engagement this is — name + the jump-to-client,
-                first thing visible on open (moved up from Key facts;
-                this is the ONE place the name renders). */}
-            {client && (
-              <p style={{ marginTop: '2px', display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                <span style={{ fontSize: '12px', fontWeight: 500, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{client.name}</span>
-                <button onClick={() => onOpenClient(client.id)} style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', padding: 0, flexShrink: 0 }}>
-                  View client →
-                </button>
-              </p>
-            )}
-            <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '2px' }}>
-              Engagement · opened {fmtDate(eng.created_at) || '—'} · founded by {eng.founded_by}
+            <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {client && (
+                <>
+                  <button onClick={() => onOpenClient(client.id)}
+                    style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', padding: 0 }}>
+                    View profile
+                  </button>
+                  {' · '}
+                </>
+              )}
+              opened {formatFullDate(eng.created_at) || '—'} · founded by {eng.founded_by}
             </p>
           </div>
           <CardMenu items={menuItems} />

@@ -25,8 +25,13 @@
 //   — write paths preserved: Source None-clear, EditableDesc,
 //     stage Advance (which server-side writes the stage_change
 //     touchpoint — route source guard)
-//   — EngagementPanel header carries the client line (name + View
-//     client →) — moved up from Key facts, renders exactly ONCE
+//   — EngagementPanel header (Option B): the CLIENT NAME is the 19px/600
+//     headline (renders exactly ONCE; the auto-generated engagement
+//     title is NOT rendered); quiet subtitle = 'View profile' accent
+//     link (fires onOpenClient — the old View client → button is gone)
+//     + full-format opened date + founded-by. Full prose dates ride the
+//     roomy header/subtitle spots ONLY — the vitals strip and Timeline
+//     rows keep their compact formats (deliberate, not drift)
 //   — action rows are cardKit ActionRow: equal-width repeat(N,1fr)
 //     grid, soft-tinted no-border buttons (Call blue / neutral gray /
 //     Advance+Send green), behaviors unchanged
@@ -38,6 +43,7 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import PersonCard from '@/components/hive/PersonCard'
+import { formatFullDate } from '@/components/hive/shared/engagementStatus'
 import ClientProfile from '@/components/hive/ClientProfile'
 import EngagementPanel from '@/components/hive/EngagementPanel'
 
@@ -443,19 +449,93 @@ describe('vitals strip', () => {
   })
 })
 
-// ═══ header client line (EngagementPanel) ══════════════════
-describe('header client identity', () => {
-  it('client name + View client → render up top (before the tabs), exactly ONCE, same swap behavior', async () => {
+// ═══ header — Option B: the client name IS the headline ════
+const FULL_MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const fullDate = (t: number) => { const d = new Date(t); return `${FULL_MON[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}` }
+
+describe('header client identity (Option B)', () => {
+  it('client name is the primary headline — 19px/600 h2, larger than the subtitle; renders exactly ONCE', async () => {
+    const { host, unmount } = await mountPanel()
+    const h2 = host.querySelector('h2')! as HTMLElement
+    expect(h2.textContent).toBe('Dana Client')
+    expect(h2.style.fontSize).toBe('19px')
+    expect(String(h2.style.fontWeight)).toBe('600')
+    // headline outranks the 12px subtitle
+    const sub = buttonContaining(host, 'View profile')!.parentElement as HTMLElement
+    expect(sub.style.fontSize).toBe('12px')
+    // once across the whole card — the header IS the name's one home
+    expect(host.textContent!.split('Dana Client').length - 1).toBe(1)
+    await unmount()
+  })
+
+  it('the engagement title is NOT rendered — auto-generated or custom, the header dropped it', async () => {
+    engOver = { engagement: { title: 'Engagement – Jul 2026' } }
+    const auto = await mountPanel()
+    expect(auto.host.textContent).not.toContain('Engagement – Jul 2026')
+    await auto.unmount()
+
+    engOver = {} // default payload carries the custom title 'Kitchen + Pantry'
+    const custom = await mountPanel()
+    expect(custom.host.textContent).not.toContain('Kitchen + Pantry')
+    await custom.unmount()
+  })
+
+  it("subtitle: 'View profile' accent link + full opened date + founded-by; click fires onOpenClient; old View client → gone", async () => {
     const opened: string[] = []
     const { host, unmount } = await mountPanel({ onOpenClient: (id: string) => opened.push(id) })
-    const view = buttonContaining(host, 'View client')!
+    const view = buttonContaining(host, 'View profile')! as HTMLElement
     expect(view).toBeTruthy()
+    expect(['#378ADD', 'rgb(55, 138, 221)']).toContain(view.style.color)
     // header region: above the tab bar in DOM order
     expect(view.compareDocumentPosition(tabButton(host, 'Overview')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    // moved, not duplicated — Key facts lost its copy
-    expect(host.textContent!.split('Dana Client').length - 1).toBe(1)
+    // founding facts ride the same line, FULL-format date (created_at = 5d ago)
+    const sub = view.parentElement as HTMLElement
+    expect(sub.textContent).toContain(`opened ${fullDate(now - 5 * 86400000)}`)
+    expect(sub.textContent).toContain('founded by manual')
+    // the old separate blue button is gone
+    expect(buttonContaining(host, 'View client')).toBeUndefined()
     await click(view)
     expect(opened).toEqual(['lead-9']) // identical swap-to-profile behavior
+    await unmount()
+  })
+
+  it('bottom action row untouched by the header rework: Call / Log touchpoint / Advance, equal-width grid', async () => {
+    const { host, unmount } = await mountPanel()
+    const row = buttonContaining(host, 'Log touchpoint')!.parentElement as HTMLElement
+    expect([...row.children].map(el => (el.textContent || '').trim())).toEqual(['Call', 'Log touchpoint', 'Advance to Estimate →'])
+    expect(row.style.display).toBe('grid')
+    expect(row.getAttribute('style')).toMatch(/repeat\(3,\s*1fr\)/)
+    await unmount()
+  })
+})
+
+// ═══ full prose dates — headers full, strip/timeline compact ═
+describe('full-date treatment (formatFullDate)', () => {
+  it("produces 'July 7, 2026' — full month name, day, year; null/garbage → null", () => {
+    expect(formatFullDate('2026-07-07T12:00:00')).toBe('July 7, 2026')
+    expect(formatFullDate('2025-01-02T12:00:00')).toBe('January 2, 2025')
+    expect(formatFullDate(null)).toBeNull()
+    expect(formatFullDate('not-a-date')).toBeNull()
+  })
+
+  it("ClientProfile subtitle: 'client since' rides the full date now", async () => {
+    const { host, unmount } = await mountProfile()
+    expect(host.textContent).toContain(`client since ${fullDate(now - 40 * 86400000)}`)
+    await unmount()
+  })
+
+  it("PersonCard subtitle: 'inquired' rides the full date (name was already the headline)", async () => {
+    const { host, unmount } = await mountPerson()
+    expect(host.textContent).toContain(`inquired ${fullDate(now - 40 * 86400000)}`)
+    await unmount()
+  })
+
+  it('the vitals strip stays COMPACT — full dates never leak into the tight cells', async () => {
+    engOver = { children: { assessments: [{ id: 'a1', scheduled_at: inDays(5), completed_at: null, status: 'scheduled' }] } }
+    const { host, unmount } = await mountPanel()
+    const next = stripValues(host)[3].textContent!
+    expect(next).toBe(shortDate(now + 5 * 86400000)) // 'Jul 14', not 'July 14, 2026'
+    expect(next).not.toContain(String(new Date(now).getFullYear()))
     await unmount()
   })
 })

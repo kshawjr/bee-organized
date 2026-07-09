@@ -32,7 +32,7 @@
 import React, { useState, useEffect } from 'react'
 import { CHIP_STYLES, stageDisplayLabel, ACCENT_BLUE } from './shared/stageConfig'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
-import { deriveStatusChip, engagementValue, displayTitle, fmtMoney } from './shared/engagementStatus'
+import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, formatFullDate } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import VitalsStrip, { vitalsAge } from './shared/VitalsStrip'
 import {
@@ -458,8 +458,10 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
             {statusMeta && <StatusChip label={statusMeta.label} styleKey={statusMeta.styleKey} />}
           </p>
+          {/* 'client since' rides the full prose date (header has the
+              room); closed-engagement rows below keep compact monthYear. */}
           <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '2px' }}>
-            {fmtMoney(agg?.lifetime_paid || 0)} lifetime · client since {monthYear(c.created_at) || '—'}{c.location_name ? ` · ${c.location_name}` : ''}
+            {fmtMoney(agg?.lifetime_paid || 0)} lifetime · client since {formatFullDate(c.created_at) || '—'}{c.location_name ? ` · ${c.location_name}` : ''}
           </p>
         </div>
         <CardMenu items={[{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]} />

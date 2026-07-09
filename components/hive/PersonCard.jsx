@@ -38,17 +38,12 @@ import PinnedBuzz from './shared/PinnedBuzz'
 import InitialsAvatar from './shared/InitialsAvatar'
 import { MicroLabel, quietBtn, CardMenu, undoToast, ActionRow, actionBtn } from './shared/cardKit'
 import VitalsStrip, { vitalsAge, vitalsFuture, nextFromChildren } from './shared/VitalsStrip'
+import { formatFullDate } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
 import { CHIP_STYLES, ACCENT_BLUE } from './shared/stageConfig'
 import { IconPhone, IconMail, IconSend } from '@/components/ui/icons'
 
-const fmtDate = (d) => {
-  if (!d) return null
-  const dt = new Date(d)
-  if (isNaN(dt)) return null
-  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-}
 
 export default function PersonCard({ person, people = [], onClose, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
   const [data, setData] = useState(null)
@@ -325,7 +320,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
             )}
           </div>
           <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '2px' }}>
-            Prospect · inquired {fmtDate(person.created) || '—'} · via {(effSource || 'unknown').toLowerCase()}
+            Prospect · inquired {formatFullDate(person.created) || '—'} · via {(effSource || 'unknown').toLowerCase()}
           </p>
         </div>
         <CardMenu items={[{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]} />

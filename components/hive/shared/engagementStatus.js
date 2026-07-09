@@ -30,6 +30,18 @@ export const fmtTime = (d) => {
   return m ? `${h}:${String(m).padStart(2, '0')}${ap}` : `${h}${ap}`
 }
 
+// Full prose date — 'July 7, 2026' (full month name). For the roomy
+// header/subtitle spots (opened / client since / inquired lines); the
+// vitals strip and Timeline rows KEEP the compact formatInboxAge/
+// formatInboxFuture treatment — deliberate, not an inconsistency.
+const FULL_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
+export const formatFullDate = (d) => {
+  if (!d) return null
+  const dt = new Date(d)
+  if (isNaN(dt)) return null
+  return `${FULL_MONTHS[dt.getMonth()]} ${dt.getDate()}, ${dt.getFullYear()}`
+}
+
 // 'Jul 6, 7pm' — compact date+time for chips.
 export const fmtShortTime = (d) => {
   const date = fmtShort(d)
