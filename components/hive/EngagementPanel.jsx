@@ -2,7 +2,9 @@
 // ─────────────────────────────────────────────────────────────
 // The ONE-DEAL work card — the board's click-through. Tabbed layout
 // (approved): compact header (stage-tinted avatar + inline-rename title
-// + stage chip + subtitle + ··· menu) → VITALS STRIP (Stage / Value /
+// + stage chip + client line [name + View client → — whose engagement
+// this is, immediately visible on open; the ONE place the name renders]
+// + founding subtitle + ··· menu) → VITALS STRIP (Stage / Value /
 // Last touch / Next — the four-cell deal-health row, visible on every
 // tab) → tabs (Overview / Timeline / Files) → content. Fetches
 // GET /api/engagements/:id on open (board rows stay lightweight;
@@ -15,12 +17,13 @@
 //
 // Overview: pinned buzz (INHERITED from the client — the same
 // lead_notes kind='buzz' rows ClientProfile shows) → key facts
-// (client + View client →, tappable phone/email, Source MetaSelect
-// [LEAD-level write], Type MetaSelect [ENGAGEMENT-level write], shared
-// ReferrerField) → job description (engagements.description) →
-// Jobber records checklist (status view — the chronological version
-// lives in the Timeline tab) → engagement-scoped recent activity +
-// composer → quiet actions (Call / Log / Jobber / Advance). Close
+// (tappable phone/email, Source MetaSelect [LEAD-level write], Type
+// MetaSelect [ENGAGEMENT-level write], shared ReferrerField — the
+// client NAME moved up to the header) → job description
+// (engagements.description) → Jobber records checklist (status view —
+// the chronological version lives in the Timeline tab) →
+// engagement-scoped recent activity + composer → soft-tinted equal-grid
+// actions (Call / Log / Jobber / Advance — cardKit ActionRow). Close
 // lives in the ··· menu → the same inline Won/Lost confirm as before
 // (Won gated on settled invoices).
 //
@@ -43,8 +46,7 @@ import Timeline from './shared/Timeline'
 import CardTabs from './shared/CardTabs'
 import PinnedBuzz from './shared/PinnedBuzz'
 import InitialsAvatar from './shared/InitialsAvatar'
-import { MicroLabel, quietBtn, CardMenu } from './shared/cardKit'
-import { GREEN_TEXT } from '@/components/ui/tokens'
+import { MicroLabel, quietBtn, CardMenu, ActionRow, actionBtn } from './shared/cardKit'
 import { fmtTime, engagementValue } from './shared/engagementStatus'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
@@ -419,16 +421,11 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
 
       {closeConfirm}
 
-      {/* Key facts — client identity + the shared editable meta */}
+      {/* Key facts — contact + the shared editable meta (the client
+          NAME + View client → moved up to the header client line). */}
       {client && eng && (
         <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <MicroLabel>Key facts</MicroLabel>
-          <p style={{ fontSize: '13px', fontWeight: 500, color: '#1a1a18', display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{client.name}</span>
-            <button onClick={() => onOpenClient(client.id)} style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', padding: 0, flexShrink: 0 }}>
-              View client →
-            </button>
-          </p>
           {client.phone && (
             <p style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
               <span style={{ color: '#8a8a84', display: 'inline-flex' }}><IconPhone size={13} /></span>
@@ -534,35 +531,36 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           composer; the merged past/future stream is the Timeline tab. */}
       <NotesStream label="Recent activity" items={activity} onPost={addEngagementNote} nowMs={nowMs} />
 
-      {/* Quiet actions — hairline row; Advance forward-only; Close lives
-          in the ··· menu (inline confirm above). */}
+      {/* Actions — soft-tinted equal-width grid (cardKit ActionRow);
+          Advance forward-only; Close lives in the ··· menu (inline
+          confirm above). */}
       <div>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <ActionRow>
           {client?.phone && (
-            <a href={`tel:${client.phone}`} style={quietBtn()}>
+            <a href={`tel:${client.phone}`} style={actionBtn('blue')}>
               <IconPhone size={14} /> Call
             </a>
           )}
-          <button style={quietBtn()} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
+          <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
             Log touchpoint
           </button>
           {canSendToJobber && client && (
-            <button style={quietBtn(GREEN_TEXT)} disabled={busy} onClick={() => onSendToJobber(client.id, { engagementId })}>
+            <button style={actionBtn('green')} disabled={busy} onClick={() => onSendToJobber(client.id, { engagementId })}>
               <IconSend size={14} /> Send to Jobber
             </button>
           )}
           {jobberHref && (
-            <a href={jobberHref} target="_blank" rel="noreferrer" style={quietBtn()}>
+            <a href={jobberHref} target="_blank" rel="noreferrer" style={actionBtn('gray')}>
               <IconExternalLink size={14} /> Open in Jobber
             </a>
           )}
           {nextStage && (
-            <button style={quietBtn()} disabled={busy}
+            <button style={actionBtn('green')} disabled={busy}
               onClick={() => patchEngagement({ stage: nextStage }, `Moved to ${stageDisplayLabel(nextStage)}`)}>
               Advance to {stageDisplayLabel(nextStage)} →
             </button>
           )}
-        </div>
+        </ActionRow>
         {touchOpen && (
           <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <select value={touchMethod} onChange={e => setTouchMethod(e.target.value)}
@@ -633,6 +631,17 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                 <StatusChip label={stageDisplayLabel(eng.stage)} styleKey={eng.stage} />
               </span>
             </div>
+            {/* Whose engagement this is — name + the jump-to-client,
+                first thing visible on open (moved up from Key facts;
+                this is the ONE place the name renders). */}
+            {client && (
+              <p style={{ marginTop: '2px', display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                <span style={{ fontSize: '12px', fontWeight: 500, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{client.name}</span>
+                <button onClick={() => onOpenClient(client.id)} style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', padding: 0, flexShrink: 0 }}>
+                  View client →
+                </button>
+              </p>
+            )}
             <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '2px' }}>
               Engagement · opened {fmtDate(eng.created_at) || '—'} · founded by {eng.founded_by}
             </p>

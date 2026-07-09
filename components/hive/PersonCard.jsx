@@ -36,12 +36,11 @@ import Timeline from './shared/Timeline'
 import CardTabs from './shared/CardTabs'
 import PinnedBuzz from './shared/PinnedBuzz'
 import InitialsAvatar from './shared/InitialsAvatar'
-import { MicroLabel, quietBtn, CardMenu, undoToast } from './shared/cardKit'
+import { MicroLabel, quietBtn, CardMenu, undoToast, ActionRow, actionBtn } from './shared/cardKit'
 import VitalsStrip, { vitalsAge, vitalsFuture, nextFromChildren } from './shared/VitalsStrip'
 import StatusChip from '@/components/ui/StatusChip'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
 import { CHIP_STYLES, ACCENT_BLUE } from './shared/stageConfig'
-import { GREEN_TEXT } from '@/components/ui/tokens'
 import { IconPhone, IconMail, IconSend } from '@/components/ui/icons'
 
 const fmtDate = (d) => {
@@ -266,24 +265,24 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
           merged stream (incl. future) is the Timeline tab. */}
       <NotesStream label="Recent activity" items={stream} onPost={addNote} nowMs={nowMs} />
 
-      {/* Quiet actions — hairline, no fills; Send is the one restrained
-          accent (the founding door). */}
+      {/* Actions — soft-tinted equal-width grid (cardKit ActionRow);
+          Send (the founding door) carries the green forward tone. */}
       <div>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <ActionRow>
           {person.phone && (
-            <a href={`tel:${person.phone}`} style={quietBtn()}>
+            <a href={`tel:${person.phone}`} style={actionBtn('blue')}>
               <IconPhone size={14} /> Call
             </a>
           )}
-          <button style={quietBtn()} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
+          <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
             Log touchpoint
           </button>
           {canSend && onSendToJobber && (
-            <button style={quietBtn(GREEN_TEXT)} disabled={busy} onClick={() => onSendToJobber(person)}>
+            <button style={actionBtn('green')} disabled={busy} onClick={() => onSendToJobber(person)}>
               <IconSend size={14} /> Send to Jobber
             </button>
           )}
-        </div>
+        </ActionRow>
         {touchOpen && (
           <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <select value={touchMethod} onChange={e => setTouchMethod(e.target.value)}

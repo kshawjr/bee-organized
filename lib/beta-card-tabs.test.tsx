@@ -25,6 +25,11 @@
 //   — write paths preserved: Source None-clear, EditableDesc,
 //     stage Advance (which server-side writes the stage_change
 //     touchpoint — route source guard)
+//   — EngagementPanel header carries the client line (name + View
+//     client →) — moved up from Key facts, renders exactly ONCE
+//   — action rows are cardKit ActionRow: equal-width repeat(N,1fr)
+//     grid, soft-tinted no-border buttons (Call blue / neutral gray /
+//     Advance+Send green), behaviors unchanged
 //   — §8.5: no BeeHub/PartnersContext/useContext in the card pieces
 //   — tab switching works post-streaming without content vanishing
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -435,6 +440,59 @@ describe('vitals strip', () => {
     const snoozed = await mount(<PersonCard person={person({ snoozeUntil: inDays(3) })} onClose={() => {}} lookupOptions={LOOKUPS} onSendToJobber={() => {}} />)
     expect(stripValues(snoozed.host).map(p => p.textContent)[3]).toBe(shortDate(now + 3 * 86400000))
     await snoozed.unmount()
+  })
+})
+
+// ═══ header client line (EngagementPanel) ══════════════════
+describe('header client identity', () => {
+  it('client name + View client → render up top (before the tabs), exactly ONCE, same swap behavior', async () => {
+    const opened: string[] = []
+    const { host, unmount } = await mountPanel({ onOpenClient: (id: string) => opened.push(id) })
+    const view = buttonContaining(host, 'View client')!
+    expect(view).toBeTruthy()
+    // header region: above the tab bar in DOM order
+    expect(view.compareDocumentPosition(tabButton(host, 'Overview')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // moved, not duplicated — Key facts lost its copy
+    expect(host.textContent!.split('Dana Client').length - 1).toBe(1)
+    await click(view)
+    expect(opened).toEqual(['lead-9']) // identical swap-to-profile behavior
+    await unmount()
+  })
+})
+
+// ═══ action row — equal-width soft-tinted grid ═════════════
+describe('action row', () => {
+  const rowOf = (host: Element) => buttonContaining(host, 'Log touchpoint')!.parentElement as HTMLElement
+
+  it('every card: repeat(N,1fr) grid sized to the rendered button count — not a flex row', async () => {
+    for (const m of [mountPerson, mountProfile, mountPanel]) {
+      const { host, unmount } = await m()
+      const row = rowOf(host)
+      const n = row.children.length
+      expect(n).toBeGreaterThanOrEqual(3)
+      expect(row.style.display).toBe('grid')
+      expect(row.getAttribute('style')).toMatch(new RegExp(`repeat\\(${n},\\s*1fr\\)`))
+      await unmount()
+    }
+  })
+
+  it('soft tints, matching text color, no hairline: Call blue, Advance/Send green, neutrals gray, 38px', async () => {
+    const ep = await mountPanel()
+    const call = [...ep.host.querySelectorAll('a')].find(a => (a.textContent || '').includes('Call'))!
+    expect(call.getAttribute('style')).toMatch(/rgba\(55,\s*138,\s*221/) // ~10% accent tint
+    expect(call.getAttribute('style')).not.toContain('solid')           // no hairline border
+    expect(['#2b6aad', 'rgb(43, 106, 173)']).toContain((call as HTMLElement).style.color)
+    const advance = buttonContaining(ep.host, 'Advance to Estimate')!
+    expect(advance.getAttribute('style')).toMatch(/rgba\(29,\s*158,\s*117/) // ~12% success tint
+    const log = buttonContaining(ep.host, 'Log touchpoint')!
+    expect(log.getAttribute('style')).toMatch(/rgba\(0,\s*0,\s*0/) // neutral gray tint
+    expect((log as HTMLElement).style.height).toBe('38px')
+    await ep.unmount()
+
+    const pc = await mountPerson()
+    const send = buttonContaining(pc.host, 'Send to Jobber')!
+    expect(send.getAttribute('style')).toMatch(/rgba\(29,\s*158,\s*117/) // founding door rides green
+    await pc.unmount()
   })
 })
 

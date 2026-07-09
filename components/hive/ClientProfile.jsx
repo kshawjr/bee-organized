@@ -17,7 +17,8 @@
 // EngagementPanel; closed capped at 2) → recent activity (client-WIDE
 // slice: kind='job' notes — INCLUDING client-level ones posted on
 // PersonCard, the old inventory gap — + touchpoints, engagement-scoped
-// items tagged '· re: <title>') + composer → quiet actions.
+// items tagged '· re: <title>') + composer → soft-tinted equal-grid
+// actions (cardKit ActionRow).
 //
 // Overlay model: HiveShell holds ONE overlay slot — ClientProfile and
 // EngagementPanel REPLACE each other (no stacking); two taps loop,
@@ -46,8 +47,7 @@ import CardTabs from './shared/CardTabs'
 import PinnedBuzz from './shared/PinnedBuzz'
 import InitialsAvatar from './shared/InitialsAvatar'
 import NotesStream from './NotesStream'
-import { MicroLabel, quietBtn, CardMenu, undoToast } from './shared/cardKit'
-import { GREEN_TEXT } from '@/components/ui/tokens'
+import { MicroLabel, quietBtn, CardMenu, undoToast, ActionRow, actionBtn } from './shared/cardKit'
 import useIsMobile from './shared/useIsMobile'
 
 const QUIET = '#f7f6f4'
@@ -387,38 +387,38 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
           the exhaustive merged stream is the Timeline tab. */}
       <NotesStream label="Recent activity" items={stream} onPost={addNote} nowMs={nowMs} />
 
-      {/* Quiet actions */}
+      {/* Actions — soft-tinted equal-width grid (cardKit ActionRow). */}
       <div>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <ActionRow>
           {c.phone && (
-            <a href={`tel:${c.phone}`} style={quietBtn()}>
+            <a href={`tel:${c.phone}`} style={actionBtn('blue')}>
               <IconPhone size={14} /> Call
             </a>
           )}
-          <button style={quietBtn()} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
+          <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
             Log touchpoint
           </button>
           {jobberLinked ? (
             jobberHref ? (
-              <a href={jobberHref} target="_blank" rel="noreferrer" style={quietBtn()}>
+              <a href={jobberHref} target="_blank" rel="noreferrer" style={actionBtn('gray')}>
                 <IconExternalLink size={14} /> Open in Jobber
               </a>
             ) : (
-              <span title="No Jobber record link available" style={{ ...quietBtn(), color: '#c9c7c0', cursor: 'default' }}>
+              <span title="No Jobber record link available" style={{ ...actionBtn('gray'), color: '#c9c7c0', cursor: 'default' }}>
                 <IconExternalLink size={14} /> Open in Jobber
               </span>
             )
           ) : (
             onSendToJobber && (
-              <button style={quietBtn(GREEN_TEXT)} disabled={busy} onClick={() => onSendToJobber(c.id)}>
+              <button style={actionBtn('green')} disabled={busy} onClick={() => onSendToJobber(c.id)}>
                 <IconSend size={14} /> Send to Jobber
               </button>
             )
           )}
-          <button style={quietBtn()} disabled={busy} onClick={newEngagement}>
+          <button style={actionBtn('gray')} disabled={busy} onClick={newEngagement}>
             <IconPlus size={14} /> New engagement
           </button>
-        </div>
+        </ActionRow>
         {touchOpen && (
           <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <select value={touchMethod} onChange={e => setTouchMethod(e.target.value)}
