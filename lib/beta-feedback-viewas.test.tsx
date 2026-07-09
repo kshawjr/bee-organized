@@ -48,10 +48,11 @@ describe('feedback composer affordance (franchise mount only)', () => {
     expect(screenSrc).toContain('Report a bug / suggest a feature')
   })
 
-  it('the franchise feedback mount passes onReportFeedback → the EXISTING FeedbackModal (setShowFeedback)', () => {
-    expect(franchiseMount).toContain('onReportFeedback={() => setShowFeedback(true)}')
-    // Reuse contract: showFeedback mounts the one existing modal.
-    expect(beehub).toContain('{showFeedback && <FeedbackModal onClose={() => setShowFeedback(false)} />}')
+  it('the franchise feedback mount passes onReportFeedback → the EXISTING FeedbackModal (setShowFeedback), landing on the Submit tab', () => {
+    expect(franchiseMount).toContain("onReportFeedback={() => setShowFeedback('submit')}")
+    // Reuse contract: showFeedback mounts the one existing modal; the
+    // 'submit' intent rides through as initialTab.
+    expect(beehub).toContain("{showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} onClose={() => setShowFeedback(false)} />}")
   })
 
   it('the elevated admin mounts pass NO composer prop and NO location override', () => {

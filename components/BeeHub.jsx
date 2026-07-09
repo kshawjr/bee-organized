@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation"
 import { useLeadsRealtime } from "@/lib/use-leads-realtime"
 import dynamic from "next/dynamic"
 import { canSeeBetaBoard, defaultHiveView, hydrateHiveView } from "@/components/hive/shared/betaGate"
+// Pure presentational icon set (inline SVG, zero deps) — safe to import
+// statically like betaGate; it pulls no beta-chunk surface code with it.
+import { IconBug, IconBulb, IconPlus, IconPaperclip } from "@/components/ui/icons"
 // Phase 1 beta surfaces are DYNAMIC imports only (ssr:false) — separate
 // chunk, loaded when the toggle flips. A crash in beta code must never
 // reach the main bundle (two all-user incident scares on 2026-07-03).
@@ -26431,14 +26434,18 @@ function HelpIconButton({ onOpenGuide, onOpenManual, onOpenFeedback, onOpen, tit
 // ═══════════════════════════════════════════════════════
 
 // Status → display config. Keys mirror the DB check constraint on
-// feedback_items.status. Colors per Kevin's design spec.
+// feedback_items.status. Colors are the locked beta chip families
+// (components/ui/README.md, dark-on-light pairs) so feedback chips speak
+// the same vocabulary as the hive surfaces: submitted → teal (new),
+// under_review → blue (in motion), planned → purple, in_progress → amber
+// (in-flight/attention), shipped → green (done), declined → gray (closed).
 const FEEDBACK_STATUS_CONF = {
-  submitted:    { label:'Submitted',    color:'#6b7280', bg:'rgba(107,114,128,0.12)' },
-  under_review: { label:'Under Review', color:'#2563eb', bg:'rgba(37,99,235,0.12)'  },
-  planned:      { label:'Planned',      color:'#7c3aed', bg:'rgba(124,58,237,0.12)' },
-  in_progress:  { label:'In Progress',  color:'#d97706', bg:'rgba(217,119,6,0.14)'  },
-  shipped:      { label:'Shipped',      color:'#16a34a', bg:'rgba(22,163,74,0.13)'  },
-  declined:     { label:'Declined',     color:'#b91c1c', bg:'rgba(185,28,28,0.10)'  },
+  submitted:    { label:'Submitted',    color:'#085041', bg:'#E1F5EE' },
+  under_review: { label:'Under Review', color:'#0C447C', bg:'#E6F1FB' },
+  planned:      { label:'Planned',      color:'#3C3489', bg:'#EEEDFE' },
+  in_progress:  { label:'In Progress',  color:'#633806', bg:'#FAEEDA' },
+  shipped:      { label:'Shipped',      color:'#27500A', bg:'#EAF3DE' },
+  declined:     { label:'Declined',     color:'#444441', bg:'#F1EFE8' },
 }
 const FEEDBACK_STATUS_ORDER = ['submitted','under_review','planned','in_progress','shipped','declined']
 
@@ -26457,10 +26464,12 @@ function feedbackTimeAgo(iso) {
   return new Date(iso).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })
 }
 
+// Locked chip anatomy (StatusChip spec): 11px/500, padding 2px 8px,
+// radius 10px, no border.
 function FeedbackStatusBadge({ status }) {
   const conf = FEEDBACK_STATUS_CONF[status] || FEEDBACK_STATUS_CONF.submitted
   return (
-    <span style={{ display:'inline-block', padding:'3px 9px', borderRadius:'20px', fontSize:'11px', fontWeight:700, color:conf.color, background:conf.bg, whiteSpace:'nowrap', lineHeight:1.3 }}>
+    <span style={{ display:'inline-block', padding:'2px 8px', borderRadius:'10px', fontSize:'11px', fontWeight:500, lineHeight:1.5, color:conf.color, background:conf.bg, whiteSpace:'nowrap' }}>
       {conf.label}
     </span>
   )
@@ -26562,8 +26571,10 @@ function FeedbackItemCard({ item }) {
   )
 }
 
-function FeedbackModal({ onClose }) {
-  const [tab, setTab]           = useState('mine') // 'mine' (default) | 'submit'
+// initialTab: 'mine' (default — the Help "?" menu path) | 'submit' (the
+// Feedback screen's composer button lands straight on the form).
+function FeedbackModal({ onClose, initialTab = 'mine' }) {
+  const [tab, setTab]           = useState(initialTab) // 'mine' | 'submit'
   const [items, setItems]       = useState([])
   const [loading, setLoading]   = useState(true)
   const [loadError, setLoadError] = useState(null)
@@ -28331,72 +28342,141 @@ function AdminFeedbackScreen({
     return true
   })
 
-  const selStyle = { padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#1a2e2b', background:'white', cursor:'pointer' }
+  // The franchise (owner/manager) mount is the one that passes the
+  // composer callback; the elevated admin mounts never do. The same
+  // signal drives the own-location redundancy rule: on the franchise
+  // mount every row IS the caller's location, so the location filter and
+  // the row meta's location segment drop there and stay on elevated
+  // mounts. If an elevated mount ever gains a composer, split this into
+  // its own prop instead of widening this one.
+  const franchiseMount = !!onReportFeedback
+
+  // Terminal statuses read as closed: rows dim, and the header's "open"
+  // count excludes them.
+  const isClosedStatus = s => s === 'shipped' || s === 'declined'
+  const openCount = items.filter(i => !isClosedStatus(i.status)).length
+  const statusCounts = items.reduce((acc, i) => { acc[i.status] = (acc[i.status] || 0) + 1; return acc }, {})
+  const typePills = [
+    { key:'all',     label:'All',      count: items.length },
+    { key:'bug',     label:'Bugs',     count: items.filter(i => i.type === 'bug').length },
+    { key:'feature', label:'Features', count: items.filter(i => i.type === 'feature').length },
+  ]
+  const statusPills = [
+    { key:'all', label:'All', count: null },
+    ...FEEDBACK_STATUS_ORDER.map(s => ({ key:s, label: FEEDBACK_STATUS_CONF[s].label, count: statusCounts[s] || 0 })),
+  ]
+
+  // Soft filter pill — active gets a quiet gray fill, inactive is muted
+  // text; the count trails after a middot in quiet gray.
+  const pillStyle = active => ({
+    padding:'5px 12px', borderRadius:'20px', border:'none',
+    background: active ? 'rgba(0,0,0,0.07)' : 'transparent',
+    color: active ? '#1a1a18' : '#6b6b66',
+    fontSize:'12px', fontWeight:500, fontFamily:'inherit', cursor:'pointer', whiteSpace:'nowrap',
+  })
+  // Quiet input chrome — the interactive-hairline alpha (buttons and
+  // inputs share rgba(0,0,0,0.15); container hairlines stay at 0.08).
+  const quietInput = { padding:'7px 10px', border:'0.5px solid rgba(0,0,0,0.15)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#1a1a18', background:'white', cursor:'pointer' }
 
   return (
     <div style={{ padding:'14px 1.25rem 1rem', fontFamily:'DM Sans,system-ui,sans-serif' }}>
-      {/* Filter strip */}
-      <div style={{ display:'flex', flexWrap:'wrap', gap:'8px', marginBottom:'14px' }}>
-        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} style={selStyle}>
-          <option value="all">All types</option>
-          <option value="bug">🐛 Bugs</option>
-          <option value="feature">✨ Features</option>
-        </select>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={selStyle}>
-          <option value="all">All statuses</option>
-          {FEEDBACK_STATUS_ORDER.map(s => (
-            <option key={s} value={s}>{FEEDBACK_STATUS_CONF[s].label}</option>
-          ))}
-        </select>
-        <select value={locFilter} onChange={e => setLocFilter(e.target.value)} style={selStyle}>
-          <option value="all">All locations</option>
-          {locOptions.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-        </select>
-        <input value={userQuery} onChange={e => setUserQuery(e.target.value)} placeholder="Search by user name/email" style={{ ...selStyle, cursor:'text', flex:'1 1 180px', minWidth:'150px' }} />
+      {/* Header — light headline + muted count subtitle. The franchise
+          composer button rides the header right as a soft-tinted accent
+          action (the cardKit actionBtn idiom: ~10% tint, never a loud
+          fill). */}
+      <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:'12px', marginBottom:'14px' }}>
+        <div>
+          <h2 style={{ fontSize:'19px', fontWeight:500, color:'#1a1a18', margin:0, lineHeight:1.3 }}>Feedback</h2>
+          <p style={{ fontSize:'12px', color:'#8a8a84', marginTop:'2px' }}>
+            {loading || error ? '—' : `${items.length} item${items.length !== 1 ? 's' : ''} · ${openCount} open`}
+          </p>
+        </div>
         {onReportFeedback && (
           <button
             onClick={onReportFeedback}
             aria-label="Report a bug or suggest a feature"
-            style={{ ...selStyle, marginLeft:'auto', fontWeight:600, whiteSpace:'nowrap' }}
+            style={{ display:'inline-flex', alignItems:'center', gap:'6px', height:'36px', padding:'0 14px', borderRadius:'9px', border:'none', background:'rgba(55,138,221,0.10)', color:'#2b6aad', fontSize:'13px', fontWeight:500, fontFamily:'inherit', cursor:'pointer', whiteSpace:'nowrap', flexShrink:0 }}
           >
-            🐛 Report a bug / suggest a feature
+            <IconPlus size={13} /> Report a bug / suggest a feature
           </button>
         )}
       </div>
 
+      {/* Filter pills — type group | status group, one wrapping strip. */}
+      <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', gap:'2px 4px', marginBottom:'8px' }}>
+        {typePills.map(p => (
+          <button key={`type-${p.key}`} onClick={() => setTypeFilter(p.key)} aria-pressed={typeFilter === p.key} style={pillStyle(typeFilter === p.key)}>
+            {p.label}{p.count != null && <span style={{ color:'#b5b3ac', fontWeight:400 }}> · {p.count}</span>}
+          </button>
+        ))}
+        <span aria-hidden="true" style={{ width:'1px', height:'16px', background:'rgba(0,0,0,0.12)', margin:'0 8px', flexShrink:0 }} />
+        {statusPills.map(p => (
+          <button key={`status-${p.key}`} onClick={() => setStatusFilter(p.key)} aria-pressed={statusFilter === p.key} style={pillStyle(statusFilter === p.key)}>
+            {p.label}{p.count != null && <span style={{ color:'#b5b3ac', fontWeight:400 }}> · {p.count}</span>}
+          </button>
+        ))}
+      </div>
+      <div style={{ display:'flex', flexWrap:'wrap', gap:'8px', marginBottom:'14px' }}>
+        {!franchiseMount && (
+          <select value={locFilter} onChange={e => setLocFilter(e.target.value)} style={quietInput}>
+            <option value="all">All locations</option>
+            {locOptions.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+        )}
+        <input value={userQuery} onChange={e => setUserQuery(e.target.value)} placeholder="Search by user name/email" style={{ ...quietInput, cursor:'text', flex:'1 1 200px', maxWidth:'320px' }} />
+      </div>
+
       {loading ? (
-        <p style={{ fontSize:'13px', color:'#8a9e9a', textAlign:'center', padding:'30px 0' }}>Loading…</p>
+        <p style={{ fontSize:'13px', color:'#8a8a84', textAlign:'center', padding:'30px 0' }}>Loading…</p>
       ) : error ? (
         <div style={{ textAlign:'center', padding:'24px 0' }}>
           <p style={{ fontSize:'13px', color:'#b91c1c', marginBottom:'10px' }}>{error}</p>
           <button onClick={load} style={{ padding:'8px 16px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Retry</button>
         </div>
       ) : filtered.length === 0 ? (
-        <p style={{ fontSize:'13px', color:'#8a9e9a', textAlign:'center', padding:'30px 0' }}>
+        <p style={{ fontSize:'13px', color:'#8a8a84', textAlign:'center', padding:'30px 0' }}>
           {items.length === 0 ? 'No feedback submitted yet.' : 'No items match these filters.'}
         </p>
       ) : (
-        <div style={{ background:'white', border:'1px solid rgba(0,0,0,0.08)', borderRadius:'12px', overflow:'hidden' }}>
-          {/* Header row (≥640px) */}
-          <div className="bee-fb-row bee-fb-head" style={{ display:'grid', gridTemplateColumns:'28px 1fr 1.1fr 120px 110px', gap:'10px', padding:'10px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)', fontSize:'11px', fontWeight:700, color:'#8a9e9a' }}>
-            <span></span><span>Title</span><span>Submitter</span><span>Status</span><span>Submitted</span>
-          </div>
-          {filtered.map(it => (
-            <button key={it.id} onClick={() => setSelected(it)} style={{ width:'100%', display:'grid', gridTemplateColumns:'28px 1fr 1.1fr 120px 110px', gap:'10px', alignItems:'center', padding:'11px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)', background:'white', border:'none', borderLeft:'none', borderRight:'none', cursor:'pointer', textAlign:'left', fontFamily:'inherit' }}>
-              <span style={{ fontSize:'16px' }}>{it.type === 'bug' ? '🐛' : '✨'}</span>
-              <span style={{ display:'flex', alignItems:'center', gap:'8px', minWidth:0 }}>
-                <span style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{it.title}</span>
-                {Array.isArray(it.attachments) && it.attachments.length > 0 && (
-                  <span style={{ flexShrink:0, fontSize:'11px', fontWeight:600, color:'#8a9e9a' }}>📎 {it.attachments.length}</span>
-                )}
-              </span>
-              <span style={{ fontSize:'12px', color:'#4a5e5a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                {it.submitter_name || 'Unknown'}{it.location_name ? ` · ${it.location_name}` : ''}
-              </span>
-              <span><FeedbackStatusBadge status={it.status} /></span>
-              <span style={{ fontSize:'11px', color:'#8a9e9a' }}>{feedbackTimeAgo(it.created_at)}</span>
-            </button>
-          ))}
+        /* One rounded container, hairline-divided rows — not per-row boxes. */
+        <div style={{ background:'white', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:'12px', overflow:'hidden' }}>
+          {filtered.map((it, idx) => {
+            const closed = isClosedStatus(it.status)
+            const bug = it.type === 'bug'
+            return (
+              <button
+                key={it.id}
+                onClick={() => setSelected(it)}
+                style={{
+                  width:'100%', display:'flex', alignItems:'center', gap:'12px', padding:'11px 14px',
+                  border:'none', borderTop: idx === 0 ? 'none' : '0.5px solid rgba(0,0,0,0.08)',
+                  background:'transparent', cursor:'pointer', textAlign:'left', fontFamily:'inherit',
+                  opacity: closed ? 0.72 : 1,
+                }}
+              >
+                {/* Soft-tinted type tile — bug → red family, feature → accent blue. */}
+                <span style={{ width:'28px', height:'28px', borderRadius:'8px', display:'inline-flex', alignItems:'center', justifyContent:'center', flexShrink:0, background: bug ? '#FCEBEB' : 'rgba(55,138,221,0.10)', color: bug ? '#791F1F' : '#2b6aad' }}>
+                  {bug ? <IconBug size={15} /> : <IconBulb size={15} />}
+                </span>
+                <span style={{ flex:1, minWidth:0 }}>
+                  <span style={{ display:'flex', alignItems:'center', gap:'7px', minWidth:0 }}>
+                    <span style={{ fontSize:'13px', fontWeight:500, color:'#1a1a18', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{it.title}</span>
+                    {Array.isArray(it.attachments) && it.attachments.length > 0 && (
+                      <span style={{ flexShrink:0, display:'inline-flex', alignItems:'center', gap:'3px', fontSize:'11px', color:'#8a8a84' }}>
+                        <IconPaperclip size={11} />{it.attachments.length}
+                      </span>
+                    )}
+                  </span>
+                  <span style={{ display:'block', fontSize:'11px', color:'#8a8a84', marginTop:'1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    {it.submitter_name || 'Unknown'}
+                    {!franchiseMount && it.location_name ? ` · ${it.location_name}` : ''}
+                    {` · ${feedbackTimeAgo(it.created_at)}`}
+                  </span>
+                </span>
+                <span style={{ flexShrink:0 }}><FeedbackStatusBadge status={it.status} /></span>
+              </button>
+            )
+          })}
         </div>
       )}
 
@@ -29175,11 +29255,10 @@ function SuperAdminLayout({
 
       case 'feedback':
         return (
-          <div style={{ padding:'28px 28px 48px' }}>
-            <div style={{ marginBottom:'20px' }}>
-              <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'3px' }}>Feedback</h1>
-              <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Bugs, feature requests, and general feedback from franchise owners</p>
-            </div>
+          // The screen carries its own modern header (headline + counts)
+          // now, so no serif h1 here like the sibling tabs — the wrapper
+          // padding shrinks to offset the screen's internal padding.
+          <div style={{ padding:'14px 8px 48px' }}>
             <AdminFeedbackScreen onPendingCountChange={handleFeedbackPending} />
           </div>
         )
@@ -31060,7 +31139,10 @@ export default function App({
   // Hive Hub Manual: reference-only, never auto-opens, no dismiss flag.
   const [manualSlides, setManualSlides]     = useState(Array.isArray(initialManualSlides) ? initialManualSlides : [])
   const [showManual, setShowManual]         = useState(false)
-  // Feedback / bug-report modal — opened from the "? Help" pill's 3rd option.
+  // Feedback / bug-report modal — false | true | 'submit'. The "? Help"
+  // pill's 3rd option sets true (modal opens on its My Items default);
+  // the Feedback screen's composer button sets 'submit' (lands on the
+  // Submit tab). One modal, one state, two entry intents.
   const [showFeedback, setShowFeedback]     = useState(false)
   // Seat pricing: single source of truth from Supabase tier_prices. Falls back
   // to DEFAULT_TIER_PRICES synthetic rows if the table is empty / unmigrated,
@@ -31802,11 +31884,14 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     // what they'd really see; the route honors ?location_id= for elevated
     // callers and ignores it for real owners (hard-scoped anyway).
     // onReportFeedback surfaces the composer here (franchise mount only).
+    // 'submit' lands the modal on the Submit tab — the button says
+    // "report", so it opens the form; the Help "?" path keeps the
+    // My Items default.
     if (activeNav==='feedback') return (
       <div style={pageStyle}>
         <AdminFeedbackScreen
           locationId={viewAsUser?.locationId || null}
-          onReportFeedback={() => setShowFeedback(true)}
+          onReportFeedback={() => setShowFeedback('submit')}
         />
       </div>
     )
@@ -31941,7 +32026,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         open={showManual}
         onClose={() => setShowManual(false)}
       />
-      {showFeedback && <FeedbackModal onClose={() => setShowFeedback(false)} />}
+      {showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} onClose={() => setShowFeedback(false)} />}
       <LocPickerDropdown />
 
       {/* Sidebar nav - desktop only. The column itself no longer scrolls —

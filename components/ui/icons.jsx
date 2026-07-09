@@ -182,6 +182,24 @@ export const IconPaperclip = make(
   <path d="M15 7l-6.5 6.5a1.5 1.5 0 0 0 3 3l6.5 -6.5a3 3 0 0 0 -6 -6l-6.5 6.5a4.5 4.5 0 0 0 9 9l6.5 -6.5" />
 )
 
+export const IconBug = make(<>
+  <path d="M9 9v-1a3 3 0 0 1 6 0v1" />
+  <path d="M8 9h8a6 6 0 0 1 1 3v3a5 5 0 0 1 -10 0v-3a6 6 0 0 1 1 -3" />
+  <path d="M3 13l4 0" />
+  <path d="M17 13l4 0" />
+  <path d="M12 20l0 -6" />
+  <path d="M4 19l3.35 -2" />
+  <path d="M20 19l-3.35 -2" />
+  <path d="M4 7l3.75 2.4" />
+  <path d="M20 7l-3.75 2.4" />
+</>)
+
+export const IconBulb = make(<>
+  <path d="M3 12h1m8 -9v1m8 8h1m-15.4 -6.4l.7 .7m12.1 -.7l-.7 .7" />
+  <path d="M9 16a5 5 0 1 1 6 0a3.5 3.5 0 0 0 -1 3a2 2 0 0 1 -4 0a3.5 3.5 0 0 0 -1 -3" />
+  <path d="M9.7 17l4.6 0" />
+</>)
+
 // Within-stage status → leading icon (mockup chips/status text). One map
 // so board chips and list status text pick identical glyphs.
 const STATUS_ICON = {
