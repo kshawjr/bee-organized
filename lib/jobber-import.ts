@@ -476,25 +476,32 @@ export async function upsertAssessment(
     jobber_synced_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   }
-  const { data: existing } = await supabaseService
+  // Pre-select is a stats hint only (import route counts created vs
+  // updated) — correctness lives in the DB-level upsert below. The
+  // arbiter is assessments_service_request_id_idx; concurrent webhook
+  // deliveries for the same request merge into one row instead of
+  // racing check-then-insert (the Chelsea Atkins dupe snowball).
+  const { data: existing, error: selectError } = await supabaseService
     .from('assessments')
     .select('id')
     .eq('service_request_id', service_request_id)
     .maybeSingle()
-  if (existing) {
-    await supabaseService.from('assessments').update(payload).eq('id', existing.id)
-    return { id: existing.id, created: false }
-  }
+  if (selectError) throw new Error(`Assessment lookup: ${selectError.message}`)
   const { data, error } = await supabaseService
     .from('assessments')
-    .insert({
-      ...payload,
-      created_at: request.assessment.startAt || new Date().toISOString(),
-    })
+    .upsert(
+      {
+        ...payload,
+        // Re-stamped on update too (upsert sets every payload column);
+        // nothing reads assessments.created_at — ordering uses scheduled_at.
+        created_at: request.assessment.startAt || new Date().toISOString(),
+      },
+      { onConflict: 'service_request_id' },
+    )
     .select('id')
     .single()
   if (error) throw new Error(`Assessment: ${error.message}`)
-  return { id: data.id, created: true }
+  return { id: data.id, created: !existing }
 }
 
 export async function upsertQuote(
