@@ -1,11 +1,17 @@
 // components/hive/ClientProfile.jsx
 // ─────────────────────────────────────────────────────────────
 // The CLIENT-level card (fullest of the three) — tabbed layout
-// (approved): compact header → tabs (Overview / Timeline / Files) →
-// content. Fetches GET /api/clients/:id/profile on open.
+// (approved): compact header → VITALS STRIP (Status / Lifetime / Last
+// touch / Open — the four-cell client-health row, visible on every tab)
+// → tabs (Overview / Timeline / Files) → content. Fetches
+// GET /api/clients/:id/profile on open.
+//
+// The strip REPLACED the Overview money-tiles row (Lifetime/Open/Owing).
+// Owing keeps a red Key-facts line when nonzero (plus each Final
+// Processing engagement row's 'Owes $X' chip) — nothing silently drops.
 //
 // Overview: pinned buzz (client-level — the SAME note every engagement
-// panel inherits) → money tiles → key facts (contact + display-only
+// panel inherits) → key facts (contact + display-only
 // source line + shared ReferrerField + referred-us) → request details
 // (pre-Jobber only) → engagements list (open tappable → swaps to
 // EngagementPanel; closed capped at 2) → recent activity (client-WIDE
@@ -27,7 +33,7 @@ import { CHIP_STYLES, stageDisplayLabel, ACCENT_BLUE } from './shared/stageConfi
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
 import { deriveStatusChip, engagementValue, displayTitle, fmtMoney } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
-import MetricCard from '@/components/ui/MetricCard'
+import VitalsStrip, { vitalsAge } from './shared/VitalsStrip'
 import {
   IconPhone, IconMail, IconMapPin, IconPlayerPause, IconExternalLink, IconSend,
   IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPlus, IconPaperclip,
@@ -246,13 +252,6 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
           this client's EngagementPanel(s). */}
       <PinnedBuzz notes={buzz} onPost={addBuzzNote} emptyLabel="Add a note about this client" nowMs={nowMs} />
 
-      {/* Money tiles */}
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: '8px' }}>
-        <MetricCard label="Lifetime paid" value={fmtMoney(agg?.lifetime_paid || 0)} />
-        <MetricCard label="Open pipeline" value={fmtMoney(agg?.open_pipeline || 0)} />
-        <MetricCard label="Owing" value={fmtMoney(agg?.owing || 0)} tone={(agg?.owing || 0) > 0 ? 'red' : null} />
-      </div>
-
       {/* Key facts — contact + marketing state; Source stays display-only
           on this surface (deliberate: the ReferrerField below is the edit
           affordance, shared with the other two cards). */}
@@ -280,6 +279,11 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
               </a>
             )}
           </span>
+        )}
+        {/* Nonzero owing stays loud after the money tiles' removal — the
+            strip has no Owing cell (Open replaced it). */}
+        {(agg?.owing || 0) > 0 && (
+          <p style={{ fontSize: '12px', fontWeight: 500, color: '#791F1F' }}>Owing {fmtMoney(agg.owing)}</p>
         )}
         <p style={{ fontSize: '12px', color: c.paused ? '#633806' : '#085041', display: 'flex', alignItems: 'center', gap: '7px' }}>
           <IconPlayerPause size={13} /> {c.paused ? 'Drips paused' : 'Drips active'}
@@ -460,6 +464,15 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         </div>
         <CardMenu items={[{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]} />
       </div>
+
+      {/* Vitals strip — client-health row; Status in its status color.
+          Replaces the old Overview money tiles (owing → Key facts line). */}
+      <VitalsStrip cells={[
+        { label: 'Status', value: statusMeta?.label ?? null, color: fam.text },
+        { label: 'Lifetime', value: (agg?.lifetime_paid || 0) > 0 ? fmtMoney(agg.lifetime_paid) : null },
+        { label: 'Last touch', value: touches.length ? vitalsAge(touches.reduce((m, t) => Math.max(m, new Date(t.occurred_at).getTime() || 0), 0), nowMs) : null },
+        { label: 'Open', value: (agg?.open_pipeline || 0) > 0 ? fmtMoney(agg.open_pipeline) : null },
+      ]} />
 
       <CardTabs
         tabs={[{ key: 'overview', label: 'Overview' }, { key: 'timeline', label: 'Timeline' }, { key: 'files', label: 'Files' }]}

@@ -2,7 +2,10 @@
 // ─────────────────────────────────────────────────────────────
 // The PRE-ENGAGEMENT record card — what an Inbox row opens. Tabbed
 // layout (approved): compact header (status-tinted avatar + name +
-// chip + subtitle + ··· menu) → tabs → content.
+// chip + subtitle + ··· menu) → VITALS STRIP (Status / Inquired / Last
+// touch / Next — visible on every tab; Next = soonest future item among
+// snooze + any open engagement's assessments/jobs, usually '—'
+// pre-engagement) → tabs → content.
 //
 // Tabs: Overview (default) / Timeline. NO Files tab — nothing to file
 // pre-founding. Tab switching is a post-streaming JS stepper: only the
@@ -34,6 +37,7 @@ import CardTabs from './shared/CardTabs'
 import PinnedBuzz from './shared/PinnedBuzz'
 import InitialsAvatar from './shared/InitialsAvatar'
 import { MicroLabel, quietBtn, CardMenu, undoToast } from './shared/cardKit'
+import VitalsStrip, { vitalsAge, vitalsFuture, nextFromChildren } from './shared/VitalsStrip'
 import StatusChip from '@/components/ui/StatusChip'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
 import { CHIP_STYLES, ACCENT_BLUE } from './shared/stageConfig'
@@ -188,6 +192,24 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
     ...touches.map(tp => ({ t: 'touch', ts: tp.occurred_at, ...tp })),
   ].sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 8)
 
+  // Vitals-strip inputs — everything already on hand, no new queries.
+  // Last touch: most recent touchpoint from the profile fetch. Next:
+  // soonest future item among the lead's snooze (Inbox prop) and any
+  // open engagement's future assessments/job starts from the profile
+  // payload — pre-engagement that's usually nothing → '—'.
+  const lastTouchTs = touches
+    .reduce((m, t) => Math.max(m, new Date(t.occurred_at).getTime() || 0), 0) || null
+  const nextTs = (() => {
+    const cands = []
+    const snooze = person.snoozeUntil ? new Date(person.snoozeUntil).getTime() : NaN
+    if (Number.isFinite(snooze) && snooze > nowMs) cands.push(snooze)
+    for (const e of data?.engagements || []) {
+      const t = nextFromChildren(e, nowMs)
+      if (t) cands.push(t)
+    }
+    return cands.length ? Math.min(...cands) : null
+  })()
+
   // Once the profile row is loaded it is authoritative INCLUDING null —
   // the old `c?.source ?? person.source` fallback resurrected the stale
   // prop whenever the loaded (or None-cleared) value was null.
@@ -309,6 +331,15 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
         </div>
         <CardMenu items={[{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]} />
       </div>
+
+      {/* Vitals strip — lead-health row; Status in its status color,
+          Next in the accent. */}
+      <VitalsStrip cells={[
+        { label: 'Status', value: statusMeta?.label ?? null, color: fam.text },
+        { label: 'Inquired', value: person.created ? vitalsAge(person.created, nowMs) : null },
+        { label: 'Last touch', value: lastTouchTs ? vitalsAge(lastTouchTs, nowMs) : null },
+        { label: 'Next', value: nextTs ? vitalsFuture(nextTs, nowMs) : null, color: ACCENT_BLUE },
+      ]} />
 
       {/* Tabs — Overview default; NO Files pre-founding. */}
       <CardTabs

@@ -2,17 +2,22 @@
 // ─────────────────────────────────────────────────────────────
 // The ONE-DEAL work card — the board's click-through. Tabbed layout
 // (approved): compact header (stage-tinted avatar + inline-rename title
-// + stage chip + subtitle + ··· menu) → tabs (Overview / Timeline /
-// Files) → content. Fetches GET /api/engagements/:id on open (board
-// rows stay lightweight; `seed` renders the shell synchronously).
+// + stage chip + subtitle + ··· menu) → VITALS STRIP (Stage / Value /
+// Last touch / Next — the four-cell deal-health row, visible on every
+// tab) → tabs (Overview / Timeline / Files) → content. Fetches
+// GET /api/engagements/:id on open (board rows stay lightweight;
+// `seed` renders the shell synchronously).
+//
+// The strip REPLACED the Overview's standalone 5-segment stage bar and
+// the money-tiles row (both redundant with it). Invoiced/paid detail
+// moved onto the invoice record row ('$X of $Y paid'); owing keeps its
+// red trailing state there — no financial info lost.
 //
 // Overview: pinned buzz (INHERITED from the client — the same
-// lead_notes kind='buzz' rows ClientProfile shows) → stage bar
-// (current-state only) → key facts (client + View client →, tappable
-// phone/email, Source MetaSelect [LEAD-level write], Type MetaSelect
-// [ENGAGEMENT-level write], shared ReferrerField) → job description
-// (engagements.description) → adaptive money tiles (Value/Paid until
-// invoicing exists, then Value/Invoiced/Paid; Paid red when owing) →
+// lead_notes kind='buzz' rows ClientProfile shows) → key facts
+// (client + View client →, tappable phone/email, Source MetaSelect
+// [LEAD-level write], Type MetaSelect [ENGAGEMENT-level write], shared
+// ReferrerField) → job description (engagements.description) →
 // Jobber records checklist (status view — the chronological version
 // lives in the Timeline tab) → engagement-scoped recent activity +
 // composer → quiet actions (Call / Log / Jobber / Advance). Close
@@ -26,10 +31,10 @@
 
 import React, { useState, useEffect } from 'react'
 import useIsMobile from './shared/useIsMobile'
-import { ENGAGEMENT_STAGES, STAGE_RANK, isTerminal, stageDisplayLabel, ACCENT_BLUE, CHIP_STYLES } from './shared/stageConfig'
+import { ENGAGEMENT_STAGES, isTerminal, stageDisplayLabel, ACCENT_BLUE, CHIP_STYLES } from './shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
 import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconMail, IconExternalLink, IconCalendar, IconSend, IconPaperclip } from '@/components/ui/icons'
-import MetricCard from '@/components/ui/MetricCard'
+import VitalsStrip, { vitalsAge, vitalsFuture, nextFromChildren } from './shared/VitalsStrip'
 import NotesStream from './NotesStream'
 import OverlayShell from './OverlayShell'
 import MetaSelect from './MetaSelect'
@@ -40,7 +45,7 @@ import PinnedBuzz from './shared/PinnedBuzz'
 import InitialsAvatar from './shared/InitialsAvatar'
 import { MicroLabel, quietBtn, CardMenu } from './shared/cardKit'
 import { GREEN_TEXT } from '@/components/ui/tokens'
-import { fmtTime } from './shared/engagementStatus'
+import { fmtTime, engagementValue } from './shared/engagementStatus'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
 const fmtDate = (d) => {
@@ -50,54 +55,11 @@ const fmtDate = (d) => {
   return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-// Quiet light surface used by the description + money cards (mockup).
+// Quiet light surface used by the description + key-facts cards (mockup).
 const QUIET = '#f7f6f4'
-// Stage-bar palette (mockup-exact).
+// Record-state palette (mockup-exact): green done / blue in-motion.
 const BAR_DONE = '#1D9E75'
 const BAR_CURRENT = '#378ADD'
-const BAR_FUTURE = '#ECEAE4'
-
-const BAR_SEGMENTS = [
-  { key: 'Request', label: 'Request' },
-  { key: 'Estimate', label: 'Estimate' },
-  { key: 'Job in Progress', label: 'Job' },
-  { key: 'Final Processing', label: 'Final' },
-  { key: 'Closed Won', label: 'Won' },
-]
-
-// Five equal segments, labels below: completed green w/ muted labels,
-// current blue w/ weight-500 dark label, future neutral. Current-state
-// only — the history lives in the Timeline tab's stage_change entries.
-function StageBar({ stage }) {
-  const rank = STAGE_RANK[stage] ?? 0
-  const lost = stage === 'Closed Lost'
-  return (
-    <div>
-      <div style={{ display: 'flex', gap: '5px' }}>
-        {BAR_SEGMENTS.map((seg) => {
-          const segRank = STAGE_RANK[seg.key] ?? 0
-          const color = lost ? BAR_FUTURE
-            : segRank < rank ? BAR_DONE
-            : segRank === rank ? BAR_CURRENT
-            : BAR_FUTURE
-          return <div key={seg.key} style={{ flex: 1, height: '5px', borderRadius: '2px', background: color }} />
-        })}
-      </div>
-      <div style={{ display: 'flex', gap: '5px', marginTop: '5px' }}>
-        {BAR_SEGMENTS.map((seg) => {
-          const segRank = STAGE_RANK[seg.key] ?? 0
-          const current = !lost && segRank === rank
-          return (
-            <span key={seg.key} style={{ flex: 1, fontSize: '11px', textAlign: 'center', color: current ? '#1a1a18' : '#b5b3ac', fontWeight: current ? 500 : 400 }}>
-              {seg.label}
-            </span>
-          )
-        })}
-      </div>
-      {lost && <p style={{ fontSize: '11px', color: '#791F1F', marginTop: '4px' }}>Closed lost</p>}
-    </div>
-  )
-}
 
 // One RECORDS checklist row (mockup anatomy): leading family-colored
 // glyph, primary 13px, secondary 11px muted, trailing state — green ✓
@@ -384,10 +346,15 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     i.status === 'paid' ? DONE
     : { label: `owing ${fmtMoney(i.balance_owing != null ? i.balance_owing : i.total)}`, color: '#791F1F' }
 
-  // Money tiles adapt to financial state: the Invoiced column appears
-  // once invoicing exists (estimate-stage shows Value/Paid only).
-  const hasInvoicing = children.invoices.length > 0 || Number(eng?.total_invoiced) > 0
-  const engValue = eng ? (Number(eng.total_invoiced) > 0 ? eng.total_invoiced : Math.max(0, ...children.quotes.map(q => Number(q.total) || 0))) : 0
+  // Vitals-strip inputs — everything already fetched, no new queries.
+  // Value: total_invoiced once real, best quote before that, null → '—'.
+  // Last touch: most recent touchpoint. Next: soonest future assessment
+  // or job start among THIS engagement's children (lead-level drip
+  // projections stay with the Timeline tab's own fetch).
+  const stripValue = eng ? engagementValue({ ...eng, quotes: children.quotes }) : null
+  const lastTouchTs = (children.touchpoints || [])
+    .reduce((m, t) => Math.max(m, new Date(t.occurred_at).getTime() || 0), 0) || null
+  const nextTs = nextFromChildren(children, nowMs)
 
   // Close-out (doc §4): the trigger lives in the ··· menu; the inline
   // Won/Lost confirm (never a second modal) renders on Overview.
@@ -450,9 +417,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           profile); every engagement of this client shows it. */}
       {client && <PinnedBuzz notes={client.buzz || []} onPost={addBuzz} emptyLabel="Add a note about this client" nowMs={nowMs} />}
 
-      {/* Stage progress — current state only */}
-      {eng && <StageBar stage={eng.stage} />}
-
       {closeConfirm}
 
       {/* Key facts — client identity + the shared editable meta */}
@@ -505,15 +469,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
         </div>
       )}
 
-      {/* Money — columns adapt to financial state */}
-      {eng && (
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : (hasInvoicing ? '1fr 1fr 1fr' : '1fr 1fr'), gap: '8px' }}>
-          <MetricCard label="Engagement value" value={fmtMoney(engValue)} />
-          {hasInvoicing && <MetricCard label="Invoiced" value={fmtMoney(eng.total_invoiced)} />}
-          <MetricCard label="Paid" value={fmtMoney(eng.total_paid)} tone={Number(eng.balance_owing) > 0 ? 'red' : 'teal'} />
-        </div>
-      )}
-
       {/* Records checklist — STATUS view (✓ / scheduled-date / dashed
           pending); the chronological version is the Timeline tab. */}
       <div>
@@ -551,10 +506,16 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
               state={jobState(j)}
             />
           ))}
+          {/* '$X of $Y paid' rides the invoice row — the strip carries no
+              paid column, so this is where the paid detail lives now. */}
           {children.invoices.map(inv => (
             <RecordRow key={inv.id} icon={<IconFileInvoice size={15} />} iconColor="#791F1F" current={currentType === 'invoice'}
               primary={`Invoice · ${fmtMoney(inv.total)}`}
-              secondary={[inv.issued_at && `issued ${fmtDate(inv.issued_at)}`, inv.paid_at && `paid ${fmtDate(inv.paid_at)}`].filter(Boolean).join(' · ') || null}
+              secondary={[
+                `${fmtMoney(inv.paid_amount != null ? inv.paid_amount : Math.max(0, (Number(inv.total) || 0) - (Number(inv.balance_owing) || 0)))} of ${fmtMoney(inv.total)} paid`,
+                inv.issued_at && `issued ${fmtDate(inv.issued_at)}`,
+                inv.paid_at && `paid ${fmtDate(inv.paid_at)}`,
+              ].filter(Boolean).join(' · ')}
               state={invoiceState(inv)}
             />
           ))}
@@ -678,6 +639,17 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           </div>
           <CardMenu items={menuItems} />
         </div>
+      )}
+
+      {/* Vitals strip — the deal-health row; Stage in its status color,
+          Next in the accent. Replaces the old stage bar + money tiles. */}
+      {eng && (
+        <VitalsStrip cells={[
+          { label: 'Stage', value: stageDisplayLabel(eng.stage), color: stageFam.text },
+          { label: 'Value', value: stripValue != null ? fmtMoney(stripValue) : null },
+          { label: 'Last touch', value: lastTouchTs ? vitalsAge(lastTouchTs, nowMs) : null },
+          { label: 'Next', value: nextTs ? vitalsFuture(nextTs, nowMs) : null, color: ACCENT_BLUE },
+        ]} />
       )}
 
       <CardTabs
