@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, createContext, useContext } from "r
 import { useRouter } from "next/navigation"
 import { useLeadsRealtime } from "@/lib/use-leads-realtime"
 import dynamic from "next/dynamic"
-import { canSeeBetaBoard } from "@/components/hive/shared/betaGate"
+import { canSeeBetaBoard, defaultHiveView, hydrateHiveView } from "@/components/hive/shared/betaGate"
 // Phase 1 beta surfaces are DYNAMIC imports only (ssr:false) — separate
 // chunk, loaded when the toggle flips. A crash in beta code must never
 // reach the main bundle (two all-user incident scares on 2026-07-03).
@@ -10094,11 +10094,14 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
   // Render the location pill on every card for elevated users — they want to
   // see where each lead came from even when filtered to a single location.
   const showLocation = isElevated
-  // Default 'list' on both SSR and client. Hydrate from localStorage after
-  // mount to avoid React hydration mismatch on the initial render.
-  const [view, setView] = useState('list')
+  // GO-LIVE 2026-07-09: beta ('engagements') is the landing view whenever
+  // the gate is open; stored Classic views no longer win the initial load
+  // (ignore-on-hydrate — the key isn't cleared, so rollback restores the
+  // old behavior untouched). Policy lives in betaGate.js. Same value on
+  // SSR and client (derived from role) — no hydration mismatch.
+  const [view, setView] = useState(defaultHiveView(newBoardAllowed))
   useEffect(() => {
-    try { const v = localStorage.getItem('bee_hive_view'); if (v && (v !== 'engagements' || newBoardAllowed)) setView(v) } catch {}
+    try { const v = hydrateHiveView(newBoardAllowed, localStorage.getItem('bee_hive_view')); if (v) setView(v) } catch {}
   }, [])
   // Beta Inbox → Send to Jobber: reuses the EXISTING SendToJobberPopup
   // confirm flow (module scope in this file — the beta chunk can't and
