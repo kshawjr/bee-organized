@@ -8,10 +8,23 @@
 //
 // Stage moves: desktop drag between columns → PATCH /api/engagements/:id
 // { stage }, forward-only (client pre-checks STAGE_RANK; server re-checks
-// and 409s). leads.stage is never touched from here. Mobile is one column
-// at a time (swipe/arrows + pager dots); stage moves happen from the
-// engagement sheet per the locked mobile rules — the sheet is the future
-// EngagementPanel, so mobile has no drag.
+// and 409s). LINKED engagements (any Jobber child record — isJobberLinked)
+// get NO manual pipeline moves: the webhook derivation drives their
+// stage, so a linked pipeline drop no-ops with a toast. LOCAL cards keep
+// pipeline drag (their only stage mover) and commit directly — pipeline
+// moves aren't closes.
+//
+// CLOSE drags (both linked AND local): while a drag is live the closed
+// rail becomes two drop zones (won / lost). Dropping there does NOT
+// commit — the card visually lands in a pending closed column and the
+// SHARED human close flow (shared/CloseEngagementConfirm — the same
+// component + PATCH the panel's ··· menu Close uses) opens. Confirm
+// commits the terminal stage; Cancel snaps the card back to its prior
+// column with no write. Order is drop → popup → commit-or-revert; the
+// stage is NEVER committed on drop. leads.stage is never touched from
+// here. Mobile is one column at a time (swipe/arrows + pager dots);
+// stage moves happen from the engagement sheet per the locked mobile
+// rules — the sheet is the future EngagementPanel, so mobile has no drag.
 //
 // Card click opens the CLIENT (PersonPanel) via onOpenClient — the
 // EngagementPanel replaces that seam next screen (see TODO below).
@@ -24,7 +37,8 @@ import { SECTION_LABEL, SECTION_COUNT, TEXT_SUCCESS, TEXT_DANGER, TEXT_MUTED } f
 import FilterChips from '@/components/ui/FilterChips'
 // THE shared status derivation — board cards and list rows consume the
 // same module so the two lenses can never disagree.
-import { deriveStatusChip, displayTitle, engagementValue, fmtMoney } from './shared/engagementStatus'
+import { deriveStatusChip, displayTitle, engagementValue, fmtMoney, isJobberLinked } from './shared/engagementStatus'
+import CloseEngagementConfirm from './shared/CloseEngagementConfirm'
 import StatusChip from '@/components/ui/StatusChip'
 import Card from '@/components/ui/Card'
 import SectionHeader from '@/components/ui/SectionHeader'
@@ -55,12 +69,12 @@ const CLOSED_WINDOW = 40
 
 // Card typography (LOCKED): name 13px/500 near-black, subtitle 11px muted,
 // value 12px/500. 100% sans — no serif inside the board.
-function EngagementCard({ e, onOpen, draggable, onDragStart, accent = null }) {
+function EngagementCard({ e, onOpen, draggable, onDragStart, onDragEnd, accent = null }) {
   const chip = deriveStatusChip(e)
   const rawValue = engagementValue(e)
   const value = rawValue != null ? fmtMoney(rawValue) : null
   return (
-    <div draggable={draggable || undefined} onDragStart={onDragStart}>
+    <div draggable={draggable || undefined} onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <Card onClick={onOpen} accent={accent}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '3px' }}>
           <p style={{ flex: 1, minWidth: 0, fontSize: '13px', fontWeight: 500, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -93,6 +107,13 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
   const [dragOverCol, setDragOverCol] = useState(null)
   const dragId = useRef(null)
   const touchX = useRef(null)
+
+  // Live-drag state (state, not just the ref — the won/lost close drop
+  // zones render only while a card is in the air) and the PENDING close:
+  // the drop landed but NOTHING has committed — the confirm popup owns
+  // what happens next (confirm → PATCH, cancel → snap back).
+  const [dragging, setDragging] = useState(false)
+  const [pendingClose, setPendingClose] = useState(null) // { eng, target, prevStage }
 
   // Closed rail state — collapsed by default every mount (it's an
   // archive peek, not a pinned lens). Data is fetched ONCE on first
@@ -144,9 +165,15 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
   }
   const byStage = (key) => orderColumn(visibleRows.filter(e => e.stage === key))
 
+  // PIPELINE moves only (columns are the non-terminal BOARD_STAGES —
+  // close drags never route here; they go through beginClose below).
   async function moveStage(id, targetStage) {
     const row = rows.find(r => r.id === id)
     if (!row || row.stage === targetStage) return
+    if (isJobberLinked(row)) {
+      setToast({ kind: 'error', msg: 'Jobber drives this engagement — its pipeline stage follows the real records' })
+      return
+    }
     if ((STAGE_RANK[targetStage] ?? 0) <= (STAGE_RANK[row.stage] ?? 0)) {
       setToast({ kind: 'error', msg: 'Engagements only move forward — reopen from the engagement panel instead' })
       return
@@ -166,6 +193,38 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
     }
   }
 
+  // ── drag-to-close (PENDING, not committed) ────────────────────
+  // Drop → the card optimistically leaves its pipeline column and lands
+  // in a pending closed column with the shared confirm open. The
+  // terminal PATCH fires ONLY from the confirm button (inside
+  // CloseEngagementConfirm — the same write path as the panel's ···
+  // Close); cancel restores the prior column with zero writes. Both
+  // linked and local cards close this way — there is no Jobber
+  // auto-Lost, so closing is always a human act.
+  function beginClose(id, target) {
+    const row = rows.find(r => r.id === id)
+    if (!row || isTerminal(row.stage)) return
+    setPendingClose({ eng: row, target, prevStage: row.stage })
+    setRows(rs => rs.map(r => r.id === id ? { ...r, stage: target } : r))
+  }
+
+  function cancelPendingClose() {
+    if (!pendingClose) return
+    const { eng, prevStage } = pendingClose
+    setRows(rs => rs.map(r => r.id === eng.id ? { ...r, stage: prevStage } : r))
+    setPendingClose(null)
+  }
+
+  function confirmedClose(stage) {
+    if (!pendingClose) return
+    const { eng } = pendingClose
+    setRows(rs => rs.map(r => r.id === eng.id ? { ...r, stage } : r))
+    setPendingClose(null)
+    // The closed window (if already loaded) predates this close — drop
+    // it so the next rail expand refetches with the new row included.
+    setClosedData(null)
+  }
+
   function openCard(e) {
     // EngagementPanel is the click-through (HiveShell passes
     // onOpenEngagement); PersonPanel remains the fallback for any
@@ -179,6 +238,7 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
     return (
       <div
         key={stage.key}
+        data-board-col={stage.key}
         onDragOver={droppable ? (ev) => { ev.preventDefault(); setDragOverCol(stage.key) } : undefined}
         onDragLeave={droppable ? () => setDragOverCol(null) : undefined}
         onDrop={droppable ? (ev) => {
@@ -203,7 +263,8 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
               e={e}
               onOpen={() => openCard(e)}
               draggable={!isMobile}
-              onDragStart={!isMobile ? () => { dragId.current = e.id } : undefined}
+              onDragStart={!isMobile ? () => { dragId.current = e.id; setDragging(true) } : undefined}
+              onDragEnd={!isMobile ? () => { setDragging(false); setDragOverCol(null) } : undefined}
             />
           ))}
           {cards.length === 0 && (
@@ -212,6 +273,66 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
             </div>
           )}
         </div>
+      </div>
+    )
+  }
+
+  // ── Close drop zones (desktop, live-drag only) ────────────────
+  // While a card is in the air the closed rail's slot becomes two drop
+  // targets — won and lost. Dropping opens the pending close flow
+  // (beginClose); it never PATCHes directly.
+  const CLOSE_ZONES = [
+    { target: CLOSED_WON, label: 'Closed won', aria: 'Close as won', color: `var(--text-success, ${TEXT_SUCCESS})`, tint: 'rgba(29,158,117,0.08)' },
+    { target: CLOSED_LOST, label: 'Closed lost', aria: 'Close as lost', color: `var(--text-danger, ${TEXT_DANGER})`, tint: 'rgba(121,31,31,0.06)' },
+  ]
+  const renderCloseZones = () => (
+    <div key="closed-rail" style={{ width: '220px', flexShrink: 0, padding: '2px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <SectionHeader label="Close" count={null} />
+      {CLOSE_ZONES.map(z => (
+        <div
+          key={z.target}
+          aria-label={z.aria}
+          onDragOver={(ev) => { ev.preventDefault(); setDragOverCol(z.target) }}
+          onDragLeave={() => setDragOverCol(null)}
+          onDrop={(ev) => {
+            ev.preventDefault()
+            setDragOverCol(null)
+            if (dragId.current) beginClose(dragId.current, z.target)
+            dragId.current = null
+            setDragging(false)
+          }}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            minHeight: '96px', borderRadius: '10px',
+            border: `1.5px dashed ${z.color}`,
+            background: dragOverCol === z.target ? z.tint : 'transparent',
+            fontSize: '12px', fontWeight: 500, color: z.color,
+          }}
+        >
+          {z.label}
+        </div>
+      ))}
+    </div>
+  )
+
+  // ── Pending close column (drop landed, popup open) ────────────
+  // The card sits in the closed column visually while NOTHING is
+  // committed; the shared confirm decides. Cancel puts it back.
+  const renderPendingClose = () => {
+    const { eng: pendingEng, target, prevStage } = pendingClose
+    const zone = CLOSE_ZONES.find(z => z.target === target)
+    return (
+      <div key="closed-rail" style={{ width: '220px', flexShrink: 0, padding: '2px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <SectionHeader label={target === CLOSED_WON ? 'Closing — won' : 'Closing — lost'} count={null} />
+        <EngagementCard e={{ ...pendingEng, stage: prevStage }} onOpen={() => {}} accent={zone.color} />
+        <CloseEngagementConfirm
+          engagementId={pendingEng.id}
+          invoices={pendingEng.invoices || []}
+          initialCloseAs={target}
+          onCancel={cancelPendingClose}
+          onClosed={(stage) => confirmedClose(stage)}
+          setToast={setToast}
+        />
       </div>
     )
   }
@@ -362,7 +483,9 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
         <div style={{ overflowX: 'auto', paddingBottom: '1rem', WebkitOverflowScrolling: 'touch' }}>
           <div style={{ display: 'flex', gap: '16px', minWidth: 'max-content', alignItems: 'flex-start' }}>
             {BOARD_STAGES.map(stage => renderColumn(stage, { droppable: true }))}
-            {renderClosedRail()}
+            {/* 5th-column slot: pending close (popup open) > live-drag
+                drop zones > the closed rail. */}
+            {pendingClose ? renderPendingClose() : dragging ? renderCloseZones() : renderClosedRail()}
           </div>
         </div>
       )}

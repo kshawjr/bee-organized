@@ -50,7 +50,8 @@ import CardTabs from './shared/CardTabs'
 import PinnedBuzz from './shared/PinnedBuzz'
 import InitialsAvatar from './shared/InitialsAvatar'
 import { MicroLabel, quietBtn, CardMenu, ActionRow, actionBtn } from './shared/cardKit'
-import { fmtTime, engagementValue, formatFullDate } from './shared/engagementStatus'
+import CloseEngagementConfirm from './shared/CloseEngagementConfirm'
+import { fmtTime, engagementValue, formatFullDate, isJobberLinked } from './shared/engagementStatus'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
 const fmtDate = (d) => {
@@ -104,9 +105,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   const [touchNote, setTouchNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [closeOpen, setCloseOpen] = useState(false)
-  const [closeAs, setCloseAs] = useState('Closed Lost')
-  const [closeReason, setCloseReason] = useState('lost_no_response')
-  const [closeNote, setCloseNote] = useState('')
   const nowMs = Date.now()
 
   const isMobile = useIsMobile()
@@ -116,7 +114,17 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     setData(null); setLoadErr(null)
     fetch(`/api/engagements/${engagementId}`)
       .then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `HTTP ${r.status}`); return r.json() })
-      .then(d => { if (!dead) setData(d) })
+      .then(d => {
+        if (dead) return
+        setData(d)
+        // The GET route drift-recovers linked engagements on open (a
+        // swallowed webhook failure can leave stage stale) — when the
+        // stage it returns differs from the board row we opened from,
+        // push the correction back so the board doesn't stay stale.
+        if (seed?.stage && d?.engagement?.stage && d.engagement.stage !== seed.stage) {
+          onChanged(engagementId, { stage: d.engagement.stage })
+        }
+      })
       .catch(e => { if (!dead) setLoadErr(String(e.message || e)) })
     return () => { dead = true }
   }, [engagementId])
@@ -182,6 +190,14 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     const i = order.findIndex(s => s.key === eng.stage)
     return i >= 0 && i < order.length - 1 ? order[i + 1].key : null
   })()
+
+  // LINKED = any Jobber child record → the webhook derivation drives
+  // pipeline stage; manual Advance is redundant there (its only unique
+  // effect would be asserting a stage the records don't support). LOCAL
+  // engagements keep Advance — it's their only stage mover. Gated on
+  // !!data like canSendToJobber: never guess linkage from the seed.
+  const linked = !!data && isJobberLinked(children)
+  const showAdvance = !!data && !linked && !!nextStage
 
   // Client-level buzz — posted from the pinned band (append-only; the
   // band owns the draft, we own the notes array + optimistic prepend).
@@ -352,60 +368,24 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     .reduce((m, t) => Math.max(m, new Date(t.occurred_at).getTime() || 0), 0) || null
   const nextTs = nextFromChildren(children, nowMs)
 
-  // Close-out (doc §4): the trigger lives in the ··· menu; the inline
-  // Won/Lost confirm (never a second modal) renders on Overview.
-  const closeConfirm = closeOpen && eng && (() => {
-    const invoices = children.invoices || []
-    const settled = invoices.length === 0 || invoices.every(i => i.status === 'paid' || Number(i.balance_owing) === 0)
-    const confirmClose = async () => {
-      const bodyPatch = closeAs === 'Closed Won'
-        ? { stage: 'Closed Won', closed_reason: 'won', closed_note: closeNote.trim() || undefined }
-        : { stage: 'Closed Lost', closed_reason: closeReason, closed_note: closeNote.trim() || undefined }
-      const ok = await patchEngagement(bodyPatch, `Closed as ${closeAs === 'Closed Won' ? 'won' : 'lost'}`)
-      if (ok) setTimeout(onClose, 900)
-    }
-    const segBtn = (key, label, disabled, why) => (
-      <button key={key} disabled={disabled} title={disabled ? why : undefined}
-        onClick={() => { setCloseAs(key) }}
-        style={{ flex: 1, padding: '7px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 500, fontFamily: 'inherit', cursor: disabled ? 'default' : 'pointer',
-          border: `0.5px solid ${closeAs === key && !disabled ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.12)'}`,
-          background: closeAs === key && !disabled ? '#fff' : 'transparent',
-          color: disabled ? '#c9c7c0' : (closeAs === key ? '#1a1a18' : '#8a8a84') }}>
-        {label}
-      </button>
-    )
-    return (
-      <div style={{ padding: '12px', background: '#f7f6f4', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <p style={{ fontSize: '11px', fontWeight: 500, color: '#8a8a84', letterSpacing: '0.6px', textTransform: 'uppercase' }}>Close as</p>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          {segBtn('Closed Lost', 'Lost', false)}
-          {segBtn('Closed Won', 'Won', !settled, 'Invoices still owing — settle them in Jobber first (or close as lost / written off)')}
-        </div>
-        {closeAs === 'Closed Lost' && (
-          <select value={closeReason} onChange={e => setCloseReason(e.target.value)}
-            style={{ padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', background: '#fff' }}>
-            <option value="lost_no_response">No response</option>
-            <option value="lost_competitor">Went with someone else</option>
-            <option value="lost_not_fit">Not a fit</option>
-            <option value="written_off">Written off</option>
-            <option value="lost_other">Other</option>
-          </select>
-        )}
-        <input value={closeNote} onChange={e => setCloseNote(e.target.value)} placeholder="Note (optional)…"
-          style={{ padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none', background: '#fff' }} />
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-          <button onClick={() => setCloseOpen(false)} disabled={busy}
-            style={{ padding: '7px 12px', borderRadius: '8px', border: 'none', background: 'transparent', fontSize: '12px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
-            Cancel
-          </button>
-          <button onClick={confirmClose} disabled={busy || (closeAs === 'Closed Won' && !settled)}
-            style={{ padding: '7px 14px', borderRadius: '8px', border: 'none', background: '#1a1a18', color: '#fff', fontSize: '12px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>
-            Close as {closeAs === 'Closed Won' ? 'won' : 'lost'}
-          </button>
-        </div>
-      </div>
-    )
-  })()
+  // Close-out (doc §4): the trigger lives in the ··· menu; the SHARED
+  // human close flow (shared/CloseEngagementConfirm — same component +
+  // write path as the board's drag-to-close) renders inline on
+  // Overview, never a second modal.
+  const closeConfirm = closeOpen && eng && (
+    <CloseEngagementConfirm
+      engagementId={engagementId}
+      invoices={children.invoices || []}
+      onCancel={() => setCloseOpen(false)}
+      onClosed={(stage, j) => {
+        setCloseOpen(false)
+        setData(d => d ? { ...d, engagement: { ...d.engagement, stage: j.stage } } : d)
+        onChanged(engagementId, { stage: j.stage })
+        setTimeout(onClose, 900)
+      }}
+      setToast={setToast}
+    />
+  )
 
   const overview = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
@@ -525,9 +505,13 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           composer; the merged past/future stream is the Timeline tab. */}
       <NotesStream label="Recent activity" items={activity} onPost={addEngagementNote} nowMs={nowMs} />
 
-      {/* Actions — soft-tinted equal-width grid (cardKit ActionRow);
-          Advance forward-only; Close lives in the ··· menu (inline
-          confirm above). */}
+      {/* Actions — soft-tinted equal-width grid (cardKit ActionRow;
+          the repeat(N,1fr) grid counts rendered children, so the row
+          reflows cleanly when Advance is absent). Advance is LOCAL
+          engagements only (forward-only) — linked ones get their stage
+          from Jobber. Close lives in the ··· menu for BOTH (inline
+          confirm above — there is no Jobber auto-Lost, so the manual
+          close path must always exist). */}
       <div>
         <ActionRow>
           {client?.phone && (
@@ -548,7 +532,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
               <IconExternalLink size={14} /> Open in Jobber
             </a>
           )}
-          {nextStage && (
+          {showAdvance && (
             <button style={actionBtn('green')} disabled={busy}
               onClick={() => patchEngagement({ stage: nextStage }, `Moved to ${stageDisplayLabel(nextStage)}`)}>
               Advance to {stageDisplayLabel(nextStage)} →

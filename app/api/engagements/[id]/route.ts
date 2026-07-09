@@ -3,7 +3,10 @@
 // GET   /api/engagements/:id — engagement + full children (chronological)
 //   + client summary (name, lifetime paid across ALL engagements, prior
 //   count, other-open count). Fetched by EngagementPanel on open so the
-//   board rows stay lightweight.
+//   board rows stay lightweight. Panel open also DRIFT-RECOVERS linked
+//   engagements (recoverEngagementStageDrift): forward-only, silent
+//   re-derive from the children fetched here — self-heals a stale stage
+//   left by a swallowed webhook failure.
 // PATCH /api/engagements/:id — { stage? , title? }
 //   stage: forward-only against ENGAGEMENT_STAGE_RANK (engagement-only
 //   rank in lib/engagements.ts), stamps stage_entered_at / closed_at.
@@ -21,7 +24,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { writeSyncLog } from '@/lib/sync-log'
-import { ENGAGEMENT_STAGE_RANK, type EngagementStage } from '@/lib/engagements'
+import { ENGAGEMENT_STAGE_RANK, recoverEngagementStageDrift, type EngagementStage } from '@/lib/engagements'
 
 // Close-out vocabulary (doc §4). 'won' is the only Won reason; the rest
 // are the Lost picker's options.
@@ -100,6 +103,32 @@ export async function GET(
   }
   const touchpoints = touches.map(t => ({ ...t, user_label: t.user_id ? (authorById[t.user_id] ?? null) : null }))
 
+  // Drift recovery — LINKED engagements only (any child record: the
+  // webhook derivation owns their stage, but its write is swallow-and-
+  // log and there's no reconciliation job, so panel open self-heals).
+  // Re-derives from the children fetched above; forward-only; silent
+  // (automated — never the human close popup, even when it derives to
+  // Closed Won); writes nothing at all when the stage already matches.
+  // LOCAL engagements (no children) derive to Request → structurally a
+  // no-op, so the hasAnyChild gate is belt-and-suspenders.
+  let engagementOut = engagement
+  const isTerminalStage = engagement.stage === 'Closed Won' || engagement.stage === 'Closed Lost'
+  const hasAnyChild =
+    (srRes.data?.length ?? 0) > 0 || (quotesRes.data?.length ?? 0) > 0 ||
+    (jobsRes.data?.length ?? 0) > 0 || (invoicesRes.data?.length ?? 0) > 0 ||
+    (assessRes.data?.length ?? 0) > 0
+  if (hasAnyChild && !isTerminalStage) {
+    const drift = await recoverEngagementStageDrift(engagement, {
+      sr: srRes.data?.[0] ?? null,
+      quotes: quotesRes.data ?? [],
+      jobs: jobsRes.data ?? [],
+      invoices: invoicesRes.data ?? [],
+    })
+    if (drift.corrected && drift.patch) {
+      engagementOut = { ...engagement, ...drift.patch }
+    }
+  }
+
   // Referrer name resolution — same polymorphic lookup as the profile
   // route: kind 'partner' → partners row (contacts share the table),
   // kind 'lead' → another leads row. The panel's ReferrerField shows who.
@@ -122,7 +151,7 @@ export async function GET(
   const priorCount = Math.max(0, siblings.length - 1)
 
   return NextResponse.json({
-    engagement,
+    engagement: engagementOut,
     children: {
       service_requests: srRes.data ?? [],
       assessments: assessRes.data ?? [],

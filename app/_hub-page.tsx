@@ -701,6 +701,7 @@ export default async function HubPage({
           const jobsByEng        = byEngagement(jobsRaw)
           const invoicesByEng    = byEngagement(invoicesRaw)
           const assessmentsByEng = byEngagement(assessmentsRaw)
+          const serviceReqsByEng = byEngagement(serviceRequestsRaw)
 
           initialEngagements = engOpen.map((e: any) => ({
             ...e,
@@ -723,6 +724,10 @@ export default async function HubPage({
             assessments: (assessmentsByEng[e.id] || []).map((a: any) => ({
               id: a.id, scheduled_at: a.scheduled_at, status: a.status, completed_at: a.completed_at,
             })),
+            // id-only: the board needs SRs solely for the linked-vs-local
+            // gate (isJobberLinked) — request-founded engagements must not
+            // read as local just because no quote exists yet.
+            service_requests: (serviceReqsByEng[e.id] || []).map((sr: any) => ({ id: sr.id })),
           }))
           console.log(`[hub-page] Fetched ${initialEngagements.length} open engagements for ${hubUser.email}`)
         }

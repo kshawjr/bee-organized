@@ -539,6 +539,70 @@ export async function maybeAdvanceEngagementStage(
   return advance ? { advanced: true, stage: derived.stage } : { advanced: false }
 }
 
+// ── drift recovery (panel-open re-derive) ─────────────────────────
+
+// The webhook's stage-advance is swallow-and-log by design and there is
+// no reconciliation job — so a failed webhook write leaves a LINKED
+// engagement's stored stage lagging what its child records prove. The
+// engagement GET route calls this on panel open with the children it
+// ALREADY fetched (no re-query): re-derive via deriveEngagementStage
+// (live mode — the same authority the webhook uses) and apply the
+// result only when it is FORWARD progress on ENGAGEMENT_STAGE_RANK.
+//
+// This is an AUTOMATED correction — it writes the stage directly and
+// silently, exactly as the webhook would have, EVEN when the derived
+// stage is Closed Won (all invoices paid → the engagement should simply
+// BE won). It must never route through the human close confirm; the
+// popup binds to human UI intent, not to the Won value.
+//
+// A stage_change touchpoint is written ONLY when the stage actually
+// moved — a no-op re-derive (the overwhelmingly common panel open)
+// writes nothing at all, not even updated_at.
+export async function recoverEngagementStageDrift(
+  engagement: { id: string; stage: string; client_id: string; location_uuid: string | null },
+  children: EngagementChildren,
+): Promise<{ corrected: boolean; stage?: EngagementStage; patch?: Record<string, any> }> {
+  const currentRank = ENGAGEMENT_STAGE_RANK[engagement.stage as EngagementStage] ?? 0
+  const derived = deriveEngagementStage(children)
+  const newRank = ENGAGEMENT_STAGE_RANK[derived.stage] ?? 0
+  if (newRank <= currentRank) return { corrected: false }
+
+  const nowIso = new Date().toISOString()
+  const patch: Record<string, any> = {
+    stage: derived.stage,
+    stage_entered_at: nowIso,
+    updated_at: nowIso,
+  }
+  if (derived.closed_reason) patch.closed_reason = derived.closed_reason
+  if (derived.closed_at) patch.closed_at = derived.closed_at
+
+  const { error } = await supabaseService.from('engagements').update(patch).eq('id', engagement.id)
+  if (error) {
+    console.error('[engagements] drift recovery write failed', { engagementId: engagement.id, error: error.message })
+    return { corrected: false }
+  }
+
+  // Trail: system touchpoint (user_id null — nobody clicked anything)
+  // so the timeline explains the move, plus a sync_log breadcrumb for
+  // the audit trail. Both fail-safe: the correction already committed.
+  await supabaseService.from('touchpoints').insert({
+    lead_id: engagement.client_id,
+    location_uuid: engagement.location_uuid,
+    engagement_id: engagement.id,
+    kind: 'stage_change',
+    label: `Stage: ${engagement.stage} → ${derived.stage}`,
+    occurred_at: nowIso,
+  })
+  await writeSyncLog({
+    location_id: 'unknown',
+    entity_id: engagement.id,
+    entity_type: 'engagement',
+    status: 'success',
+    message: `[engagement:drift] stage corrected on panel open: ${engagement.stage} → ${derived.stage} (stale after a missed webhook advance)`,
+  })
+  return { corrected: true, stage: derived.stage, patch }
+}
+
 // ── convenience: found-or-get for a service request (rule 1) ──────
 
 // Every service request founds exactly one engagement. Used by the

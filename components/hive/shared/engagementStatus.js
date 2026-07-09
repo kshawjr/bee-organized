@@ -70,6 +70,20 @@ export function displayTitle(e) {
   return `Engagement – ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
 }
 
+// LINKED vs LOCAL — THE gate for manual pipeline control. "Linked" =
+// the engagement has ANY Jobber child record (the inverse of the
+// panel's canSendToJobber "zero child records" check, and the same
+// derivation family as jobberHref). Linked engagements get their
+// pipeline stage from the webhook/import derivation; only LOCAL
+// engagements (no children → derivation always says Request) keep the
+// Advance button and pipeline drag. NOT a stored flag — always derived.
+// Accepts either a board row or the panel's fetched children object
+// (both carry the child arrays under the same keys).
+export const ENGAGEMENT_CHILD_KEYS = ['service_requests', 'quotes', 'jobs', 'invoices', 'assessments']
+export function isJobberLinked(rec) {
+  return ENGAGEMENT_CHILD_KEYS.some(k => ((rec || {})[k] || []).length > 0)
+}
+
 // Card/row value: real money once invoiced, best quote before that.
 // Returns a number or null (callers fmtMoney / em-dash).
 export function engagementValue(e) {
