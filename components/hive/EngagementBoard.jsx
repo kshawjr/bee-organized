@@ -59,12 +59,22 @@ const BOARD_SORTS = [
 
 const BOARD_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 
-// Closed rail (5th column, desktop): the board only ever loads a RECENT
-// WINDOW of closed engagements — there are ~1,375 terminal rows and the
-// board is a working surface, not the archive (that's the List). The
-// window rides GET /api/engagements?closed=1&limit=40 (explicit .range()
-// server-side — never a bare .select(), the 1000-row silent-truncation
-// gotcha). The All/Won/Lost toggle filters THIS window in memory only.
+// Closed rail (5th column, desktop): the board only ever loads RECENT
+// WINDOWS of closed engagements — there are ~1,500 terminal rows and the
+// board is a working surface, not the archive (that's the List). EACH
+// All/Won/Lost segment fetches its OWN window, server-narrowed exactly
+// like the List's filters (GET /api/engagements?closed=1[&stage=won|lost]
+// &limit=40 — explicit .range() server-side, never a bare .select(), the
+// 1000-row silent-truncation gotcha), cached per segment until the
+// location scope changes or a close commits.
+//
+// Why per-segment (2026-07-10): the old design fetched ONE mixed window
+// and narrowed it in memory — bulk imports stamp their stale_on_import
+// losses with the import MOMENT, so a freshly-imported location's mixed
+// window was 40/40 Lost and the Won segment rendered empty despite 88
+// historical wins (NW Arkansas). The bound is a COUNT cap over
+// most-recently-closed-first — never a date window, so historical closes
+// always surface.
 const CLOSED_WINDOW = 40
 
 // Card typography (LOCKED): name 13px/500 near-black, subtitle 11px muted,
@@ -116,35 +126,43 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
   const [pendingClose, setPendingClose] = useState(null) // { eng, target, prevStage }
 
   // Closed rail state — collapsed by default every mount (it's an
-  // archive peek, not a pinned lens). Data is fetched ONCE on first
-  // expand; the All/Won/Lost toggle never refetches.
+  // archive peek, not a pinned lens). Each segment's window is fetched
+  // on first visit and cached; revisiting a segment never refetches.
   const [closedOpen, setClosedOpen] = useState(false)
   const [closedSeg, setClosedSeg] = useState('all')     // 'all' | 'won' | 'lost'
-  const [closedData, setClosedData] = useState(null)    // { rows, total } — recent window only
-  const [closedLoading, setClosedLoading] = useState(false)
+  const [closedData, setClosedData] = useState({})      // per segment: { rows, total }
+  const [closedLoading, setClosedLoading] = useState({}) // per segment: bool
 
-  async function fetchClosedWindow() {
-    setClosedLoading(true)
+  async function fetchClosedWindow(seg) {
+    setClosedLoading(l => ({ ...l, [seg]: true }))
     try {
       const params = new URLSearchParams({ closed: '1', offset: '0', limit: String(CLOSED_WINDOW) })
+      // Server-narrowed won/lost — the same stage param the List's
+      // filters ride; 'all' omits it (route default = both stages).
+      if (seg !== 'all') params.set('stage', seg)
       if (locFilter !== 'all') params.set('location_uuid', locFilter)
       const res = await fetch(`/api/engagements?${params}`)
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      setClosedData({ rows: j.rows || [], total: j.total ?? null })
+      setClosedData(prev => ({ ...prev, [seg]: { rows: j.rows || [], total: j.total ?? null } }))
     } catch (err) {
       setToast({ kind: 'error', msg: `Closed engagements failed to load: ${err.message}` })
     } finally {
-      setClosedLoading(false)
+      setClosedLoading(l => ({ ...l, [seg]: false }))
     }
   }
 
-  // Window is per location scope — drop it when the switcher moves.
-  useEffect(() => { setClosedData(null); setClosedSeg('all') }, [locFilter])
+  // Windows are per location scope — drop them when the switcher moves.
+  useEffect(() => { setClosedData({}); setClosedSeg('all') }, [locFilter])
 
   function expandClosed() {
     setClosedOpen(true)
-    if (!closedData && !closedLoading) fetchClosedWindow()
+    if (!closedData[closedSeg] && !closedLoading[closedSeg]) fetchClosedWindow(closedSeg)
+  }
+
+  function pickClosedSeg(seg) {
+    setClosedSeg(seg)
+    if (!closedData[seg] && !closedLoading[seg]) fetchClosedWindow(seg)
   }
 
   // Within-column ordering (persisted separately from the list's sort).
@@ -220,9 +238,9 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
     const { eng } = pendingClose
     setRows(rs => rs.map(r => r.id === eng.id ? { ...r, stage } : r))
     setPendingClose(null)
-    // The closed window (if already loaded) predates this close — drop
-    // it so the next rail expand refetches with the new row included.
-    setClosedData(null)
+    // Any loaded closed windows predate this close — drop them so the
+    // next rail expand refetches with the new row included.
+    setClosedData({})
   }
 
   function openCard(e) {
@@ -339,9 +357,10 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
 
   // ── Closed rail (desktop 5th column) ─────────────────────────
   // Collapsed: thin vertical rail, quieter than the pipeline columns.
-  // Expanded: header + All/Won/Lost toggle over the loaded window, cards
-  // with a won/lost left-edge cue, and the List hand-off for the archive.
-  const scopedClosedTotal = closedData?.total ?? (locFilter === 'all' ? closedCount : null)
+  // Expanded: header + All/Won/Lost toggle, each segment over its OWN
+  // server-narrowed window, cards with a won/lost left-edge cue, and the
+  // List hand-off for the archive.
+  const scopedClosedTotal = closedData.all?.total ?? (locFilter === 'all' ? closedCount : null)
   const renderClosedRail = () => {
     if (!closedOpen) {
       return (
@@ -363,10 +382,11 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
         </button>
       )
     }
-    const windowRows = closedData?.rows || []
-    const segRows = closedSeg === 'won' ? windowRows.filter(e => e.stage === CLOSED_WON)
-      : closedSeg === 'lost' ? windowRows.filter(e => e.stage === CLOSED_LOST)
-      : windowRows
+    // Each segment renders its own server-narrowed window — no in-memory
+    // stage filtering (that design starved Won behind 40 recent losses).
+    const segData = closedData[closedSeg]
+    const segRows = segData?.rows || []
+    const segLoading = !!closedLoading[closedSeg]
     return (
       <div key="closed-rail" style={{ width: '220px', flexShrink: 0, padding: '2px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '8px' }}>
@@ -391,7 +411,7 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
               { key: 'lost', label: 'Lost', color: `var(--text-danger, ${TEXT_DANGER})` },
             ]}
             active={closedSeg}
-            onChange={setClosedSeg}
+            onChange={pickClosedSeg}
           />
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -403,17 +423,17 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
               accent={e.stage === CLOSED_WON ? `var(--text-success, ${TEXT_SUCCESS})` : `var(--text-danger, ${TEXT_DANGER})`}
             />
           ))}
-          {closedLoading && (
+          {segLoading && (
             <div style={{ padding: '14px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px' }}>Loading…</div>
           )}
-          {!closedLoading && segRows.length === 0 && (
+          {!segLoading && segRows.length === 0 && (
             <div style={{ padding: '14px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px', border: '0.5px dashed rgba(0,0,0,0.12)', borderRadius: '10px' }}>
               Empty
             </div>
           )}
-          {!closedLoading && closedData && closedData.total != null && closedData.rows.length < closedData.total && (
+          {!segLoading && segData && segData.total != null && segRows.length < segData.total && (
             <div style={{ fontSize: '11px', color: '#b5b3ac', padding: '2px 2px 8px' }}>
-              Showing {closedData.rows.length} most recent ·{' '}
+              Showing {segRows.length} most recent ·{' '}
               <button
                 onClick={onViewClosedInList}
                 style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline', textUnderlineOffset: '2px' }}

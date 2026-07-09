@@ -6,9 +6,13 @@
 //      treatment — NO pill background/radius; active = 2px underline.
 //      List column headers: sentence case (no uppercase), sort carets
 //      still render, sort handler still fires on click.
-//   B) Board closed rail: collapsed by default; expands on click with
-//      ONE capped fetch (limit=40 → server .range()); the All/Won/Lost
-//      toggle filters the loaded window in memory — NO further fetch.
+//   B) Board closed rail: collapsed by default; each All/Won/Lost
+//      segment fetches its OWN count-capped, most-recently-closed-first
+//      window (limit=40 → server .range(); stage=won|lost narrows
+//      server-side like the List) and caches it — revisiting a segment
+//      never refetches. NO date-window predicate anywhere: the old
+//      one-mixed-window design starved Won behind 40 import-stamped
+//      losses (NW Arkansas: 88 historical wins rendered "Empty").
 //   C) Won/Lost bind to the AUDITED stage strings 'Closed Won' /
 //      'Closed Lost' (prod audit 2026-07-04) via CLOSED_STAGE_FILTERS —
 //      never closed_reason, which is asymmetric ('won'/'stale_on_import').
@@ -56,11 +60,17 @@ const CLOSED_ROWS = [
 ]
 
 let fetchCalls: string[] = []
+// Stage-aware, like the real route: stage=won|lost narrows server-side.
 const fetchMock = vi.fn(async (url: any) => {
   fetchCalls.push(String(url))
+  const stage = new URLSearchParams(String(url).split('?')[1] || '').get('stage')
+  const rows = stage === 'won' ? CLOSED_ROWS.filter(r => r.stage === CLOSED_WON)
+    : stage === 'lost' ? CLOSED_ROWS.filter(r => r.stage === CLOSED_LOST)
+    : CLOSED_ROWS
+  const total = stage === 'won' ? 680 : stage === 'lost' ? 695 : 1375
   return {
     ok: true,
-    json: async () => ({ rows: CLOSED_ROWS, total: 1375, offset: 0, limit: 40 }),
+    json: async () => ({ rows, total, offset: 0, limit: 40 }),
   } as any
 })
 
@@ -410,7 +420,7 @@ describe('board closed rail', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('expands on click with ONE capped fetch; the All/Won/Lost toggle never refetches', async () => {
+  it('each segment fetches its OWN server-narrowed capped window; revisits hit the cache', async () => {
     const container = mount(
       <EngagementBoard engagements={OPEN_ENGAGEMENTS as any} closedCount={1375} />
     )
@@ -421,31 +431,87 @@ describe('board closed rail', () => {
     expect(fetchCalls[0]).toContain('closed=1')
     expect(fetchCalls[0]).toContain('limit=40') // explicit cap → server .range()
     expect(fetchCalls[0]).toContain('offset=0')
+    expect(fetchCalls[0]).not.toContain('stage=') // 'all' = both stages
 
-    // Window rendered: all three closed cards + the List hand-off line.
+    // All window rendered: all three closed cards + the List hand-off line.
     expect(container.textContent).toContain('Wonnie Winner')
     expect(container.textContent).toContain('Lossie Loser')
     expect(container.textContent).toContain('Showing 3 most recent')
     expect(container.textContent).toContain('view all in List')
 
-    // Won: in-memory narrowing, NO new request.
+    // Won: its OWN server-narrowed window (same stage param as the List),
+    // count-capped — NEVER a date predicate.
     const wonSeg = segButtons(container).find(b => (b.textContent || '') === 'Won')!
     await fire(wonSeg)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchCalls[1]).toContain('closed=1')
+    expect(fetchCalls[1]).toContain('stage=won')
+    expect(fetchCalls[1]).toContain('limit=40')
     expect(container.textContent).toContain('Wonnie Winner')
     expect(container.textContent).toContain('Vic Victory')
     expect(container.textContent).not.toContain('Lossie Loser')
 
-    // Lost: same window, still no new request.
+    // Lost: same treatment, its own narrowed window.
     const lostSeg = segButtons(container).find(b => (b.textContent || '') === 'Lost')!
     await fire(lostSeg)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchCalls[2]).toContain('stage=lost')
     expect(container.textContent).toContain('Lossie Loser')
     expect(container.textContent).not.toContain('Wonnie Winner')
+
+    // Revisiting fetched segments rides the cache — no new requests.
+    await fire(segButtons(container).find(b => (b.textContent || '') === 'Won')!)
+    await fire(segButtons(container).find(b => (b.textContent || '') === 'All')!)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+
+    // No request ever carries a date-window predicate — the bound is the
+    // count cap + closed_at DESC ordering (server-side), nothing else.
+    for (const u of fetchCalls) {
+      expect(u).not.toMatch(/closed_at|since|from=|month|after|start/)
+    }
 
     // Pipeline control collapses back to the rail.
     await fire(container.querySelector('[aria-label="Collapse to pipeline"]')!)
     expect(container.querySelector('[aria-label="Expand closed engagements"]')).toBeTruthy()
+  })
+
+  it('REGRESSION (NW Arkansas): 40 import-stamped recent losses no longer starve Won — historical wins from prior months surface', async () => {
+    // The real failure shape: the mixed recency window is 100% Closed
+    // Lost stamped with the import moment; every Closed Won carries a
+    // REAL historical closed_at (months/years back). The old in-memory
+    // narrowing rendered Won "Empty"; per-segment fetch must not.
+    const staleLosses = Array.from({ length: 40 }, (_, i) =>
+      eng({ stage: CLOSED_LOST, client_name: `Stale Lost ${i}`, closed_at: daysAgo(0), closed_reason: 'stale_on_import' }))
+    const historicalWins = [
+      eng({ stage: CLOSED_WON, client_name: 'Hattie Historical', closed_at: daysAgo(95), closed_reason: 'won' }),  // 3+ months back
+      eng({ stage: CLOSED_WON, client_name: 'Yolanda Yesteryear', closed_at: daysAgo(400), closed_reason: 'won' }), // prior year
+    ]
+    const nwaMock = vi.fn(async (url: any) => {
+      const stage = new URLSearchParams(String(url).split('?')[1] || '').get('stage')
+      const rows = stage === 'won' ? historicalWins : stage === 'lost' ? staleLosses : staleLosses
+      const total = stage === 'won' ? 88 : stage === 'lost' ? 76 : 164
+      return { ok: true, json: async () => ({ rows, total, offset: 0, limit: 40 }) } as any
+    })
+    vi.stubGlobal('fetch', nwaMock)
+
+    const container = mount(
+      <EngagementBoard engagements={[] as any} closedCount={164} locFilter="loc-nwa-uuid" />
+    )
+    await fire(container.querySelector('[aria-label="Expand closed engagements"]')!)
+    // Mixed window is all losses — the honest 'All' view.
+    expect(container.textContent).toContain('Stale Lost 0')
+    expect(container.textContent).not.toContain('Hattie Historical')
+
+    // Won segment: historical closes appear despite ranking far past the
+    // mixed window — and the location scope rides the request unchanged.
+    await fire(segButtons(container).find(b => (b.textContent || '') === 'Won')!)
+    const wonCall = nwaMock.mock.calls.map(c => String(c[0])).find(u => u.includes('stage=won'))!
+    expect(wonCall).toContain('location_uuid=loc-nwa-uuid')
+    expect(container.textContent).toContain('Hattie Historical')
+    expect(container.textContent).toContain('Yolanda Yesteryear')
+    expect(container.textContent).not.toContain('Stale Lost 0')
+    // Bounded: the cap line reflects the segment's own total (88 wins).
+    expect(container.textContent).toContain('Showing 2 most recent')
   })
 
   it('closed cards carry the won/lost left-edge cue via the semantic tokens', () => {
