@@ -66,6 +66,11 @@ type JoinedData = {
   invoices?: any[]
   // Lookup table for tag IDs → tag definitions (id, label, color, etc.)
   tag_lookups?: Record<string, any>
+  // Per-client Closed Won roll-up (hub-page engagement sweep): drives the
+  // people-side 'Client' status + the directory's value/job detail line.
+  // value = Σ won engagements' total_paid (falling back per-row to
+  // total_invoiced when nothing is recorded paid).
+  won_summary?: { count: number; value: number; lastClosedAt: string | null } | null
 }
 
 function fmtCreatedShort(iso: string | null | undefined): string {
@@ -290,6 +295,9 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     // invoice rows) — financials fallback when invoice child rows are absent.
     paidAmount: row.paid_amount ?? null,
     invoicePaidAt: row.invoice_paid_at || null,
+    // Closed Won engagement roll-up — null when the client has never won.
+    // deriveClientStatus reads .count; the directory reads .value/.lastClosedAt.
+    wonEngagements: joined.won_summary || null,
     assessment,
     assessmentType,
     estimateSent,

@@ -24,7 +24,7 @@ import NewClientSheet from './NewClientSheet'
 import { mapLeadToPerson } from '@/lib/people-mapper'
 import { leadColsToPersonFields } from './shared/leadPatchMap'
 import { deriveClientStatus } from './shared/clientStatus'
-import { isTerminal } from './shared/stageConfig'
+import { isTerminal, CLOSED_WON } from './shared/stageConfig'
 import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount } from './shared/engagementStatus'
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
@@ -206,17 +206,21 @@ export default function HiveShell({
   const nowMs = Date.now()
   const openCount = openFiltered.filter(e => passesEngagementFilters(e, workFilters, nowMs)).length
 
-  // Inbox badge: New + Attempting in the current location scope.
+  // Inbox badge: New + Attempting in the current location scope. The
+  // won set (session-closed Won + hydrated person.wonEngagements inside
+  // the derivation) keeps won clients out of the count — same inputs as
+  // the Inbox worklist itself.
   const inboxCount = useMemo(() => {
     const scopedPeople = locFilter === 'all' ? people : people.filter(p => p.locationId === locFilter)
     const openIds = new Set(openFiltered.map(e => e.client_id))
+    const wonIds = new Set(filtered.filter(e => e.stage === CLOSED_WON).map(e => e.client_id))
     let n = 0
     for (const p of scopedPeople) {
-      const s = deriveClientStatus(p, openIds)
+      const s = deriveClientStatus(p, openIds, Date.now(), wonIds)
       if (s === 'New' || s === 'Attempting') n++
     }
     return n
-  }, [people, locFilter, openFiltered])
+  }, [people, locFilter, openFiltered, filtered])
 
   const tabPills = TABS.map(t => <TabPill key={t.key} tab={t} active={t.key === lens} onSelect={() => pickLens(t.key)} badgeCount={t.badge ? inboxCount : null} />)
   // Desktop "New" pill — the ONE solid chrome element, visible from all

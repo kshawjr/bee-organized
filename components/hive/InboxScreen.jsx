@@ -39,7 +39,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { deriveClientStatus } from './shared/clientStatus'
-import { CHIP_STYLES, ACCENT_BLUE } from './shared/stageConfig'
+import { CHIP_STYLES, ACCENT_BLUE, CLOSED_WON, isTerminal } from './shared/stageConfig'
 import { formatInboxAgeParts } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import { GREEN_FILL, HAIRLINE_BORDER, TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY } from '@/components/ui/tokens'
@@ -169,7 +169,17 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     locFilter === 'all' ? people : people.filter(p => p.locationId === locFilter)
   ), [people, locFilter])
 
-  const openClientIds = useMemo(() => new Set(engagements.map(e => e.client_id)), [engagements])
+  // Server ships open engagements only, but session closes arrive as
+  // terminal rowPatches — filter them so a just-closed row doesn't keep
+  // reading Active, and collect session Closed Won for the 'Client'
+  // derivation (won clients are customers; they never belong in this
+  // front-of-funnel worklist).
+  const openClientIds = useMemo(() => new Set(
+    engagements.filter(e => !isTerminal(e.stage)).map(e => e.client_id)
+  ), [engagements])
+  const wonClientIds = useMemo(() => new Set(
+    engagements.filter(e => e.stage === CLOSED_WON).map(e => e.client_id)
+  ), [engagements])
 
   const reachCount = (p) => (p.outreachTimeline || []).filter(t => t.type === 'reach_out').length + (loggedIds.has(p.id) ? 1 : 0)
   const lastReach = (p) => Math.max(0, ...(p.outreachTimeline || []).filter(t => t.type === 'reach_out').map(t => new Date(t.occurred_at || 0).getTime() || 0), loggedIds.has(p.id) ? nowMs : 0)
@@ -205,7 +215,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       if (snoozedIds.has(p.id) || (p.snoozeUntil && new Date(p.snoozeUntil).getTime() > nowMs)) continue
       if (p.inboxDismissedAt || dismissedIds.has(p.id)) continue
       if (!passesInboxFilters(p)) continue
-      const status = deriveClientStatus(p, openClientIds, nowMs)
+      const status = deriveClientStatus(p, openClientIds, nowMs, wonClientIds)
       if (status === 'New') (loggedIds.has(p.id) ? working : fresh).push(p)
       else if (status === 'Attempting') working.push(p)
     }
@@ -217,7 +227,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     fresh.sort(cmp)
     working.sort(cmp)
     return { fresh, working }
-  }, [scoped, openClientIds, loggedIds, junkedIds, snoozedIds, dismissedIds, filters, inboxSort]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scoped, openClientIds, wonClientIds, loggedIds, junkedIds, snoozedIds, dismissedIds, filters, inboxSort]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function patchLead(id, patch) {
     const res = await fetch(`/api/leads/${id}`, {

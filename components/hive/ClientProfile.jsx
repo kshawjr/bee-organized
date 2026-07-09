@@ -98,11 +98,20 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   const jobNotes = data?.job_notes ?? []
   const engTitleById = Object.fromEntries(engagements.map(e => [e.id, displayTitle(e)]))
 
+  // Won roll-up from the profile's own (complete, current) engagement set —
+  // same shape the hub-page sweep ships as person.wonEngagements.
+  const won = engagements.filter(e => e.stage === 'Closed Won')
+  const wonSummary = won.length > 0 ? {
+    count: won.length,
+    value: won.reduce((s, e) => s + (Number(e.total_paid) || Number(e.total_invoiced) || 0), 0),
+    lastClosedAt: won.map(e => e.closed_at).filter(Boolean).sort().pop() || null,
+  } : null
   const status = c ? deriveClientStatus(
     {
       id: c.id, email: c.email, phone: c.phone, paidAmount: agg?.lifetime_paid ?? c.paid_amount,
       created: c.created_at,
       outreachTimeline: touches.map(t => ({ type: t.kind, occurred_at: t.occurred_at })),
+      wonEngagements: wonSummary,
     },
     new Set(open.length > 0 ? [c.id] : []),
     nowMs,

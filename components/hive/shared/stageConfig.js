@@ -63,6 +63,7 @@ export const CLIENT_STATUSES = [
   { key: 'Attempting', label: 'Attempting' },
   { key: 'Nurturing',  label: 'Nurturing' },
   { key: 'Active',     label: 'Active client' },
+  { key: 'Client',     label: 'Client' }, // won — ≥1 Closed Won engagement
   { key: 'Past',       label: 'Past client' },
 ]
 
@@ -113,6 +114,7 @@ export const CHIP_STYLES = {
   'Attempting':      BLUE,
   'Nurturing':       AMBER,
   'Active':          PURPLE,  // relationship family (locked directory mockup)
+  'Client':          GREEN,   // won — approved family, the customer badge
   'Past':            GRAY,
   'Active client':   PURPLE,
   'Past client':     GRAY,

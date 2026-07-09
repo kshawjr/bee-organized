@@ -618,6 +618,40 @@ export default async function HubPage({
       const jobsByLead        = groupBy(jobsRaw)
       const invoicesByLead    = groupBy(invoicesRaw)
 
+      // ── ONE paginated sweep over ALL engagements (open + closed): repeat
+      // counts for the board chips + the per-client Closed Won roll-up that
+      // feeds the people-side 'Client' status (won clients must not read as
+      // Nurturing). Runs BEFORE the people mapping so the roll-up ships on
+      // every Person — deliberately independent of the open-engagements
+      // fetch below AND of the stored leads.client_status column.
+      const repeatCounts: Record<string, number> = {}
+      const wonByClient: Record<string, { count: number; value: number; lastClosedAt: string | null }> = {}
+      for (let from = 0; ; from += PAGE) {
+        let q = supabaseService
+          .from('engagements')
+          .select('id, client_id, stage, total_paid, total_invoiced, closed_at')
+          .order('id', { ascending: true })
+          .range(from, from + PAGE - 1)
+        if (!isElevated && hubUser.location_id) {
+          q = q.eq('location_uuid', hubUser.location_id)
+        }
+        const { data, error } = await q
+        if (error) {
+          console.error('[hub-page] engagement sweep error:', error.message)
+          break
+        }
+        for (const r of data || []) {
+          repeatCounts[r.client_id] = (repeatCounts[r.client_id] || 0) + 1
+          if (r.stage === 'Closed Won') {
+            const w = wonByClient[r.client_id] || (wonByClient[r.client_id] = { count: 0, value: 0, lastClosedAt: null })
+            w.count += 1
+            w.value += Number(r.total_paid) || Number(r.total_invoiced) || 0
+            if (r.closed_at && (!w.lastClosedAt || r.closed_at > w.lastClosedAt)) w.lastClosedAt = r.closed_at
+          }
+        }
+        if ((data || []).length < PAGE) break
+      }
+
       const { mapLeadToPerson } = await import('@/lib/people-mapper')
       initialPeople = leadsRaw.map((row: any) =>
         mapLeadToPerson(row, {
@@ -631,6 +665,7 @@ export default async function HubPage({
           jobs:             jobsByLead[row.id]        || [],
           invoices:         invoicesByLead[row.id]    || [],
           tag_lookups,
+          won_summary:      wonByClient[row.id]       || null,
         })
       )
       console.log(`[hub-page] Fetched ${initialPeople.length} leads + joined data for ${hubUser.email}`)
@@ -639,8 +674,8 @@ export default async function HubPage({
       // Same short-page .range() loop as the leads load above — the 1000-row
       // cap lesson (80ded92/3099875) applies to engagements too. Child rows
       // for the within-stage chips are reused from the fetches above (they
-      // carry engagement_id since step 1); repeat count is a paginated
-      // client_id sweep over ALL engagements including closed.
+      // carry engagement_id since step 1); repeat counts come from the
+      // all-engagements sweep above.
       {
         const engOpen: any[] = []
         let engErr: { message: string } | null = null
@@ -664,27 +699,6 @@ export default async function HubPage({
         if (engErr) {
           console.error('[hub-page] engagements fetch error:', engErr.message)
         } else if (engOpen.length > 0) {
-          const repeatCounts: Record<string, number> = {}
-          for (let from = 0; ; from += PAGE) {
-            let q = supabaseService
-              .from('engagements')
-              .select('id, client_id')
-              .order('id', { ascending: true })
-              .range(from, from + PAGE - 1)
-            if (!isElevated && hubUser.location_id) {
-              q = q.eq('location_uuid', hubUser.location_id)
-            }
-            const { data, error } = await q
-            if (error) {
-              console.error('[hub-page] engagement repeat-count fetch error:', error.message)
-              break
-            }
-            for (const r of data || []) {
-              repeatCounts[r.client_id] = (repeatCounts[r.client_id] || 0) + 1
-            }
-            if ((data || []).length < PAGE) break
-          }
-
           const leadInfoById: Record<string, { name: string; phone: string | null; email: string | null }> = {}
           for (const l of leadsRaw) leadInfoById[l.id] = { name: l.name || 'Unknown', phone: l.phone || null, email: l.email || null }
 

@@ -11,7 +11,7 @@
 'use client'
 
 import React, { useState, useEffect, useMemo } from 'react'
-import { CHIP_STYLES } from './shared/stageConfig'
+import { CHIP_STYLES, CLOSED_WON, isTerminal } from './shared/stageConfig'
 import { deriveClientStatus, CLIENT_STATUS_ORDER, CLIENT_STATUS_META } from './shared/clientStatus'
 import { fmtMoney, relAge, lastActivityTs } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
@@ -55,6 +55,19 @@ function detailLine(person, status, openEngs, nowMs) {
       const n = openEngs.length
       const base = `${n} Open Engagement${n === 1 ? '' : 's'}`
       return paid > 0 ? `${base} · ${fmtMoney(paid)} Paid` : base
+    }
+    case 'Client': {
+      // Won-history line (mockup: "$4,400 · 2 Jobs"). Value prefers the
+      // Closed Won engagement roll-up (Σ total_paid) over the single-slot
+      // leads.paid_amount denorm; jobs are the already-joined child rows.
+      const w = person.wonEngagements
+      const value = (w && Number(w.value)) || paid
+      const jobCount = (person.jobs || []).length
+      const bits = []
+      if (value > 0) bits.push(fmtMoney(value))
+      if (jobCount > 0) bits.push(`${jobCount} Job${jobCount === 1 ? '' : 's'}`)
+      if (bits.length === 0 && w?.lastClosedAt) bits.push(`Won ${monthYear(w.lastClosedAt)}`)
+      return bits.join(' · ') || 'Won Client'
     }
     case 'Past': {
       const last = Math.max(0, ...openEngs.map(e => lastActivityTs(e)), person.created ? new Date(person.created).getTime() : 0)
@@ -100,22 +113,32 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
     locFilter === 'all' ? people : people.filter(p => p.locationId === locFilter)
   ), [people, locFilter])
 
+  // The engagements prop is the server-hydrated OPEN set — but rows closed
+  // THIS SESSION arrive with a terminal rowPatch (HiveShell seam), so
+  // filter terminals here: a just-closed engagement must leave the open
+  // set immediately, and a just-won one must flip its person to Client.
   const openByClient = useMemo(() => {
     const m = new Map()
     for (const e of engagements) {
+      if (isTerminal(e.stage)) continue
       if (!m.has(e.client_id)) m.set(e.client_id, [])
       m.get(e.client_id).push(e)
     }
     return m
   }, [engagements])
   const openClientIds = useMemo(() => new Set(openByClient.keys()), [openByClient])
+  // Session-won clients (the live half of the 'Client' derivation; the
+  // hydrated half is person.wonEngagements from the hub-page sweep).
+  const wonClientIds = useMemo(() => new Set(
+    engagements.filter(e => e.stage === CLOSED_WON).map(e => e.client_id)
+  ), [engagements])
 
   // Derive once per person over the FULL scoped set — counts and the
   // banner always reflect everything, not just rendered rows.
   const classified = useMemo(() => scoped.map(p => ({
     p,
-    status: deriveClientStatus(p, openClientIds, nowMs),
-  })), [scoped, openClientIds]) // eslint-disable-line react-hooks/exhaustive-deps
+    status: deriveClientStatus(p, openClientIds, nowMs, wonClientIds),
+  })), [scoped, openClientIds, wonClientIds]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const lastActivityOf = (p) => Math.max(
     new Date(p.created || 0).getTime() || 0,
