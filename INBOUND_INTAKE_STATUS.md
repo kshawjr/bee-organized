@@ -24,23 +24,23 @@ lead). Endpoint is much further along than "partial" — core is done; gaps are 
 
 ### Must-fix before real leads flow
 
-1. **[~1-2h] OBSERVABILITY (biggest gap)**: endpoint writes NOTHING to `sync_log` — a failed Make lead
-   dies in Vercel logs, invisible in Bee Hub. Add a `sync_log` write (success + failure) mirroring the
-   Jobber receiver (`direction='inbound'`). The webhook-observability dashboard work (Webhooks tab /
-   Slack digest) was unmerged at audit time but has since landed on main (by `5738107`, 2026-07-10) —
-   feed this endpoint into it too.
+1. ~~**OBSERVABILITY (biggest gap)**~~ — **DONE `938c7e2` (2026-07-10)**. Every authenticated outcome
+   writes `sync_log` (`direction='inbound'`, `topic=LEAD_INTAKE` in the message so the Webhooks tab /
+   Slack digest pick the rows up; 401s deliberately unlogged, mirroring the Jobber signature-invalid
+   exception). Error rows carry the error code + the submitted slug/email for diagnosis; success rows
+   carry source, dedup tier, drip_enrolled, and any warnings.
 2. **[~5min] CONFIRM `LEAD_INTAKE_API_KEY` is set in Vercel Production**. Audit couldn't verify (Vercel
    MCP unauth'd). If it's only in local `.env.local`, the live endpoint 401s everything (safe but dead).
    Check Vercel → Settings → Env Vars → Production. Generate with `openssl rand -hex 32` if absent, put
    same value in Make.
-3. **[~15-30min] EMAIL-REQUIRED POLICY** (route.ts:91): email is hard-required, but FB/IG lead ads often
-   send phone-only → those 400 and the lead is lost. Decide: require email-OR-phone instead?
-   (Recommended yes if running paid ad lead-gen.) Update validation + test.
-4. **[~15min] CONTRACT DOC**: no doc of the payload shape — configuring Make means source-diving. Write
-   a half-page: required (`location_slug`, `full_name`, `email`), optional (`phone`, `address`, `city`,
-   `state`, `zip`, `project_type`, `message`, `source`, `metadata`), the `X-API-Key` header. Note: Make
-   MUST set `source` explicitly (e.g. `facebook_lead_ad`) or Make leads look like generic `web_form`
-   leads.
+3. ~~**EMAIL-REQUIRED POLICY**~~ — **DONE `938c7e2` (2026-07-10)**. Now `full_name` + (valid email OR
+   phone with ≥7 digits); neither → `400 email_or_phone_required`. Phone-only leads are captured but
+   NOT drip-enrolled (`drip_skipped_reason: 'no_email'`) — enrolling would burn drip eligibility via a
+   `stopped_reason='no_email'` progress row; skipping keeps a later email-bearing resubmission eligible
+   (that sequence is test-pinned in `lib/beta-intake-observability.test.ts`).
+4. ~~**CONTRACT DOC**~~ — **DONE `938c7e2` (2026-07-10)**: [INTAKE_CONTRACT.md](INTAKE_CONTRACT.md) —
+   endpoint, `X-API-Key`, required/optional fields, response semantics, retry guidance (retry 5xx,
+   alert-don't-retry 400), and the explicit-`source` requirement for Make.
 
 ### Nice-to-have (not blockers)
 
