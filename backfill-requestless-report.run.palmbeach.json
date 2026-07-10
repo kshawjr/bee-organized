@@ -1,0 +1,125 @@
+{
+  "mode": "execute",
+  "locations": {
+    "loc_palmbeach": {
+      "name": "Palm Beach",
+      "clients_repaired": 20,
+      "quotes_written": 15,
+      "jobs_written": 30,
+      "invoices_written": 30,
+      "engagements_founded": 34,
+      "engagements_closed_won": 18,
+      "engagements_closed_lost_stale": 15,
+      "engagements_open": 1,
+      "stage_changes": {
+        "Nurturing → Final Processing": 2,
+        "Nurturing → Closed Won": 15
+      },
+      "stage_change_list": [
+        {
+          "lead_id": "cd39298d-96c7-43b0-9ea3-f37ab76549e4",
+          "name": "Andrea Quinn",
+          "from": "Nurturing",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "c95a0af2-c51f-4d58-82f4-4437eb8c1f44",
+          "name": "Caitlin Orourke",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "5ad2969d-2872-4e64-a9f0-07d38a370556",
+          "name": "Susan Seborg-Rackley",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "b0b60eac-ea88-4230-ac0e-00263e600b55",
+          "name": "Marjorie Rice",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "43783327-084d-47f8-8f6c-9278d1fcce96",
+          "name": "Tracy Cleveland",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "89350365-2864-4fba-b351-1c1b771b965c",
+          "name": "Carlie Atkins",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "225d24b5-74a9-45de-8128-64e86fdec00a",
+          "name": "Heather Andrews",
+          "from": "Nurturing",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "1710406a-92e2-4c6b-9748-7b985ce41eff",
+          "name": "Lea Barfield",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "875e87ce-aee6-49e6-a321-0968dc480878",
+          "name": "Lisa Johnson",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "1d522fe3-9ac2-42b8-9aa2-7b0a026570b1",
+          "name": "Groh LLC",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "14fdae14-63ef-4848-9d98-4f835e3bce3d",
+          "name": "Lainie Lipschultz",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "d46695f0-e06a-463a-b13f-55da8d3a79b0",
+          "name": "Daniel Rogowski",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "02d897ef-283c-47f9-a645-3c4fd81f1fcf",
+          "name": "Marc Dubin",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "ad165b26-7eec-4a5c-a4f9-b073f4a7ec1f",
+          "name": "LW Holdings",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "dcca1965-8a09-43a0-8f80-c79393d225e0",
+          "name": "Parisa Fowles",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "39e09c33-7603-4cf8-92ce-bb4bc28b0d2d",
+          "name": "Lauren Kaiser",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "977ef1ad-d88b-4b66-a6f1-72f690442de8",
+          "name": "50th  Birthday",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        }
+      ],
+      "errors": []
+    }
+  }
+}

@@ -1,0 +1,138 @@
+{
+  "mode": "execute",
+  "locations": {
+    "loc_nwarkansas": {
+      "name": "Northwest Arkansas",
+      "clients_repaired": 28,
+      "quotes_written": 21,
+      "jobs_written": 29,
+      "invoices_written": 28,
+      "engagements_founded": 38,
+      "engagements_closed_won": 15,
+      "engagements_closed_lost_stale": 21,
+      "engagements_open": 2,
+      "stage_changes": {
+        "Nurturing → Closed Won": 16,
+        "Nurturing → Final Processing": 2,
+        "Nurturing → Job in Progress": 1
+      },
+      "stage_change_list": [
+        {
+          "lead_id": "e09d8910-3f07-4647-bb5c-3642afaa89e8",
+          "name": "Jenny Frazier",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "c53d0a2a-5be2-4100-a695-1eb5f0f39f1d",
+          "name": "Amy Hull",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "bddef354-9324-497c-a957-e15135069542",
+          "name": "Jamie Fischer",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "872b1dbb-21cf-4648-bdff-623c434a4cc9",
+          "name": "Valerie Hohenberger",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "f6e7cade-4bde-424f-b484-59ef08bd840d",
+          "name": "Jody Barth",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "ee2a0bd0-03c8-40c4-b291-3e12991aa921",
+          "name": "Clint Gill",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "ea61c142-0d66-407c-a414-268b491b5817",
+          "name": "Keri Chambers",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "0dd1579e-7071-430e-9817-d20b759e170b",
+          "name": "Katie Johnson",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "f40decc4-1411-4afb-a641-df0fcf569f3a",
+          "name": "Liv Barber",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "3cc054ed-2461-4cc6-9873-c644a5ed2aae",
+          "name": "Casey Sarkin",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "eb64e550-7dfa-4033-bc70-c6c36fb00ef0",
+          "name": "Matthew Berry",
+          "from": "Nurturing",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "613e3f77-8d92-47ec-a03b-c7ac0a1b1060",
+          "name": "Allison Shelby",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "69c7003c-cb09-4bd7-9bb7-20d55168c4b2",
+          "name": "Samantha Risi",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "f1f4d178-5a07-49d1-86e1-1bc7c1d4da95",
+          "name": "Craig Wilson",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "f0be7255-fe0a-4e94-abe6-488f6d15a438",
+          "name": "Daphne Vought",
+          "from": "Nurturing",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "cc7ffb89-8c41-44bf-9b5c-77663a253174",
+          "name": "Myla Conroy",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "5551aa2f-3b26-405d-a0b1-d97e2f610988",
+          "name": "Kayla Daniel",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "91a81836-64f1-42e2-bede-aa68371a4a06",
+          "name": "Tara Yarbrough",
+          "from": "Nurturing",
+          "to": "Job in Progress"
+        },
+        {
+          "lead_id": "1ccfc8f6-4977-49d6-baa6-4a24283b9158",
+          "name": "Airen Williamson",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        }
+      ],
+      "errors": []
+    }
+  }
+}
