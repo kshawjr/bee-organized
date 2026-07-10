@@ -25,6 +25,8 @@ import { isAdmin } from '@/lib/auth'
 import { applyDripSideEffects } from '@/lib/drip-lifecycle'
 import { sendDripStep } from '@/lib/drip-send'
 import { mapLeadToPerson } from '@/lib/people-mapper'
+import { diffContactPatch, type ContactWriteback } from '@/lib/jobber-contact-writeback'
+import { syncLeadContactToJobber } from '@/lib/jobber-contact-sync'
 
 const VALID_STAGES = [
   'New',
@@ -196,7 +198,7 @@ export async function PATCH(
   // ─── Load existing lead for scoping check ─────────────────────
   const { data: existing, error: loadError } = await supabaseService
     .from('leads')
-    .select('id, location_uuid, location_id, stage')
+    .select('id, location_uuid, location_id, stage, jobber_client_id, phone, email')
     .eq('id', id)
     .single()
 
@@ -339,6 +341,26 @@ export async function PATCH(
     }
   }
 
+  // ─── Jobber contact write-back on real phone/email change ─────
+  // Jobber-linked leads never pass through send-to-jobber again, so the
+  // d51b764 write-back can't reach them (feedback #2/#4 — Ankur's case).
+  // When THIS patch actually changes phone/email (normalized diff:
+  // formatting-only edits and webhook echoes don't count), push the new
+  // value(s) to the linked Jobber client. Awaited but non-fatal — the
+  // lead save above already succeeded; the outcome rides the response
+  // and a sync_log breadcrumb (syncLeadContactToJobber never throws).
+  let contactWriteback: ContactWriteback | null = null
+  const contactDiff = diffContactPatch(patch, existing)
+  if (contactDiff.changed && existing.jobber_client_id && existing.location_id) {
+    contactWriteback = await syncLeadContactToJobber({
+      leadId: id,
+      locationSlug: existing.location_id,
+      jobberClientId: String(existing.jobber_client_id),
+      phone: contactDiff.phone ?? '',
+      email: contactDiff.email ?? '',
+    })
+  }
+
   // ─── Return fresh row ─────────────────────────────────────────
   const { data: fresh, error: refetchError } = await supabaseService
     .from('leads')
@@ -351,7 +373,13 @@ export async function PATCH(
     return NextResponse.json({ error: 'refetch_failed' }, { status: 500 })
   }
 
-  return NextResponse.json({ lead: fresh }, { status: 200 })
+  return NextResponse.json(
+    {
+      lead: fresh,
+      ...(contactWriteback ? { contact_writeback: contactWriteback } : {}),
+    },
+    { status: 200 },
+  )
 }
 
 export async function DELETE(

@@ -44,8 +44,42 @@ export function normalizePhoneDigits(raw: string | null | undefined): string {
   return digits
 }
 
-function normalizeEmail(raw: string | null | undefined): string {
+export function normalizeEmail(raw: string | null | undefined): string {
   return String(raw ?? '').trim().toLowerCase()
+}
+
+// Per-field trigger decision for the lead-edit sync (PATCH /api/leads/:id).
+// Returns the NEW value to push, or null when the patch must not trigger a
+// push for that field: field absent from the patch, non-string (clearing —
+// we never delete Jobber-side data), or equal to the stored value after
+// normalization (digits-only phones, case-insensitive emails), so a
+// formatting-only edit — or a webhook echo re-saving Jobber's own value —
+// never reaches the Jobber API.
+export interface ContactPatchDiff {
+  phone: string | null
+  email: string | null
+  changed: boolean
+}
+
+export function diffContactPatch(
+  patch: Record<string, unknown>,
+  stored: { phone?: string | null; email?: string | null },
+): ContactPatchDiff {
+  let phone: string | null = null
+  if (typeof patch.phone === 'string') {
+    const next = patch.phone.trim()
+    const key = normalizePhoneDigits(next)
+    if (key && key !== normalizePhoneDigits(stored.phone)) phone = next
+  }
+
+  let email: string | null = null
+  if (typeof patch.email === 'string') {
+    const next = patch.email.trim()
+    const key = normalizeEmail(next)
+    if (key && key !== normalizeEmail(stored.email)) email = next
+  }
+
+  return { phone, email, changed: phone !== null || email !== null }
 }
 
 function primaryOrFirst<T extends { primary?: boolean | null }>(entries: T[]): T | undefined {
