@@ -1,0 +1,92 @@
+{
+  "mode": "execute",
+  "locations": {
+    "loc_nwarkansas": {
+      "name": "Northwest Arkansas",
+      "clients_repaired": 28,
+      "quotes_written": 35,
+      "jobs_written": 63,
+      "invoices_written": 62,
+      "engagements_founded": 54,
+      "engagements_closed_won": 46,
+      "engagements_closed_lost_stale": 5,
+      "engagements_open": 3,
+      "stage_changes": {
+        "Closed Won → Job in Progress": 3,
+        "Closed Won → Nurturing": 1,
+        "Nurturing → Final Processing": 1,
+        "Closed Won → Final Processing": 2,
+        "Nurturing → Closed Won": 4
+      },
+      "stage_change_list": [
+        {
+          "lead_id": "579832ba-6896-4443-9da8-fad7aef5e578",
+          "name": "Kaylee Hartman",
+          "from": "Closed Won",
+          "to": "Job in Progress"
+        },
+        {
+          "lead_id": "00a4e2a5-987f-4cda-9722-a6695facd610",
+          "name": "Tom Ballas",
+          "from": "Closed Won",
+          "to": "Job in Progress"
+        },
+        {
+          "lead_id": "9ba25b66-76f3-448a-8319-41975c521087",
+          "name": "Shammara Howell",
+          "from": "Closed Won",
+          "to": "Nurturing"
+        },
+        {
+          "lead_id": "b3bd50aa-9406-4291-afa7-ec4df4389f34",
+          "name": "Vicki Shadow",
+          "from": "Nurturing",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "56842e41-7d3b-444f-bda7-3eaf448661ac",
+          "name": "Tami Wollner",
+          "from": "Closed Won",
+          "to": "Job in Progress"
+        },
+        {
+          "lead_id": "58a7ed58-ca4b-4a91-a3eb-91fd9567d413",
+          "name": "Bonnie Bauman",
+          "from": "Closed Won",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "995b148a-c7ea-48d5-935f-ac3b6dcf2604",
+          "name": "Aida Ramos",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "884226be-da0d-4720-a7d3-bff489435b18",
+          "name": "Cerissa Hayot",
+          "from": "Closed Won",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "549c6962-4698-4f1d-b7b3-25113bcf06d4",
+          "name": "Heather Wagstaff",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "6bb1b85d-f243-4293-b1c9-833e0066887a",
+          "name": "David Tyler",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "777bf935-ec07-4c97-88d7-a9fd817f3923",
+          "name": "Anna Nunn",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        }
+      ],
+      "errors": []
+    }
+  }
+}

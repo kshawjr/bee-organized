@@ -762,13 +762,35 @@ for (const [slug, locReport] of Object.entries(scan.locations)) {
           await maybeAdvanceEngagementStageBackfill(engId)
         }
 
-        // lead stage re-derivation from the full requestless bundle
-        const allInvoices = myJobs.flatMap(j => j.invoices?.nodes || [])
+        // Lead-stage re-derivation from the FULL post-landing local history.
+        // The 7/9 run derived from the requestless bundle alone — complete
+        // for that zero-history cohort (the bundle WAS the history) — but a
+        // blind-spot client has other landed records whose newer events must
+        // win; bundle-only derivation projected regressions like Closed Won
+        // → Nurturing off a stale 2023 artifact. Post-landing, the local
+        // tables hold the full merged history: read it back and map each row
+        // to the node shape determineLeadStage consumes (exact inverse of
+        // the upsert payload mappings above). For zero-history clients the
+        // read-back equals the bundle, so 7/9 behavior is unchanged.
+        const [srRows, quoteRows, jobRows, invoiceRows] = await Promise.all([
+          sb(`service_requests?select=requested_at,created_at&lead_id=eq.${c.lead_id}`),
+          sb(`quotes?select=sent_at,created_at&lead_id=eq.${c.lead_id}`),
+          sb(`jobs?select=status,scheduled_start,completed_at,created_at&lead_id=eq.${c.lead_id}`),
+          sb(`invoices?select=status,issued_at,created_at&lead_id=eq.${c.lead_id}`),
+        ])
         const lead = one(await sb(`leads?select=id,stage,email,phone,created_at&id=eq.${c.lead_id}`))
         const { stage: newStage } = determineLeadStage({
           email: lead?.email || null, phone: lead?.phone || null,
           clientCreatedAt: lead?.created_at || null,
-          requests: [], quotes: myQuotes, jobs: myJobs, invoices: allInvoices,
+          requests: (srRows || []).map(r => ({ createdAt: r.requested_at || r.created_at })),
+          quotes: (quoteRows || []).map(q => ({ createdAt: q.sent_at || q.created_at })),
+          jobs: (jobRows || []).map(j => ({
+            createdAt: j.created_at, startAt: j.scheduled_start,
+            completedAt: j.completed_at, jobStatus: j.status,
+          })),
+          invoices: (invoiceRows || []).map(i => ({
+            invoiceStatus: i.status, createdAt: i.issued_at || i.created_at,
+          })),
         }, nowMs)
         if (lead && newStage !== lead.stage) {
           await sb(`leads?id=eq.${c.lead_id}`, {

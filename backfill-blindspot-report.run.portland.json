@@ -1,0 +1,482 @@
+{
+  "mode": "execute",
+  "locations": {
+    "loc_portland": {
+      "name": "Portland",
+      "clients_repaired": 154,
+      "quotes_written": 73,
+      "jobs_written": 281,
+      "invoices_written": 402,
+      "engagements_founded": 267,
+      "engagements_closed_won": 231,
+      "engagements_closed_lost_stale": 18,
+      "engagements_open": 18,
+      "stage_changes": {
+        "Closed Won → Nurturing": 2,
+        "New → Job in Progress": 1,
+        "New → Estimate Sent": 1,
+        "Closed Won → Job in Progress": 5,
+        "New → Final Processing": 1,
+        "Nurturing → Closed Won": 26,
+        "Final Processing → Closed Won": 15,
+        "Nurturing → Final Processing": 11,
+        "Final Processing → Job in Progress": 1,
+        "Nurturing → Job in Progress": 2,
+        "Closed Won → Final Processing": 10
+      },
+      "stage_change_list": [
+        {
+          "lead_id": "ef513a28-1b2d-4d37-95c7-ee6afc779aaa",
+          "name": "Stephanie Bachelder",
+          "from": "Closed Won",
+          "to": "Nurturing"
+        },
+        {
+          "lead_id": "b0ebf774-2f44-45c6-8e39-dbf5ad6800d5",
+          "name": "Joyce Barrett",
+          "from": "New",
+          "to": "Job in Progress"
+        },
+        {
+          "lead_id": "a2faacdf-4cd7-4205-9f9c-2ad31e950b3a",
+          "name": "Ryan Corlett",
+          "from": "New",
+          "to": "Estimate Sent"
+        },
+        {
+          "lead_id": "44e792b2-34ce-4d15-88e0-0e83971ca4f0",
+          "name": "Stephanie Sahagian",
+          "from": "Closed Won",
+          "to": "Job in Progress"
+        },
+        {
+          "lead_id": "b3317d23-dbb7-457c-8bfb-d898674e24cd",
+          "name": "Tina",
+          "from": "New",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "67197681-f4a5-4851-9677-94ed6cf1afb3",
+          "name": "Catherine Gay",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "81c6119a-729a-4236-8350-e0ee5a25628e",
+          "name": "Rita Gonzalez",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "95323a0a-36cc-4489-819f-9af724a32ca6",
+          "name": "Kathy McKnight",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "a528d3f5-4d26-4f22-a3c7-1a473ee9230e",
+          "name": "Courtney Freeman",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "b96536a9-62d4-49a2-a17d-d8487c0ae675",
+          "name": "Clarissa  Klimek",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "e79461ab-7882-4d95-9f04-9dacc99ebe80",
+          "name": "Megan Bodnar",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "d693dee3-5c2f-414b-9db2-d1d1a1d2479d",
+          "name": "Steve McCall",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "4b2a7d42-22fe-40d7-9ef0-032f372dfc54",
+          "name": "Lindsay Nguyen",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "9c618234-e8cd-4a85-9977-3722482c185d",
+          "name": "Michelle  Cravens",
+          "from": "Closed Won",
+          "to": "Nurturing"
+        },
+        {
+          "lead_id": "dec6d96b-169a-4839-8cdc-6cdf87b540a0",
+          "name": "Erin Stevanus",
+          "from": "Final Processing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "bbacb0c9-7217-4ee6-a0d6-29cd24792a3d",
+          "name": "Emily Zurow",
+          "from": "Closed Won",
+          "to": "Job in Progress"
+        },
+        {
+          "lead_id": "ff70875d-f8ad-4264-8f19-041c196533bf",
+          "name": "Linda Graybeal",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "3d835812-5397-4f3c-8793-94ef03511fcd",
+          "name": "Melinda Russell",
+          "from": "Final Processing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "38563129-253a-42d9-baf0-99e947099438",
+          "name": "Sarah Heward",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "175df285-678f-41ca-aeb9-7bc6f04c34a3",
+          "name": "Molly Rice",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "a19778a6-2b0a-4879-a8df-954669a74960",
+          "name": "Ambrosia Johnson",
+          "from": "Nurturing",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "3ddd6677-ec71-42f9-8a2e-7513f014a660",
+          "name": "Jean",
+          "from": "Nurturing",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "278b738b-08c1-4eea-ad4e-a6240a22ff4b",
+          "name": "Kelsey Barrett",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "360d0270-1366-474a-b03c-f11ee0ddb360",
+          "name": "Shaira Reyes",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "da0edc3c-7d64-4e04-8f05-9d8395d208a4",
+          "name": "Ingrid Lowery",
+          "from": "Final Processing",
+          "to": "Job in Progress"
+        },
+        {
+          "lead_id": "e8c8e3cf-bc32-4386-a56c-1d38587b901c",
+          "name": "Nikotris Lewis",
+          "from": "Nurturing",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "4d1ba9f4-0ee3-4485-85f7-d15ccf8ba357",
+          "name": "Kathleen Polscer",
+          "from": "Final Processing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "0b638a3a-90b7-41b6-bb80-085f7090bd92",
+          "name": "Cheryl Neeley",
+          "from": "Nurturing",
+          "to": "Job in Progress"
+        },
+        {
+          "lead_id": "142cc628-7462-4321-a6f6-ab886a7f5f3b",
+          "name": "Hallie Wright",
+          "from": "Closed Won",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "d0d03236-7d1a-458a-979f-361b15d23e95",
+          "name": "Stefanie Reid",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "536e2929-3325-4a06-9aed-9e55e1901514",
+          "name": "Francesca Ferrucci",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "3f4fdf52-9da4-4f09-98b5-4c171516f1e4",
+          "name": "Robert Allen",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "5145a18d-678a-433b-81b1-033344b2ec39",
+          "name": "Meagan Shepherd",
+          "from": "Nurturing",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "a1dd4a92-0f22-46ce-a0b6-e179d5b8ec6f",
+          "name": "Jaime Hart",
+          "from": "Closed Won",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "28079468-cd94-45b0-949a-0ac54f6fc7be",
+          "name": "Tara Rubin",
+          "from": "Nurturing",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "43068e86-d2cb-47d9-b18e-27d3fb5322e8",
+          "name": "Jonathan Horsman",
+          "from": "Closed Won",
+          "to": "Job in Progress"
+        },
+        {
+          "lead_id": "96b1aaff-c983-460c-a88a-7361c3f8806a",
+          "name": "Liz Holland",
+          "from": "Nurturing",
+          "to": "Job in Progress"
+        },
+        {
+          "lead_id": "950274c2-f18d-45b9-95f2-b0e7289dcafa",
+          "name": "Scott Pozzi",
+          "from": "Closed Won",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "d5a3c626-9521-410d-ad37-332ca6531122",
+          "name": "Melissa Blanchette",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "f27e887c-638e-4c8d-89d0-0dbe4c7b3f40",
+          "name": "Elon Hasson",
+          "from": "Closed Won",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "e697df57-22ec-40f6-8214-948af93d1952",
+          "name": "Debra Clark",
+          "from": "Closed Won",
+          "to": "Job in Progress"
+        },
+        {
+          "lead_id": "868dbd7f-9f5a-42a6-a704-fb9c204596af",
+          "name": "Stacey Wilson",
+          "from": "Closed Won",
+          "to": "Job in Progress"
+        },
+        {
+          "lead_id": "457b0c30-a020-4fa0-a64f-e67dce11787b",
+          "name": "Jennifer Samsom",
+          "from": "Nurturing",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "1f713e5a-8fc2-46af-9b60-7c1d561ac4db",
+          "name": "Kristin Flanary",
+          "from": "Nurturing",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "9a86618a-6f65-4d9b-8137-39605e614708",
+          "name": "Laurel Truscott",
+          "from": "Closed Won",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "21146488-76b4-4087-bc19-82e1d94b312b",
+          "name": "Sue Gilmore",
+          "from": "Closed Won",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "40a8a12c-a122-44be-9c5f-9c0bd79e24a1",
+          "name": "Diane  Tsukamaki",
+          "from": "Final Processing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "fc4c36fb-9514-4855-ac69-21da627b5dd1",
+          "name": "Erik Mittra",
+          "from": "Nurturing",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "8140e9f1-04fc-4dd6-a349-68dff73efb8e",
+          "name": "Abigail",
+          "from": "Closed Won",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "e21ba54a-612d-4fdf-8201-efdc1fa1d6a6",
+          "name": "Sherry Odierno",
+          "from": "Closed Won",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "7d102473-6c1b-47d4-947a-d215fa7d360f",
+          "name": "Dandelion Waggaman",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "f970ac6e-7646-47b0-9e12-953b5e0efe97",
+          "name": "Ann Jaline",
+          "from": "Final Processing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "de377b1d-4c26-408b-9007-f53ef1253b6d",
+          "name": "Melinda Marglous",
+          "from": "Final Processing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "0a01b2f0-a1c6-4118-8b97-286e0c7a2c74",
+          "name": "Devonne Dotts",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "e348dc70-301f-4e3c-8634-70364bce728c",
+          "name": "Mary Baker",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "84dca192-d19b-406e-bf3d-c87363b2d723",
+          "name": "Lydia  Lavere",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "e93533d0-fb4f-4eb7-958c-ff3704c5bf7d",
+          "name": "Char Tritt",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "559e42f1-b8b6-4a1c-8101-5529237cfe9a",
+          "name": "Gwynne Ohm",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "f9440649-7120-4e19-ba24-85aa04c98308",
+          "name": "Allie Lawson",
+          "from": "Final Processing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "402fc05b-b833-4e4e-b38e-dbc945c450dc",
+          "name": "Linda Marcott Harris",
+          "from": "Final Processing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "9a587f27-d823-4a12-b0f8-3771749f94a5",
+          "name": "Kim Moyer",
+          "from": "Closed Won",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "33762304-6b51-4f7e-afac-82881f68c8e7",
+          "name": "Anne Bushan",
+          "from": "Final Processing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "3419530c-a52b-4d11-bfcf-bda749fb4c3f",
+          "name": "Whitney Elliott",
+          "from": "Nurturing",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "b89ab48a-6d6a-46ef-830d-f77cd6d2d730",
+          "name": "Sonja McIntosh",
+          "from": "Final Processing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "1f2f2c29-dfad-474b-be60-add4b321b910",
+          "name": "Karen  Scardina",
+          "from": "Final Processing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "f93d3708-3cab-48e3-a01d-136f75d7784b",
+          "name": "Christine Slattery",
+          "from": "Final Processing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "69531b8b-aa39-4f88-b26f-10507410a545",
+          "name": "Caitlin O'pry",
+          "from": "Final Processing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "0372020e-839d-4f27-94d3-54965893fab1",
+          "name": "Tawnie Nelson",
+          "from": "Nurturing",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "0198b280-0889-42ce-909f-aefb9e918818",
+          "name": "Matthew Jacobson",
+          "from": "Final Processing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "2e619745-8c4a-49bb-8959-c0719c2c01e7",
+          "name": "Sagina O'Halloran",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "309be1a3-9c7b-4ccc-9c71-b8cfe9fa3035",
+          "name": "Kathy Valach",
+          "from": "Final Processing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "e613eff3-4c77-4fdb-b74e-07dd5f49b058",
+          "name": "RoseMarie",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "851d572a-757a-4c23-978a-875a181b5a9b",
+          "name": "Timothy Lafolette",
+          "from": "Nurturing",
+          "to": "Final Processing"
+        },
+        {
+          "lead_id": "6eefa342-2f06-4dde-b710-1412cb46ce0b",
+          "name": "Rou Wang",
+          "from": "Nurturing",
+          "to": "Closed Won"
+        },
+        {
+          "lead_id": "02dc946a-01cd-4cb7-a987-e4dad1d49110",
+          "name": "Sarah Beyer",
+          "from": "Closed Won",
+          "to": "Final Processing"
+        }
+      ],
+      "errors": []
+    }
+  }
+}
