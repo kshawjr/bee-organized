@@ -20,6 +20,7 @@
 
 import { supabaseService } from './supabase-service'
 import { writeSyncLog } from './sync-log'
+import { isUnscheduledJobStatus } from './jobber-import'
 import { ENGAGEMENT_STAGE_RANK as RAW_ENGAGEMENT_STAGE_RANK } from '@/components/hive/shared/stageRank'
 
 export type EngagementStage =
@@ -78,6 +79,16 @@ export type DerivedStage = {
 export const engagementJobDone = (j: { status?: string | null; completed_at?: string | null }) =>
   !!j.completed_at || (j.status || '').toLowerCase().includes('complet')
 
+// UNSCHEDULED jobs (jobs.status 'unscheduled' — JOB_STATUS in
+// lib/jobber-import.ts) have no visit booked: agreed-but-unbooked work,
+// the job-side twin of a sent quote — NOT current work. They must not
+// hold an engagement at 'Job in Progress' nor block Won/Final Processing
+// when booked jobs are done; an engagement whose only jobs are
+// unscheduled classifies like its quotes (Estimate live; stale-close
+// eligible in backfill mode). completed_at wins over the label.
+const jobUnbooked = (j: { status?: string | null; completed_at?: string | null }) =>
+  !j.completed_at && isUnscheduledJobStatus(j.status)
+
 const invoicePaid = (i: { status?: string | null }) => i.status === 'paid'
 const quoteActivity = (q: { sent_at?: string | null; approved_at?: string | null; created_at?: string | null }) =>
   Math.max(ts(q.approved_at), ts(q.sent_at), ts(q.created_at))
@@ -90,8 +101,11 @@ export function deriveEngagementStage(
   const now = opts.nowMs ?? Date.now()
   const { sr, quotes, jobs, invoices } = children
 
-  if (jobs.length > 0) {
-    if (jobs.some(j => !engagementJobDone(j))) return { stage: 'Job in Progress' }
+  const bookedJobs = jobs.filter(j => !jobUnbooked(j))
+  const unbookedJobs = jobs.filter(jobUnbooked)
+
+  if (bookedJobs.length > 0) {
+    if (bookedJobs.some(j => !engagementJobDone(j))) return { stage: 'Job in Progress' }
     if (invoices.length > 0 && invoices.every(invoicePaid)) {
       const lastPaidAt = Math.max(0, ...invoices.map(i => ts(i.paid_at)))
       return {
@@ -104,9 +118,16 @@ export function deriveEngagementStage(
     return { stage: 'Final Processing' }
   }
 
-  if (quotes.length > 0) {
+  // Unbooked jobs classify with the quotes: same live stage, same
+  // backfill staleness clock (Ruling A extends — an estimate the client
+  // agreed to but never booked is no more a live deal than one they
+  // never answered).
+  if (quotes.length > 0 || unbookedJobs.length > 0) {
     if (mode === 'backfill') {
-      const last = Math.max(...quotes.map(quoteActivity))
+      const last = Math.max(
+        ...quotes.map(quoteActivity),
+        ...unbookedJobs.map(j => ts(j.created_at)),
+      )
       if (now - last > NURTURING_AGE_MS) {
         // Ruling A (decision 14): unanswered old estimate is not a live deal.
         return { stage: 'Closed Lost', closed_reason: 'stale_on_import', closed_at: new Date(now).toISOString() }

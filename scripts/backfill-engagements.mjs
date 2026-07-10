@@ -141,15 +141,20 @@ const invoicesByJob = groupBy(invoices, 'job_id')
 // ── stage derivation (447be62 re-expressed per engagement) ──────────────────
 
 const jobDone = j => !!j.completed_at || (j.status || '').toLowerCase().includes('complet')
+// Unbooked (unscheduled) jobs are not current work and classify with the
+// quotes — sync with lib/engagements.ts deriveEngagementStage.
+const jobUnbooked = j => !j.completed_at && (j.status || '').toLowerCase() === 'unscheduled'
 const invoicePaid = i => i.status === 'paid'
 const quoteActivity = q => Math.max(ts(q.approved_at), ts(q.sent_at), ts(q.created_at))
 const srActivity = s => ts(s.requested_at) || ts(s.created_at)
 
 function deriveStage({ sr, eQuotes, eJobs, eInvoices }) {
-  // Jobs present: work happened.
-  if (eJobs.length > 0) {
-    if (eJobs.some(j => !jobDone(j))) return { stage: 'Job in Progress' }
-    // All jobs done.
+  const bookedJobs = eJobs.filter(j => !jobUnbooked(j))
+  const unbookedJobs = eJobs.filter(jobUnbooked)
+  // Booked jobs present: work happened.
+  if (bookedJobs.length > 0) {
+    if (bookedJobs.some(j => !jobDone(j))) return { stage: 'Job in Progress' }
+    // All booked jobs done.
     if (eInvoices.length > 0 && eInvoices.every(invoicePaid)) {
       const lastPaidAt = Math.max(0, ...eInvoices.map(i => ts(i.paid_at)))
       return {
@@ -164,9 +169,10 @@ function deriveStage({ sr, eQuotes, eJobs, eInvoices }) {
     // Complete + owing, or complete + never invoiced: money loose end.
     return { stage: 'Final Processing' }
   }
-  // Quotes present, no jobs.
-  if (eQuotes.length > 0) {
-    const last = Math.max(...eQuotes.map(quoteActivity))
+  // Quotes (or unbooked jobs, which classify like quotes) present, no
+  // booked jobs.
+  if (eQuotes.length > 0 || unbookedJobs.length > 0) {
+    const last = Math.max(...eQuotes.map(quoteActivity), ...unbookedJobs.map(j => ts(j.created_at)))
     if (NOW - last > THIRTY_D) {
       // Ruling A (decision 14): an unanswered old estimate is not a live
       // deal — close; client joins the nurture pool at the client level.

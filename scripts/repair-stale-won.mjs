@@ -79,6 +79,9 @@ async function sbAll(pathBase) {
 const ts = v => (v ? new Date(v).getTime() || 0 : 0)
 const nowIso = () => new Date().toISOString()
 const jobDone = j => !!j.completed_at || (j.status || '').toLowerCase().includes('complet')
+// Unbooked (unscheduled) jobs are not work evidence — they must neither
+// satisfy nor block the won condition. Sync with lib/engagements.ts.
+const jobUnbooked = j => !j.completed_at && (j.status || '').toLowerCase() === 'unscheduled'
 const THIRTY_D = 30 * 24 * 60 * 60 * 1000
 
 console.log(`repair-stale-won — ${EXECUTE ? '⚠ EXECUTE (writes to prod)' : 'DRY RUN (no writes)'}\n`)
@@ -104,7 +107,7 @@ for (const i of invAll) (invBy[i.engagement_id] ||= []).push(i)
 const flips = []      // won-condition holds → flip
 const heldOut = []    // money present but won-condition fails → NEVER touch, report
 for (const e of staleLost) {
-  const jobs = jobsBy[e.id] || []
+  const jobs = (jobsBy[e.id] || []).filter(j => !jobUnbooked(j))
   const invs = invBy[e.id] || []
   const won = jobs.length > 0 && jobs.every(jobDone) && invs.length > 0 && invs.every(i => i.status === 'paid')
   if (won) {

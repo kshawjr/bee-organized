@@ -236,11 +236,32 @@ export async function drainJobInvoices(
 
 // ── constants ─────────────────────────────────────────────────────
 
+// Jobber jobStatus → jobs.status. Anything unmapped lands as 'unknown'.
+// Keep in sync with the port in scripts/backfill-requestless.mjs.
 export const JOB_STATUS: Record<string, string> = {
   ACTIVE: 'in_progress', COMPLETED: 'completed',
   REQUIRES_INVOICING: 'completed', LATE: 'late',
   TODAY: 'today', UPCOMING: 'upcoming', ARCHIVED: 'archived',
+  UNSCHEDULED: 'unscheduled',
 }
+
+// UNSCHEDULED is Jobber's only pre-active status with no visit on the
+// calendar — UPCOMING/TODAY are booked and will happen, ACTIVE/LATE are
+// underway. An unscheduled job is agreed-but-unbooked work, the job-side
+// twin of a sent quote awaiting a response — NOT current work. Stage
+// derivation treats it like a quote of the same age (fresh → live deal,
+// aged → Nurturing) instead of 'Job in Progress'; before this entry it
+// fell to 'unknown' and pinned its lead at Job in Progress forever.
+// Matches both the raw Jobber value and the mapped DB value (same word,
+// case aside). completedAt/completed_at on the row wins over the label —
+// callers guard that side.
+export const isUnscheduledJobStatus = (status: string | null | undefined): boolean =>
+  (status || '').toLowerCase() === 'unscheduled'
+
+// Raw Jobber jobStatus values that mean the job is booked or underway —
+// the only statuses that may promote a lead to 'Job in Progress' on the
+// webhook path (JOB_CREATE/JOB_UPDATE in jobber-webhook-handlers.ts).
+export const BOOKED_JOB_STATUSES = new Set(['ACTIVE', 'TODAY', 'UPCOMING', 'LATE'])
 
 export const NURTURING_AGE_MS = 30 * 24 * 60 * 60 * 1000  // 30 days
 
@@ -324,17 +345,28 @@ export function determineLeadStage(
   if (!email && !phone && !hasActivity) return { stage: 'New', isJunk: true }
 
   // 2. Any job still active/scheduled is current work, full stop.
+  //    UNSCHEDULED jobs are exempt: nothing is booked, so nothing is in
+  //    progress — they ride the quote lane below instead. Every other
+  //    non-completed status, including unmapped ones, stays conservative:
+  //    current work.
   const jobDone = (j: any) =>
     !!j.completedAt || (j.jobStatus || '').toLowerCase().includes('complet')
-  if (jobs.some((j) => !jobDone(j))) return { stage: 'Job in Progress', isJunk: false }
+  const jobUnbooked = (j: any) => !jobDone(j) && isUnscheduledJobStatus(j.jobStatus)
+  if (jobs.some((j) => !jobDone(j) && !jobUnbooked(j))) return { stage: 'Job in Progress', isJunk: false }
 
   // Most recent engagement wins. Ties (same-timestamp chain events)
   // resolve to the more advanced state: invoice ≥ job ≥ quote ≥ request,
   // via strict > on the earlier-chain comparisons below.
   const isPaid = (i: any) => (i.invoiceStatus || '').toUpperCase() === 'PAID'
   const lastRequest = Math.max(0, ...requests.map((r) => ts(r.createdAt)))
-  const lastQuote   = Math.max(0, ...quotes.map((q) => ts(q.createdAt)))
-  const lastJob     = Math.max(0, ...jobs.map((j) => Math.max(ts(j.completedAt), ts(j.startAt), ts(j.createdAt))))
+  // Unscheduled jobs ride the quote lane: agreed-but-unbooked work is an
+  // estimate awaiting a response (fresh → 'Estimate Sent', aged →
+  // 'Nurturing'), never job evidence — the job lane falls through to
+  // 'Final Processing' (rule 3), which asserts money outstanding that an
+  // unbooked job never earned.
+  const lastQuote   = Math.max(0, ...quotes.map((q) => ts(q.createdAt)),
+                                  ...jobs.filter(jobUnbooked).map((j) => ts(j.createdAt)))
+  const lastJob     = Math.max(0, ...jobs.filter((j) => !jobUnbooked(j)).map((j) => Math.max(ts(j.completedAt), ts(j.startAt), ts(j.createdAt))))
   const lastPaid    = Math.max(0, ...invoices.filter(isPaid).map((i) => ts(i.createdAt)))
   const lastUnpaid  = Math.max(0, ...invoices.filter((i) => !isPaid(i)).map((i) => ts(i.createdAt)))
   const head = Math.max(lastRequest, lastQuote, lastJob, lastPaid, lastUnpaid)

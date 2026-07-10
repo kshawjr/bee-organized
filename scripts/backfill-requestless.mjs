@@ -273,11 +273,14 @@ function determineLeadStage(bundle, nowMs = Date.now()) {
   const hasActivity = requests.length > 0 || quotes.length > 0 || jobs.length > 0 || invoices.length > 0
   if (!email && !phone && !hasActivity) return { stage: 'New', isJunk: true }
   const jobDone = j => !!j.completedAt || (j.jobStatus || '').toLowerCase().includes('complet')
-  if (jobs.some(j => !jobDone(j))) return { stage: 'Job in Progress', isJunk: false }
+  // UNSCHEDULED jobs are unbooked work — never 'Job in Progress'; they
+  // ride the quote lane (sync with lib/jobber-import.ts determineLeadStage).
+  const jobUnbooked = j => !jobDone(j) && (j.jobStatus || '').toLowerCase() === 'unscheduled'
+  if (jobs.some(j => !jobDone(j) && !jobUnbooked(j))) return { stage: 'Job in Progress', isJunk: false }
   const isPaid = i => (i.invoiceStatus || '').toUpperCase() === 'PAID'
   const lastRequest = Math.max(0, ...requests.map(r => ts(r.createdAt)))
-  const lastQuote   = Math.max(0, ...quotes.map(q => ts(q.createdAt)))
-  const lastJob     = Math.max(0, ...jobs.map(j => Math.max(ts(j.completedAt), ts(j.startAt), ts(j.createdAt))))
+  const lastQuote   = Math.max(0, ...quotes.map(q => ts(q.createdAt)), ...jobs.filter(jobUnbooked).map(j => ts(j.createdAt)))
+  const lastJob     = Math.max(0, ...jobs.filter(j => !jobUnbooked(j)).map(j => Math.max(ts(j.completedAt), ts(j.startAt), ts(j.createdAt))))
   const lastPaid    = Math.max(0, ...invoices.filter(isPaid).map(i => ts(i.createdAt)))
   const lastUnpaid  = Math.max(0, ...invoices.filter(i => !isPaid(i)).map(i => ts(i.createdAt)))
   const head = Math.max(lastRequest, lastQuote, lastJob, lastPaid, lastUnpaid)
@@ -297,10 +300,12 @@ function determineLeadStage(bundle, nowMs = Date.now()) {
   return { stage: created && !aged(created) ? 'New' : 'Nurturing', isJunk: false }
 }
 
+// Sync with JOB_STATUS in lib/jobber-import.ts.
 const JOB_STATUS = {
   ACTIVE: 'in_progress', COMPLETED: 'completed',
   REQUIRES_INVOICING: 'completed', LATE: 'late',
   TODAY: 'today', UPCOMING: 'upcoming', ARCHIVED: 'archived',
+  UNSCHEDULED: 'unscheduled',
 }
 
 // Port of upsertQuote (service_request_id null for requestless).
@@ -514,18 +519,23 @@ async function resolveEngagementForChild({ childTable, childId, leadId, quoteDbI
 function deriveEngagementStageBackfill(children, nowMs = Date.now()) {
   const { quotes, jobs, invoices } = children
   const jobDone = j => !!j.completed_at || (j.status || '').toLowerCase().includes('complet')
+  // Unbooked (unscheduled) jobs classify with the quotes — sync with
+  // lib/engagements.ts deriveEngagementStage.
+  const jobUnbooked = j => !j.completed_at && (j.status || '').toLowerCase() === 'unscheduled'
   const invoicePaid = i => i.status === 'paid'
   const quoteActivity = q => Math.max(ts(q.approved_at), ts(q.sent_at), ts(q.created_at))
-  if (jobs.length > 0) {
-    if (jobs.some(j => !jobDone(j))) return { stage: 'Job in Progress' }
+  const bookedJobs = jobs.filter(j => !jobUnbooked(j))
+  const unbookedJobs = jobs.filter(jobUnbooked)
+  if (bookedJobs.length > 0) {
+    if (bookedJobs.some(j => !jobDone(j))) return { stage: 'Job in Progress' }
     if (invoices.length > 0 && invoices.every(invoicePaid)) {
       const lastPaidAt = Math.max(0, ...invoices.map(i => ts(i.paid_at)))
       return { stage: 'Closed Won', closed_reason: 'won', closed_at: new Date(lastPaidAt || nowMs).toISOString() }
     }
     return { stage: 'Final Processing' }
   }
-  if (quotes.length > 0) {
-    const last = Math.max(...quotes.map(quoteActivity))
+  if (quotes.length > 0 || unbookedJobs.length > 0) {
+    const last = Math.max(...quotes.map(quoteActivity), ...unbookedJobs.map(j => ts(j.created_at)))
     if (nowMs - last > NURTURING_AGE_MS) {
       return { stage: 'Closed Lost', closed_reason: 'stale_on_import', closed_at: new Date(nowMs).toISOString() }
     }
