@@ -1,0 +1,73 @@
+{
+  "mode": "execute",
+  "jobs": [
+    {
+      "db_job_id": "c26372a4-ecae-433a-9223-25b9a4738422",
+      "jobber_job_id": "119907096",
+      "location": "loc_portland",
+      "title": "Home Organization",
+      "engagement_id": "c99a8a78-8327-4c37-9de5-e659046c28f6",
+      "lead_id": "2ff0172f-02a8-49e9-b31b-7e391ca455f7",
+      "invoices_to_write": 4,
+      "dollars": 4562.9,
+      "written": [
+        {
+          "jobber_invoice_id": "157076609",
+          "status": "paid",
+          "total": 1395.65,
+          "issued_at": "2026-05-21T14:57:28Z"
+        },
+        {
+          "jobber_invoice_id": "159616881",
+          "status": "paid",
+          "total": 1483.2,
+          "issued_at": "2026-06-09T16:08:56Z"
+        },
+        {
+          "jobber_invoice_id": "160535023",
+          "status": "paid",
+          "total": 247.2,
+          "issued_at": "2026-06-16T22:56:44Z"
+        },
+        {
+          "jobber_invoice_id": "161514070",
+          "status": "paid",
+          "total": 1436.85,
+          "issued_at": "2026-06-25T13:27:27Z"
+        }
+      ],
+      "engagement_patch": {
+        "before": {
+          "stage": "Job in Progress",
+          "total_invoiced": 6351.1,
+          "total_paid": 6351.1,
+          "balance_owing": 0
+        },
+        "after": {
+          "stage": "Job in Progress",
+          "total_invoiced": 10914.000000000002,
+          "total_paid": 10914.000000000002,
+          "balance_owing": 0
+        }
+      },
+      "lead_patch": {
+        "before": {
+          "paid_amount": 1071.2,
+          "balance_owing": 0,
+          "invoice_paid_at": "2026-05-12T18:16:25+00:00"
+        },
+        "after": {
+          "paid_amount": 1436.85,
+          "balance_owing": 0,
+          "invoice_paid_at": "2026-06-25T13:27:27Z"
+        }
+      },
+      "lead_stage": "unchanged"
+    }
+  ],
+  "totals": {
+    "invoices_written": 4,
+    "dollars": 4562.9
+  },
+  "errors": []
+}

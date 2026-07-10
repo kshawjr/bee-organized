@@ -1,0 +1,44 @@
+{
+  "checked": 260,
+  "truncated": [
+    {
+      "db_job_id": "c26372a4-ecae-433a-9223-25b9a4738422",
+      "jobber_job_id": "119907096",
+      "location": "loc_portland",
+      "title": "Home Organization",
+      "jobber_invoice_count": 14,
+      "jobber_total_count_field": 14,
+      "db_invoice_count": 10,
+      "missing_count": 4,
+      "missing_total": 4562.9,
+      "missing": [
+        {
+          "jobber_invoice_id": "157076609",
+          "createdAt": "2026-05-21T14:57:28Z",
+          "status": "paid",
+          "total": 1395.65
+        },
+        {
+          "jobber_invoice_id": "159616881",
+          "createdAt": "2026-06-09T16:08:56Z",
+          "status": "paid",
+          "total": 1483.2
+        },
+        {
+          "jobber_invoice_id": "160535023",
+          "createdAt": "2026-06-16T22:56:44Z",
+          "status": "paid",
+          "total": 247.2
+        },
+        {
+          "jobber_invoice_id": "161514070",
+          "createdAt": "2026-06-25T13:27:27Z",
+          "status": "paid",
+          "total": 1436.85
+        }
+      ]
+    }
+  ],
+  "deleted_in_jobber": [],
+  "errors": []
+}
