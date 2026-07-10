@@ -52,7 +52,7 @@ describe('feedback composer affordance (franchise mount only)', () => {
     expect(franchiseMount).toContain("onReportFeedback={() => setShowFeedback('submit')}")
     // Reuse contract: showFeedback mounts the one existing modal; the
     // 'submit' intent rides through as initialTab.
-    expect(beehub).toContain("{showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} onClose={() => setShowFeedback(false)} />}")
+    expect(beehub).toContain("{showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} viewAsUserId={viewAsUser?.id || null} onClose={() => setShowFeedback(false)} />}")
   })
 
   it('the elevated admin mounts pass NO composer prop and NO location override', () => {
@@ -103,6 +103,55 @@ describe('real-session scoping unchanged (server routes)', () => {
 
   it('non-owner/manager/elevated callers are still 403; users list only their OWN items', () => {
     expect(adminRoute).toContain("return NextResponse.json({ error: 'forbidden' }, { status: 403 })")
-    expect(userRoute).toContain(".eq('user_id', user.id)")
+    // The user route defaults to the session user; the override only ever
+    // replaces it inside the elevated-role check (asserted in detail below).
+    expect(userRoute).toContain('let targetUserId = user.id')
+  })
+})
+
+// The identity half of view-as parity (the location half is 681b3a7 above):
+// the "mine" tab under view-as shows the IMPERSONATED user's items, via an
+// elevated-only ?user_id= override on GET /api/feedback.
+describe('view-as feedback identity parity (mine tab)', () => {
+  // The FeedbackModal function body (up to the next top-level component).
+  const modalSrc = beehub.slice(
+    beehub.indexOf('function FeedbackModal('),
+    beehub.indexOf('function FeedbackModal(') + 6000
+  )
+
+  it('the modal mount passes the IMPERSONATED user id (null for real sessions)', () => {
+    expect(beehub).toContain('viewAsUserId={viewAsUser?.id || null}')
+  })
+
+  it('FeedbackModal appends ?user_id= only when impersonating, and refetches when it changes', () => {
+    expect(modalSrc).toContain('viewAsUserId = null')
+    expect(modalSrc).toMatch(/viewAsUserId\s*\?\s*`\/api\/feedback\?user_id=\$\{encodeURIComponent\(viewAsUserId\)\}`\s*:\s*'\/api\/feedback'/)
+    expect(modalSrc).toMatch(/useEffect\(\(\) => \{ loadItems\(\) \}, \[viewAsUserId\]\)/)
+  })
+
+  it('GET /api/feedback honors ?user_id= ONLY after an elevated-role check on the SESSION user', () => {
+    // Default target is the session user…
+    expect(userRoute).toContain('let targetUserId = user.id')
+    // …and the only reassignment is gated on the caller's own hub_users role
+    // being elevated (role looked up by session id, never from the request).
+    const overrideBlock = userRoute.slice(
+      userRoute.indexOf("searchParams.get('user_id')"),
+      userRoute.indexOf('targetUserId = override') + 'targetUserId = override'.length
+    )
+    expect(overrideBlock).toContain(".eq('id', user.id)")
+    expect(overrideBlock).toMatch(/if \(caller && ELEVATED_ROLES\.includes\(caller\.role\)\) targetUserId = override/)
+    expect(userRoute.split('targetUserId = override').length).toBe(2) // exactly one assignment site
+    // The query binds to the resolved target, not raw input.
+    expect(userRoute).toContain(".eq('user_id', targetUserId)")
+    // ELEVATED_ROLES stays the corp tier only — owner/manager never qualify.
+    expect(userRoute).toMatch(/const ELEVATED_ROLES = \['super_admin', 'admin'\]/)
+  })
+
+  it('a non-elevated caller passing ?user_id= is IGNORED — read stays scoped to their own session id', () => {
+    // No unconditional use of the raw param in a query filter…
+    expect(userRoute).not.toMatch(/\.eq\('user_id', override\)/)
+    // …and there is no other searchParams read that could smuggle identity in.
+    const paramReads = userRoute.match(/searchParams\.get\('[^']+'\)/g) || []
+    expect(paramReads).toEqual(["searchParams.get('user_id')"])
   })
 })

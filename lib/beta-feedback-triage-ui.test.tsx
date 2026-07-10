@@ -39,14 +39,14 @@ const modalSrc = beehub.slice(
 
 describe('submit-tab default (Feedback-screen button only)', () => {
   it('FeedbackModal takes initialTab, defaulting to mine (Help-menu behavior unchanged)', () => {
-    expect(modalSrc).toContain("function FeedbackModal({ onClose, initialTab = 'mine' })")
+    expect(modalSrc).toContain("function FeedbackModal({ onClose, initialTab = 'mine', viewAsUserId = null })")
     expect(modalSrc).toContain('useState(initialTab)')
   })
 
   it("the Feedback screen's composer button opens on the SUBMIT tab", () => {
     expect(beehub).toContain("onReportFeedback={() => setShowFeedback('submit')}")
     expect(beehub).toContain(
-      "{showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} onClose={() => setShowFeedback(false)} />}"
+      "{showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} viewAsUserId={viewAsUser?.id || null} onClose={() => setShowFeedback(false)} />}"
     )
   })
 

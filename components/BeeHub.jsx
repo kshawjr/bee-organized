@@ -26573,7 +26573,15 @@ function FeedbackItemCard({ item }) {
 
 // initialTab: 'mine' (default — the Help "?" menu path) | 'submit' (the
 // Feedback screen's composer button lands straight on the form).
-function FeedbackModal({ onClose, initialTab = 'mine' }) {
+//
+// viewAsUserId: under view-as the "mine" tab should preview the IMPERSONATED
+// user's items, but API calls ride the real session (view-as is display-only),
+// so the mount passes the impersonated hub_users id and loadItems appends
+// ?user_id= — which /api/feedback honors for elevated callers and ignores for
+// everyone else. Null for real sessions → no param, own items as always.
+// Known wrinkle: the Submit tab still files as the REAL session user, so a
+// submission made while impersonating won't appear in the list it lands on.
+function FeedbackModal({ onClose, initialTab = 'mine', viewAsUserId = null }) {
   const [tab, setTab]           = useState(initialTab) // 'mine' | 'submit'
   const [items, setItems]       = useState([])
   const [loading, setLoading]   = useState(true)
@@ -26632,7 +26640,7 @@ function FeedbackModal({ onClose, initialTab = 'mine' }) {
     setLoading(true)
     setLoadError(null)
     try {
-      const res = await fetch('/api/feedback')
+      const res = await fetch(viewAsUserId ? `/api/feedback?user_id=${encodeURIComponent(viewAsUserId)}` : '/api/feedback')
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       setItems(Array.isArray(data.items) ? data.items : [])
@@ -26643,7 +26651,7 @@ function FeedbackModal({ onClose, initialTab = 'mine' }) {
     }
   }
 
-  useEffect(() => { loadItems() }, [])
+  useEffect(() => { loadItems() }, [viewAsUserId])
 
   useEffect(() => {
     if (!toast) return
@@ -32026,7 +32034,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         open={showManual}
         onClose={() => setShowManual(false)}
       />
-      {showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} onClose={() => setShowFeedback(false)} />}
+      {showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} viewAsUserId={viewAsUser?.id || null} onClose={() => setShowFeedback(false)} />}
       <LocPickerDropdown />
 
       {/* Sidebar nav - desktop only. The column itself no longer scrolls —

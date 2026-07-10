@@ -18,16 +18,39 @@ export const runtime = 'nodejs'
 
 const VALID_TYPES = new Set(['bug', 'feature'])
 
+// Roles allowed to read another user's items via ?user_id=. Matches
+// ELEVATED_ROLES in /api/admin/feedback and ADMIN_ROLES in the attachment
+// route — the corp tier that already sees all feedback through triage.
+const ELEVATED_ROLES = ['super_admin', 'admin']
+
 // GET — caller's own items, newest first.
-export async function GET() {
+//
+// Elevated callers (super_admin/admin) may pass ?user_id= to read another
+// user's list — the view-as "mine" tab rides this so impersonation previews
+// the impersonated user's items instead of the impersonator's own. For every
+// other caller the param is IGNORED, never honored (same stance as the
+// ?location_id= override on /api/admin/feedback): a real user's read is
+// always scoped to their own session user_id.
+export async function GET(req: NextRequest) {
   const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
+  let targetUserId = user.id
+  const override = req.nextUrl.searchParams.get('user_id')
+  if (override && override !== user.id) {
+    const { data: caller } = await supabase
+      .from('hub_users')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+    if (caller && ELEVATED_ROLES.includes(caller.role)) targetUserId = override
+  }
+
   const { data, error } = await supabaseService
     .from('feedback_items')
     .select('*')
-    .eq('user_id', user.id)
+    .eq('user_id', targetUserId)
     .order('created_at', { ascending: false })
 
   if (error) {
