@@ -28502,6 +28502,261 @@ function AdminFeedbackScreen({
   )
 }
 
+// ── Admin Webhooks tab — Jobber webhook sync-log observability ──────
+//
+// Enriched rows come from GET /api/admin/webhook-log (the time window is
+// the only server-side filter; the failure/didn't-land pills, location
+// select, and the name/id search all filter client-side over the
+// returned window, so "look up Joe Green" is instant).
+//
+// TWO indicators per row:
+//   Processed — the handler ran without error (sync_log.status).
+//   Landed    — the record reached its intended state, verified and
+//               RECORDED at processing time (sync_log.landed_status,
+//               written by lib/webhook-landed.ts — see LANDED RULES
+//               there). '—' = processed-only event, processing failed
+//               (moot), or a row from before the instrumentation.
+// Rows with an error (red ✕) or an amber Landed (▲) expand on click to
+// show the full sync_log message for copy/paste into a bug report.
+
+const WEBHOOK_WINDOWS = [
+  { key:'24h', label:'24h' },
+  { key:'7d',  label:'7 days' },
+  { key:'30d', label:'30 days' },
+  { key:'all', label:'All time' },
+]
+
+const WEBHOOK_ENTITY_EMOJI = {
+  REQUEST:'📥', QUOTE:'📄', JOB:'🔨', INVOICE:'💵', CLIENT:'👤', PROPERTY:'🏠', ASSESSMENT:'📋', APP:'🔌',
+}
+
+function webhookEntityEmoji(topic) {
+  const prefix = String(topic || '').split('_')[0]
+  return WEBHOOK_ENTITY_EMOJI[prefix] || '⚙️'
+}
+
+// Small tinted status glyph — the locked anatomy for both indicator
+// columns. kind: 'ok' | 'fail' | 'stuck' | 'na'
+function WebhookStatusChip({ kind, label }) {
+  const conf = {
+    ok:    { bg:'rgba(22,101,52,0.08)', fg:'#166534', glyph:'✓' },
+    fail:  { bg:'#FCEBEB',              fg:'#791F1F', glyph:'✕' },
+    stuck: { bg:'#FEF3C7',              fg:'#92400E', glyph:'▲' },
+    na:    { bg:'transparent',          fg:'#b5b3ac', glyph:'—' },
+  }[kind] || { bg:'transparent', fg:'#b5b3ac', glyph:'—' }
+  return (
+    <span title={label} aria-label={label} style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:'26px', height:'22px', borderRadius:'6px', background:conf.bg, color:conf.fg, fontSize:'12px', fontWeight:600, lineHeight:1 }}>
+      {conf.glyph}
+    </span>
+  )
+}
+
+function AdminWebhookLogScreen() {
+  const [events, setEvents]       = useState([])
+  const [truncated, setTruncated] = useState(false)
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState(null)
+  const [winKey, setWinKey]       = useState('24h')
+  const [pill, setPill]           = useState('all')   // all | failures | stuck
+  const [locFilter, setLocFilter] = useState('all')
+  const [q, setQ]                 = useState('')
+  const [expanded, setExpanded]   = useState(null)    // event id
+  const [copiedId, setCopiedId]   = useState(null)
+
+  // Deep link (?whFilter=failures|stuck&whWindow=24h|7d|30d|all) — the
+  // Slack digest links land here pre-filtered.
+  useEffect(() => {
+    try {
+      const p = new URLSearchParams(window.location.search)
+      const f = p.get('whFilter'); const w = p.get('whWindow')
+      if (f === 'failures' || f === 'stuck') setPill(f)
+      if (w && WEBHOOK_WINDOWS.some(x => x.key === w)) setWinKey(w)
+    } catch {}
+  }, [])
+
+  async function load(win) {
+    setLoading(true); setError(null)
+    try {
+      const res = await fetch(`/api/admin/webhook-log?window=${encodeURIComponent(win)}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      setEvents(Array.isArray(data.events) ? data.events : [])
+      setTruncated(!!data.truncated)
+    } catch (e) {
+      setError("Couldn't load the webhook log. Please try again.")
+    } finally { setLoading(false) }
+  }
+  useEffect(() => { load(winKey) }, [winKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Distinct locations present in the data, for the filter dropdown.
+  const locOptions = (() => {
+    const seen = new Map()
+    events.forEach(e => { if (e.location_id) seen.set(e.location_id, e.location_name || e.location_id) })
+    return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+  })()
+
+  const failureCount = events.filter(e => !e.processed).length
+  const stuckCount   = events.filter(e => e.landed === 'stuck').length
+
+  const filtered = events.filter(e => {
+    if (pill === 'failures' && e.processed) return false
+    if (pill === 'stuck' && e.landed !== 'stuck') return false
+    if (locFilter !== 'all' && e.location_id !== locFilter) return false
+    if (q.trim()) {
+      const needle = q.trim().toLowerCase()
+      const hay = `${e.client_name || ''} ${e.topic || ''} ${e.friendly || ''} ${e.jobber_item || ''} ${e.message || ''}`.toLowerCase()
+      if (!hay.includes(needle)) return false
+    }
+    return true
+  })
+
+  const pills = [
+    { key:'all',      label:'All events',  count: events.length },
+    { key:'failures', label:'Failures',    count: failureCount },
+    { key:'stuck',    label:"Didn't land", count: stuckCount },
+  ]
+
+  const pillStyle = active => ({
+    padding:'5px 12px', borderRadius:'20px', border:'none',
+    background: active ? 'rgba(0,0,0,0.07)' : 'transparent',
+    color: active ? '#1a1a18' : '#6b6b66',
+    fontSize:'12px', fontWeight:500, fontFamily:'inherit', cursor:'pointer', whiteSpace:'nowrap',
+  })
+  const quietInput = { padding:'7px 10px', border:'0.5px solid rgba(0,0,0,0.15)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#1a1a18', background:'white', cursor:'pointer' }
+  const colHead = { width:'70px', textAlign:'center', fontSize:'11px', color:'#8a8a84', flexShrink:0 }
+
+  async function copyMessage(e, ev) {
+    ev.stopPropagation()
+    try {
+      await navigator.clipboard.writeText(e.message)
+      setCopiedId(e.id)
+      setTimeout(() => setCopiedId(null), 1400)
+    } catch {}
+  }
+
+  return (
+    <div style={{ padding:'14px 1.25rem 1rem', fontFamily:'DM Sans,system-ui,sans-serif' }}>
+      {/* Header — light headline + muted count subtitle. */}
+      <div style={{ marginBottom:'14px' }}>
+        <h2 style={{ fontSize:'19px', fontWeight:500, color:'#1a1a18', margin:0, lineHeight:1.3 }}>Webhooks</h2>
+        <p style={{ fontSize:'12px', color:'#8a8a84', marginTop:'2px' }}>
+          {loading || error ? '—' : `${events.length} event${events.length !== 1 ? 's' : ''} · ${failureCount} failure${failureCount !== 1 ? 's' : ''} · ${stuckCount} didn't land${truncated ? ' · showing newest 1000' : ''}`}
+        </p>
+      </div>
+
+      {/* Filter pills — status group | time-window group, one wrapping strip. */}
+      <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', gap:'2px 4px', marginBottom:'8px' }}>
+        {pills.map(p => (
+          <button key={`wh-${p.key}`} onClick={() => setPill(p.key)} aria-pressed={pill === p.key} style={pillStyle(pill === p.key)}>
+            {p.label}<span style={{ color:'#b5b3ac', fontWeight:400 }}> · {p.count}</span>
+          </button>
+        ))}
+        <span aria-hidden="true" style={{ width:'1px', height:'16px', background:'rgba(0,0,0,0.12)', margin:'0 8px', flexShrink:0 }} />
+        {WEBHOOK_WINDOWS.map(w => (
+          <button key={`whw-${w.key}`} onClick={() => setWinKey(w.key)} aria-pressed={winKey === w.key} style={pillStyle(winKey === w.key)}>
+            {w.label}
+          </button>
+        ))}
+      </div>
+      <div style={{ display:'flex', flexWrap:'wrap', gap:'8px', marginBottom:'14px' }}>
+        <select value={locFilter} onChange={e => setLocFilter(e.target.value)} style={quietInput}>
+          <option value="all">All locations</option>
+          {locOptions.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+        </select>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by client name, job id, event type" style={{ ...quietInput, cursor:'text', flex:'1 1 220px', maxWidth:'360px' }} />
+      </div>
+
+      {loading ? (
+        <p style={{ fontSize:'13px', color:'#8a8a84', textAlign:'center', padding:'30px 0' }}>Loading…</p>
+      ) : error ? (
+        <div style={{ textAlign:'center', padding:'24px 0' }}>
+          <p style={{ fontSize:'13px', color:'#b91c1c', marginBottom:'10px' }}>{error}</p>
+          <button onClick={() => load(winKey)} style={{ padding:'8px 16px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Retry</button>
+        </div>
+      ) : filtered.length === 0 ? (
+        <p style={{ fontSize:'13px', color:'#8a8a84', textAlign:'center', padding:'30px 0' }}>
+          {events.length === 0 ? 'No webhook events in this window.' : 'No events match these filters.'}
+        </p>
+      ) : (
+        /* One rounded container, hairline-divided rows — not per-row boxes. */
+        <div style={{ background:'white', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:'12px', overflow:'hidden' }}>
+          {/* Column header strip — the two indicator columns need naming. */}
+          <div style={{ display:'flex', alignItems:'center', gap:'12px', padding:'8px 14px', background:'rgba(0,0,0,0.015)' }}>
+            <span style={{ flex:1, fontSize:'11px', color:'#8a8a84' }}>Event</span>
+            <span style={colHead}>Processed</span>
+            <span style={colHead}>Landed</span>
+            <span style={{ ...colHead, textAlign:'right' }}>When</span>
+          </div>
+          {filtered.map(e => {
+            const expandable = !!e.error || e.landed === 'stuck'
+            const isOpen = expanded === e.id
+            return (
+              <div key={e.id} style={{ borderTop:'0.5px solid rgba(0,0,0,0.08)' }}>
+                <button
+                  onClick={() => expandable && setExpanded(isOpen ? null : e.id)}
+                  aria-expanded={expandable ? isOpen : undefined}
+                  style={{
+                    width:'100%', display:'flex', alignItems:'center', gap:'12px', padding:'10px 14px',
+                    border:'none', background: e.landed === 'stuck' ? 'rgba(254,243,199,0.35)' : 'transparent',
+                    cursor: expandable ? 'pointer' : 'default', textAlign:'left', fontFamily:'inherit',
+                  }}
+                >
+                  {/* Soft-tinted entity tile. */}
+                  <span style={{ width:'28px', height:'28px', borderRadius:'8px', display:'inline-flex', alignItems:'center', justifyContent:'center', flexShrink:0, background: !e.processed ? '#FCEBEB' : 'rgba(0,0,0,0.04)', fontSize:'14px' }}>
+                    {webhookEntityEmoji(e.topic)}
+                  </span>
+                  <span style={{ flex:1, minWidth:0 }}>
+                    <span style={{ display:'flex', alignItems:'baseline', gap:'7px', minWidth:0 }}>
+                      <span style={{ fontSize:'13px', fontWeight:500, color:'#1a1a18', whiteSpace:'nowrap' }}>{e.friendly}</span>
+                      <span style={{ fontSize:'10px', color:'#b5b3ac', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{e.topic}</span>
+                    </span>
+                    <span style={{ display:'block', fontSize:'11px', color:'#8a8a84', marginTop:'1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {e.client_name || (e.jobber_item ? `Jobber #${e.jobber_item}` : 'Unknown record')}
+                      {e.location_name ? ` · ${e.location_name}` : ''}
+                      {e.stage_to && e.stage_from !== e.stage_to ? ` · stage → ${e.stage_to}` : ''}
+                    </span>
+                  </span>
+                  <span style={{ width:'70px', textAlign:'center', flexShrink:0 }}>
+                    <WebhookStatusChip kind={e.processed ? 'ok' : 'fail'} label={e.processed ? 'Processed without error' : 'Processing failed'} />
+                  </span>
+                  <span style={{ width:'70px', textAlign:'center', flexShrink:0 }}>
+                    <WebhookStatusChip
+                      kind={e.landed === 'landed' ? 'ok' : e.landed === 'stuck' ? 'stuck' : 'na'}
+                      label={e.landed === 'landed' ? 'Record reached its expected state' : e.landed === 'stuck' ? "Processed but didn't land — record not in expected state" : 'No landed state for this event'}
+                    />
+                  </span>
+                  <span style={{ width:'70px', textAlign:'right', fontSize:'11px', color:'#8a8a84', flexShrink:0 }}>
+                    {feedbackTimeAgo(e.created_at)}
+                  </span>
+                </button>
+                {isOpen && (
+                  <div style={{ padding:'0 14px 12px 54px' }}>
+                    {e.error ? (
+                      <p style={{ fontSize:'11px', fontWeight:600, color:'#791F1F', margin:'0 0 4px' }}>Error</p>
+                    ) : (
+                      <p style={{ fontSize:'11px', fontWeight:600, color:'#92400E', margin:'0 0 4px' }}>
+                        Processed without error, but the record hadn't reached its expected state — check the engagement.
+                      </p>
+                    )}
+                    <div style={{ display:'flex', alignItems:'flex-start', gap:'8px' }}>
+                      <code style={{ flex:1, display:'block', fontSize:'11px', lineHeight:1.5, color:'#1a1a18', background:'rgba(0,0,0,0.03)', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:'8px', padding:'8px 10px', whiteSpace:'pre-wrap', wordBreak:'break-word' }}>
+                        {e.error || e.message}
+                      </code>
+                      <button onClick={ev => copyMessage(e, ev)} style={{ padding:'6px 10px', borderRadius:'7px', border:'0.5px solid rgba(0,0,0,0.15)', background:'white', fontSize:'11px', fontFamily:'inherit', color:'#1a1a18', cursor:'pointer', flexShrink:0 }}>
+                        {copiedId === e.id ? 'Copied ✓' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Timezone options for the Create Location form. Mirrors the friendly-label
 // list the Settings → Location step offers; locations.timezone is stored as
 // these labels app-wide and lib/drip-time.ts normalizes them to IANA for
@@ -29470,6 +29725,18 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
   const [feedbackPending, setFeedbackPending] = useState(0)
   const handleFeedbackPending = React.useCallback((n) => setFeedbackPending(n), [])
   const showFeedbackTab = role === 'super_admin' || role === 'corporate' || role === 'admin'
+  // Webhook observability is operational/sensitive — admin + super_admin
+  // only (corporate stays out, unlike Feedback).
+  const showWebhooksTab = role === 'super_admin' || role === 'admin'
+  // Deep link: /admin?adminTab=webhooks (the Slack failure digest links
+  // land here). Applied once on mount, only for tabs this role can see.
+  useEffect(() => {
+    try {
+      const t = new URLSearchParams(window.location.search).get('adminTab')
+      if (t === 'webhooks' && showWebhooksTab) setAdminTab('webhooks')
+      else if (t === 'feedback' && showFeedbackTab) setAdminTab('feedback')
+    } catch {}
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   // Prime the badge count on mount so the unhandled-feedback indicator shows
   // before the operator ever opens the Feedback tab. AdminFeedbackScreen keeps
   // it fresh thereafter via onPendingCountChange.
@@ -29590,7 +29857,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
 
           {/* Sub-tabs — native <select> on mobile (<768px), pill row at ≥768px. */}
           {(()=>{
-            const adminTabs = [{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'content',label:'✏️ Content'}]:[]),...(showFeedbackTab?[{key:'feedback',label:'🐛 Feedback'}]:[]),...(role==='super_admin'?[{key:'conversions',label:'Conversions Due'},{key:'renewals',label:'🕐 Renewals'},{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])]
+            const adminTabs = [{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'content',label:'✏️ Content'}]:[]),...(showFeedbackTab?[{key:'feedback',label:'🐛 Feedback'}]:[]),...(showWebhooksTab?[{key:'webhooks',label:'🔌 Webhooks'}]:[]),...(role==='super_admin'?[{key:'conversions',label:'Conversions Due'},{key:'renewals',label:'🕐 Renewals'},{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])]
             return (
               <>
                 <select
@@ -29697,6 +29964,8 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
           />
         ) : adminTab==='feedback' ? (
           <AdminFeedbackScreen onPendingCountChange={handleFeedbackPending} />
+        ) : adminTab==='webhooks' ? (
+          <AdminWebhookLogScreen />
         ) : adminTab==='conversions' ? (
           <ConversionsDueTab onOpenLocation={loc=>setSelectedLoc(loc)} />
         ) : adminTab==='renewals' ? (
