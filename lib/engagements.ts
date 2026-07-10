@@ -477,7 +477,13 @@ export async function resolveEngagementForChild(params: {
 // Recompute the engagement's stage from its own children and apply it
 // only when it is forward progress on ENGAGEMENT_STAGE_RANK. Also
 // refreshes the money roll-ups (cheap, and keeps weekly billing live).
-// Terminal stages never move (Closed Won/Lost share top rank).
+// Terminal stages never move (Closed Won/Lost share top rank) — with ONE
+// exception: a machine-stamped stale close (closed_reason
+// 'stale_on_import') yields to a derived Closed Won. Paid-in-full
+// evidence beats the stale stamp: import/backfill order can close a
+// quote-founded engagement as stale before its job + paid invoices
+// attach, and without the override the rank tie traps it as Lost
+// forever. Human closes (any other closed_reason) still never move.
 //
 // mode 'backfill' (bulk import path) additionally applies the §5
 // stale-close rules — silent bookkeeping, no sequences. Webhooks use
@@ -489,7 +495,7 @@ export async function maybeAdvanceEngagementStage(
 ): Promise<{ advanced: boolean; stage?: EngagementStage }> {
   const { data: eng } = await supabaseService
     .from('engagements')
-    .select('id, stage')
+    .select('id, stage, closed_reason')
     .eq('id', engagementId)
     .maybeSingle()
   if (!eng) return { advanced: false }
@@ -519,7 +525,11 @@ export async function maybeAdvanceEngagementStage(
 
   const currentRank = ENGAGEMENT_STAGE_RANK[eng.stage as EngagementStage] ?? 0
   const newRank = ENGAGEMENT_STAGE_RANK[derived.stage] ?? 0
-  const advance = newRank > currentRank
+  const staleLostOverride =
+    derived.stage === 'Closed Won' &&
+    eng.stage === 'Closed Lost' &&
+    eng.closed_reason === 'stale_on_import'
+  const advance = newRank > currentRank || staleLostOverride
 
   if (advance) {
     patch.stage = derived.stage
@@ -529,6 +539,7 @@ export async function maybeAdvanceEngagementStage(
     if (derived.closed_reason === 'stale_on_import') {
       patch.closed_note = 'Closed automatically at import: no activity within 30 days (Ruling A for quote-only).'
     }
+    if (staleLostOverride) patch.closed_note = null // the stale note is wrong on a Won row
   }
 
   const { error } = await supabaseService.from('engagements').update(patch).eq('id', engagementId)
@@ -559,13 +570,19 @@ export async function maybeAdvanceEngagementStage(
 // moved — a no-op re-derive (the overwhelmingly common panel open)
 // writes nothing at all, not even updated_at.
 export async function recoverEngagementStageDrift(
-  engagement: { id: string; stage: string; client_id: string; location_uuid: string | null },
+  engagement: { id: string; stage: string; client_id: string; location_uuid: string | null; closed_reason?: string | null },
   children: EngagementChildren,
 ): Promise<{ corrected: boolean; stage?: EngagementStage; patch?: Record<string, any> }> {
   const currentRank = ENGAGEMENT_STAGE_RANK[engagement.stage as EngagementStage] ?? 0
   const derived = deriveEngagementStage(children)
   const newRank = ENGAGEMENT_STAGE_RANK[derived.stage] ?? 0
-  if (newRank <= currentRank) return { corrected: false }
+  // Same stale-Lost exception as maybeAdvanceEngagementStage: paid-in-full
+  // evidence beats a machine 'stale_on_import' stamp. Human closes never move.
+  const staleLostOverride =
+    derived.stage === 'Closed Won' &&
+    engagement.stage === 'Closed Lost' &&
+    engagement.closed_reason === 'stale_on_import'
+  if (newRank <= currentRank && !staleLostOverride) return { corrected: false }
 
   const nowIso = new Date().toISOString()
   const patch: Record<string, any> = {
@@ -575,6 +592,7 @@ export async function recoverEngagementStageDrift(
   }
   if (derived.closed_reason) patch.closed_reason = derived.closed_reason
   if (derived.closed_at) patch.closed_at = derived.closed_at
+  if (staleLostOverride) patch.closed_note = null // the stale note is wrong on a Won row
 
   const { error } = await supabaseService.from('engagements').update(patch).eq('id', engagement.id)
   if (error) {

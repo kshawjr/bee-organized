@@ -112,12 +112,18 @@ export async function GET(
   // LOCAL engagements (no children) derive to Request → structurally a
   // no-op, so the hasAnyChild gate is belt-and-suspenders.
   let engagementOut = engagement
+  // Terminal stages are settled — except a machine-stamped stale close
+  // (closed_reason 'stale_on_import'), which drift recovery may flip to
+  // Closed Won when the children prove paid-in-full (import ordering can
+  // stamp Lost before the paid job/invoices attach).
   const isTerminalStage = engagement.stage === 'Closed Won' || engagement.stage === 'Closed Lost'
+  const staleLostRecoverable =
+    engagement.stage === 'Closed Lost' && engagement.closed_reason === 'stale_on_import'
   const hasAnyChild =
     (srRes.data?.length ?? 0) > 0 || (quotesRes.data?.length ?? 0) > 0 ||
     (jobsRes.data?.length ?? 0) > 0 || (invoicesRes.data?.length ?? 0) > 0 ||
     (assessRes.data?.length ?? 0) > 0
-  if (hasAnyChild && !isTerminalStage) {
+  if (hasAnyChild && (!isTerminalStage || staleLostRecoverable)) {
     const drift = await recoverEngagementStageDrift(engagement, {
       sr: srRes.data?.[0] ?? null,
       quotes: quotesRes.data ?? [],

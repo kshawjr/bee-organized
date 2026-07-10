@@ -100,6 +100,39 @@ describe('maybeAdvanceEngagementStage — automated Won is a direct silent write
       expect(readFileSync(f, 'utf8')).not.toContain('CloseEngagementConfirm')
     }
   })
+
+  // Stale-Lost override: import ordering can stamp a quote-founded
+  // engagement Closed Lost (stale_on_import) BEFORE its paid job/invoices
+  // attach; Won and Lost share terminal rank, so without the override the
+  // row is trapped as Lost with money on it (the 7/10 "94 paid-but-Lost"
+  // incident). Paid-in-full evidence beats the machine stamp — and ONLY
+  // the machine stamp.
+  it('a stale_on_import Closed Lost flips to Closed Won when the children prove paid-in-full', async () => {
+    h.enqueue('engagements', { id: 'eng-1', stage: 'Closed Lost', closed_reason: 'stale_on_import' })
+    h.enqueue('service_requests', [])
+    h.enqueue('quotes', [{ status: 'sent', sent_at: '2026-01-01T00:00:00Z' }])
+    h.enqueue('jobs', [doneJob])
+    h.enqueue('invoices', [paidInvoice])
+    const res = await maybeAdvanceEngagementStage('eng-1')
+    expect(res).toEqual({ advanced: true, stage: 'Closed Won' })
+    const patch = updatePayloads('engagements')[0]
+    expect(patch.stage).toBe('Closed Won')
+    expect(patch.closed_reason).toBe('won')
+    expect(patch.closed_at).toBe(new Date(paidInvoice.paid_at!).toISOString()) // real paid date, not now
+    expect(patch.closed_note).toBeNull() // the stale note is wrong on a Won row
+  })
+
+  it('a HUMAN Closed Lost never moves — paid children do not override a person\'s decision', async () => {
+    h.enqueue('engagements', { id: 'eng-1', stage: 'Closed Lost', closed_reason: 'lost_other' })
+    h.enqueue('service_requests', [])
+    h.enqueue('quotes', [])
+    h.enqueue('jobs', [doneJob])
+    h.enqueue('invoices', [paidInvoice])
+    const res = await maybeAdvanceEngagementStage('eng-1')
+    expect(res).toEqual({ advanced: false })
+    const patch = updatePayloads('engagements')[0] // money roll-ups still refresh
+    expect(patch.stage).toBeUndefined()
+  })
 })
 
 // ── drift recovery: forward-only, silent, touchpoint only on change ──
@@ -144,6 +177,31 @@ describe('recoverEngagementStageDrift — panel-open self-heal for missed webhoo
     expect(updatePayloads('engagements').length).toBe(0)
   })
 
+  it('stale_on_import Closed Lost with paid-in-full children recovers to Closed Won on panel open', async () => {
+    const staleLost = { ...ENG, stage: 'Closed Lost', closed_reason: 'stale_on_import' }
+    const res = await recoverEngagementStageDrift(staleLost, kids({
+      quotes: [{ status: 'sent', sent_at: '2026-01-01T00:00:00Z' }],
+      jobs: [doneJob],
+      invoices: [paidInvoice],
+    }))
+    expect(res.corrected).toBe(true)
+    expect(res.stage).toBe('Closed Won')
+    const patch = updatePayloads('engagements')[0]
+    expect(patch.closed_reason).toBe('won')
+    expect(patch.closed_at).toBe(new Date(paidInvoice.paid_at!).toISOString())
+    expect(patch.closed_note).toBeNull()
+  })
+
+  it('a HUMAN Closed Lost stays Lost on panel open even with paid children', async () => {
+    const humanLost = { ...ENG, stage: 'Closed Lost', closed_reason: 'lost_other' }
+    const res = await recoverEngagementStageDrift(humanLost, kids({
+      jobs: [doneJob],
+      invoices: [paidInvoice],
+    }))
+    expect(res.corrected).toBe(false)
+    expect(updatePayloads('engagements').length).toBe(0)
+  })
+
   it('a legitimate Won derivation just BECOMES Won — silent direct write, same as the webhook', async () => {
     const res = await recoverEngagementStageDrift({ ...ENG, stage: 'Job in Progress' }, kids({
       jobs: [doneJob],
@@ -173,7 +231,10 @@ describe('engagement GET route — drift recovery wired on panel open', () => {
     const src = readFileSync('app/api/engagements/[id]/route.ts', 'utf8')
     expect(src).toContain('recoverEngagementStageDrift')
     expect(src).toContain('hasAnyChild')
-    expect(src).toMatch(/hasAnyChild && !isTerminalStage/)
+    // Gate: non-terminal, OR the one recoverable terminal — a machine
+    // stale_on_import Lost (paid-in-full evidence may flip it to Won).
+    expect(src).toMatch(/hasAnyChild && \(!isTerminalStage \|\| staleLostRecoverable\)/)
+    expect(src).toMatch(/closed_reason === 'stale_on_import'/)
     expect(src).toContain('engagement: engagementOut')
   })
 })

@@ -500,7 +500,7 @@ function deriveEngagementStageBackfill(children, nowMs = Date.now()) {
 // Port of maybeAdvanceEngagementStage (backfill mode) — forward-only on
 // ENGAGEMENT_STAGE_RANK + money roll-ups.
 async function maybeAdvanceEngagementStageBackfill(engagementId) {
-  const eng = one(await sb(`engagements?select=id,stage&id=eq.${engagementId}`))
+  const eng = one(await sb(`engagements?select=id,stage,closed_reason&id=eq.${engagementId}`))
   if (!eng) return
   const [quotes, jobs, invoices] = await Promise.all([
     sb(`quotes?select=status,sent_at,approved_at,created_at&engagement_id=eq.${engagementId}`),
@@ -516,7 +516,16 @@ async function maybeAdvanceEngagementStageBackfill(engagementId) {
       (s, i) => s + (i.balance_owing != null ? num(i.balance_owing) : num(i.total) - num(i.paid_amount)), 0),
     updated_at: nowIso(),
   }
-  const advance = (ENGAGEMENT_STAGE_RANK[derived.stage] ?? 0) > (ENGAGEMENT_STAGE_RANK[eng.stage] ?? 0)
+  // Forward-only on rank, with the stale-Lost exception (mirror of
+  // lib/engagements.ts): a machine 'stale_on_import' Lost yields to a
+  // derived Closed Won — the quote can stale-close the engagement before
+  // its job + paid invoices attach, and Won/Lost share terminal rank so
+  // a plain rank check would trap it as Lost. Human closes never move.
+  const staleLostOverride =
+    derived.stage === 'Closed Won' &&
+    eng.stage === 'Closed Lost' &&
+    eng.closed_reason === 'stale_on_import'
+  const advance = (ENGAGEMENT_STAGE_RANK[derived.stage] ?? 0) > (ENGAGEMENT_STAGE_RANK[eng.stage] ?? 0) || staleLostOverride
   if (advance) {
     patch.stage = derived.stage
     patch.stage_entered_at = nowIso()
@@ -525,6 +534,7 @@ async function maybeAdvanceEngagementStageBackfill(engagementId) {
     if (derived.closed_reason === 'stale_on_import') {
       patch.closed_note = 'Closed automatically at import: no activity within 30 days (Ruling A for quote-only).'
     }
+    if (staleLostOverride) patch.closed_note = null // the stale note is wrong on a Won row
   }
   await sb(`engagements?id=eq.${engagementId}`, { method: 'PATCH', body: JSON.stringify(patch), headers: { Prefer: 'return=minimal' } })
   return advance ? derived.stage : null
@@ -548,7 +558,13 @@ function simulateClient(client, nowMs) {
         paid_at: (i.invoiceStatus || '').toUpperCase() === 'PAID' ? (i.createdAt || null) : null,
       })),
     }, nowMs)
-    if ((ENGAGEMENT_STAGE_RANK[derived.stage] ?? 0) > (ENGAGEMENT_STAGE_RANK[eng.stage] ?? 0)) {
+    // Same stale-Lost override as the execute path: a machine-stamped
+    // stale close yields to a derived Closed Won (rank tie would trap it).
+    const staleLostOverride =
+      derived.stage === 'Closed Won' &&
+      eng.stage === 'Closed Lost' &&
+      eng.closed_reason === 'stale_on_import'
+    if ((ENGAGEMENT_STAGE_RANK[derived.stage] ?? 0) > (ENGAGEMENT_STAGE_RANK[eng.stage] ?? 0) || staleLostOverride) {
       eng.stage = derived.stage
       eng.closed_reason = derived.closed_reason || eng.closed_reason
     }
@@ -654,6 +670,7 @@ for (const [slug, locReport] of Object.entries(scan.locations)) {
         if (!myQuotes.length && !myJobs.length) continue // vanished since scan
 
         // quotes first — Job.quote links resolve against written quote rows
+        const touchedEngIds = new Set()
         for (const q of myQuotes) {
           const qRes = await upsertQuote(q, c.lead_id, slug)
           stats.quotes_written++
@@ -661,6 +678,7 @@ for (const [slug, locReport] of Object.entries(scan.locations)) {
             childTable: 'quotes', childId: qRes.id, leadId: c.lead_id, locSlug: slug,
           })
           if (engId) {
+            touchedEngIds.add(engId)
             await attachToEngagement('quotes', qRes.id, engId)
             const adv = await maybeAdvanceEngagementStageBackfill(engId)
             if (qRes.created && adv === 'Closed Lost') stats.engagements_closed_lost_stale++
@@ -691,10 +709,20 @@ for (const [slug, locReport] of Object.entries(scan.locations)) {
             quoteDbId: jRes.quote_db_id, title: j.title || null, locSlug: slug,
           })
           if (engId) {
+            touchedEngIds.add(engId)
             await attachToEngagement('jobs', jRes.id, engId)
             for (const iid of invIds) await attachToEngagement('invoices', iid, engId)
             await maybeAdvanceEngagementStageBackfill(engId)
           }
+        }
+
+        // Final re-derive with ALL children attached — the per-node
+        // advances above run on partial bundles (a quote can stale-close
+        // its engagement before the paid job/invoices land), so one last
+        // pass lets the stale-Lost override settle every touched
+        // engagement on its full evidence. Idempotent.
+        for (const engId of touchedEngIds) {
+          await maybeAdvanceEngagementStageBackfill(engId)
         }
 
         // lead stage re-derivation from the full requestless bundle
