@@ -545,25 +545,37 @@ export async function upsertQuote(
     updated_at: new Date().toISOString(),
   }
   if (approvedAt) payload.approved_at = approvedAt
-  const { data: existing } = await supabaseService
+  // Pre-select is a stats hint plus the approved_at-once guard —
+  // correctness lives in the DB-level upsert below. The arbiter is
+  // quotes_location_jobber_quote_id_idx (non-partial since
+  // jobber_subrecord_onconflict_targetable.sql — PostgREST can't
+  // arbitrate partial indexes); concurrent webhook deliveries for the
+  // same quote merge into one row instead of racing check-then-insert.
+  const { data: existing, error: selectError } = await supabaseService
     .from('quotes')
     .select('id, approved_at')
     .eq('jobber_quote_id', jobberQuoteId)
     .eq('location_id', location_id)
     .maybeSingle()
-  if (existing) {
-    // Preserve an earlier approved_at if already set — only stamp once.
-    if (existing.approved_at) delete payload.approved_at
-    await supabaseService.from('quotes').update(payload).eq('id', existing.id)
-    return { id: existing.id, created: false, status: payload.status as string }
-  }
+  if (selectError) throw new Error(`Quote lookup: ${selectError.message}`)
+  // Preserve an earlier approved_at if already set — only stamp once.
+  if (existing?.approved_at) delete payload.approved_at
   const { data, error } = await supabaseService
     .from('quotes')
-    .insert({ ...payload, created_at: quote.createdAt || new Date().toISOString() })
+    .upsert(
+      {
+        ...payload,
+        // Same-value on update: every quote query shape fetches createdAt,
+        // and readers (engagements activity, people-mapper's estimateSent
+        // fallback) key off Jobber's timestamp either way.
+        created_at: quote.createdAt || new Date().toISOString(),
+      },
+      { onConflict: 'location_id,jobber_quote_id' },
+    )
     .select('id')
     .single()
   if (error) throw new Error(`Quote: ${error.message}`)
-  return { id: data.id, created: true, status: payload.status as string }
+  return { id: data.id, created: !existing, status: payload.status as string }
 }
 
 export async function upsertJob(
@@ -604,23 +616,32 @@ export async function upsertJob(
     updated_at: new Date().toISOString(),
   }
   if (quoteDbId) payload.quote_id = quoteDbId
-  const { data: existing } = await supabaseService
+  // Pre-select is a stats hint only — correctness lives in the DB-level
+  // upsert below. The arbiter is jobs_location_jobber_job_id_idx
+  // (non-partial since jobber_subrecord_onconflict_targetable.sql);
+  // concurrent webhook deliveries for the same job merge into one row
+  // instead of racing check-then-insert.
+  const { data: existing, error: selectError } = await supabaseService
     .from('jobs')
     .select('id')
     .eq('jobber_job_id', jobberJobId)
     .eq('location_id', location_id)
     .maybeSingle()
-  if (existing) {
-    await supabaseService.from('jobs').update(payload).eq('id', existing.id)
-    return { id: existing.id, created: false, quote_db_id: quoteDbId }
-  }
+  if (selectError) throw new Error(`Job lookup: ${selectError.message}`)
   const { data, error } = await supabaseService
     .from('jobs')
-    .insert({ ...payload, created_at: job.createdAt || new Date().toISOString() })
+    .upsert(
+      {
+        ...payload,
+        // Same-value on update: every job query shape fetches createdAt.
+        created_at: job.createdAt || new Date().toISOString(),
+      },
+      { onConflict: 'location_id,jobber_job_id' },
+    )
     .select('id')
     .single()
   if (error) throw new Error(`Job: ${error.message}`)
-  return { id: data.id, created: true, quote_db_id: quoteDbId }
+  return { id: data.id, created: !existing, quote_db_id: quoteDbId }
 }
 
 export async function upsertInvoice(
@@ -658,23 +679,32 @@ export async function upsertInvoice(
     jobber_synced_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   }
-  const { data: existing } = await supabaseService
+  // Pre-select is a stats hint only — correctness lives in the DB-level
+  // upsert below. The arbiter is invoices_location_jobber_invoice_id_idx
+  // (non-partial since jobber_subrecord_onconflict_targetable.sql);
+  // concurrent webhook deliveries for the same invoice merge into one
+  // row instead of racing check-then-insert.
+  const { data: existing, error: selectError } = await supabaseService
     .from('invoices')
     .select('id')
     .eq('jobber_invoice_id', jobberInvoiceId)
     .eq('location_id', location_id)
     .maybeSingle()
-  if (existing) {
-    await supabaseService.from('invoices').update(payload).eq('id', existing.id)
-    return { id: existing.id, created: false, status: payload.status as string }
-  }
+  if (selectError) throw new Error(`Invoice lookup: ${selectError.message}`)
   const { data, error } = await supabaseService
     .from('invoices')
-    .insert({ ...payload, created_at: invoice.createdAt || new Date().toISOString() })
+    .upsert(
+      {
+        ...payload,
+        // Same-value on update: every invoice query shape fetches createdAt.
+        created_at: invoice.createdAt || new Date().toISOString(),
+      },
+      { onConflict: 'location_id,jobber_invoice_id' },
+    )
     .select('id')
     .single()
   if (error) throw new Error(`Invoice: ${error.message}`)
-  return { id: data.id, created: true, status: payload.status as string }
+  return { id: data.id, created: !existing, status: payload.status as string }
 }
 
 // ── stage promotion helper (webhook handlers) ─────────────────────

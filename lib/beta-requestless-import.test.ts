@@ -77,8 +77,11 @@ import { handleQuoteCreate } from '@/lib/jobber-webhook-handlers'
 
 const callsFor = (table: string) => h.state.calls.filter(c => c.table === table)
 const opsOf = (call: { ops: [string, any[]][] }, m: string) => call.ops.filter(o => o[0] === m)
+// quotes/jobs/invoices write via idempotent .upsert since the onConflict
+// migration (beta-subrecord-upsert.test.ts pins that mechanism); this
+// suite pins WHAT lands in the row, so collect both write shapes.
 const insertPayloads = (table: string) =>
-  callsFor(table).flatMap(c => opsOf(c, 'insert').map(o => o[1][0]))
+  callsFor(table).flatMap(c => [...opsOf(c, 'insert'), ...opsOf(c, 'upsert')].map(o => o[1][0]))
 
 beforeEach(() => {
   h.reset()
