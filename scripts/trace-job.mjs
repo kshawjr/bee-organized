@@ -81,13 +81,18 @@ console.log(`  event stamps: request=${lead.request_created_at} quote_sent=${lea
 const { data: engs } = await sb.from('engagements').select('*').eq('client_id', lead.id).order('created_at')
 const RANK = { 'Request': 0, 'Estimate': 1, 'Job in Progress': 2, 'Final Processing': 3, 'Closed Won': 4, 'Closed Lost': 4 }
 const jobDone = j => !!j.completed_at || (j.status || '').toLowerCase().includes('complet')
+// Sync with lib/engagements.ts deriveEngagementStage (live mode) — unbooked
+// jobs (unscheduled / action_required / on_hold) classify with the quotes.
+const jobUnbooked = j => !j.completed_at && ['unscheduled', 'action_required', 'on_hold'].includes((j.status || '').toLowerCase())
 function derive({ quotes, jobs, invoices }) {
-  if (jobs.length > 0) {
-    if (jobs.some(j => !jobDone(j))) return 'Job in Progress'
+  const bookedJobs = jobs.filter(j => !jobUnbooked(j))
+  const unbookedJobs = jobs.filter(jobUnbooked)
+  if (bookedJobs.length > 0) {
+    if (bookedJobs.some(j => !jobDone(j))) return 'Job in Progress'
     if (invoices.length > 0 && invoices.every(i => i.status === 'paid')) return 'Closed Won'
     return 'Final Processing'
   }
-  if (quotes.length > 0) return 'Estimate'
+  if (quotes.length > 0 || unbookedJobs.length > 0) return 'Estimate'
   return 'Request'
 }
 

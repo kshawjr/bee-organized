@@ -206,8 +206,8 @@ describe('script ports carry the same unbooked semantics', () => {
     expect(s).toContain(UNBOOKED_RAW)
     expect(s).toContain(UNBOOKED_DB)
   })
-  it('backfill-engagements.mjs, repair-stale-won.mjs, repair-unscheduled-jobs.mjs, scan-unscheduled-unknown.mjs: DB-shape port', () => {
-    for (const f of ['scripts/backfill-engagements.mjs', 'scripts/repair-stale-won.mjs', 'scripts/repair-unscheduled-jobs.mjs', 'scripts/scan-unscheduled-unknown.mjs']) {
+  it('backfill-engagements.mjs, repair-stale-won.mjs, repair-unscheduled-jobs.mjs, scan-unscheduled-unknown.mjs, trace-job.mjs, repair-unbooked-jobs.mjs, verify-unbooked-repair.mjs: DB-shape port', () => {
+    for (const f of ['scripts/backfill-engagements.mjs', 'scripts/repair-stale-won.mjs', 'scripts/repair-unscheduled-jobs.mjs', 'scripts/scan-unscheduled-unknown.mjs', 'scripts/trace-job.mjs', 'scripts/repair-unbooked-jobs.mjs', 'scripts/verify-unbooked-repair.mjs']) {
       expect(readFileSync(f, 'utf8'), f).toContain(UNBOOKED_DB)
     }
   })

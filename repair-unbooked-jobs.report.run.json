@@ -1,0 +1,614 @@
+{
+  "ranAt": "2026-07-10T17:41:27.388Z",
+  "mode": "execute",
+  "countersBefore": {
+    "scheduled_stage_emails": 8,
+    "lead_drip_progress": 3,
+    "welcome_scheduled": 2,
+    "welcome_sent": 1
+  },
+  "jobFlips": [
+    {
+      "job_id": "ff3594fc-60e3-4473-a0dd-460ec90864f4",
+      "jobber_job_id": "136884331",
+      "lead_id": "418d8840-b1cc-4bcd-aace-caa68f801112",
+      "engagement_id": "9c7ebac5-e906-4c34-b447-279da05ea022",
+      "loc": "loc_palmbeach",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "8600c0b5-dc34-4382-91ce-0f67c21abf7c",
+      "jobber_job_id": "102091675",
+      "lead_id": "60e6a4c7-7ac1-41ed-9453-2e0e0f0975e4",
+      "engagement_id": "741622f0-8f16-4a1e-88be-8796fc19c172",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "0f46f4db-73b3-40ee-a1e5-2eb77421abfc",
+      "jobber_job_id": "99402439",
+      "lead_id": "19534432-4f33-4dd2-b710-0140a7d05690",
+      "engagement_id": "491feb7f-ac8c-4031-8d56-8eb31e7cc68e",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "3b452d45-36d8-4db4-8f6e-14d82943637c",
+      "jobber_job_id": "101355494",
+      "lead_id": "19f17720-2ae5-4355-af16-366614779c54",
+      "engagement_id": "be62711f-accb-4692-8639-d0fd3f2ee2cf",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "b89fc0f2-e0ac-4dec-b3a6-b24525c8b01f",
+      "jobber_job_id": "104465393",
+      "lead_id": "19f17720-2ae5-4355-af16-366614779c54",
+      "engagement_id": "be62711f-accb-4692-8639-d0fd3f2ee2cf",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "2169b146-039b-4929-92cc-87f42adb5cc0",
+      "jobber_job_id": "103551006",
+      "lead_id": "19f17720-2ae5-4355-af16-366614779c54",
+      "engagement_id": "be62711f-accb-4692-8639-d0fd3f2ee2cf",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "0305dbe4-0722-414d-963b-a34f08a83ab5",
+      "jobber_job_id": "124293894",
+      "lead_id": "19f17720-2ae5-4355-af16-366614779c54",
+      "engagement_id": "be62711f-accb-4692-8639-d0fd3f2ee2cf",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "8685a1b0-aed3-41eb-893d-8f8a21321c18",
+      "jobber_job_id": "101552425",
+      "lead_id": "19f17720-2ae5-4355-af16-366614779c54",
+      "engagement_id": "be62711f-accb-4692-8639-d0fd3f2ee2cf",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "fdf9e51d-705d-4926-9de6-35c30389d9d7",
+      "jobber_job_id": "99292192",
+      "lead_id": "d27d38e6-5cba-4142-a8e3-7ce0584198fb",
+      "engagement_id": "26850b9c-3911-4b7c-ba2b-d486b297dbbb",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "c00ca49c-b950-4f30-8f34-4dc46ff2bc8e",
+      "jobber_job_id": "97907348",
+      "lead_id": "e1db6172-c649-49a1-a827-2ca0a5363c41",
+      "engagement_id": "f514ace9-3d9c-4958-ab34-37fc97d9d60c",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "acd8244f-68d2-4374-b74f-981723d7fd67",
+      "jobber_job_id": "99763531",
+      "lead_id": "d27d38e6-5cba-4142-a8e3-7ce0584198fb",
+      "engagement_id": "26850b9c-3911-4b7c-ba2b-d486b297dbbb",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "f633c688-8d9b-4445-b8a4-31f2cb9b4eaa",
+      "jobber_job_id": "95893705",
+      "lead_id": "8c01b412-b7e0-43bc-8c16-1085171fa459",
+      "engagement_id": "e4933ea7-98d8-48a0-b33a-530f4851f637",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "4f0acadd-deeb-4fed-965d-8503cea3386f",
+      "jobber_job_id": "147434989",
+      "lead_id": "995b4a0b-ebb0-423c-b0e4-a8492be0ffe9",
+      "engagement_id": "a4185d9f-f866-40d6-9e55-6253d523f54c",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "0520b469-beda-4bf7-99c8-aec020ed6f4c",
+      "jobber_job_id": "146923040",
+      "lead_id": "ad7c3f46-657b-4461-9061-5aa116df53d1",
+      "engagement_id": "4dd7e79e-bc2b-45dd-bf76-0a50714f2f9c",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "503d743a-69a4-4264-847b-edf7f69b9ab1",
+      "jobber_job_id": "134157161",
+      "lead_id": "e4982e5a-f9d0-4891-b6c9-8e62ac5869ab",
+      "engagement_id": "44a79127-ed38-402e-ab2b-4dc29cc69e11",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "2cfdc72b-a62b-410e-89e0-de44a12126c7",
+      "jobber_job_id": "138821357",
+      "lead_id": "7e2bc7cd-c585-48cb-9374-730e0a7cd85e",
+      "engagement_id": "9153dad2-8c96-4d76-a69f-5bfff148a18c",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "83cf7e02-d4f0-465b-b0ec-e81e77cd0b22",
+      "jobber_job_id": "134070766",
+      "lead_id": "8b0bef7b-5f3e-4c6c-ac99-e3291fa953bb",
+      "engagement_id": "d9469973-a583-4ee5-9630-bbd00981f6e3",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "5e22c754-3431-4afa-b3c0-f02659bbe535",
+      "jobber_job_id": "99095826",
+      "lead_id": "d27d38e6-5cba-4142-a8e3-7ce0584198fb",
+      "engagement_id": "26850b9c-3911-4b7c-ba2b-d486b297dbbb",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "773c6749-5ed9-469a-a38a-df8e61178bac",
+      "jobber_job_id": "143705960",
+      "lead_id": "505b29ca-8569-456b-b6dd-7e09b4e8842e",
+      "engagement_id": "3a5c2ff9-8d0e-4059-bae7-fb8ed3e11639",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "052d1cc2-867e-40b3-8ff2-d6acd7f049f4",
+      "jobber_job_id": "138512222",
+      "lead_id": "6479a511-a6da-44bb-ba02-4aec75b6dd99",
+      "engagement_id": "7a96cfc0-83d0-4f3e-b470-7d8928229add",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "45de4eea-6a37-4ed4-bb9f-035fbeafbfec",
+      "jobber_job_id": "138517278",
+      "lead_id": "b62a601b-cfb6-480b-9e16-7a3824a0698d",
+      "engagement_id": "66db44e0-9b69-4615-821a-b54531909323",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "34d7b349-a0bd-4d04-8b8c-b41dd4f08803",
+      "jobber_job_id": "137334813",
+      "lead_id": "8b0bef7b-5f3e-4c6c-ac99-e3291fa953bb",
+      "engagement_id": "d9469973-a583-4ee5-9630-bbd00981f6e3",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "b76b9352-e353-4f5b-a5c0-2a30b0e76b0f",
+      "jobber_job_id": "131710962",
+      "lead_id": "aa43b3d1-0463-48d1-9332-f00b8a13a200",
+      "engagement_id": "111174e6-c32e-434f-9a6c-f828656245f1",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "4ebabbfa-c9cd-4883-903b-74f4f664b329",
+      "jobber_job_id": "134070900",
+      "lead_id": "ddee7836-9572-4957-bd23-2c72c812deb0",
+      "engagement_id": "a8df4054-cb06-48be-8656-e22994eae504",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "73a13535-7529-42ea-981d-3b754a9db1fa",
+      "jobber_job_id": "137501189",
+      "lead_id": "8b0bef7b-5f3e-4c6c-ac99-e3291fa953bb",
+      "engagement_id": "d9469973-a583-4ee5-9630-bbd00981f6e3",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "a5049b5b-ed18-4794-bd3c-4ecc3264cf36",
+      "jobber_job_id": "131710434",
+      "lead_id": "ddee7836-9572-4957-bd23-2c72c812deb0",
+      "engagement_id": "a8df4054-cb06-48be-8656-e22994eae504",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "81c4b1a5-2932-4f21-9ced-906f1b1d3d6e",
+      "jobber_job_id": "123247487",
+      "lead_id": "7df76cbb-36a0-400c-ba5e-6af6adb30973",
+      "engagement_id": "dfa1f7d3-ad9f-4814-8bae-52b0c96c63bc",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "347481d1-3190-4e5c-9cea-93719413b133",
+      "jobber_job_id": "119672510",
+      "lead_id": "0c423e10-1d7c-4702-90d3-d21addf22af4",
+      "engagement_id": "df3dee3f-a8f0-4242-adad-4f96330defdc",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "8726e9cf-1713-4bc8-a055-ae7f6f9a7c83",
+      "jobber_job_id": "114497846",
+      "lead_id": "d976c026-f03d-4f13-8e8f-ac50bef9d511",
+      "engagement_id": "78a138c1-f164-4eb2-bf04-3b9836e231eb",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "a36af755-852c-41c9-a313-60864b590bef",
+      "jobber_job_id": "118843589",
+      "lead_id": "799aeae7-7a61-460b-9a39-fb0bfaf6bc6f",
+      "engagement_id": "a35f793b-8a67-43b6-9e69-5cb2d5dcaece",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "276dded7-3692-461d-a4fd-405de3cda509",
+      "jobber_job_id": "109015197",
+      "lead_id": "ab1bbc1f-3164-438c-9077-f061207ef83c",
+      "engagement_id": "8c834e03-d93f-4c0d-bb3b-5c200bbc3d9c",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "fd968058-cbe8-444b-8b85-dc718650cc81",
+      "jobber_job_id": "119133010",
+      "lead_id": "58077431-8b1f-46dc-b6a7-d8f59c616f20",
+      "engagement_id": "9751648e-cd9d-4a3e-9fab-212aa41ca7be",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "5b63d053-b6e2-493b-b53e-16a9d36e6640",
+      "jobber_job_id": "114569805",
+      "lead_id": "af9ba5d5-889e-4fcc-8816-a3c12e1d1dff",
+      "engagement_id": "16b353bd-584d-443d-adb1-5900bd79d6a0",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "41333e42-8a03-47ad-a15d-8df950aa4d78",
+      "jobber_job_id": "111270410",
+      "lead_id": "db539484-b7b3-4baa-9538-1d51510b5028",
+      "engagement_id": "6de5a215-f37b-4624-a88d-12acedc5d35a",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "35865831-fdda-445a-b84c-4ac6e04b9e77",
+      "jobber_job_id": "107262341",
+      "lead_id": "58077431-8b1f-46dc-b6a7-d8f59c616f20",
+      "engagement_id": "9751648e-cd9d-4a3e-9fab-212aa41ca7be",
+      "loc": "loc_temecula",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "ccf9ed1d-6eb2-422c-8d6c-340e5691cce2",
+      "jobber_job_id": "130703785",
+      "lead_id": "91a81836-64f1-42e2-bede-aa68371a4a06",
+      "engagement_id": "1d4bd1d8-0a8c-4403-b9ad-3b5e9e2596e7",
+      "loc": "loc_nwarkansas",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "d9c6f7f2-bb1c-4d91-a861-f3282bbee154",
+      "jobber_job_id": "150025706",
+      "lead_id": "7f92eeb4-e4eb-4123-8f16-0ca0c4d9b7dc",
+      "engagement_id": "0204a295-6aa9-4884-acee-b6fd8a89ea61",
+      "loc": "loc_nwarkansas",
+      "raw": "action_required",
+      "to": "action_required"
+    },
+    {
+      "job_id": "a776b0ae-8e49-40f9-961d-45b2e3c8ede8",
+      "jobber_job_id": "140492122",
+      "lead_id": "0b638a3a-90b7-41b6-bb80-085f7090bd92",
+      "engagement_id": "b0f4386f-819f-4ef2-ab02-adf498476e0e",
+      "loc": "loc_portland",
+      "raw": "upcoming",
+      "to": "upcoming"
+    }
+  ],
+  "untouched": [],
+  "engagementMoves": [
+    {
+      "engagement_id": "9c7ebac5-e906-4c34-b447-279da05ea022",
+      "title": "(L)",
+      "client_id": "418d8840-b1cc-4bcd-aace-caa68f801112",
+      "from": "Job in Progress",
+      "to": "Closed Lost",
+      "closed_reason": "stale_on_import"
+    },
+    {
+      "engagement_id": "741622f0-8f16-4a1e-88be-8796fc19c172",
+      "title": "Engagement – Jul 2026",
+      "client_id": "60e6a4c7-7ac1-41ed-9453-2e0e0f0975e4",
+      "from": "Job in Progress",
+      "to": "Closed Lost",
+      "closed_reason": "stale_on_import"
+    },
+    {
+      "engagement_id": "491feb7f-ac8c-4031-8d56-8eb31e7cc68e",
+      "title": "decluttering and packing",
+      "client_id": "19534432-4f33-4dd2-b710-0140a7d05690",
+      "from": "Job in Progress",
+      "to": "Closed Lost",
+      "closed_reason": "stale_on_import"
+    },
+    {
+      "engagement_id": "26850b9c-3911-4b7c-ba2b-d486b297dbbb",
+      "title": "Engagement – Jul 2026",
+      "client_id": "d27d38e6-5cba-4142-a8e3-7ce0584198fb",
+      "from": "Job in Progress",
+      "to": "Closed Won",
+      "closed_reason": "won"
+    },
+    {
+      "engagement_id": "f514ace9-3d9c-4958-ab34-37fc97d9d60c",
+      "title": "Engagement – Jul 2026",
+      "client_id": "e1db6172-c649-49a1-a827-2ca0a5363c41",
+      "from": "Job in Progress",
+      "to": "Closed Lost",
+      "closed_reason": "stale_on_import"
+    },
+    {
+      "engagement_id": "4dd7e79e-bc2b-45dd-bf76-0a50714f2f9c",
+      "title": "Engagement – Jul 2026",
+      "client_id": "ad7c3f46-657b-4461-9061-5aa116df53d1",
+      "from": "Job in Progress",
+      "to": "Closed Won",
+      "closed_reason": "won"
+    },
+    {
+      "engagement_id": "44a79127-ed38-402e-ab2b-4dc29cc69e11",
+      "title": "Engagement – Jul 2026",
+      "client_id": "e4982e5a-f9d0-4891-b6c9-8e62ac5869ab",
+      "from": "Job in Progress",
+      "to": "Closed Lost",
+      "closed_reason": "stale_on_import"
+    },
+    {
+      "engagement_id": "9153dad2-8c96-4d76-a69f-5bfff148a18c",
+      "title": "Engagement – Jul 2026",
+      "client_id": "7e2bc7cd-c585-48cb-9374-730e0a7cd85e",
+      "from": "Job in Progress",
+      "to": "Closed Lost",
+      "closed_reason": "stale_on_import"
+    },
+    {
+      "engagement_id": "7a96cfc0-83d0-4f3e-b470-7d8928229add",
+      "title": "Engagement – Jul 2026",
+      "client_id": "6479a511-a6da-44bb-ba02-4aec75b6dd99",
+      "from": "Job in Progress",
+      "to": "Closed Won",
+      "closed_reason": "won"
+    },
+    {
+      "engagement_id": "a35f793b-8a67-43b6-9e69-5cb2d5dcaece",
+      "title": "Engagement – Jul 2026",
+      "client_id": "799aeae7-7a61-460b-9a39-fb0bfaf6bc6f",
+      "from": "Job in Progress",
+      "to": "Closed Lost",
+      "closed_reason": "stale_on_import"
+    },
+    {
+      "engagement_id": "8c834e03-d93f-4c0d-bb3b-5c200bbc3d9c",
+      "title": "Engagement – Jul 2026",
+      "client_id": "ab1bbc1f-3164-438c-9077-f061207ef83c",
+      "from": "Job in Progress",
+      "to": "Closed Lost",
+      "closed_reason": "stale_on_import"
+    },
+    {
+      "engagement_id": "9751648e-cd9d-4a3e-9fab-212aa41ca7be",
+      "title": "Engagement – Jul 2026",
+      "client_id": "58077431-8b1f-46dc-b6a7-d8f59c616f20",
+      "from": "Final Processing",
+      "to": "Job in Progress",
+      "closed_reason": null
+    },
+    {
+      "engagement_id": "16b353bd-584d-443d-adb1-5900bd79d6a0",
+      "title": "Engagement – Jul 2026",
+      "client_id": "af9ba5d5-889e-4fcc-8816-a3c12e1d1dff",
+      "from": "Job in Progress",
+      "to": "Final Processing",
+      "closed_reason": null
+    },
+    {
+      "engagement_id": "1d4bd1d8-0a8c-4403-b9ad-3b5e9e2596e7",
+      "title": "PRETEND JOB",
+      "client_id": "91a81836-64f1-42e2-bede-aa68371a4a06",
+      "from": "Job in Progress",
+      "to": "Closed Lost",
+      "closed_reason": "stale_on_import"
+    },
+    {
+      "engagement_id": "0204a295-6aa9-4884-acee-b6fd8a89ea61",
+      "title": "Pantry Organization",
+      "client_id": "7f92eeb4-e4eb-4123-8f16-0ca0c4d9b7dc",
+      "from": "Job in Progress",
+      "to": "Estimate",
+      "closed_reason": null
+    }
+  ],
+  "engagementFlagged": [],
+  "stageMoves": [
+    {
+      "lead_id": "418d8840-b1cc-4bcd-aace-caa68f801112",
+      "name": "Amber Grow",
+      "loc": "loc_palmbeach",
+      "from": "Job in Progress",
+      "to": "Nurturing"
+    },
+    {
+      "lead_id": "60e6a4c7-7ac1-41ed-9453-2e0e0f0975e4",
+      "name": "Megan McKinney-Rickey",
+      "loc": "loc_temecula",
+      "from": "Job in Progress",
+      "to": "Closed Won"
+    },
+    {
+      "lead_id": "19534432-4f33-4dd2-b710-0140a7d05690",
+      "name": "Shannon  Williams",
+      "loc": "loc_temecula",
+      "from": "Job in Progress",
+      "to": "Nurturing"
+    },
+    {
+      "lead_id": "d27d38e6-5cba-4142-a8e3-7ce0584198fb",
+      "name": "Brande Roderick",
+      "loc": "loc_temecula",
+      "from": "Job in Progress",
+      "to": "Closed Won"
+    },
+    {
+      "lead_id": "e1db6172-c649-49a1-a827-2ca0a5363c41",
+      "name": "Wendy Blanch",
+      "loc": "loc_temecula",
+      "from": "Job in Progress",
+      "to": "Closed Won"
+    },
+    {
+      "lead_id": "ad7c3f46-657b-4461-9061-5aa116df53d1",
+      "name": "Jeff Messick",
+      "loc": "loc_temecula",
+      "from": "Job in Progress",
+      "to": "Closed Won"
+    },
+    {
+      "lead_id": "e4982e5a-f9d0-4891-b6c9-8e62ac5869ab",
+      "name": "George Simmons",
+      "loc": "loc_temecula",
+      "from": "Job in Progress",
+      "to": "Closed Won"
+    },
+    {
+      "lead_id": "7e2bc7cd-c585-48cb-9374-730e0a7cd85e",
+      "name": "Shelia & Bill Guy",
+      "loc": "loc_temecula",
+      "from": "Job in Progress",
+      "to": "Closed Won"
+    },
+    {
+      "lead_id": "6479a511-a6da-44bb-ba02-4aec75b6dd99",
+      "name": "Lyn Stanley",
+      "loc": "loc_temecula",
+      "from": "Job in Progress",
+      "to": "Closed Won"
+    },
+    {
+      "lead_id": "b62a601b-cfb6-480b-9e16-7a3824a0698d",
+      "name": "Adina Stern",
+      "loc": "loc_temecula",
+      "from": "Job in Progress",
+      "to": "Closed Won"
+    },
+    {
+      "lead_id": "7df76cbb-36a0-400c-ba5e-6af6adb30973",
+      "name": "Margo Smith",
+      "loc": "loc_temecula",
+      "from": "Job in Progress",
+      "to": "Closed Won"
+    },
+    {
+      "lead_id": "0c423e10-1d7c-4702-90d3-d21addf22af4",
+      "name": "Jamaal  Turner",
+      "loc": "loc_temecula",
+      "from": "Job in Progress",
+      "to": "Closed Won"
+    },
+    {
+      "lead_id": "d976c026-f03d-4f13-8e8f-ac50bef9d511",
+      "name": "Kennise  Clark",
+      "loc": "loc_temecula",
+      "from": "Job in Progress",
+      "to": "Closed Won"
+    },
+    {
+      "lead_id": "799aeae7-7a61-460b-9a39-fb0bfaf6bc6f",
+      "name": "Sharon  Dimeglio",
+      "loc": "loc_temecula",
+      "from": "Job in Progress",
+      "to": "Nurturing"
+    },
+    {
+      "lead_id": "ab1bbc1f-3164-438c-9077-f061207ef83c",
+      "name": "Sue  Tiritilli",
+      "loc": "loc_temecula",
+      "from": "Job in Progress",
+      "to": "Nurturing"
+    },
+    {
+      "lead_id": "af9ba5d5-889e-4fcc-8816-a3c12e1d1dff",
+      "name": "Ryan Cullinane",
+      "loc": "loc_temecula",
+      "from": "Job in Progress",
+      "to": "Closed Won"
+    },
+    {
+      "lead_id": "91a81836-64f1-42e2-bede-aa68371a4a06",
+      "name": "Tara Yarbrough",
+      "loc": "loc_nwarkansas",
+      "from": "Job in Progress",
+      "to": "Nurturing"
+    },
+    {
+      "lead_id": "7f92eeb4-e4eb-4123-8f16-0ca0c4d9b7dc",
+      "name": "Lauren Hinrichs",
+      "loc": "loc_nwarkansas",
+      "from": "Job in Progress",
+      "to": "Estimate Sent"
+    }
+  ],
+  "leadsFlagged": [],
+  "errors": [],
+  "countersAfter": {
+    "scheduled_stage_emails": 8,
+    "lead_drip_progress": 3,
+    "welcome_scheduled": 2,
+    "welcome_sent": 1
+  }
+}
