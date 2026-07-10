@@ -1,9 +1,15 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+// Lazy-init: modules that import a writeSyncLog caller (e.g.
+// jobber-import.ts) must stay loadable without Supabase env — the client
+// is only constructed on first write, inside writeSyncLog's try/catch,
+// preserving its never-throw contract.
+let client: SupabaseClient | null = null
+const supabaseClient = () =>
+  (client ??= createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  ))
 
 export type SyncLogLandedStatus = 'landed' | 'not_landed' | 'na'
 
@@ -38,7 +44,7 @@ export async function writeSyncLog({
     // supabase-js does not throw on insert failure — it resolves with
     // { error }. Check it, or a rejected row (constraint, missing
     // column pre-migration) vanishes without a trace.
-    const { error } = await supabase.from('sync_log').insert({
+    const { error } = await supabaseClient().from('sync_log').insert({
       location_id,
       direction,
       entity_type,

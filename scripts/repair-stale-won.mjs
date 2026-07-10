@@ -79,9 +79,10 @@ async function sbAll(pathBase) {
 const ts = v => (v ? new Date(v).getTime() || 0 : 0)
 const nowIso = () => new Date().toISOString()
 const jobDone = j => !!j.completed_at || (j.status || '').toLowerCase().includes('complet')
-// Unbooked (unscheduled) jobs are not work evidence — they must neither
-// satisfy nor block the won condition. Sync with lib/engagements.ts.
-const jobUnbooked = j => !j.completed_at && (j.status || '').toLowerCase() === 'unscheduled'
+// Unbooked jobs (unscheduled / action_required / on_hold) are not work
+// evidence — they must neither satisfy nor block the won condition.
+// Sync with lib/engagements.ts.
+const jobUnbooked = j => !j.completed_at && ['unscheduled', 'action_required', 'on_hold'].includes((j.status || '').toLowerCase())
 const THIRTY_D = 30 * 24 * 60 * 60 * 1000
 
 console.log(`repair-stale-won — ${EXECUTE ? '⚠ EXECUTE (writes to prod)' : 'DRY RUN (no writes)'}\n`)

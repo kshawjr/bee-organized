@@ -141,9 +141,10 @@ const invoicesByJob = groupBy(invoices, 'job_id')
 // ── stage derivation (447be62 re-expressed per engagement) ──────────────────
 
 const jobDone = j => !!j.completed_at || (j.status || '').toLowerCase().includes('complet')
-// Unbooked (unscheduled) jobs are not current work and classify with the
-// quotes — sync with lib/engagements.ts deriveEngagementStage.
-const jobUnbooked = j => !j.completed_at && (j.status || '').toLowerCase() === 'unscheduled'
+// Unbooked jobs (unscheduled / action_required / on_hold) are not
+// current work and classify with the quotes — sync with
+// lib/engagements.ts deriveEngagementStage.
+const jobUnbooked = j => !j.completed_at && ['unscheduled', 'action_required', 'on_hold'].includes((j.status || '').toLowerCase())
 const invoicePaid = i => i.status === 'paid'
 const quoteActivity = q => Math.max(ts(q.approved_at), ts(q.sent_at), ts(q.created_at))
 const srActivity = s => ts(s.requested_at) || ts(s.created_at)

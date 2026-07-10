@@ -273,9 +273,10 @@ function determineLeadStage(bundle, nowMs = Date.now()) {
   const hasActivity = requests.length > 0 || quotes.length > 0 || jobs.length > 0 || invoices.length > 0
   if (!email && !phone && !hasActivity) return { stage: 'New', isJunk: true }
   const jobDone = j => !!j.completedAt || (j.jobStatus || '').toLowerCase().includes('complet')
-  // UNSCHEDULED jobs are unbooked work — never 'Job in Progress'; they
-  // ride the quote lane (sync with lib/jobber-import.ts determineLeadStage).
-  const jobUnbooked = j => !jobDone(j) && (j.jobStatus || '').toLowerCase() === 'unscheduled'
+  // Unbooked jobs (unscheduled / action_required / on_hold) — never
+  // 'Job in Progress'; they ride the quote lane (sync with
+  // lib/jobber-import.ts determineLeadStage).
+  const jobUnbooked = j => !jobDone(j) && ['unscheduled', 'action_required', 'on_hold'].includes((j.jobStatus || '').toLowerCase())
   if (jobs.some(j => !jobDone(j) && !jobUnbooked(j))) return { stage: 'Job in Progress', isJunk: false }
   const isPaid = i => (i.invoiceStatus || '').toUpperCase() === 'PAID'
   const lastRequest = Math.max(0, ...requests.map(r => ts(r.createdAt)))
@@ -306,6 +307,8 @@ const JOB_STATUS = {
   REQUIRES_INVOICING: 'completed', LATE: 'late',
   TODAY: 'today', UPCOMING: 'upcoming', ARCHIVED: 'archived',
   UNSCHEDULED: 'unscheduled',
+  ACTION_REQUIRED: 'action_required', ON_HOLD: 'on_hold',
+  EXPIRING_WITHIN_30_DAYS: 'in_progress',
 }
 
 // Port of upsertQuote (service_request_id null for requestless).
@@ -521,7 +524,7 @@ function deriveEngagementStageBackfill(children, nowMs = Date.now()) {
   const jobDone = j => !!j.completed_at || (j.status || '').toLowerCase().includes('complet')
   // Unbooked (unscheduled) jobs classify with the quotes — sync with
   // lib/engagements.ts deriveEngagementStage.
-  const jobUnbooked = j => !j.completed_at && (j.status || '').toLowerCase() === 'unscheduled'
+  const jobUnbooked = j => !j.completed_at && ['unscheduled', 'action_required', 'on_hold'].includes((j.status || '').toLowerCase())
   const invoicePaid = i => i.status === 'paid'
   const quoteActivity = q => Math.max(ts(q.approved_at), ts(q.sent_at), ts(q.created_at))
   const bookedJobs = jobs.filter(j => !jobUnbooked(j))

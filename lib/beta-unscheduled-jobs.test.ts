@@ -5,10 +5,13 @@
 // Jobber's UNSCHEDULED status was unmapped: jobs landed as status
 // 'unknown' and — because every non-completed job read as current work —
 // pinned their lead at 'Job in Progress' forever (the dormant-2025-job
-// bug). The documented decision (see JOB_STATUS / isUnscheduledJobStatus
+// bug). The documented decision (see JOB_STATUS / isUnbookedJobStatus
 // in lib/jobber-import.ts): an unscheduled job has no visit booked, so it
 // is NOT in progress — it classifies like a quote of the same age (fresh
-// → live deal, aged → Nurturing / backfill stale-close). These tests pin:
+// → live deal, aged → Nurturing / backfill stale-close). The predicate
+// was later broadened to the whole unbooked family (action_required /
+// on_hold — see beta-unbooked-jobs.test.ts); these tests keep pinning
+// the unscheduled lane through the broadened predicate:
 //   1) the map entry + status predicates
 //   2) determineLeadStage (lead lane: quote-lane treatment)
 //   3) deriveEngagementStage (engagement lane: quotes branch)
@@ -25,7 +28,7 @@ vi.mock('@/lib/sync-log', () => ({ writeSyncLog: vi.fn(async () => {}) }))
 import {
   JOB_STATUS,
   BOOKED_JOB_STATUSES,
-  isUnscheduledJobStatus,
+  isUnbookedJobStatus,
   determineLeadStage,
 } from '@/lib/jobber-import'
 import { deriveEngagementStage } from '@/lib/engagements'
@@ -37,17 +40,17 @@ describe('JOB_STATUS map covers UNSCHEDULED', () => {
   it("maps UNSCHEDULED → 'unscheduled' (no longer falls to 'unknown')", () => {
     expect(JOB_STATUS['UNSCHEDULED']).toBe('unscheduled')
   })
-  it('predicate matches raw Jobber and mapped DB spellings, nothing else', () => {
-    expect(isUnscheduledJobStatus('UNSCHEDULED')).toBe(true)
-    expect(isUnscheduledJobStatus('unscheduled')).toBe(true)
-    expect(isUnscheduledJobStatus('Unscheduled')).toBe(true)
-    expect(isUnscheduledJobStatus('ACTIVE')).toBe(false)
-    expect(isUnscheduledJobStatus('unknown')).toBe(false)
-    expect(isUnscheduledJobStatus(null)).toBe(false)
-    expect(isUnscheduledJobStatus(undefined)).toBe(false)
+  it('predicate matches raw Jobber and mapped DB spellings; unknown/booked stay outside', () => {
+    expect(isUnbookedJobStatus('UNSCHEDULED')).toBe(true)
+    expect(isUnbookedJobStatus('unscheduled')).toBe(true)
+    expect(isUnbookedJobStatus('Unscheduled')).toBe(true)
+    expect(isUnbookedJobStatus('ACTIVE')).toBe(false)
+    expect(isUnbookedJobStatus('unknown')).toBe(false)
+    expect(isUnbookedJobStatus(null)).toBe(false)
+    expect(isUnbookedJobStatus(undefined)).toBe(false)
   })
-  it('booked-work statuses are exactly ACTIVE/TODAY/UPCOMING/LATE', () => {
-    expect([...BOOKED_JOB_STATUSES].sort()).toEqual(['ACTIVE', 'LATE', 'TODAY', 'UPCOMING'])
+  it('booked-work statuses are exactly ACTIVE/TODAY/UPCOMING/LATE/EXPIRING_WITHIN_30_DAYS', () => {
+    expect([...BOOKED_JOB_STATUSES].sort()).toEqual(['ACTIVE', 'EXPIRING_WITHIN_30_DAYS', 'LATE', 'TODAY', 'UPCOMING'])
     expect(BOOKED_JOB_STATUSES.has('UNSCHEDULED')).toBe(false)
   })
 })
@@ -85,9 +88,11 @@ describe('determineLeadStage — unscheduled jobs are not current work', () => {
     expect(r).toEqual({ stage: 'Job in Progress', isJunk: false })
   })
   it('an unmapped non-completed status stays conservative → Job in Progress', () => {
+    // ON_HOLD (the original example here) is mapped + unbooked now —
+    // a genuinely never-seen status must still read as current work.
     const r = determineLeadStage({
       ...base,
-      jobs: [{ jobStatus: 'ON_HOLD', createdAt: '2025-08-15T00:00:00Z' }],
+      jobs: [{ jobStatus: 'SOME_FUTURE_JOBBER_STATUS', createdAt: '2025-08-15T00:00:00Z' }],
     }, NOW)
     expect(r).toEqual({ stage: 'Job in Progress', isJunk: false })
   })
@@ -154,8 +159,8 @@ describe('deriveEngagementStage — unbooked jobs classify with the quotes', () 
 describe('webhook job handlers gate stage promotion on booked status', () => {
   const src = readFileSync('lib/jobber-webhook-handlers.ts', 'utf8')
 
-  it('JOB_CREATE skips the Job in Progress promotion for unscheduled jobs', () => {
-    expect(src).toContain("if (stagePromotion === 'Job in Progress' && isUnscheduledJobStatus(jobRec.jobStatus))")
+  it('JOB_CREATE skips the Job in Progress promotion for unbooked jobs', () => {
+    expect(src).toContain("if (stagePromotion === 'Job in Progress' && isUnbookedJobStatus(jobRec.jobStatus))")
   })
   it('JOB_UPDATE promotes when the refreshed status shows the job booked/underway', () => {
     expect(src).toContain("if (stagePromotion === null && BOOKED_JOB_STATUSES.has((jobRec.jobStatus || '').toUpperCase()))")
@@ -172,14 +177,14 @@ describe('script ports carry the same unscheduled semantics', () => {
     const s = readFileSync('scripts/backfill-requestless.mjs', 'utf8')
     expect(s).toContain("UNSCHEDULED: 'unscheduled'")
     // lead-lane port (raw Jobber shape)
-    expect(s).toContain("const jobUnbooked = j => !jobDone(j) && (j.jobStatus || '').toLowerCase() === 'unscheduled'")
+    expect(s).toContain("const jobUnbooked = j => !jobDone(j) && ['unscheduled', 'action_required', 'on_hold'].includes((j.jobStatus || '').toLowerCase())")
     // engagement-lane port (DB shape)
-    expect(s).toContain("const jobUnbooked = j => !j.completed_at && (j.status || '').toLowerCase() === 'unscheduled'")
+    expect(s).toContain("const jobUnbooked = j => !j.completed_at && ['unscheduled', 'action_required', 'on_hold'].includes((j.status || '').toLowerCase())")
     expect(s).toContain('if (quotes.length > 0 || unbookedJobs.length > 0)')
   })
   it('backfill-engagements.mjs: booked/unbooked split in deriveStage', () => {
     const s = readFileSync('scripts/backfill-engagements.mjs', 'utf8')
-    expect(s).toContain("const jobUnbooked = j => !j.completed_at && (j.status || '').toLowerCase() === 'unscheduled'")
+    expect(s).toContain("const jobUnbooked = j => !j.completed_at && ['unscheduled', 'action_required', 'on_hold'].includes((j.status || '').toLowerCase())")
     expect(s).toContain('if (eQuotes.length > 0 || unbookedJobs.length > 0)')
   })
   it('repair-stale-won.mjs: unbooked jobs neither satisfy nor block the won condition', () => {

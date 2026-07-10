@@ -123,7 +123,8 @@ function projectLeadStage({ email, phone, clientCreatedAt, requests, quotes, job
   const hasActivity = requests.length > 0 || quotes.length > 0 || jobs.length > 0 || invoices.length > 0
   if (!email && !phone && !hasActivity) return 'New (junk)'
   const jobDone = j => !!j.completed_at || (j.status || '').toLowerCase().includes('complet')
-  const jobUnbooked = j => !jobDone(j) && (j.status || '').toLowerCase() === 'unscheduled'
+  // Sync with lib/jobber-import.ts (unbooked-statuses decision).
+  const jobUnbooked = j => !jobDone(j) && ['unscheduled', 'action_required', 'on_hold'].includes((j.status || '').toLowerCase())
   if (jobs.some(j => !jobDone(j) && !jobUnbooked(j))) return 'Job in Progress'
   const isPaid = i => (i.status || '').toLowerCase() === 'paid'
   const lastRequest = Math.max(0, ...requests.map(r => ts(r.requested_at) || ts(r.created_at)))

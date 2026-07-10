@@ -39,14 +39,15 @@
 //   JOB_CREATE       → 'Job in Progress'   forward-only + stamp job_created_at +
 //                                          scheduled_at (belt-and-suspenders with
 //                                          QUOTE_APPROVED; idempotent via rank guard).
-//                                          SKIPPED when the job is UNSCHEDULED —
-//                                          unbooked work is not in progress
-//                                          (see handleJobCore)
+//                                          SKIPPED when the job is unbooked
+//                                          (UNSCHEDULED / ACTION_REQUIRED /
+//                                          ON_HOLD) — unbooked work is not in
+//                                          progress (see handleJobCore)
 //   JOB_UPDATE       → (no change) EXCEPT: promotes 'Job in Progress'
 //                                          (forward-only) when the refreshed
 //                                          status shows the job booked/underway
 //                                          (BOOKED_JOB_STATUSES) — closes the
-//                                          gap an unscheduled JOB_CREATE leaves
+//                                          gap an unbooked JOB_CREATE leaves
 //   JOB_COMPLETE     → 'Closed Won'     forward-only + stop drip
 //   JOB_DESTROY      → (no change)      null jobber_job_id on lead
 //   INVOICE_CREATE   → (no change)      stamp invoice_created_at +
@@ -98,7 +99,7 @@ import {
   upsertInvoice,
   extractJobberId,
   promoteLeadStage,
-  isUnscheduledJobStatus,
+  isUnbookedJobStatus,
   BOOKED_JOB_STATUSES,
 } from './jobber-import'
 import {
@@ -515,17 +516,18 @@ async function handleJobCore(
   }
 
   // Stage promotion is conditional on the job being booked work.
-  // UNSCHEDULED jobs (no visit on the calendar) are agreed-but-unbooked —
-  // not in progress (see JOB_STATUS / BOOKED_JOB_STATUSES in
-  // jobber-import.ts) — so JOB_CREATE for one keeps the lead where it is
-  // (job_created_at still stamps; the timeline is true either way).
-  // Symmetrically, JOB_UPDATE — which never promoted before — promotes
-  // when the refreshed status shows the job booked or underway, so a job
-  // created unscheduled doesn't strand its lead when it finally lands on
-  // the calendar. JOB_COMPLETE ('Closed Won') stays unconditional, and
-  // every promotion remains forward-only via applyStagePromotion.
+  // Unbooked jobs (unscheduled / action_required / on_hold — nothing on
+  // the calendar, nothing underway) are not in progress (see JOB_STATUS
+  // / BOOKED_JOB_STATUSES in jobber-import.ts) — so JOB_CREATE for one
+  // keeps the lead where it is (job_created_at still stamps; the
+  // timeline is true either way). Symmetrically, JOB_UPDATE — which
+  // never promoted before — promotes when the refreshed status shows the
+  // job booked or underway, so a job created unbooked doesn't strand its
+  // lead when it finally lands on the calendar. JOB_COMPLETE ('Closed
+  // Won') stays unconditional, and every promotion remains forward-only
+  // via applyStagePromotion.
   let promotion = stagePromotion
-  if (stagePromotion === 'Job in Progress' && isUnscheduledJobStatus(jobRec.jobStatus)) {
+  if (stagePromotion === 'Job in Progress' && isUnbookedJobStatus(jobRec.jobStatus)) {
     promotion = null
   }
   if (stagePromotion === null && BOOKED_JOB_STATUSES.has((jobRec.jobStatus || '').toUpperCase())) {
@@ -580,7 +582,7 @@ async function handleJobCore(
 }
 
 // JOB_CREATE → 'Job in Progress' (forward-only) + stamp job_created_at + scheduled_at
-//              (promotion skipped for UNSCHEDULED jobs — see handleJobCore)
+//              (promotion skipped for unbooked jobs — see handleJobCore)
 export function handleJobCreate(ctx: HandlerCtx) {
   return handleJobCore(ctx, 'Job in Progress', 'job_created_at')
 }

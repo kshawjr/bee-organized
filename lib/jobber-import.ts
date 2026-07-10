@@ -21,6 +21,7 @@
 
 import { supabaseService } from './supabase-service'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
+import { writeSyncLog } from './sync-log'
 
 // ── GraphQL: bulk pagination queries (used by the import route) ────
 
@@ -236,32 +237,56 @@ export async function drainJobInvoices(
 
 // ── constants ─────────────────────────────────────────────────────
 
-// Jobber jobStatus → jobs.status. Anything unmapped lands as 'unknown'.
-// Keep in sync with the port in scripts/backfill-requestless.mjs.
+// Jobber jobStatus → jobs.status. Anything unmapped lands as 'unknown'
+// (and now writes an error sync_log row — see upsertJob). Keep in sync
+// with the port in scripts/backfill-requestless.mjs.
+//
+// Exhaustive over JobStatusTypeEnum (introspected live 2026-07-10,
+// X-JOBBER-GRAPHQL-VERSION 2025-04-16). Jobber's own descriptions:
+//   active                   "jobs in progress (the job is not closed)"        → BOOKED
+//   late                     "visit passed but was not marked complete"        → BOOKED
+//   today                    "active jobs with a visit today"                  → BOOKED
+//   upcoming                 "active jobs with a visit in the future"          → BOOKED
+//   expiring_within_30_days  "active jobs that are expiring within 30 days"    → BOOKED
+//   unscheduled              "visits created, set up to be scheduled later"    → UNBOOKED
+//   action_required          "still active, but no more upcoming visits — like
+//                            being 'on hold'; a prompt to either schedule more
+//                            visits or close the job"                          → UNBOOKED
+//   on_hold                  (Jobber's own alias for action_required)          → UNBOOKED
+//   requires_invoicing       "overdue invoice reminder — create an invoice"    → work done
+//   archived                 "closed jobs you are done with"                   → closed
+// COMPLETED is not in the current enum — kept defensively for older
+// webhook payloads/API versions (completedAt is the real done signal).
 export const JOB_STATUS: Record<string, string> = {
   ACTIVE: 'in_progress', COMPLETED: 'completed',
   REQUIRES_INVOICING: 'completed', LATE: 'late',
   TODAY: 'today', UPCOMING: 'upcoming', ARCHIVED: 'archived',
   UNSCHEDULED: 'unscheduled',
+  ACTION_REQUIRED: 'action_required', ON_HOLD: 'on_hold',
+  EXPIRING_WITHIN_30_DAYS: 'in_progress',
 }
 
-// UNSCHEDULED is Jobber's only pre-active status with no visit on the
-// calendar — UPCOMING/TODAY are booked and will happen, ACTIVE/LATE are
-// underway. An unscheduled job is agreed-but-unbooked work, the job-side
-// twin of a sent quote awaiting a response — NOT current work. Stage
-// derivation treats it like a quote of the same age (fresh → live deal,
-// aged → Nurturing) instead of 'Job in Progress'; before this entry it
-// fell to 'unknown' and pinned its lead at Job in Progress forever.
-// Matches both the raw Jobber value and the mapped DB value (same word,
-// case aside). completedAt/completed_at on the row wins over the label —
-// callers guard that side.
-export const isUnscheduledJobStatus = (status: string | null | undefined): boolean =>
-  (status || '').toLowerCase() === 'unscheduled'
+// Unbooked job statuses: nothing on the calendar, nothing underway —
+// UNSCHEDULED (visits to be scheduled later), ACTION_REQUIRED (no more
+// upcoming visits; Jobber: "you can think of action required like being
+// 'on hold' … a prompt to either schedule more visits or close the job"),
+// and ON_HOLD (Jobber's alias for the same state). Unbooked work is NOT
+// current work: stage derivation treats it like a quote of the same age
+// (fresh → live deal, aged → Nurturing / backfill stale-close) instead of
+// 'Job in Progress'; before these entries such jobs fell to 'unknown' and
+// pinned their lead at Job in Progress forever (Tami Wollner's dormant
+// unscheduled job; Wendy Blanch's 2024 action_required job). Matches both
+// the raw Jobber value and the mapped DB value (same word, case aside).
+// completedAt/completed_at on the row wins over the label — callers guard
+// that side.
+const UNBOOKED_JOB_STATUSES = new Set(['unscheduled', 'action_required', 'on_hold'])
+export const isUnbookedJobStatus = (status: string | null | undefined): boolean =>
+  UNBOOKED_JOB_STATUSES.has((status || '').toLowerCase())
 
 // Raw Jobber jobStatus values that mean the job is booked or underway —
 // the only statuses that may promote a lead to 'Job in Progress' on the
 // webhook path (JOB_CREATE/JOB_UPDATE in jobber-webhook-handlers.ts).
-export const BOOKED_JOB_STATUSES = new Set(['ACTIVE', 'TODAY', 'UPCOMING', 'LATE'])
+export const BOOKED_JOB_STATUSES = new Set(['ACTIVE', 'TODAY', 'UPCOMING', 'LATE', 'EXPIRING_WITHIN_30_DAYS'])
 
 export const NURTURING_AGE_MS = 30 * 24 * 60 * 60 * 1000  // 30 days
 
@@ -345,13 +370,13 @@ export function determineLeadStage(
   if (!email && !phone && !hasActivity) return { stage: 'New', isJunk: true }
 
   // 2. Any job still active/scheduled is current work, full stop.
-  //    UNSCHEDULED jobs are exempt: nothing is booked, so nothing is in
-  //    progress — they ride the quote lane below instead. Every other
-  //    non-completed status, including unmapped ones, stays conservative:
-  //    current work.
+  //    Unbooked jobs (unscheduled / action_required / on_hold) are
+  //    exempt: nothing is booked, so nothing is in progress — they ride
+  //    the quote lane below instead. Every other non-completed status,
+  //    including unmapped ones, stays conservative: current work.
   const jobDone = (j: any) =>
     !!j.completedAt || (j.jobStatus || '').toLowerCase().includes('complet')
-  const jobUnbooked = (j: any) => !jobDone(j) && isUnscheduledJobStatus(j.jobStatus)
+  const jobUnbooked = (j: any) => !jobDone(j) && isUnbookedJobStatus(j.jobStatus)
   if (jobs.some((j) => !jobDone(j) && !jobUnbooked(j))) return { stage: 'Job in Progress', isJunk: false }
 
   // Most recent engagement wins. Ties (same-timestamp chain events)
@@ -359,7 +384,7 @@ export function determineLeadStage(
   // via strict > on the earlier-chain comparisons below.
   const isPaid = (i: any) => (i.invoiceStatus || '').toUpperCase() === 'PAID'
   const lastRequest = Math.max(0, ...requests.map((r) => ts(r.createdAt)))
-  // Unscheduled jobs ride the quote lane: agreed-but-unbooked work is an
+  // Unbooked jobs ride the quote lane: agreed-but-unbooked work is an
   // estimate awaiting a response (fresh → 'Estimate Sent', aged →
   // 'Nurturing'), never job evidence — the job lane falls through to
   // 'Final Processing' (rule 3), which asserts money outstanding that an
@@ -684,12 +709,13 @@ export async function upsertJob(
     if (quoteRow) quoteDbId = quoteRow.id
   }
 
+  const mappedStatus = JOB_STATUS[job.jobStatus?.toUpperCase()]
   const payload: Record<string, any> = {
     service_request_id, lead_id, location_id,
     jobber_job_id: jobberJobId,
     job_url: job.jobberWebUri || null,
     title: job.title || null,
-    status: JOB_STATUS[job.jobStatus?.toUpperCase()] ?? 'unknown',
+    status: mappedStatus ?? 'unknown',
     scheduled_start: job.startAt || null,
     completed_at:    job.completedAt || null,
     total: job.total ? parseFloat(job.total) : null,
@@ -698,13 +724,14 @@ export async function upsertJob(
   }
   if (quoteDbId) payload.quote_id = quoteDbId
   // Pre-select is a stats hint only — correctness lives in the DB-level
-  // upsert below. The arbiter is jobs_location_jobber_job_id_idx
+  // upsert below (status also feeds the unmapped-status alarm, which is
+  // best-effort). The arbiter is jobs_location_jobber_job_id_idx
   // (non-partial since jobber_subrecord_onconflict_targetable.sql);
   // concurrent webhook deliveries for the same job merge into one row
   // instead of racing check-then-insert.
   const { data: existing, error: selectError } = await supabaseService
     .from('jobs')
-    .select('id')
+    .select('id, status')
     .eq('jobber_job_id', jobberJobId)
     .eq('location_id', location_id)
     .maybeSingle()
@@ -722,6 +749,27 @@ export async function upsertJob(
     .select('id')
     .single()
   if (error) throw new Error(`Job: ${error.message}`)
+
+  // Unmapped-status alarm: a jobStatus value missing from JOB_STATUS
+  // lands as 'unknown', which derivation reads conservatively as current
+  // work — a never-seen Jobber status must surface on the webhook
+  // dashboard within hours, not months later via a confused client
+  // (Wendy Blanch's 2024 action_required job). The topic= token is what
+  // makes the row render there (lib/webhook-observability.ts). Fires on
+  // the first landing only (new row, or an existing row that wasn't
+  // already 'unknown') so webhook re-deliveries don't storm the log;
+  // best-effort by design — writeSyncLog never throws.
+  if (mappedStatus === undefined && existing?.status !== 'unknown') {
+    await writeSyncLog({
+      location_id,
+      entity_id: data.id,
+      entity_type: 'job',
+      direction: 'inbound',
+      jobber_record_id: jobberJobId ?? undefined,
+      status: 'error',
+      message: `[job-status] topic=JOB_STATUS_UNMAPPED unmapped Jobber job status: ${job.jobStatus ?? '(null)'} — stored 'unknown' (derivation reads it as current work until mapped) job=${jobberJobId} lead=${lead_id}`,
+    })
+  }
   return { id: data.id, created: !existing, quote_db_id: quoteDbId }
 }
 

@@ -20,7 +20,7 @@
 
 import { supabaseService } from './supabase-service'
 import { writeSyncLog } from './sync-log'
-import { isUnscheduledJobStatus } from './jobber-import'
+import { isUnbookedJobStatus } from './jobber-import'
 import { ENGAGEMENT_STAGE_RANK as RAW_ENGAGEMENT_STAGE_RANK } from '@/components/hive/shared/stageRank'
 
 export type EngagementStage =
@@ -79,15 +79,16 @@ export type DerivedStage = {
 export const engagementJobDone = (j: { status?: string | null; completed_at?: string | null }) =>
   !!j.completed_at || (j.status || '').toLowerCase().includes('complet')
 
-// UNSCHEDULED jobs (jobs.status 'unscheduled' — JOB_STATUS in
-// lib/jobber-import.ts) have no visit booked: agreed-but-unbooked work,
-// the job-side twin of a sent quote — NOT current work. They must not
-// hold an engagement at 'Job in Progress' nor block Won/Final Processing
-// when booked jobs are done; an engagement whose only jobs are
-// unscheduled classifies like its quotes (Estimate live; stale-close
-// eligible in backfill mode). completed_at wins over the label.
+// Unbooked jobs (jobs.status 'unscheduled' / 'action_required' /
+// 'on_hold' — JOB_STATUS in lib/jobber-import.ts) have no visit booked:
+// agreed-but-unbooked or ran-out-of-visits work, the job-side twin of a
+// sent quote — NOT current work. They must not hold an engagement at
+// 'Job in Progress' nor block Won/Final Processing when booked jobs are
+// done; an engagement whose only jobs are unbooked classifies like its
+// quotes (Estimate live; stale-close eligible in backfill mode).
+// completed_at wins over the label.
 const jobUnbooked = (j: { status?: string | null; completed_at?: string | null }) =>
-  !j.completed_at && isUnscheduledJobStatus(j.status)
+  !j.completed_at && isUnbookedJobStatus(j.status)
 
 const invoicePaid = (i: { status?: string | null }) => i.status === 'paid'
 const quoteActivity = (q: { sent_at?: string | null; approved_at?: string | null; created_at?: string | null }) =>
