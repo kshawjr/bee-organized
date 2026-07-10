@@ -1,0 +1,1084 @@
+{
+  "mode": "dry-run",
+  "scope": {
+    "staleLostTotal": 926,
+    "flips": 95,
+    "heldOut": []
+  },
+  "perLocation": {
+    "Palm Beach": {
+      "flips": 11,
+      "dollars": 43446.200000000004,
+      "zeroDollar": 0
+    },
+    "Portland": {
+      "flips": 72,
+      "dollars": 124256.2,
+      "zeroDollar": 1
+    },
+    "Northwest Arkansas": {
+      "flips": 12,
+      "dollars": 32244.989999999998,
+      "zeroDollar": 0
+    }
+  },
+  "dollarsRecovered": 199947,
+  "statusMoves": {
+    "Past → Client": 63,
+    "Nurturing → Client": 1
+  },
+  "moveList": [
+    {
+      "lead_id": "43783327-084d-47f8-8f6c-9278d1fcce96",
+      "name": "Tracy Cleveland",
+      "loc": "Palm Beach",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "1710406a-92e2-4c6b-9748-7b985ce41eff",
+      "name": "Lea Barfield",
+      "loc": "Palm Beach",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "1d522fe3-9ac2-42b8-9aa2-7b0a026570b1",
+      "name": "Groh LLC",
+      "loc": "Palm Beach",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "d46695f0-e06a-463a-b13f-55da8d3a79b0",
+      "name": "Daniel Rogowski",
+      "loc": "Palm Beach",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "39e09c33-7603-4cf8-92ce-bb4bc28b0d2d",
+      "name": "Lauren Kaiser",
+      "loc": "Palm Beach",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "30f40282-ca7e-402b-9a1d-ad0c8d5178a7",
+      "name": "Meg Witten",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "7e16b453-15ac-4357-8cfd-6d413b616d99",
+      "name": "Ann Dart",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "06864d58-a521-4d15-8aa0-86358e041651",
+      "name": "Debra Jo Bauer Bauer",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "8ec0e292-c9aa-4d1f-8759-b1a9b76baaa8",
+      "name": "Chris Blake",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "aa845acc-bd33-4e60-87e7-01d08d0e13d4",
+      "name": "Deborah Allison",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "44134259-90dc-490c-acd1-b921e95ab5ab",
+      "name": "Misha Herrmann",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "693db5c0-6e43-4740-a981-fa7593de92ed",
+      "name": "Liz Gage",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "33e65ace-a612-48ee-a2c5-1d533394c1e9",
+      "name": "Connor  Carey",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "1b10175f-5e7e-4684-a436-b7caa783a810",
+      "name": "Stacey Andrew's",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "395cd6d5-ad93-4199-b6c6-7394cd90d2a5",
+      "name": "Faith Thomas",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "c5c5b62a-0722-4168-9be1-947d2e4c9751",
+      "name": "Karen Eggert",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "4de07ad0-7ed2-4897-b5d0-de341928d6d4",
+      "name": "Michael Montoya",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "52d5ef9b-a131-4edd-901e-3e41419c2d03",
+      "name": "Nina Nititadakul",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "e0d85289-a68b-4835-9f5b-a99e03b93797",
+      "name": "Robin La Baw",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "e37b6aab-5c9c-4ced-a8bc-f945a1816891",
+      "name": "Jamie Berkowitz",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "237336a8-45c0-4fec-9e50-db20823a07c3",
+      "name": "Diana Hall",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "054f6882-a0f5-4d48-b692-cddb9e17a2b1",
+      "name": "Lauren Boker",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "08f146d2-f2cc-40ad-a927-ef18f5449ab5",
+      "name": "William Byrne",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "4b1eecb1-8956-433c-a89d-222df0e764bb",
+      "name": "Jennifer Hsu",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "1a7f3793-df89-43a5-8256-aadb8dfe6456",
+      "name": "Jenny Wuest",
+      "loc": "Portland",
+      "move": "Nurturing → Client"
+    },
+    {
+      "lead_id": "cc6da125-e2b0-4a53-bd35-beca2ba453c3",
+      "name": "Heidi A Effmann",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "e3a287dd-127a-4329-8987-4a17eb59faf2",
+      "name": "Doug Sprague",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "c58e75aa-c7f6-46ac-a860-578b687c5af7",
+      "name": "Dave Hires",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "7b7e66b2-fa8b-4567-b4d8-379ca5892440",
+      "name": "Judith Schor",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "933036da-8289-49d3-bf48-03a59d5be7ce",
+      "name": "Jane Goodwin",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "8e2e5b60-d224-49c6-8ff7-d6e0714eca1a",
+      "name": "Jeri Chaitlin",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "df0291d2-fd59-4e60-87b0-c48787377f7d",
+      "name": "Paul Hamilton",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "8c5b089c-8eef-4c97-8ac3-cb86909987ea",
+      "name": "Alexis Halmy",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "d0fec42c-22ca-4c32-8e4d-d8937652df5e",
+      "name": "Shawnee Halligan",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "e7ad7264-69c9-46aa-9975-58844e4b06cf",
+      "name": "Amala Afoaku",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "624392be-f38f-40c7-a553-add9b8511238",
+      "name": "Joel Martin",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "3993a0d1-0981-49a3-b2a2-617d0da2976d",
+      "name": "Catherine Kittams",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "954342c0-a654-4e64-b587-5386842bc7e1",
+      "name": "Kelsey Lang",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "86f61698-9213-401c-bffc-e7e64337e598",
+      "name": "Debbie Madden",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "127a0016-e192-4ef3-8470-6da2be2785cc",
+      "name": "Al Bonin",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "a0ed5eaf-b4d5-4ea6-aea1-f3a16dedd1f6",
+      "name": "Lindsay  Wells",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "98a5788c-899e-449d-97fb-e2ad2514d84c",
+      "name": "Jeanne Bailey",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "796de81e-9ed0-47f4-8654-23da7ea07a32",
+      "name": "Brian Cruickshank",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "0271ba3a-c8ac-4ec4-b6c4-a63de9a492cd",
+      "name": "Lynne Messer",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "bf24b987-d585-49ac-a7e0-04c2ab2e151b",
+      "name": "Mary Lang",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "da06ea38-3e06-413b-a5ba-a33a6a26e56b",
+      "name": "Natalie Lu",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "32dcec5e-dcb0-40c8-8bcc-009e9000231f",
+      "name": "Katherine",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "c235b918-97ac-4ef2-bbda-585c84bed516",
+      "name": "Jasmine",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "637482c7-a03b-46d3-8100-81a9c25e6395",
+      "name": "Angie Barchus",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "2a8abee9-8cdc-4caf-89f6-11ab3a7fe514",
+      "name": "Jennifer  Leone",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "d72cc846-1dde-41c6-8bfd-d64cab5c39c0",
+      "name": "Danny",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "265df3df-8419-47de-b193-ae497448a5c6",
+      "name": "Anna West",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "71e715a9-0eeb-4a12-a6d1-82f2aa638347",
+      "name": "Rachel Brusseau",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "bf37752f-b51b-4ade-af14-c0d55a517f23",
+      "name": "Marti Baird",
+      "loc": "Portland",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "e09d8910-3f07-4647-bb5c-3642afaa89e8",
+      "name": "Jenny Frazier",
+      "loc": "Northwest Arkansas",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "bddef354-9324-497c-a957-e15135069542",
+      "name": "Jamie Fischer",
+      "loc": "Northwest Arkansas",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "ee2a0bd0-03c8-40c4-b291-3e12991aa921",
+      "name": "Clint Gill",
+      "loc": "Northwest Arkansas",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "ea61c142-0d66-407c-a414-268b491b5817",
+      "name": "Keri Chambers",
+      "loc": "Northwest Arkansas",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "0dd1579e-7071-430e-9817-d20b759e170b",
+      "name": "Katie Johnson",
+      "loc": "Northwest Arkansas",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "3cc054ed-2461-4cc6-9873-c644a5ed2aae",
+      "name": "Casey Sarkin",
+      "loc": "Northwest Arkansas",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "613e3f77-8d92-47ec-a03b-c7ac0a1b1060",
+      "name": "Allison Shelby",
+      "loc": "Northwest Arkansas",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "cc7ffb89-8c41-44bf-9b5c-77663a253174",
+      "name": "Myla Conroy",
+      "loc": "Northwest Arkansas",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "69c7003c-cb09-4bd7-9bb7-20d55168c4b2",
+      "name": "Samantha Risi",
+      "loc": "Northwest Arkansas",
+      "move": "Past → Client"
+    },
+    {
+      "lead_id": "5551aa2f-3b26-405d-a0b1-d97e2f610988",
+      "name": "Kayla Daniel",
+      "loc": "Northwest Arkansas",
+      "move": "Past → Client"
+    }
+  ],
+  "flipIds": [
+    {
+      "id": "12fd55aa-9d17-47c6-9b9e-c44dfb425e81",
+      "client_id": "cd39298d-96c7-43b0-9ea3-f37ab76549e4",
+      "loc": "Palm Beach",
+      "paid": 5107.55,
+      "newClosedAt": "2023-01-23T19:34:39.000Z"
+    },
+    {
+      "id": "33a3df9e-a734-42a3-b49b-517bd6eb7700",
+      "client_id": "5ad2969d-2872-4e64-a9f0-07d38a370556",
+      "loc": "Palm Beach",
+      "paid": 11391.6,
+      "newClosedAt": "2025-02-21T02:16:47.000Z"
+    },
+    {
+      "id": "de1977ad-1b3a-4e03-9394-a9b26fbbded0",
+      "client_id": "b0b60eac-ea88-4230-ac0e-00263e600b55",
+      "loc": "Palm Beach",
+      "paid": 1866.71,
+      "newClosedAt": "2023-07-11T23:46:23.000Z"
+    },
+    {
+      "id": "575b0c22-cc8e-4fe8-93cc-8a7f962dcf8a",
+      "client_id": "b0b60eac-ea88-4230-ac0e-00263e600b55",
+      "loc": "Palm Beach",
+      "paid": 7021.77,
+      "newClosedAt": "2023-12-31T17:06:14.000Z"
+    },
+    {
+      "id": "7387d147-2fb8-46c5-b0c6-a13934f06504",
+      "client_id": "43783327-084d-47f8-8f6c-9278d1fcce96",
+      "loc": "Palm Beach",
+      "paid": 7010.69,
+      "newClosedAt": "2023-11-10T17:19:15.000Z"
+    },
+    {
+      "id": "e6b3be14-6366-4d47-82e0-9bff42f8d5a1",
+      "client_id": "225d24b5-74a9-45de-8128-64e86fdec00a",
+      "loc": "Palm Beach",
+      "paid": 2663.75,
+      "newClosedAt": "2023-05-30T23:27:50.000Z"
+    },
+    {
+      "id": "ba0a195c-5179-490b-8975-c0344faff127",
+      "client_id": "1710406a-92e2-4c6b-9748-7b985ce41eff",
+      "loc": "Palm Beach",
+      "paid": 3916.26,
+      "newClosedAt": "2023-09-11T21:18:00.000Z"
+    },
+    {
+      "id": "c05daa66-88dc-49f7-b542-e60d507bf511",
+      "client_id": "875e87ce-aee6-49e6-a321-0968dc480878",
+      "loc": "Palm Beach",
+      "paid": 722.5,
+      "newClosedAt": "2023-10-26T12:12:50.000Z"
+    },
+    {
+      "id": "b604ad19-3595-464f-906a-cea35a903e1a",
+      "client_id": "1d522fe3-9ac2-42b8-9aa2-7b0a026570b1",
+      "loc": "Palm Beach",
+      "paid": 1742.5,
+      "newClosedAt": "2023-09-19T21:23:23.000Z"
+    },
+    {
+      "id": "67859615-c5d5-4132-a155-c658f385e8de",
+      "client_id": "d46695f0-e06a-463a-b13f-55da8d3a79b0",
+      "loc": "Palm Beach",
+      "paid": 1551.25,
+      "newClosedAt": "2025-06-25T20:52:07.000Z"
+    },
+    {
+      "id": "adcb043d-d0d7-421b-a9a4-824ee2e3d6d1",
+      "client_id": "39e09c33-7603-4cf8-92ce-bb4bc28b0d2d",
+      "loc": "Palm Beach",
+      "paid": 451.62,
+      "newClosedAt": "2023-09-18T15:16:56.000Z"
+    },
+    {
+      "id": "39072c3b-700e-4ff3-9b65-78cd5bae22d8",
+      "client_id": "30f40282-ca7e-402b-9a1d-ad0c8d5178a7",
+      "loc": "Portland",
+      "paid": 770.41,
+      "newClosedAt": "2026-06-05T17:27:25.000Z"
+    },
+    {
+      "id": "f9754cc2-c245-4592-b4ee-3395d6de0d77",
+      "client_id": "7e16b453-15ac-4357-8cfd-6d413b616d99",
+      "loc": "Portland",
+      "paid": 746.8,
+      "newClosedAt": "2024-06-14T17:15:46.000Z"
+    },
+    {
+      "id": "02ea1686-6582-4c4e-9621-cae4f06ee60d",
+      "client_id": "06864d58-a521-4d15-8aa0-86358e041651",
+      "loc": "Portland",
+      "paid": 704.82,
+      "newClosedAt": "2022-10-07T18:27:01.000Z"
+    },
+    {
+      "id": "7e60c512-c8c9-4c40-93bc-cb11ca504ff9",
+      "client_id": "8ec0e292-c9aa-4d1f-8759-b1a9b76baaa8",
+      "loc": "Portland",
+      "paid": 558.78,
+      "newClosedAt": "2024-06-06T21:43:21.000Z"
+    },
+    {
+      "id": "7b63ad6b-0357-434d-a81f-e09030bb2dd8",
+      "client_id": "aa845acc-bd33-4e60-87e7-01d08d0e13d4",
+      "loc": "Portland",
+      "paid": 432.6,
+      "newClosedAt": "2023-02-15T16:22:59.000Z"
+    },
+    {
+      "id": "fda84d26-13ea-4608-8b66-4767d6995fe7",
+      "client_id": "2a054337-0bdc-4680-8e68-2bc721ea6493",
+      "loc": "Portland",
+      "paid": 420,
+      "newClosedAt": "2022-09-09T17:33:39.000Z"
+    },
+    {
+      "id": "cfda5ea6-57d8-4a3e-a94e-b274498cc11d",
+      "client_id": "44134259-90dc-490c-acd1-b921e95ab5ab",
+      "loc": "Portland",
+      "paid": 341.19,
+      "newClosedAt": "2024-08-21T23:39:37.000Z"
+    },
+    {
+      "id": "4a1d7012-2c7b-4464-89db-66511048323c",
+      "client_id": "693db5c0-6e43-4740-a981-fa7593de92ed",
+      "loc": "Portland",
+      "paid": 317,
+      "newClosedAt": "2023-07-11T14:16:44.000Z"
+    },
+    {
+      "id": "70f6f1d7-e334-4e94-8c19-ad17f516d788",
+      "client_id": "33e65ace-a612-48ee-a2c5-1d533394c1e9",
+      "loc": "Portland",
+      "paid": 231.75,
+      "newClosedAt": "2024-12-09T15:52:24.000Z"
+    },
+    {
+      "id": "de7026fe-c9c7-4df0-82b6-853867fa7a46",
+      "client_id": "1b10175f-5e7e-4684-a436-b7caa783a810",
+      "loc": "Portland",
+      "paid": 576.38,
+      "newClosedAt": "2022-08-18T02:32:27.000Z"
+    },
+    {
+      "id": "36dde177-79fc-4aeb-9c9d-a960088dcd28",
+      "client_id": "395cd6d5-ad93-4199-b6c6-7394cd90d2a5",
+      "loc": "Portland",
+      "paid": 535.6,
+      "newClosedAt": "2025-07-16T20:45:51.000Z"
+    },
+    {
+      "id": "8e9d3b10-3d37-4426-a65e-627877b97043",
+      "client_id": "c5c5b62a-0722-4168-9be1-947d2e4c9751",
+      "loc": "Portland",
+      "paid": 463.5,
+      "newClosedAt": "2024-06-09T14:06:01.000Z"
+    },
+    {
+      "id": "e91d8a42-2068-40be-a07f-15b5a427a499",
+      "client_id": "96dbd144-50aa-49e6-9a52-038b24580cea",
+      "loc": "Portland",
+      "paid": 432.6,
+      "newClosedAt": "2022-11-03T17:07:08.000Z"
+    },
+    {
+      "id": "2963863b-aec8-4ba8-9e79-cf067a0d86ba",
+      "client_id": "4de07ad0-7ed2-4897-b5d0-de341928d6d4",
+      "loc": "Portland",
+      "paid": 412,
+      "newClosedAt": "2025-05-13T14:21:16.000Z"
+    },
+    {
+      "id": "6efc114c-cf48-4ef5-a348-d3e74bc797c7",
+      "client_id": "52d5ef9b-a131-4edd-901e-3e41419c2d03",
+      "loc": "Portland",
+      "paid": 338.86,
+      "newClosedAt": "2022-10-09T02:51:50.000Z"
+    },
+    {
+      "id": "1d40eab6-bf9f-4e07-aaf1-a36ca7bafe47",
+      "client_id": "e0d85289-a68b-4835-9f5b-a99e03b93797",
+      "loc": "Portland",
+      "paid": 309,
+      "newClosedAt": "2024-12-18T02:13:44.000Z"
+    },
+    {
+      "id": "a44b3572-9602-4e28-9d17-62d08ae48e7a",
+      "client_id": "e37b6aab-5c9c-4ced-a8bc-f945a1816891",
+      "loc": "Portland",
+      "paid": 535.6,
+      "newClosedAt": "2025-06-04T19:30:42.000Z"
+    },
+    {
+      "id": "ece53072-a4c5-48bb-8a0b-040a43cf26aa",
+      "client_id": "1daf66ac-bc3a-4835-8851-bd4c21f4fdc4",
+      "loc": "Portland",
+      "paid": 386.25,
+      "newClosedAt": "2024-11-20T00:34:37.000Z"
+    },
+    {
+      "id": "30cccdf0-241d-4e3b-a4e5-265bac83a7f7",
+      "client_id": "237336a8-45c0-4fec-9e50-db20823a07c3",
+      "loc": "Portland",
+      "paid": 375,
+      "newClosedAt": "2024-02-25T23:18:40.000Z"
+    },
+    {
+      "id": "bb7e5108-8354-42d3-9d04-298df071a270",
+      "client_id": "054f6882-a0f5-4d48-b692-cddb9e17a2b1",
+      "loc": "Portland",
+      "paid": 247.2,
+      "newClosedAt": "2025-05-31T17:14:06.000Z"
+    },
+    {
+      "id": "c4d9dba1-282e-498c-a100-5fa77837cfa0",
+      "client_id": "08f146d2-f2cc-40ad-a927-ef18f5449ab5",
+      "loc": "Portland",
+      "paid": 244.63,
+      "newClosedAt": "2024-03-27T21:55:13.000Z"
+    },
+    {
+      "id": "0250278d-22da-47f5-bb71-b844de1d1f32",
+      "client_id": "17068705-1020-4b37-9696-a1bf448a10bf",
+      "loc": "Portland",
+      "paid": 231.75,
+      "newClosedAt": "2024-11-01T22:32:05.000Z"
+    },
+    {
+      "id": "794bcc45-2740-447c-a7c9-63121594b56a",
+      "client_id": "4b1eecb1-8956-433c-a89d-222df0e764bb",
+      "loc": "Portland",
+      "paid": 216.3,
+      "newClosedAt": "2023-06-24T02:18:32.000Z"
+    },
+    {
+      "id": "88546879-6ed4-411b-9e15-b6e0b7d578f7",
+      "client_id": "1a7f3793-df89-43a5-8256-aadb8dfe6456",
+      "loc": "Portland",
+      "paid": 0,
+      "newClosedAt": "2022-08-23T20:04:35.000Z"
+    },
+    {
+      "id": "eb59679e-e9ad-4e8b-ba05-ce18f6c898db",
+      "client_id": "723d7dca-ddf1-449c-a689-9e729ebba6fb",
+      "loc": "Portland",
+      "paid": 15750.640000000001,
+      "newClosedAt": "2023-12-01T20:56:29.000Z"
+    },
+    {
+      "id": "dc4096ab-3d54-4698-957e-38ebcd6b50d0",
+      "client_id": "39ff3261-8838-4848-8481-8dc033c256cf",
+      "loc": "Portland",
+      "paid": 5610.82,
+      "newClosedAt": "2023-08-16T13:48:30.000Z"
+    },
+    {
+      "id": "b276f239-19b5-4d9c-b7fe-143f0d5e6dc9",
+      "client_id": "39ff3261-8838-4848-8481-8dc033c256cf",
+      "loc": "Portland",
+      "paid": 5034.63,
+      "newClosedAt": "2025-03-18T18:54:30.000Z"
+    },
+    {
+      "id": "d6498b56-3314-4088-bdd8-a24315dd2ce7",
+      "client_id": "cc6da125-e2b0-4a53-bd35-beca2ba453c3",
+      "loc": "Portland",
+      "paid": 8248.31,
+      "newClosedAt": "2025-08-30T14:41:38.000Z"
+    },
+    {
+      "id": "d93c28e8-fa11-4c66-abdc-31b8442c6343",
+      "client_id": "e3a287dd-127a-4329-8987-4a17eb59faf2",
+      "loc": "Portland",
+      "paid": 7509.18,
+      "newClosedAt": "2023-06-02T15:21:04.000Z"
+    },
+    {
+      "id": "e3768c3d-199a-4130-a74b-95fcf68d658a",
+      "client_id": "c58e75aa-c7f6-46ac-a860-578b687c5af7",
+      "loc": "Portland",
+      "paid": 5759.42,
+      "newClosedAt": "2025-12-22T16:47:43.000Z"
+    },
+    {
+      "id": "3fd85ff0-9f08-499d-b98e-233b6518ef2c",
+      "client_id": "f1f25786-213d-4af1-a370-8e10ebfb946d",
+      "loc": "Portland",
+      "paid": 2555.54,
+      "newClosedAt": "2024-01-12T00:41:59.000Z"
+    },
+    {
+      "id": "5e3b78d8-b18b-45ad-992a-a4e50653045d",
+      "client_id": "dde7c3fa-793e-431a-8438-0128b62fcadf",
+      "loc": "Portland",
+      "paid": 2800.26,
+      "newClosedAt": "2022-10-21T20:40:55.000Z"
+    },
+    {
+      "id": "acbfd5d4-8201-405c-bd2e-66e4d73cda75",
+      "client_id": "7b7e66b2-fa8b-4567-b4d8-379ca5892440",
+      "loc": "Portland",
+      "paid": 3811.38,
+      "newClosedAt": "2025-04-09T01:27:17.000Z"
+    },
+    {
+      "id": "2c9b7c20-848a-48ca-a975-e39416ec9776",
+      "client_id": "02b410a0-aef9-4042-ac7d-c7967f0a7b85",
+      "loc": "Portland",
+      "paid": 721,
+      "newClosedAt": "2024-06-09T14:02:59.000Z"
+    },
+    {
+      "id": "b8cf65d9-fb2d-4515-887f-6f1bb59c9e16",
+      "client_id": "ab01e079-14d4-4bfb-9c60-90ae95ffc493",
+      "loc": "Portland",
+      "paid": 1004.25,
+      "newClosedAt": "2024-08-13T21:02:46.000Z"
+    },
+    {
+      "id": "74d9a781-b0ff-4b95-9388-99c70fd8b76d",
+      "client_id": "6d1bc72d-06d3-4083-8d95-87dcf8aa389e",
+      "loc": "Portland",
+      "paid": 1800,
+      "newClosedAt": "2025-02-26T21:21:14.000Z"
+    },
+    {
+      "id": "bbfc04ca-1225-4d33-992b-82a29f428423",
+      "client_id": "933036da-8289-49d3-bf48-03a59d5be7ce",
+      "loc": "Portland",
+      "paid": 3063.7,
+      "newClosedAt": "2025-09-18T15:34:28.000Z"
+    },
+    {
+      "id": "870c119d-c270-4795-9979-19962b393bd2",
+      "client_id": "8e2e5b60-d224-49c6-8ff7-d6e0714eca1a",
+      "loc": "Portland",
+      "paid": 1873.31,
+      "newClosedAt": "2023-06-25T16:12:54.000Z"
+    },
+    {
+      "id": "c4b5b925-710b-4e3b-b765-ad24a3fd4ef7",
+      "client_id": "13b76d00-4c76-4013-8019-9ebadb26efec",
+      "loc": "Portland",
+      "paid": 379.53,
+      "newClosedAt": "2024-03-02T16:32:48.000Z"
+    },
+    {
+      "id": "13c41abf-647b-4eb6-86b2-070a1ce744a8",
+      "client_id": "df0291d2-fd59-4e60-87b0-c48787377f7d",
+      "loc": "Portland",
+      "paid": 764.79,
+      "newClosedAt": "2023-02-21T18:00:17.000Z"
+    },
+    {
+      "id": "f0135641-cdc3-449e-9f72-21a695558545",
+      "client_id": "df0291d2-fd59-4e60-87b0-c48787377f7d",
+      "loc": "Portland",
+      "paid": 927.83,
+      "newClosedAt": "2023-03-08T16:06:15.000Z"
+    },
+    {
+      "id": "6b9c2783-d474-470f-b801-e77e9e9151c1",
+      "client_id": "bb90a338-8725-422d-a652-96d3d1e94db1",
+      "loc": "Portland",
+      "paid": 622.2,
+      "newClosedAt": "2025-11-12T21:43:33.000Z"
+    },
+    {
+      "id": "ede639e6-0578-4836-b134-21fa704c478d",
+      "client_id": "8c5b089c-8eef-4c97-8ac3-cb86909987ea",
+      "loc": "Portland",
+      "paid": 1394.13,
+      "newClosedAt": "2023-08-16T23:54:34.000Z"
+    },
+    {
+      "id": "b9418fce-e50b-452a-9119-48ba88a09e55",
+      "client_id": "ab01e079-14d4-4bfb-9c60-90ae95ffc493",
+      "loc": "Portland",
+      "paid": 2188.75,
+      "newClosedAt": "2023-10-23T23:19:16.000Z"
+    },
+    {
+      "id": "36fce6c7-0834-4308-a277-b84d8d1b2d25",
+      "client_id": "d0fec42c-22ca-4c32-8e4d-d8937652df5e",
+      "loc": "Portland",
+      "paid": 2728.06,
+      "newClosedAt": "2023-10-23T23:24:57.000Z"
+    },
+    {
+      "id": "9aa6dc5b-5f1b-4798-bd27-59345edce06d",
+      "client_id": "e7ad7264-69c9-46aa-9975-58844e4b06cf",
+      "loc": "Portland",
+      "paid": 2145.48,
+      "newClosedAt": "2023-10-12T01:27:31.000Z"
+    },
+    {
+      "id": "51a6d57c-1c46-4f82-8387-23b0bc614bbd",
+      "client_id": "624392be-f38f-40c7-a553-add9b8511238",
+      "loc": "Portland",
+      "paid": 1437.66,
+      "newClosedAt": "2025-12-15T16:35:46.000Z"
+    },
+    {
+      "id": "0613598b-10d6-47e6-b048-df4b672df33c",
+      "client_id": "3993a0d1-0981-49a3-b2a2-617d0da2976d",
+      "loc": "Portland",
+      "paid": 3392.18,
+      "newClosedAt": "2025-07-11T18:38:02.000Z"
+    },
+    {
+      "id": "440e5de5-b96e-4691-b3bf-e4daad89c509",
+      "client_id": "954342c0-a654-4e64-b587-5386842bc7e1",
+      "loc": "Portland",
+      "paid": 3291.14,
+      "newClosedAt": "2023-05-09T12:37:44.000Z"
+    },
+    {
+      "id": "7e0cf3a3-b322-469b-b1b0-54812e7cb27c",
+      "client_id": "86f61698-9213-401c-bffc-e7e64337e598",
+      "loc": "Portland",
+      "paid": 3158.19,
+      "newClosedAt": "2024-06-23T11:51:38.000Z"
+    },
+    {
+      "id": "6b6ead89-6f8d-4827-a871-277e5583bb30",
+      "client_id": "127a0016-e192-4ef3-8470-6da2be2785cc",
+      "loc": "Portland",
+      "paid": 2848.28,
+      "newClosedAt": "2023-05-01T15:13:42.000Z"
+    },
+    {
+      "id": "9b2bd720-b9b2-4bb0-8768-ea7fbe6ee7ac",
+      "client_id": "f9a5f0d1-b463-487a-a298-15800838a9b1",
+      "loc": "Portland",
+      "paid": 669.5,
+      "newClosedAt": "2024-07-26T23:05:24.000Z"
+    },
+    {
+      "id": "e4c1d550-e533-41a8-82cf-7da84da6109f",
+      "client_id": "a0ed5eaf-b4d5-4ea6-aea1-f3a16dedd1f6",
+      "loc": "Portland",
+      "paid": 1807.14,
+      "newClosedAt": "2025-02-12T02:44:43.000Z"
+    },
+    {
+      "id": "ae5f43cd-4eee-4340-80b1-1d8626bcf1f1",
+      "client_id": "c785365b-e7a0-4899-bb46-bfb9148a1b43",
+      "loc": "Portland",
+      "paid": 1706.36,
+      "newClosedAt": "2023-05-26T16:54:04.000Z"
+    },
+    {
+      "id": "430c0c47-1011-40dd-864d-ba52e950a7ca",
+      "client_id": "98a5788c-899e-449d-97fb-e2ad2514d84c",
+      "loc": "Portland",
+      "paid": 1698.44,
+      "newClosedAt": "2023-02-19T16:33:43.000Z"
+    },
+    {
+      "id": "0f7610bf-1649-4e6e-8133-0216f32f8077",
+      "client_id": "796de81e-9ed0-47f4-8654-23da7ea07a32",
+      "loc": "Portland",
+      "paid": 1637.46,
+      "newClosedAt": "2026-04-13T17:22:34.000Z"
+    },
+    {
+      "id": "525970d3-8858-4503-be7e-6e6eb49308ec",
+      "client_id": "8034e55b-f952-4d8d-8f67-df1e3b52c610",
+      "loc": "Portland",
+      "paid": 424.88,
+      "newClosedAt": "2025-02-06T00:08:23.000Z"
+    },
+    {
+      "id": "81823057-fc9b-47f4-a42c-f9a67b9bbafa",
+      "client_id": "0271ba3a-c8ac-4ec4-b6c4-a63de9a492cd",
+      "loc": "Portland",
+      "paid": 1326,
+      "newClosedAt": "2022-08-13T14:54:53.000Z"
+    },
+    {
+      "id": "7a7cb97b-10c9-4804-8e52-ecda0a490cf4",
+      "client_id": "bf24b987-d585-49ac-a7e0-04c2ab2e151b",
+      "loc": "Portland",
+      "paid": 1280.19,
+      "newClosedAt": "2023-06-25T15:20:55.000Z"
+    },
+    {
+      "id": "96281f29-b8b8-4fa9-8b8a-bf5abcadc2a3",
+      "client_id": "da06ea38-3e06-413b-a5ba-a33a6a26e56b",
+      "loc": "Portland",
+      "paid": 1273.48,
+      "newClosedAt": "2025-10-11T16:52:26.000Z"
+    },
+    {
+      "id": "327ef57e-8fef-47d8-a11d-ab9479fd7e46",
+      "client_id": "08daaca4-5e37-4bda-bb88-9f96962738dd",
+      "loc": "Portland",
+      "paid": 988.8,
+      "newClosedAt": "2023-11-28T19:52:22.000Z"
+    },
+    {
+      "id": "7d6d9478-95eb-487d-925a-1f298d1d5c61",
+      "client_id": "bbca7239-294f-448f-9a0a-214e637b5022",
+      "loc": "Portland",
+      "paid": 1098.95,
+      "newClosedAt": "2024-02-25T02:03:21.000Z"
+    },
+    {
+      "id": "9dab0071-dfba-489c-a4e2-90e71624c976",
+      "client_id": "32dcec5e-dcb0-40c8-8bcc-009e9000231f",
+      "loc": "Portland",
+      "paid": 1098.54,
+      "newClosedAt": "2023-02-09T04:32:11.000Z"
+    },
+    {
+      "id": "b91edcd9-0cad-4c6d-b487-b28007ae4801",
+      "client_id": "c235b918-97ac-4ef2-bbda-585c84bed516",
+      "loc": "Portland",
+      "paid": 1016.6,
+      "newClosedAt": "2025-06-30T17:36:18.000Z"
+    },
+    {
+      "id": "9c58129d-f456-4469-8164-18f728db7302",
+      "client_id": "637482c7-a03b-46d3-8100-81a9c25e6395",
+      "loc": "Portland",
+      "paid": 972.84,
+      "newClosedAt": "2022-09-09T17:39:44.000Z"
+    },
+    {
+      "id": "5a00e6e9-bc59-452e-8a9b-6c5c061af414",
+      "client_id": "2a8abee9-8cdc-4caf-89f6-11ab3a7fe514",
+      "loc": "Portland",
+      "paid": 950.58,
+      "newClosedAt": "2024-07-04T15:47:51.000Z"
+    },
+    {
+      "id": "f7a61ecd-ef79-4ab7-adf4-0b37cef44b42",
+      "client_id": "d72cc846-1dde-41c6-8bfd-d64cab5c39c0",
+      "loc": "Portland",
+      "paid": 857.99,
+      "newClosedAt": "2025-01-14T16:05:06.000Z"
+    },
+    {
+      "id": "81ac7c36-25b7-4256-a825-860a0b90cbd6",
+      "client_id": "265df3df-8419-47de-b193-ae497448a5c6",
+      "loc": "Portland",
+      "paid": 1070.23,
+      "newClosedAt": "2024-11-09T15:24:07.000Z"
+    },
+    {
+      "id": "859f6459-33e9-41d7-80e7-d69a8d003f11",
+      "client_id": "40268c75-1064-467f-8482-ba24f02440ae",
+      "loc": "Portland",
+      "paid": 810,
+      "newClosedAt": "2023-05-15T15:22:35.000Z"
+    },
+    {
+      "id": "6918ebab-0832-43b2-98d7-4611f7e6750b",
+      "client_id": "71e715a9-0eeb-4a12-a6d1-82f2aa638347",
+      "loc": "Portland",
+      "paid": 988.8,
+      "newClosedAt": "2025-06-12T14:54:17.000Z"
+    },
+    {
+      "id": "d441aed0-ecc9-4ea3-8599-6b33aea66492",
+      "client_id": "bf37752f-b51b-4ade-af14-c0d55a517f23",
+      "loc": "Portland",
+      "paid": 977.99,
+      "newClosedAt": "2024-04-13T03:10:56.000Z"
+    },
+    {
+      "id": "5421168a-a666-4455-b0de-efe0b714934c",
+      "client_id": "4a8a4c72-f421-44c3-83e9-0cb541c62bfc",
+      "loc": "Portland",
+      "paid": 952.75,
+      "newClosedAt": "2024-03-01T00:57:41.000Z"
+    },
+    {
+      "id": "0e8a7574-ae83-4a74-a719-88916da46493",
+      "client_id": "e09d8910-3f07-4647-bb5c-3642afaa89e8",
+      "loc": "Northwest Arkansas",
+      "paid": 7996.59,
+      "newClosedAt": "2026-02-26T23:58:12.000Z"
+    },
+    {
+      "id": "b4f62ee3-7209-4541-b800-5a3f2c702bbf",
+      "client_id": "c53d0a2a-5be2-4100-a695-1eb5f0f39f1d",
+      "loc": "Northwest Arkansas",
+      "paid": 4039.4,
+      "newClosedAt": "2025-07-24T13:56:31.000Z"
+    },
+    {
+      "id": "821d7475-a27e-42ee-b661-7e68a1b8d7b9",
+      "client_id": "bddef354-9324-497c-a957-e15135069542",
+      "loc": "Northwest Arkansas",
+      "paid": 4680.61,
+      "newClosedAt": "2024-12-10T20:17:06.000Z"
+    },
+    {
+      "id": "48332b46-1b0a-4fcd-834d-d9be3d36e572",
+      "client_id": "f6e7cade-4bde-424f-b484-59ef08bd840d",
+      "loc": "Northwest Arkansas",
+      "paid": 1651.4,
+      "newClosedAt": "2024-10-13T22:55:52.000Z"
+    },
+    {
+      "id": "8263fc22-0e6e-40f5-98cd-8fad3673a039",
+      "client_id": "ee2a0bd0-03c8-40c4-b291-3e12991aa921",
+      "loc": "Northwest Arkansas",
+      "paid": 2881.64,
+      "newClosedAt": "2025-05-22T16:34:19.000Z"
+    },
+    {
+      "id": "fc273749-18a9-44a2-ba3d-4085712cbe4f",
+      "client_id": "ea61c142-0d66-407c-a414-268b491b5817",
+      "loc": "Northwest Arkansas",
+      "paid": 2684.62,
+      "newClosedAt": "2024-09-04T00:28:15.000Z"
+    },
+    {
+      "id": "4adb1b54-a13f-4979-996e-474ac14e09ef",
+      "client_id": "0dd1579e-7071-430e-9817-d20b759e170b",
+      "loc": "Northwest Arkansas",
+      "paid": 2471.14,
+      "newClosedAt": "2026-03-28T21:42:19.000Z"
+    },
+    {
+      "id": "7c84cc82-b9ed-4204-8a8c-bd2a3d766874",
+      "client_id": "3cc054ed-2461-4cc6-9873-c644a5ed2aae",
+      "loc": "Northwest Arkansas",
+      "paid": 2024.41,
+      "newClosedAt": "2024-09-18T20:11:28.000Z"
+    },
+    {
+      "id": "bcd8fc60-9b1d-4f75-b0a1-05f6aee9635d",
+      "client_id": "613e3f77-8d92-47ec-a03b-c7ac0a1b1060",
+      "loc": "Northwest Arkansas",
+      "paid": 1320,
+      "newClosedAt": "2025-04-07T14:07:31.000Z"
+    },
+    {
+      "id": "978271f9-3758-468d-9d9e-d4784710dce9",
+      "client_id": "cc7ffb89-8c41-44bf-9b5c-77663a253174",
+      "loc": "Northwest Arkansas",
+      "paid": 655.77,
+      "newClosedAt": "2025-10-03T02:42:56.000Z"
+    },
+    {
+      "id": "012e186f-1d1b-463d-a466-af683b8cce54",
+      "client_id": "69c7003c-cb09-4bd7-9bb7-20d55168c4b2",
+      "loc": "Northwest Arkansas",
+      "paid": 1276.91,
+      "newClosedAt": "2025-10-16T22:47:24.000Z"
+    },
+    {
+      "id": "26391281-c1b8-420c-ae7d-e8f991c59aa8",
+      "client_id": "5551aa2f-3b26-405d-a0b1-d97e2f610988",
+      "loc": "Northwest Arkansas",
+      "paid": 562.5,
+      "newClosedAt": "2025-07-20T22:34:52.000Z"
+    }
+  ],
+  "errors": []
+}
