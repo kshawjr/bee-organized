@@ -179,12 +179,41 @@ const JOBS_QUERY = `
         client { id }
         invoices(first: 10) {
           nodes { id createdAt invoiceStatus amounts { total } }
+          pageInfo { hasNextPage endCursor }
         }
       }
       pageInfo { hasNextPage endCursor }
     }
   }
 `
+
+// Continuation pages for one job's invoices — mirrors lib/jobber-import.ts
+// JOB_INVOICES_QUERY/drainJobInvoices (42474fc): a job can out-page its
+// nested invoices(first: 10); without the drain, invoice 11+ is invisible
+// to the scan's counts.
+const JOB_INVOICES_QUERY = `
+  query GetJobInvoices($id: EncodedId!, $after: String) {
+    job(id: $id) {
+      invoices(first: 50, after: $after) {
+        nodes { id createdAt invoiceStatus amounts { total } }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+`
+
+async function drainJobInvoices(token, jobNode) {
+  let pageInfo = jobNode?.invoices?.pageInfo
+  while (pageInfo?.hasNextPage) {
+    const res = await jobberQueryThrottled(token, JOB_INVOICES_QUERY, { id: jobNode.id, after: pageInfo.endCursor })
+    if (res.errors?.length) throw new Error(`job_invoices (${jobNode.id}): ${JSON.stringify(res.errors).slice(0, 300)}`)
+    if (!res.data?.job) break   // job deleted mid-drain — nothing to keep
+    const conn = res.data.job.invoices
+    jobNode.invoices.nodes.push(...(conn?.nodes || []))
+    pageInfo = conn?.pageInfo
+    jobNode.invoices.pageInfo = pageInfo
+  }
+}
 
 async function fetchAllJobber(token, query, key) {
   const all = []
@@ -198,6 +227,11 @@ async function fetchAllJobber(token, query, key) {
     }
     const page = res.data?.[key]
     if (!page) break
+    if (key === 'jobs') {
+      for (const j of page.nodes) {
+        if (j.invoices?.pageInfo?.hasNextPage) await drainJobInvoices(token, j)
+      }
+    }
     all.push(...page.nodes)
     pages++
     if (pages % 10 === 0) process.stdout.write(`  [${key}] ${all.length} fetched...\n`)
