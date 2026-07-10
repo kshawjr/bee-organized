@@ -28625,11 +28625,28 @@ function AdminWebhookLogScreen() {
   const quietInput = { padding:'7px 10px', border:'0.5px solid rgba(0,0,0,0.15)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#1a1a18', background:'white', cursor:'pointer' }
   const colHead = { width:'70px', textAlign:'center', fontSize:'11px', color:'#8a8a84', flexShrink:0 }
 
-  async function copyMessage(e, ev) {
+  // Context-rich copy block — one click, pasteable into ClickUp/Slack as-is.
+  function buildCopyBlock(e) {
+    const record = e.client_name
+      || (e.jobber_item ? `Jobber #${e.jobber_item}` : null)
+      || e.entity_id || '—'
+    const loc = e.location_id ? (e.location_name || e.location_id) : 'unscoped'
+    return [
+      `Event: ${e.friendly} (${e.topic})`,
+      `Record: ${record} · ${loc}${e.lead_id ? ` · lead=${e.lead_id}` : ''}`,
+      `When: ${e.created_at}`,
+      `Status: ${e.processed ? 'processed ok' : 'processed fail'} · landed=${e.landed || 'n/a'}`,
+      `Reason: ${e.reason || '—'}`,
+      `Raw: ${e.message}`,
+    ].join('\n')
+  }
+
+  // copyKey distinguishes the two buttons per row: `${id}:ctx` / `${id}:raw`.
+  async function copyText(text, copyKey, ev) {
     ev.stopPropagation()
     try {
-      await navigator.clipboard.writeText(e.message)
-      setCopiedId(e.id)
+      await navigator.clipboard.writeText(text)
+      setCopiedId(copyKey)
       setTimeout(() => setCopiedId(null), 1400)
     } catch {}
   }
@@ -28686,10 +28703,19 @@ function AdminWebhookLogScreen() {
             <span style={colHead}>Processed</span>
             <span style={colHead}>Landed</span>
             <span style={{ ...colHead, textAlign:'right' }}>When</span>
+            <span aria-hidden="true" style={{ width:'12px', flexShrink:0 }} />
           </div>
           {filtered.map(e => {
-            const expandable = !!e.error || e.landed === 'stuck'
+            // Any failed row is expandable — the pre-Phase-1 failures have
+            // no error= token but their raw message must still be readable.
+            const expandable = !e.processed || e.landed === 'stuck'
             const isOpen = expanded === e.id
+            // Intake rows that never resolved a location show the slug the
+            // caller sent — a Make mapping typo reads straight off the row.
+            const record = e.client_name
+              || (e.jobber_item ? `Jobber #${e.jobber_item}` : null)
+              || (e.intake_slug ? `slug ${e.intake_slug}` : 'Unknown record')
+            const showLoc = e.location_name && !(!e.client_name && !e.jobber_item && e.intake_slug)
             return (
               <div key={e.id} style={{ borderTop:'0.5px solid rgba(0,0,0,0.08)' }}>
                 <button
@@ -28711,10 +28737,16 @@ function AdminWebhookLogScreen() {
                       <span style={{ fontSize:'10px', color:'#b5b3ac', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{e.topic}</span>
                     </span>
                     <span style={{ display:'block', fontSize:'11px', color:'#8a8a84', marginTop:'1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                      {e.client_name || (e.jobber_item ? `Jobber #${e.jobber_item}` : 'Unknown record')}
-                      {e.location_name ? ` · ${e.location_name}` : ''}
+                      {record}
+                      {showLoc ? ` · ${e.location_name}` : ''}
                       {e.stage_to && e.stage_from !== e.stage_to ? ` · stage → ${e.stage_to}` : ''}
                     </span>
+                    {/* Inline failure reason — readable without a click. */}
+                    {!e.processed && e.reason && (
+                      <span style={{ display:'block', fontSize:'11px', color:'rgba(121,31,31,0.75)', marginTop:'1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        {e.reason}
+                      </span>
+                    )}
                   </span>
                   <span style={{ width:'70px', textAlign:'center', flexShrink:0 }}>
                     <WebhookStatusChip kind={e.processed ? 'ok' : 'fail'} label={e.processed ? 'Processed without error' : 'Processing failed'} />
@@ -28728,10 +28760,14 @@ function AdminWebhookLogScreen() {
                   <span style={{ width:'70px', textAlign:'right', fontSize:'11px', color:'#8a8a84', flexShrink:0 }}>
                     {feedbackTimeAgo(e.created_at)}
                   </span>
+                  {/* Expand chevron — quiet, rotates when open. */}
+                  <span aria-hidden="true" style={{ width:'12px', textAlign:'center', fontSize:'12px', lineHeight:1, color:'#b5b3ac', flexShrink:0, transform: isOpen ? 'rotate(90deg)' : 'none', transition:'transform 0.15s ease' }}>
+                    {expandable ? '›' : ''}
+                  </span>
                 </button>
                 {isOpen && (
                   <div style={{ padding:'0 14px 12px 54px' }}>
-                    {e.error ? (
+                    {!e.processed ? (
                       <p style={{ fontSize:'11px', fontWeight:600, color:'#791F1F', margin:'0 0 4px' }}>Error</p>
                     ) : (
                       <p style={{ fontSize:'11px', fontWeight:600, color:'#92400E', margin:'0 0 4px' }}>
@@ -28740,11 +28776,16 @@ function AdminWebhookLogScreen() {
                     )}
                     <div style={{ display:'flex', alignItems:'flex-start', gap:'8px' }}>
                       <code style={{ flex:1, display:'block', fontSize:'11px', lineHeight:1.5, color:'#1a1a18', background:'rgba(0,0,0,0.03)', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:'8px', padding:'8px 10px', whiteSpace:'pre-wrap', wordBreak:'break-word' }}>
-                        {e.error || e.message}
+                        {e.message}
                       </code>
-                      <button onClick={ev => copyMessage(e, ev)} style={{ padding:'6px 10px', borderRadius:'7px', border:'0.5px solid rgba(0,0,0,0.15)', background:'white', fontSize:'11px', fontFamily:'inherit', color:'#1a1a18', cursor:'pointer', flexShrink:0 }}>
-                        {copiedId === e.id ? 'Copied ✓' : 'Copy'}
-                      </button>
+                      <span style={{ display:'flex', flexDirection:'column', gap:'6px', flexShrink:0 }}>
+                        <button onClick={ev => copyText(buildCopyBlock(e), `${e.id}:ctx`, ev)} style={{ padding:'6px 10px', borderRadius:'7px', border:'0.5px solid rgba(0,0,0,0.15)', background:'white', fontSize:'11px', fontFamily:'inherit', color:'#1a1a18', cursor:'pointer', whiteSpace:'nowrap' }}>
+                          {copiedId === `${e.id}:ctx` ? 'Copied ✓' : 'Copy details'}
+                        </button>
+                        <button onClick={ev => copyText(e.message, `${e.id}:raw`, ev)} style={{ padding:'6px 10px', borderRadius:'7px', border:'none', background:'transparent', fontSize:'11px', fontFamily:'inherit', color:'#8a8a84', cursor:'pointer', whiteSpace:'nowrap' }}>
+                          {copiedId === `${e.id}:raw` ? 'Copied ✓' : 'Copy raw'}
+                        </button>
+                      </span>
                     </div>
                   </div>
                 )}

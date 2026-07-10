@@ -33,6 +33,7 @@ export type ParsedSyncLogMessage = {
   skipped: boolean          // "[skipped] unknown topic=X" rows
   itemRaw: string | null    // item=… as written (b64 global id or numeric)
   leadId: string | null     // lead=<uuid> when the handler resolved one
+  slug: string | null       // slug=… (intake rows: the location slug as sent)
   stageFrom: string | null  // "(stage A → B)" when the lead stage moved
   stageTo: string | null
   error: string | null      // error=… (runs to " — " or end of message)
@@ -46,12 +47,13 @@ export function parseSyncLogMessage(message: string): ParsedSyncLogMessage {
   if (skippedMatch) {
     return {
       topic: skippedMatch[1], skipped: true, itemRaw: null, leadId: null,
-      stageFrom: null, stageTo: null, error: null, note: null,
+      slug: null, stageFrom: null, stageTo: null, error: null, note: null,
     }
   }
   const topic     = message.match(/(?:^|\s)topic=(\S+)/)?.[1] || null
   const itemRaw   = message.match(/(?:^|\s)item=(\S+)/)?.[1] || null
   const leadRaw   = message.match(/(?:^|\s)lead=(\S+)/)?.[1] || null
+  const slug      = message.match(/(?:^|\s)slug=(\S+)/)?.[1] || null
   const stage     = message.match(/\(stage (.+?) → (.+?)\)/)
   // error text runs until the " — note" separator or end of message.
   const error     = message.match(/(?:^|\s)error=([\s\S]+?)(?= — |$)/)?.[1] || null
@@ -61,11 +63,20 @@ export function parseSyncLogMessage(message: string): ParsedSyncLogMessage {
     skipped: false,
     itemRaw,
     leadId: leadRaw && UUID_RE.test(leadRaw) ? leadRaw : null,
+    slug,
     stageFrom: stage?.[1] || null,
     stageTo: stage?.[2] || null,
     error,
     note,
   }
+}
+
+// Human-readable failure reason for a processed=false row. Phase-1 rows
+// carry an explicit error= token; the 9 pre-Phase-1 failures don't, so
+// fall back to the " — " note tail, then the whole message — every
+// failed row must yield SOMETHING renderable inline.
+export function failureReason(parsed: ParsedSyncLogMessage, message: string): string {
+  return parsed.error || parsed.note || message
 }
 
 // ── topic metadata ────────────────────────────────────────────
@@ -127,12 +138,15 @@ export type WebhookLogEvent = {
   skipped: boolean
   processed: boolean          // sync_log.status === 'success'
   error: string | null
+  reason: string | null       // failureReason() — set on processed=false rows only
   landed: Landed              // null = N/A ("—")
   client_name: string | null
   lead_id: string | null
   location_id: string | null  // slug; null = event we couldn't scope
   location_name: string | null
   jobber_item: string | null  // numeric Jobber id (search target)
+  intake_slug: string | null  // slug= from the message (LEAD_INTAKE rows)
+  entity_id: string | null    // raw sync_log.entity_id (intake rows: email/phone)
   stage_from: string | null
   stage_to: string | null
   message: string
@@ -277,14 +291,17 @@ export async function fetchWebhookLogEvents(opts: {
       subRow?.lead_id ||
       null
 
+    const processed = row.status === 'success'
+
     return {
       id: row.id,
       created_at: row.created_at,
       topic,
       friendly: friendlyTopic(topic, parsed.skipped),
       skipped: parsed.skipped,
-      processed: row.status === 'success',
+      processed,
       error: parsed.error,
+      reason: processed ? null : failureReason(parsed, row.message || ''),
       landed: mapLandedStatus((row as any).landed_status),
       client_name: leadId ? leadName.get(leadId) || null : null,
       lead_id: leadId,
@@ -293,6 +310,8 @@ export async function fetchWebhookLogEvents(opts: {
         ? locName.get(row.location_id) || null
         : 'Unknown account',
       jobber_item: numericId,
+      intake_slug: parsed.slug,
+      entity_id: row.entity_id || null,
       stage_from: parsed.stageFrom,
       stage_to: parsed.stageTo,
       message: row.message || '',

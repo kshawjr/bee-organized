@@ -30,6 +30,7 @@ import {
   parseSyncLogMessage,
   mapLandedStatus,
   friendlyTopic,
+  failureReason,
 } from '@/lib/webhook-observability'
 
 const LEAD = '97ccfc85-ecba-4bc9-8495-b13e6a9e8507'
@@ -120,6 +121,43 @@ describe('parseSyncLogMessage', () => {
     const p = parseSyncLogMessage('topic=UNKNOWN item=unknown error=missing_fields account=unknown')
     expect(p.topic).toBe('UNKNOWN')
     expect(p.error).toBe('missing_fields account=unknown')
+  })
+
+  // Intake rows (app/api/leads/intake) — the slug= token is the
+  // diagnostic when the location never resolved (Make mapping typo).
+  it('parses slug= from an intake location_not_found row', () => {
+    const p = parseSyncLogMessage(
+      '[intake] topic=LEAD_INTAKE error=location_not_found slug=palm-beach — no location with this slug (check the Make location mapping)',
+    )
+    expect(p.topic).toBe('LEAD_INTAKE')
+    expect(p.slug).toBe('palm-beach')
+    expect(p.error).toBe('location_not_found slug=palm-beach')
+    expect(p.note).toContain('check the Make location mapping')
+  })
+
+  it('slug is null when the message has no slug= token', () => {
+    const p = parseSyncLogMessage('[intake] topic=LEAD_INTAKE error=invalid_json')
+    expect(p.slug).toBeNull()
+    expect(p.error).toBe('invalid_json')
+  })
+})
+
+describe('failureReason — inline reason for processed=false rows', () => {
+  it('prefers the error= token (Phase-1 message format)', () => {
+    const msg = 'topic=JOB_UPDATE item=1 error=quote_fetch: boom — extra context here'
+    expect(failureReason(parseSyncLogMessage(msg), msg)).toBe('quote_fetch: boom')
+  })
+
+  it('legacy row without error= falls back to the " — " note tail', () => {
+    const msg = 'topic=JOB_UPDATE item=150436177 — Job: null value in column "service_request_id" violates not-null constraint'
+    expect(failureReason(parseSyncLogMessage(msg), msg)).toBe(
+      'Job: null value in column "service_request_id" violates not-null constraint',
+    )
+  })
+
+  it('legacy row with neither error= nor note falls back to the whole message', () => {
+    const msg = 'topic=JOB_UPDATE item=150436177 failed hard'
+    expect(failureReason(parseSyncLogMessage(msg), msg)).toBe(msg)
   })
 })
 

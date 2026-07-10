@@ -12,15 +12,22 @@
 //      distinct (amber #FEF3C7 chip + tinted row) — it's the silent-stuck
 //      case the whole feature exists to surface.
 //
-//   3) FAILED-ROW ERROR: rows with an error (and amber rows) expand to
-//      show the message with a Copy affordance — that's what the admin
-//      pastes into a bug report.
+//   3) FAILED-ROW ERROR: ANY failed row shows its reason inline (no click)
+//      and expands — including the pre-Phase-1 rows with no error= token
+//      (reason falls back to the " — " tail, then the whole message).
+//      The expanded panel shows the full raw message with a context-rich
+//      Copy details block (pasteable into ClickUp/Slack) + a Copy raw
+//      secondary.
 //
 //   4) SEARCH + FILTERS: client-name/job-id/event-type search, pills for
 //      All / Failures / Didn't land, time-window pills, location select.
 //
 //   5) DEEP LINK: /admin?adminTab=webhooks&whFilter=…&whWindow=… — the
 //      Slack digest links land pre-filtered.
+//
+//   6) INTAKE ROWS: LEAD_INTAKE failures with no client/jobber item show
+//      the slug= from the message instead of 'Unknown record · Unknown
+//      account' — a Make mapping typo reads straight off the row.
 
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -76,11 +83,50 @@ describe('admin webhooks tab — indicators', () => {
     expect(screen).toContain("e.landed === 'stuck' ? 'rgba(254,243,199,0.35)' : 'transparent'")
   })
 
-  it('failed and stuck rows expand to the message with a Copy affordance', () => {
-    expect(screen).toContain("const expandable = !!e.error || e.landed === 'stuck'")
-    expect(screen).toContain('navigator.clipboard.writeText(e.message)')
-    expect(screen).toMatch(/\{e\.error \|\| e\.message\}/)
+  it('ANY failed row and stuck rows expand to the full raw message', () => {
+    // !e.processed (not !!e.error) — the 9 pre-Phase-1 failures have no
+    // error= token but must still open to their raw message.
+    expect(screen).toContain("const expandable = !e.processed || e.landed === 'stuck'")
+    expect(screen).toMatch(/<code[^>]*>\s*\{e\.message\}/)
     expect(screen).toContain("hadn't reached its expected state")
+  })
+
+  it('failed rows show the reason inline — muted red, single line, no click', () => {
+    expect(screen).toMatch(/\{!e\.processed && e\.reason && \(/)
+    // #791F1F-family tint + ellipsis, per the quiet-UI system
+    expect(screen).toMatch(/color:'rgba\(121,31,31,0\.75\)'[^}]*textOverflow:'ellipsis'/)
+  })
+
+  it('reason derivation is server-side with legacy fallbacks (lib)', () => {
+    const lib = readFileSync(join(process.cwd(), 'lib/webhook-observability.ts'), 'utf8')
+    expect(lib).toContain('return parsed.error || parsed.note || message')
+    expect(lib).toMatch(/reason: processed \? null : failureReason\(parsed, row\.message \|\| ''\)/)
+  })
+
+  it('expandable rows carry a chevron that rotates when open', () => {
+    expect(screen).toMatch(/transform: isOpen \? 'rotate\(90deg\)' : 'none'/)
+    expect(screen).toContain("{expandable ? '›' : ''}")
+  })
+
+  it('Copy details builds the context block; Copy raw stays as secondary', () => {
+    expect(screen).toMatch(/`Event: \$\{e\.friendly\} \(\$\{e\.topic\}\)`/)
+    expect(screen).toMatch(/`Record: \$\{record\} · \$\{loc\}\$\{e\.lead_id \? ` · lead=\$\{e\.lead_id\}` : ''\}`/)
+    expect(screen).toMatch(/`When: \$\{e\.created_at\}`/)
+    expect(screen).toMatch(/`Status: \$\{e\.processed \? 'processed ok' : 'processed fail'\} · landed=\$\{e\.landed \|\| 'n\/a'\}`/)
+    expect(screen).toMatch(/`Reason: \$\{e\.reason \|\| '—'\}`/)
+    expect(screen).toMatch(/`Raw: \$\{e\.message\}`/)
+    // both copy paths hit the clipboard, keyed per button
+    expect(screen).toContain('navigator.clipboard.writeText(text)')
+    expect(screen).toContain('buildCopyBlock(e), `${e.id}:ctx`')
+    expect(screen).toContain('copyText(e.message, `${e.id}:raw`')
+    expect(screen).toContain("'Copy details'")
+    expect(screen).toContain("'Copy raw'")
+  })
+
+  it('intake rows with no client/jobber item show the slug, not Unknown record · Unknown account', () => {
+    expect(screen).toMatch(/\|\| \(e\.intake_slug \? `slug \$\{e\.intake_slug\}` : 'Unknown record'\)/)
+    // the 'Unknown account' segment is suppressed when the slug is shown
+    expect(screen).toContain('const showLoc = e.location_name && !(!e.client_name && !e.jobber_item && e.intake_slug)')
   })
 })
 
