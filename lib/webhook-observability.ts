@@ -135,9 +135,12 @@ export type WebhookLogEvent = {
   message: string
 }
 
-export type FetchWindow = '24h' | '7d' | '30d' | 'all'
+// '12h' exists for the Slack digest cron; the dashboard pills only
+// offer 24h/7d/30d/all.
+export type FetchWindow = '12h' | '24h' | '7d' | '30d' | 'all'
 
 export const WINDOW_MS: Record<Exclude<FetchWindow, 'all'>, number> = {
+  '12h': 12 * 60 * 60 * 1000,
   '24h': 24 * 60 * 60 * 1000,
   '7d':  7 * 24 * 60 * 60 * 1000,
   '30d': 30 * 24 * 60 * 60 * 1000,
