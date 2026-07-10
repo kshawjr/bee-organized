@@ -53,6 +53,12 @@ vi.mock('@/lib/drip-lifecycle', () => ({
 vi.mock('@/lib/drip-send', () => ({
   sendDripStep: vi.fn(async () => ({ sent: true })),
 }))
+// sync_log module creates its own supabase client at import time — mock
+// it out (observability call shapes are pinned in
+// beta-intake-observability.test.ts, not here).
+vi.mock('@/lib/sync-log', () => ({
+  writeSyncLog: vi.fn(async () => {}),
+}))
 
 import { POST } from '@/app/api/leads/intake/route'
 import { startDripForLead } from '@/lib/drip-lifecycle'

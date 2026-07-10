@@ -21,10 +21,21 @@
 //
 // No service_requests row is created here — these are pre-Jobber leads,
 // the Hive pipeline will pick them up via stage filter.
+//
+// CONTACT POLICY: full_name + at least one of (valid email | phone with
+// ≥7 digits). FB/IG lead ads are often phone-only — requiring email
+// would 400 those and lose the lead. Phone-only leads are captured but
+// NOT drip-enrolled (see the no_email gate below).
+//
+// OBSERVABILITY: every authenticated outcome writes a sync_log row
+// (topic=LEAD_INTAKE) so failures surface on the admin Webhooks tab and
+// the Slack digest instead of dying in Vercel logs. Payload contract
+// for Make lives in INTAKE_CONTRACT.md.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { timingSafeEqual } from 'crypto'
 import { supabaseService } from '@/lib/supabase-service'
+import { writeSyncLog } from '@/lib/sync-log'
 import { applyDripSideEffects, startDripForLead } from '@/lib/drip-lifecycle'
 import { sendDripStep } from '@/lib/drip-send'
 import {
@@ -55,6 +66,37 @@ function splitName(full: string): { first: string | null; last: string | null } 
   }
 }
 
+// ─── sync_log observability ─────────────────────────────────────
+// Every AUTHENTICATED outcome writes a sync_log row so a failed Make
+// lead is visible on the admin Webhooks tab + the Slack digest instead
+// of dying in Vercel logs. 401s are deliberately NOT logged — mirrors
+// the Jobber receiver's signature-invalid exception (unauthenticated
+// noise must not be able to fill the log).
+//
+// The `topic=LEAD_INTAKE` token is load-bearing: fetchWebhookLogEvents
+// (lib/webhook-observability.ts) drops rows without a parseable topic.
+// sync_log.location_id holds the location SLUG — the dashboard resolves
+// location names by joining on locations.location_id, same as the
+// Jobber dispatcher. writeSyncLog is fail-soft internally; awaited
+// because Vercel serverless kills post-response work.
+async function logIntake(args: {
+  status: 'success' | 'error'
+  landed: 'landed' | 'na'
+  locationSlug: string | null
+  entityId: string
+  detail: string
+}) {
+  await writeSyncLog({
+    location_id: args.locationSlug,
+    entity_id: args.entityId,
+    entity_type: 'client',
+    direction: 'inbound',
+    status: args.status,
+    message: `[intake] topic=LEAD_INTAKE ${args.detail}`.slice(0, 1000),
+    landed_status: args.landed,
+  })
+}
+
 export async function POST(req: NextRequest) {
   if (!verifyApiKey(req.headers.get('x-api-key'))) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
@@ -64,6 +106,10 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json()
   } catch {
+    await logIntake({
+      status: 'error', landed: 'na', locationSlug: null,
+      entityId: 'unknown', detail: 'error=invalid_json',
+    })
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
   }
 
@@ -82,14 +128,37 @@ export async function POST(req: NextRequest) {
     metadata,
   } = body || {}
 
+  // Email-or-phone: FB/IG lead ads are often phone-only. An email that
+  // is present but unparseable is treated as absent (warned below) —
+  // never stored, never drip-targeted.
+  const validEmail: string | null =
+    typeof email === 'string' && EMAIL_RE.test(email) ? email.trim() : null
+  const phoneDigits = typeof phone === 'string' ? phone.replace(/\D/g, '') : ''
+  const hasPhone = phoneDigits.length >= 7
+  // Best pre-insert handle for error-row entity_id: no lead id exists yet.
+  const emailEntity =
+    typeof email === 'string' && email.trim() ? email.trim() : 'unknown'
+
   if (!location_slug || typeof location_slug !== 'string') {
+    await logIntake({
+      status: 'error', landed: 'na', locationSlug: null,
+      entityId: emailEntity, detail: 'error=location_slug required',
+    })
     return NextResponse.json({ error: 'location_slug required' }, { status: 400 })
   }
   if (!full_name || typeof full_name !== 'string' || !full_name.trim()) {
+    await logIntake({
+      status: 'error', landed: 'na', locationSlug: null,
+      entityId: emailEntity, detail: 'error=full_name required',
+    })
     return NextResponse.json({ error: 'full_name required' }, { status: 400 })
   }
-  if (!email || typeof email !== 'string' || !EMAIL_RE.test(email)) {
-    return NextResponse.json({ error: 'valid email required' }, { status: 400 })
+  if (!validEmail && !hasPhone) {
+    await logIntake({
+      status: 'error', landed: 'na', locationSlug: null,
+      entityId: emailEntity, detail: 'error=email_or_phone_required',
+    })
+    return NextResponse.json({ error: 'email_or_phone_required' }, { status: 400 })
   }
 
   // Slug lives in locations.location_id (Zoho-style ID, used as slug across repo).
@@ -100,12 +169,24 @@ export async function POST(req: NextRequest) {
     .maybeSingle()
 
   if (locErr) {
+    await logIntake({
+      status: 'error', landed: 'na', locationSlug: null,
+      entityId: location_slug,
+      detail: `error=location_lookup_failed slug=${location_slug} — ${locErr.message}`,
+    })
     return NextResponse.json(
       { error: 'location_lookup_failed', detail: locErr.message },
       { status: 500 },
     )
   }
   if (!location) {
+    // The slug is the diagnostic: a Make mapping typo must be readable
+    // straight off the dashboard row.
+    await logIntake({
+      status: 'error', landed: 'na', locationSlug: null,
+      entityId: location_slug,
+      detail: `error=location_not_found slug=${location_slug} — no location with this slug (check the Make location mapping)`,
+    })
     return NextResponse.json({ error: 'location_not_found' }, { status: 400 })
   }
 
@@ -120,14 +201,19 @@ export async function POST(req: NextRequest) {
   // only) — raw leads.phone is free-text and never matched DB-side.
   let possibleDuplicateIds: string[] = []
   const dedupWarnings: string[] = []
+  if (email && !validEmail) {
+    // Present-but-unparseable email: the lead proceeds on phone, but the
+    // dropped value must be visible in the response + sync_log message.
+    dedupWarnings.push('email_invalid_ignored')
+  }
   try {
     const strongRows = await queryLeadMatches(supabaseService, {
-      email,
+      email: validEmail,
       phone,
       locationUuid: location.id,
     })
     // (cast: the JS module's inferred return is a union TS won't narrow)
-    const verdict = classifyLeadMatches(strongRows, { email, phone }) as {
+    const verdict = classifyLeadMatches(strongRows, { email: validEmail, phone }) as {
       tier: 'solid' | 'in_question' | 'none'
       match?: any
       matchedOn?: string
@@ -139,7 +225,9 @@ export async function POST(req: NextRequest) {
         matched: verdict.match,
         matchedOn: verdict.matchedOn ?? 'email',
         location,
-        submission: { email, phone, address, city, state, zip, project_type, message },
+        submission: { email: validEmail, phone, address, city, state, zip, project_type, message },
+        source: source || 'web_form',
+        baseWarnings: dedupWarnings,
         now,
       })
     }
@@ -183,7 +271,7 @@ export async function POST(req: NextRequest) {
       name: full_name.trim(),
       first_name: first,
       last_name: last,
-      email: email.trim(),
+      email: validEmail,
       phone: phone || null,
       address: address || null,
       city: city || null,
@@ -204,6 +292,11 @@ export async function POST(req: NextRequest) {
     .single()
 
   if (insertErr || !lead) {
+    await logIntake({
+      status: 'error', landed: 'na', locationSlug: location.location_id,
+      entityId: emailEntity,
+      detail: `error=insert_failed — ${insertErr?.message || 'insert returned no row'}`,
+    })
     return NextResponse.json(
       { error: 'insert_failed', detail: insertErr?.message },
       { status: 500 },
@@ -267,7 +360,16 @@ export async function POST(req: NextRequest) {
   // set yet, so firing the drip would silently half-fail. Capture the lead
   // + touchpoint regardless, but only enroll active locations.
   let dripEnrolled = false
-  if (location.lifecycle_status === 'active') {
+  let dripSkippedReason: string | null = null
+  if (!validEmail) {
+    // CRITICAL: never enroll a phone-only lead. sendDripStep would stop
+    // the progress row with stopped_reason='no_email', and the merge path
+    // blocks re-enrollment on ANY existing progress row — enrolling here
+    // would permanently burn the lead's drip eligibility. Skipping keeps
+    // a later email-bearing resubmission eligible.
+    dripSkippedReason = 'no_email'
+    console.log(`[intake] lead ${lead.id} has no email — drip not enrolled`)
+  } else if (location.lifecycle_status === 'active') {
     // Mirror /api/leads POST: applyDripSideEffects starts the default drip
     // (prevStage=null signals a fresh start), then an inline sendDripStep
     // fires step 1 immediately instead of waiting for the hourly cron. Both
@@ -302,6 +404,21 @@ export async function POST(req: NextRequest) {
     )
   }
 
+  // Success row. Warnings never flip status — the lead row landed and
+  // that's the primary goal — but they must be readable off the row.
+  const dedupTier = possibleDuplicateIds.length
+    ? `in_question(${possibleDuplicateIds.length})`
+    : 'none'
+  await logIntake({
+    status: 'success', landed: 'landed', locationSlug: location.location_id,
+    entityId: lead.id,
+    detail:
+      `lead=${lead.id} source=${source || 'web_form'} dedup=${dedupTier}` +
+      ` drip_enrolled=${dripEnrolled}` +
+      (dripSkippedReason ? ` drip_skipped_reason=${dripSkippedReason}` : '') +
+      (warnings.length ? ` — warnings: ${warnings.join('; ')}` : ''),
+  })
+
   return NextResponse.json({
     success: true,
     lead_id: lead.id,
@@ -312,6 +429,7 @@ export async function POST(req: NextRequest) {
       lifecycle_status: location.lifecycle_status ?? null,
     },
     drip_enrolled: dripEnrolled,
+    ...(dripSkippedReason ? { drip_skipped_reason: dripSkippedReason } : {}),
     ...(possibleDuplicateIds.length
       ? { possible_duplicate_of: possibleDuplicateIds }
       : {}),
@@ -344,7 +462,7 @@ async function mergeResubmission(args: {
   matchedOn: string
   location: { id: string; name: string; location_id: string; lifecycle_status: string | null }
   submission: {
-    email: string
+    email: string | null
     phone?: string | null
     address?: string | null
     city?: string | null
@@ -353,13 +471,15 @@ async function mergeResubmission(args: {
     project_type?: string | null
     message?: string | null
   }
+  source: string
+  baseWarnings: string[]
   now: string
 }): Promise<NextResponse> {
-  const { matched, matchedOn, location, submission, now } = args
-  const warnings: string[] = []
+  const { matched, matchedOn, location, submission, source, now } = args
+  const warnings: string[] = [...args.baseWarnings]
 
   const incoming: Record<string, string | null> = {
-    email: submission.email.trim(),
+    email: submission.email || null,
     phone: submission.phone || null,
     address: submission.address || null,
     city: submission.city || null,
@@ -374,6 +494,7 @@ async function mergeResubmission(args: {
     }
   }
 
+  let fillUpdateFailed = false
   if (Object.keys(fills).length > 0) {
     fills.updated_at = now
     const { error: updErr } = await supabaseService
@@ -383,8 +504,20 @@ async function mergeResubmission(args: {
     if (updErr) {
       console.error('[intake] merge fill update failed', updErr)
       warnings.push(`merge_update_failed: ${updErr.message}`)
+      fillUpdateFailed = true
     }
   }
+
+  // The email the lead ACTUALLY has on record after the merge: what was
+  // already stored, else the submitted fill — but only if the fill write
+  // succeeded (enrolling against an email that never persisted would let
+  // sendDripStep stop the row with stopped_reason='no_email', permanently
+  // burning drip eligibility — same trap as the fresh-insert path).
+  const emailOnRecord: string | null = !isEmptyField(matched.email)
+    ? (matched.email as string)
+    : !fillUpdateFailed && typeof fills.email === 'string'
+      ? fills.email
+      : null
 
   try {
     const { error: tpErr } = await supabaseService.from('touchpoints').insert({
@@ -412,7 +545,11 @@ async function mergeResubmission(args: {
   // active-location gate as the fresh-insert path, and only drip-
   // eligible stages seed (mirrors resumePausedDripsForLead).
   let dripEnrolled = false
-  if (location.lifecycle_status === 'active') {
+  let dripSkippedReason: string | null = null
+  if (!emailOnRecord) {
+    dripSkippedReason = 'no_email'
+    console.log(`[intake] merged lead ${matched.id} has no email — drip not enrolled`)
+  } else if (location.lifecycle_status === 'active') {
     try {
       const { data: anyProgress, error: progErr } = await supabaseService
         .from('lead_drip_progress')
@@ -448,6 +585,16 @@ async function mergeResubmission(args: {
     }
   }
 
+  await logIntake({
+    status: 'success', landed: 'landed', locationSlug: location.location_id,
+    entityId: matched.id,
+    detail:
+      `lead=${matched.id} source=${source} merged (matched on ${matchedOn})` +
+      ` drip_enrolled=${dripEnrolled}` +
+      (dripSkippedReason ? ` drip_skipped_reason=${dripSkippedReason}` : '') +
+      (warnings.length ? ` — warnings: ${warnings.join('; ')}` : ''),
+  })
+
   return NextResponse.json({
     success: true,
     lead_id: matched.id,
@@ -460,6 +607,7 @@ async function mergeResubmission(args: {
       lifecycle_status: location.lifecycle_status ?? null,
     },
     drip_enrolled: dripEnrolled,
+    ...(dripSkippedReason ? { drip_skipped_reason: dripSkippedReason } : {}),
     ...(warnings.length ? { warnings } : {}),
   })
 }

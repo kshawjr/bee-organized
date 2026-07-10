@@ -96,6 +96,9 @@ export const TOPIC_FRIENDLY: Record<string, string> = {
   // Capture-everything rows from the dispatcher's pre-handler paths:
   UNPARSEABLE:        'Unparseable event',
   UNKNOWN:            'Unknown event',
+  // Inbound lead intake (app/api/leads/intake) — not a Jobber webhook,
+  // but the same silent-failure class rides the same log + digest.
+  LEAD_INTAKE:        'Lead intake',
 }
 
 export function friendlyTopic(topic: string | null, skipped: boolean): string {
