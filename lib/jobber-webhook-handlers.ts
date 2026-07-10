@@ -321,10 +321,11 @@ export async function handleRequestUpdate(ctx: HandlerCtx): Promise<HandlerResul
   const res = await fetchAndUpsertRequest(globalId, ctx)
   if ('error' in res) {
     if (res.error === 'request_not_found_in_jobber') {
+      const spec = DESTROY_SPECS.REQUEST_DESTROY
       const destroyed = await nullifyLeadJobberColumns(
         ctx,
-        'jobber_request_id',
-        ['jobber_request_id', 'jobber_assessment_id'],
+        spec.match,
+        spec.nulls,
         'REQUEST_UPDATE→soft-destroy',
       )
       return destroyed
@@ -746,6 +747,34 @@ type JobberMatchColumn =
   | 'jobber_invoice_id'
   | 'jobber_assessment_id'
 
+// Single source for which lead columns each destroy topic matches on and
+// nulls. The handlers below write from this map, and lib/webhook-landed.ts
+// verifies the same columns afterward — sharing it means the "landed"
+// check can never drift from what the handler actually nulled.
+export const DESTROY_SPECS: Record<
+  string,
+  { match: JobberMatchColumn; nulls: string[] }
+> = {
+  REQUEST_DESTROY:    { match: 'jobber_request_id',    nulls: ['jobber_request_id', 'jobber_assessment_id'] },
+  QUOTE_DESTROY:      { match: 'jobber_quote_id',      nulls: ['jobber_quote_id'] },
+  JOB_DESTROY:        { match: 'jobber_job_id',        nulls: ['jobber_job_id'] },
+  INVOICE_DESTROY:    { match: 'jobber_invoice_id',    nulls: ['jobber_invoice_id'] },
+  ASSESSMENT_DESTROY: { match: 'jobber_assessment_id', nulls: ['jobber_assessment_id'] },
+  PROPERTY_DESTROY:   { match: 'jobber_property_id',   nulls: ['jobber_property_id'] },
+  CLIENT_DESTROY: {
+    match: 'jobber_client_id',
+    nulls: [
+      'jobber_client_id',
+      'jobber_property_id',
+      'jobber_request_id',
+      'jobber_assessment_id',
+      'jobber_job_id',
+      'jobber_quote_id',
+      'jobber_invoice_id',
+    ],
+  },
+}
+
 // Shared "find lead by jobber_<x>_id, null these columns" helper used
 // by every destroy handler and the REQUEST_UPDATE soft-destroy fallback.
 async function nullifyLeadJobberColumns(
@@ -788,42 +817,26 @@ async function nullifyLeadJobberColumns(
 
 // REQUEST_DESTROY → null jobber_request_id + jobber_assessment_id (paired)
 export function handleRequestDestroy(ctx: HandlerCtx) {
-  return nullifyLeadJobberColumns(
-    ctx,
-    'jobber_request_id',
-    ['jobber_request_id', 'jobber_assessment_id'],
-    'REQUEST_DESTROY',
-  )
+  const spec = DESTROY_SPECS.REQUEST_DESTROY
+  return nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'REQUEST_DESTROY')
 }
 
 // QUOTE_DESTROY → null jobber_quote_id
 export function handleQuoteDestroy(ctx: HandlerCtx) {
-  return nullifyLeadJobberColumns(
-    ctx,
-    'jobber_quote_id',
-    ['jobber_quote_id'],
-    'QUOTE_DESTROY',
-  )
+  const spec = DESTROY_SPECS.QUOTE_DESTROY
+  return nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'QUOTE_DESTROY')
 }
 
 // JOB_DESTROY → null jobber_job_id
 export function handleJobDestroy(ctx: HandlerCtx) {
-  return nullifyLeadJobberColumns(
-    ctx,
-    'jobber_job_id',
-    ['jobber_job_id'],
-    'JOB_DESTROY',
-  )
+  const spec = DESTROY_SPECS.JOB_DESTROY
+  return nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'JOB_DESTROY')
 }
 
 // INVOICE_DESTROY → null jobber_invoice_id
 export function handleInvoiceDestroy(ctx: HandlerCtx) {
-  return nullifyLeadJobberColumns(
-    ctx,
-    'jobber_invoice_id',
-    ['jobber_invoice_id'],
-    'INVOICE_DESTROY',
-  )
+  const spec = DESTROY_SPECS.INVOICE_DESTROY
+  return nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'INVOICE_DESTROY')
 }
 
 // ASSESSMENT_DESTROY → null jobber_assessment_id (keep jobber_request_id)
@@ -832,12 +845,8 @@ export function handleInvoiceDestroy(ctx: HandlerCtx) {
 // log "unknown topic" if it ever fires. Harmless no-op if Jobber doesn't
 // support the topic at the subscription level.
 export function handleAssessmentDestroy(ctx: HandlerCtx) {
-  return nullifyLeadJobberColumns(
-    ctx,
-    'jobber_assessment_id',
-    ['jobber_assessment_id'],
-    'ASSESSMENT_DESTROY',
-  )
+  const spec = DESTROY_SPECS.ASSESSMENT_DESTROY
+  return nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'ASSESSMENT_DESTROY')
 }
 
 // PROPERTY_DESTROY → null jobber_property_id; address fields stay.
@@ -845,31 +854,15 @@ export function handleAssessmentDestroy(ctx: HandlerCtx) {
 // property doesn't invalidate the owner's notes about where the
 // customer lives.
 export function handlePropertyDestroy(ctx: HandlerCtx) {
-  return nullifyLeadJobberColumns(
-    ctx,
-    'jobber_property_id',
-    ['jobber_property_id'],
-    'PROPERTY_DESTROY',
-  )
+  const spec = DESTROY_SPECS.PROPERTY_DESTROY
+  return nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'PROPERTY_DESTROY')
 }
 
 // CLIENT_DESTROY → null ALL jobber_*_id columns (full link break).
 // The lead row stays as a Bee Hub-only record.
 export function handleClientDestroy(ctx: HandlerCtx) {
-  return nullifyLeadJobberColumns(
-    ctx,
-    'jobber_client_id',
-    [
-      'jobber_client_id',
-      'jobber_property_id',
-      'jobber_request_id',
-      'jobber_assessment_id',
-      'jobber_job_id',
-      'jobber_quote_id',
-      'jobber_invoice_id',
-    ],
-    'CLIENT_DESTROY',
-  )
+  const spec = DESTROY_SPECS.CLIENT_DESTROY
+  return nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'CLIENT_DESTROY')
 }
 
 // PROPERTY_CREATE / PROPERTY_UPDATE — Jobber-side is authoritative for
@@ -901,10 +894,11 @@ async function handlePropertyCore(
       itemId: ctx.itemId,
       globalId,
     })
+    const spec = DESTROY_SPECS.PROPERTY_DESTROY
     return nullifyLeadJobberColumns(
       ctx,
-      'jobber_property_id',
-      ['jobber_property_id'],
+      spec.match,
+      spec.nulls,
       `${noun}→soft-destroy`,
     )
   }

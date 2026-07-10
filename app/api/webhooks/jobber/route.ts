@@ -10,10 +10,19 @@
 //   3. Parse + extract { topic, account_id, item_id, occurred_at }.
 //   4. Look up the Bee Hub location via jobber_account_id.
 //   5. Dispatch to per-topic handler (lib/jobber-webhook-handlers.ts).
-//   6. Write a sync_log row (direction='inbound').
-//   7. Always 200 once we accept the request — Jobber stops retrying.
+//   6. Landed check (lib/webhook-landed.ts) — re-read the record's
+//      actual state and record landed/not_landed/na.
+//   7. Write a sync_log row (direction='inbound', landed_status set).
+//   8. Always 200 once we accept the request — Jobber stops retrying.
 //      Unknown topics / disconnected accounts / handler errors are
 //      logged but don't propagate as 5xx.
+//
+// EVERY signature-valid event writes a sync_log row — including
+// unparseable payloads, missing-field envelopes, and events from
+// accounts with no connected location (those log with location_id=null).
+// The one deliberate exception: signature-INVALID requests are 401'd
+// without a DB write — they are unauthenticated, and persisting them
+// would let anyone spam rows into sync_log.
 //
 // Replay protection: occurred_at older than 5 minutes is logged but
 // still processed (Jobber occasionally re-sends).
@@ -34,6 +43,7 @@ import {
   type HandlerResult,
 } from '@/lib/jobber-webhook-handlers'
 import { writeSyncLog } from '@/lib/sync-log'
+import { checkLanded, type LandedStatus } from '@/lib/webhook-landed'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -81,11 +91,24 @@ export async function POST(req: NextRequest) {
   }
 
   // 3. Parse + unwrap envelope.
+  // Everything past the signature check is a genuine Jobber event and
+  // gets a sync_log row — "capture every webhook" includes payloads we
+  // can't parse or can't attribute to a connected location. Those rows
+  // carry location_id=null (requires migrations/sync_log_landed_status.sql).
   let envelope: EventEnvelope
   try {
     envelope = JSON.parse(rawBody) as EventEnvelope
   } catch (err) {
     console.error('[jobber-webhook] bad_json', err)
+    await writeSyncLog({
+      location_id: null,
+      entity_id: 'unparseable',
+      entity_type: 'request',
+      direction: 'inbound',
+      status: 'error',
+      message: `topic=UNPARSEABLE error=bad_json — signature-valid body failed JSON.parse: ${rawBody.slice(0, 180)}`,
+      landed_status: 'na',
+    })
     return NextResponse.json({ error: 'bad_json' }, { status: 400 })
   }
 
@@ -93,6 +116,16 @@ export async function POST(req: NextRequest) {
 
   if (!topic || accountId == null || itemId == null) {
     console.error('[jobber-webhook] missing_fields', { topic, accountId, itemId })
+    await writeSyncLog({
+      location_id: null,
+      entity_id: itemId != null ? String(itemId) : 'unknown',
+      entity_type: topic ? topicToEntityType(topic) : 'request',
+      direction: 'inbound',
+      jobber_record_id: itemId != null ? String(itemId) : undefined,
+      status: 'error',
+      message: `topic=${topic || 'UNKNOWN'} item=${itemId ?? 'unknown'} error=missing_fields account=${accountId ?? 'unknown'}`,
+      landed_status: 'na',
+    })
     return NextResponse.json({ error: 'missing_fields' }, { status: 400 })
   }
 
@@ -110,11 +143,21 @@ export async function POST(req: NextRequest) {
   const location = await lookupLocationByJobberAccountId(accountId)
   if (!location) {
     // Common case: an account that was once connected then disconnected.
-    // Acknowledge so Jobber stops retrying. No sync_log because we have
-    // no location_id to scope it to.
+    // Acknowledge so Jobber stops retrying. Logged with location_id=null
+    // so the event is still visible on the admin dashboard.
     console.warn(
       `[jobber-webhook] no_location_for_account topic=${topic} account=${accountId} item=${itemId}`,
     )
+    await writeSyncLog({
+      location_id: null,
+      entity_id: String(itemId),
+      entity_type: topicToEntityType(topic),
+      direction: 'inbound',
+      jobber_record_id: String(itemId),
+      status: 'success',
+      message: `topic=${topic} item=${itemId} — skipped: no connected location for account=${accountId}`,
+      landed_status: 'na',
+    })
     return NextResponse.json({ ok: true, skipped: 'unknown_account' })
   }
 
@@ -128,6 +171,7 @@ export async function POST(req: NextRequest) {
       jobber_record_id: String(itemId),
       status: 'success',
       message: `[skipped] unknown topic=${topic}`,
+      landed_status: 'na',
     })
     return NextResponse.json({ ok: true, skipped: 'unknown_topic' })
   }
@@ -148,7 +192,12 @@ export async function POST(req: NextRequest) {
     result = { processed: false, error: String(err?.message || err) }
   }
 
-  // 7. sync_log.
+  // 7. Landed check — did the record actually reach its intended state?
+  // Recorded, not inferred from "no error threw" (lib/webhook-landed.ts).
+  // checkLanded never throws (records 'na' on internal failure).
+  const landed: LandedStatus = await checkLanded(ctx, result)
+
+  // 8. sync_log.
   const entityType = topicToEntityType(topic)
   const status = result.error ? 'error' : 'success'
   const stagePart =
@@ -169,6 +218,7 @@ export async function POST(req: NextRequest) {
     jobber_record_id: String(itemId),
     status,
     message,
+    landed_status: landed,
   })
 
   // Always 200 after we accept it — Jobber retries on 5xx, and the
@@ -176,6 +226,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     processed: result.processed,
+    landed,
     lead_id: result.lead_id || null,
     lead_stage: result.lead_stage || null,
     prev_stage: result.prev_stage || null,
