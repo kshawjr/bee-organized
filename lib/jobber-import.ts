@@ -86,6 +86,10 @@ export const QUOTES_QUERY = `
   }
 `
 
+// Nested invoices carry their own pageInfo: a job can exceed the nested
+// `first` (recurring/installment billing — prod has jobs at 10+), and a
+// capped fetch silently drops invoice 11+ from the import. The import
+// route drains hasNextPage jobs via JOB_INVOICES_QUERY before staging.
 export const JOBS_QUERY = `
   query GetJobs($after: String) {
     jobs(first: 50, after: $after) {
@@ -99,9 +103,25 @@ export const JOBS_QUERY = `
             id createdAt jobberWebUri invoiceStatus
             amounts { subtotal taxAmount discountAmount total }
           }
+          pageInfo { hasNextPage endCursor }
         }
       }
       pageInfo { hasNextPage endCursor }
+    }
+  }
+`
+
+// Continuation pages for one job's invoices (see JOBS_QUERY comment).
+export const JOB_INVOICES_QUERY = `
+  query GetJobInvoices($id: EncodedId!, $after: String) {
+    job(id: $id) {
+      invoices(first: 50, after: $after) {
+        nodes {
+          id createdAt jobberWebUri invoiceStatus
+          amounts { subtotal taxAmount discountAmount total }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
     }
   }
 `
@@ -147,6 +167,11 @@ export const SINGLE_QUOTE_QUERY = `
   }
 `
 
+// Nested invoices here are shape-mirroring only — no webhook handler
+// consumes them for upserts (invoice rows arrive one-at-a-time via the
+// INVOICE_* topics / SINGLE_INVOICE_QUERY), so the `first: 10` cap does
+// not drop data on this path. If a consumer is ever added, drain with
+// JOB_INVOICES_QUERY like the bulk import does.
 export const SINGLE_JOB_QUERY = `
   query GetJob($id: EncodedId!) {
     job(id: $id) {
@@ -184,6 +209,30 @@ export const SINGLE_PROPERTY_QUERY = `
     }
   }
 `
+
+// Fetches the remaining invoice pages for a job whose nested connection
+// reports hasNextPage, appending them to jobNode.invoices.nodes in place.
+// runQuery abstracts the caller's executor (the import route passes a
+// jobberQueryThrottled wrapper). Fail-loud on errors: a partial drain
+// staged silently would be the exact data loss this exists to prevent.
+export async function drainJobInvoices(
+  runQuery: (query: string, variables: Record<string, any>) => Promise<{ data?: any; errors?: any[] }>,
+  jobNode: any,
+): Promise<void> {
+  let pageInfo = jobNode?.invoices?.pageInfo
+  while (pageInfo?.hasNextPage) {
+    const res = await runQuery(JOB_INVOICES_QUERY, { id: jobNode.id, after: pageInfo.endCursor })
+    if (res.errors?.length) {
+      throw new Error(`job_invoices error (job ${jobNode.id}): ${JSON.stringify(res.errors)}`)
+    }
+    // Job deleted between the page fetch and the drain — nothing to keep.
+    if (!res.data?.job) break
+    const conn = res.data.job.invoices
+    jobNode.invoices.nodes.push(...(conn?.nodes || []))
+    pageInfo = conn?.pageInfo
+    jobNode.invoices.pageInfo = pageInfo
+  }
+}
 
 // ── constants ─────────────────────────────────────────────────────
 

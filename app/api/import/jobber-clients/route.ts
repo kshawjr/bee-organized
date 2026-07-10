@@ -60,6 +60,7 @@ import {
   REQUESTS_QUERY,
   QUOTES_QUERY,
   JOBS_QUERY,
+  drainJobInvoices,
   upsertLead,
   upsertServiceRequest,
   determineLeadStage,
@@ -432,6 +433,7 @@ export async function POST(req: NextRequest) {
           // Defence-in-depth: allFetchedUpfront gates the token fetch; if
           // control reaches here without a token, something's wrong.
           if (!jobberToken) throw new Error(`internal: jobberToken not initialized (entity=${entity})`)
+          const token = jobberToken   // narrowed const — closures below keep the non-null type
           let cursor: string | null = cursors[entity] || null
           for (;;) {
             const vars = cursor ? { after: cursor } : {}
@@ -441,6 +443,20 @@ export async function POST(req: NextRequest) {
             }
             const page = res.data?.[entity]
             if (!page) break
+            // Jobs can out-page their nested invoices connection (first: 10
+            // in JOBS_QUERY) — drain the remainder before the node is staged,
+            // so everything downstream (upserts, stage classification) sees
+            // the full invoice set.
+            if (entity === 'jobs') {
+              for (const j of page.nodes) {
+                if (j.invoices?.pageInfo?.hasNextPage) {
+                  await drainJobInvoices(
+                    (q, v) => jobberQueryThrottled(token, q, v, { onThrottlePause }),
+                    j,
+                  )
+                }
+              }
+            }
             if (page.nodes.length) {
               // Upsert with dedup: crash-in-window recovery, a resuming job,
               // or a rival segment that briefly overlapped can safely re-stage
