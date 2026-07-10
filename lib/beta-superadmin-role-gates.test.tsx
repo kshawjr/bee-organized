@@ -8,7 +8,7 @@
 //      behind the explicit legacy gate. Configure / Recycle Bin / Webhooks
 //      stay super_admin-only.
 //
-//   2) RENEWALS: KEPT visible to corporate (Kevin's call, 7/10). The Billing
+//   2) RENEWALS: KEPT visible to corporate (ratified by Kevin, 7/10 PM). The Billing
 //      cluster's per-item gating (Conversions and Pricing individually
 //      super_admin-wrapped, Renewals not) is deliberate — flip by wrapping
 //      the renewals item in a role === 'super_admin' spread if reversed.
