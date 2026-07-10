@@ -1,0 +1,116 @@
+{
+  "ranAt": "2026-07-10T13:46:15.879Z",
+  "mode": "dry-run",
+  "countersBefore": {
+    "scheduled_stage_emails": 6,
+    "lead_drip_progress": 3,
+    "welcome_scheduled": 2,
+    "welcome_sent": 1
+  },
+  "jobFlips": [
+    {
+      "job_id": "cfb8268c-b8e7-47c9-a198-8d8522b2328c",
+      "jobber_job_id": "144601792",
+      "lead_id": "bb90a338-8725-422d-a652-96d3d1e94db1",
+      "loc": "loc_portland",
+      "raw": "unscheduled"
+    },
+    {
+      "job_id": "f03cc218-2edb-40dc-9fba-df539875b5e6",
+      "jobber_job_id": "140874075",
+      "lead_id": "8b4a559d-484a-48dd-a1da-abc765e43e5b",
+      "loc": "loc_portland",
+      "raw": "unscheduled"
+    },
+    {
+      "job_id": "56bca629-e560-4d38-8b88-4c1731d85726",
+      "jobber_job_id": "134040071",
+      "lead_id": "ace5ea1d-3574-45e5-871d-0b2849f88776",
+      "loc": "loc_portland",
+      "raw": "unscheduled"
+    },
+    {
+      "job_id": "cbf86e4a-6db2-451f-8ba6-4f9bc4bcb5ca",
+      "jobber_job_id": "147733860",
+      "lead_id": "868dbd7f-9f5a-42a6-a704-fb9c204596af",
+      "loc": "loc_portland",
+      "raw": "unscheduled"
+    },
+    {
+      "job_id": "40a13aa3-b302-418f-ac07-0a8fb281ce73",
+      "jobber_job_id": "118310357",
+      "lead_id": "56842e41-7d3b-444f-bda7-3eaf448661ac",
+      "loc": "loc_nwarkansas",
+      "raw": "unscheduled"
+    }
+  ],
+  "untouched": [
+    {
+      "job_id": "ff3594fc-60e3-4473-a0dd-460ec90864f4",
+      "jobber_job_id": "136884331",
+      "loc": "loc_palmbeach",
+      "raw": "action_required"
+    },
+    {
+      "job_id": "a776b0ae-8e49-40f9-961d-45b2e3c8ede8",
+      "jobber_job_id": "140492122",
+      "loc": "loc_portland",
+      "raw": "action_required"
+    },
+    {
+      "job_id": "ccf9ed1d-6eb2-422c-8d6c-340e5691cce2",
+      "jobber_job_id": "130703785",
+      "loc": "loc_nwarkansas",
+      "raw": "action_required"
+    }
+  ],
+  "stageMoves": [
+    {
+      "lead_id": "bb90a338-8725-422d-a652-96d3d1e94db1",
+      "name": "Jade Maniscalco",
+      "loc": "loc_portland",
+      "from": "Job in Progress",
+      "to": "Nurturing",
+      "moves": true
+    },
+    {
+      "lead_id": "8b4a559d-484a-48dd-a1da-abc765e43e5b",
+      "name": "Vanessa Stergin",
+      "loc": "loc_portland",
+      "from": "Job in Progress",
+      "to": "Nurturing",
+      "moves": true
+    },
+    {
+      "lead_id": "ace5ea1d-3574-45e5-871d-0b2849f88776",
+      "name": "Karen Fleischmann",
+      "loc": "loc_portland",
+      "from": "Job in Progress",
+      "to": "Nurturing",
+      "moves": true
+    },
+    {
+      "lead_id": "868dbd7f-9f5a-42a6-a704-fb9c204596af",
+      "name": "Stacey Wilson",
+      "loc": "loc_portland",
+      "from": "Job in Progress",
+      "to": "Estimate Sent",
+      "moves": true
+    },
+    {
+      "lead_id": "56842e41-7d3b-444f-bda7-3eaf448661ac",
+      "name": "Tami Wollner",
+      "loc": "loc_nwarkansas",
+      "from": "Job in Progress",
+      "to": "Nurturing",
+      "moves": true
+    }
+  ],
+  "errors": [],
+  "countersAfter": {
+    "scheduled_stage_emails": 6,
+    "lead_drip_progress": 3,
+    "welcome_scheduled": 2,
+    "welcome_sent": 1
+  }
+}
