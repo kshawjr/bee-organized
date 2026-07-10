@@ -435,6 +435,33 @@ describe('vitals strip', () => {
     await unmount()
   })
 
+  it('ClientProfile: $0 engagement sum does not mask the leads.paid_amount denorm — chips Past client', async () => {
+    // Aggregate is always numeric once loaded, so a ?? fallback never fires;
+    // paid history on the lead row must still win the Past existence test.
+    const base = profilePayload()
+    profileOver = {
+      client: { ...base.client, paid_amount: 500 },
+      engagements: [], touchpoints: [],
+      aggregates: { lifetime_paid: 0, open_pipeline: 0, owing: 0, open_count: 0, total_count: 0 },
+    }
+    const { host, unmount } = await mountProfile()
+    expect(stripValues(host).map(p => p.textContent)).toEqual(['Past client', '—', '—', '—'])
+    await unmount()
+  })
+
+  it('ClientProfile: a $0 Closed Won engagement still chips Client — won rank ignores dollars', async () => {
+    profileOver = {
+      engagements: [
+        { id: 'eng-z', title: 'Comped job', stage: 'Closed Won', founded_by: 'request', created_at: daysAgo(60), closed_at: daysAgo(30), total_invoiced: 0, total_paid: 0, balance_owing: 0, quotes: [], jobs: [], invoices: [], assessments: [] },
+      ],
+      touchpoints: [],
+      aggregates: { lifetime_paid: 0, open_pipeline: 0, owing: 0, open_count: 0, total_count: 1 },
+    }
+    const { host, unmount } = await mountProfile()
+    expect(stripValues(host).map(p => p.textContent)).toEqual(['Client', '—', '—', '—'])
+    await unmount()
+  })
+
   it("PersonCard: Status/Inquired/Last touch/Next — Next is '—' pre-engagement, snooze fills it", async () => {
     const pc = await mountPerson()
     expect(stripLabels(pc.host)).toEqual(['Status', 'Inquired', 'Last touch', 'Next'])

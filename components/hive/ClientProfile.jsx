@@ -108,7 +108,10 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   } : null
   const status = c ? deriveClientStatus(
     {
-      id: c.id, email: c.email, phone: c.phone, paidAmount: agg?.lifetime_paid ?? c.paid_amount,
+      // || not ??: the aggregate is always numeric once loaded, so ?? never
+      // falls back — a $0 engagement sum must not mask the leads.paid_amount
+      // denorm for the Past existence test (paidAmount > 0).
+      id: c.id, email: c.email, phone: c.phone, paidAmount: agg?.lifetime_paid || c.paid_amount,
       created: c.created_at,
       outreachTimeline: touches.map(t => ({ type: t.kind, occurred_at: t.occurred_at })),
       wonEngagements: wonSummary,
