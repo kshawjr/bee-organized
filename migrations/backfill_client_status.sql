@@ -1,7 +1,8 @@
 -- migrations/backfill_client_status.sql
 --
--- ⚠️ NOT YET RUN — written 2026-07-09, awaiting Kevin's review of the
--- projected counts before executing. Run in the Supabase SQL editor.
+-- Written 2026-07-09; execution authorized by Kevin 2026-07-10 after the
+-- stale-won engagement repair (4dc7478) cleaned the underlying data.
+-- Run in the Supabase SQL editor.
 --
 -- Adds + populates leads.client_status with the SAME precedence the live
 -- derivation uses (components/hive/shared/clientStatus.js). The column
@@ -33,10 +34,15 @@
 -- The live derivation stays authoritative; re-run this whenever the
 -- stored column needs to be trued up (it is idempotent).
 --
--- Projected breakdown (prod read 2026-07-09, 2,243 in-scope of 2,283):
---   Client 697 · Nurturing 1,483 · Active 57 · New 3 · Attempting 1 ·
---   no_contact 2 · Past 0 — per location: Portland 433 Client /
---   Palm Beach 190 / NW Arkansas 74.
+-- Projected breakdown (prod read 2026-07-10 late, post-4dc7478 repair,
+-- 2,243 in-scope of 2,283):
+--   Client 843 · Nurturing 1,322 · Active 75 · New 1 · no_contact 2 ·
+--   Past 0 · Attempting 0 — per location Client: Portland 546 /
+--   Palm Beach 206 / NW Arkansas 91. (Earlier stale projections: 697
+--   Client on 7/9 pre-requestless-backfill; 779 Client / 63 Past on
+--   7/10 pre-repair — the 63 Past were misfounded stale-Lost wins.)
+--   Live-app activity between projection and run may shift a count by
+--   ±1-2; the UPDATE derives at run time, so stored == derived always.
 
 ALTER TABLE leads
   ADD COLUMN IF NOT EXISTS client_status text;
@@ -103,7 +109,7 @@ WHERE l.is_junk IS NOT TRUE;
 -- ── Verify after running ─────────────────────────────────────────────
 -- SELECT client_status, COUNT(*) FROM leads
 -- WHERE is_junk IS NOT TRUE GROUP BY 1 ORDER BY 2 DESC;
--- Expect ~697 'Client' rows and zero won clients under 'Nurturing':
+-- Expect ~843 'Client' rows and zero won clients under 'Nurturing':
 -- SELECT COUNT(*) FROM leads l
 -- WHERE l.client_status = 'Nurturing'
 --   AND EXISTS (SELECT 1 FROM engagements e
