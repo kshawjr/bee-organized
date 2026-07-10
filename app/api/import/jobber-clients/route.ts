@@ -71,6 +71,7 @@ import {
 } from '@/lib/jobber-import'
 import {
   ensureEngagementForServiceRequest,
+  resolveEngagementForChild,
   attachToEngagement,
   maybeAdvanceEngagementStage,
 } from '@/lib/engagements'
@@ -566,6 +567,12 @@ export async function POST(req: NextRequest) {
         const reqByClient: Record<string, any[]> = {}
         const quotesByReq: Record<string, any[]> = {}
         const jobsByReq:   Record<string, any[]> = {}
+        // Requestless quotes/jobs (created directly on a client in Jobber,
+        // no service request) join by client{id} instead — they used to be
+        // fetched, staged, then silently dropped here, leaving the client
+        // with zero history (the requestless-import gap).
+        const reqlessQuotesByClient: Record<string, any[]> = {}
+        const reqlessJobsByClient:   Record<string, any[]> = {}
 
         for (const r of requests) {
           const cid = r.client?.id
@@ -577,11 +584,21 @@ export async function POST(req: NextRequest) {
         }
         for (const q of quotes) {
           const rid = q.request?.id
-          if (rid && reqIds.has(rid)) (quotesByReq[rid] ||= []).push(q)
+          if (rid) {
+            if (reqIds.has(rid)) (quotesByReq[rid] ||= []).push(q)
+          } else {
+            const cid = q.client?.id
+            if (cid && unwrittenClientIds.has(cid)) (reqlessQuotesByClient[cid] ||= []).push(q)
+          }
         }
         for (const j of jobs) {
           const rid = j.request?.id
-          if (rid && reqIds.has(rid)) (jobsByReq[rid] ||= []).push(j)
+          if (rid) {
+            if (reqIds.has(rid)) (jobsByReq[rid] ||= []).push(j)
+          } else {
+            const cid = j.client?.id
+            if (cid && unwrittenClientIds.has(cid)) (reqlessJobsByClient[cid] ||= []).push(j)
+          }
         }
 
         // ─── set _has* flags so determineStage works on flat queries ──
@@ -715,6 +732,73 @@ export async function POST(req: NextRequest) {
               }
             }
 
+            // ─── requestless quotes/jobs (no service request in Jobber) ──
+            // Written with service_request_id null; engagements resolve via
+            // resolveEngagementForChild (rule 5 founds when no open
+            // engagement exists — never the SR-founding path). Quotes first
+            // so a requestless job's Job.quote link (resolved inside
+            // upsertJob) can find its quote row.
+            for (const quote of (reqlessQuotesByClient[client.id] || [])) {
+              const qRes = await upsertQuote(quote, null, leadId, locSlug)
+              qRes.created ? stats.quotes_created++ : stats.quotes_updated++
+              try {
+                const engId = await resolveEngagementForChild({
+                  childTable: 'quotes',
+                  childId: qRes.id,
+                  leadId,
+                  locationSlug: locSlug,
+                })
+                if (engId) {
+                  await attachToEngagement('quotes', qRes.id, engId)
+                  await maybeAdvanceEngagementStage(engId, { mode: 'backfill' })
+                }
+              } catch (err: any) {
+                stats.engagement_errors++
+                console.error('[engagements] requestless quote dual-write failed', err?.message || err)
+              }
+            }
+            for (const job of (reqlessJobsByClient[client.id] || [])) {
+              const jRes = await upsertJob(job, null, leadId, locSlug)
+              jRes.created ? stats.jobs_created++ : stats.jobs_updated++
+              const rlInvoiceIds: string[] = []
+              for (const inv of (job.invoices?.nodes || [])) {
+                const iRes = await upsertInvoice(inv, jRes.id, null, leadId, locSlug)
+                iRes.created ? stats.invoices_created++ : stats.invoices_updated++
+                rlInvoiceIds.push(iRes.id)
+                // Same historical-paid roll-up as the request-joined path.
+                if (iRes.status === 'paid') {
+                  const paidTotal = inv.amounts?.total ? parseFloat(inv.amounts.total) : null
+                  await supabaseService
+                    .from('leads')
+                    .update({
+                      paid_amount: paidTotal,
+                      balance_owing: 0,
+                      invoice_paid_at: inv.createdAt || new Date().toISOString(),
+                      updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', leadId)
+                }
+              }
+              try {
+                const engId = await resolveEngagementForChild({
+                  childTable: 'jobs',
+                  childId: jRes.id,
+                  leadId,
+                  quoteDbId: jRes.quote_db_id ?? null,
+                  title: job.title || null,
+                  locationSlug: locSlug,
+                })
+                if (engId) {
+                  await attachToEngagement('jobs', jRes.id, engId)
+                  for (const iid of rlInvoiceIds) await attachToEngagement('invoices', iid, engId)
+                  await maybeAdvanceEngagementStage(engId, { mode: 'backfill' })
+                }
+              } catch (err: any) {
+                stats.engagement_errors++
+                console.error('[engagements] requestless job dual-write failed', err?.message || err)
+              }
+            }
+
             // ─── lead-level stage classification ──
             // Now that every sub-record is written, classify the lead from
             // its full history (latest engagement wins) and write the stage
@@ -722,8 +806,17 @@ export async function POST(req: NextRequest) {
             // never cleared here (an owner-junked lead stays junked).
             // Deliberately NOT touched: paused, drips, webhook stage logic.
             const clientReqs     = reqByClient[client.id] || []
-            const clientQuotes   = clientReqs.flatMap((r: any) => quotesByReq[r.id] || [])
-            const clientJobs     = clientReqs.flatMap((r: any) => jobsByReq[r.id] || [])
+            // Requestless quotes/jobs count toward the stage derivation too —
+            // clientInvoices derives from clientJobs, so requestless jobs'
+            // nested invoices ride along automatically.
+            const clientQuotes   = [
+              ...clientReqs.flatMap((r: any) => quotesByReq[r.id] || []),
+              ...(reqlessQuotesByClient[client.id] || []),
+            ]
+            const clientJobs     = [
+              ...clientReqs.flatMap((r: any) => jobsByReq[r.id] || []),
+              ...(reqlessJobsByClient[client.id] || []),
+            ]
             const clientInvoices = clientJobs.flatMap((j: any) => j.invoices?.nodes || [])
             const leadEmail = client.emails?.find((e: any) => e.primary)?.address ?? client.emails?.[0]?.address ?? null
             const leadPhone = client.phones?.find((p: any) => p.primary)?.number  ?? client.phones?.[0]?.number  ?? null

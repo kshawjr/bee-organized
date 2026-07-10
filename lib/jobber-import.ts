@@ -68,12 +68,17 @@ export const REQUESTS_QUERY = `
   }
 `
 
+// client{id} rides alongside request{id} so requestless quotes (created
+// directly on a client, no service request) can be joined by client —
+// without it they fetch, stage, and then silently drop in the import's
+// request-keyed join (the requestless-import gap).
 export const QUOTES_QUERY = `
   query GetQuotes($after: String) {
     quotes(first: 50, after: $after) {
       nodes {
         id createdAt jobberWebUri
         request { id }
+        client { id }
         amounts { subtotal taxAmount discountAmount total }
       }
       pageInfo { hasNextPage endCursor }
@@ -88,6 +93,7 @@ export const JOBS_QUERY = `
         id createdAt jobberWebUri title jobStatus startAt completedAt total
         request { id }
         quote { id }
+        client { id }
         invoices(first: 10) {
           nodes {
             id createdAt jobberWebUri invoiceStatus
@@ -135,6 +141,7 @@ export const SINGLE_QUOTE_QUERY = `
     quote(id: $id) {
       id createdAt jobberWebUri quoteStatus
       request { id client { id } }
+      client { id }
       amounts { subtotal taxAmount discountAmount total }
     }
   }
@@ -504,9 +511,13 @@ export async function upsertAssessment(
   return { id: data.id, created: !existing }
 }
 
+// service_request_id is null for requestless quotes (created directly on
+// a client in Jobber — no service request exists). Requires the
+// quotes.service_request_id NOT NULL constraint to be dropped; until that
+// migration runs, a null insert fails loudly (caught per-record upstream).
 export async function upsertQuote(
   quote: any,
-  service_request_id: string,
+  service_request_id: string | null,
   lead_id: string,
   location_id: string,
 ) {

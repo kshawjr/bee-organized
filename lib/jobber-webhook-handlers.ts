@@ -369,23 +369,31 @@ async function handleQuoteCore(
     })
     return { processed: false, error: 'quote_not_found_in_jobber' }
   }
-  const requestGlobalId = quoteRec.request?.id
-  if (!requestGlobalId) return { processed: false, error: 'quote_missing_request' }
+  // Requestless quotes (created directly on a client — live quote-first
+  // bookings) fall back to client{id}, same shape as handleJobCore. They
+  // used to hard-drop here as quote_missing_request.
+  let sr: { id: string; lead_id: string } | null = null
+  let leadId: string | null = null
 
-  let sr = await findServiceRequestByJobberId(requestGlobalId, ctx.location.location_id)
-  let leadId: string
-
-  if (sr) {
+  if (quoteRec.request?.id) {
+    sr = await findServiceRequestByJobberId(quoteRec.request.id, ctx.location.location_id)
+    if (!sr) {
+      const parent = await fetchAndUpsertRequest(quoteRec.request.id, ctx)
+      if ('error' in parent) return { processed: false, error: parent.error }
+      sr = { id: parent.service_request_id, lead_id: parent.lead_id }
+    }
     leadId = sr.lead_id
-  } else {
-    const parent = await fetchAndUpsertRequest(requestGlobalId, ctx)
-    if ('error' in parent) return { processed: false, error: parent.error }
-    sr = { id: parent.service_request_id, lead_id: parent.lead_id }
-    leadId = parent.lead_id
+  } else if (quoteRec.client?.id) {
+    const existing = await findLeadByJobberClientId(quoteRec.client.id, ctx.location.location_id)
+    if (existing) leadId = existing.id
+  }
+
+  if (!leadId) {
+    return { processed: false, error: 'quote_no_matching_lead' }
   }
 
   // Upsert the quotes row (sub-table source of truth).
-  const qRes = await upsertQuote(quoteRec, sr.id, leadId, ctx.location.location_id)
+  const qRes = await upsertQuote(quoteRec, sr?.id || null, leadId, ctx.location.location_id)
 
   // Dual-write (step 3): resolve + attach + forward-only stage advance.
   // Additive: leads.stage promotion below is untouched.
@@ -394,7 +402,7 @@ async function handleQuoteCore(
       childTable: 'quotes',
       childId: qRes.id,
       leadId,
-      serviceRequestId: sr.id,
+      serviceRequestId: sr?.id || null,
       locationSlug: ctx.location.location_id,
     })
     if (engId) {
