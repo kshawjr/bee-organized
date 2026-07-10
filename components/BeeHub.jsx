@@ -29365,6 +29365,9 @@ function SuperAdminLayout({
       items: [
         { key:'content',   label:'Content',     icon:'✏️' },
         { key:'configure', label:'Configure',   icon:'⚙️' },
+        // Webhook observability is operational/sensitive — super_admin only,
+        // matching the legacy AdminScreen gate (corporate stays out).
+        { key:'webhooks',  label:'Webhooks',    icon:'🔌' },
         { key:'bin',       label:'Recycle Bin', icon:'🗑' },
       ],
     }] : []),
@@ -29381,6 +29384,7 @@ function SuperAdminLayout({
     profile:     { label:'Profile',        cluster:'My Account'   },
     content:     { label:'Content',        cluster:'Advanced'     },
     configure:   { label:'Configure',      cluster:'Advanced'     },
+    webhooks:    { label:'Webhooks',       cluster:'Advanced'     },
     bin:         { label:'Recycle Bin',    cluster:'Advanced'     },
   }
 
@@ -29594,6 +29598,15 @@ function SuperAdminLayout({
               <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'3px' }}>Configure</h1>
             </div>
             <ConfigureTab />
+          </div>
+        )
+
+      case 'webhooks':
+        return (
+          // Like Feedback, the screen carries its own modern header
+          // (headline + counts) — reduced wrapper padding, no serif h1.
+          <div style={{ padding:'14px 8px 48px' }}>
+            <AdminWebhookLogScreen />
           </div>
         )
 
@@ -31494,6 +31507,18 @@ export default function App({
   }
   const [franchiseRole, setFranchiseRole]   = useState(initialFranchiseRole ?? 'owner') // owner|manager|light|readonly
   const [activeNav, setActiveNav]           = useState(ROUTE_TO_NAV[initialRoute] || 'home')
+  // Deep link: /admin?adminTab=webhooks (the Slack failure digest links land
+  // here). The legacy AdminScreen parses this param itself, but elevated users
+  // render SuperAdminLayout instead — map it to the layout's initial section.
+  // super_admin only: webhook internals aren't a corporate surface, matching
+  // the legacy showWebhooksTab gate.
+  const [adminDeepLinkSection, setAdminDeepLinkSection] = useState(null)
+  useEffect(() => {
+    try {
+      const t = new URLSearchParams(window.location.search).get('adminTab')
+      if (t === 'webhooks' && role === 'super_admin') setAdminDeepLinkSection('webhooks')
+    } catch {}
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [viewAsTarget, setViewAsTarget]     = useState(null)
   const [viewAsUser, setViewAsUser]         = useState(null) // full user object when viewing as specific user
   const [locFilter, setLocFilter]           = useState(initialLocFilter ?? 'all')
@@ -32105,7 +32130,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           initialLocations={initialLocations}
           isMobile={isMobile}
           topOffset={TOTAL_TOP}
-          initialSection='dashboard'
+          initialSection={adminDeepLinkSection || 'dashboard'}
           onExitAdmin={()=>nav('hive')}
         />
       </div>
