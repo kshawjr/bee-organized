@@ -43,6 +43,11 @@ import { writeSyncLog } from '@/lib/sync-log'
 import { requireIanaTimezone } from '@/lib/drip-time'
 import { upsertServiceRequest } from '@/lib/jobber-import'
 import { attachToEngagement } from '@/lib/engagements'
+import {
+  buildContactEditFields,
+  resolveContactWriteback,
+  type ContactWriteback,
+} from '@/lib/jobber-contact-writeback'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -153,6 +158,9 @@ function pickPrimaryAddress(lead: any): {
 // it under `filter:` — that no longer validates against the current schema
 // and returns: InputObject 'ClientFilterAttributes' doesn't accept argument
 // 'searchTerm'.
+// emails/phones carry their EncodedIds so a matched client's contact info
+// can be updated via emailsToEdit/phonesToEdit without a second fetch — the
+// contact write-back (lib/jobber-contact-writeback.ts) diffs against these.
 const FIND_CLIENT_QUERY = /* GraphQL */ `
   query FindClient($searchTerm: String!) {
     clients(searchTerm: $searchTerm, first: 10) {
@@ -161,8 +169,8 @@ const FIND_CLIENT_QUERY = /* GraphQL */ `
         firstName
         lastName
         companyName
-        emails { address primary }
-        phones { number primary }
+        emails { id address primary }
+        phones { id number primary }
       }
     }
   }
@@ -414,6 +422,7 @@ export async function POST(
   // ─────────────────────────────────────────────────────────────────
   let jobberClientGlobalId: string | null = null
   let matchStatus: 'matched_existing' | 'new_client' = 'new_client'
+  let matchedClientNode: any = null
 
   if (email) {
     const search = await jobberGraphQL(locationSlug, FIND_CLIENT_QUERY, {
@@ -431,21 +440,31 @@ export async function POST(
     if (exactMatch) {
       jobberClientGlobalId = exactMatch.id
       matchStatus = 'matched_existing'
+      matchedClientNode = exactMatch
     }
   }
 
   // ─────────────────────────────────────────────────────────────────
   // 2. CREATE or UPDATE the client
   // ─────────────────────────────────────────────────────────────────
+  let contactWriteback: ContactWriteback = { phone: 'unchanged', email: 'unchanged' }
+
   if (jobberClientGlobalId) {
-    // Matched: refresh name in case it changed locally. ClientEditInput no
-    // longer accepts a bare `phones` field — it expects phonesToAdd /
-    // phonesToEdit / phonesToDelete keyed by EncodedId. Without the existing
-    // phone IDs to target, we'd just duplicate phones every save, so phone
-    // updates on existing clients are skipped here.
+    // Matched: refresh name in case it changed locally, and sync phone/email
+    // through phonesToEdit/phonesToAdd (emails mirror) using the entry ids
+    // the search already fetched — fetch-at-push, nothing stored, never a
+    // *ToDelete. Values already present on the client are omitted entirely.
+    const { fields: contactFields, plan: contactPlan } = buildContactEditFields(
+      { phone, email },
+      {
+        phones: matchedClientNode?.phones || [],
+        emails: matchedClientNode?.emails || [],
+      },
+    )
     const editInput: Record<string, any> = {
       firstName: firstName || null,
       lastName:  lastName  || null,
+      ...contactFields,
     }
     const edit = await jobberMutation(locationSlug, CLIENT_EDIT_MUTATION, {
       clientId: jobberClientGlobalId,
@@ -457,6 +476,7 @@ export async function POST(
       console.warn('[send-to-jobber] clientEdit userErrors',
         JSON.stringify(edit.userErrors))
     }
+    contactWriteback = resolveContactWriteback(contactPlan, !!edit.userErrors?.length)
   } else {
     const createInput: Record<string, any> = {
       firstName: firstName || null,
@@ -464,6 +484,10 @@ export async function POST(
     }
     if (email) createInput.emails = [{ address: email, primary: true }]
     if (phone) createInput.phones = [{ number: phone, primary: true }]
+    contactWriteback = {
+      phone: phone ? 'added' : 'unchanged',
+      email: email ? 'added' : 'unchanged',
+    }
     const create = await jobberMutation(locationSlug, CLIENT_CREATE_MUTATION, {
       input: createInput,
     })
@@ -751,7 +775,8 @@ export async function POST(
       `client=${jobberClientId}` +
       (jobberRequestId    ? `; request=${jobberRequestId}`    : '') +
       (jobberAssessmentId ? `; assessment=${jobberAssessmentId}` : '') +
-      (engagementId       ? `; engagement=${engagementId}`    : ''),
+      (engagementId       ? `; engagement=${engagementId}`    : '') +
+      `; contact=phone:${contactWriteback.phone},email:${contactWriteback.email}`,
   })
 
   return NextResponse.json({
@@ -761,5 +786,6 @@ export async function POST(
     jobber_property_id:   jobberPropertyId,
     jobber_request_id:    jobberRequestId,
     jobber_assessment_id: jobberAssessmentId,
+    contact_writeback:    contactWriteback,
   })
 }
