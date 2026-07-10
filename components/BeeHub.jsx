@@ -29346,6 +29346,10 @@ function SuperAdminLayout({
         { key:'locations', label:'Locations', icon:'🏢' },
         ...(showFeedback ? [{ key:'feedback', label:'Feedback', icon:'🐛', badge:feedbackPending }] : []),
         { key:'users', label:'Users', icon:'👥' },
+        // Content (Hive Hub Guide / manual editor) matches the legacy
+        // AdminScreen gate — corporate edits it too, so it can't live in the
+        // super_admin-only Advanced cluster.
+        ...(role === 'super_admin' || role === 'corporate' ? [{ key:'content', label:'Content', icon:'✏️' }] : []),
       ],
     },
     ...(role === 'super_admin' || role === 'corporate' ? [{
@@ -29363,7 +29367,6 @@ function SuperAdminLayout({
     ...(role === 'super_admin' ? [{
       header: 'Advanced',
       items: [
-        { key:'content',   label:'Content',     icon:'✏️' },
         { key:'configure', label:'Configure',   icon:'⚙️' },
         // Webhook observability is operational/sensitive — super_admin only,
         // matching the legacy AdminScreen gate (corporate stays out).
@@ -29381,8 +29384,8 @@ function SuperAdminLayout({
     conversions: { label:'Conversions Due',cluster:'Billing'      },
     renewals:    { label:'Renewals',       cluster:'Billing'      },
     pricing:     { label:'Pricing',        cluster:'Billing'      },
+    content:     { label:'Content',        cluster:'Operations'   },
     profile:     { label:'Profile',        cluster:'My Account'   },
-    content:     { label:'Content',        cluster:'Advanced'     },
     configure:   { label:'Configure',      cluster:'Advanced'     },
     webhooks:    { label:'Webhooks',       cluster:'Advanced'     },
     bin:         { label:'Recycle Bin',    cluster:'Advanced'     },
@@ -31517,6 +31520,9 @@ export default function App({
     try {
       const t = new URLSearchParams(window.location.search).get('adminTab')
       if (t === 'webhooks' && role === 'super_admin') setAdminDeepLinkSection('webhooks')
+      // Feedback is a broader surface than webhooks — both elevated roles,
+      // mirroring the legacy AdminScreen showFeedbackTab gate.
+      else if (t === 'feedback' && (role === 'super_admin' || role === 'corporate')) setAdminDeepLinkSection('feedback')
     } catch {}
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [viewAsTarget, setViewAsTarget]     = useState(null)
