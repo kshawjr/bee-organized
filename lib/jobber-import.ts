@@ -62,7 +62,7 @@ export const REQUESTS_QUERY = `
       nodes {
         id createdAt jobberWebUri
         client { id }
-        assessment { id startAt }
+        assessment { id startAt isComplete completedAt }
       }
       pageInfo { hasNextPage endCursor }
     }
@@ -150,7 +150,7 @@ export const SINGLE_REQUEST_QUERY = `
                emails { address primary }
                phones  { number  primary }
                billingAddress { street city province postalCode } }
-      assessment { id startAt }
+      assessment { id startAt isComplete completedAt }
       quotes(first: 5) { nodes { id } }
       jobs(first: 5)   { nodes { id invoices(first: 5) { nodes { id } } } }
     }
@@ -612,7 +612,21 @@ export async function upsertAssessment(
       ? { jobber_assessment_id: extractJobberId(request.assessment.id) }
       : {}),
     scheduled_at: request.assessment.startAt || null,
-    status: 'scheduled',
+    // Completion state (Jobber Assessment.isComplete/completedAt — added to
+    // REQUESTS_QUERY / SINGLE_REQUEST_QUERY alongside id/startAt). completed_at
+    // is the load-bearing done-signal every hive derivation keys off
+    // (!a.completed_at); status is the display string. isComplete is Boolean!
+    // in Jobber (always present on a real payload); the else branch only fires
+    // for a malformed/partial payload — there we keep the historical
+    // 'scheduled' insert default but DON'T touch completed_at, so a re-sync
+    // can never null a recorded completion. Jobber's model is binary (a
+    // cancelled assessment is deleted → the request has no assessment), so
+    // this mapping is non-lossy.
+    ...(typeof request.assessment.isComplete === 'boolean'
+      ? request.assessment.isComplete
+        ? { status: 'completed', completed_at: request.assessment.completedAt || null }
+        : { status: 'scheduled', completed_at: null }
+      : { status: 'scheduled' }),
     source: 'jobber',
     jobber_synced_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),

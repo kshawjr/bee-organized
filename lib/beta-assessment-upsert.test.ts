@@ -175,3 +175,62 @@ describe('upsertAssessment idempotency', () => {
     expect(h.state.rows).toHaveLength(2)
   })
 })
+
+describe('upsertAssessment completion mapping (isComplete/completedAt)', () => {
+  const completeReq = {
+    id: REQUEST.id,
+    assessment: {
+      ...REQUEST.assessment,
+      isComplete: true,
+      completedAt: '2026-04-09T18:00:00+00:00',
+    },
+  }
+  const incompleteReq = {
+    id: REQUEST.id,
+    assessment: { ...REQUEST.assessment, isComplete: false, completedAt: null },
+  }
+
+  it('isComplete:true → status:completed + completed_at from completedAt', async () => {
+    await upsertAssessment(completeReq, 'sr-c', 'lead-1', 'loc-1')
+    const p = h.state.upserts[0].payload
+    expect(p.status).toBe('completed')
+    expect(p.completed_at).toBe('2026-04-09T18:00:00+00:00')
+  })
+
+  it('isComplete:false → status:scheduled + completed_at:null', async () => {
+    await upsertAssessment(incompleteReq, 'sr-i', 'lead-1', 'loc-1')
+    const p = h.state.upserts[0].payload
+    expect(p.status).toBe('scheduled')
+    expect(p.completed_at).toBeNull()
+  })
+
+  it('isComplete:true with null completedAt → status:completed, completed_at:null (no bad date)', async () => {
+    await upsertAssessment(
+      { id: REQUEST.id, assessment: { ...REQUEST.assessment, isComplete: true, completedAt: null } },
+      'sr-cn', 'lead-1', 'loc-1',
+    )
+    const p = h.state.upserts[0].payload
+    expect(p.status).toBe('completed')
+    expect(p.completed_at).toBeNull()
+  })
+
+  it('guard: malformed payload (no isComplete boolean) never writes completed_at — keeps scheduled default, cannot null a recorded completion on re-sync', async () => {
+    // REQUEST has no isComplete → else branch: status default 'scheduled',
+    // completed_at omitted entirely (preserved on update, not nulled).
+    await call()
+    const p = h.state.upserts[0].payload
+    expect(p.status).toBe('scheduled')
+    expect('completed_at' in p).toBe(false)
+  })
+
+  it('re-sync from complete→incomplete flips both back (Jobber un-complete is honored)', async () => {
+    await upsertAssessment(completeReq, 'sr-flip', 'lead-1', 'loc-1')
+    await upsertAssessment(
+      { id: REQUEST.id, assessment: { ...REQUEST.assessment, isComplete: false, completedAt: null } },
+      'sr-flip', 'lead-1', 'loc-1',
+    )
+    expect(h.state.rows).toHaveLength(1)
+    expect(h.state.rows[0].status).toBe('scheduled')
+    expect(h.state.rows[0].completed_at).toBeNull()
+  })
+})
