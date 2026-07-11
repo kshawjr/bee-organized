@@ -420,6 +420,17 @@ describe('board closed rail', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('Part 5: the collapsed rail reads as a real column — filled NEUTRAL token bg, not transparent', () => {
+    const html = renderToString(
+      <EngagementBoard engagements={OPEN_ENGAGEMENTS as any} closedCount={1375} />
+    )
+    // The rail button carries the gray-family (closed/past) token fill —
+    // neutral, never red/green — so it doesn't wash into the warm canvas.
+    const railStyle = html.match(/aria-label="Expand closed engagements"[^>]*style="([^"]*)"/)?.[1] || ''
+    expect(railStyle).toContain('background:#F1EFE8')
+    expect(railStyle).not.toContain('background:transparent')
+  })
+
   it('each segment fetches its OWN server-narrowed capped window; revisits hit the cache', async () => {
     const container = mount(
       <EngagementBoard engagements={OPEN_ENGAGEMENTS as any} closedCount={1375} />

@@ -337,8 +337,14 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
           style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px',
             width: '34px', minHeight: '200px', padding: '12px 0', flexShrink: 0,
-            border: T.border.divider, borderRadius: T.radius.inset,
-            background: 'transparent', cursor: 'pointer', fontFamily: 'inherit',
+            // Display-only presence (Part 5): a filled NEUTRAL gray tint
+            // (the closed/past chip family — never red/green; the rail
+            // holds won+lost mixed) + a slightly stronger border than the
+            // pipeline columns' hairline, so the collapsed rail reads as a
+            // real "Closed" column against the warm canvas instead of
+            // washing into it. Still secondary — muted, thin, collapsed.
+            border: T.border.control, borderRadius: T.radius.inset,
+            background: T.family.gray.bg, cursor: 'pointer', fontFamily: 'inherit',
           }}
         >
           <IconChevronRight size={12} style={{ transform: 'rotate(180deg)', color: T.ink.quiet }} />

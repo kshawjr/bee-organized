@@ -119,6 +119,13 @@ const btnByText = (c: Element, t: string) => buttons(c).find(b => (b.textContent
 const cardOf = (c: Element, name: string) =>
   ([...c.querySelectorAll('[draggable="true"]')] as HTMLElement[]).find(d => (d.textContent || '').includes(name))
 
+// The masthead ··· menu (RecordMenu) portals its items to <body>; the
+// trigger lives in the panel container.
+const recordTrigger = (c: Element) => c.querySelector('[data-bee-record-menu-trigger]') as HTMLButtonElement | null
+const openRecordMenu = async (c: Element) => { await fire(recordTrigger(c)!) }
+const menuItem = (t: string) =>
+  [...document.querySelectorAll('[data-bee-record-menu] button')].find(b => (b.textContent || '').includes(t)) as HTMLButtonElement | undefined
+
 // ── A) the linked/local predicate ─────────────────────────────
 describe('isJobberLinked — any child record makes an engagement linked', () => {
   it('true for each child family, false only for zero children', () => {
@@ -166,32 +173,42 @@ describe('EngagementPanel — no Advance for any engagement; the action-bar Clos
     expect(patchCalls.length).toBe(0)
   })
 
-  it('action-bar Close… opens the shared confirm for LINKED too; cancel writes nothing (moved out of the ··· menu, build 2)', async () => {
+  it('close actions live in the ··· menu (no action-bar Close button); opening Lost shows the reason wizard, cancel writes nothing', async () => {
     const { container } = await mountPanel(LINKED, { ...emptyChildren(), quotes: [{ id: 'q1', status: 'sent', total: 800 }] })
-    await fire(btnByText(container, 'Close…')!)
-    expect(container.textContent).toContain('Close as')
-    expect(container.querySelector('select')).toBeTruthy() // Lost reason picker (Lost is the default)
+    // The standalone action-bar Close… button is gone (Part 1).
+    expect(btnByText(container, 'Close…')).toBeUndefined()
+    expect(recordTrigger(container)).toBeTruthy()
+    await openRecordMenu(container)
+    expect(menuItem('Mark as Closed Won')).toBeTruthy()
+    expect(menuItem('Mark as Closed Lost')).toBeTruthy()
+    await fire(menuItem('Mark as Closed Lost')!)
+    expect(container.textContent).toContain('Close as lost')  // wizard open
+    expect(container.textContent).toContain('No response')     // reason option
     await fire(btnByText(container, 'Cancel')!)
-    expect(container.textContent).not.toContain('Close as lost')
     expect(patchCalls.length).toBe(0)
   })
 
   it('confirming Lost PATCHes the terminal stage + reason through the one write path', async () => {
     const { container, onChanged } = await mountPanel(LOCAL, emptyChildren())
-    await fire(btnByText(container, 'Close…')!)
-    await fire(btnByText(container, 'Close as lost')!)
+    await openRecordMenu(container)
+    await fire(menuItem('Mark as Closed Lost')!)
+    await fire(btnByText(container, 'Next')!)          // reason → follow-up step
+    await fire(btnByText(container, 'Close as lost')!)  // commit
     expect(patchCalls.length).toBe(1)
     expect(patchCalls[0].body.stage).toBe(CLOSED_LOST)
     expect(patchCalls[0].body.closed_reason).toBe('lost_no_response')
     expect(onChanged).toHaveBeenCalledWith(LOCAL.id, { stage: CLOSED_LOST })
   })
 
-  it('Won gate: owing invoices disable the Won segment and its confirm', async () => {
+  it('Won gate: owing invoices block the Won wizard at the invoice step (Next disabled, no write)', async () => {
     const owing = { ...emptyChildren(), jobs: [{ id: 'j1', completed_at: daysAgo(1) }], invoices: [{ id: 'i1', status: 'sent', total: 900, balance_owing: 900 }] }
-    const { container } = await mountPanel(eng({ id: 'e-owing', stage: 'Final Processing' }), owing)
-    await fire(btnByText(container, 'Close…')!)
-    const wonSeg = buttons(container).find(b => (b.textContent || '') === 'Won')!
-    expect(wonSeg.disabled).toBe(true)
+    const { container } = await mountPanel(eng({ id: 'e-owing', stage: 'Final Processing', total_invoiced: 900 }), owing)
+    await openRecordMenu(container)
+    await fire(menuItem('Mark as Closed Won')!)
+    expect(container.textContent).toContain('Still owing')
+    const next = btnByText(container, 'Next')! as HTMLButtonElement
+    expect(next.disabled).toBe(true)
+    expect(patchCalls.length).toBe(0)
   })
 
   it('drift-corrected stage from the GET propagates to the board via onChanged', async () => {
@@ -331,24 +348,41 @@ describe('EngagementBoard — pipeline columns are not drop targets; drag-to-clo
 })
 
 // ── D) one popup, one write path — source-pinned ──────────────
-describe('shared close flow — single component, single write path', () => {
-  it('panel and board both render shared/CloseEngagementConfirm; neither carries a private close PATCH', () => {
+describe('shared close flow — single write path across confirm + wizards', () => {
+  it('the panel mounts the ··· menu + wizards, the board mounts the drag-confirm; NONE fork the write body', () => {
     const panel = readFileSync('components/hive/EngagementPanel.jsx', 'utf8')
     const board = readFileSync('components/hive/EngagementBoard.jsx', 'utf8')
-    expect(panel).toContain("from './shared/CloseEngagementConfirm'")
+    // Panel close-out lives in the ··· menu → the Won/Lost wizards.
+    expect(panel).toContain("from './shared/RecordMenu'")
+    expect(panel).toContain("from './shared/CloseLostWizard'")
+    expect(panel).toContain("from './shared/CloseWonWizard'")
+    // Board keeps the drag-to-close confirm.
     expect(board).toContain("from './shared/CloseEngagementConfirm'")
-    // The terminal close body (closed_reason) is built ONLY inside the
-    // shared component — no fork can drift the write path.
+    // The terminal close body (closed_reason) is built ONLY in the shared
+    // write helper — the host card files never fork it.
     expect(panel).not.toContain('closed_reason')
     expect(board).not.toContain('closed_reason')
-    const shared = readFileSync('components/hive/shared/CloseEngagementConfirm.jsx', 'utf8')
-    expect(shared).toContain('closed_reason')
-    expect(shared).toMatch(/method: 'PATCH'/)
+    // THE single write path: commitEngagementClose in closeEngagement.js.
+    const helper = readFileSync('components/hive/shared/closeEngagement.js', 'utf8')
+    expect(helper).toContain('closed_reason')
+    expect(helper).toMatch(/method: 'PATCH'/)
+    // Every human close UI routes through the one helper.
+    for (const f of [
+      'components/hive/shared/CloseEngagementConfirm.jsx',
+      'components/hive/shared/CloseLostWizard.jsx',
+      'components/hive/shared/CloseWonWizard.jsx',
+    ]) {
+      expect(readFileSync(f, 'utf8')).toContain('commitEngagementClose')
+    }
   })
 
-  it('the automated stage writers never import the human popup', () => {
+  it('the automated stage writers never import a human close UI or the client write helper', () => {
     for (const f of ['lib/engagements.ts', 'lib/jobber-webhook-handlers.ts', 'app/api/import/jobber-clients/route.ts', 'app/api/engagements/[id]/route.ts']) {
-      expect(readFileSync(f, 'utf8')).not.toContain('CloseEngagementConfirm')
+      const src = readFileSync(f, 'utf8')
+      expect(src).not.toContain('CloseEngagementConfirm')
+      expect(src).not.toContain('CloseLostWizard')
+      expect(src).not.toContain('CloseWonWizard')
+      expect(src).not.toContain('commitEngagementClose')
     }
   })
 })

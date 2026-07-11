@@ -95,8 +95,9 @@ export async function GET(
     // panel's activity stream.
     supabaseService.from('touchpoints').select('id, kind, method, label, notes, occurred_at, user_id').eq('engagement_id', id).order('occurred_at', { ascending: false }).limit(50),
     // Location name for the v2 masthead's client line; jobber_access_token
-    // presence tells the assignee picker whether to mark unmapped users.
-    supabaseService.from('locations').select('name, jobber_access_token').eq('id', engagement.location_uuid).maybeSingle(),
+    // presence tells the assignee picker whether to mark unmapped users;
+    // reviews_link feeds the Close-Won wizard's Google-review offer.
+    supabaseService.from('locations').select('name, jobber_access_token, reviews_link').eq('id', engagement.location_uuid).maybeSingle(),
     // LIVE drip only (stopped/completed excluded — Kevin's rule: the
     // banner is gone once the drip ends; paused still shows). Same
     // active-row filter the outreach-timeline endpoint uses.
@@ -219,6 +220,7 @@ export async function GET(
       id: engagement.client_id,
       location_name: locRes.data?.name ?? null,
       jobber_connected: !!locRes.data?.jobber_access_token,
+      reviews_link: locRes.data?.reviews_link ?? null,
       name: clientRes.data?.name ?? 'Unknown',
       email: clientRes.data?.email ?? null,
       phone: clientRes.data?.phone ?? null,

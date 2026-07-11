@@ -58,7 +58,7 @@ import React, { useState, useEffect } from 'react'
 import useIsMobile from './shared/useIsMobile'
 import { isTerminal, stageDisplayLabel, CHIP_STYLES, STAGE_RECORD_FAMILY, milestoneFamilies } from './shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
-import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconExternalLink, IconCalendar, IconSend, IconPaperclip } from '@/components/ui/icons'
+import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconClock, IconPhone, IconExternalLink, IconCalendar, IconSend, IconPaperclip } from '@/components/ui/icons'
 import NotesStream from './NotesStream'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
@@ -69,7 +69,9 @@ import InitialsAvatar from './shared/InitialsAvatar'
 import EngagementAssignees from './shared/EngagementAssignees'
 import { MicroLabel, quietBtn, ActionRow, actionBtn, metaValueBtn } from './shared/cardKit'
 import { EditPencil } from './shared/inlineEdit'
-import CloseEngagementConfirm from './shared/CloseEngagementConfirm'
+import RecordMenu from './shared/RecordMenu'
+import CloseLostWizard from './shared/CloseLostWizard'
+import CloseWonWizard from './shared/CloseWonWizard'
 import ClosedSummary from './shared/ClosedSummary'
 import { fmtTime, fmtShort, engagementValue, displayTitle, formatFullDate, invoiceNumber, daysInStage } from './shared/engagementStatus'
 import { recordJobberUrl } from './shared/jobberLinks'
@@ -185,7 +187,9 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   const [touchMethod, setTouchMethod] = useState('call')
   const [touchNote, setTouchNote] = useState('')
   const [busy, setBusy] = useState(false)
-  const [closeOpen, setCloseOpen] = useState(false)
+  // The ··· masthead menu drives the close-out wizards (Won/Lost) and
+  // Reopen — the standalone action-bar Close… button was retired here.
+  const [wizard, setWizard] = useState(null) // null | 'won' | 'lost'
   const nowMs = Date.now()
 
   const isMobile = useIsMobile()
@@ -330,24 +334,47 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   // hidden (not '$0') when neither exists.
   const dealValue = eng ? engagementValue({ ...eng, quotes: children.quotes }) : null
 
-  // Close-out (doc §4): the trigger lives in the ··· menu; the SHARED
-  // human close flow (shared/CloseEngagementConfirm — same component +
-  // write path as the board's drag-to-close) renders inline on
-  // Overview, never a second modal.
-  const closeConfirm = closeOpen && eng && (
-    <CloseEngagementConfirm
-      engagementId={engagementId}
-      invoices={children.invoices || []}
-      onCancel={() => setCloseOpen(false)}
-      onClosed={(stage, j) => {
-        setCloseOpen(false)
-        setData(d => d ? { ...d, engagement: { ...d.engagement, stage: j.stage } } : d)
-        onChanged(engagementId, { stage: j.stage })
-        setTimeout(onClose, 900)
-      }}
-      setToast={setToast}
-    />
-  )
+  // Close-out (doc §4/§5): the triggers live in the masthead ··· menu.
+  // "Mark as Closed Won/Lost" open the engagement-scoped WIZARDS
+  // (CloseWonWizard / CloseLostWizard) — both commit through the ONE
+  // shared close write path (commitEngagementClose). On commit the panel
+  // closes after a beat, mirroring the old inline confirm's behavior.
+  const onWizardClosed = (stage, j) => {
+    setWizard(null)
+    setData(d => d ? { ...d, engagement: { ...d.engagement, stage: j.stage } } : d)
+    onChanged(engagementId, { stage: j.stage })
+    setTimeout(onClose, 900)
+  }
+
+  // Reopen (resurrect) — Closed Lost only; the server route re-derives the
+  // correct open stage from the records. Keeps the panel open on the
+  // freshly-derived open stage (nurture/terminal fields cleared).
+  async function reopenEngagement() {
+    if (!eng || eng.stage !== 'Closed Lost') return
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/engagements/${engagementId}/reopen`, { method: 'POST' })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      // Set the derived open stage; ClosedSummary hides for any open
+      // stage, so the stale terminal fields need no explicit clearing
+      // here (and the write-path source pin keeps those literals out of
+      // this host file). A reopen from the panel is a rare click — the
+      // next fetch carries the fully-cleared row.
+      setData(d => d ? { ...d, engagement: { ...d.engagement, stage: j.stage } } : d)
+      onChanged(engagementId, { stage: j.stage })
+      setToast({ kind: 'success', msg: `Reopened · ${j.stage}` })
+    } catch (e) {
+      setToast({ kind: 'error', msg: `Reopen failed: ${e.message}` })
+    } finally { setBusy(false) }
+  }
+
+  // Masthead ··· menu items — grows with more record actions later.
+  const menuItems = eng ? [
+    !isTerminal(eng.stage) && { key: 'won', label: 'Mark as Closed Won', icon: <IconCheck size={15} />, onClick: () => setWizard('won') },
+    !isTerminal(eng.stage) && { key: 'lost', label: 'Mark as Closed Lost', icon: <IconX size={15} />, onClick: () => setWizard('lost') },
+    eng.stage === 'Closed Lost' && { key: 'reopen', label: 'Reopen', icon: <IconClock size={15} />, onClick: reopenEngagement },
+  ].filter(Boolean) : []
 
   // ── The milestone checklist rows (design-system pass 7/11) ────
   // The expected arc from the stage machine's canonical order; real
@@ -519,7 +546,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
 
   const overview = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      {closeConfirm}
       <div className="bee-card-cols">
         {leftCol}
         {rightCol}
@@ -559,11 +585,8 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
             <IconExternalLink size={14} /> Open in Jobber
           </a>
         )}
-        {eng && !isTerminal(eng.stage) && (
-          <button style={actionBtn('gray')} disabled={busy} onClick={() => { setTab('overview'); setCloseOpen(true) }}>
-            Close…
-          </button>
-        )}
+        {/* Close… moved to the masthead ··· menu (Part 1) — the close-out
+            wizards live there now, not as a standalone action-bar button. */}
       </ActionRow>
       {touchOpen && (
         <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -681,6 +704,13 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                 {fmtMoney(dealValue)}
               </p>
             )}
+            {/* Masthead ··· overflow menu (Part 1) — portal-rendered so
+                the overlay card's rounding/overflow can't clip it. Houses
+                the close-out actions today (Won/Lost wizards, Reopen);
+                structured to grow as more record actions land. */}
+            {data && menuItems.length > 0 && (
+              <RecordMenu items={menuItems} ariaLabel="Engagement actions" />
+            )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
             <span style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, letterSpacing: T.type.trackTitle, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -788,5 +818,32 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     </div>
   )
 
-  return <OverlayShell isMobile={isMobile} onClose={onClose} maxWidth={840}>{body}</OverlayShell>
+  return (
+    <>
+      <OverlayShell isMobile={isMobile} onClose={onClose} maxWidth={840}>{body}</OverlayShell>
+      {wizard === 'lost' && eng && (
+        <CloseLostWizard
+          engagementId={engagementId}
+          leadId={client?.id}
+          isMobile={isMobile}
+          onCancel={() => setWizard(null)}
+          onClosed={onWizardClosed}
+          setToast={setToast}
+        />
+      )}
+      {wizard === 'won' && eng && (
+        <CloseWonWizard
+          engagementId={engagementId}
+          leadId={client?.id}
+          invoices={children.invoices || []}
+          totalInvoiced={eng.total_invoiced || 0}
+          reviewsLink={client?.reviews_link || null}
+          isMobile={isMobile}
+          onCancel={() => setWizard(null)}
+          onClosed={onWizardClosed}
+          setToast={setToast}
+        />
+      )}
+    </>
+  )
 }

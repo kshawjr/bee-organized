@@ -24,6 +24,7 @@
 
 import React, { useState } from 'react'
 import { CLOSED_WON, CLOSED_LOST } from './stageConfig'
+import { commitEngagementClose, invoicesSettled } from './closeEngagement'
 import { T } from './tokens'
 
 export default function CloseEngagementConfirm({
@@ -40,22 +41,14 @@ export default function CloseEngagementConfirm({
   const [busy, setBusy] = useState(false)
 
   // Won gate: every invoice paid or zero balance (no invoices = clear).
-  const settled = invoices.length === 0 ||
-    invoices.every(i => i.status === 'paid' || Number(i.balance_owing) === 0)
+  const settled = invoicesSettled(invoices)
 
   async function confirmClose() {
-    const bodyPatch = closeAs === CLOSED_WON
-      ? { stage: CLOSED_WON, closed_reason: 'won', closed_note: closeNote.trim() || undefined }
-      : { stage: CLOSED_LOST, closed_reason: closeReason, closed_note: closeNote.trim() || undefined }
     setBusy(true)
     try {
-      const res = await fetch(`/api/engagements/${engagementId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bodyPatch),
+      const j = await commitEngagementClose(engagementId, {
+        closeAs, closedReason: closeReason, closedNote: closeNote,
       })
-      const j = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
       setToast({ kind: 'success', msg: `Closed as ${closeAs === CLOSED_WON ? 'won' : 'lost'}` })
       onClosed(closeAs, j)
     } catch (e) {

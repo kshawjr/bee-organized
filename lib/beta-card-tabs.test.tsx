@@ -525,12 +525,15 @@ describe('header client identity (Option B)', () => {
     await unmount()
   })
 
-  it('bottom action bar: Call / Log touchpoint / Send to Jobber / Close…, equal-width grid — NO Advance (removed 7/10)', async () => {
+  it('bottom action bar: Call / Log touchpoint / Send to Jobber, equal-width grid — NO Advance (7/10), NO Close… (moved to ···, Part 1)', async () => {
     const { host, unmount } = await mountPanel({ onSendToJobber: () => {} })
     const row = buttonContaining(host, 'Log touchpoint')!.parentElement as HTMLElement
-    expect([...row.children].map(el => (el.textContent || '').trim())).toEqual(['Call', 'Log touchpoint', 'Send to Jobber', 'Close…'])
+    expect([...row.children].map(el => (el.textContent || '').trim())).toEqual(['Call', 'Log touchpoint', 'Send to Jobber'])
     expect(row.style.display).toBe('grid')
-    expect(row.getAttribute('style')).toMatch(/repeat\(4,\s*1fr\)/)
+    expect(row.getAttribute('style')).toMatch(/repeat\(3,\s*1fr\)/)
+    // The close-out actions live in the masthead ··· menu now.
+    expect(buttonContaining(host, 'Close…')).toBeUndefined()
+    expect(host.querySelector('[data-bee-record-menu-trigger]')).toBeTruthy()
     await unmount()
   })
 })
@@ -641,10 +644,15 @@ describe('write paths', () => {
     expect(src).toContain('manual_stage_move_rejected') // terminal-only stage writes
   })
 
-  it('Close… rides the pinned action bar (build 2 — out of the ··· menu), same inline Won/Lost confirm + write', async () => {
+  it('Close-out lives in the masthead ··· menu (Part 1) → the Lost wizard commits through the one write path', async () => {
     const { host, unmount } = await mountPanel()
-    await click(buttonContaining(host, 'Close…')!)
-    expect(host.textContent).toContain('Close as')
+    // Open the ··· menu (trigger in the card; items portal to <body>).
+    await click(host.querySelector('[data-bee-record-menu-trigger]')!)
+    const lostItem = [...document.querySelectorAll('[data-bee-record-menu] button')]
+      .find(b => (b.textContent || '').includes('Mark as Closed Lost'))!
+    await click(lostItem)
+    // Wizard: reason step → follow-up step → commit (default reason, skip follow-up).
+    await click(buttonContaining(host, 'Next')!)
     await click(buttonContaining(host, 'Close as lost')!)
     expect(engPatches).toEqual([{ stage: 'Closed Lost', closed_reason: 'lost_no_response' }])
     await unmount()

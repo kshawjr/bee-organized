@@ -258,6 +258,23 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
     finally { setBusy(false) }
   }
 
+  // Reopen (resurrect) a Closed LOST engagement — the server route
+  // re-derives the correct open stage from the records (Closed Won stays
+  // out of scope; no button is rendered for it). Updates the row in place
+  // so it moves back to the open list without a full reload.
+  async function reopenEngagement(engId, ev) {
+    ev?.stopPropagation?.()
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/engagements/${engId}/reopen`, { method: 'POST' })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      setData(d => d ? { ...d, engagements: (d.engagements || []).map(e => e.id === engId ? { ...e, stage: j.stage, closed_at: null, closed_reason: null, closed_note: null, nurture_started_at: null } : e) } : d)
+      setToast({ kind: 'success', msg: `Reopened · ${j.stage}` })
+    } catch (e) { setToast({ kind: 'error', msg: `Reopen failed: ${e.message}` }) }
+    finally { setBusy(false) }
+  }
+
   async function markJunk() {
     if (!c) return
     try {
@@ -452,6 +469,14 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
                   <span style={{ flex: 1, minWidth: 0, fontSize: '11px', color: T.ink.secondary, fontVariantNumeric: T.type.tabular, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {displayTitle(e)}{Number(money) > 0 ? ` · ${fmtMoney(money)}` : ''} · {won ? 'won' : 'lost'} {monthYear(e.closed_at) || ''}{reason ? ` · ${reason}` : ''}
                   </span>
+                  {/* Reopen (resurrect) — Closed LOST only; re-derives the
+                      open stage server-side. Closed Won is out of scope. */}
+                  {!won && (
+                    <button onClick={(ev) => reopenEngagement(e.id, ev)} disabled={busy} aria-label="Reopen engagement"
+                      style={{ flexShrink: 0, border: T.border.control, background: T.surface.raised, borderRadius: T.radius.control, padding: '2px 8px', fontSize: '11px', fontWeight: 500, color: T.ink.secondary, cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+                      Reopen
+                    </button>
+                  )}
                 </span>
                 {note && (
                   <span style={{ fontSize: '11px', fontStyle: 'italic', color: T.ink.muted, paddingLeft: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
