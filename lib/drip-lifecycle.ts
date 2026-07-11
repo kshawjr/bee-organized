@@ -9,6 +9,7 @@ import { nextSendAt } from './drip-time'
 import {
   scheduleStageEmails,
   cancelStageEmails,
+  resolveDripCategory,
 } from './stage-emails'
 import { cancelPendingWelcomeEmail } from './welcome-email'
 
@@ -36,8 +37,9 @@ interface LocationCtx {
   timezone: string | null
 }
 
-// Start a drip when a lead enters 'New'. Looks up the location's default
-// drip path, finds step 1, computes next_send_at in the location's tz,
+// Start a drip when a lead enters 'New'. Resolves the lead's project_type
+// through its Move/Organizing tag to pick the location's move vs organizing
+// default path, finds step 1, computes next_send_at in the location's tz,
 // and inserts a lead_drip_progress row idempotently.
 //
 // Skips entirely when leads.paused = true. Imported leads (Jobber
@@ -49,7 +51,7 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
   try {
     const { data: leadRow, error: leadErr } = await supabaseService
       .from('leads')
-      .select('paused, marketing_opt_out')
+      .select('paused, marketing_opt_out, project_type')
       .eq('id', leadId)
       .maybeSingle()
     if (leadErr) {
@@ -68,7 +70,7 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
 
     const { data: loc, error: locErr } = await supabaseService
       .from('locations')
-      .select('id, timezone, default_drip_path')
+      .select('id, timezone, default_drip_path, default_move_drip_path')
       .eq('id', locationUuid)
       .maybeSingle()
 
@@ -76,8 +78,24 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
       console.error('[drip] startDrip: location lookup failed', { leadId, locationUuid, locErr })
       return
     }
-    if (!loc.default_drip_path) {
-      // Owner hasn't picked a default — silently skip.
+
+    // New Client Drip selection: the lead's project_type resolves through
+    // its admin-configured Move/Organizing tag (lookups.attrs.drip_category)
+    // to pick which of the location's two default paths to enroll:
+    //   - Move-tagged   → default_move_drip_path
+    //   - Organizing / untagged / unrecognized → default_drip_path
+    // resolveDripCategory defaults to 'general' (Organizing) for a null /
+    // unknown project_type, so the fallback is safe by construction. A
+    // Move-tagged lead at a location that never configured a move path
+    // falls back to the organizing default rather than enrolling nothing.
+    const dripCategory = await resolveDripCategory(leadRow?.project_type ?? null)
+    const pathKey =
+      dripCategory === 'move'
+        ? loc.default_move_drip_path || loc.default_drip_path
+        : loc.default_drip_path
+
+    if (!pathKey) {
+      // Owner hasn't picked the relevant default — silently skip.
       return
     }
 
@@ -92,7 +110,7 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
         .from('drip_paths')
         .select('id')
         .eq('location_uuid', locationUuid)
-        .eq('path_key', loc.default_drip_path)
+        .eq('path_key', pathKey)
         .eq('is_active', true)
         .maybeSingle()
       if (locCopyErr) {
@@ -106,7 +124,7 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
           .from('drip_paths')
           .select('id')
           .eq('is_master', true)
-          .eq('path_key', loc.default_drip_path)
+          .eq('path_key', pathKey)
           .eq('is_active', true)
           .maybeSingle()
         if (masterErr) {
@@ -121,7 +139,7 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
       console.error('[drip] startDrip: path not found (neither copy nor master)', {
         leadId,
         locationUuid,
-        path_key: loc.default_drip_path,
+        path_key: pathKey,
       })
       return
     }

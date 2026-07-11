@@ -62,7 +62,7 @@ const ALL_STAGE_EMAIL_KEYS = [
 // Admin-editable via Configure tab in BeeHub. Defaults to 'general' if
 // the project_type isn't found.
 
-async function resolveDripCategory(projectType: string | null): Promise<'general' | 'move'> {
+export async function resolveDripCategory(projectType: string | null): Promise<'general' | 'move'> {
   if (!projectType) return 'general'
   const { data } = await supabaseService
     .from('lookups')
