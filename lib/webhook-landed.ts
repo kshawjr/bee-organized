@@ -29,6 +29,9 @@
 //                        legitimately holds the engagement at Job in
 //                        Progress — that is not stuck.
 //   INVOICE_CREATE     → invoices row exists + engagement attached
+//   INVOICE_UPDATE     → invoices row exists + engagement attached (refresh
+//                        semantics; paid-ness derived from the record, so
+//                        no status='paid' requirement)
 //   INVOICE_PAID       → invoices row status='paid' + engagement attached
 //   *_DESTROY          → the DESTROY_SPECS columns are actually null on
 //                        the matched lead ('na' when no lead matched —
@@ -205,6 +208,16 @@ export async function checkLanded(
         )
         if (!inv?.engagement_id) return 'not_landed'
         return inv.status === 'paid' ? 'landed' : 'not_landed'
+      }
+      case 'INVOICE_UPDATE': {
+        // Refresh semantics (like JOB_UPDATE): the invoice row must exist +
+        // be attached to an engagement. Paid-ness is derived from the record,
+        // not the topic, so we don't require status='paid' here — a non-paid
+        // update that lands the row + attachment is still 'landed'.
+        const inv = await fetchSubRow(
+          'invoices', 'jobber_invoice_id', 'id, engagement_id', numeric, loc,
+        )
+        return inv?.engagement_id ? 'landed' : 'not_landed'
       }
       case 'PROPERTY_CREATE':
       case 'PROPERTY_UPDATE': {

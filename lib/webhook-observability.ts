@@ -95,6 +95,7 @@ export const TOPIC_FRIENDLY: Record<string, string> = {
   JOB_COMPLETE:       'Job completed',
   JOB_DESTROY:        'Job deleted',
   INVOICE_CREATE:     'Invoice created',
+  INVOICE_UPDATE:     'Invoice updated',
   INVOICE_PAID:       'Invoice paid',
   INVOICE_DESTROY:    'Invoice deleted',
   CLIENT_UPDATE:      'Client updated',

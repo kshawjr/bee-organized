@@ -52,7 +52,16 @@
 //   JOB_DESTROY      → (no change)      null jobber_job_id on lead
 //   INVOICE_CREATE   → (no change)      stamp invoice_created_at +
 //                                       balance_owing
-//   INVOICE_PAID     → 'Closed Won'     forward-only + stop drip
+//   INVOICE_UPDATE   → 'Closed Won' when the refreshed invoiceStatus is
+//                                       PAID (forward-only + stop drip);
+//                                       otherwise a balance_owing refresh,
+//                                       no stage change. This is the topic
+//                                       Jobber actually emits on payment
+//                                       (mirrors JOB_UPDATE's derive-from-
+//                                       status promotion).
+//   INVOICE_PAID     → 'Closed Won'     forward-only + stop drip (kept
+//                                       defensively; Jobber signals payment
+//                                       via INVOICE_UPDATE in practice)
 //   INVOICE_DESTROY  → (no change)      null jobber_invoice_id on lead
 //   CLIENT_UPDATE    → (no change)      refresh name/email/phone
 //   CLIENT_DESTROY   → (no change)      null ALL jobber_*_id columns on
@@ -593,9 +602,25 @@ export function handleJobComplete(ctx: HandlerCtx) {
 }
 
 // Internal: shared invoice pipeline.
+//
+// `mode` decides how paid-ness is resolved:
+//   'create' → treat as a fresh (unpaid) invoice: stamp invoice_created_at,
+//              refresh balance_owing, no stage promotion.
+//   'paid'   → treat as paid: stamp invoice_paid_at, zero the balance,
+//              promote lead → 'Closed Won'.
+//   'update' → DERIVE from the fetched invoiceStatus, exactly the way
+//              JOB_UPDATE derives its promotion from the refreshed
+//              jobStatus. Jobber emits INVOICE_UPDATE (not a distinct
+//              INVOICE_PAID) when an invoice is marked paid, so a
+//              now-PAID update behaves like 'paid'; any other update just
+//              refreshes the invoice row + balance_owing, no stamp/promo.
+// Either way, upsertInvoice writes the invoices row's status/balance from
+// invoiceStatus, so the engagement re-derivation (maybeAdvanceEngagementStage,
+// live mode → rests done+paid at Final Processing) is correct regardless of
+// which topic fired.
 async function handleInvoiceCore(
   ctx: HandlerCtx,
-  paid: boolean,
+  mode: 'create' | 'paid' | 'update',
 ): Promise<HandlerResult> {
   const globalId = encodeJobberId('Invoice', ctx.itemId)
   const res = await jobberGraphQL(ctx.location.location_id, SINGLE_INVOICE_QUERY, {
@@ -618,6 +643,12 @@ async function handleInvoiceCore(
     })
     return { processed: false, error: 'invoice_not_found_in_jobber' }
   }
+
+  // Ground truth for paid-ness is the fetched record, not the topic.
+  // 'update' derives from it (INVOICE_UPDATE is what fires on payment);
+  // 'paid'/'create' keep their explicit intent.
+  const isPaid = (invRec.invoiceStatus || '').toUpperCase() === 'PAID'
+  const paid = mode === 'paid' || (mode === 'update' && isPaid)
 
   const firstJob = invRec.jobs?.nodes?.[0]
   let sr: { id: string; lead_id: string } | null = null
@@ -685,7 +716,9 @@ async function handleInvoiceCore(
     leadPatch.invoice_paid_at = stampIso
   } else {
     leadPatch.balance_owing = totalNum
-    leadPatch.invoice_created_at = stampIso
+    // invoice_created_at is a create-time stamp only — an unpaid UPDATE
+    // (JOB_UPDATE-style refresh) must not re-stamp it.
+    if (mode === 'create') leadPatch.invoice_created_at = stampIso
   }
   await supabaseService.from('leads').update(leadPatch).eq('id', leadId)
 
@@ -704,12 +737,24 @@ async function handleInvoiceCore(
 
 // INVOICE_CREATE → no stage change + invoice_created_at + balance_owing
 export function handleInvoiceCreate(ctx: HandlerCtx) {
-  return handleInvoiceCore(ctx, false)
+  return handleInvoiceCore(ctx, 'create')
 }
 
 // INVOICE_PAID → 'Closed Won' + invoice_paid_at + paid_amount + stop drip
+// (Jobber appears to signal payment via INVOICE_UPDATE instead — kept wired
+// defensively so a real INVOICE_PAID delivery is never dropped.)
 export function handleInvoicePaid(ctx: HandlerCtx) {
-  return handleInvoiceCore(ctx, true)
+  return handleInvoiceCore(ctx, 'paid')
+}
+
+// INVOICE_UPDATE → refresh the invoice row; derive paid-ness from the
+// refreshed invoiceStatus (mirrors JOB_UPDATE). A now-PAID invoice promotes
+// like INVOICE_PAID (→ 'Closed Won' on the lead board; engagement rests at
+// Final Processing in live mode); any other update is a balance refresh.
+// This is the topic Jobber actually emits when an invoice is marked paid,
+// so it drives the live "fully paid → Close Won reachable" chain.
+export function handleInvoiceUpdate(ctx: HandlerCtx) {
+  return handleInvoiceCore(ctx, 'update')
 }
 
 // CLIENT_UPDATE — refresh name/email/phone/address. No stage change.
@@ -1034,6 +1079,7 @@ export const TOPIC_HANDLERS: Record<string, (ctx: HandlerCtx) => Promise<Handler
   JOB_COMPLETE:       handleJobComplete,
   JOB_DESTROY:        handleJobDestroy,
   INVOICE_CREATE:     handleInvoiceCreate,
+  INVOICE_UPDATE:     handleInvoiceUpdate,
   INVOICE_PAID:       handleInvoicePaid,
   INVOICE_DESTROY:    handleInvoiceDestroy,
   CLIENT_UPDATE:      handleClientUpdate,
