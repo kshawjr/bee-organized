@@ -38,3 +38,4 @@ next-env.d.ts
 
 # backfill dry-run/run reports (step 2)
 backfill-engagements-report*.json
+backfill-assessment-appointment-ids.report*.json

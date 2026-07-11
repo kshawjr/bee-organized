@@ -206,6 +206,20 @@ describe('syncEngagementAssignmentToJobber (team/crew)', () => {
     expect(writeSyncLog.mock.calls[0][0]).toMatchObject({ entity_type: 'engagement', direction: 'outbound', status: 'success' })
   })
 
+  it('assessment with null jobber_assessment_id → assessment none, no appointmentEditAssignment (the id-drop bug)', async () => {
+    // Reproduces engagement 59badae2: the assessment row exists but its
+    // jobber_assessment_id is null, so there is no appointment to target.
+    // The sync must report assessment=none and never call the mutation.
+    // (The 'A1' happy-path test above pins the inverse: id present → synced.)
+    wireLinked({ jobs: [], assess: [{ jobber_assessment_id: null }] })
+    const res = await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
+    expect(res.assessment).toBe('none')
+    expect(varsFor('appointmentEditAssignment')).toEqual([])
+    // and the query guards at the source: filters out null-id rows
+    const assessCall = h.state.calls.find(c => c.table === 'assessments')!
+    expect(assessCall.ops).toContainEqual(['not', ['jobber_assessment_id', 'is', null]])
+  })
+
   it('completed visits are left untouched; crew only lands on live visits', async () => {
     wireLinked()
     jobberGraphQL.mockResolvedValueOnce({

@@ -62,7 +62,7 @@ export const REQUESTS_QUERY = `
       nodes {
         id createdAt jobberWebUri
         client { id }
-        assessment { startAt }
+        assessment { id startAt }
       }
       pageInfo { hasNextPage endCursor }
     }
@@ -150,7 +150,7 @@ export const SINGLE_REQUEST_QUERY = `
                emails { address primary }
                phones  { number  primary }
                billingAddress { street city province postalCode } }
-      assessment { startAt }
+      assessment { id startAt }
       quotes(first: 5) { nodes { id } }
       jobs(first: 5)   { nodes { id invoices(first: 5) { nodes { id } } } }
     }
@@ -583,6 +583,16 @@ export async function upsertAssessment(
   const payload = {
     service_request_id, lead_id, location_id,
     jobber_request_id: extractJobberId(request.id),
+    // The appointment id (Request.assessment.id) — the target for
+    // appointmentEditAssignment in the engagement-assignee sync. Without
+    // it that sync reports assessment=none. Stored numeric via
+    // extractJobberId, matching every sibling jobber_*_id column; the
+    // GraphQL selections (REQUESTS_QUERY / SINGLE_REQUEST_QUERY) now
+    // fetch `assessment { id startAt }`. Guarded because a re-sync must
+    // never null a good id if a payload ever arrives id-less.
+    ...(request.assessment?.id
+      ? { jobber_assessment_id: extractJobberId(request.assessment.id) }
+      : {}),
     scheduled_at: request.assessment.startAt || null,
     status: 'scheduled',
     source: 'jobber',

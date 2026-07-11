@@ -100,9 +100,12 @@ vi.mock('@/lib/supabase-service', () => ({
 
 import { upsertAssessment } from '@/lib/jobber-import'
 
+// Request/Assessment ids are Jobber EncodedIds (base64 gid); upsert
+// stores the extracted numeric. gid://Jobber/Request/99 and
+// gid://Jobber/Assessment/424242 below.
 const REQUEST = {
   id: 'Z2lkOi8vSm9iYmVyL1JlcXVlc3QvOTk=',
-  assessment: { startAt: '2026-07-17T22:30:00+00:00' },
+  assessment: { id: 'Z2lkOi8vSm9iYmVyL0Fzc2Vzc21lbnQvNDI0MjQy', startAt: '2026-07-17T22:30:00+00:00' },
 }
 const call = () => upsertAssessment(REQUEST, 'sr-1', 'lead-1', 'loc-1')
 
@@ -116,6 +119,24 @@ describe('upsertAssessment idempotency', () => {
     expect(h.state.upserts).toHaveLength(1)
     expect(h.state.upserts[0].opts).toMatchObject({ onConflict: 'service_request_id' })
     expect(h.state.upserts[0].payload.service_request_id).toBe('sr-1')
+  })
+
+  it('captures the appointment id from request.assessment.id (numeric)', async () => {
+    // The bug: assessments landed with null jobber_assessment_id, so the
+    // engagement-assignee sync had no appointment to target (assessment=none).
+    await call()
+    expect(h.state.upserts).toHaveLength(1)
+    expect(h.state.upserts[0].payload.jobber_assessment_id).toBe('424242')
+    expect(h.state.rows[0].jobber_assessment_id).toBe('424242')
+  })
+
+  it('an id-less assessment payload does not write jobber_assessment_id (never nulls a good id on re-sync)', async () => {
+    const res = await upsertAssessment(
+      { id: REQUEST.id, assessment: { startAt: '2026-07-17T22:30:00+00:00' } },
+      'sr-2', 'lead-1', 'loc-1',
+    )
+    expect(res.created).toBe(true)
+    expect('jobber_assessment_id' in h.state.upserts[0].payload).toBe(false)
   })
 
   it('concurrent double-call for the same service_request_id lands ONE row', async () => {
