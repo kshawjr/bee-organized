@@ -1,17 +1,20 @@
 -- Engagement-level Assigned To — plural, multi-user foundation.
 -- Idempotent; run manually in the Supabase editor (standing migration-
--- review rule). APPLIED to prod 2026-07-11.
+-- review rule). APPLIED to prod 2026-07-11 — verified via pg_policies
+-- (2 policies) + a live select (table present, 0 rows). An earlier paste
+-- did not land; the whole block rolls back if any statement errors.
 --
 -- Assignment used to live on leads.assigned_to (single value). It now lives
 -- on the engagement as a many-to-many junction: an engagement can carry
 -- several assignees, and a hub_user can be assigned to many engagements.
 --
 -- FORWARD-ONLY — the junction starts EMPTY. No backfill: the legacy
--- leads.assigned_to values are import-stamped junk (one block per
--- location, and the ids aren't even hub_users — flagged for separate
--- cleanup). Existing engagements correctly have no assignee; future ones
--- get real assignees through the masthead picker. leads.assigned_to is
--- legacy-unused (left in place, not dropped here).
+-- leads.assigned_to is an import blanket-stamp (one value per location =
+-- that location's OWNER hub_user, applied to every lead), not real
+-- per-lead assignment — flagged for separate cleanup. Existing
+-- engagements correctly have no assignee; future ones get real assignees
+-- through the masthead picker. leads.assigned_to is legacy-unused (left
+-- in place, not dropped here).
 
 -- ── 1. Junction table ───────────────────────────────────────────────────────
 
