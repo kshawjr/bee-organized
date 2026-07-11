@@ -328,6 +328,24 @@ export function extractJobberId(globalId: string | null | undefined): string | n
   }
 }
 
+// The Jobber gid namespaces we round-trip through numeric storage. Every
+// jobber_*_id column persists the numeric tail (via extractJobberId), so
+// any outbound mutation typed EncodedId! must rebuild the base64 global id
+// from that numeric — feeding the bare number is rejected with
+// "'<n>' is not a valid EncodedId". User ids are the exception: the roster
+// stores them already-encoded, so they never pass through here.
+export type JobberIdType =
+  | 'Client' | 'Request' | 'Quote' | 'Job' | 'Invoice' | 'Property'
+  | 'Assessment' | 'Visit' | 'Appointment' | 'User'
+
+// Inverse of extractJobberId: numeric (or already-encoded) → base64 global
+// id. Idempotent — normalizes to numeric first, so an encoded input is
+// re-canonicalized rather than double-wrapped (which would resolve to null).
+export function encodeJobberId(type: JobberIdType, rawId: string): string {
+  const numeric = extractJobberId(rawId) || rawId
+  return Buffer.from(`gid://Jobber/${type}/${numeric}`, 'utf8').toString('base64')
+}
+
 export function determineStage(request: any): string {
   if (request._hasInvoice)    return 'Final Processing'
   if (request._hasJob)        return 'Job in Progress'

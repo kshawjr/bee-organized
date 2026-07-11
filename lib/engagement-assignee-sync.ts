@@ -30,6 +30,15 @@
 // set clears the team/crew. Completed visits are left untouched — crew is
 // about who WILL do the work, not a rewrite of finished history.
 //
+// ENCODED-ID CONTRACT: every id fed to an EncodedId! arg must be the full
+// base64 global id (gid://Jobber/<Type>/<n>), never the bare numeric — Jobber
+// rejects a bare number with "'<n>' is not a valid EncodedId". Our jobber_*_id
+// columns store the numeric tail (extractJobberId at import), so jobId and
+// appointmentId are re-encoded here via encodeJobberId (matching contact-/
+// address-sync). Two ids need NO re-encode: visit ids arrive already-encoded
+// from the visits read, and jobber_user_id is stored already-encoded by the
+// roster — so assignedUserIds pass through untouched.
+//
 // UNMAPPED assignees (hub_user with no jobber_user_id — e.g. Kevin/Leslie,
 // no Jobber identity) are valid internal assignments but are simply
 // skipped for the Jobber push; the UI marks them so it's not a surprise.
@@ -46,6 +55,7 @@
 
 import { supabaseService } from './supabase-service'
 import { jobberMutation, jobberGraphQL } from './jobber'
+import { encodeJobberId } from './jobber-import'
 import { writeSyncLog } from './sync-log'
 
 // Read a job's visits so we can push the crew onto each. first: 100 covers
@@ -181,7 +191,12 @@ export async function syncEngagementAssignmentToJobber(
   for (const jobId of jobIds) {
     let visitNodes: Array<{ id: string; isComplete: boolean }> = []
     try {
-      const { data, errors } = await jobberGraphQL(locationSlug, JOB_VISITS_QUERY, { jobId })
+      // jobber_job_id is stored numeric (extractJobberId at import); the
+      // EncodedId! arg needs the base64 global id, so re-encode at the call.
+      // Feeding the bare number is rejected ("'<n>' is not a valid EncodedId").
+      const { data, errors } = await jobberGraphQL(locationSlug, JOB_VISITS_QUERY, {
+        jobId: encodeJobberId('Job', jobId),
+      })
       if (errors?.length) {
         jobFailed = true
         console.warn('[assignee-sync] job visits read errors', JSON.stringify(errors))
@@ -230,8 +245,13 @@ export async function syncEngagementAssignmentToJobber(
   // An empty array clears the appointment's team.
   for (const appointmentId of apptIds) {
     try {
+      // jobber_assessment_id is stored numeric (the appointment's numeric
+      // tail via extractJobberId). appointmentEditAssignment(appointmentId:
+      // EncodedId!) accepts the assessment's global id — re-encode from
+      // numeric, same as the job path. assignedUserIds are already encoded
+      // (roster stores jobber_user_id as the full gid), so they pass through.
       const r = await jobberMutation(locationSlug, APPOINTMENT_EDIT_ASSIGNMENT_MUTATION, {
-        appointmentId,
+        appointmentId: encodeJobberId('Assessment', appointmentId),
         input: { assignedUserIds: allJobberUserIds },
       })
       if (r.userErrors?.length) {

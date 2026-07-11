@@ -98,6 +98,7 @@ import {
   upsertJob,
   upsertInvoice,
   extractJobberId,
+  encodeJobberId,
   promoteLeadStage,
   isUnbookedJobStatus,
   BOOKED_JOB_STATUSES,
@@ -109,8 +110,6 @@ import {
   maybeAdvanceEngagementStage,
 } from './engagements'
 import type { LocationRow } from './jobber-webhook'
-
-type JobberType = 'Client' | 'Request' | 'Quote' | 'Job' | 'Invoice' | 'Property'
 
 export type HandlerCtx = {
   topic: string
@@ -131,18 +130,12 @@ export type HandlerResult = {
   error?: string
 }
 
-// ── encoding helpers ──────────────────────────────────────────
-
 // Webhook payloads ship itemId in either form: bare numeric ("136289662")
 // or the full base64-encoded GraphQL global id
-// ("Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYyODk2NjI="). Normalize to numeric via
-// extractJobberId, then build the canonical global id ourselves. Without
-// this, base64-input gets double-wrapped → Jobber resolves to null →
-// "<entity>_not_found_in_jobber" even though the record exists.
-function encodeJobberId(type: JobberType, rawItemId: string): string {
-  const numeric = extractJobberId(rawItemId) || rawItemId
-  return Buffer.from(`gid://Jobber/${type}/${numeric}`, 'utf8').toString('base64')
-}
+// ("Z2lkOi8vSm9iYmVyL0NsaWVudC8xMzYyODk2NjI="). encodeJobberId normalizes to
+// numeric first, then rebuilds the canonical global id — so base64-input
+// isn't double-wrapped (which would resolve to null → "<entity>_not_found_
+// in_jobber" even though the record exists). Shared from ./jobber-import.
 
 // ── lead resolution ───────────────────────────────────────────
 

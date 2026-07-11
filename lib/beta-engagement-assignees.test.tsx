@@ -76,6 +76,7 @@ import {
   getEngagementAssignees,
   syncEngagementAssignmentToJobber,
 } from '@/lib/engagement-assignee-sync'
+import { encodeJobberId, extractJobberId } from '@/lib/jobber-import'
 import { persistRosterAndMatch } from '@/lib/jobber-team-roster'
 import EngagementAssignees from '@/components/hive/shared/EngagementAssignees'
 
@@ -169,13 +170,20 @@ describe('getEngagementAssignees', () => {
 //   · Request                 → NEVER assigned (result 'skipped')
 describe('syncEngagementAssignmentToJobber (team/crew)', () => {
   // Note: the sync reads `jobs` then `assessments` (no service_requests).
+  // jobber_job_id / jobber_assessment_id are stored NUMERIC (extractJobberId
+  // at import) — the real prod values from engagement 59badae2's location —
+  // so the sync must re-encode them to base64 gids before feeding EncodedId!.
+  const JOB_NUM = '141304145'      // gid://Jobber/Job/141304145
+  const ASSESS_NUM = '2123185874'  // gid://Jobber/Assessment/2123185874
+  const JOB_GID = encodeJobberId('Job', JOB_NUM)
+  const ASSESS_GID = encodeJobberId('Assessment', ASSESS_NUM)
   const wireLinked = (over: any = {}) => {
     h.enqueue('engagement_assignees', over.assignees ?? [
       assignee({ hub_user_id: 'u1', jobber_user_id: 'j1' }),
       assignee({ hub_user_id: 'u2', full_name: 'Wendy', email: 'w@x.com', jobber_user_id: 'j2' }),
     ])
-    h.enqueue('jobs', over.jobs ?? [{ jobber_job_id: 'J1' }])
-    h.enqueue('assessments', over.assess ?? [{ jobber_assessment_id: 'A1' }])
+    h.enqueue('jobs', over.jobs ?? [{ jobber_job_id: JOB_NUM }])
+    h.enqueue('assessments', over.assess ?? [{ jobber_assessment_id: ASSESS_NUM }])
   }
   const varsFor = (needle: string) =>
     jobberMutation.mock.calls.filter(c => String(c[1]).includes(needle)).map(c => c[2])
@@ -187,16 +195,22 @@ describe('syncEngagementAssignmentToJobber (team/crew)', () => {
       request: 'skipped', job: 'synced', assessment: 'synced',
       visitsTouched: 1, mapped: 2, unmapped: 0,
     })
-    // job's visits were read to find the crew surface
-    expect(jobberGraphQL.mock.calls[0][2]).toEqual({ jobId: 'J1' })
-    // crew (multi) pushed onto the visit — NOT the job, NOT salesperson
+    // job's visits were read to find the crew surface — jobId re-encoded
+    // from the stored numeric to the base64 gid (never fed bare).
+    expect(jobberGraphQL.mock.calls[0][2]).toEqual({ jobId: JOB_GID })
+    expect(jobberGraphQL.mock.calls[0][2].jobId).not.toMatch(/^\d+$/)
+    // crew (multi) pushed onto the visit — visitId comes back already-encoded
+    // from the visits read (no re-encode); assignedUserIds pass through
+    // untouched (roster stores jobber_user_id already-encoded).
     expect(varsFor('visitEditAssignedUsers')).toEqual([
       { visitId: 'V1', input: { assignedUserIds: ['j1', 'j2'] } },
     ])
-    // assessment appointment = ALL mapped ids
+    // assessment appointment = ALL mapped ids; appointmentId re-encoded to
+    // the Assessment gid (the EncodedId! the mutation demands).
     expect(varsFor('appointmentEditAssignment')).toEqual([
-      { appointmentId: 'A1', input: { assignedUserIds: ['j1', 'j2'] } },
+      { appointmentId: ASSESS_GID, input: { assignedUserIds: ['j1', 'j2'] } },
     ])
+    expect(varsFor('appointmentEditAssignment')[0].appointmentId).not.toMatch(/^\d+$/)
     // no salesperson / request / job edit anywhere (team model)
     expect(varsFor('jobEdit')).toEqual([])
     expect(varsFor('requestEdit')).toEqual([])
@@ -252,7 +266,7 @@ describe('syncEngagementAssignmentToJobber (team/crew)', () => {
     const res = await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
     expect(res).toMatchObject({ request: 'skipped', job: 'cleared', assessment: 'cleared', mapped: 0, unmapped: 1 })
     expect(varsFor('visitEditAssignedUsers')).toEqual([{ visitId: 'V1', input: { assignedUserIds: [] } }])
-    expect(varsFor('appointmentEditAssignment')).toEqual([{ appointmentId: 'A1', input: { assignedUserIds: [] } }])
+    expect(varsFor('appointmentEditAssignment')).toEqual([{ appointmentId: ASSESS_GID, input: { assignedUserIds: [] } }])
   })
 
   it('a visit userErrors reply marks the job failed but does not throw; assessment still syncs', async () => {
@@ -293,7 +307,7 @@ describe('syncEngagementAssignmentToJobber (team/crew)', () => {
       { visitId: 'V1', input: { assignedUserIds: ['j1', 'j2', 'j3'] } },
     ])
     expect(varsFor('appointmentEditAssignment')).toEqual([
-      { appointmentId: 'A1', input: { assignedUserIds: ['j1', 'j2', 'j3'] } },
+      { appointmentId: ASSESS_GID, input: { assignedUserIds: ['j1', 'j2', 'j3'] } },
     ])
   })
 
@@ -313,6 +327,80 @@ describe('syncEngagementAssignmentToJobber (team/crew)', () => {
     expect(jobberMutation).not.toHaveBeenCalled()
     expect(jobberGraphQL).not.toHaveBeenCalled()
     expect(writeSyncLog).not.toHaveBeenCalled()
+  })
+})
+
+// ══ 3b) ENCODED-ID CONTRACT — no bare numeric may reach EncodedId! ══
+// Regression guard for the 2026-07-11 prod bug (engagement 59badae2):
+// jobber_job_id / jobber_assessment_id are stored NUMERIC, but the job-visits
+// read (jobId), the appointment assignment (appointmentId), and the visit
+// crew push (visitId) all type their id as EncodedId!. Feeding the bare
+// number is rejected ("'<n>' is not a valid EncodedId"). visit ids arrive
+// already-encoded from the read; jobber_user_id is stored already-encoded by
+// the roster — so those two pass through, and re-encoding them would
+// double-wrap. These tests pin: numeric in → base64 gid out, and NOTHING
+// numeric is ever sent.
+describe('encoded-id contract (EncodedId! args)', () => {
+  const JOB_NUM = '141304145'
+  const ASSESS_NUM = '2123185874'
+  const wire = () => {
+    h.enqueue('engagement_assignees', [
+      assignee({ hub_user_id: 'u1', jobber_user_id: 'Z2lkOi8vSm9iYmVyL1VzZXIvMQ==' }), // already-encoded gid://Jobber/User/1
+    ])
+    h.enqueue('jobs', [{ jobber_job_id: JOB_NUM }])
+    h.enqueue('assessments', [{ jobber_assessment_id: ASSESS_NUM }])
+  }
+  const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64')
+  const decode = (s: string) => Buffer.from(s, 'base64').toString('utf8')
+
+  it('encodeJobberId round-trips numeric → gid → numeric (inverse of extractJobberId)', () => {
+    const gid = encodeJobberId('Job', JOB_NUM)
+    expect(decode(gid)).toBe('gid://Jobber/Job/141304145')
+    expect(extractJobberId(gid)).toBe(JOB_NUM)
+    // idempotent: an already-encoded input is not double-wrapped
+    expect(encodeJobberId('Job', gid)).toBe(gid)
+  })
+
+  it('jobId (visits read) and appointmentId (assign) are sent as gids, never bare numeric', async () => {
+    wire()
+    await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
+    const jobId = jobberGraphQL.mock.calls[0][2].jobId
+    expect(jobId).toBe(b64('gid://Jobber/Job/141304145'))
+    expect(decode(jobId)).toMatch(/^gid:\/\/Jobber\/Job\/\d+$/)
+
+    const apptVars = jobberMutation.mock.calls.find(c => String(c[1]).includes('appointmentEditAssignment'))![2]
+    expect(apptVars.appointmentId).toBe(b64('gid://Jobber/Assessment/2123185874'))
+    expect(decode(apptVars.appointmentId)).toMatch(/^gid:\/\/Jobber\/Assessment\/\d+$/)
+  })
+
+  it('NO EncodedId! arg anywhere in the sync is a bare numeric string', async () => {
+    wire()
+    await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
+    const idsSent: string[] = []
+    for (const [, , vars] of jobberGraphQL.mock.calls) if (vars?.jobId) idsSent.push(vars.jobId)
+    for (const [, , vars] of jobberMutation.mock.calls) {
+      if (vars?.visitId) idsSent.push(vars.visitId)
+      if (vars?.appointmentId) idsSent.push(vars.appointmentId)
+    }
+    expect(idsSent.length).toBeGreaterThan(0)
+    for (const id of idsSent) expect(id).not.toMatch(/^\d+$/)
+  })
+
+  it('assignedUserIds (already-encoded jobber_user_id) pass through UNtouched — not re-wrapped', async () => {
+    wire()
+    await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
+    const apptVars = jobberMutation.mock.calls.find(c => String(c[1]).includes('appointmentEditAssignment'))![2]
+    // exactly the stored value — a re-encode would corrupt it to a double gid
+    expect(apptVars.input.assignedUserIds).toEqual(['Z2lkOi8vSm9iYmVyL1VzZXIvMQ=='])
+  })
+
+  it('the module re-encodes job + assessment ids at the call site (source pin)', () => {
+    const src = readFileSync('lib/engagement-assignee-sync.ts', 'utf8')
+    expect(src).toMatch(/encodeJobberId\('Job',/)
+    expect(src).toMatch(/encodeJobberId\('Assessment',/)
+    // visit ids and assignedUserIds must NOT be re-encoded (already encoded)
+    expect(src).not.toMatch(/encodeJobberId\('Visit'/)
+    expect(src).not.toMatch(/encodeJobberId\('User'/)
   })
 })
 
