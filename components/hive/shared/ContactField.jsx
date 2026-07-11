@@ -3,8 +3,12 @@
 // THE editable contact row (phone/email) — one implementation, two
 // mounts: ClientProfile Key Facts + EngagementPanel Key Facts. Quiet
 // system per the locked design language: inline edit (no modal),
-// hairline input, always-visible quiet ✎ (the descBlock idiom — hover
-// has no tap equivalent), Enter/blur saves, Esc cancels.
+// hairline input, Enter/blur saves, Esc cancels. Affordances follow
+// the shared inline-edit standard (shared/inlineEdit.jsx, Kevin 7/10):
+// always-visible readable ✎ in view mode; edit mode gains the trailing
+// green-✓ / muted-✗ pair (visible path — the shortcuts still work);
+// in-flight disables the pair, failure keeps the edit open with the
+// inline error.
 //
 // The VALUE stays a live tel:/mailto: anchor (stopPropagation) —
 // clicking the number still calls; clicking anywhere else on the row
@@ -37,6 +41,7 @@
 import React, { useState, useRef } from 'react'
 import { IconPhone, IconMail } from '@/components/ui/icons'
 import { ACCENT_BLUE } from './stageConfig'
+import { EditPencil, InlineEditControls } from './inlineEdit'
 import { normalizePhoneDigits } from '@/lib/jobber-contact-writeback'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -68,6 +73,7 @@ export default function ContactField({ kind, leadId, value, onSaved = () => {}, 
   const saving = useRef(false)
 
   const open = () => { setDraft(value || ''); setErr(null); cancelled.current = false; setEditing(true) }
+  const cancel = () => { cancelled.current = true; setErr(null); setEditing(false) }
 
   async function save() {
     if (cancelled.current || saving.current) return
@@ -98,7 +104,9 @@ export default function ContactField({ kind, leadId, value, onSaved = () => {}, 
             : `${f.label} ${verb}`
       setToast({ kind: 'success', msg })
     } catch (e) {
-      // Keep the draft on a failed save — the input stays open.
+      // Keep the draft on a failed save — the input stays open with the
+      // inline error (the standard: never silently drop a draft).
+      setErr(`Save failed: ${e.message}`)
       setToast({ kind: 'error', msg: `Save failed: ${e.message}` })
     } finally {
       saving.current = false
@@ -121,11 +129,12 @@ export default function ContactField({ kind, leadId, value, onSaved = () => {}, 
             onChange={e => { setDraft(e.target.value); if (err) setErr(null) }}
             onKeyDown={e => {
               if (e.key === 'Enter') save()
-              if (e.key === 'Escape') { cancelled.current = true; setErr(null); setEditing(false) }
+              if (e.key === 'Escape') cancel()
             }}
             onBlur={save}
             style={{ flex: 1, minWidth: 0, padding: '5px 8px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '6px', fontSize: '12px', fontFamily: 'inherit', color: '#1a1a18', background: '#fff', outline: 'none' }}
           />
+          <InlineEditControls busy={busy} onSave={save} onCancel={cancel} />
         </div>
         {err && <p style={{ fontSize: '11px', color: '#791F1F', marginTop: '3px', paddingLeft: '20px' }}>{err}</p>}
       </div>
@@ -140,7 +149,7 @@ export default function ContactField({ kind, leadId, value, onSaved = () => {}, 
         style={{ color: ACCENT_BLUE, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {value}
       </a>
-      <span aria-hidden style={{ fontSize: '11px', color: '#c9c7c0', flexShrink: 0 }}>✎</span>
+      <EditPencil />
     </p>
   ) : (
     <p onClick={open} style={{ fontSize: '12px', color: '#c9c7c0', display: 'flex', alignItems: 'center', gap: '7px', cursor: 'text' }}>

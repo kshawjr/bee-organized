@@ -50,6 +50,7 @@ import StatusChip from '@/components/ui/StatusChip'
 import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconExternalLink, IconCalendar, IconSend, IconPaperclip } from '@/components/ui/icons'
 import VitalsStrip, { vitalsAge, vitalsFuture, nextFromChildren } from './shared/VitalsStrip'
 import NotesStream from './NotesStream'
+import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
 import ContactField from './shared/ContactField'
 import MetaSelect from './MetaSelect'
@@ -106,9 +107,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
-  const [descEditing, setDescEditing] = useState(false)
-  const [descDraft, setDescDraft] = useState('')
-  const [descExpanded, setDescExpanded] = useState(false)
   const [touchOpen, setTouchOpen] = useState(false)
   const [touchMethod, setTouchMethod] = useState('call')
   const [touchNote, setTouchNote] = useState('')
@@ -186,13 +184,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     }
   }
 
-  async function saveDescription() {
-    const t = descDraft.trim().slice(0, 2000)
-    setDescEditing(false)
-    if (t === (eng?.description || '').trim()) return
-    await patchEngagement({ description: t })
-  }
-
   // Client-level buzz — posted from the pinned band (append-only; the
   // band owns the draft, we own the notes array + optimistic prepend).
   // Same rows ClientProfile shows: buzz is the CLIENT's standing note.
@@ -256,60 +247,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     } catch (e) {
       setToast({ kind: 'error', msg: `Touchpoint failed: ${e.message}` })
     } finally { setBusy(false) }
-  }
-
-  // Job description — the engagement's own editable field.
-  const descBlock = () => {
-    if (!eng) return null
-    if (descEditing) {
-      return (
-        <textarea
-          autoFocus
-          value={descDraft}
-          onChange={e => setDescDraft(e.target.value)}
-          onBlur={saveDescription}
-          onKeyDown={e => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') saveDescription()
-            if (e.key === 'Escape') setDescEditing(false)
-          }}
-          rows={3}
-          maxLength={2000}
-          placeholder="Describe the work…"
-          style={{ width: '100%', padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '6px', fontSize: '12px', lineHeight: 1.45, color: '#1a1a18', fontFamily: 'inherit', outline: 'none', resize: 'vertical', boxSizing: 'border-box' }}
-        />
-      )
-    }
-    const text = (eng.description || '').trim()
-    if (!text) {
-      return (
-        <button onClick={() => { setDescDraft(''); setDescEditing(true) }}
-          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', border: '0.5px dashed rgba(0,0,0,0.15)', borderRadius: '6px', background: 'transparent', fontSize: '12px', color: '#b5b3ac', cursor: 'text', fontFamily: 'inherit' }}>
-          Add a description…
-        </button>
-      )
-    }
-    const clampLikely = text.length > 120 || text.includes('\n')
-    return (
-      <div onClick={() => { setDescDraft(eng.description || ''); setDescEditing(true) }}
-        title="Click to edit description"
-        style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', cursor: 'text', background: QUIET, borderRadius: '6px', padding: '8px 10px' }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{
-            fontSize: '12px', fontStyle: 'italic', color: '#6b6b66', lineHeight: 1.45, whiteSpace: 'pre-wrap',
-            ...(descExpanded ? {} : { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }),
-          }}>
-            {text}
-          </p>
-          {clampLikely && !descExpanded && (
-            <button onClick={(e) => { e.stopPropagation(); setDescExpanded(true) }}
-              style={{ border: 'none', background: 'transparent', padding: 0, marginTop: '2px', fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
-              Show more
-            </button>
-          )}
-        </div>
-        <span style={{ fontSize: '11px', color: '#c9c7c0', flexShrink: 0 }}>✎</span>
-      </div>
-    )
   }
 
   // Engagement-SCOPED recent slice: this engagement's notes + touches.
@@ -425,11 +362,14 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
         </div>
       )}
 
-      {/* Job description — engagements.description (⌘-Enter/blur saves) */}
+      {/* Job description — engagements.description via the shared
+          EditableDesc idiom (⌘-Enter/blur/✓ saves, Esc/✗ cancels;
+          patchEngagement's boolean keeps a failed save open inline). */}
       {eng && data && (
         <div>
           <MicroLabel>Description</MicroLabel>
-          {descBlock()}
+          <EditableDesc text={eng.description} showEmpty placeholder="Describe the work…"
+            onSave={t => patchEngagement({ description: t })} />
         </div>
       )}
 

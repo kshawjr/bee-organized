@@ -132,15 +132,19 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
     }
   }
 
+  // Boolean return feeds EditableDesc's inline-edit standard: false
+  // keeps the textarea open with the draft after the optimistic revert.
   async function saveDesc(text) {
     const prev = c?.request_details ?? null
     setData(d => d ? { ...d, client: { ...d.client, request_details: text || null } } : d)
     try {
       await patchLead({ request_details: text || null })
       setToast({ kind: 'success', msg: 'Description saved' })
+      return true
     } catch (e) {
       setData(d => d ? { ...d, client: { ...d.client, request_details: prev } } : d)
       setToast({ kind: 'error', msg: `Save failed: ${e.message}` })
+      return false
     }
   }
 

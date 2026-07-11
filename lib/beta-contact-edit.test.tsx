@@ -9,7 +9,10 @@
 //      Enter/blur saves, Esc cancels with zero writes; the value stays
 //      a live tel:/mailto: anchor. Client-side validation blocks junk
 //      saves (email regex, phone ≥7 digits) with a quiet inline error —
-//      no PATCH fires.
+//      no PATCH fires. Affordances follow the shared inline-edit
+//      standard (shared/inlineEdit.jsx, 7/10): readable EditPencil in
+//      view mode, ✓/✗ pair in edit mode — those behaviors are pinned
+//      in beta-inline-edit-standard.test.tsx.
 //   B) Toast tells the WHOLE truth from the PATCH response:
 //      'Phone updated · synced to Jobber'   (contact_writeback updated/added)
 //      'Phone updated'                       (not linked / nothing pushed)
@@ -116,14 +119,17 @@ describe('ContactField — inline edit save/cancel/validate', () => {
     ).then(m => ({ ...m, onSaved, setToast }))
   }
 
-  it('display: live tel: anchor + quiet ✎; row click opens the input pre-filled', async () => {
+  it('display: live tel: anchor + the STANDARD pencil (readable ink, not ghost); row click opens the input pre-filled with the ✓/✗ pair', async () => {
     const { host, unmount } = await mountField()
     expect(host.querySelector('a[href="tel:(561) 555-0100"]')).toBeTruthy()
     expect(host.textContent).toContain('✎')
+    expect(host.querySelector('.bee-edit-pencil')).toBeTruthy() // shared/inlineEdit standard, no private fork
     expect(input(host)).toBeNull()
     await click(host.querySelector('p')!)
     expect(input(host)).toBeTruthy()
     expect((input(host) as HTMLInputElement).value).toBe('(561) 555-0100')
+    expect(host.querySelector('button[aria-label="Save"]')).toBeTruthy()
+    expect(host.querySelector('button[aria-label="Cancel"]')).toBeTruthy()
     await unmount()
   })
 

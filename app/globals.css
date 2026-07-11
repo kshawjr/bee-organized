@@ -67,3 +67,16 @@ select{-webkit-appearance:none}
 .bee-tip-wrap:hover .bee-tip {
   display: block;
 }
+/* bee-inline-edit — THE inline-edit affordance standard (Kevin 7/10).
+ * Components live in components/hive/shared/inlineEdit.jsx and carry
+ * their base looks as inline styles (tests + standalone mounts render
+ * correctly without this sheet); these rules add only what inline
+ * styles can't express: hover darkening and the in-flight spinner.
+ * The font-size override releases these 22px glyph buttons from the
+ * body-wide 16px!important floor (that floor is an iOS zoom-on-focus
+ * guard for text fields — glyph buttons don't zoom). */
+.bee-edit-pencil:hover, :hover > .bee-edit-pencil { color: #1a1a18 !important }
+.bee-inline-save, .bee-inline-cancel { font-size: 13px !important }
+.bee-inline-save:not(:disabled):hover { background: rgba(29, 158, 117, 0.22) !important }
+.bee-inline-cancel:not(:disabled):hover { color: #1a1a18 !important; border-color: rgba(0, 0, 0, 0.3) !important }
+@keyframes bee-inline-spin { to { transform: rotate(360deg) } }
