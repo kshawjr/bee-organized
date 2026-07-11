@@ -326,6 +326,37 @@ describe('masthead Type — a quiet editable meta value, not a bordered box', ()
   })
 })
 
+describe('masthead meta-row — Type + Assigned align without a phantom stretch column', () => {
+  it('groups Type + Assigned under one hairline-topped row and NEITHER cell grows (the flex:1 1 220px dead-band scrunch is gone)', async () => {
+    stubEngagementFetch(basePayload())
+    const { host, unmount } = await mount(
+      <EngagementPanel engagementId="eng-1" onClose={() => {}} setToast={() => {}} lookupOptions={{ sources: [], projectTypes: ['Client', 'Move'] } as any} />
+    )
+    const labels = [...host.querySelectorAll('p')].filter(p => ['Type', 'Assigned to'].includes((p.textContent || '').trim()))
+    const typeLabel = labels.find(p => (p.textContent || '').trim() === 'Type')!
+    const assignLabel = labels.find(p => (p.textContent || '').trim() === 'Assigned to')!
+    expect(typeLabel).toBeTruthy()
+    expect(assignLabel).toBeTruthy()
+    // Type cell wraps its MicroLabel directly; the Assigned cell wraps the
+    // EngagementAssignees root (which owns the "Assigned to" MicroLabel).
+    const typeCell = typeLabel.parentElement as HTMLElement
+    const assignCell = (assignLabel.closest('div') as HTMLElement).parentElement as HTMLElement
+    // ONE aligned meta-row — same parent, grouped by a hairline top rule.
+    expect(typeCell.parentElement).toBe(assignCell.parentElement)
+    const row = typeCell.parentElement as HTMLElement
+    expect(row.style.borderTop).toBe(T.border.divider)
+    // NEITHER cell greedily eats the masthead width — the old bug was
+    // flex:'1 1 220px' on the Assigned cell (grow:1 + 220px basis), which
+    // stretched its wrapper across the row while its content sat left,
+    // leaving the dead band. Both are content-sized now.
+    for (const cell of [typeCell, assignCell]) {
+      expect(cell.style.flex).not.toContain('220')
+      expect(cell.style.flexGrow === '1').toBe(false)
+    }
+    await unmount()
+  })
+})
+
 describe('figures — tabular numerals + tracking', () => {
   it('the masthead deal value and the money in record rows are tabular + tracked', async () => {
     stubEngagementFetch(basePayload())

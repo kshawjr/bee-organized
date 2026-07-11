@@ -803,8 +803,19 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                 the engagement_assignees junction; picker = the
                 engagement's LOCATION hub_users; unmapped-to-Jobber users
                 are selectable but marked. */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px 28px', alignItems: 'flex-start' }}>
-            <div style={{ minWidth: 0 }}>
+          {/* Deal metadata — Type + Assigned To as ONE quiet aligned row
+              under matching uppercase MicroLabels (the ClientProfile meta
+              idiom, so both cards read as one system). A hairline top rule
+              groups them as the deal's meta band and gives the row a
+              defined edge. NEITHER cell grows: the old `flex: 1 1 220px`
+              on the Assigned cell made its wrapper eat ALL remaining
+              masthead width (~500px) while its content stayed small and
+              left-aligned — the "dead band to the right" scrunch. Both
+              cells now size to content (`flex: 0 1 auto`) and shrink/wrap
+              gracefully, so a lone "Add type" + "+ Assign" sits naturally
+              with no phantom stretch column. */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 32px', alignItems: 'flex-start', marginTop: '2px', paddingTop: '12px', borderTop: T.border.divider }}>
+            <div style={{ flex: '0 1 auto', minWidth: 0 }}>
               <MicroLabel>Type</MicroLabel>
               <MetaSelect
                 label="Type" value={eng.project_type || null} options={lookupOptions.projectTypes}
@@ -819,7 +830,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
               />
             </div>
             {data && (
-              <div style={{ minWidth: 0, flex: '1 1 220px' }}>
+              <div style={{ flex: '0 1 auto', minWidth: 0 }}>
                 <EngagementAssignees
                   engagementId={engagementId}
                   assignees={assignees}
