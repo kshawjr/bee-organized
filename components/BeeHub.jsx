@@ -133,6 +133,9 @@ const CompaniesContext = createContext(null)
 // that actually exist server-side.
 const isUuidStr = (s) => typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 
+// Classic (non-Hive) board stage vocabulary — the PersonCard/pipeline
+// views in BeeHub still render from this. NOT the Hive engagement stage
+// machine (that's ENGAGEMENT_STAGES in components/hive/shared/stageConfig).
 const STAGES = [
   { key:'New',             label:'New',             color:'#6366f1', bg:'rgba(99,102,241,0.08)',  dot:'#6366f1', icon:'✨' },
   { key:'Attempting',      label:'Attempting to Contact', color:'#f97316', bg:'rgba(249,115,22,0.08)',  dot:'#f97316', icon:'📲' },
@@ -1100,11 +1103,6 @@ function getDefaultPathForProject(projectType) {
   const id = cat==='move' ? getDefaultMovePathId() : getDefaultPathId()
   return DRIP_PATHS_CONFIG.find(p=>p.id===id) || DRIP_PATHS_CONFIG.find(p=>p.projectType===cat) || DRIP_PATHS_CONFIG[0]
 }
-
-// Admin-managed client kanban stages (Hive)
-let _clientStages = null
-function getClientStages() { return _clientStages || STAGES }
-function setAdminClientStages(list) { if(Array.isArray(list)) _clientStages = list }
 
 // Admin-managed partner kanban stages
 let _partnerStages = null
@@ -24485,14 +24483,6 @@ const LOOKUP_CATEGORIES_CONFIG = {
     defaultColor: '#8a9e9a',
     syncGetter: 'project_types',
   },
-  client_stages: {
-    label: 'Client Stages',
-    desc: 'Kanban columns for the Hive (Clients) screen',
-    section: 'CLIENTS',
-    fields: ['label', 'color', 'icon'],
-    defaultColor: '#6366f1',
-    syncGetter: 'client_stages',
-  },
   lead_sources: {
     label: 'Client Sources',
     desc: 'Where new clients come from (Website, Referral, etc.)',
@@ -24567,7 +24557,6 @@ function pushLookupsToGetters(category, rows) {
   }))
 
   switch (category) {
-    case 'client_stages':       setAdminClientStages(toStageShape()); break
     case 'partner_stages':      setAdminPartnerStages(toStageShape()); break
     case 'client_tags':         setAdminClientTags(toTagShape()); setAdminClientTagsRaw(rows); break
     case 'partner_specialties': setAdminSpecialties(toTagShape()); break
@@ -25040,7 +25029,7 @@ function ConfigureTab() {
 
   // Overview view: tiles grouped by section
   const sections = [
-    { key: 'CLIENTS',  cats: ['closed_lost_reasons', 'client_tags', 'project_types', 'client_stages', 'lead_sources'] },
+    { key: 'CLIENTS',  cats: ['closed_lost_reasons', 'client_tags', 'project_types', 'lead_sources'] },
     { key: 'PARTNERS', cats: ['partner_specialties', 'partner_tiers', 'partner_stages', 'touchpoint_types'] },
   ]
 
@@ -31307,7 +31296,6 @@ export default function App({
       label: r.label,
     }))
 
-    if (Array.isArray(initialLookups.client_stages))       setAdminClientStages(toStageShape(initialLookups.client_stages))
     if (Array.isArray(initialLookups.partner_stages))      setAdminPartnerStages(toStageShape(initialLookups.partner_stages))
     if (Array.isArray(initialLookups.client_tags)) {
       setAdminClientTags(toTagShape(initialLookups.client_tags))
