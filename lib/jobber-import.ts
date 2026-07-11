@@ -62,7 +62,7 @@ export const REQUESTS_QUERY = `
       nodes {
         id createdAt jobberWebUri
         client { id }
-        assessment { id startAt isComplete completedAt }
+        assessment { id startAt duration isComplete completedAt }
       }
       pageInfo { hasNextPage endCursor }
     }
@@ -150,7 +150,7 @@ export const SINGLE_REQUEST_QUERY = `
                emails { address primary }
                phones  { number  primary }
                billingAddress { street city province postalCode } }
-      assessment { id startAt isComplete completedAt }
+      assessment { id startAt duration isComplete completedAt }
       quotes(first: 5) { nodes { id } }
       jobs(first: 5)   { nodes { id invoices(first: 5) { nodes { id } } } }
     }
@@ -627,6 +627,19 @@ export async function upsertAssessment(
         ? { status: 'completed', completed_at: request.assessment.completedAt || null }
         : { status: 'scheduled', completed_at: null }
       : { status: 'scheduled' }),
+    // Appointment duration in minutes (Jobber Assessment.duration — added to
+    // REQUESTS_QUERY / SINGLE_REQUEST_QUERY alongside id/startAt). Verified
+    // live: `duration` is already minutes (== (endAt-startAt)/60000 exactly),
+    // so it maps 1:1 to duration_minutes with no derivation. Guarded exactly
+    // like the appointment id: only overwrite when the payload carries a real
+    // number. Jobber leaves duration null on ~8% of assessments (no scheduled
+    // end); on those we omit the key so the insert keeps the DB default (60)
+    // and a re-sync never nulls a good duration. Root cause was the same shape
+    // as 78f1ba8/a1cd157: the selection never fetched duration, so every row
+    // held the fake uniform 60.
+    ...(typeof request.assessment.duration === 'number'
+      ? { duration_minutes: request.assessment.duration }
+      : {}),
     source: 'jobber',
     jobber_synced_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),

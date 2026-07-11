@@ -234,3 +234,61 @@ describe('upsertAssessment completion mapping (isComplete/completedAt)', () => {
     expect(h.state.rows[0].completed_at).toBeNull()
   })
 })
+
+describe('upsertAssessment duration mapping (Jobber Assessment.duration → duration_minutes)', () => {
+  // The bug: every row held duration_minutes:60 (the DB column default),
+  // because the selection never fetched duration and upsert never set it.
+  // Jobber's `duration` is already minutes (verified live: it equals
+  // (endAt-startAt)/60000), so it maps 1:1.
+  it('real duration → duration_minutes set to that value', async () => {
+    await upsertAssessment(
+      { id: REQUEST.id, assessment: { ...REQUEST.assessment, duration: 120 } },
+      'sr-d', 'lead-1', 'loc-1',
+    )
+    expect(h.state.upserts[0].payload.duration_minutes).toBe(120)
+    expect(h.state.rows[0].duration_minutes).toBe(120)
+  })
+
+  it('a genuine 60 is still written (real value that happens to equal the default)', async () => {
+    await upsertAssessment(
+      { id: REQUEST.id, assessment: { ...REQUEST.assessment, duration: 60 } },
+      'sr-d60', 'lead-1', 'loc-1',
+    )
+    expect(h.state.upserts[0].payload.duration_minutes).toBe(60)
+  })
+
+  it('guard: absent duration never writes duration_minutes — keeps the insert-safe default', async () => {
+    // REQUEST has no duration → key omitted, so the DB column default (60)
+    // stands on insert and a re-sync can never null a good duration.
+    await call()
+    expect('duration_minutes' in h.state.upserts[0].payload).toBe(false)
+  })
+
+  it('guard: malformed duration (null / non-number) is not written', async () => {
+    await upsertAssessment(
+      { id: REQUEST.id, assessment: { ...REQUEST.assessment, duration: null } },
+      'sr-dnull', 'lead-1', 'loc-1',
+    )
+    expect('duration_minutes' in h.state.upserts[0].payload).toBe(false)
+    await upsertAssessment(
+      { id: REQUEST.id, assessment: { ...REQUEST.assessment, duration: '90' } },
+      'sr-dstr', 'lead-1', 'loc-1',
+    )
+    expect('duration_minutes' in h.state.upserts[1].payload).toBe(false)
+  })
+
+  it('a re-sync carrying a real duration does not null it on an absent-duration payload', async () => {
+    // First sync sets 120; a later payload without duration must leave the
+    // stored value intact (key omitted → column untouched on update).
+    await upsertAssessment(
+      { id: REQUEST.id, assessment: { ...REQUEST.assessment, duration: 120 } },
+      'sr-dresync', 'lead-1', 'loc-1',
+    )
+    await upsertAssessment(
+      { id: REQUEST.id, assessment: { ...REQUEST.assessment } },
+      'sr-dresync', 'lead-1', 'loc-1',
+    )
+    expect(h.state.rows).toHaveLength(1)
+    expect(h.state.rows[0].duration_minutes).toBe(120)
+  })
+})
