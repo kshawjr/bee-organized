@@ -255,10 +255,10 @@ describe('EngagementPanel — no Advance for any engagement; the action-bar Clos
 
 // ── C) board: pipeline columns inert; drag-to-close pending flow ─
 describe('EngagementBoard — pipeline columns are not drop targets; drag-to-close is pending + shared popup', () => {
-  const mountBoard = (rows: any[] = [LINKED, LOCAL]) => {
+  const mountBoard = (rows: any[] = [LINKED, LOCAL], extra: any = {}) => {
     const setToast = vi.fn()
     const container = mount(
-      <EngagementBoard engagements={rows as any} closedCount={0} setToast={setToast} />
+      <EngagementBoard engagements={rows as any} closedCount={0} setToast={setToast} {...extra} />
     )
     return { container, setToast }
   }
@@ -334,10 +334,74 @@ describe('EngagementBoard — pipeline columns are not drop targets; drag-to-clo
     expect(patchCalls.length).toBe(1)
     expect(patchCalls[0].url).toContain(`/api/engagements/${LOCAL.id}`)
     expect(patchCalls[0].body.stage).toBe(CLOSED_LOST)
-    expect(patchCalls[0].body.closed_reason).toBe('lost_no_response')
+    // No lookupOptions → the confirm falls back to the canonical LABELS; the
+    // first is 'No response', stored VERBATIM (not the old 'lost_no_response' slug).
+    expect(patchCalls[0].body.closed_reason).toBe('No response')
     // Pending column resolved; card did not return to the pipeline.
     expect(container.textContent).not.toContain('Closing — lost')
     expect(container.querySelector('[data-board-col="Request"]')!.textContent).not.toContain('Manny Manual')
+  })
+
+  // The board drag-close picker reads the SAME admin picklist as the wizard
+  // (lookupOptions.closeLostReasons): its <select> options are the admin
+  // LABELS, not the hardcoded slugs, and a net-new admin reason is stored
+  // verbatim in closed_reason (the PATCH route no longer coerces it).
+  it('drag-close reason picker renders admin picklist labels and stores a net-new reason verbatim', async () => {
+    const { container } = mountBoard([LOCAL], {
+      lookupOptions: { sources: [], projectTypes: [], closeLostReasons: ['Price too high', 'Budget on hold', 'Other'] },
+    })
+    await drag(cardOf(container, 'Manny Manual')!, 'dragstart')
+    await drag(container.querySelector('[aria-label="Close as lost"]')!, 'drop')
+    const select = container.querySelector('select')! as HTMLSelectElement
+    const opts = [...select.options].map(o => o.value)
+    expect(opts).toEqual(['Price too high', 'Budget on hold', 'Other'])   // admin labels, not slugs
+    expect(opts).not.toContain('lost_no_response')
+    // pick a net-new admin reason (not in any hardcoded enum)
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!
+      setter.call(select, 'Budget on hold')
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await fire(btnByText(container, 'Close as lost')!)
+    expect(patchCalls.length).toBe(1)
+    expect(patchCalls[0].body.stage).toBe(CLOSED_LOST)
+    expect(patchCalls[0].body.closed_reason).toBe('Budget on hold')
+  })
+
+  // 'Other' requires a note on the board picker — same rule as the wizard.
+  it('drag-close: Other requires a note (confirm disabled until one is typed)', async () => {
+    const { container } = mountBoard([LOCAL], {
+      lookupOptions: { sources: [], projectTypes: [], closeLostReasons: ['Price too high', 'Other'] },
+    })
+    await drag(cardOf(container, 'Manny Manual')!, 'dragstart')
+    await drag(container.querySelector('[aria-label="Close as lost"]')!, 'drop')
+    const select = container.querySelector('select')! as HTMLSelectElement
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!
+      setter.call(select, 'Other')
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect((btnByText(container, 'Close as lost')! as HTMLButtonElement).disabled).toBe(true)
+    const note = container.querySelector('input')! as HTMLInputElement
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      setter.call(note, 'ghosted after the quote')
+      note.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect((btnByText(container, 'Close as lost')! as HTMLButtonElement).disabled).toBe(false)
+    expect(patchCalls.length).toBe(0)
+  })
+
+  // readOnly gates the whole board drag-close pathway: cards aren't
+  // draggable, so the close zones never appear and the confirm never mounts.
+  it('drag-close: readOnly suppresses draggable cards, close zones, and popup entirely', async () => {
+    const { container } = mountBoard([LOCAL], { readOnly: true })
+    // Card still renders, but NOT draggable → no path to the close rail.
+    expect(container.textContent).toContain('Manny Manual')
+    expect(container.querySelectorAll('[draggable="true"]').length).toBe(0)
+    expect(container.querySelector('[aria-label="Close as lost"]')).toBeNull()
+    expect(container.textContent).not.toContain('Close as')
+    expect(patchCalls.length).toBe(0)
   })
 
   it('Won gate holds on drag-close: owing invoices disable Won in the popup', async () => {

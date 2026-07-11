@@ -108,7 +108,7 @@ function EngagementCard({ e, onOpen, draggable, onDragStart, onDragEnd, accent =
   )
 }
 
-export default function EngagementBoard({ engagements = [], closedCount = 0, reopenedIds = [], locFilter = 'all', workFilters = ENGAGEMENT_FILTER_DEFAULTS, setWorkFilters = () => {}, clearWorkFilters = () => {}, onOpenClient = () => {}, onOpenEngagement = null, onViewClosedInList = () => {}, setToast = () => {}, readOnly = false }) {
+export default function EngagementBoard({ engagements = [], closedCount = 0, reopenedIds = [], locFilter = 'all', workFilters = ENGAGEMENT_FILTER_DEFAULTS, setWorkFilters = () => {}, clearWorkFilters = () => {}, onOpenClient = () => {}, onOpenEngagement = null, onViewClosedInList = () => {}, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [], closeLostReasons: [] }, readOnly = false }) {
   // Local rows for optimistic drag moves; resync when the server prop changes.
   const [rows, setRows] = useState(engagements)
   useEffect(() => { setRows(engagements) }, [engagements])
@@ -312,10 +312,12 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, reo
         <CloseEngagementConfirm
           engagementId={pendingEng.id}
           invoices={pendingEng.invoices || []}
+          reasons={lookupOptions?.closeLostReasons || []}
           initialCloseAs={target}
           onCancel={cancelPendingClose}
           onClosed={(stage) => confirmedClose(stage)}
           setToast={setToast}
+          readOnly={readOnly}
         />
       </div>
     )

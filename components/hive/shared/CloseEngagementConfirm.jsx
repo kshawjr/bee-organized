@@ -24,25 +24,32 @@
 
 import React, { useState } from 'react'
 import { CLOSED_WON, CLOSED_LOST } from './stageConfig'
-import { commitEngagementClose, invoicesSettled } from './closeEngagement'
+import { commitEngagementClose, invoicesSettled, DEFAULT_CLOSE_LOST_REASONS, OTHER_LOST_REASON } from './closeEngagement'
 import { T } from './tokens'
 
 export default function CloseEngagementConfirm({
   engagementId,
   invoices = [],
+  reasons = [],                   // admin-configured close-lost LABELS (HiveShell lookupOptions.closeLostReasons)
   initialCloseAs = CLOSED_LOST,   // drag-to-close preselects its column
   onClosed = () => {},            // (stage, patchJson) after the PATCH commits
   onCancel = () => {},            // no write happened — safe to snap back
   setToast = () => {},
   readOnly = false,               // defensive — its trigger is gated upstream
 }) {
+  // Same source as the Close-LOST wizard: admin picklist labels, with the
+  // canonical set as the code-level fallback when unconfigured. The picked
+  // LABEL is stored verbatim in closed_reason (no slug coercion).
+  const reasonList = Array.isArray(reasons) && reasons.length > 0 ? reasons : DEFAULT_CLOSE_LOST_REASONS
   const [closeAs, setCloseAs] = useState(initialCloseAs)
-  const [closeReason, setCloseReason] = useState('lost_no_response')
+  const [closeReason, setCloseReason] = useState(reasonList[0])
   const [closeNote, setCloseNote] = useState('')
   const [busy, setBusy] = useState(false)
 
   // Won gate: every invoice paid or zero balance (no invoices = clear).
   const settled = invoicesSettled(invoices)
+  // 'Other' REQUIRES a note — same rule the wizard enforces.
+  const otherNeedsNote = closeAs === CLOSED_LOST && closeReason === OTHER_LOST_REASON && !closeNote.trim()
 
   async function confirmClose() {
     setBusy(true)
@@ -80,21 +87,20 @@ export default function CloseEngagementConfirm({
       {closeAs === CLOSED_LOST && (
         <select value={closeReason} onChange={e => setCloseReason(e.target.value)}
           style={{ padding: '8px 10px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', background: T.surface.raised }}>
-          <option value="lost_no_response">No response</option>
-          <option value="lost_competitor">Went with someone else</option>
-          <option value="lost_not_fit">Not a fit</option>
-          <option value="written_off">Written off</option>
-          <option value="lost_other">Other</option>
+          {reasonList.map(r => (
+            <option key={r} value={r}>{r}</option>
+          ))}
         </select>
       )}
-      <input value={closeNote} onChange={e => setCloseNote(e.target.value)} placeholder="Note (optional)…"
+      <input value={closeNote} onChange={e => setCloseNote(e.target.value)}
+        placeholder={otherNeedsNote ? 'Note (required for “Other”)…' : 'Note (optional)…'}
         style={{ padding: '8px 10px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', outline: 'none', background: T.surface.raised }} />
       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
         <button onClick={onCancel} disabled={busy}
           style={{ padding: '7px 12px', borderRadius: T.radius.control, border: 'none', background: 'transparent', fontSize: '12px', color: T.ink.muted, cursor: 'pointer', fontFamily: 'inherit' }}>
           Cancel
         </button>
-        <button onClick={confirmClose} disabled={readOnly || busy || (closeAs === CLOSED_WON && !settled)}
+        <button onClick={confirmClose} disabled={readOnly || busy || otherNeedsNote || (closeAs === CLOSED_WON && !settled)}
           style={{ padding: '7px 14px', borderRadius: T.radius.control, border: 'none', background: T.ink.primary, color: T.ink.inverse, fontSize: '12px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>
           Close as {closeAs === CLOSED_WON ? 'won' : 'lost'}
         </button>

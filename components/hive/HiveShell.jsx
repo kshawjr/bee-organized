@@ -370,6 +370,7 @@ export default function HiveShell({
           onOpenEngagement={openEngagement}
           onViewClosedInList={viewClosedInList}
           setToast={setToast}
+          lookupOptions={lookupOptions}
           readOnly={readOnly}
         />
       )}
