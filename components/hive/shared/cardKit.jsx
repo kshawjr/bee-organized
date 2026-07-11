@@ -45,7 +45,8 @@ export const quietBtn = (accent = null) => ({
 // matching-color icon + label:
 //   blue  — reach-the-human actions (Call)
 //   gray  — neutral (Log touchpoint, Open in Jobber, New engagement)
-//   green — forward motion (Advance, Send to Jobber — the founding door)
+//   green — forward motion (Send to Jobber — the founding door; the
+//           Advance button was removed 7/10, stages move via Jobber)
 export const ACTION_TONES = {
   blue:  { bg: 'rgba(55,138,221,0.10)', text: '#2b6aad' },
   gray:  { bg: 'rgba(0,0,0,0.06)',      text: '#444441' },

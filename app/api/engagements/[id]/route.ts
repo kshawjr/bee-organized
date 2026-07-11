@@ -8,8 +8,16 @@
 //   re-derive from the children fetched here — self-heals a stale stage
 //   left by a swallowed webhook failure.
 // PATCH /api/engagements/:id — { stage? , title? }
-//   stage: forward-only against ENGAGEMENT_STAGE_RANK (engagement-only
-//   rank in lib/engagements.ts), stamps stage_entered_at / closed_at.
+//   stage: TERMINAL-ONLY (decision 2026-07-10, Kevin — all business
+//   flows through Jobber, so a manual non-terminal stage assertion is
+//   always fiction; the panel Advance button and board pipeline drag
+//   were removed the same day). The only human stage write is the
+//   close: 'Closed Won' / 'Closed Lost' from an open stage, stamping
+//   stage_entered_at / closed_at / closed_reason. Non-terminal stage
+//   values are rejected for EVERY engagement, linked or local —
+//   pipeline stages move only via the Jobber derivation (webhooks /
+//   import / panel-open drift recovery), which writes the DB directly
+//   and never through this route.
 //   title: non-empty trimmed string (≤200 chars) — retires the generic
 //   'Engagement – Jul 2026' fallbacks via inline edit.
 //   NEVER touches leads.stage — the lead board stays webhook/import-driven
@@ -244,15 +252,26 @@ export async function PATCH(
         { status: 400 },
       )
     }
-    const currentRank = ENGAGEMENT_STAGE_RANK[engagement.stage as EngagementStage] ?? 0
-    const newRank = ENGAGEMENT_STAGE_RANK[stage]
     const targetTerminal = stage === 'Closed Won' || stage === 'Closed Lost'
     const currentTerminal = engagement.stage === 'Closed Won' || engagement.stage === 'Closed Lost'
     if (stage !== engagement.stage) {
-      // Terminal moves are ALWAYS allowed from any OPEN stage (closing is
-      // not 'backward'); terminal→terminal stays rejected. Non-terminal
-      // moves keep the forward-only rank rule.
-      if (currentTerminal || (!targetTerminal && newRank <= currentRank)) {
+      // Manual stage moves are gone (7/10): the only stage this route
+      // accepts is a terminal close. Non-terminal values are rejected
+      // for every engagement — Jobber derivation owns pipeline moves.
+      if (!targetTerminal) {
+        return NextResponse.json(
+          {
+            error: 'manual_stage_move_rejected',
+            message: 'Pipeline stages move only via Jobber — this route accepts terminal closes only',
+            current: engagement.stage,
+            requested: stage,
+          },
+          { status: 409 },
+        )
+      }
+      // Terminal→terminal stays rejected (a settled close never flips
+      // through this route; stale_on_import recovery is the GET's job).
+      if (currentTerminal) {
         return NextResponse.json(
           { error: 'backward_move_rejected', current: engagement.stage, requested: stage },
           { status: 409 },

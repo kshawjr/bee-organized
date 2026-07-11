@@ -26,18 +26,24 @@
 // (engagements.description) → Jobber records checklist (status view —
 // the chronological version lives in the Timeline tab) →
 // engagement-scoped recent activity + composer → soft-tinted equal-grid
-// actions (Call / Log / Jobber / Advance — cardKit ActionRow). Close
-// lives in the ··· menu → the same inline Won/Lost confirm as before
-// (Won gated on settled invoices).
+// actions (Call / Log / Send to Jobber / Open in Jobber — cardKit
+// ActionRow). Close lives in the ··· menu → the same inline Won/Lost
+// confirm as before (Won gated on settled invoices).
 //
-// Desktop: centered modal. Mobile: bottom sheet; stage moves happen
-// HERE via Advance — the board has no mobile drag. Beta chunk.
+// NO manual stage mover (decision 2026-07-10, Kevin): all business
+// flows through Jobber — a local engagement's stage assertion is
+// always fiction, so pipeline stages move ONLY via the Jobber
+// derivation (webhooks / import / drift recovery). The Advance button
+// was removed 7/10; the only human stage write left is the terminal
+// Close (won/lost) via the ··· menu.
+//
+// Desktop: centered modal. Mobile: bottom sheet. Beta chunk.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
 import React, { useState, useEffect } from 'react'
 import useIsMobile from './shared/useIsMobile'
-import { ENGAGEMENT_STAGES, isTerminal, stageDisplayLabel, ACCENT_BLUE, CHIP_STYLES } from './shared/stageConfig'
+import { isTerminal, stageDisplayLabel, ACCENT_BLUE, CHIP_STYLES } from './shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
 import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconMail, IconExternalLink, IconCalendar, IconSend, IconPaperclip } from '@/components/ui/icons'
 import VitalsStrip, { vitalsAge, vitalsFuture, nextFromChildren } from './shared/VitalsStrip'
@@ -51,7 +57,7 @@ import PinnedBuzz from './shared/PinnedBuzz'
 import InitialsAvatar from './shared/InitialsAvatar'
 import { MicroLabel, quietBtn, CardMenu, ActionRow, actionBtn } from './shared/cardKit'
 import CloseEngagementConfirm from './shared/CloseEngagementConfirm'
-import { fmtTime, engagementValue, formatFullDate, isJobberLinked } from './shared/engagementStatus'
+import { fmtTime, engagementValue, formatFullDate } from './shared/engagementStatus'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
 const fmtDate = (d) => {
@@ -183,21 +189,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     if (t === (eng?.description || '').trim()) return
     await patchEngagement({ description: t })
   }
-
-  const nextStage = (() => {
-    if (!eng || isTerminal(eng.stage)) return null
-    const order = ENGAGEMENT_STAGES.filter(s => s.key !== 'Closed Lost')
-    const i = order.findIndex(s => s.key === eng.stage)
-    return i >= 0 && i < order.length - 1 ? order[i + 1].key : null
-  })()
-
-  // LINKED = any Jobber child record → the webhook derivation drives
-  // pipeline stage; manual Advance is redundant there (its only unique
-  // effect would be asserting a stage the records don't support). LOCAL
-  // engagements keep Advance — it's their only stage mover. Gated on
-  // !!data like canSendToJobber: never guess linkage from the seed.
-  const linked = !!data && isJobberLinked(children)
-  const showAdvance = !!data && !linked && !!nextStage
 
   // Client-level buzz — posted from the pinned band (append-only; the
   // band owns the draft, we own the notes array + optimistic prepend).
@@ -506,12 +497,12 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
       <NotesStream label="Recent activity" items={activity} onPost={addEngagementNote} nowMs={nowMs} />
 
       {/* Actions — soft-tinted equal-width grid (cardKit ActionRow;
-          the repeat(N,1fr) grid counts rendered children, so the row
-          reflows cleanly when Advance is absent). Advance is LOCAL
-          engagements only (forward-only) — linked ones get their stage
-          from Jobber. Close lives in the ··· menu for BOTH (inline
-          confirm above — there is no Jobber auto-Lost, so the manual
-          close path must always exist). */}
+          the repeat(N,1fr) grid counts rendered children). NO manual
+          stage mover here (7/10 decision, Kevin): stages move ONLY via
+          Jobber derivation — Send to Jobber is the forward door for
+          local engagements. Close lives in the ··· menu for BOTH
+          (inline confirm above — there is no Jobber auto-Lost, so the
+          manual close path must always exist). */}
       <div>
         <ActionRow>
           {client?.phone && (
@@ -531,12 +522,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
             <a href={jobberHref} target="_blank" rel="noreferrer" style={actionBtn('gray')}>
               <IconExternalLink size={14} /> Open in Jobber
             </a>
-          )}
-          {showAdvance && (
-            <button style={actionBtn('green')} disabled={busy}
-              onClick={() => patchEngagement({ stage: nextStage }, `Moved to ${stageDisplayLabel(nextStage)}`)}>
-              Advance to {stageDisplayLabel(nextStage)} →
-            </button>
           )}
         </ActionRow>
         {touchOpen && (

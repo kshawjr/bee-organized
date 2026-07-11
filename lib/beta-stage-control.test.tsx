@@ -1,23 +1,31 @@
 // @vitest-environment happy-dom
 //
-// Engagement stage control — linked vs local (2026-07-09):
+// Engagement stage control (2026-07-09, tightened 2026-07-10):
 //   THE PRINCIPLE: the Won/Lost confirmation popup binds to HUMAN UI
 //   INTENT, never to the Won stage value. Automated writers (import
 //   backfill, webhook derivation, panel-open drift recovery) write
 //   stage directly and silently; only the human close paths (··· menu
 //   Close + board drag-to-close) raise the confirm.
 //
+//   MANUAL PIPELINE MOVES ARE GONE (decision 2026-07-10, Kevin): all
+//   business flows through Jobber — a local engagement's stage
+//   assertion is always fiction, so the panel Advance button and the
+//   board's local-card pipeline drag were both removed. The ONLY human
+//   stage write left is the terminal close.
+//
 //   A) isJobberLinked — "linked" = ANY child record (SR/quote/job/
 //      invoice/assessment); the inverse of canSendToJobber.
-//   B) Panel: Advance renders for LOCAL engagements only (linked stage
-//      is Jobber-driven); the ··· Close flow is the SHARED confirm.
-//   C) Board: pipeline drags no-op for linked cards (toast, no PATCH);
-//      local pipeline drags commit directly. Drag-to-close (both card
-//      types) is PENDING — drop opens the shared popup, confirm
-//      commits the terminal PATCH, cancel snaps the card back with
-//      zero writes.
+//   B) Panel: NO Advance button for ANY engagement — linked OR local;
+//      the ··· Close flow is the SHARED confirm.
+//   C) Board: pipeline columns are not drop targets — dropping any
+//      card on a column writes nothing and moves nothing. Drag-to-close
+//      (both card types) is PENDING — drop opens the shared popup,
+//      confirm commits the terminal PATCH, cancel snaps the card back
+//      with zero writes.
 //   D) One popup, one write path: panel menu-close and board drag-close
 //      both render shared/CloseEngagementConfirm (source-pinned).
+//   (API side: beta-stage-terminal-only.test.ts pins the route
+//   rejection of non-terminal stage values.)
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -132,8 +140,8 @@ describe('isJobberLinked — any child record makes an engagement linked', () =>
   })
 })
 
-// ── B) panel: Advance gating + shared menu close ──────────────
-describe('EngagementPanel — Advance is local-only; ··· Close is the shared confirm', () => {
+// ── B) panel: no manual mover + shared menu close ─────────────
+describe('EngagementPanel — no Advance for any engagement; ··· Close is the shared confirm', () => {
   const mountPanel = async (engagement: any, children: any) => {
     panelPayload = { engagement, children, client: clientPayload }
     const onChanged = vi.fn()
@@ -150,14 +158,12 @@ describe('EngagementPanel — Advance is local-only; ··· Close is the shared 
     expect(btnByText(container, 'Advance to')).toBeUndefined()
   })
 
-  it('LOCAL: Advance renders and PATCHes the next stage (its only stage mover)', async () => {
+  it('LOCAL: no Advance button either — the manual mover was removed 7/10 (stages move via Jobber)', async () => {
     const { container } = await mountPanel(LOCAL, emptyChildren())
-    const adv = btnByText(container, 'Advance to Estimate')!
-    expect(adv).toBeTruthy()
-    await fire(adv)
-    expect(patchCalls.length).toBe(1)
-    expect(patchCalls[0].url).toContain(`/api/engagements/${LOCAL.id}`)
-    expect(patchCalls[0].body).toEqual({ stage: 'Estimate' })
+    expect(container.textContent).toContain('Pat Tester') // panel loaded
+    expect(btnByText(container, 'Advance to')).toBeUndefined()
+    expect(btnByText(container, 'Advance')).toBeUndefined()
+    expect(patchCalls.length).toBe(0)
   })
 
   it('··· menu Close opens the shared confirm for LINKED too; cancel writes nothing', async () => {
@@ -208,8 +214,8 @@ describe('EngagementPanel — Advance is local-only; ··· Close is the shared 
   })
 })
 
-// ── C) board: pipeline drags + drag-to-close pending flow ─────
-describe('EngagementBoard — linked pipeline drag no-ops; drag-to-close is pending + shared popup', () => {
+// ── C) board: pipeline columns inert; drag-to-close pending flow ─
+describe('EngagementBoard — pipeline columns are not drop targets; drag-to-close is pending + shared popup', () => {
   const mountBoard = (rows: any[] = [LINKED, LOCAL]) => {
     const setToast = vi.fn()
     const container = mount(
@@ -222,21 +228,22 @@ describe('EngagementBoard — linked pipeline drag no-ops; drag-to-close is pend
     await drag(container.querySelector(`[data-board-col="${colKey}"]`)!, 'drop')
   }
 
-  it('LINKED pipeline drag → no PATCH, Jobber-drives toast', async () => {
+  it('LINKED pipeline drop is inert — no PATCH, no move (columns are not drop targets, 7/10)', async () => {
     const { container, setToast } = mountBoard()
     await dropOnCol(container, 'Lin Linked', 'Job in Progress')
     expect(patchCalls.length).toBe(0)
-    expect(setToast).toHaveBeenCalledWith(expect.objectContaining({ msg: expect.stringContaining('Jobber drives') }))
+    expect(setToast).not.toHaveBeenCalled()
     // Card stays in its column.
     expect(container.querySelector('[data-board-col="Estimate"]')!.textContent).toContain('Lin Linked')
+    expect(container.querySelector('[data-board-col="Job in Progress"]')!.textContent).not.toContain('Lin Linked')
   })
 
-  it('LOCAL pipeline drag commits directly — no popup for pipeline moves', async () => {
+  it('LOCAL pipeline drop is inert too — the local-card pipeline drag was removed 7/10', async () => {
     const { container } = mountBoard()
     await dropOnCol(container, 'Manny Manual', 'Estimate')
-    expect(patchCalls.length).toBe(1)
-    expect(patchCalls[0].url).toContain(`/api/engagements/${LOCAL.id}`)
-    expect(patchCalls[0].body).toEqual({ stage: 'Estimate' })
+    expect(patchCalls.length).toBe(0)
+    expect(container.querySelector('[data-board-col="Request"]')!.textContent).toContain('Manny Manual')
+    expect(container.querySelector('[data-board-col="Estimate"]')!.textContent).not.toContain('Manny Manual')
     expect(container.textContent).not.toContain('Close as') // never the popup
   })
 

@@ -6,13 +6,13 @@
 // app/_hub-page.tsx (client_name, repeat_count, minimal quotes/jobs/
 // invoices for chips).
 //
-// Stage moves: desktop drag between columns → PATCH /api/engagements/:id
-// { stage }, forward-only (client pre-checks STAGE_RANK; server re-checks
-// and 409s). LINKED engagements (any Jobber child record — isJobberLinked)
-// get NO manual pipeline moves: the webhook derivation drives their
-// stage, so a linked pipeline drop no-ops with a toast. LOCAL cards keep
-// pipeline drag (their only stage mover) and commit directly — pipeline
-// moves aren't closes.
+// NO manual pipeline moves (decision 2026-07-10, Kevin): all business
+// flows through Jobber — a local engagement's stage assertion is always
+// fiction, so pipeline stages move ONLY via the Jobber derivation
+// (webhooks / import / drift recovery). The old local-card pipeline
+// drag (drop on a column → PATCH { stage }) was removed 7/10 alongside
+// the panel's Advance button; pipeline columns are no longer drop
+// targets for ANY card. Dragging exists solely to reach the close rail.
 //
 // CLOSE drags (both linked AND local): while a drag is live the closed
 // rail becomes two drop zones (won / lost). Dropping there does NOT
@@ -22,9 +22,8 @@
 // commits the terminal stage; Cancel snaps the card back to its prior
 // column with no write. Order is drop → popup → commit-or-revert; the
 // stage is NEVER committed on drop. leads.stage is never touched from
-// here. Mobile is one column at a time (swipe/arrows + pager dots);
-// stage moves happen from the engagement sheet per the locked mobile
-// rules — the sheet is the future EngagementPanel, so mobile has no drag.
+// here. Mobile is one column at a time (swipe/arrows + pager dots) —
+// no drag; closes happen from the engagement panel's ··· menu.
 //
 // Card click opens the CLIENT (PersonPanel) via onOpenClient — the
 // EngagementPanel replaces that seam next screen (see TODO below).
@@ -32,12 +31,12 @@
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react'
-import { ENGAGEMENT_STAGES, STAGE_RANK, isTerminal, CLOSED_WON, CLOSED_LOST } from './shared/stageConfig'
+import { ENGAGEMENT_STAGES, isTerminal, CLOSED_WON, CLOSED_LOST } from './shared/stageConfig'
 import { SECTION_LABEL, SECTION_COUNT, TEXT_SUCCESS, TEXT_DANGER, TEXT_MUTED } from '@/components/ui/tokens'
 import FilterChips from '@/components/ui/FilterChips'
 // THE shared status derivation — board cards and list rows consume the
 // same module so the two lenses can never disagree.
-import { deriveStatusChip, displayTitle, engagementValue, fmtMoney, isJobberLinked } from './shared/engagementStatus'
+import { deriveStatusChip, displayTitle, engagementValue, fmtMoney } from './shared/engagementStatus'
 import CloseEngagementConfirm from './shared/CloseEngagementConfirm'
 import StatusChip from '@/components/ui/StatusChip'
 import Card from '@/components/ui/Card'
@@ -183,34 +182,6 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
   }
   const byStage = (key) => orderColumn(visibleRows.filter(e => e.stage === key))
 
-  // PIPELINE moves only (columns are the non-terminal BOARD_STAGES —
-  // close drags never route here; they go through beginClose below).
-  async function moveStage(id, targetStage) {
-    const row = rows.find(r => r.id === id)
-    if (!row || row.stage === targetStage) return
-    if (isJobberLinked(row)) {
-      setToast({ kind: 'error', msg: 'Jobber drives this engagement — its pipeline stage follows the real records' })
-      return
-    }
-    if ((STAGE_RANK[targetStage] ?? 0) <= (STAGE_RANK[row.stage] ?? 0)) {
-      setToast({ kind: 'error', msg: 'Engagements only move forward — reopen from the engagement panel instead' })
-      return
-    }
-    const prevStage = row.stage
-    setRows(rs => rs.map(r => r.id === id ? { ...r, stage: targetStage } : r))
-    try {
-      const res = await fetch(`/api/engagements/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stage: targetStage }),
-      })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
-    } catch (err) {
-      setRows(rs => rs.map(r => r.id === id ? { ...r, stage: prevStage } : r))
-      setToast({ kind: 'error', msg: `Move failed: ${err.message}` })
-    }
-  }
-
   // ── drag-to-close (PENDING, not committed) ────────────────────
   // Drop → the card optimistically leaves its pipeline column and lands
   // in a pending closed column with the shared confirm open. The
@@ -251,25 +222,17 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
     else onOpenClient(e.client_id)
   }
 
-  const renderColumn = (stage, { droppable }) => {
+  // Pipeline columns are NOT drop targets (7/10 decision — no manual
+  // stage moves); cards stay draggable only to reach the close rail.
+  const renderColumn = (stage) => {
     const cards = byStage(stage.key)
     return (
       <div
         key={stage.key}
         data-board-col={stage.key}
-        onDragOver={droppable ? (ev) => { ev.preventDefault(); setDragOverCol(stage.key) } : undefined}
-        onDragLeave={droppable ? () => setDragOverCol(null) : undefined}
-        onDrop={droppable ? (ev) => {
-          ev.preventDefault()
-          setDragOverCol(null)
-          if (dragId.current) moveStage(dragId.current, stage.key)
-          dragId.current = null
-        } : undefined}
         style={{
           width: isMobile ? '100%' : '220px', flexShrink: 0,
           borderRadius: '10px',
-          background: dragOverCol === stage.key ? 'rgba(225,245,238,0.5)' : 'transparent',
-          outline: dragOverCol === stage.key ? '1.5px dashed rgba(8,80,65,0.35)' : 'none',
           padding: '2px',
         }}
       >
@@ -475,7 +438,7 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
           <button onClick={() => setMobileCol(c => Math.min(BOARD_STAGES.length - 1, c + 1))} disabled={mobileCol === BOARD_STAGES.length - 1}
             style={{ border: 'none', background: 'transparent', fontSize: '18px', color: mobileCol === BOARD_STAGES.length - 1 ? '#c9c7c0' : '#6b6b66', cursor: 'pointer', padding: '4px 8px' }}><IconChevronRight size={16} /></button>
         </div>
-        {renderColumn(stage, { droppable: false })}
+        {renderColumn(stage)}
         <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', marginTop: '12px' }}>
           {BOARD_STAGES.map((s, i) => (
             <button key={s.key} onClick={() => setMobileCol(i)} aria-label={s.label}
@@ -502,7 +465,7 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
       ) : (
         <div style={{ overflowX: 'auto', paddingBottom: '1rem', WebkitOverflowScrolling: 'touch' }}>
           <div style={{ display: 'flex', gap: '16px', minWidth: 'max-content', alignItems: 'flex-start' }}>
-            {BOARD_STAGES.map(stage => renderColumn(stage, { droppable: true }))}
+            {BOARD_STAGES.map(stage => renderColumn(stage))}
             {/* 5th-column slot: pending close (popup open) > live-drag
                 drop zones > the closed rail. */}
             {pendingClose ? renderPendingClose() : dragging ? renderCloseZones() : renderClosedRail()}

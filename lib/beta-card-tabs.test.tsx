@@ -22,9 +22,10 @@
 //     EngagementPanel description + records checklist
 //   — TWO activity surfaces: Overview quick slice + composer AND the
 //     Timeline tab's full stream
-//   — write paths preserved: Source None-clear, EditableDesc,
-//     stage Advance (which server-side writes the stage_change
-//     touchpoint — route source guard)
+//   — write paths preserved: Source None-clear, EditableDesc, the ···
+//     menu Close (stage Advance was REMOVED 2026-07-10 per Kevin —
+//     stages move only via Jobber derivation; the route still writes
+//     the stage_change touchpoint on closes — source guard)
 //   — EngagementPanel header (Option B): the CLIENT NAME is the 19px/600
 //     headline (renders exactly ONCE; the auto-generated engagement
 //     title is NOT rendered); quiet subtitle = 'View profile' accent
@@ -34,7 +35,7 @@
 //     rows keep their compact formats (deliberate, not drift)
 //   — action rows are cardKit ActionRow: equal-width repeat(N,1fr)
 //     grid, soft-tinted no-border buttons (Call blue / neutral gray /
-//     Advance+Send green), behaviors unchanged
+//     Send-to-Jobber green), behaviors unchanged
 //   — §8.5: no BeeHub/PartnersContext/useContext in the card pieces
 //   — tab switching works post-streaming without content vanishing
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -526,10 +527,10 @@ describe('header client identity (Option B)', () => {
     await unmount()
   })
 
-  it('bottom action row untouched by the header rework: Call / Log touchpoint / Advance, equal-width grid', async () => {
-    const { host, unmount } = await mountPanel()
+  it('bottom action row: Call / Log touchpoint / Send to Jobber, equal-width grid — NO Advance (removed 7/10)', async () => {
+    const { host, unmount } = await mountPanel({ onSendToJobber: () => {} })
     const row = buttonContaining(host, 'Log touchpoint')!.parentElement as HTMLElement
-    expect([...row.children].map(el => (el.textContent || '').trim())).toEqual(['Call', 'Log touchpoint', 'Advance to Estimate →'])
+    expect([...row.children].map(el => (el.textContent || '').trim())).toEqual(['Call', 'Log touchpoint', 'Send to Jobber'])
     expect(row.style.display).toBe('grid')
     expect(row.getAttribute('style')).toMatch(/repeat\(3,\s*1fr\)/)
     await unmount()
@@ -572,7 +573,7 @@ describe('action row', () => {
   const rowOf = (host: Element) => buttonContaining(host, 'Log touchpoint')!.parentElement as HTMLElement
 
   it('every card: repeat(N,1fr) grid sized to the rendered button count — not a flex row', async () => {
-    for (const m of [mountPerson, mountProfile, mountPanel]) {
+    for (const m of [mountPerson, mountProfile, () => mountPanel({ onSendToJobber: () => {} })]) {
       const { host, unmount } = await m()
       const row = rowOf(host)
       const n = row.children.length
@@ -583,14 +584,14 @@ describe('action row', () => {
     }
   })
 
-  it('soft tints, matching text color, no hairline: Call blue, Advance/Send green, neutrals gray, 38px', async () => {
-    const ep = await mountPanel()
+  it('soft tints, matching text color, no hairline: Call blue, Send green, neutrals gray, 38px', async () => {
+    const ep = await mountPanel({ onSendToJobber: () => {} })
     const call = [...ep.host.querySelectorAll('a')].find(a => (a.textContent || '').includes('Call'))!
     expect(call.getAttribute('style')).toMatch(/rgba\(55,\s*138,\s*221/) // ~10% accent tint
     expect(call.getAttribute('style')).not.toContain('solid')           // no hairline border
     expect(['#2b6aad', 'rgb(43, 106, 173)']).toContain((call as HTMLElement).style.color)
-    const advance = buttonContaining(ep.host, 'Advance to Estimate')!
-    expect(advance.getAttribute('style')).toMatch(/rgba\(29,\s*158,\s*117/) // ~12% success tint
+    const panelSend = buttonContaining(ep.host, 'Send to Jobber')!
+    expect(panelSend.getAttribute('style')).toMatch(/rgba\(29,\s*158,\s*117/) // ~12% success tint
     const log = buttonContaining(ep.host, 'Log touchpoint')!
     expect(log.getAttribute('style')).toMatch(/rgba\(0,\s*0,\s*0/) // neutral gray tint
     expect((log as HTMLElement).style.height).toBe('38px')
@@ -628,15 +629,16 @@ describe('write paths', () => {
     await unmount()
   })
 
-  it('stage Advance is a quiet action and PATCHes forward-only; the route writes the stage_change touchpoint (source guard)', async () => {
+  it('stage Advance is GONE (7/10 — stages move via Jobber); the route still writes the stage_change touchpoint on closes (source guard)', async () => {
+    // Default payload = LOCAL engagement (zero work records) — the old
+    // button rendered exactly here; now no surface offers a manual move.
     const { host, unmount } = await mountPanel()
-    const advance = buttonContaining(host, 'Advance to Estimate')!
-    expect(advance).toBeTruthy()
-    await click(advance)
-    expect(engPatches).toEqual([{ stage: 'Estimate' }])
+    expect(buttonContaining(host, 'Advance')).toBeUndefined()
+    expect(engPatches).toEqual([])
     await unmount()
     const src = readFileSync('app/api/engagements/[id]/route.ts', 'utf8')
     expect(src).toContain("kind: 'stage_change'")
+    expect(src).toContain('manual_stage_move_rejected') // terminal-only stage writes
   })
 
   it('Close moved to the ··· menu, same inline Won/Lost confirm + write', async () => {
