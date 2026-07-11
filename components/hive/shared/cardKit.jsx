@@ -30,6 +30,36 @@ export function MicroLabel({ children }) {
   )
 }
 
+// ── the pill/badge scale (design-system pass 7/11) ────────────
+// ONE person/category PILL anatomy — assignee + tag pills and the
+// dashed "+ add" affordances share height/font/radius here, tuned to
+// sit level with the status CHIPS beside them. BOTH cards reach for this
+// (EngagementAssignees on the panel; TagsRow/ContactsBlock on the
+// profile) so the two surfaces can't drift chip-vs-pill-vs-button.
+//   leading — tighten the left inset for a pill that carries an avatar
+//   dashed  — the "+ add" affordance (transparent, dashed hairline)
+export const pillStyle = ({ dashed = false, leading = false } = {}) => ({
+  display: 'inline-flex', alignItems: 'center', gap: T.badge.gap,
+  height: T.badge.height, boxSizing: 'border-box',
+  padding: leading ? `0 ${T.badge.padX} 0 ${T.badge.padAvatarL}` : `0 ${T.badge.padX}`,
+  borderRadius: T.radius.pill,
+  border: dashed ? T.border.dashed : T.border.thin,
+  background: dashed ? 'transparent' : T.surface.raised,
+  fontSize: T.badge.font, fontWeight: T.badge.weight, lineHeight: 1,
+  color: dashed ? T.ink.muted : T.ink.primary,
+  fontFamily: 'inherit', whiteSpace: 'nowrap',
+})
+
+// A quiet, BORDERLESS editable meta VALUE — the masthead Type cell (and
+// any future meta value): value in primary ink with the inline-edit ✎,
+// no input box. Sits under a MicroLabel, mirroring the profile's cells.
+export const metaValueBtn = (filled) => ({
+  display: 'inline-flex', alignItems: 'center', gap: '6px', maxWidth: '100%', minWidth: 0,
+  border: 'none', background: 'transparent', padding: 0,
+  fontSize: '13px', fontWeight: 500, color: filled ? T.ink.primary : T.ink.quiet,
+  letterSpacing: T.type.trackTitle, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+})
+
 // Quiet action — hairline outline, dark text, ≥44px tap target. The
 // CARD action rows moved to ActionRow/actionBtn below; this stays for
 // inline mini-form controls (the touchpoint Log button).

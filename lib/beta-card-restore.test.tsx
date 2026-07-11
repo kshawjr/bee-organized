@@ -344,12 +344,15 @@ describe('source/type — person-vs-deal split (single home each)', () => {
     await unmount()
   })
 
-  it("panel masthead carries the Type pill ABOVE the tab bar (header area, not Overview content)", async () => {
+  it("panel masthead carries the Type value ABOVE the tab bar (header area, not Overview content) — a quiet editable meta value, not a bordered box", async () => {
     const { host, unmount } = await mountPanel()
-    const typePill = [...host.querySelectorAll('button')].find(b => (b.textContent || '').includes('Type: Client'))!
-    expect(typePill).toBeTruthy()
+    const typeCell = host.querySelector('[aria-label="Edit type"]')!
+    expect(typeCell).toBeTruthy()
+    expect(typeCell.textContent).toContain('Client')
+    // the standalone bordered "Type: Client" pill box is gone
+    expect([...host.querySelectorAll('button')].some(b => (b.textContent || '').includes('Type: Client'))).toBe(false)
     const tabBar = [...host.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Overview tab')!
-    expect(typePill.compareDocumentPosition(tabBar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(typeCell.compareDocumentPosition(tabBar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     await unmount()
   })
 })

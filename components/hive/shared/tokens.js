@@ -70,7 +70,7 @@ export const T = {
     pop: '0 8px 24px rgba(0,0,0,0.14)',        // menus, popovers
     float: '0 8px 30px rgba(26,26,24,0.12)',   // FAB, floating chrome
     drawer: '0 12px 40px rgba(26,26,24,0.22)',
-    overlay: '0 24px 80px rgba(26,26,24,0.25)', // centered modal
+    overlay: '0 1px 2px rgba(0,0,0,0.04), 0 24px 80px rgba(26,26,24,0.22)', // centered modal — two-layer soft lift (contact + deep drop)
     sheet: '0 -8px 40px rgba(26,26,24,0.2)',    // mobile bottom sheet
     knob: '0 1px 3px rgba(0,0,0,0.25)',         // toggle knob
   },
@@ -90,6 +90,28 @@ export const T = {
     trackTitle: '-0.015em', // headings/names
     trackNum: '-0.01em',    // money + figures
     tabular: 'tabular-nums',
+  },
+
+  // ── badge + avatar scale — ONE anatomy both cards share ───────
+  // Status/stage CHIPS stay rectangles (StatusChip → radius.chip); the
+  // person/category PILLS (assignees, tags, + add affordances) and the
+  // inline avatars read their size/type from HERE, so a masthead or
+  // left-column row of mixed chips + pills + buttons sits on one
+  // baseline instead of each component picking its own height. Both
+  // cards reach through cardKit.pillStyle to this, never per-card px.
+  badge: {
+    font: '11px',      // chip + pill text (StatusChip references this too)
+    weight: 500,
+    height: '22px',    // shared pill / + add control height (chips read level)
+    padX: '10px',      // pill / + add horizontal inset
+    padAvatarL: '4px', // tighter left inset when a leading avatar rides
+    gap: '6px',
+  },
+  avatar: {
+    identity: '32px',     // masthead identity circle (InitialsAvatar) — one anatomy with inbox/directory rows
+    identityFont: '11px',
+    inline: '18px',       // inline assignee / secondary-contact minis
+    inlineFont: '9px',
   },
 
   // ── THE action accent (brand teal — ui/tokens GREEN_FILL) ─────

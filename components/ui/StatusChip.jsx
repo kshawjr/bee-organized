@@ -24,7 +24,7 @@ export default function StatusChip({ label, styleKey = 'gray', icon = null }) {
       padding: '2px 8px',
       borderRadius: T.radius.chip,
       background: s.bg, color: s.text,
-      fontSize: '11px', fontWeight: 500,
+      fontSize: T.badge.font, fontWeight: T.badge.weight,
       lineHeight: 1.5, whiteSpace: 'nowrap',
     }}>
       {icon && <span style={{ display: 'inline-flex', alignItems: 'center', lineHeight: 1 }}>{icon}</span>}

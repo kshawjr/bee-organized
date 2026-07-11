@@ -20,6 +20,13 @@
 //      appears ONLY when the engagement carries assessment records;
 //      closed engagements render no placeholders. milestoneFamilies
 //      derives from the stage machine's canonical order.
+//   F) Visual-consistency pass (7/11): the milestone rail runs a
+//      CONTINUOUS line node-to-node (absolute connector, can't collapse);
+//      ONE chip/pill/avatar token scale both cards reach for
+//      (T.badge/T.avatar + cardKit.pillStyle); the modal card lift
+//      (warm border + two-layer soft shadow + 16r); the masthead Type is
+//      a quiet editable meta value (no bordered box); figures carry
+//      tabular numerals + tracking.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -126,9 +133,15 @@ describe('chip anatomy', () => {
     expect(html).not.toContain('border-radius:10px')
   })
 
-  it('TagsRow keeps the pill radius for tags (categorical — pill is right there)', () => {
+  it('TagsRow keeps the pill radius for tags (categorical — pill is right there) via the SHARED pillStyle', () => {
+    const cardKit = readFileSync('components/hive/shared/cardKit.jsx', 'utf8')
+    // the pill radius is single-homed in cardKit.pillStyle now (one scale
+    // both cards reach for), not re-declared per component
+    expect(cardKit).toContain('export const pillStyle')
+    expect(cardKit).toContain('T.radius.pill')
+    // TagsRow composes it rather than hand-rolling a pill
     const src = readFileSync('components/hive/shared/TagsRow.jsx', 'utf8')
-    expect(src).toContain('T.radius.pill')
+    expect(src).toContain('pillStyle')
   })
 })
 
@@ -234,6 +247,98 @@ describe('milestone records view', () => {
     const call = Array.from(host.querySelectorAll('a[href^="tel:"]'))[0] as HTMLElement
     expect(call).toBeTruthy()
     expect([T.accent.deep, 'rgb(8, 80, 65)']).toContain(call.style.color)
+    await unmount()
+  })
+})
+
+// ── F) visual-consistency pass (7/11) ───────────────────────────
+describe('milestone rail — continuous line node-to-node', () => {
+  it('an absolute connector sits between EVERY non-last node, pinned node-bottom → row-bottom so it can NEVER collapse to a nub', async () => {
+    stubEngagementFetch(basePayload()) // Estimate arc: request·quote·job·invoice = 4 rows
+    const { host, unmount } = await mount(
+      <EngagementPanel engagementId="eng-1" onClose={() => {}} setToast={() => {}} />
+    )
+    const conns = Array.from(host.querySelectorAll('[data-rail-connector]')) as HTMLElement[]
+    expect(conns.length).toBe(3) // rows - 1: a segment under every node but the last
+    conns.forEach(c => {
+      const css = c.style.cssText
+      expect(css).toContain('position: absolute') // pinned, not a flex:1 spacer that collapses
+      expect(css).toContain('bottom: 0')          // reaches the row bottom → meets the next node flush
+      expect(css).toContain('top: 18px')          // starts at the node's bottom edge (no gap at the node)
+      expect(css.includes('solid') || css.includes('dashed')).toBe(true)
+    })
+    // solid THROUGH real records, dashed INTO the future placeholders
+    const borders = conns.map(c => c.style.cssText)
+    expect(borders.some(b => b.includes('solid'))).toBe(true)
+    expect(borders.some(b => b.includes('dashed'))).toBe(true)
+    await unmount()
+  })
+})
+
+describe('one chip / pill / avatar token scale — both cards reach for it', () => {
+  it('T.badge + T.avatar carry the shared anatomy (font/weight/height + avatar sizes)', () => {
+    expect(T.badge).toMatchObject({ font: '11px', weight: 500, height: '22px' })
+    expect(T.avatar).toMatchObject({ identity: '32px', inline: '18px' })
+  })
+
+  it('cardKit.pillStyle is the ONE pill home (radius + height), composed by both cards’ pill blocks', () => {
+    const kit = readFileSync('components/hive/shared/cardKit.jsx', 'utf8')
+    expect(kit).toContain('export const pillStyle')
+    expect(kit).toContain('T.radius.pill')
+    expect(kit).toContain('T.badge.height')
+    // panel pill (assignees) + profile pills (tags, contacts) all compose it
+    for (const f of ['EngagementAssignees.jsx', 'TagsRow.jsx', 'ContactsBlock.jsx']) {
+      expect(readFileSync(join('components/hive/shared', f), 'utf8'), f).toContain('pillStyle')
+    }
+  })
+
+  it('StatusChip reads its type from T.badge; InitialsAvatar + the inline avatar read T.avatar (no per-component drift)', () => {
+    expect(readFileSync('components/ui/StatusChip.jsx', 'utf8')).toContain('T.badge')
+    expect(readFileSync('components/hive/shared/InitialsAvatar.jsx', 'utf8')).toContain('T.avatar.identity')
+    expect(readFileSync('components/hive/shared/EngagementAssignees.jsx', 'utf8')).toContain('T.avatar.inline')
+  })
+})
+
+describe('modal card lift (both overlays)', () => {
+  it('the shell card wears the warm border + 16r + a TWO-layer soft shadow (the board/list lift)', () => {
+    const shell = readFileSync('components/hive/OverlayShell.jsx', 'utf8')
+    expect(shell).toContain('T.border.card')
+    expect(shell).toContain('T.radius.card')
+    expect(shell).toContain('T.shadow.overlay')
+    // two-layer = two rgba stops (contact + deep drop), like T.shadow.card
+    expect((T.shadow.overlay.match(/rgba\(/g) || []).length).toBeGreaterThanOrEqual(2)
+    expect(T.radius.card).toBe('16px')
+  })
+})
+
+describe('masthead Type — a quiet editable meta value, not a bordered box', () => {
+  it('renders the value under a Type label with the inline-edit affordance; the old "Type: …" pill box is gone', async () => {
+    stubEngagementFetch(basePayload({ engagement: { project_type: 'Client' } }))
+    const { host, unmount } = await mount(
+      <EngagementPanel engagementId="eng-1" onClose={() => {}} setToast={() => {}} lookupOptions={{ sources: [], projectTypes: ['Client', 'Move'] } as any} />
+    )
+    const typeCell = host.querySelector('[aria-label="Edit type"]') as HTMLElement
+    expect(typeCell).toBeTruthy()
+    expect(typeCell.textContent).toContain('Client')
+    expect(typeCell.style.border === '' || typeCell.style.border.includes('none')).toBe(true) // borderless value, no box
+    expect([...host.querySelectorAll('button')].some(b => (b.textContent || '').includes('Type: Client'))).toBe(false)
+    await unmount()
+  })
+})
+
+describe('figures — tabular numerals + tracking', () => {
+  it('the masthead deal value and the money in record rows are tabular + tracked', async () => {
+    stubEngagementFetch(basePayload())
+    const { host, unmount } = await mount(
+      <EngagementPanel engagementId="eng-1" onClose={() => {}} setToast={() => {}} />
+    )
+    const ps = Array.from(host.querySelectorAll('p')) as HTMLElement[]
+    const value = ps.find(p => p.textContent === '$1,200')! // masthead deal value (best quote)
+    expect(value.style.fontVariantNumeric).toBe('tabular-nums')
+    expect(value.style.letterSpacing).toBe(T.type.trackNum)
+    const quoteRow = ps.find(p => (p.textContent || '').startsWith('Quote'))! // milestone record row
+    expect(quoteRow.style.fontVariantNumeric).toBe('tabular-nums')
+    expect(quoteRow.style.letterSpacing).toBe(T.type.trackTitle)
     await unmount()
   })
 })

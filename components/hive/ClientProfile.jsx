@@ -301,7 +301,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   // assigned-to, preferences. All display/inline-edit; no new writes.
   const leftCol = c && (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', minWidth: 0 }}>
-      <div style={{ background: QUIET, borderRadius: T.radius.control, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+      <div style={{ background: QUIET, border: T.border.divider, borderRadius: T.radius.inset, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
         <MicroLabel>Contact</MicroLabel>
         {/* Phone/email/address: click-to-edit (shared ContactField +
             AddressField); values stay live tel:/mailto: links. Source
@@ -410,7 +410,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
                 style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', background: T.surface.raised, border: T.border.divider, borderRadius: T.radius.control, cursor: 'pointer' }}>
                 <span style={{ color: (CHIP_STYLES[e.stage] || CHIP_STYLES.gray).text, display: 'inline-flex', flexShrink: 0 }}><StageIcon size={15} /></span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, fontVariantNumeric: T.type.tabular, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <p style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, fontVariantNumeric: T.type.tabular, letterSpacing: T.type.trackTitle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {displayTitle(e)}{value != null ? ` · ${fmtMoney(value)}` : ''}
                   </p>
                   {(e.description || '').trim() && (
@@ -568,7 +568,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         <InitialsAvatar name={c.name} bg={fam.bg} text={fam.text} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: '16px', fontWeight: 500, color: T.ink.primary, letterSpacing: T.type.trackTitle, display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+          <p style={{ fontSize: '19px', fontWeight: 600, color: T.ink.primary, letterSpacing: T.type.trackTitle, display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
             {statusMeta && <StatusChip label={statusMeta.label} styleKey={statusMeta.styleKey} />}
           </p>

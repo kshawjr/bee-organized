@@ -22,7 +22,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { T } from './tokens'
-import { MicroLabel } from './cardKit'
+import { MicroLabel, pillStyle } from './cardKit'
 
 export default function TagsRow({ leadId, tags = [], options = [], onChange = () => {}, setToast = () => {} }) {
   const [open, setOpen] = useState(false)
@@ -62,7 +62,7 @@ export default function TagsRow({ leadId, tags = [], options = [], onChange = ()
       <MicroLabel>Tags</MicroLabel>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', position: 'relative' }}>
         {tags.map(t => (
-          <span key={t.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '3px 8px 3px 10px', borderRadius: T.radius.pill, border: T.border.thin, background: T.surface.raised, fontSize: '11px', color: T.ink.primary, whiteSpace: 'nowrap' }}>
+          <span key={t.id} style={pillStyle()}>
             {t.label}
             <button aria-label={`Remove tag ${t.label}`} disabled={busyId === t.id}
               onClick={() => toggle(t)}
@@ -74,7 +74,7 @@ export default function TagsRow({ leadId, tags = [], options = [], onChange = ()
         {tags.length === 0 && <span style={{ fontSize: '11px', color: T.ink.quiet }}>No tags</span>}
         <span style={{ position: 'relative', display: 'inline-block' }}>
           <button onClick={() => setOpen(v => !v)} aria-label="Add tag"
-            style={{ padding: '3px 10px', borderRadius: T.radius.pill, border: T.border.dashed, background: 'transparent', fontSize: '11px', color: T.ink.muted, fontFamily: 'inherit', cursor: 'pointer' }}>
+            style={{ ...pillStyle({ dashed: true }), cursor: 'pointer' }}>
             + Tag
           </button>
           {open && (

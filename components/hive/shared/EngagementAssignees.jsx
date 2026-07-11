@@ -25,7 +25,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { T } from './tokens'
-import { MicroLabel } from './cardKit'
+import { MicroLabel, pillStyle } from './cardKit'
 
 const initialsOf = (name) =>
   (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?'
@@ -44,8 +44,8 @@ function MiniAvatar({ id, name }) {
   const fam = familyFor(id)
   return (
     <span aria-hidden style={{
-      width: '22px', height: '22px', borderRadius: T.radius.round, background: fam.bg, color: fam.text,
-      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: 600, flexShrink: 0,
+      width: T.avatar.inline, height: T.avatar.inline, borderRadius: T.radius.round, background: fam.bg, color: fam.text,
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: T.avatar.inlineFont, fontWeight: 600, flexShrink: 0,
     }}>
       {initialsOf(name)}
     </span>
@@ -111,7 +111,7 @@ export default function EngagementAssignees({
           return (
             <span key={a.hub_user_id}
               title={unmapped ? "Won't sync to Jobber until linked (Settings → Team)" : undefined}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 8px 3px 4px', borderRadius: T.radius.pill, border: T.border.thin, background: T.surface.raised, fontSize: '11px', color: T.ink.primary, whiteSpace: 'nowrap' }}>
+              style={pillStyle({ leading: true })}>
               <MiniAvatar id={a.hub_user_id} name={nameFor(a)} />
               {nameFor(a)}
               {unmapped && (
@@ -128,7 +128,7 @@ export default function EngagementAssignees({
         {assignees.length === 0 && <span style={{ fontSize: '11px', color: T.ink.quiet }}>Unassigned</span>}
         <span style={{ position: 'relative', display: 'inline-block' }}>
           <button onClick={() => setOpen(v => !v)} aria-label="Assign a team member"
-            style={{ padding: '3px 10px', borderRadius: T.radius.pill, border: T.border.dashed, background: 'transparent', fontSize: '11px', color: T.ink.muted, fontFamily: 'inherit', cursor: 'pointer' }}>
+            style={{ ...pillStyle({ dashed: true }), cursor: 'pointer' }}>
             + Assign
           </button>
           {open && (

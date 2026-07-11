@@ -12,7 +12,7 @@ const initialsOf = (name) =>
 
 export default function InitialsAvatar({ name, bg, text }) {
   return (
-    <div style={{ width: '32px', height: '32px', borderRadius: T.radius.round, background: bg, color: text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 600, flexShrink: 0 }}>
+    <div style={{ width: T.avatar.identity, height: T.avatar.identity, borderRadius: T.radius.round, background: bg, color: text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: T.avatar.identityFont, fontWeight: 600, flexShrink: 0 }}>
       {initialsOf(name)}
     </div>
   )

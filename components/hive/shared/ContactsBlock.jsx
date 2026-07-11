@@ -23,7 +23,7 @@
 import React, { useState } from 'react'
 import { IconPhone, IconMail } from '@/components/ui/icons'
 import { T } from './tokens'
-import { MicroLabel } from './cardKit'
+import { MicroLabel, pillStyle } from './cardKit'
 import { EditPencil, InlineEditControls } from './inlineEdit'
 
 const ROLE_PRESETS = ['Spouse', 'Partner', 'Family member', 'Assistant', 'Property manager', 'Tenant', 'Other']
@@ -144,7 +144,7 @@ export default function ContactsBlock({ leadId, contacts = [], onChange = () => 
           <ContactForm busy={busy} err={err} onSave={(d) => save(d)} onCancel={close} />
         ) : (
           <button onClick={() => { setErr(null); setEditingId('new') }}
-            style={{ alignSelf: 'flex-start', padding: '3px 10px', borderRadius: T.radius.pill, border: T.border.dashed, background: 'transparent', fontSize: '11px', color: T.ink.muted, fontFamily: 'inherit', cursor: 'pointer' }}>
+            style={{ ...pillStyle({ dashed: true }), alignSelf: 'flex-start', cursor: 'pointer' }}>
             + Add contact
           </button>
         )}

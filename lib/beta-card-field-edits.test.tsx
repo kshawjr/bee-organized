@@ -282,20 +282,23 @@ describe('EngagementPanel — field edits', () => {
     const { host, unmount } = await mountPanel()
     expect(buttonContaining(host, 'Source: Webform')).toBeUndefined()
     expect(buttonContaining(host, 'Source · add')).toBeUndefined()
-    // Type stays — deal-scoped, riding the header area now.
-    expect(buttonContaining(host, 'Type: Client')).toBeTruthy()
+    // Type stays — deal-scoped, riding the header area now as a quiet
+    // editable meta value (no bordered "Type: …" box).
+    const typeCell = host.querySelector('[aria-label="Edit type"]')!
+    expect(typeCell).toBeTruthy()
+    expect(typeCell.textContent).toContain('Client')
     // The lead-level Source WRITE path lives on ClientProfile's
     // SourceField (beta-card-restore covers it).
     await unmount()
   })
 
-  it('Type None PATCHes the ENGAGEMENT with project_type null and the pill clears', async () => {
+  it('Type None PATCHes the ENGAGEMENT with project_type null and the value clears to the empty state', async () => {
     const { host, unmount } = await mountPanel()
-    await click(buttonContaining(host, 'Type: Client')!)
+    await click(host.querySelector('[aria-label="Edit type"]') as HTMLElement)
     await click(buttonByText(host, 'None')!)
     expect(engPatches).toEqual([{ project_type: null }])
     expect(leadPatches).toEqual([]) // engagement field — never the lead's
-    expect(buttonContaining(host, 'Type · add')).toBeTruthy()
+    expect((host.querySelector('[aria-label="Edit type"]') as HTMLElement).textContent).toContain('Add type')
     await unmount()
   })
 

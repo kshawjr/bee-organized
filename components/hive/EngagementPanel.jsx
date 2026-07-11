@@ -67,7 +67,8 @@ import Timeline from './shared/Timeline'
 import CardTabs from './shared/CardTabs'
 import InitialsAvatar from './shared/InitialsAvatar'
 import EngagementAssignees from './shared/EngagementAssignees'
-import { MicroLabel, quietBtn, ActionRow, actionBtn } from './shared/cardKit'
+import { MicroLabel, quietBtn, ActionRow, actionBtn, metaValueBtn } from './shared/cardKit'
+import { EditPencil } from './shared/inlineEdit'
 import CloseEngagementConfirm from './shared/CloseEngagementConfirm'
 import ClosedSummary from './shared/ClosedSummary'
 import { fmtTime, fmtShort, engagementValue, displayTitle, formatFullDate, invoiceNumber, daysInStage } from './shared/engagementStatus'
@@ -133,24 +134,31 @@ function MilestoneNode({ kind }) {
 // not-yet-real region, matching the Timeline's dashed-future idiom.
 function MilestoneRow({ kind, primary, secondary = null, state = null, href = null, Icon, glyph, last = false, connectorDashed = false }) {
   const future = kind === 'future'
+  // The rail column STRETCHES to the row's height (align-items:stretch;
+  // the content side sets height via paddingBottom), and the connector
+  // is absolutely pinned node-bottom → row-bottom so it ALWAYS fills the
+  // gap — it can't collapse to a nub the way a flex:1 spacer does. The
+  // next row's node meets this line flush (the list stacks with no gap),
+  // so the rail reads as ONE continuous vertical line node-to-node:
+  // solid through real records, dashed into future placeholders.
   return (
-    <div style={{ display: 'flex', gap: '10px' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '18px', flexShrink: 0 }}>
-        <MilestoneNode kind={kind} />
+    <div style={{ display: 'flex', gap: '10px', alignItems: 'stretch' }}>
+      <div style={{ position: 'relative', width: '18px', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         {!last && (
-          <span aria-hidden style={{
-            flex: 1, width: 0, minHeight: '8px', marginTop: '2px', marginBottom: '2px',
+          <span aria-hidden data-rail-connector="1" style={{
+            position: 'absolute', top: '18px', bottom: 0, left: '50%', width: 0,
             borderLeft: `1px ${connectorDashed ? 'dashed' : 'solid'} ${T.hairline.control}`,
           }} />
         )}
+        <MilestoneNode kind={kind} />
       </div>
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-start', gap: '8px', paddingBottom: last ? 0 : '14px' }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-start', gap: '8px', paddingBottom: last ? 0 : '16px' }}>
         <span style={{ fontSize: '13px', flexShrink: 0, width: '18px', textAlign: 'center', color: future ? T.ink.quiet : glyph, lineHeight: '18px' }}>
           <Icon size={14} />
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: '13px', fontWeight: 500, color: future ? T.ink.quiet : T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{primary}</p>
-          {secondary && <p style={{ fontSize: '11px', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{secondary}</p>}
+          <p style={{ fontSize: '13px', fontWeight: 500, color: future ? T.ink.quiet : T.ink.primary, fontVariantNumeric: T.type.tabular, letterSpacing: T.type.trackTitle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{primary}</p>
+          {secondary && <p style={{ fontSize: '11px', color: T.ink.muted, fontVariantNumeric: T.type.tabular, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{secondary}</p>}
         </div>
         {state && (
           <span style={{ flexShrink: 0, fontSize: state.check ? '14px' : '12px', fontWeight: 500, color: state.color, whiteSpace: 'nowrap', lineHeight: '18px' }}>
@@ -454,7 +462,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           actions are HONEST DEEP LINKS into the invoice in Jobber —
           never a button pretending at a capability the API lacks. */}
       {children.invoices.length > 0 && (
-        <div style={{ background: T.surface.sunken, borderRadius: T.radius.inset, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+        <div style={{ background: T.surface.sunken, border: T.border.divider, borderRadius: T.radius.inset, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
           <MicroLabel>Invoice detail</MicroLabel>
           {children.invoices.map(inv => {
             const url = recordJobberUrl('invoice', inv)
@@ -675,39 +683,57 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
             )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-            <span style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, letterSpacing: T.type.trackTitle, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {displayTitle(eng)}
             </span>
             <span style={{ flexShrink: 0 }}>
               <StatusChip label={stageDisplayLabel(eng.stage)} styleKey={eng.stage} />
             </span>
             {stageDays != null && (
-              <span style={{ fontSize: '11px', color: T.ink.muted, whiteSpace: 'nowrap', flexShrink: 0 }}>
+              <span style={{ fontSize: '11px', color: T.ink.muted, fontVariantNumeric: T.type.tabular, whiteSpace: 'nowrap', flexShrink: 0 }}>
                 {stageDays} day{stageDays === 1 ? '' : 's'} in stage
               </span>
             )}
           </div>
-          {/* Type — DEAL-scoped (Kevin's person-vs-deal split); its one
-              home — the profile never shows it. ENGAGEMENT-level write. */}
-          <div>
-            <MetaSelect label="Type" value={eng.project_type || null} options={lookupOptions.projectTypes}
-              onPick={(v) => patchEngagement({ project_type: v })} />
+          {/* Meta cells — Type + Assigned as ALIGNED metadata under
+              matching uppercase MicroLabels (the ClientProfile treatment,
+              so both cards read as one system), wrapping gracefully when
+              the modal is narrow.
+              · Type — DEAL-scoped (Kevin's person-vs-deal split); its one
+                home, the profile never shows it. A QUIET editable value
+                (project_type, engagement-level PATCH) with the shared
+                inline-edit pencil — NOT a bordered input box.
+              · Assigned to — ENGAGEMENT-level, PLURAL (multi-user build):
+                the engagement_assignees junction; picker = the
+                engagement's LOCATION hub_users; unmapped-to-Jobber users
+                are selectable but marked. */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px 28px', alignItems: 'flex-start' }}>
+            <div style={{ minWidth: 0 }}>
+              <MicroLabel>Type</MicroLabel>
+              <MetaSelect
+                label="Type" value={eng.project_type || null} options={lookupOptions.projectTypes}
+                onPick={(v) => patchEngagement({ project_type: v })}
+                renderTrigger={(toggle) => (
+                  <button onClick={toggle} aria-label="Edit type" style={metaValueBtn(!!eng.project_type)}>
+                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{eng.project_type || 'Add type'}</span>
+                    <EditPencil />
+                  </button>
+                )}
+              />
+            </div>
+            {data && (
+              <div style={{ minWidth: 0, flex: '1 1 220px' }}>
+                <EngagementAssignees
+                  engagementId={engagementId}
+                  assignees={assignees}
+                  users={locationUsers.filter(u => !eng.location_uuid || u.locationId === eng.location_uuid)}
+                  jobberConnected={!!client?.jobber_connected}
+                  onChange={next => setData(d => d ? { ...d, assignees: next } : d)}
+                  setToast={setToast}
+                />
+              </div>
+            )}
           </div>
-          {/* Assigned to — ENGAGEMENT-level, PLURAL (multi-user build).
-              Replaces the old lead-level single AssignedToField. Writes
-              the engagement_assignees junction; the picker is the
-              engagement's LOCATION hub_users. Unmapped-to-Jobber users
-              are selectable but marked. */}
-          {data && (
-            <EngagementAssignees
-              engagementId={engagementId}
-              assignees={assignees}
-              users={locationUsers.filter(u => !eng.location_uuid || u.locationId === eng.location_uuid)}
-              jobberConnected={!!client?.jobber_connected}
-              onChange={next => setData(d => d ? { ...d, assignees: next } : d)}
-              setToast={setToast}
-            />
-          )}
         </div>
       )}
 
