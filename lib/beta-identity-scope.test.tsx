@@ -187,9 +187,11 @@ describe('the old chrome is gone (BeeHub source)', () => {
     // Old All Locations switcher path → same setShowLocPicker
     expect(src).toMatch(/onOpenLocationPicker=\{\(\)=>setShowLocPicker\(true\)\}/)
     // Old strip View-as path → same setRole('franchise') + setViewAsTarget
-    expect(src).toMatch(/onOpenViewAs=\{\(\)=>\{ if \(!viewAsUser\) setRole\('franchise'\); setViewAsTarget\(true\) \}\}/)
+    // (.* tolerates the [view-as] logViewAs() instrumentation prefix — observation
+    //  only, 868kaxm20; the setter wiring these lines guard is unchanged)
+    expect(src).toMatch(/onOpenViewAs=\{\(\)=>\{ .*if \(!viewAsUser\) setRole\('franchise'\); setViewAsTarget\(true\) \}\}/)
     // Old strip Exit path → same reset triple
-    expect(src).toMatch(/onExitViewAs=\{\(\)=>\{ setViewAsUser\(null\); setRole\('super_admin'\); setLocFilter\('all'\) \}\}/)
+    expect(src).toMatch(/onExitViewAs=\{\(\)=>\{ .*setViewAsUser\(null\); setRole\('super_admin'\); setLocFilter\('all'\) \}\}/)
     // The old footer blocks are gone (switcher comment + user-info block)
     expect(src).not.toContain('Location picker — elevated roles only')
     expect(src).not.toContain('User info at bottom')

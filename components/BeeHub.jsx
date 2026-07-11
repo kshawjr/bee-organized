@@ -31431,6 +31431,28 @@ export default function App({
   const [viewAsTarget, setViewAsTarget]     = useState(null)
   const [viewAsUser, setViewAsUser]         = useState(null) // full user object when viewing as specific user
   const [locFilter, setLocFilter]           = useState(initialLocFilter ?? 'all')
+  // ── [view-as] lifecycle instrumentation — OBSERVATION ONLY (868kaxm20).
+  // Logs the state delta at every enter / cancel / exit transition so a
+  // strand (a transition that flips role+scope but never restores) is
+  // greppable in both the browser console and Vercel runtime logs. This
+  // does NOT change behavior — the fix is a follow-up off these logs.
+  // `before` is the live closure snapshot at the moment the handler fires
+  // (setters are async, so these still hold pre-transition values);
+  // `after` is what the handler is about to apply. Remove once fixed.
+  const logViewAs = (event, after = {}) => {
+    try {
+      console.log(`[view-as] ${event}`, {
+        before: {
+          role,
+          franchiseRole,
+          viewAsUser: viewAsUser ? { id: viewAsUser.id, name: viewAsUser.name, role: viewAsUser.role } : null,
+          viewAsTarget,
+          locFilter,
+        },
+        after,
+      })
+    } catch {}
+  }
   const [showLocPicker, setShowLocPicker]   = useState(false)
   const [showRolePicker, setShowRolePicker] = useState(false)
   const [showGlobalSearch, setShowGlobalSearch] = useState(false)
@@ -31906,13 +31928,13 @@ if (Array.isArray(initialPeople)) return
             {profileRole && <p style={{ fontSize:'10px', color:'#a8c9c4', marginTop:'4px', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px' }}>{profileRole}</p>}
           </div>
           {role === 'super_admin' && !viewAsUser && (
-            <button onClick={()=>{ setShowMobileProfile(false); setRole('franchise'); setViewAsTarget(true) }}
+            <button onClick={()=>{ logViewAs('enter:open-picker', { source:'mobile', roleFlip:'super_admin→franchise', viewAsTarget:true }); setShowMobileProfile(false); setRole('franchise'); setViewAsTarget(true) }}
               style={{ width:'100%', minHeight:'44px', padding:'12px 14px', background:'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', fontSize:'13px', color:'#1a2e2b', fontFamily:'inherit', cursor:'pointer', textAlign:'left' }}>
               👁 View as user…
             </button>
           )}
           {role === 'super_admin' && viewAsUser && (
-            <button onClick={()=>{ setShowMobileProfile(false); setViewAsUser(null); setRole('super_admin'); setLocFilter('all') }}
+            <button onClick={()=>{ logViewAs('exit:restore', { source:'mobile', role:'super_admin', viewAsUser:null, locFilter:'all' }); setShowMobileProfile(false); setViewAsUser(null); setRole('super_admin'); setLocFilter('all') }}
               style={{ width:'100%', minHeight:'44px', padding:'12px 14px', background:'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', fontSize:'13px', color:'#ef4444', fontFamily:'inherit', cursor:'pointer', textAlign:'left' }}>
               Exit view-as
             </button>
@@ -32023,7 +32045,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           locFilter={locFilter}
           locStatuses={locStatuses}
           onStatusChange={updateLocStatus}
-          onViewLocation={(id)=>setViewAsTarget(id)}
+          onViewLocation={(id)=>{ logViewAs('enter:open-picker', { source:'location-card', locationId:id, roleFlip:'none', viewAsTarget:id }); setViewAsTarget(id) }}
           users={users}
           setUsers={setUsers}
           people={people}
@@ -32052,7 +32074,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           locFilter={locFilter}
           locStatuses={locStatuses}
           onStatusChange={updateLocStatus}
-          onViewLocation={(id)=>setViewAsTarget(id)}
+          onViewLocation={(id)=>{ logViewAs('enter:open-picker', { source:'location-card-admin', locationId:id, roleFlip:'none', viewAsTarget:id }); setViewAsTarget(id) }}
           users={users}
           setUsers={setUsers}
           people={people}
@@ -32330,8 +32352,8 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
                 locationLabel={locationLabel}
                 locationCount={(initialLocations || ALL_LOCATIONS).length}
                 canSwitchLocation={isElevated}
-                onOpenViewAs={()=>{ if (!viewAsUser) setRole('franchise'); setViewAsTarget(true) }}
-                onExitViewAs={()=>{ setViewAsUser(null); setRole('super_admin'); setLocFilter('all') }}
+                onOpenViewAs={()=>{ logViewAs('enter:open-picker', { source:'sidebar', roleFlip: !viewAsUser ? 'super_admin→franchise' : 'none', viewAsTarget:true }); if (!viewAsUser) setRole('franchise'); setViewAsTarget(true) }}
+                onExitViewAs={()=>{ logViewAs('exit:restore', { source:'sidebar', role:'super_admin', viewAsUser:null, locFilter:'all' }); setViewAsUser(null); setRole('super_admin'); setLocFilter('all') }}
                 onOpenLocationPicker={()=>setShowLocPicker(true)}
                 signOutHref="/api/auth/signout"
               />
@@ -32367,6 +32389,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           locations={initialLocations || ALL_LOCATIONS}
           onConfirm={(user)=>{
             const isCorp = user.role === 'corporate'
+            logViewAs('enter:confirm', { source:'picker', chosen:{ id:user.id, name:user.name, role:user.role }, role: isCorp?'corporate':'franchise', franchiseRole: isCorp?'owner':user.role, locFilter: isCorp?'all':user.locationId, viewAsUser:{ id:user.id, name:user.name }, viewAsTarget:null })
             setLocFilter(isCorp ? 'all' : user.locationId)
             setRole(isCorp ? 'corporate' : 'franchise')
             setFranchiseRole(isCorp ? 'owner' : user.role)
@@ -32375,7 +32398,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             setViewAsTarget(null)
             window.scrollTo(0,0)
           }}
-          onClose={()=>setViewAsTarget(null)}
+          onClose={()=>{ logViewAs('cancel', { source:'picker', restored:false, note:'picker dismissed; role/franchiseRole/locFilter NOT reverted — strand if entry pre-flipped role', viewAsTarget:null }); setViewAsTarget(null) }}
         />
       )}
     </div>
