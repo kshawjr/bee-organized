@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useLeadsRealtime } from "@/lib/use-leads-realtime"
 import dynamic from "next/dynamic"
 import { canSeeBetaBoard, defaultHiveView, hydrateHiveView, resolveBetaReadOnly } from "@/components/hive/shared/betaGate"
+import { financialsVisible } from "@/lib/financial-access"
 import { splitNameForPrefill } from "@/lib/name-prefill"
 import { captureViewAsSnapshot, revertViewAsCancel } from "@/lib/view-as-identity"
 import AddressAutofill from "@/components/hive/shared/AddressAutofill"
@@ -20370,7 +20371,10 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     isCoOwner && crmStatus === 'active' && !slimDone && !(currentUserProfile?.phone)
   const isReadOnly   = crmStatus === 'inactive'
   const isLiteUser   = franchiseRole === 'light' || franchiseRole === 'readonly'
-  const canSeeFinancials = !isLiteUser
+  // Money figures (Revenue card, royalty tile) — owner-or-corporate only.
+  // Manager (operational lead) and lite_user are excluded. Shared predicate
+  // with ReportsScreen (lib/financial-access) so the two can't drift.
+  const canSeeFinancials = financialsVisible(role, franchiseRole)
   // Fresh invite-accept flag (sessionStorage). Set by AcceptInviteClient
   // post-accept; consumed once on the first home render so the invited
   // employee sees the lightweight EMPLOYEE_STEPS flow even though their
@@ -20835,7 +20839,10 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
             ? <StatCard icon="🏢" label="Active Locations" value={locations.filter(l=>l.crmStatus==='active').length} sub="Franchise locations" bg="white" color='#6366f1' />
             : <StatCard icon="🔨" label="Jobs in progress" value={inProgress.length} sub="Active Jobber jobs" bg="white" color='#10b981' />
           }
-          {canSeeFinancials&&!isElevated
+          {/* Assessments today is OPERATIONAL (not money) — managers keep it.
+              Gate on !isLiteUser (the pre-financials-split behavior) so the
+              canSeeFinancials tightening doesn't hide an operational stat. */}
+          {!isLiteUser&&!isElevated
             ? <StatCard icon="📅" label="Assessments today" value={assessmentsToday.length} sub="Scheduled in Jobber" bg="white" color='#0ea5e9' />
             : null}
         </div>
@@ -30186,7 +30193,7 @@ function ReportFilters({ range, setRange, locId, setLocId, source, setSource, pr
 
 // ─── Report Sections ──────────────────────────────────────────────────────────
 
-function FranchiseReports({ range, locId, source, project, people, locFilter }) {
+function FranchiseReports({ range, locId, source, project, people, locFilter, canSeeFinancials=true }) {
   const PARTNERS = useContext(PartnersContext)?.partners || []
   const myLocId = locFilter!=='all' ? locFilter : locId
   const myPeople = people.filter(p=>!p.isJunk&&(myLocId==='all'||p.locationId===myLocId))
@@ -30264,21 +30271,28 @@ function FranchiseReports({ range, locId, source, project, people, locFilter }) 
 
   return (
     <div style={{ display:'grid', gap:'12px' }}>
-      {/* KPIs */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'8px' }}>
-        {[
-          { label:'Active',      value:active.length,              color:'#1a2e2b' },
-          { label:'Closed Won',  value:closed.length,              color:'#22c55e' },
-          { label:'Revenue',     value:`$${(revenue/1000).toFixed(0)}k`, color:'#d4a046' },
-        ].map(s=>(
+      {/* KPIs — Revenue is a money figure, dropped for non-financial roles
+          (manager). Grid columns track the card count so 2 cards don't leave
+          a phantom third column. */}
+      {(() => {
+      const kpis = [
+        { label:'Active',      value:active.length,              color:'#1a2e2b' },
+        { label:'Closed Won',  value:closed.length,              color:'#22c55e' },
+        ...(canSeeFinancials ? [{ label:'Revenue', value:`$${(revenue/1000).toFixed(0)}k`, color:'#d4a046' }] : []),
+      ]
+      return (
+      <div style={{ display:'grid', gridTemplateColumns:`repeat(${kpis.length},1fr)`, gap:'8px' }}>
+        {kpis.map(s=>(
           <div key={s.label} style={{ background:'white', borderRadius:'12px', padding:'12px', border:'1px solid rgba(0,0,0,0.06)' }}>
             <p style={{ fontSize:'20px', fontWeight:700, color:s.color, fontFamily:'Georgia,serif', marginBottom:'3px' }}>{s.value}</p>
             <p style={{ fontSize:'10px', color:'#8a9e9a' }}>{s.label}</p>
           </div>
         ))}
       </div>
+      )})()}
 
-      {/* Revenue trend */}
+      {/* Revenue trend — money figure; hidden for non-financial roles (manager). */}
+      {canSeeFinancials && (
       <ReportCard title="Revenue Trend" subtitle="Monthly collected revenue">
         <BarChart data={revData} labels={revLabels} color='#d4a046' formatVal={v=>`$${(v/1000).toFixed(0)}k`} />
         <div style={{ display:'flex', justifyContent:'space-between', marginTop:'8px', paddingTop:'8px', borderTop:'1px solid rgba(0,0,0,0.05)' }}>
@@ -30286,6 +30300,7 @@ function FranchiseReports({ range, locId, source, project, people, locFilter }) 
           <span style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>${revenue.toLocaleString()}</span>
         </div>
       </ReportCard>
+      )}
 
       {/* Pipeline breakdown */}
       <ReportCard title="My Pipeline" subtitle="Client by stage">
@@ -30369,9 +30384,12 @@ function ReportsComingSoonPlaceholder() {
 }
 
 // ─── Reports Screen ───────────────────────────────────────────────────────────
-function ReportsScreen({ role, people=[], locFilter='all' }) {
+function ReportsScreen({ role, franchiseRole='owner', people=[], locFilter='all' }) {
   const isElevated = role==='super_admin' || role==='corporate'
   const isLight = ['light','readonly'].includes(role==='franchise'?'franchise':role)
+  // Money figures gate — shared with the Home Revenue tile (lib/financial-access).
+  // Owner/elevated see revenue; manager sees operational reports only.
+  const canSeeFinancials = financialsVisible(role, franchiseRole)
 
   const [range,   setRange]   = useState('30d')
   const [locId,   setLocId]   = useState('all')
@@ -30399,7 +30417,7 @@ function ReportsScreen({ role, people=[], locFilter='all' }) {
           <>
             <ReportFilters range={range} setRange={setRange} locId={locId} setLocId={setLocId} source={source} setSource={setSource} project={project} setProject={setProject} showLoc={isElevated} />
             <div style={{ marginTop:'8px' }}>
-              <FranchiseReports range={range} locId={locId} source={source} project={project} people={people} locFilter={locFilter} />
+              <FranchiseReports range={range} locId={locId} source={source} project={project} people={people} locFilter={locFilter} canSeeFinancials={canSeeFinancials} />
             </div>
           </>
         )}
@@ -32120,7 +32138,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         />
       </div>
     )
-    if (activeNav==='reports') return <div style={pageStyle}><ReportsScreen role={role} people={people} locFilter={locFilter} /></div>
+    if (activeNav==='reports') return <div style={pageStyle}><ReportsScreen role={role} franchiseRole={franchiseRole} people={people} locFilter={locFilter} /></div>
     if (activeNav==='settings') return (
       <div style={pageStyle}>
         <SettingsScreen onStatusChange={()=>{}} selectedLoc={selectedLoc} locationId={viewAsUser?.locationId || (locFilter==='all'?'loc_kc':locFilter)} franchiseRole={franchiseRole} isSuperAdmin={role==='super_admin'&&!viewAsUser} onOpenManual={()=>setShowManual(true)} />
