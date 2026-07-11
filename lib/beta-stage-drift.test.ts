@@ -1,14 +1,19 @@
 // @vitest-environment node
 //
-// AUTOMATED stage writers stay silent + drift recovery (2026-07-09).
+// AUTOMATED stage writers stay silent + drift recovery (2026-07-09;
+// auto-Won made import-only 2026-07-11).
 //
-// Three writers can set an engagement to Closed Won — import backfill,
-// webhook derivation (both via maybeAdvanceEngagementStage), and the
-// panel-open drift recovery (recoverEngagementStageDrift). ALL are
-// automated: they write engagements.stage DIRECTLY, no popup, no
-// confirm — an import of hundreds of clients must never raise hundreds
-// of dialogs. The human close confirm binds to UI intent only (see
-// beta-stage-control.test.tsx for that side).
+// Auto-close to Closed Won is now IMPORT-ONLY: only the import backfill
+// (maybeAdvanceEngagementStage, mode 'backfill') auto-closes a wrapped-
+// up historical deal. The LIVE writers — the webhook (default mode) and
+// the panel-open drift recovery (recoverEngagementStageDrift) — rest a
+// done + all-paid deal at Final Processing instead, where the panel's
+// Mark-won button + CloseWonWizard drive the terminal move. The lone
+// automated live→Won write is the stale-Lost recovery (an import
+// artifact repaired to its honest Won terminal). These automated writes
+// stay silent — no popup, no confirm — so an import of hundreds of
+// clients never raises hundreds of dialogs. The human close confirm
+// binds to UI intent only (see beta-stage-control.test.tsx for that).
 //
 // Drift recovery exists because the webhook's stage write is swallow-
 // and-log with no reconciliation job — a failed webhook advance used to
@@ -78,21 +83,51 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-// ── the webhook/import path: silent, direct, unchanged ─────────
-describe('maybeAdvanceEngagementStage — automated Won is a direct silent write', () => {
-  it('all invoices paid → writes Closed Won + reason won straight to the row (no popup exists server-side)', async () => {
-    h.enqueue('engagements', { id: 'eng-1', stage: 'Final Processing' }) // the select
+// ── auto-close to Won is IMPORT-ONLY (2026-07-11) ───────────────
+// Import (backfill) auto-closes wrapped-up historical deals to Won so
+// owners never click through years of completed jobs. The LIVE webhook
+// (default mode) instead rests a done + all-paid deal at Final
+// Processing — the panel's Mark-won button + CloseWonWizard drive the
+// terminal move (satisfaction / review / confetti live there).
+describe('maybeAdvanceEngagementStage — auto-close to Won is import-only', () => {
+  it('IMPORT (backfill): done + all invoices paid → writes Closed Won + reason won straight to the row', async () => {
+    h.enqueue('engagements', { id: 'eng-1', stage: 'Job in Progress' }) // the select
     h.enqueue('service_requests', [])
     h.enqueue('quotes', [])
     h.enqueue('jobs', [doneJob])
     h.enqueue('invoices', [paidInvoice])
-    const res = await maybeAdvanceEngagementStage('eng-1')
+    const res = await maybeAdvanceEngagementStage('eng-1', { mode: 'backfill' })
     expect(res).toEqual({ advanced: true, stage: 'Closed Won' })
     const patches = updatePayloads('engagements')
     expect(patches.length).toBe(1)
     expect(patches[0].stage).toBe('Closed Won')
     expect(patches[0].closed_reason).toBe('won')
     expect(patches[0].closed_at).toBeTruthy()
+  })
+
+  it('LIVE (webhook): done + all invoices paid does NOT auto-close — it rests at Final Processing', async () => {
+    h.enqueue('engagements', { id: 'eng-1', stage: 'Job in Progress' })
+    h.enqueue('service_requests', [])
+    h.enqueue('quotes', [])
+    h.enqueue('jobs', [doneJob])
+    h.enqueue('invoices', [paidInvoice])
+    const res = await maybeAdvanceEngagementStage('eng-1') // default 'live'
+    expect(res).toEqual({ advanced: true, stage: 'Final Processing' })
+    const patch = updatePayloads('engagements')[0]
+    expect(patch.stage).toBe('Final Processing')
+    expect(patch.closed_reason).toBeUndefined() // never auto-Won on the live path
+  })
+
+  it('LIVE (webhook): a deal already at Final Processing + fully paid stays put (button-ready, no auto-Won)', async () => {
+    h.enqueue('engagements', { id: 'eng-1', stage: 'Final Processing' })
+    h.enqueue('service_requests', [])
+    h.enqueue('quotes', [])
+    h.enqueue('jobs', [doneJob])
+    h.enqueue('invoices', [paidInvoice])
+    const res = await maybeAdvanceEngagementStage('eng-1')
+    expect(res).toEqual({ advanced: false })
+    const patch = updatePayloads('engagements')[0] // money roll-ups still refresh
+    expect(patch.stage).toBeUndefined()
   })
 
   it('no writer on the automated path imports the human close popup', () => {
@@ -202,18 +237,29 @@ describe('recoverEngagementStageDrift — panel-open self-heal for missed webhoo
     expect(updatePayloads('engagements').length).toBe(0)
   })
 
-  it('a legitimate Won derivation just BECOMES Won — silent direct write, same as the webhook', async () => {
+  it('a done + all-paid deal rests at Final Processing on the LIVE drift path (auto-Won is import-only)', async () => {
     const res = await recoverEngagementStageDrift({ ...ENG, stage: 'Job in Progress' }, kids({
       jobs: [doneJob],
       invoices: [paidInvoice],
     }))
     expect(res.corrected).toBe(true)
-    expect(res.stage).toBe('Closed Won')
+    expect(res.stage).toBe('Final Processing')
     const patches = updatePayloads('engagements')
-    expect(patches[0].stage).toBe('Closed Won')
-    expect(patches[0].closed_reason).toBe('won')
+    expect(patches[0].stage).toBe('Final Processing')
+    expect(patches[0].closed_reason).toBeUndefined() // never auto-Won on the live path
     // The touchpoint records the move; no confirm was ever involved.
     expect(insertPayloads('touchpoints').length).toBe(1)
+  })
+
+  it('a wizard-closed Closed Won is NOT demoted by live re-derivation (forward-only protects the terminal)', async () => {
+    const won = { ...ENG, stage: 'Closed Won', closed_reason: 'won' }
+    const res = await recoverEngagementStageDrift(won, kids({
+      jobs: [doneJob],
+      invoices: [paidInvoice],
+    }))
+    expect(res.corrected).toBe(false)
+    expect(updatePayloads('engagements').length).toBe(0)
+    expect(insertPayloads('touchpoints').length).toBe(0)
   })
 
   it('uses THE derivation authority (deriveEngagementStage) — spot-check the shared rules', () => {
@@ -221,7 +267,19 @@ describe('recoverEngagementStageDrift — panel-open self-heal for missed webhoo
     expect(deriveEngagementStage(kids({ quotes: [{ status: 'sent', sent_at: new Date().toISOString() }] })).stage).toBe('Estimate')
     expect(deriveEngagementStage(kids({ jobs: [{ status: 'active' }] })).stage).toBe('Job in Progress')
     expect(deriveEngagementStage(kids({ jobs: [doneJob], invoices: [{ ...paidInvoice, status: 'sent', balance_owing: 900 }] })).stage).toBe('Final Processing')
+    // Default (honest/import) classification auto-closes to Won…
     expect(deriveEngagementStage(kids({ jobs: [doneJob], invoices: [paidInvoice] })).stage).toBe('Closed Won')
+  })
+
+  it('closeWonOnDone flag: done + all-paid is Won for import, but rests at Final Processing for live', () => {
+    const paid = kids({ jobs: [doneJob], invoices: [paidInvoice] })
+    expect(deriveEngagementStage(paid, { closeWonOnDone: true }).stage).toBe('Closed Won')
+    expect(deriveEngagementStage(paid, { closeWonOnDone: false }).stage).toBe('Final Processing')
+    // owing → Final Processing regardless of the flag (the flag only gates
+    // the all-paid → Won step, never the owing → Final Processing step).
+    const owing = kids({ jobs: [doneJob], invoices: [{ ...paidInvoice, status: 'sent', balance_owing: 900 }] })
+    expect(deriveEngagementStage(owing, { closeWonOnDone: true }).stage).toBe('Final Processing')
+    expect(deriveEngagementStage(owing, { closeWonOnDone: false }).stage).toBe('Final Processing')
   })
 })
 

@@ -63,6 +63,19 @@ const ts = (v: any) => (v ? new Date(v).getTime() : 0)
 // owns the sequence + day-90 auto-close. mode 'backfill' additionally
 // applies the §5 stale-close rules (Ruling A / decision 14) for
 // historical imports where no sequence should ever fire.
+//
+// closeWonOnDone (default true): whether a done + all-paid booked job
+// AUTO-resolves to Closed Won. IMPORT-ONLY auto-close (2026-07-11): the
+// bulk import (backfill) auto-closes historical wrapped-up deals to Won
+// so owners never click through years of completed jobs. LIVE paths
+// (webhook, panel-open drift) pass false: the same done+all-paid deal
+// rests at Final Processing (rank 3) so the panel's "Ready to close —
+// Mark won" button surfaces (canCloseWon = Final Processing + fully
+// paid) and the user runs the close-won wizard — that's where the
+// satisfaction / review / re-engage / confetti steps live, which live
+// deals must go through. Default true keeps the honest classification
+// for callers that WANT the true terminal (reopen re-derive; the stale-
+// Lost import-artifact recovery in the advance/drift paths below).
 
 export type EngagementChildren = {
   sr: { requested_at?: string | null; created_at?: string | null } | null
@@ -96,10 +109,11 @@ const quoteActivity = (q: { sent_at?: string | null; approved_at?: string | null
 
 export function deriveEngagementStage(
   children: EngagementChildren,
-  opts: { mode?: 'live' | 'backfill'; nowMs?: number } = {},
+  opts: { mode?: 'live' | 'backfill'; nowMs?: number; closeWonOnDone?: boolean } = {},
 ): DerivedStage {
   const mode = opts.mode ?? 'live'
   const now = opts.nowMs ?? Date.now()
+  const closeWonOnDone = opts.closeWonOnDone ?? true
   const { sr, quotes, jobs, invoices } = children
 
   const bookedJobs = jobs.filter(j => !jobUnbooked(j))
@@ -112,12 +126,19 @@ export function deriveEngagementStage(
     // Close-Won gate also reads — so import and UI can never disagree on
     // what "fully paid" means.
     if (invoicesFullyPaid(invoices)) {
-      const lastPaidAt = Math.max(0, ...invoices.map(i => ts(i.paid_at)))
-      return {
-        stage: 'Closed Won',
-        closed_reason: 'won',
-        closed_at: new Date(lastPaidAt || now).toISOString(),
+      // AUTO-close to Won is IMPORT-ONLY (closeWonOnDone). In LIVE contexts
+      // the deal rests at Final Processing instead — same rank-3 outcome as
+      // "complete + owing" — so the panel's Mark-won button + wizard drive
+      // the terminal move, not an automatic write.
+      if (closeWonOnDone) {
+        const lastPaidAt = Math.max(0, ...invoices.map(i => ts(i.paid_at)))
+        return {
+          stage: 'Closed Won',
+          closed_reason: 'won',
+          closed_at: new Date(lastPaidAt || now).toISOString(),
+        }
       }
+      return { stage: 'Final Processing' }
     }
     // Complete + owing, or complete + never invoiced: money loose end.
     return { stage: 'Final Processing' }
@@ -515,6 +536,15 @@ export async function resolveEngagementForChild(params: {
 // stale-close rules — silent bookkeeping, no sequences. Webhooks use
 // the default 'live' mode, where closing quiet engagements belongs to
 // the step-5 nurture cron.
+//
+// AUTO-close to Won is IMPORT-ONLY (2026-07-11). Only the backfill (bulk
+// import) caller lets a done + all-paid deal resolve to Closed Won; the
+// LIVE webhook caller rests it at Final Processing so the panel's Mark-
+// won button + close-won wizard drive the terminal move. The stale-Lost
+// override is the deliberate exception: it recovers an IMPORT ARTIFACT
+// (a machine 'stale_on_import' Lost with paid-in-full children — a mis-
+// stamped historical deal), so it uses import semantics in every context
+// and recovers straight to Won rather than stranding as Lost.
 export async function maybeAdvanceEngagementStage(
   engagementId: string,
   opts: { mode?: 'live' | 'backfill' } = {},
@@ -533,12 +563,20 @@ export async function maybeAdvanceEngagementStage(
     supabaseService.from('invoices').select('status, total, paid_amount, balance_owing, paid_at, issued_at, created_at').eq('engagement_id', engagementId),
   ])
   const invoices = invoicesRes.data ?? []
+  const mode = opts.mode ?? 'live'
+  // Auto-close to Won is import-only: backfill (bulk import) gets it,
+  // live (webhook) doesn't. The stale-Lost recovery is import-artifact
+  // repair — it too takes import semantics so it recovers to Won in
+  // every context and is never trapped as Lost.
+  const staleLostRecoverable =
+    eng.stage === 'Closed Lost' && eng.closed_reason === 'stale_on_import'
+  const closeWonOnDone = mode === 'backfill' || staleLostRecoverable
   const derived = deriveEngagementStage({
     sr: srRes.data?.[0] ?? null,
     quotes: quotesRes.data ?? [],
     jobs: jobsRes.data ?? [],
     invoices,
-  }, { mode: opts.mode ?? 'live' })
+  }, { mode, closeWonOnDone })
 
   const num = (v: any) => (v == null ? 0 : Number(v) || 0)
   const patch: Record<string, any> = {
@@ -551,10 +589,9 @@ export async function maybeAdvanceEngagementStage(
 
   const currentRank = ENGAGEMENT_STAGE_RANK[eng.stage as EngagementStage] ?? 0
   const newRank = ENGAGEMENT_STAGE_RANK[derived.stage] ?? 0
-  const staleLostOverride =
-    derived.stage === 'Closed Won' &&
-    eng.stage === 'Closed Lost' &&
-    eng.closed_reason === 'stale_on_import'
+  // Override fires only when the stale-Lost recovery actually derives Won
+  // (paid-in-full); a stale-Lost row with no paid evidence stays Lost.
+  const staleLostOverride = staleLostRecoverable && derived.stage === 'Closed Won'
   const advance = newRank > currentRank || staleLostOverride
 
   if (advance) {
@@ -587,10 +624,13 @@ export async function maybeAdvanceEngagementStage(
 // result only when it is FORWARD progress on ENGAGEMENT_STAGE_RANK.
 //
 // This is an AUTOMATED correction — it writes the stage directly and
-// silently, exactly as the webhook would have, EVEN when the derived
-// stage is Closed Won (all invoices paid → the engagement should simply
-// BE won). It must never route through the human close confirm; the
-// popup binds to human UI intent, not to the Won value.
+// silently, exactly as the webhook would have. Like the webhook (a LIVE
+// path) it does NOT auto-close to Won: a done + all-paid deal rests at
+// Final Processing so the panel's Mark-won button + close-won wizard
+// drive the terminal move (auto-close to Won is import-only, 2026-07-11).
+// The lone exception is the stale-Lost recovery — an IMPORT ARTIFACT (a
+// machine 'stale_on_import' Lost with paid-in-full children) recovers
+// straight to Won under import semantics, never stranded as Lost.
 //
 // A stage_change touchpoint is written ONLY when the stage actually
 // moved — a no-op re-derive (the overwhelmingly common panel open)
@@ -600,14 +640,15 @@ export async function recoverEngagementStageDrift(
   children: EngagementChildren,
 ): Promise<{ corrected: boolean; stage?: EngagementStage; patch?: Record<string, any> }> {
   const currentRank = ENGAGEMENT_STAGE_RANK[engagement.stage as EngagementStage] ?? 0
-  const derived = deriveEngagementStage(children)
+  // LIVE path: no auto-close to Won (closeWonOnDone false) — a done +
+  // all-paid deal rests at Final Processing. The stale-Lost recovery is
+  // the exception: an import artifact takes import semantics so paid-in-
+  // full evidence recovers it to Won rather than stranding it as Lost.
+  const staleLostRecoverable =
+    engagement.stage === 'Closed Lost' && engagement.closed_reason === 'stale_on_import'
+  const derived = deriveEngagementStage(children, { closeWonOnDone: staleLostRecoverable })
   const newRank = ENGAGEMENT_STAGE_RANK[derived.stage] ?? 0
-  // Same stale-Lost exception as maybeAdvanceEngagementStage: paid-in-full
-  // evidence beats a machine 'stale_on_import' stamp. Human closes never move.
-  const staleLostOverride =
-    derived.stage === 'Closed Won' &&
-    engagement.stage === 'Closed Lost' &&
-    engagement.closed_reason === 'stale_on_import'
+  const staleLostOverride = staleLostRecoverable && derived.stage === 'Closed Won'
   if (newRank <= currentRank && !staleLostOverride) return { corrected: false }
 
   const nowIso = new Date().toISOString()
