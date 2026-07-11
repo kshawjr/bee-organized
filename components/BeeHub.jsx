@@ -6,6 +6,7 @@ import { useLeadsRealtime } from "@/lib/use-leads-realtime"
 import dynamic from "next/dynamic"
 import { canSeeBetaBoard, defaultHiveView, hydrateHiveView, resolveBetaReadOnly } from "@/components/hive/shared/betaGate"
 import { splitNameForPrefill } from "@/lib/name-prefill"
+import { captureViewAsSnapshot, revertViewAsCancel } from "@/lib/view-as-identity"
 import AddressAutofill from "@/components/hive/shared/AddressAutofill"
 // Pure presentational icon set (inline SVG, zero deps) — safe to import
 // statically like betaGate; it pulls no beta-chunk surface code with it.
@@ -31445,6 +31446,35 @@ export default function App({
       })
     } catch {}
   }
+  // ── [view-as] cancel-revert (fix for the 868kaxm20 strand).
+  // Sidebar & mobile "View as user…" pre-flip role→'franchise' when the picker
+  // OPENS (before a user is chosen); location-card entries pre-flip nothing.
+  // Every entry snapshots the real identity BEFORE pre-flipping, and cancel
+  // restores that snapshot — so dismissing the picker can never leave a
+  // franchise-with-no-user strand, no matter which entry opened it. Single
+  // shared open/cancel path so a future entry can't reintroduce the strand.
+  const [viewAsSnapshot, setViewAsSnapshot] = useState(null)
+  const snapshotIdentityForViewAs = () => {
+    setViewAsSnapshot(captureViewAsSnapshot({ role, franchiseRole, viewAsUser, locFilter }))
+  }
+  const cancelViewAsPicker = () => {
+    const next = revertViewAsCancel(viewAsSnapshot, { role, franchiseRole, viewAsUser, locFilter })
+    logViewAs('cancel', {
+      source: 'picker',
+      restored: !!viewAsSnapshot,
+      role: next.role,
+      franchiseRole: next.franchiseRole,
+      viewAsUser: next.viewAsUser ? { id: next.viewAsUser.id, name: next.viewAsUser.name } : null,
+      locFilter: next.locFilter,
+      viewAsTarget: null,
+    })
+    setRole(next.role)
+    setFranchiseRole(next.franchiseRole)
+    setViewAsUser(next.viewAsUser)
+    setLocFilter(next.locFilter)
+    setViewAsSnapshot(null)
+    setViewAsTarget(null)
+  }
   const [showLocPicker, setShowLocPicker]   = useState(false)
   const [showRolePicker, setShowRolePicker] = useState(false)
   const [showGlobalSearch, setShowGlobalSearch] = useState(false)
@@ -31927,7 +31957,7 @@ if (Array.isArray(initialPeople)) return
             {profileRole && <p style={{ fontSize:'10px', color:'#a8c9c4', marginTop:'4px', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px' }}>{profileRole}</p>}
           </div>
           {role === 'super_admin' && !viewAsUser && (
-            <button onClick={()=>{ logViewAs('enter:open-picker', { source:'mobile', roleFlip:'super_admin→franchise', viewAsTarget:true }); setShowMobileProfile(false); setRole('franchise'); setViewAsTarget(true) }}
+            <button onClick={()=>{ logViewAs('enter:open-picker', { source:'mobile', roleFlip:'super_admin→franchise', viewAsTarget:true }); setShowMobileProfile(false); snapshotIdentityForViewAs(); setRole('franchise'); setViewAsTarget(true) }}
               style={{ width:'100%', minHeight:'44px', padding:'12px 14px', background:'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', fontSize:'13px', color:'#1a2e2b', fontFamily:'inherit', cursor:'pointer', textAlign:'left' }}>
               👁 View as user…
             </button>
@@ -32044,7 +32074,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           locFilter={locFilter}
           locStatuses={locStatuses}
           onStatusChange={updateLocStatus}
-          onViewLocation={(id)=>{ logViewAs('enter:open-picker', { source:'location-card', locationId:id, roleFlip:'none', viewAsTarget:id }); setViewAsTarget(id) }}
+          onViewLocation={(id)=>{ logViewAs('enter:open-picker', { source:'location-card', locationId:id, roleFlip:'none', viewAsTarget:id }); snapshotIdentityForViewAs(); setViewAsTarget(id) }}
           users={users}
           setUsers={setUsers}
           people={people}
@@ -32073,7 +32103,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           locFilter={locFilter}
           locStatuses={locStatuses}
           onStatusChange={updateLocStatus}
-          onViewLocation={(id)=>{ logViewAs('enter:open-picker', { source:'location-card-admin', locationId:id, roleFlip:'none', viewAsTarget:id }); setViewAsTarget(id) }}
+          onViewLocation={(id)=>{ logViewAs('enter:open-picker', { source:'location-card-admin', locationId:id, roleFlip:'none', viewAsTarget:id }); snapshotIdentityForViewAs(); setViewAsTarget(id) }}
           users={users}
           setUsers={setUsers}
           people={people}
@@ -32351,7 +32381,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
                 locationLabel={locationLabel}
                 locationCount={(initialLocations || ALL_LOCATIONS).length}
                 canSwitchLocation={isElevated}
-                onOpenViewAs={()=>{ logViewAs('enter:open-picker', { source:'sidebar', roleFlip: !viewAsUser ? 'super_admin→franchise' : 'none', viewAsTarget:true }); if (!viewAsUser) setRole('franchise'); setViewAsTarget(true) }}
+                onOpenViewAs={()=>{ logViewAs('enter:open-picker', { source:'sidebar', roleFlip: !viewAsUser ? 'super_admin→franchise' : 'none', viewAsTarget:true }); snapshotIdentityForViewAs(); if (!viewAsUser) setRole('franchise'); setViewAsTarget(true) }}
                 onExitViewAs={()=>{ logViewAs('exit:restore', { source:'sidebar', role:'super_admin', viewAsUser:null, locFilter:'all' }); setViewAsUser(null); setRole('super_admin'); setLocFilter('all') }}
                 onOpenLocationPicker={()=>setShowLocPicker(true)}
                 signOutHref="/api/auth/signout"
@@ -32395,9 +32425,10 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             setViewAsUser(user)
             setActiveNav('home')
             setViewAsTarget(null)
+            setViewAsSnapshot(null)
             window.scrollTo(0,0)
           }}
-          onClose={()=>{ logViewAs('cancel', { source:'picker', restored:false, note:'picker dismissed; role/franchiseRole/locFilter NOT reverted — strand if entry pre-flipped role', viewAsTarget:null }); setViewAsTarget(null) }}
+          onClose={cancelViewAsPicker}
         />
       )}
     </div>

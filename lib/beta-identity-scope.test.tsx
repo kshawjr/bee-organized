@@ -19,6 +19,7 @@ import { act } from 'react-dom/test-utils'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import IdentityScopeControl from '@/components/hive/IdentityScopeControl'
+import { captureViewAsSnapshot, revertViewAsCancel } from '@/lib/view-as-identity'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -196,5 +197,95 @@ describe('the old chrome is gone (BeeHub source)', () => {
     expect(src).not.toContain('Location picker — elevated roles only')
     expect(src).not.toContain('User info at bottom')
     expect(src.match(/Sign Out/g) || []).toHaveLength(4) // mobile drawer + mobile menu + 2 non-chrome usages — the desktop footer's is gone
+  })
+})
+
+// ── The view-as cancel-revert strand (868kaxm20).
+// Sidebar & mobile "View as user…" PRE-FLIP role→'franchise' the moment the
+// picker opens (before a user is chosen). The strand: cancelling used to clear
+// only viewAsTarget, stranding role at 'franchise' with viewAsUser=null. Fix:
+// every entry snapshots identity on open; cancel restores that snapshot.
+describe('view-as cancel reverts every pre-flipped field (strand fix)', () => {
+  const PRE_OPEN = { role: 'super_admin', franchiseRole: 'owner', viewAsUser: null, locFilter: 'all' }
+
+  it('sidebar/mobile pre-flip: cancel restores role AND every sibling field to pre-open', () => {
+    // Entry snapshots the real identity BEFORE pre-flipping role→franchise.
+    const snap = captureViewAsSnapshot(PRE_OPEN)
+    // Entry pre-flips role (the observed strand mutation).
+    const afterPreflip = { ...PRE_OPEN, role: 'franchise' }
+    // Cancel restores.
+    const reverted = revertViewAsCancel(snap, afterPreflip)
+    // The named strand field is back to the real role — not stranded at franchise.
+    expect(reverted.role).toBe('super_admin')
+    // And the full identity matches the exact pre-open state.
+    expect(reverted).toEqual(PRE_OPEN)
+    // viewAsUser stays null (no impersonation was ever committed).
+    expect(reverted.viewAsUser).toBeNull()
+  })
+
+  it('the snapshot is captured from PRE-flip values, so a later pre-flip cannot leak into the revert', () => {
+    const snap = captureViewAsSnapshot(PRE_OPEN)
+    // Mutating the live identity after snapshotting must not change the snapshot.
+    const afterPreflip = { ...PRE_OPEN, role: 'franchise', locFilter: 'loc-77' }
+    expect(snap.role).toBe('super_admin')
+    expect(revertViewAsCancel(snap, afterPreflip).role).toBe('super_admin')
+    expect(revertViewAsCancel(snap, afterPreflip).locFilter).toBe('all')
+  })
+
+  it('location-card entry pre-flips nothing: cancel is a faithful no-op', () => {
+    const snap = captureViewAsSnapshot(PRE_OPEN)
+    // No pre-flip — live == pre-open.
+    const reverted = revertViewAsCancel(snap, PRE_OPEN)
+    expect(reverted).toEqual(PRE_OPEN)
+  })
+
+  it('re-opening the picker WHILE impersonating: cancel keeps the impersonation intact', () => {
+    const IMPERSONATING = {
+      role: 'franchise', franchiseRole: 'manager',
+      viewAsUser: { id: 'u1', name: 'Dana Owner' }, locFilter: 'loc-1',
+    }
+    // Sidebar re-open does NOT pre-flip when already impersonating.
+    const snap = captureViewAsSnapshot(IMPERSONATING)
+    const reverted = revertViewAsCancel(snap, IMPERSONATING)
+    expect(reverted.role).toBe('franchise')
+    expect(reverted.viewAsUser).toEqual({ id: 'u1', name: 'Dana Owner' })
+    expect(reverted).toEqual(IMPERSONATING)
+  })
+
+  it('defensive: no snapshot recorded → cancel leaves the live identity untouched', () => {
+    const live = { role: 'franchise', franchiseRole: 'owner', viewAsUser: null, locFilter: 'all' }
+    expect(revertViewAsCancel(null, live)).toEqual(live)
+    expect(revertViewAsCancel(undefined, live)).toEqual(live)
+  })
+})
+
+describe('BeeHub wires the shared snapshot/cancel path (strand cannot reappear)', () => {
+  const src = readFileSync(join(process.cwd(), 'components/BeeHub.jsx'), 'utf8')
+
+  it('cancel routes through the single shared revert handler, not a bare viewAsTarget clear', () => {
+    expect(src).toContain('onClose={cancelViewAsPicker}')
+    // The old strand behavior (clear viewAsTarget only, never revert role) is gone.
+    expect(src).not.toContain('role/franchiseRole/locFilter NOT reverted')
+    expect(src).not.toMatch(/onClose=\{\(\)=>\{[^}]*restored:false[^}]*\}\}/)
+  })
+
+  it('cancelViewAsPicker reverts every identity field from the snapshot', () => {
+    const body = src.slice(src.indexOf('const cancelViewAsPicker'))
+    expect(body).toContain('revertViewAsCancel(viewAsSnapshot')
+    for (const setter of ['setRole(next.role)', 'setFranchiseRole(next.franchiseRole)', 'setViewAsUser(next.viewAsUser)', 'setLocFilter(next.locFilter)', 'setViewAsTarget(null)']) {
+      expect(body).toContain(setter)
+    }
+  })
+
+  it('every entry point that opens the picker snapshots identity FIRST', () => {
+    // mobile + location-card + location-card-admin + sidebar = 4 open entries.
+    expect((src.match(/snapshotIdentityForViewAs\(\)/g) || []).length).toBe(4)
+  })
+
+  it('confirm (successful impersonation) is unchanged — still commits role/franchiseRole/viewAsUser', () => {
+    // The impersonation commit path keeps its setters (only snapshot cleanup added).
+    expect(src).toMatch(/setRole\(isCorp \? 'corporate' : 'franchise'\)/)
+    expect(src).toMatch(/setFranchiseRole\(isCorp \? 'owner' : user\.role\)/)
+    expect(src).toContain('setViewAsUser(user)')
   })
 })
