@@ -505,7 +505,10 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             {fmtMoney(agg?.lifetime_paid || 0)} lifetime · client since {formatFullDate(c.created_at) || '—'}{c.location_name ? ` · ${c.location_name}` : ''}
           </p>
         </div>
-        <CardMenu items={[{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]} />
+        {/* Jobber-owns-deletion rule (Kevin 7/10): linked records are
+            never junkable here — Jobber's *_DESTROY webhooks are their
+            only deletion path. CardMenu renders nothing on empty items. */}
+        <CardMenu items={jobberLinked ? [] : [{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]} />
       </div>
 
       {/* Vitals strip — client-health row; Status in its status color.

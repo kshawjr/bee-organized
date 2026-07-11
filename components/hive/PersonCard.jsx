@@ -79,7 +79,8 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
   const statusMeta = CLIENT_STATUS_META[status] || null
   const fam = statusMeta ? (CHIP_STYLES[statusMeta.styleKey] || CHIP_STYLES.gray) : CHIP_STYLES.gray
 
-  const canSend = !person.jobberRef && !c?.jobber_client_id
+  const jobberLinked = !!(person.jobberRef || c?.jobber_client_id)
+  const canSend = !jobberLinked
 
   async function patchLead(patch) {
     const res = await fetch(`/api/leads/${person.id}`, {
@@ -327,7 +328,10 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
             Prospect · inquired {formatFullDate(person.created) || '—'} · via {(effSource || 'unknown').toLowerCase()}
           </p>
         </div>
-        <CardMenu items={[{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]} />
+        {/* Jobber-owns-deletion rule (Kevin 7/10): linked records are
+            never junkable here — Jobber's *_DESTROY webhooks are their
+            only deletion path. CardMenu renders nothing on empty items. */}
+        <CardMenu items={jobberLinked ? [] : [{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]} />
       </div>
 
       {/* Vitals strip — lead-health row; Status in its status color,

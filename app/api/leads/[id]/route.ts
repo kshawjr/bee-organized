@@ -249,6 +249,24 @@ export async function PATCH(
     }
   }
 
+  // ─── Jobber-owns-deletion rule (Kevin 7/10) ───────────────────
+  // Junking is Bee Hub's deletion door and it is PRE-JOBBER territory
+  // only: a linked record's lifecycle belongs to Jobber (the *_DESTROY
+  // webhooks — which write via the service client, never this route —
+  // are the sole deletion path for linked records). Browser surfaces
+  // hide the affordance; this 409 is the enforcement, mirroring the
+  // manual_stage_move_rejected precedent. is_junk=false (restore/undo,
+  // Bin resurrection) stays allowed.
+  if (patch.is_junk === true && existing.jobber_client_id) {
+    return NextResponse.json(
+      {
+        error: 'jobber_linked_junk_rejected',
+        detail: 'This record is linked to Jobber — archive or delete it in Jobber; the change syncs back automatically.',
+      },
+      { status: 409 }
+    )
+  }
+
   // addresses must be an array of {type, value} objects
   if ('addresses' in patch) {
     if (!Array.isArray(patch.addresses)) {

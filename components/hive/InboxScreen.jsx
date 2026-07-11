@@ -8,6 +8,15 @@
 // for it via onSendToJobber). 'Log call' posts the existing
 // /api/touchpoints reach_out.
 //
+// Bulk selection (feedback #5): Select toggle in the header (or row
+// long-press) → checkboxes + select-all-visible (respects filters) +
+// Remove (N), which is mark-junk batched over the selection with one
+// batch Undo. The Jobber-owns-deletion rule (Kevin 7/10) applies
+// throughout: leads are removable ONLY pre-Jobber — any row with a
+// jobberRef is excluded from selection (grayed checkbox, 'Managed in
+// Jobber') and gets no junk row in its ··· menu; the API 409s
+// (jobber_linked_junk_rejected) as the real enforcement.
+//
 // Soft row actions (the ··· overflow): Snooze / Dismiss / Mark as junk.
 // All three are Inbox-scoped removals riding EXISTING write paths
 // (PATCH /api/leads/:id) plus session-local Sets for optimistic
@@ -37,7 +46,7 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { deriveClientStatus } from './shared/clientStatus'
 import { CHIP_STYLES, ACCENT_BLUE, CLOSED_WON, isTerminal } from './shared/stageConfig'
 import { formatInboxAgeParts } from './shared/engagementStatus'
@@ -148,6 +157,13 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
   const [snoozedIds, setSnoozedIds] = useState(() => new Set())
   const [dismissedIds, setDismissedIds] = useState(() => new Set())
   const [menuFor, setMenuFor] = useState(null) // row id whose ··· menu is open
+  // Bulk selection (feedback #5) — the Inbox is the ONLY surface where
+  // leads are removable (pre-Jobber; Kevin 7/10). Remove = the same
+  // mark-junk write path as the ··· row action, batched. Selection is
+  // session-only state; Jobber-linked rows are never selectable.
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const [confirmRemove, setConfirmRemove] = useState(false) // N>5 confirm step
   const [sortRaw, setSort] = useStoredState('bee_hive_inbox_sort', { key: 'newest' })
   const inboxSort = INBOX_SORTS.some(o => o.key === sortRaw.key) ? sortRaw.key : 'newest'
   const [filters, setFilters, clearFilters] = useStoredState('bee_hive_inbox_filters', INBOX_FILTER_DEFAULTS)
@@ -229,6 +245,50 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     return { fresh, working }
   }, [scoped, openClientIds, wonClientIds, loggedIds, junkedIds, snoozedIds, dismissedIds, filters, inboxSort]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Selection universe ─────────────────────────────────────
+  // The VISIBLE rows (filters + section derivation already applied),
+  // minus Jobber-linked ones: a linked lead's lifecycle belongs to
+  // Jobber (its *_DESTROY webhooks are the only deletion path), so it
+  // is never selectable. jobberRef covers real links AND this session's
+  // optimistic 'REQ-…'/'JOB-…' sends. Selection SURVIVES filter changes
+  // but only currently-visible selectable rows count toward Remove —
+  // select-all-then-narrow can never junk a hidden row.
+  const visibleRows = useMemo(() => [...fresh, ...working], [fresh, working])
+  const selectableIds = useMemo(() => new Set(visibleRows.filter(p => !p.jobberRef).map(p => p.id)), [visibleRows])
+  const effectiveSelected = useMemo(() => [...selectedIds].filter(id => selectableIds.has(id)), [selectedIds, selectableIds])
+  const selCount = effectiveSelected.length
+
+  const exitSelect = () => { setSelectMode(false); setSelectedIds(new Set()); setConfirmRemove(false) }
+  const toggleSelect = (p) => {
+    if (p.jobberRef) return // managed in Jobber — never selectable
+    setConfirmRemove(false)
+    setSelectedIds(prev => {
+      const n = new Set(prev)
+      if (n.has(p.id)) n.delete(p.id); else n.add(p.id)
+      return n
+    })
+  }
+  const toggleSelectAll = () => {
+    setConfirmRemove(false)
+    setSelectedIds(selCount === selectableIds.size ? new Set() : new Set(selectableIds))
+  }
+
+  // Long-press on a row (mobile path into selection mode). Cancelled by
+  // release/leave; touch scrolling fires pointercancel, which also
+  // cancels. A fired long-press swallows the click that follows it.
+  const lpTimer = useRef(null)
+  const lpFired = useRef(false)
+  const pressStart = (p) => {
+    lpFired.current = false
+    clearTimeout(lpTimer.current)
+    lpTimer.current = setTimeout(() => {
+      lpFired.current = true
+      if (!selectMode) { setSelectMode(true); toggleSelect(p) }
+    }, 500)
+  }
+  const pressEnd = () => clearTimeout(lpTimer.current)
+  useEffect(() => () => clearTimeout(lpTimer.current), [])
+
   async function patchLead(id, patch) {
     const res = await fetch(`/api/leads/${id}`, {
       method: 'PATCH',
@@ -276,6 +336,47 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       }))
     } catch (e) {
       setToast({ kind: 'error', msg: `Junk failed: ${e.message}` })
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  // Bulk Remove — mark-junk semantics, batched: leaves the Inbox
+  // immediately, drips stop / welcome cancels server-side (the same
+  // is_junk branch the single action trips), recoverable via the Bin
+  // and the batch Undo below. Hard delete stays super_admin Bin
+  // territory. Partial failures keep the failed rows in place and say
+  // so; Undo restores exactly the rows that were removed.
+  function requestRemove() {
+    if (selCount === 0) return
+    if (selCount > 5 && !confirmRemove) { setConfirmRemove(true); return }
+    bulkRemoveSelected()
+  }
+
+  async function bulkRemoveSelected() {
+    const rows = visibleRows.filter(p => selectedIds.has(p.id) && !p.jobberRef)
+    if (rows.length === 0) return
+    setBusyId('bulk')
+    try {
+      const results = await Promise.allSettled(rows.map(p => patchLead(p.id, { is_junk: true })))
+      const done = rows.filter((_, i) => results[i].status === 'fulfilled')
+      const failed = rows.length - done.length
+      exitSelect()
+      if (done.length === 0) {
+        setToast({ kind: 'error', msg: 'Remove failed — please try again' })
+        return
+      }
+      setJunkedIds(prev => { const n = new Set(prev); done.forEach(p => n.add(p.id)); return n })
+      const text = failed > 0
+        ? `Removed ${done.length} of ${rows.length} (${failed} failed)`
+        : `Removed ${done.length} ${done.length === 1 ? 'lead' : 'leads'}`
+      setToast(undoToast(text, async () => {
+        const undos = await Promise.allSettled(done.map(p => patchLead(p.id, { is_junk: false })))
+        const restored = done.filter((_, i) => undos[i].status === 'fulfilled')
+        setJunkedIds(prev => { const n = new Set(prev); restored.forEach(p => n.delete(p.id)); return n })
+        if (restored.length === done.length) setToast({ kind: 'success', msg: `${restored.length} restored` })
+        else setToast({ kind: 'error', msg: `Undo failed for ${done.length - restored.length} of ${done.length}` })
+      }))
     } finally {
       setBusyId(null)
     }
@@ -361,6 +462,11 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
   function Row({ p, family, pill }) {
     const sent = freshlySent(p)
     const canSend = !p.jobberRef
+    // Jobber-owns-deletion rule: ANY jobberRef (imported/linked client,
+    // or this session's optimistic send) means the record's lifecycle
+    // belongs to Jobber — excluded from selection, no junk affordance.
+    const linked = !!p.jobberRef
+    const checked = !linked && selectedIds.has(p.id)
     // tel: dials on the digits-only key — phone_normalized when the row
     // carries it, else a client-side strip of the formatted value. The
     // formatted `phone` stays the visible label.
@@ -405,17 +511,43 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
                 label={<><IconClock size={13} />Snooze until next week</>} />
               <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); dismissLead(p) }}
                 label={<><IconCheck size={13} />Dismiss</>} />
-              <MenuRow danger disabled={busyId === p.id} onPick={() => { setMenuFor(null); markJunk(p) }}
-                label="Mark as junk" />
+              {/* Jobber-owns-deletion rule: no junk door on linked rows
+                  (the API 409s it anyway — this keeps the UI honest). */}
+              {!linked && (
+                <MenuRow danger disabled={busyId === p.id} onPick={() => { setMenuFor(null); markJunk(p) }}
+                  label="Mark as junk" />
+              )}
             </div>
           )}
         </div>
       </>
     )
     return (
-      <div className="bee-inbox-row" onClick={() => onOpenPerson(p)}
+      <div className="bee-inbox-row"
+        onClick={() => {
+          // A fired long-press already entered selection — swallow the
+          // click that follows the pointer release.
+          if (lpFired.current) { lpFired.current = false; return }
+          if (selectMode) toggleSelect(p)
+          else onOpenPerson(p)
+        }}
+        onPointerDown={() => pressStart(p)}
+        onPointerUp={pressEnd} onPointerLeave={pressEnd} onPointerCancel={pressEnd}
         style={{ padding: isMobile ? '12px 14px' : '13px 16px', borderBottom: '0.5px solid rgba(0,0,0,0.08)', cursor: 'pointer' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {selectMode && (
+            <input type="checkbox" checked={checked} disabled={linked}
+              title={linked ? 'Managed in Jobber' : `Select ${p.name}`}
+              aria-label={linked ? 'Managed in Jobber' : `Select ${p.name}`}
+              onClick={(ev) => ev.stopPropagation()}
+              onChange={() => toggleSelect(p)}
+              style={{
+                width: '16px', height: '16px', flexShrink: 0, margin: 0,
+                accentColor: GREEN_FILL,
+                opacity: linked ? 0.35 : 1,
+                cursor: linked ? 'not-allowed' : 'pointer',
+              }} />
+          )}
           <InitialsAvatar name={p.name} bg={family.bg} text={family.text} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <p style={{ fontSize: '14px', fontWeight: 600, color: `var(--text-primary, ${TEXT_PRIMARY})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -454,13 +586,17 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
                to the row like any other text. */
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
               <AgeInline created={p.created} nowMs={nowMs} />
-              <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onClick={ev => ev.stopPropagation()}>
-                {actions}
-              </div>
+              {/* Selection mode swaps the action cluster for checkboxes —
+                  no per-row writes while a batch is being composed. */}
+              {!selectMode && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onClick={ev => ev.stopPropagation()}>
+                  {actions}
+                </div>
+              )}
             </div>
           )}
         </div>
-        {isMobile && (
+        {isMobile && !selectMode && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '2px', marginTop: '6px', paddingLeft: '37px' }} onClick={ev => ev.stopPropagation()}>
             {actions}
           </div>
@@ -482,6 +618,14 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       `}</style>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', marginBottom: '12px' }}>
+        {/* Selection mode toggle — FilterButton's pill vocabulary. The
+            other door in is a row long-press. */}
+        {visibleRows.length > 0 && (
+          <button onClick={() => (selectMode ? exitSelect() : setSelectMode(true))} aria-pressed={selectMode}
+            style={{ padding: '5px 12px', borderRadius: '20px', border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, background: selectMode ? '#fff' : 'transparent', fontSize: '12px', fontWeight: selectMode ? 500 : 400, color: selectMode ? '#1a1a18' : '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', lineHeight: 'inherit' }}>
+            Select
+          </button>
+        )}
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <FilterButton count={inboxFilterCount(filters)} open={fltOpen} onToggle={() => setFltOpen(v => !v)} label="Filter & sort" />
           <FilterPopover open={fltOpen} count={inboxFilterCount(filters)} onClear={clearFilters}>
@@ -513,6 +657,54 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
           </FilterPopover>
         </div>
       </div>
+
+      {/* Bulk action bar — select-all-visible (respects active filters),
+          count chip, Remove (N) + Cancel; N>5 swaps in a confirm step. */}
+      {selectMode && (
+        <div role="toolbar" aria-label="Bulk actions"
+          style={{
+            display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '12px',
+            padding: '8px 12px', background: '#fff',
+            border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, borderRadius: '10px',
+          }}>
+          <button onClick={toggleSelectAll} disabled={selectableIds.size === 0}
+            style={{ padding: '5px 10px', borderRadius: '8px', border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 500, color: selectableIds.size === 0 ? '#b5b3ac' : ACCENT_BLUE, cursor: selectableIds.size === 0 ? 'default' : 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+            {selCount === selectableIds.size && selCount > 0 ? 'Clear selection' : `Select all (${selectableIds.size})`}
+          </button>
+          <span style={{ fontSize: '11px', fontWeight: 500, color: '#6b6b66', background: '#f2f1ee', borderRadius: '20px', padding: '3px 10px', whiteSpace: 'nowrap' }}>
+            {selCount} selected
+          </span>
+          <span style={{ flex: 1 }} />
+          {confirmRemove && selCount > 5 ? (
+            <>
+              <span style={{ fontSize: '12px', color: '#6b6b66' }}>
+                Remove {selCount} leads? They move to the Bin and drips stop.
+              </span>
+              <button onClick={bulkRemoveSelected} disabled={busyId === 'bulk'}
+                style={{ padding: '6px 14px', borderRadius: '8px', border: 'none', background: '#b42318', fontSize: '12px', fontWeight: 600, color: '#fff', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', opacity: busyId === 'bulk' ? 0.6 : 1 }}>
+                Remove {selCount}
+              </button>
+              <button onClick={() => setConfirmRemove(false)}
+                style={{ padding: '6px 12px', borderRadius: '8px', border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, background: 'transparent', fontSize: '12px', color: '#6b6b66', cursor: 'pointer', fontFamily: 'inherit' }}>
+                Keep
+              </button>
+            </>
+          ) : (
+            <>
+              {selCount > 0 && (
+                <button onClick={requestRemove} disabled={busyId === 'bulk'}
+                  style={{ padding: '6px 14px', borderRadius: '8px', border: 'none', background: '#b42318', fontSize: '12px', fontWeight: 600, color: '#fff', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', opacity: busyId === 'bulk' ? 0.6 : 1 }}>
+                  Remove ({selCount})
+                </button>
+              )}
+              <button onClick={exitSelect}
+                style={{ padding: '6px 12px', borderRadius: '8px', border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, background: 'transparent', fontSize: '12px', color: '#6b6b66', cursor: 'pointer', fontFamily: 'inherit' }}>
+                Cancel
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {fresh.length === 0 && working.length === 0 ? (
         inboxFilterCount(filters) > 0 ? (
