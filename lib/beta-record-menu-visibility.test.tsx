@@ -3,12 +3,10 @@
 // EngagementPanel ··· menu — REFINEMENT pins (menu-refinement build):
 //
 //   A) CONDITIONAL VISIBILITY (the matrix):
-//      · Mark as Closed Won  → ONLY at Final Processing (the last working
-//        stage) AND when invoicesFullyPaid — ≥1 invoice AND every invoice
-//        paid, the SAME predicate the import's stage derivation uses to
-//        move a done job to Closed Won (engagementStatus.js). ZERO invoices
-//        does NOT qualify (never invoiced = not wrapping up). Absent — not
-//        disabled — otherwise.
+//      · Mark as Closed Won  → NEVER in the ··· menu at ANY stage. The
+//        visible "Ready to close — Mark won" button is now the SOLE path
+//        to Close Won (see lib/beta-close-won-button.test.tsx for its
+//        gate). The menu item was removed as redundant.
 //      · Mark as Closed Lost → any OPEN engagement; NEVER on a closed one
 //        (so it can't leak onto a Closed Won).
 //      · Reopen → Closed Lost ONLY (never Won — settled money out of scope).
@@ -40,7 +38,6 @@ const eng = (over: any = {}) => ({
 })
 const emptyChildren = () => ({ service_requests: [], assessments: [], quotes: [], jobs: [], invoices: [], notes: [], touchpoints: [] })
 const paidInvoices = () => [{ id: 'i1', status: 'paid', total: 900, balance_owing: 0 }]
-const owingInvoices = () => [{ id: 'i1', status: 'sent', total: 900, balance_owing: 900 }]
 const client = (over: any = {}) => ({
   id: 'c1', name: 'Pat Tester', email: null, phone: null, source: null,
   referred_by_kind: null, referred_by_id: null, referred_by_name: null, buzz: [],
@@ -115,35 +112,22 @@ const mountPanel = async (engagement: any, children: any, spies: any = {}) => {
 }
 
 // ── A) the visibility matrix ──────────────────────────────────
-describe('··· menu — conditional visibility (Won gated to final+paid; Lost open-only; Reopen closed-lost-only)', () => {
-  it('Mark as Closed Won is ABSENT at every non-final stage, even when paid', async () => {
+describe('··· menu — conditional visibility (Won never in menu; Lost open-only; Reopen closed-lost-only)', () => {
+  it('Mark as Closed Won is ABSENT from the ··· menu at every open stage (button owns Close Won now)', async () => {
     for (const stage of ['Request', 'Estimate', 'Job in Progress']) {
       const { container } = await mountPanel(eng({ stage }), { ...emptyChildren(), invoices: paidInvoices() })
       await openMenu(container)
-      expect(menuItem('Mark as Closed Won'), `Won hidden at ${stage}`).toBeFalsy()
+      expect(menuItem('Mark as Closed Won'), `Won absent from menu at ${stage}`).toBeFalsy()
       expect(menuItem('Mark as Closed Lost'), `Lost shown at ${stage}`).toBeTruthy()
       document.body.innerHTML = ''
     }
   })
 
-  it('Mark as Closed Won is ABSENT at Final Processing while an invoice is still owing', async () => {
-    const { container } = await mountPanel(eng({ stage: 'Final Processing', total_invoiced: 900 }), { ...emptyChildren(), invoices: owingInvoices() })
-    await openMenu(container)
-    expect(menuItem('Mark as Closed Won')).toBeFalsy()
-    expect(menuItem('Mark as Closed Lost')).toBeTruthy()
-  })
-
-  it('Mark as Closed Won is ABSENT at Final Processing with ZERO invoices (the empty-list fix — un-invoiced is not wrapping up)', async () => {
-    const { container } = await mountPanel(eng({ stage: 'Final Processing' }), { ...emptyChildren(), invoices: [] })
-    await openMenu(container)
-    expect(menuItem('Mark as Closed Won')).toBeFalsy()
-    expect(menuItem('Mark as Closed Lost')).toBeTruthy()
-  })
-
-  it('Mark as Closed Won APPEARS at Final Processing when every invoice is settled', async () => {
+  it('Mark as Closed Won is ABSENT from the ··· menu even at Final Processing when every invoice is settled (the button, not the menu, carries it)', async () => {
     const { container } = await mountPanel(eng({ stage: 'Final Processing', total_invoiced: 900 }), { ...emptyChildren(), invoices: paidInvoices() })
     await openMenu(container)
-    expect(menuItem('Mark as Closed Won')).toBeTruthy()
+    expect(menuItem('Mark as Closed Won')).toBeFalsy()
+    // Lost still available on the (still-open) Final Processing engagement.
     expect(menuItem('Mark as Closed Lost')).toBeTruthy()
   })
 

@@ -425,13 +425,13 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
 
   // Masthead ··· menu items — grows with more record actions later.
   // Visibility rules (beta-record-menu-visibility pin):
-  //   Won    → Final Processing + fully-paid only (canCloseWon)
   //   Lost   → any OPEN (non-terminal) engagement; never on a closed one
   //   Reopen → Closed Lost only (never Won — settled money is out of scope)
+  // Close Won is NOT a menu item — the visible "Ready to close — Mark won"
+  // button (canCloseWon gate, below) is the SOLE path to Close Won.
   // While a reopen is in flight the closed actions drop optimistically.
   // readOnly (868kawwmh) hides EVERY write affordance — the whole menu drops.
   const menuItems = (eng && !readOnly) ? [
-    canCloseWon && { key: 'won', label: 'Mark as Closed Won', icon: <IconCheck size={15} />, onClick: () => setWizard('won') },
     !isTerminal(eng.stage) && { key: 'lost', label: 'Mark as Closed Lost', icon: <IconX size={15} />, onClick: () => setWizard('lost') },
     eng.stage === 'Closed Lost' && !reopening && { key: 'reopen', label: 'Reopen', icon: <IconClock size={15} />, onClick: reopenEngagement },
   ].filter(Boolean) : []
@@ -768,7 +768,8 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
             )}
             {/* Masthead ··· overflow menu (Part 1) — portal-rendered so
                 the overlay card's rounding/overflow can't clip it. Houses
-                the close-out actions today (Won/Lost wizards, Reopen);
+                the close-out actions today (Lost wizard, Reopen — Close
+                Won lives on the dedicated button below, not here);
                 structured to grow as more record actions land. */}
             {data && menuItems.length > 0 && (
               <RecordMenu items={menuItems} ariaLabel="Engagement actions" />
@@ -837,9 +838,9 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
       {/* READY-TO-CLOSE cue — the primary, obvious win path. Surfaces
           ONLY when canCloseWon (Final Processing + ≥1 invoice all paid —
           the import's own wrapping-up-settled rule): the deal is done and
-          the money is in, so we say so and offer the win in one tap. The
-          ··· menu keeps "Mark as Closed Won" for consistency; this is the
-          affirmative front door. Opens the EXISTING CloseWonWizard
+          the money is in, so we say so and offer the win in one tap. This
+          button is the SOLE Close-Won affordance — the ··· menu no longer
+          carries a "Mark as Closed Won" item. Opens the EXISTING CloseWonWizard
           (setWizard('won')) — same commit + confetti path. readOnly hides
           every write affordance, this included. */}
       {eng && canCloseWon && !readOnly && (

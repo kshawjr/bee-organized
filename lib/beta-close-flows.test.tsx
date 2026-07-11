@@ -111,10 +111,10 @@ const mountPanel = async (engagement: any, children: any, cl: any = client()) =>
 
 // ── Part 1: the ··· portal menu ───────────────────────────────
 describe('··· masthead menu — portal, close actions, reopen visibility', () => {
-  it('open engagement: menu portals OUT of the panel container and offers Lost (Won is gated to final+paid; Reopen is closed-only)', async () => {
+  it('open engagement: menu portals OUT of the panel container and offers Lost (Won never in the menu; Reopen is closed-only)', async () => {
     // eng() defaults to the Request stage — Lost is always available on an
-    // OPEN engagement, but Won now only surfaces at Final Processing + fully
-    // paid (the full matrix lives in beta-record-menu-visibility.test).
+    // OPEN engagement. Won is NEVER a menu item (the ready-to-close button
+    // owns Close Won; the full matrix lives in beta-record-menu-visibility.test).
     const { container } = await mountPanel(eng(), emptyChildren())
     expect(btnByText(container, 'Close…')).toBeUndefined()
     await openMenu(container)
@@ -125,7 +125,7 @@ describe('··· masthead menu — portal, close actions, reopen visibility', ()
     expect(container.contains(m)).toBe(false)
     expect(m.style.position).toBe('fixed')
     expect(menuItem('Mark as Closed Lost')).toBeTruthy()
-    expect(menuItem('Mark as Closed Won')).toBeFalsy() // not final-stage / not paid
+    expect(menuItem('Mark as Closed Won')).toBeFalsy() // never a menu item
     expect(menuItem('Reopen')).toBeFalsy()
   })
 
@@ -217,7 +217,10 @@ describe('Close-Lost wizard — reason (Other requires note) + follow-up marker'
 // ── Part 3: Close-WON wizard ──────────────────────────────────
 describe('Close-Won wizard — 4-step stepper, satisfaction, review, re-engage', () => {
   const paidChildren = () => ({ ...emptyChildren(), jobs: [{ id: 'j1', completed_at: daysAgo(1) }], invoices: [{ id: 'i1', status: 'paid', total: 1200, balance_owing: 0 }] })
-  const openWon = async (container: Element) => { await openMenu(container); await fire(menuItem('Mark as Closed Won')!) }
+  // Close Won left the ··· menu — the "Ready to close" button (shown at
+  // Final Processing + fully paid, which wonEng/paidChildren satisfy) is now
+  // the sole entry into the SAME CloseWonWizard.
+  const openWon = async (container: Element) => { await fire(container.querySelector('[data-bee-ready-to-close]') as HTMLButtonElement) }
   const wonEng = () => eng({ id: 'e-1', stage: 'Final Processing', total_invoiced: 1200 })
 
   it('step 1 shows the invoice total and settled state; No royalty line', async () => {

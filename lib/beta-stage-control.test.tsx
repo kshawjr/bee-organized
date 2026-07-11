@@ -211,24 +211,27 @@ describe('EngagementPanel — no Advance for any engagement; the action-bar Clos
     expect(onChanged).toHaveBeenCalledWith(LOCAL.id, { stage: CLOSED_LOST })
   })
 
-  it('Won gate (panel menu): owing invoices HIDE Mark as Closed Won entirely — Final Processing but not settled', async () => {
-    // The Won gate now lives at the MENU: at the final stage with an open
-    // balance, the item is absent (not a disabled wizard step). The wizard's
-    // own owing gate still guards the board drag-close path (see §C below).
+  it('Won is NEVER a ··· menu item — Final Processing + owing shows no Won item and no ready-to-close button', async () => {
+    // Close Won left the ··· menu entirely; the "Ready to close" button is
+    // the sole path (gate covered in beta-close-won-button). With an open
+    // balance the button's gate fails too, so neither affordance appears.
     const owing = { ...emptyChildren(), jobs: [{ id: 'j1', completed_at: daysAgo(1) }], invoices: [{ id: 'i1', status: 'sent', total: 900, balance_owing: 900 }] }
     const { container } = await mountPanel(eng({ id: 'e-owing', stage: 'Final Processing', total_invoiced: 900 }), owing)
     await openRecordMenu(container)
     expect(menuItem('Mark as Closed Won')).toBeFalsy()
+    expect(container.querySelector('[data-bee-ready-to-close]')).toBeFalsy()
     // Lost is still available on an open engagement.
     expect(menuItem('Mark as Closed Lost')).toBeTruthy()
     expect(patchCalls.length).toBe(0)
   })
 
-  it('Won gate (panel menu): Final Processing + fully PAID shows Mark as Closed Won', async () => {
+  it('Won stays OUT of the ··· menu even at Final Processing + fully PAID — only the ready-to-close button appears', async () => {
     const paid = { ...emptyChildren(), jobs: [{ id: 'j1', completed_at: daysAgo(1) }], invoices: [{ id: 'i1', status: 'paid', total: 900, balance_owing: 0 }] }
     const { container } = await mountPanel(eng({ id: 'e-paid', stage: 'Final Processing', total_invoiced: 900 }), paid)
     await openRecordMenu(container)
-    expect(menuItem('Mark as Closed Won')).toBeTruthy()
+    expect(menuItem('Mark as Closed Won')).toBeFalsy()
+    // The button — not the menu — carries Close Won.
+    expect(container.querySelector('[data-bee-ready-to-close]')).toBeTruthy()
   })
 
   it('drift-corrected stage from the GET propagates to the board via onChanged', async () => {
