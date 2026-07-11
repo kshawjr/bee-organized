@@ -40,3 +40,4 @@ next-env.d.ts
 backfill-engagements-report*.json
 backfill-assessment-appointment-ids.report*.json
 backfill-assessment-completion.report*.json
+backfill-assessment-duration.report*.json
