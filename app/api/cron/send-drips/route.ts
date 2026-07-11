@@ -81,9 +81,13 @@ export async function GET(req: NextRequest) {
     const result = await sendDripStepForRow(row as any)
     if (result.sent) {
       sent++
-    } else if (result.error === 'no_email' || result.error === 'non_email_channel') {
-      // Expected skips: drip auto-stopped (no_email) or auto-advanced past
-      // a non-email step. Both bookkeeping mutations already happened.
+    } else if (
+      result.error === 'no_email' ||
+      result.error === 'non_email_channel' ||
+      result.error === 'opted_out'
+    ) {
+      // Expected skips: drip auto-stopped (no_email / opted_out) or
+      // auto-advanced past a non-email step. Bookkeeping already happened.
       skipped++
     } else if (result.error) {
       failed++
@@ -99,11 +103,16 @@ export async function GET(req: NextRequest) {
   let welcomeSkipped = 0
   let welcomeFailed = 0
 
+  // paused=true rows are HELD, not cancelled — excluded here so they
+  // don't burn batch slots, and released automatically on the first
+  // tick after resume. sendWelcomeEmail re-checks paused/junk/opt-out
+  // at send time (authoritative gate).
   const { data: welcomeDue, error: welcomeErr } = await supabaseService
     .from('leads')
     .select('id')
     .lte('welcome_email_scheduled_at', nowIso)
     .is('welcome_email_sent_at', null)
+    .eq('paused', false)
     .limit(BATCH_LIMIT)
 
   if (welcomeErr) {
@@ -113,7 +122,13 @@ export async function GET(req: NextRequest) {
       const result = await sendWelcomeEmail(lead.id)
       if (result.sent) {
         welcomeSent++
-      } else if (result.error === 'no_email' || result.error === 'already_sent') {
+      } else if (
+        result.error === 'no_email' ||
+        result.error === 'already_sent' ||
+        result.error === 'junk' ||        // cancelled at send time
+        result.error === 'opted_out' ||   // cancelled at send time
+        result.error === 'paused'         // HELD — retried after resume
+      ) {
         welcomeSkipped++
       } else if (result.error) {
         welcomeFailed++
@@ -147,7 +162,8 @@ export async function GET(req: NextRequest) {
       } else if (
         result.error === 'no_email' ||
         result.error === 'already_sent' ||
-        result.error === 'cancelled'
+        result.error === 'cancelled' ||
+        result.error === 'opted_out'
       ) {
         stageSkipped++
       } else if (result.error) {

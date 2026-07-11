@@ -94,12 +94,23 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // Lead
   const { data: lead, error: leadErr } = await supabaseService
     .from('leads')
-    .select('id, name, first_name, email, location_uuid, assigned_to')
+    .select('id, name, first_name, email, location_uuid, assigned_to, marketing_opt_out')
     .eq('id', row.lead_id)
     .maybeSingle()
 
   if (leadErr || !lead) {
     return { sent: false, error: `lead_lookup: ${leadErr?.message ?? 'missing'}` }
+  }
+
+  // Opted out of marketing → stop this drip permanently. Send-time is
+  // the authoritative opt-out gate (startDripForLead also refuses to
+  // enroll, but a lead can opt out mid-sequence).
+  if (lead.marketing_opt_out === true) {
+    await supabaseService
+      .from('lead_drip_progress')
+      .update({ stopped_at: new Date().toISOString(), stopped_reason: 'opted_out' })
+      .eq('id', row.id)
+    return { sent: false, error: 'opted_out' }
   }
 
   // No email → stop this drip permanently with reason='no_email'
