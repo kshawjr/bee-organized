@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useLeadsRealtime } from "@/lib/use-leads-realtime"
 import dynamic from "next/dynamic"
 import { canSeeBetaBoard, defaultHiveView, hydrateHiveView } from "@/components/hive/shared/betaGate"
+import { splitNameForPrefill } from "@/lib/name-prefill"
 import AddressAutofill from "@/components/hive/shared/AddressAutofill"
 // Pure presentational icon set (inline SVG, zero deps) — safe to import
 // statically like betaGate; it pulls no beta-chunk surface code with it.
@@ -10942,7 +10943,10 @@ function WelcomeStep({ ownerName, ownerEmail, topOffset, onContinue }) {
 // ─── Onboarding Screen ────────────────────────────────────────────────────────
 function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='owner', topOffset=0, onComplete=()=>{}, onSkipOnboarding=()=>{} }) {
   const isOwner   = franchiseRole === 'owner'
-  const nameParts = (ownerName||'').split(' ')
+  // ownerName arrives as the FULL stored name (full_name || email — see the
+  // DashboardScreen mount). splitNameForPrefill handles the email/'there'
+  // no-name cases and keeps multi-word last names intact.
+  const namePrefill = splitNameForPrefill(ownerName)
   const currentLocationCtx = useContext(CurrentLocationContext)
   const currentUserCtx     = useContext(CurrentUserContext)
   const seatsCtx           = useContext(SeatsContext)
@@ -11015,8 +11019,8 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
 
   // Per-step forms - prefilled from invite data, or from DB on remount (Pass 2)
   const [profileForm, setProfileForm] = useState({
-    firstName: currentUserCtx?.first_name || nameParts[0]||'',
-    lastName:  currentUserCtx?.last_name  || nameParts.slice(1).join(' ')||'',
+    firstName: currentUserCtx?.first_name || namePrefill.firstName||'',
+    lastName:  currentUserCtx?.last_name  || namePrefill.lastName||'',
     email:     currentUserCtx?.email      || ownerEmail||'',
     phone:     currentUserCtx?.phone      || '',
   })
@@ -11494,7 +11498,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   if (!isOwner) return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'7rem', paddingTop:`${topOffset}px` }}>
       <div style={{ background:BRAND.dark, padding:'1rem 1.25rem 1.25rem' }}>
-        <h1 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'white', marginBottom:'2px' }}>Hi {ownerName&&ownerName!=='there'?ownerName.trim():'there'}!</h1>
+        <h1 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'white', marginBottom:'2px' }}>Hi {getFirstName(ownerName, ownerEmail) || 'there'}!</h1>
         <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.7)', marginBottom:'8px' }}>{doneCount} of {STEPS.length} steps complete</p>
         <div style={{ height:'4px', background:'rgba(255,255,255,0.1)', borderRadius:'2px', overflow:'hidden' }}>
           <div style={{ height:'100%', width:`${(doneCount/STEPS.length)*100}%`, background:'#a8c9c4', borderRadius:'2px', transition:'width 0.4s' }} />
@@ -20630,7 +20634,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         <p style={{ fontSize:'11px', color:BRAND.teal, fontWeight:600, marginBottom:'2px', opacity:0.7, textTransform:'uppercase', letterSpacing:'1.5px' }}>The Hive Hub</p>
         <p style={{ fontSize:'12px', color:BRAND.teal, fontWeight:500, marginBottom:'4px', opacity:0.7 }}>{dateStr}{timeStr && ` · ${timeStr}`}</p>
         <h1 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'white', marginBottom:'4px' }}>
-          {!now?'Hello':now.getHours()<12?'Good morning':now.getHours()<17?'Good afternoon':'Good evening'}{ownerName&&ownerName!=='there'&&ownerName.trim().length>1?`, ${ownerName.trim().split(' ')[0]}`:''} 👋
+          {!now?'Hello':now.getHours()<12?'Good morning':now.getHours()<17?'Good afternoon':'Good evening'}{getFirstName(ownerName, ownerEmail)?`, ${getFirstName(ownerName, ownerEmail)}`:''} 👋
         </h1>
         <button
           onClick={()=>{ if (onClickLocation) onClickLocation() }}
@@ -32088,6 +32092,11 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     )
     return (
       <div style={pageStyle}>
+        {/* ownerName carries the FULL stored name (full_name || email).
+            Onboarding's profile step splits it into First/Last prefill;
+            greeting sites apply getFirstName themselves. Do NOT wrap in
+            getFirstName here — that blanked invited users' last names
+            on the onboarding profile step. */}
         <DashboardScreen
           startNav='home'
           role={role}
@@ -32098,7 +32107,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           onClickLocation={()=>setShowLocPicker(true)}
           isElevated={isElevated}
           crmStatus={effectiveCrmStatus}
-          ownerName={getFirstName(viewAsUser?.name || selectedLoc?.owner || currentUser?.name, viewAsUser?.email || currentUser?.email) || 'Kevin Shaw'}
+          ownerName={(viewAsUser?.name || selectedLoc?.owner || currentUser?.name || '').trim() || 'Kevin Shaw'}
           ownerEmail={viewAsUser?.email || currentUser?.email || ''}
           topOffset={TOTAL_TOP}
           partners={partners}
