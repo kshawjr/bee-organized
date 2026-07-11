@@ -12,6 +12,15 @@
 // bottom would clip it, closes on outside-click AND Esc, and only ever
 // shows ONE menu (self-contained open state).
 //
+// STACKING (why NOT the inbox's zIndex:80): unlike the inbox row (a
+// top-level tab), this menu's first home — the EngagementPanel masthead —
+// lives INSIDE OverlayShell's fixed scrim (zIndex 10005). A body-portal at
+// z-80 is a stacking sibling of that overlay in the root context, so it
+// rendered BEHIND the scrim + card: the menu "opened" (state flipped,
+// portal mounted) but was invisible AND unclickable — no error, no visible
+// response. The portal therefore sits ABOVE the overlay layer so a menu
+// spawned from within any overlay floats over it.
+//
 // Structured to GROW: pass `items` — an array of
 //   { key, label, onClick, danger?, icon?, disabled? }
 // (a falsy entry is skipped, so callers can inline conditionals). More
@@ -71,7 +80,7 @@ function MenuPortal({ anchorRef, onClose, children }) {
       style={{
         position: 'fixed', top: 0, left: 0, ...(pos || {}),
         visibility: pos ? 'visible' : 'hidden',
-        minWidth: '200px', zIndex: 80, background: T.surface.raised,
+        minWidth: '200px', zIndex: 10011, background: T.surface.raised,
         border: T.border.thin, borderRadius: T.radius.inset,
         boxShadow: T.shadow.pop, padding: '4px',
       }}>
