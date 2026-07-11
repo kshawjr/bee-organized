@@ -334,18 +334,32 @@ describe('PersonCard (build-2 straggler)', () => {
     expect(src).toContain('label="Source"')
   })
 
-  it('invoice inset ghosts (v2): Record payment / Send reminder render DISABLED with the coming tooltip', async () => {
+  it('invoice inset (build-3 verdict): actions are HONEST DEEP LINKS — Jobber has no send/payment mutations, so no button pretends otherwise', async () => {
     engBody = engagementPayload({
-      children: { invoices: [{ id: 'i1', jobber_invoice_id: '990551221', total: 4400, status: 'paid', balance_owing: 0, paid_amount: 4400, issued_at: daysAgo(9), paid_at: daysAgo(2) }] },
+      children: { invoices: [{ id: 'i1', jobber_invoice_id: '990551221', invoice_url: 'https://secure.getjobber.com/invoices/551', total: 4400, status: 'sent', balance_owing: 4400, paid_amount: 0, issued_at: daysAgo(9) }] },
     })
     const { host, unmount } = await mountPanel()
-    for (const label of ['Record payment', 'Send reminder']) {
-      const btn = [...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === label) as HTMLButtonElement
-      expect(btn, label).toBeTruthy()
-      expect(btn.disabled).toBe(true)
-      expect(btn.title).toContain('Coming')
+    // the ghost buttons are gone for good
+    expect([...host.querySelectorAll('button')].some(b => (b.textContent || '').includes('Record payment'))).toBe(false)
+    expect([...host.querySelectorAll('button')].some(b => (b.textContent || '').includes('Send reminder'))).toBe(false)
+    // honest links: labeled '… in Jobber', real hrefs, new tab
+    for (const verb of ['Collect', 'Send']) {
+      const a = [...host.querySelectorAll('a')].find(x => (x.textContent || '').includes(`${verb} in Jobber`)) as HTMLAnchorElement
+      expect(a, verb).toBeTruthy()
+      expect(a.getAttribute('href')).toBe('https://secure.getjobber.com/invoices/551')
+      expect(a.getAttribute('target')).toBe('_blank')
     }
     expect(host.textContent).toContain('INV-551221')
     await unmount()
+  })
+
+  it('invoice inset links HIDE on a paid invoice (nothing to collect/send) and on a local record (no URL derivable)', async () => {
+    engBody = engagementPayload({
+      children: { invoices: [{ id: 'i1', jobber_invoice_id: '990551221', invoice_url: 'https://secure.getjobber.com/invoices/551', total: 4400, status: 'paid', balance_owing: 0, paid_amount: 4400, issued_at: daysAgo(9), paid_at: daysAgo(2) }] },
+    })
+    const paid = await mountPanel()
+    expect([...paid.host.querySelectorAll('a')].some(a => (a.textContent || '').includes('in Jobber'))).toBe(false)
+    expect(paid.host.textContent).toContain('INV-551221') // detail line stays
+    await paid.unmount()
   })
 })

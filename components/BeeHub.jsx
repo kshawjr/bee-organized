@@ -2126,7 +2126,6 @@ function SendToJobberPopup({ person, engagementId = null, onDone, onClose }) {
   const hasAddress = leadHasUsableAddress(person)
   const wantsAssessment = action === 'request' && includeAssessment && !!date
   const addressRequired =
-    action === 'job' ||
     (wantsAssessment && assessmentType === 'in-person')
   const blockSendForAddress = addressRequired && !hasAddress
 
@@ -2160,11 +2159,9 @@ function SendToJobberPopup({ person, engagementId = null, onDone, onClose }) {
 
     const isReq = action === 'request'
     const hasAssessment = isReq && includeAssessment && date
-    const creationType = hasAssessment
-      ? 'request_with_assessment'
-      : isReq
-        ? 'request_only'
-        : 'job_direct'
+    // job_direct retired (build 3) — the chooser only offers Request now,
+    // matching the server's validation gate.
+    const creationType = hasAssessment ? 'request_with_assessment' : 'request_only'
 
     const body = { creation_type: creationType }
     if (engagementId) body.engagement_id = engagementId
@@ -2262,7 +2259,12 @@ function SendToJobberPopup({ person, engagementId = null, onDone, onClose }) {
         <>
           <p style={{ fontSize:'13px', color:'#8a9e9a', marginBottom:'1rem' }}>{person.jobberClient?`For ${person.jobberClient.clientId}`:'New client will be created.'}</p>
           <AC aKey="request" icon="📋" title="Create a Request" color="#0ea5e9" desc="Add a request in Jobber. Optionally attach an assessment." />
-          <AC aKey="job"     icon="🔨" title="Create a Job Directly" color="#10b981" desc="Skip request - create a job directly when client is ready." />
+          {/* The direct-job option was REMOVED (card-restore build 3): the
+              server has 400-gated job_direct since JobCreateAttributes
+              grew required fields we don't collect (invoicing:
+              JobInvoicingAttributes! = billing strategy + frequency,
+              introspected 2026-07-11). Honest UI > a button that always
+              errors. Restore only WITH a billing-strategy picker. */}
           <button onClick={()=>action&&setStep(action==='request'?'request-details':'confirm')} disabled={!action} style={{ width:'100%', padding:'12px', background:action?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:action?'white':'#9ca3af', cursor:action?'pointer':'not-allowed', marginTop:'4px' }}>Continue →</button>
         </>
       )}
@@ -2326,9 +2328,9 @@ function SendToJobberPopup({ person, engagementId = null, onDone, onClose }) {
           <div style={{ background:'#f7f5f0', borderRadius:'12px', padding:'14px', marginBottom:'1.25rem', display:'grid', gap:'8px' }}>
             {[
               ['Client',     person.jobberClient?`${person.jobberClient.clientId} (existing)`:`${person.name} (new)`],
-              ['Creating',   action==='request'?'Request':'Job directly'],
-              ...(action==='request'?[['Assessment', includeAssessment&&date?`${assessmentType==='virtual'?'Virtual':'In-person'} · ${date} at ${time}`:'None']]: []),
-              ['Stage after', action==='request' ? 'Request' : 'Job in Progress'],
+              ['Creating',   'Request'],
+              ['Assessment', includeAssessment&&date?`${assessmentType==='virtual'?'Virtual':'In-person'} · ${date} at ${time}`:'None'],
+              ['Stage after', 'Request'],
             ].map(([l,v])=>(
               <div key={l} style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                 <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{l}</span>
@@ -9934,6 +9936,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
   // the user's own location).
   const hiveCurrentUserCtx = useContext(CurrentUserContext)
   const hiveCurrentLocationCtx = useContext(CurrentLocationContext)
+  const hiveLocationUsersCtx = useContext(LocationUsersContext)
   // Partners CRM mutators for the onPartnerCreated seam — the beta
   // referrer picker's inline create hands its confirmed row up here.
   const hivePartnersCtx = useContext(PartnersContext)
@@ -10170,6 +10173,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
           locFilter={locFilter}
           currentLocationUuid={locFilter!=='all' ? locFilter : (hiveCurrentLocationCtx?.id || hiveCurrentUserCtx?.locationId || null)}
           currentUserId={hiveCurrentUserCtx?.id || null}
+          locationUsers={hiveLocationUsersCtx || []}
           // People-merge seam (BeeHub → HiveShell onPersonCreated, passed
           // DOWN): the shell hands the mapped person up after a confirmed
           // /api/leads insert; we merge it into people-state here so the

@@ -21,6 +21,10 @@ const LEAD_COL_TO_PERSON_FIELD = {
   request_details: 'jobDetail',
   snoozed_until: 'snoozeUntil', // Timeline's un-snooze → Inbox reflects live
   is_junk: 'isJunk',            // card ··· menu junk → Inbox row drops live
+  // Build-3 preference/assignment writes (PreferencesBlock + AssignedToField)
+  marketing_opt_out: 'marketingOptOut',
+  paused: 'paused',
+  assigned_to: 'assignedTo',
   phone: 'phone',               // ContactField inline edit → Inbox tel:/filters live
   email: 'email',
   // AddressField inline edit. Person has ONE flat address field (the

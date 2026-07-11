@@ -42,12 +42,12 @@
 import React, { useState, useEffect } from 'react'
 import { CHIP_STYLES, stageDisplayLabel, ACCENT_BLUE } from './shared/stageConfig'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
-import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, fmtShort, daysSince, closedReasonLabel } from './shared/engagementStatus'
+import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, daysSince, closedReasonLabel } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import { vitalsAge } from './shared/VitalsStrip'
 import MetricBand from './shared/MetricBand'
 import {
-  IconPhone, IconPlayerPause, IconExternalLink, IconSend, IconChevronRight, IconMail,
+  IconPhone, IconExternalLink, IconSend, IconChevronRight,
   IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPlus, IconPaperclip,
 } from '@/components/ui/icons'
 import EditableDesc from './EditableDesc'
@@ -56,6 +56,10 @@ import ContactField from './shared/ContactField'
 import AddressField from './shared/AddressField'
 import SourceField from './shared/SourceField'
 import ReferrerField from './shared/ReferrerField'
+import ContactsBlock from './shared/ContactsBlock'
+import TagsRow from './shared/TagsRow'
+import AssignedToField from './shared/AssignedToField'
+import PreferencesBlock from './shared/PreferencesBlock'
 import { jobberClientUrl } from './shared/jobberLinks'
 import Timeline from './shared/Timeline'
 import CardTabs from './shared/CardTabs'
@@ -82,7 +86,7 @@ const STAGE_ICON = {
 // siblings/onNavigate: the opener's natural ordering (e.g. the client
 // directory's visible rows). When absent the prev/next chevrons hide —
 // a panel→profile swap or a fresh create has no "next client".
-export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, lookupOptions = { sources: [], projectTypes: [] }, siblings = null, onNavigate = () => {} }) {
+export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, lookupOptions = { sources: [], projectTypes: [], clientTags: [] }, locationUsers = [], siblings = null, onNavigate = () => {} }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -334,77 +338,53 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         )}
       </div>
 
-      {/* Secondary contacts — display + live links; add/edit is Build 3. */}
-      {(data.contacts || []).length > 0 && (
-        <div>
-          <MicroLabel>Contacts · {data.contacts.length}</MicroLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {data.contacts.map(ct => (
-              <div key={ct.id} style={{ fontSize: '12px', color: '#1a1a18' }}>
-                <p>{ct.name}{ct.role ? <span style={{ color: '#8a8a84' }}> · {ct.role}</span> : null}</p>
-                <p style={{ display: 'flex', gap: '10px', marginTop: '1px' }}>
-                  {ct.phone && (
-                    <a className="bee-contact-link" href={`tel:${ct.phone}`} style={{ color: ACCENT_BLUE, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
-                      <IconPhone size={11} /> {ct.phone}
-                    </a>
-                  )}
-                  {ct.email && (
-                    <a className="bee-contact-link" href={`mailto:${ct.email}`} style={{ color: ACCENT_BLUE, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      <IconMail size={11} /> {ct.email}
-                    </a>
-                  )}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Secondary contacts — full CRUD (build 3) via the existing
+          lead-contacts routes; inline-edit standard. */}
+      <ContactsBlock
+        leadId={c.id}
+        contacts={data.contacts || []}
+        onChange={next => setData(d => d ? { ...d, contacts: next } : d)}
+        setToast={setToast}
+      />
 
-      {/* Tags — display pills; the + is a Build-3 placeholder. */}
-      <div>
-        <MicroLabel>Tags</MicroLabel>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
-          {tags.map(t => (
-            <span key={t} style={{ padding: '3px 10px', borderRadius: '20px', border: '0.5px solid rgba(0,0,0,0.12)', background: '#fff', fontSize: '11px', color: '#1a1a18', whiteSpace: 'nowrap' }}>
-              {t}
-            </span>
-          ))}
-          {tags.length === 0 && <span style={{ fontSize: '11px', color: '#b5b3ac' }}>No tags</span>}
-          <button disabled title="Tag editing is coming in a later build"
-            style={{ padding: '3px 10px', borderRadius: '20px', border: '0.5px dashed rgba(0,0,0,0.18)', background: 'transparent', fontSize: '11px', color: '#c9c7c0', fontFamily: 'inherit', cursor: 'default' }}>
-            + Tag
-          </button>
-        </div>
-      </div>
+      {/* Tags — live popover (build 3): lead_tags junction writes over
+          admin-managed client_tags lookups; × removes. */}
+      <TagsRow
+        leadId={c.id}
+        tags={tags}
+        options={lookupOptions.clientTags || []}
+        onChange={next => setData(d => d ? { ...d, tags: next } : d)}
+        setToast={setToast}
+      />
 
-      {/* Assigned to — display only (assignment moves are Build 3). */}
-      <div>
-        <MicroLabel>Assigned to</MicroLabel>
-        <p style={{ fontSize: '12px', color: c.assigned_to_name ? '#1a1a18' : '#b5b3ac' }}>
-          {c.assigned_to_name || 'Unassigned'}
-        </p>
-      </div>
+      {/* Assigned to — live picker (build 3): the location's hub_users →
+          leads.assigned_to (the same column send-to-jobber reads for
+          request/assessment assignment). */}
+      <AssignedToField
+        leadId={c.id}
+        value={c.assigned_to || null}
+        valueName={c.assigned_to_name || null}
+        users={locationUsers.filter(u => !c.location_uuid || u.locationId === c.location_uuid)}
+        onSaved={(cols, name) => {
+          setData(d => d ? { ...d, client: { ...d.client, ...cols, assigned_to_name: name } } : d)
+          onLeadPatched(c.id, cols)
+        }}
+        setToast={setToast}
+      />
 
-      {/* Preferences — DISPLAY only (toggles are Build 3). Replaces the
-          old paused chip + opt-out line. The nurture-drip row hides
-          when the client has live business (v4 rule: drips are a
-          no-open-work concern). */}
-      <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
-        <MicroLabel>Preferences</MicroLabel>
-        <p style={{ fontSize: '12px', color: c.marketing_opt_out ? '#791F1F' : '#6b6b66' }}>
-          {c.marketing_opt_out ? 'Opted out of marketing' : 'Marketing emails OK'}
-        </p>
-        <p style={{ fontSize: '12px', color: c.snoozed_until && new Date(c.snoozed_until).getTime() > nowMs ? '#633806' : '#6b6b66' }}>
-          {c.snoozed_until && new Date(c.snoozed_until).getTime() > nowMs
-            ? `Snoozed until ${fmtShort(c.snoozed_until)}`
-            : 'Not snoozed'}
-        </p>
-        {open.length === 0 && (
-          <p style={{ fontSize: '12px', color: c.paused ? '#633806' : '#085041', display: 'flex', alignItems: 'center', gap: '7px' }}>
-            <IconPlayerPause size={13} /> {c.paused ? 'Nurture drips paused' : 'Nurture drips active'}
-          </p>
-        )}
-      </div>
+      {/* Preferences — LIVE toggles (build 3): marketing opt-out
+          (confirmed), snooze set/unset, drip pause/activate; the
+          nurture-drip row hides with live business (v4 rule). */}
+      <PreferencesBlock
+        client={c}
+        openCount={open.length}
+        nowMs={nowMs}
+        onPatched={cols => {
+          setData(d => d ? { ...d, client: { ...d.client, ...cols } } : d)
+          onLeadPatched(c.id, cols)
+        }}
+        setToast={setToast}
+      />
     </div>
   )
 

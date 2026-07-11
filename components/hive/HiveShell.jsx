@@ -100,6 +100,10 @@ export default function HiveShell({
   closedCount = 0,
   closedWonCount = 0,
   people = [],
+  // Location team roster (id/name/email/locationId) — BeeHub bridges its
+  // LocationUsersContext here so the profile's assigned-to picker can
+  // stay §8.5-clean (props only, no context in the hive chunk).
+  locationUsers = [],
   locFilter = 'all',
   currentLocationUuid = null,
   currentUserId = null,
@@ -154,15 +158,22 @@ export default function HiveShell({
   // Admin-managed option lists (lookups: global, super-admin curated) —
   // fetched ONCE per shell mount and threaded to PersonCard +
   // EngagementPanel (lighter than per-card fetches).
-  const [lookupOptions, setLookupOptions] = useState({ sources: [], projectTypes: [] })
+  const [lookupOptions, setLookupOptions] = useState({ sources: [], projectTypes: [], clientTags: [] })
   useEffect(() => {
     let dead = false
     fetch('/api/lookups')
       .then(r => r.json())
       .then(j => {
         if (dead) return
-        const by = (cat) => (j.lookups || []).filter(l => l.category === cat).map(l => l.label)
-        setLookupOptions({ sources: by('lead_sources'), projectTypes: by('project_types') })
+        const rows = (j.lookups || []).filter(l => l.is_active !== false)
+        const by = (cat) => rows.filter(l => l.category === cat).map(l => l.label)
+        setLookupOptions({
+          sources: by('lead_sources'),
+          projectTypes: by('project_types'),
+          // Tag writes are id-keyed (lead_tags junction), so tags keep
+          // { id, label } instead of the label-only shape.
+          clientTags: rows.filter(l => l.category === 'client_tags').map(l => ({ id: l.id, label: l.label })),
+        })
       })
       .catch(() => {})
     return () => { dead = true }
@@ -439,6 +450,7 @@ export default function HiveShell({
           siblings={overlay.siblings ?? null}
           onNavigate={(id) => setOverlay(o => (o && o.type === 'client' ? { ...o, clientId: id } : o))}
           people={people}
+          locationUsers={locationUsers}
           onClose={() => setOverlay(null)}
           onOpenEngagement={openEngagement}
           onLeadPatched={handleLeadPatched}

@@ -577,11 +577,37 @@ export async function POST(
     // this with two requestCreate variants. Omitting the key lets Jobber
     // accept the request without a property attached.
     if (jobberPropertyGlobalId) requestInput.propertyId = jobberPropertyGlobalId
-    const reqCreate = await jobberMutation(
+    // Owner assignment at CREATION (card-restore build 3): introspection
+    // 2026-07-11 confirmed RequestCreateInput.salespersonId: EncodedId —
+    // the same stored jobber_user_id the assessment assignment uses.
+    // NON-FATAL like that path: if Jobber rejects the id (stale roster
+    // link, deactivated user), retry once WITHOUT it rather than killing
+    // the whole send.
+    if (assignedJobberUserId) requestInput.salespersonId = assignedJobberUserId
+    let reqCreate = await jobberMutation(
       locationSlug,
       REQUEST_CREATE_MUTATION,
       { input: requestInput },
     )
+    if (reqCreate.userErrors?.length && requestInput.salespersonId) {
+      console.warn('[send-to-jobber] requestCreate with salespersonId failed — retrying unassigned', {
+        leadId, salespersonId: requestInput.salespersonId,
+        userErrors: JSON.stringify(reqCreate.userErrors),
+      })
+      await writeSyncLog({
+        location_id: locationSlug,
+        entity_id: leadId,
+        entity_type: 'client',
+        status: 'success',
+        message: `[send-to-jobber] topic=REQUEST_ASSIGN_RETRY salespersonId=${requestInput.salespersonId} rejected (${reqCreate.userErrors[0]?.message ?? 'unknown'}) — request created unassigned`,
+      })
+      delete requestInput.salespersonId
+      reqCreate = await jobberMutation(
+        locationSlug,
+        REQUEST_CREATE_MUTATION,
+        { input: requestInput },
+      )
+    }
     if (reqCreate.userErrors?.length) {
       return fail('request_create', reqCreate.userErrors[0].message)
     }

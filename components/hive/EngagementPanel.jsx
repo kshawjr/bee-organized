@@ -348,30 +348,42 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
       </div>
 
       {/* Invoice detail inset — number (classic INV- derivation, no DB
-          column) + dates; the action buttons are Build-3 placeholders,
-          DISABLED-ghost per the blessed design. */}
+          column) + dates. Build 3 verdict (introspected 2026-07-11):
+          Jobber's API has NO send-invoice and NO record-payment
+          mutation (only markAsSent/close/reopen bookkeeping flips —
+          classic's popup buttons were mock-era local fictions). So the
+          actions are HONEST DEEP LINKS into the invoice in Jobber —
+          never a button pretending at a capability the API lacks. */}
       {children.invoices.length > 0 && (
-        <div style={{ background: QUIET, borderRadius: '8px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <div style={{ background: QUIET, borderRadius: '8px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
           <MicroLabel>Invoice detail</MicroLabel>
-          {children.invoices.map(inv => (
-            <p key={inv.id} style={{ fontSize: '12px', color: '#1a1a18', fontVariantNumeric: 'tabular-nums', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {[
-                invoiceNumber(inv),
-                inv.issued_at && `issued ${fmtDate(inv.issued_at)}`,
-                inv.paid_at && `paid ${fmtDate(inv.paid_at)}`,
-              ].filter(Boolean).join(' · ')}
-            </p>
-          ))}
-          <div style={{ display: 'flex', gap: '8px', marginTop: '2px' }}>
-            <button disabled title="Coming in a later build"
-              style={{ padding: '5px 12px', borderRadius: '8px', border: '0.5px dashed rgba(0,0,0,0.18)', background: 'transparent', fontSize: '11px', color: '#c9c7c0', fontFamily: 'inherit', cursor: 'default' }}>
-              Record payment
-            </button>
-            <button disabled title="Coming in a later build"
-              style={{ padding: '5px 12px', borderRadius: '8px', border: '0.5px dashed rgba(0,0,0,0.18)', background: 'transparent', fontSize: '11px', color: '#c9c7c0', fontFamily: 'inherit', cursor: 'default' }}>
-              Send reminder
-            </button>
-          </div>
+          {children.invoices.map(inv => {
+            const url = recordJobberUrl('invoice', inv)
+            const unpaid = inv.status !== 'paid'
+            return (
+              <div key={inv.id} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <p style={{ fontSize: '12px', color: '#1a1a18', fontVariantNumeric: 'tabular-nums', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {[
+                    invoiceNumber(inv),
+                    inv.issued_at && `issued ${fmtDate(inv.issued_at)}`,
+                    inv.paid_at && `paid ${fmtDate(inv.paid_at)}`,
+                  ].filter(Boolean).join(' · ')}
+                </p>
+                {url && unpaid && (
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <a className="bee-contact-link" href={url} target="_blank" rel="noreferrer" aria-label={`Collect ${invoiceNumber(inv)} in Jobber`}
+                      style={{ padding: '5px 12px', borderRadius: '8px', border: '0.5px solid rgba(0,0,0,0.15)', background: '#fff', fontSize: '11px', fontWeight: 500, color: '#1a1a18', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                      Collect in Jobber <IconExternalLink size={11} />
+                    </a>
+                    <a className="bee-contact-link" href={url} target="_blank" rel="noreferrer" aria-label={`Send ${invoiceNumber(inv)} in Jobber`}
+                      style={{ padding: '5px 12px', borderRadius: '8px', border: '0.5px solid rgba(0,0,0,0.15)', background: '#fff', fontSize: '11px', fontWeight: 500, color: '#1a1a18', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                      Send in Jobber <IconExternalLink size={11} />
+                    </a>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
@@ -487,6 +499,27 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
 
   const drip = data?.drip ?? null
 
+  // Drip pause/resume (build 3) — the lead-scoped routes keep the
+  // paused flag and the progress rows in lockstep (13baa26). The banner
+  // stays visible either way (paused is still a LIVE drip — only
+  // stopped/completed hides it, and those never come back through
+  // these buttons).
+  const [dripBusy, setDripBusy] = useState(false)
+  async function setDripPaused(pause) {
+    if (!client) return
+    setDripBusy(true)
+    try {
+      const res = await fetch(`/api/leads/${client.id}/${pause ? 'drip-pause' : 'drip-resume'}`, { method: 'POST' })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      setData(d => d && d.drip ? { ...d, drip: { ...d.drip, paused: pause } } : d)
+      onLeadPatched(client.id, { paused: pause })
+      setToast({ kind: 'success', msg: pause ? 'Drip paused' : 'Drip resumed' })
+    } catch (e) {
+      setToast({ kind: 'error', msg: `Drip ${pause ? 'pause' : 'resume'} failed: ${e.message}` })
+    } finally { setDripBusy(false) }
+  }
+
   const body = (
     <div style={{ padding: isMobile ? '0 16px 0' : '0 24px 0', display: 'flex', flexDirection: 'column', gap: '14px' }}>
       <style>{`
@@ -575,11 +608,15 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
       {eng && !isTerminal(eng.stage) && drip && (
         <div aria-label="Drip banner" style={{ background: QUIET, borderRadius: '8px', padding: '9px 12px', display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', color: '#6b6b66' }}>
           <span style={{ color: '#8a8a84', display: 'inline-flex', flexShrink: 0 }}><IconSend size={13} /></span>
-          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             Drip · step {drip.current_step}{drip.total_steps != null ? ` of ${drip.total_steps}` : ''}
             {drip.next_send_at ? ` · next ${fmtShort(drip.next_send_at)}` : ''}
             {drip.paused ? ' · paused' : ''}
           </span>
+          <button disabled={dripBusy} onClick={() => setDripPaused(!drip.paused)}
+            style={{ flexShrink: 0, padding: '3px 10px', borderRadius: '8px', border: '0.5px solid rgba(0,0,0,0.15)', background: '#fff', fontSize: '11px', fontWeight: 500, color: '#1a1a18', cursor: dripBusy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+            {drip.paused ? 'Resume' : 'Pause'}
+          </button>
         </div>
       )}
 

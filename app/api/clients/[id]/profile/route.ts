@@ -39,7 +39,7 @@ export async function GET(
 
   const { data: lead, error: leadError } = await supabaseService
     .from('leads')
-    .select('id, name, first_name, last_name, email, phone, address, city, state, zip, created_at, source, paused, marketing_opt_out, snoozed_until, assigned_to, referred_by_kind, referred_by_id, jobber_client_id, location_uuid, location_id, paid_amount, request_details, project_type')
+    .select('id, name, first_name, last_name, email, phone, address, city, state, zip, created_at, source, paused, marketing_opt_out, snoozed_until, snoozed_note, assigned_to, referred_by_kind, referred_by_id, jobber_client_id, location_uuid, location_id, paid_amount, request_details, project_type')
     .eq('id', id)
     .maybeSingle()
   if (leadError || !lead) {
@@ -104,15 +104,16 @@ export async function GET(
   // Tag labels — junction → lookups.label (display vocabulary; classic's
   // attrs.key ids stay classic's concern via people-mapper).
   const tagLookupIds = Array.from(new Set((tagsRes.data ?? []).map((lt: any) => lt.tag_lookup_id).filter(Boolean)))
-  let tags: string[] = []
+  let tags: { id: string, label: string }[] = []
   if (tagLookupIds.length > 0) {
     const { data: tagRows } = await supabaseService
       .from('lookups')
       .select('id, label')
       .in('id', tagLookupIds)
     tags = (tagsRes.data ?? [])
-      .map((lt: any) => (tagRows ?? []).find(r => r.id === lt.tag_lookup_id)?.label)
-      .filter(Boolean) as string[]
+      .map((lt: any) => (tagRows ?? []).find(r => r.id === lt.tag_lookup_id))
+      .filter(Boolean)
+      .map((r: any) => ({ id: r.id, label: r.label }))
   }
 
   const engagements = engagementsRes.data ?? []
