@@ -48,6 +48,7 @@ import {
   resolveContactWriteback,
   type ContactWriteback,
 } from '@/lib/jobber-contact-writeback'
+import { getEngagementAssignees, resolveJobberAssignment } from '@/lib/engagement-assignee-sync'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -390,15 +391,21 @@ export async function POST(
     return fail('lookup', 'location_not_connected_to_jobber', 400)
   }
 
-  // Assigned hub_user (for jobber_user_id assignment on assessments)
-  let assignedJobberUserId: string | null = null
-  if (lead.assigned_to) {
-    const { data: assignedUser } = await supabaseService
-      .from('hub_users')
-      .select('id, jobber_user_id')
-      .eq('id', lead.assigned_to)
-      .maybeSingle()
-    assignedJobberUserId = assignedUser?.jobber_user_id ?? null
+  // Assignee → Jobber ids. Assignment lives ONLY on the engagement
+  // (engagement_assignees, plural) — read the junction when we have an
+  // engagementId. Request/job take ONE salesperson (the PRIMARY = first
+  // assignee); the assessment appointment takes ALL mapped assignees.
+  // No leads.assigned_to fallback: that column is import-stamped junk
+  // (ids aren't hub_users) and assignment is forward-only now. A bare
+  // lead send (no engagementId — the webhook founds the engagement later)
+  // simply ships unassigned; the user assigns via the panel afterward.
+  let salesPersonJobberId: string | null = null   // request/job salesperson (singular)
+  let allAssigneeJobberIds: string[] = []          // assessment appointment (multi)
+  if (engagementId) {
+    const engAssignees = await getEngagementAssignees(engagementId)
+    const resolved = resolveJobberAssignment(engAssignees)
+    salesPersonJobberId = resolved.primaryJobberUserId
+    allAssigneeJobberIds = resolved.allJobberUserIds
   }
 
   // ── Address ─────────────────────────────────────────────────────
@@ -583,7 +590,7 @@ export async function POST(
     // NON-FATAL like that path: if Jobber rejects the id (stale roster
     // link, deactivated user), retry once WITHOUT it rather than killing
     // the whole send.
-    if (assignedJobberUserId) requestInput.salespersonId = assignedJobberUserId
+    if (salesPersonJobberId) requestInput.salespersonId = salesPersonJobberId
     let reqCreate = await jobberMutation(
       locationSlug,
       REQUEST_CREATE_MUTATION,
@@ -681,17 +688,19 @@ export async function POST(
       }
       jobberAssessmentGlobalId = assessCreate.data?.assessmentCreate?.assessment?.id || null
 
-      // Assign team member if we have their Jobber user ID. Non-fatal —
-      // a missing assignment shouldn't kill the whole send.
-      if (jobberAssessmentGlobalId && assignedJobberUserId) {
+      // Assign the team to the assessment appointment. MULTI now
+      // (engagement-assigned-to-multi): AppointmentEditAssignmentInput.
+      // assignedUserIds is [EncodedId!]! (introspected 2026-07-11), so we
+      // send ALL mapped assignees, not just one. Non-fatal — a missing
+      // assignment shouldn't kill the whole send. Unmapped assignees
+      // (no jobber_user_id) are simply absent from the array.
+      if (jobberAssessmentGlobalId && allAssigneeJobberIds.length > 0) {
         const assign = await jobberMutation(
           locationSlug,
           APPOINTMENT_EDIT_ASSIGNMENT_MUTATION,
           {
             appointmentId: jobberAssessmentGlobalId,
-            // AppointmentEditAssignmentInput.assignedUserIds (was `assignedUsers` in
-            // older schema versions — Jobber renamed to clarify the value is IDs).
-            input: { assignedUserIds: [assignedJobberUserId] },
+            input: { assignedUserIds: allAssigneeJobberIds },
           },
         )
         if (assign.userErrors?.length) {

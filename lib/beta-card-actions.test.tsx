@@ -22,7 +22,6 @@ import EngagementPanel from '@/components/hive/EngagementPanel'
 import PreferencesBlock from '@/components/hive/shared/PreferencesBlock'
 import ContactsBlock from '@/components/hive/shared/ContactsBlock'
 import TagsRow from '@/components/hive/shared/TagsRow'
-import AssignedToField from '@/components/hive/shared/AssignedToField'
 import { leadColsToPersonFields } from '@/components/hive/shared/leadPatchMap'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
@@ -421,42 +420,13 @@ describe('tags (TagsRow)', () => {
   })
 })
 
-// ═══ G) assigned-to ════════════════════════════════════════════
-describe('assigned-to (AssignedToField)', () => {
-  const USERS = [
-    { id: 'u1', name: 'Kevin Shaw', email: 'kevin@bmave.com', locationId: 'loc-uuid-1' },
-    { id: 'u2', name: 'Wendy Ortiz', email: 'wendy@x.com', locationId: 'loc-uuid-1' },
-  ]
-
-  it('pick PATCHes leads.assigned_to and the display shows the name', async () => {
-    const onSaved = vi.fn()
-    const { host, unmount } = await mount(
-      <AssignedToField leadId="lead-9" value={null} users={USERS} onSaved={onSaved} setToast={() => {}} />
-    )
-    expect(host.textContent).toContain('Unassigned')
-    await click(host.querySelector('[title="Edit assignee"]')!)
-    await click(btnContaining(host, 'Wendy Ortiz')!)
-    expect(calls).toEqual([{ url: expect.stringContaining('/api/leads/lead-9'), method: 'PATCH', body: { assigned_to: 'u2' } }])
-    expect(onSaved).toHaveBeenCalledWith({ assigned_to: 'u2' }, 'Wendy Ortiz')
-    await unmount()
-  })
-
-  it('Unassigned clears to null; picking the current assignee writes nothing', async () => {
-    const onSaved = vi.fn()
-    const { host, unmount } = await mount(
-      <AssignedToField leadId="lead-9" value="u1" valueName="Kevin Shaw" users={USERS} onSaved={onSaved} setToast={() => {}} />
-    )
-    await click(host.querySelector('[title="Edit assignee"]')!)
-    await click(btnContaining(host, 'Kevin Shaw')!) // no-op pick
-    expect(calls).toEqual([])
-    await click(host.querySelector('[title="Edit assignee"]')!)
-    await click(btnContaining(host, 'Unassigned')!)
-    expect(calls).toEqual([{ url: expect.stringContaining('/api/leads/lead-9'), method: 'PATCH', body: { assigned_to: null } }])
-    expect(onSaved).toHaveBeenCalledWith({ assigned_to: null }, null)
-    await unmount()
-  })
-
-  it('assigned_to propagates through leadPatchMap (Inbox rows read assignedTo)', () => {
+// ═══ G) assigned-to — MOVED to the engagement (multi-user build) ═══
+// The lead-level AssignedToField was removed; assignment now lives on the
+// engagement (engagement_assignees junction) and is covered in full by
+// lib/beta-engagement-assignees.test.tsx. leadPatchMap still maps the
+// legacy column (harmless, Inbox rows read assignedTo) — pinned here.
+describe('assigned-to (legacy leadPatchMap mapping)', () => {
+  it('assigned_to still propagates through leadPatchMap (Inbox rows read assignedTo)', () => {
     expect(leadColsToPersonFields({ assigned_to: 'u2', paused: true, marketing_opt_out: true }))
       .toEqual({ assignedTo: 'u2', paused: true, marketingOptOut: true })
   })
@@ -464,11 +434,10 @@ describe('assigned-to (AssignedToField)', () => {
 
 // ═══ profile integration — the wired left column ═══════════════
 describe('ClientProfile wires the live blocks', () => {
-  it('preferences/contacts/tags/assigned-to all mount with data from the profile payload', async () => {
+  it('preferences/contacts/tags all mount with data from the profile payload (assigned-to moved to engagement)', async () => {
     profileBody = profilePayload({
       contacts: [{ id: 'ct-1', name: 'Marco Delgado', role: 'Spouse', phone: null, email: null }],
       tags: [{ id: 'tag-vip', label: 'VIP' }],
-      client: { assigned_to: 'u1', assigned_to_name: 'Kevin Shaw' },
     })
     const { host, unmount } = await mount(
       <ClientProfile clientId="lead-9" people={[]} onClose={() => {}} setToast={() => {}}
@@ -477,7 +446,8 @@ describe('ClientProfile wires the live blocks', () => {
     )
     expect(host.textContent).toContain('Marco Delgado')
     expect(host.textContent).toContain('VIP')
-    expect(host.textContent).toContain('Kevin Shaw')
+    // The lead-level "Assigned to" row is gone — no assignee picker here.
+    expect(host.textContent).not.toContain('Assigned to')
     expect(btn(host, 'Opt out…')).toBeTruthy()
     expect(btn(host, 'Snooze…')).toBeTruthy()
     expect(btn(host, '+ Add contact')).toBeTruthy()
@@ -490,7 +460,7 @@ describe('ClientProfile wires the live blocks', () => {
 describe('introspection-gated verdicts (live schema 2026-07-11)', () => {
   it('H: send-to-jobber assigns salespersonId at request creation, NON-FATAL (retry-without on rejection)', () => {
     const route = readFileSync('app/api/leads/[id]/send-to-jobber/route.ts', 'utf8')
-    expect(route).toContain('requestInput.salespersonId = assignedJobberUserId')
+    expect(route).toContain('requestInput.salespersonId = salesPersonJobberId')
     expect(route).toContain('retrying unassigned') // the non-fatal path
     expect(route).toContain('REQUEST_ASSIGN_RETRY') // sync_log breadcrumb
   })

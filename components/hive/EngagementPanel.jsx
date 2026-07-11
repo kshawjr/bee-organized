@@ -66,6 +66,7 @@ import MetaSelect from './MetaSelect'
 import Timeline from './shared/Timeline'
 import CardTabs from './shared/CardTabs'
 import InitialsAvatar from './shared/InitialsAvatar'
+import EngagementAssignees from './shared/EngagementAssignees'
 import { MicroLabel, quietBtn, ActionRow, actionBtn } from './shared/cardKit'
 import CloseEngagementConfirm from './shared/CloseEngagementConfirm'
 import ClosedSummary from './shared/ClosedSummary'
@@ -168,7 +169,7 @@ function MilestoneRow({ kind, primary, secondary = null, state = null, href = nu
   )
 }
 
-export default function EngagementPanel({ engagementId, seed = null, people = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
+export default function EngagementPanel({ engagementId, seed = null, people = [], locationUsers = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -204,6 +205,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   const eng = data?.engagement ?? seed
   const children = data?.children ?? { service_requests: [], assessments: [], quotes: [], jobs: [], invoices: [], notes: [], touchpoints: [] }
   const client = data?.client ?? null
+  const assignees = data?.assignees ?? []
 
   async function patchEngagement(body, okMsg) {
     setBusy(true)
@@ -691,6 +693,21 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
             <MetaSelect label="Type" value={eng.project_type || null} options={lookupOptions.projectTypes}
               onPick={(v) => patchEngagement({ project_type: v })} />
           </div>
+          {/* Assigned to — ENGAGEMENT-level, PLURAL (multi-user build).
+              Replaces the old lead-level single AssignedToField. Writes
+              the engagement_assignees junction; the picker is the
+              engagement's LOCATION hub_users. Unmapped-to-Jobber users
+              are selectable but marked. */}
+          {data && (
+            <EngagementAssignees
+              engagementId={engagementId}
+              assignees={assignees}
+              users={locationUsers.filter(u => !eng.location_uuid || u.locationId === eng.location_uuid)}
+              jobberConnected={!!client?.jobber_connected}
+              onChange={next => setData(d => d ? { ...d, assignees: next } : d)}
+              setToast={setToast}
+            />
+          )}
         </div>
       )}
 

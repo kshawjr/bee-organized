@@ -33,6 +33,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { writeSyncLog } from '@/lib/sync-log'
 import { ENGAGEMENT_STAGE_RANK, recoverEngagementStageDrift, type EngagementStage } from '@/lib/engagements'
+import { getEngagementAssignees } from '@/lib/engagement-assignee-sync'
 
 // Close-out vocabulary (doc §4). 'won' is the only Won reason; the rest
 // are the Lost picker's options.
@@ -93,8 +94,9 @@ export async function GET(
     // THIS engagement's touchpoints — interleaved with notes in the
     // panel's activity stream.
     supabaseService.from('touchpoints').select('id, kind, method, label, notes, occurred_at, user_id').eq('engagement_id', id).order('occurred_at', { ascending: false }).limit(50),
-    // Location name for the v2 masthead's client line.
-    supabaseService.from('locations').select('name').eq('id', engagement.location_uuid).maybeSingle(),
+    // Location name for the v2 masthead's client line; jobber_access_token
+    // presence tells the assignee picker whether to mark unmapped users.
+    supabaseService.from('locations').select('name, jobber_access_token').eq('id', engagement.location_uuid).maybeSingle(),
     // LIVE drip only (stopped/completed excluded — Kevin's rule: the
     // banner is gone once the drip ends; paused still shows). Same
     // active-row filter the outreach-timeline endpoint uses.
@@ -189,6 +191,10 @@ export async function GET(
     referredByName = ref?.name ?? null
   }
 
+  // Engagement-level assignees (junction → hub_users). Ordered by
+  // assignment time so [0] is the primary (the Jobber salesperson).
+  const assignees = await getEngagementAssignees(id)
+
   const siblings = clientEngsRes.data ?? []
   const num = (v: any) => (v == null ? 0 : Number(v) || 0)
   const lifetimePaid = siblings.reduce((s, e) => s + num(e.total_paid), 0)
@@ -198,6 +204,7 @@ export async function GET(
 
   return NextResponse.json({
     engagement: engagementOut,
+    assignees,
     children: {
       service_requests: srRes.data ?? [],
       assessments: assessRes.data ?? [],
@@ -211,6 +218,7 @@ export async function GET(
     client: {
       id: engagement.client_id,
       location_name: locRes.data?.name ?? null,
+      jobber_connected: !!locRes.data?.jobber_access_token,
       name: clientRes.data?.name ?? 'Unknown',
       email: clientRes.data?.email ?? null,
       phone: clientRes.data?.phone ?? null,

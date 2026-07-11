@@ -59,7 +59,6 @@ import SourceField from './shared/SourceField'
 import ReferrerField from './shared/ReferrerField'
 import ContactsBlock from './shared/ContactsBlock'
 import TagsRow from './shared/TagsRow'
-import AssignedToField from './shared/AssignedToField'
 import PreferencesBlock from './shared/PreferencesBlock'
 import { jobberClientUrl } from './shared/jobberLinks'
 import Timeline from './shared/Timeline'
@@ -358,20 +357,10 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         setToast={setToast}
       />
 
-      {/* Assigned to — live picker (build 3): the location's hub_users →
-          leads.assigned_to (the same column send-to-jobber reads for
-          request/assessment assignment). */}
-      <AssignedToField
-        leadId={c.id}
-        value={c.assigned_to || null}
-        valueName={c.assigned_to_name || null}
-        users={locationUsers.filter(u => !c.location_uuid || u.locationId === c.location_uuid)}
-        onSaved={(cols, name) => {
-          setData(d => d ? { ...d, client: { ...d.client, ...cols, assigned_to_name: name } } : d)
-          onLeadPatched(c.id, cols)
-        }}
-        setToast={setToast}
-      />
+      {/* Assigned-to moved to the ENGAGEMENT (engagement-assigned-to-multi
+          build): assignment is a deal concept now, plural + Jobber-mapped,
+          and lives on the EngagementPanel masthead. leads.assigned_to is
+          legacy-unused. The lead-level row here was removed. */}
 
       {/* Preferences — LIVE toggles (build 3): marketing opt-out
           (confirmed), snooze set/unset, drip pause/activate; the

@@ -418,6 +418,7 @@ export default function HiveShell({
           engagementId={overlay.engagement.id}
           seed={overlay.engagement}
           people={people}
+          locationUsers={locationUsers}
           onClose={() => setOverlay(null)}
           onOpenClient={openClient}
           onChanged={(id, patch) => setRowPatches(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))}

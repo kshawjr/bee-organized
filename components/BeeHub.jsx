@@ -17915,6 +17915,18 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
         <div>
           <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>Team Members</p>
           <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Tap to manage role</p>
+          {jobberConnected && users.length > 0 && (() => {
+            // Read-only Jobber-mapping report: how many team members carry a
+            // jobber_user_id (assignable to Jobber jobs) vs. not. Corporate
+            // users with no field role are correctly unmapped.
+            const linked = users.filter(u => u.jobberUserId).length
+            const unlinked = users.length - linked
+            return (
+              <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>
+                Jobber: {linked} linked{unlinked ? ` · ${unlinked} not linked` : ''}
+              </p>
+            )
+          })()}
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
           {jobberConnected && dbLocationId && (
