@@ -6,9 +6,10 @@
 //
 // Assignment moved from leads.assigned_to (single) to a many-to-many
 // junction (engagement_assignees). The picker in the EngagementPanel
-// masthead writes here. Both verbs push the resulting set to Jobber
-// (non-fatal): request/job salesperson = primary assignee, assessment
-// appointment = ALL mapped assignees (see lib/engagement-assignee-sync).
+// masthead writes here. Both verbs push the resulting set to Jobber as the
+// TEAM/CREW (non-fatal): ALL mapped assignees onto the assessment
+// appointment team AND every non-completed job visit's crew. Requests are
+// not assigned (pre-work, no crew concept). See lib/engagement-assignee-sync.
 //
 // Auth mirrors the sibling engagements route: logged-in hub_user;
 // super_admin/admin any location, everyone else scoped to their own

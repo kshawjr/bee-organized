@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
 //
-// Engagement-level Assigned To — PLURAL, Jobber-mapped (multi-user
-// foundation). Covers the whole build:
-//   · resolveJobberAssignment  — primary(singular)/all(multi) semantics
+// Engagement-level Assigned To — PLURAL, the Jobber TEAM/CREW who DO the
+// work (assessment team + job crew), NOT the salesperson. Covers the build:
+//   · resolveJobberAssignment  — all(multi) crew semantics
 //   · getEngagementAssignees    — junction→hub_users join, order, names
-//   · syncEngagementAssignmentToJobber — request/job salesperson (one),
-//     assessment appointment (all); failure honesty; no-op when no
-//     linked Jobber record; clear when nobody mapped
+//   · syncEngagementAssignmentToJobber — assessment team (all) + job crew
+//     (all, onto every non-completed visit); request never assigned;
+//     completed visits skipped; failure honesty; clear when nobody mapped;
+//     no-op when no linked Jobber record; edit re-syncs the crew
 //   · persistRosterAndMatch     — auto-match: exact / case-insensitive / none
 //   · EngagementAssignees UI     — multi-select, unmapped marking, add/remove
 //   · migration SQL              — RLS ::text cast + PK + backfill filters
@@ -14,10 +15,11 @@
 //   · lead-level row removed      — AssignedToField gone from ClientProfile
 //
 // INTROSPECTED LIVE 2026-07-11 (loc_test, API 2025-04-16):
-//   RequestEditInput.salespersonId : EncodedId  (singular)
-//   JobEditInput.salespersonId     : EncodedId  (singular)
-//   AppointmentEditAssignmentInput.assignedUserIds : [EncodedId!]! (multi)
-//   VisitEditAssignedUsersInput.assignedUserIds    : [EncodedId!]! (multi, NOT wired)
+//   AppointmentEditAssignmentInput.assignedUserIds : [EncodedId!]! (multi) — assessment team
+//   VisitEditAssignedUsersInput.assignedUserIds    : [EncodedId!]! (multi) — job crew (per visit)
+//   Job crew read via job(id).visits.nodes { id isComplete }
+//   JobEditInput / RequestEditInput expose only salespersonId (singular) —
+//     NOT a crew; the team model does not use them (request = not assigned)
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { readFileSync, existsSync } from 'node:fs'
 import React from 'react'
@@ -55,7 +57,17 @@ vi.mock('@/lib/supabase-service', () => ({
   supabaseService: { from: (t: string) => h.makeBuilder(t) },
 }))
 const jobberMutation = vi.fn(async () => ({ data: {}, userErrors: [] as any[] }))
-vi.mock('@/lib/jobber', () => ({ jobberMutation: (...a: any[]) => jobberMutation(...a) }))
+// Job crew reads the job's visits first (jobberGraphQL). Default: one
+// non-completed visit V1 per job — tests that need a different visit set
+// override with jobberGraphQL.mockImplementation / mockResolvedValueOnce.
+const jobberGraphQL = vi.fn(async () => ({
+  data: { job: { id: 'J1', visits: { totalCount: 1, nodes: [{ id: 'V1', isComplete: false }] } } },
+  errors: undefined as any,
+}))
+vi.mock('@/lib/jobber', () => ({
+  jobberMutation: (...a: any[]) => jobberMutation(...a),
+  jobberGraphQL: (...a: any[]) => jobberGraphQL(...a),
+}))
 const writeSyncLog = vi.fn(async () => {})
 vi.mock('@/lib/sync-log', () => ({ writeSyncLog: (...a: any[]) => writeSyncLog(...a) }))
 
@@ -67,7 +79,14 @@ import {
 import { persistRosterAndMatch } from '@/lib/jobber-team-roster'
 import EngagementAssignees from '@/components/hive/shared/EngagementAssignees'
 
-beforeEach(() => { h.reset(); jobberMutation.mockClear(); writeSyncLog.mockClear() })
+beforeEach(() => {
+  h.reset(); jobberMutation.mockClear(); writeSyncLog.mockClear()
+  jobberGraphQL.mockClear()
+  jobberGraphQL.mockImplementation(async () => ({
+    data: { job: { id: 'J1', visits: { totalCount: 1, nodes: [{ id: 'V1', isComplete: false }] } } },
+    errors: undefined as any,
+  }))
+})
 
 // `over` keys are honored verbatim when present — including explicit null
 // (a `??` default would swallow `jobber_user_id: null`, the unmapped case).
@@ -142,65 +161,143 @@ describe('getEngagementAssignees', () => {
   })
 })
 
-// ══ 3) syncEngagementAssignmentToJobber — the push ═══════════════
-describe('syncEngagementAssignmentToJobber', () => {
+// ══ 3) syncEngagementAssignmentToJobber — the TEAM/CREW push ══════
+// Assignees are the crew who DO the work, PLURAL:
+//   · Assessment appointment  → ALL assignees (appointmentEditAssignment)
+//   · Job crew                → ALL assignees onto every non-completed
+//                               visit (visitEditAssignedUsers)
+//   · Request                 → NEVER assigned (result 'skipped')
+describe('syncEngagementAssignmentToJobber (team/crew)', () => {
+  // Note: the sync reads `jobs` then `assessments` (no service_requests).
   const wireLinked = (over: any = {}) => {
     h.enqueue('engagement_assignees', over.assignees ?? [
       assignee({ hub_user_id: 'u1', jobber_user_id: 'j1' }),
       assignee({ hub_user_id: 'u2', full_name: 'Wendy', email: 'w@x.com', jobber_user_id: 'j2' }),
     ])
-    h.enqueue('service_requests', over.sr ?? [{ jobber_request_id: 'R1' }])
     h.enqueue('jobs', over.jobs ?? [{ jobber_job_id: 'J1' }])
     h.enqueue('assessments', over.assess ?? [{ jobber_assessment_id: 'A1' }])
   }
+  const varsFor = (needle: string) =>
+    jobberMutation.mock.calls.filter(c => String(c[1]).includes(needle)).map(c => c[2])
 
-  it('request+job get the PRIMARY (singular); assessment gets ALL (multi)', async () => {
+  it('job crew = ALL assignees on each non-completed visit; assessment team = ALL', async () => {
     wireLinked()
     const res = await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
-    expect(res).toMatchObject({ request: 'synced', job: 'synced', assessment: 'synced', mapped: 2, unmapped: 0 })
-
-    const byMutation = (needle: string) =>
-      jobberMutation.mock.calls.filter(c => String(c[1]).includes(needle))
-    // request salesperson = primary only
-    expect(byMutation('requestEdit')[0][2]).toEqual({ requestId: 'R1', input: { salespersonId: 'j1' } })
-    // job salesperson = primary only
-    expect(byMutation('jobEdit')[0][2]).toEqual({ jobId: 'J1', input: { salespersonId: 'j1' } })
+    expect(res).toMatchObject({
+      request: 'skipped', job: 'synced', assessment: 'synced',
+      visitsTouched: 1, mapped: 2, unmapped: 0,
+    })
+    // job's visits were read to find the crew surface
+    expect(jobberGraphQL.mock.calls[0][2]).toEqual({ jobId: 'J1' })
+    // crew (multi) pushed onto the visit — NOT the job, NOT salesperson
+    expect(varsFor('visitEditAssignedUsers')).toEqual([
+      { visitId: 'V1', input: { assignedUserIds: ['j1', 'j2'] } },
+    ])
     // assessment appointment = ALL mapped ids
-    expect(byMutation('appointmentEditAssignment')[0][2]).toEqual({ appointmentId: 'A1', input: { assignedUserIds: ['j1', 'j2'] } })
+    expect(varsFor('appointmentEditAssignment')).toEqual([
+      { appointmentId: 'A1', input: { assignedUserIds: ['j1', 'j2'] } },
+    ])
+    // no salesperson / request / job edit anywhere (team model)
+    expect(varsFor('jobEdit')).toEqual([])
+    expect(varsFor('requestEdit')).toEqual([])
+    expect(varsFor('salespersonId')).toEqual([])
     // breadcrumb written, outbound, engagement-scoped
     expect(writeSyncLog).toHaveBeenCalledTimes(1)
     expect(writeSyncLog.mock.calls[0][0]).toMatchObject({ entity_type: 'engagement', direction: 'outbound', status: 'success' })
   })
 
-  it('nobody mapped → salespersonId null (clear) and assessment gets []', async () => {
-    wireLinked({ assignees: [assignee({ hub_user_id: 'u1', jobber_user_id: null })] })
+  it('completed visits are left untouched; crew only lands on live visits', async () => {
+    wireLinked()
+    jobberGraphQL.mockResolvedValueOnce({
+      data: { job: { id: 'J1', visits: { totalCount: 3, nodes: [
+        { id: 'V1', isComplete: true },   // done — skip
+        { id: 'V2', isComplete: false },  // live — assign
+        { id: 'V3', isComplete: false },  // live — assign
+      ] } } },
+      errors: undefined,
+    })
     const res = await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
-    expect(res).toMatchObject({ request: 'cleared', job: 'cleared', assessment: 'cleared', mapped: 0, unmapped: 1 })
-    const reqVars = jobberMutation.mock.calls.find(c => String(c[1]).includes('requestEdit'))![2]
-    expect(reqVars).toEqual({ requestId: 'R1', input: { salespersonId: null } })
-    const apptVars = jobberMutation.mock.calls.find(c => String(c[1]).includes('appointmentEditAssignment'))![2]
-    expect(apptVars).toEqual({ appointmentId: 'A1', input: { assignedUserIds: [] } })
+    expect(res.visitsTouched).toBe(2)
+    expect(varsFor('visitEditAssignedUsers').map(v => v.visitId)).toEqual(['V2', 'V3'])
   })
 
-  it('a userErrors reply marks that target failed but does not throw', async () => {
-    wireLinked({ jobs: [{ jobber_job_id: 'J1' }] })
+  it('a linked job with no non-completed visit → job none (nothing to crew)', async () => {
+    wireLinked({ assess: [] })
+    jobberGraphQL.mockResolvedValueOnce({
+      data: { job: { id: 'J1', visits: { totalCount: 1, nodes: [{ id: 'V1', isComplete: true }] } } },
+      errors: undefined,
+    })
+    const res = await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
+    expect(res.job).toBe('none')
+    expect(res.visitsTouched).toBe(0)
+    expect(varsFor('visitEditAssignedUsers')).toEqual([])
+  })
+
+  it('nobody mapped → crew + team cleared (empty arrays), request still skipped', async () => {
+    wireLinked({ assignees: [assignee({ hub_user_id: 'u1', jobber_user_id: null })] })
+    const res = await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
+    expect(res).toMatchObject({ request: 'skipped', job: 'cleared', assessment: 'cleared', mapped: 0, unmapped: 1 })
+    expect(varsFor('visitEditAssignedUsers')).toEqual([{ visitId: 'V1', input: { assignedUserIds: [] } }])
+    expect(varsFor('appointmentEditAssignment')).toEqual([{ appointmentId: 'A1', input: { assignedUserIds: [] } }])
+  })
+
+  it('a visit userErrors reply marks the job failed but does not throw; assessment still syncs', async () => {
+    wireLinked()
     jobberMutation.mockImplementation(async (_loc: any, mut: any) =>
-      String(mut).includes('jobEdit')
-        ? { data: {}, userErrors: [{ message: 'user not on job' }] }
+      String(mut).includes('visitEditAssignedUsers')
+        ? { data: {}, userErrors: [{ message: 'user not on visit' }] }
         : { data: {}, userErrors: [] })
     const res = await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
     expect(res.job).toBe('failed')
-    expect(res.request).toBe('synced')
+    expect(res.assessment).toBe('synced')
+    expect(res.request).toBe('skipped')
     // failure flips the breadcrumb to error but still writes it
     expect(writeSyncLog.mock.calls[0][0]).toMatchObject({ status: 'error' })
     jobberMutation.mockImplementation(async () => ({ data: {}, userErrors: [] }))
   })
 
-  it('no linked Jobber records → no mutations, no breadcrumb (pure local engagement)', async () => {
-    wireLinked({ sr: [], jobs: [], assess: [] })
+  it('a failed visits READ marks the job failed (no visit push attempted)', async () => {
+    wireLinked({ assess: [] })
+    jobberGraphQL.mockResolvedValueOnce({ data: null, errors: [{ message: 'boom' }] })
     const res = await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
-    expect(res).toMatchObject({ request: 'none', job: 'none', assessment: 'none' })
+    expect(res.job).toBe('failed')
+    expect(res.visitsTouched).toBe(0)
+    expect(varsFor('visitEditAssignedUsers')).toEqual([])
+  })
+
+  it('editing the roster re-syncs the current crew to the visit (idempotent re-push)', async () => {
+    // Simulate an edit: now three assignees. A fresh sync pushes the full
+    // current set — Jobber stores last-written, so this is the "edit
+    // re-syncs crew" path.
+    wireLinked({ assignees: [
+      assignee({ hub_user_id: 'u1', jobber_user_id: 'j1' }),
+      assignee({ hub_user_id: 'u2', jobber_user_id: 'j2' }),
+      assignee({ hub_user_id: 'u3', full_name: 'Ana', email: 'a@x.com', jobber_user_id: 'j3' }),
+    ] })
+    await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
+    expect(varsFor('visitEditAssignedUsers')).toEqual([
+      { visitId: 'V1', input: { assignedUserIds: ['j1', 'j2', 'j3'] } },
+    ])
+    expect(varsFor('appointmentEditAssignment')).toEqual([
+      { appointmentId: 'A1', input: { assignedUserIds: ['j1', 'j2', 'j3'] } },
+    ])
+  })
+
+  it('request is NEVER assigned — no requestEdit/salesperson mutation, result skipped', async () => {
+    wireLinked()
+    const res = await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
+    expect(res.request).toBe('skipped')
+    // the sync never even reads service_requests (only jobs + assessments)
+    expect(h.state.calls.some(c => c.table === 'service_requests')).toBe(false)
+    expect(jobberMutation.mock.calls.some(c => String(c[1]).includes('requestEdit'))).toBe(false)
+  })
+
+  it('no linked Jobber records → no reads/mutations, no breadcrumb (pure local engagement)', async () => {
+    wireLinked({ jobs: [], assess: [] })
+    const res = await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
+    expect(res).toMatchObject({ request: 'skipped', job: 'none', assessment: 'none' })
     expect(jobberMutation).not.toHaveBeenCalled()
+    expect(jobberGraphQL).not.toHaveBeenCalled()
     expect(writeSyncLog).not.toHaveBeenCalled()
   })
 })
