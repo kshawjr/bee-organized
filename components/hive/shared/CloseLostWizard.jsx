@@ -2,9 +2,12 @@
 // ─────────────────────────────────────────────────────────────
 // Close-LOST wizard (doc §4) — the classic ClosePopup, rebuilt in the
 // beta design. Engagement-scoped, two steps:
-//   1) Reason — the configurable close-lost reasons (CLOSE_LOST_REASONS,
-//      the vocabulary the PATCH route validates). "Other" REQUIRES a
-//      note; every other reason takes an optional one.
+//   1) Reason — the ADMIN-CONFIGURED close-lost reasons (lookups category
+//      'closed_lost_reasons', threaded in via the `reasons` prop off
+//      HiveShell's lookupOptions; falls back to DEFAULT_CLOSE_LOST_REASONS
+//      when unconfigured). The picked LABEL is stored verbatim in
+//      closed_reason. "Other" REQUIRES a note; every other reason takes an
+//      optional one.
 //   2) Follow-up — "Set a reminder to follow up later?" Yes → a date + a
 //      short reason → writes a REAL follow-up (a persisted touchpoints
 //      marker via writeEngagementMarker, NOT the old client-side mock).
@@ -22,15 +25,18 @@
 
 import React, { useState } from 'react'
 import { CLOSED_LOST } from './stageConfig'
-import { commitEngagementClose, writeEngagementMarker, CLOSE_LOST_REASONS, OTHER_LOST_REASON } from './closeEngagement'
+import { commitEngagementClose, writeEngagementMarker, DEFAULT_CLOSE_LOST_REASONS, OTHER_LOST_REASON } from './closeEngagement'
 import { WizardShell, wizPrimaryBtn, wizQuietBtn, wizSeg, wizInput, wizLabel } from './CloseWizardKit'
 import { T } from './tokens'
 
 const STEPS = [{ key: 'reason', label: 'Reason' }, { key: 'followup', label: 'Follow-up' }]
 
-export default function CloseLostWizard({ engagementId, leadId, isMobile = false, onCancel = () => {}, onClosed = () => {}, setToast = () => {}, readOnly = false }) {
+export default function CloseLostWizard({ engagementId, leadId, reasons = [], isMobile = false, onCancel = () => {}, onClosed = () => {}, setToast = () => {}, readOnly = false }) {
+  // Admin-configured labels (lookups → HiveShell lookupOptions), with the
+  // canonical set as the code-level fallback when the picklist is empty.
+  const reasonList = Array.isArray(reasons) && reasons.length > 0 ? reasons : DEFAULT_CLOSE_LOST_REASONS
   const [step, setStep] = useState(0)
-  const [reason, setReason] = useState(CLOSE_LOST_REASONS[0].value)
+  const [reason, setReason] = useState(reasonList[0])
   const [note, setNote] = useState('')
   const [wantFollowUp, setWantFollowUp] = useState(false)
   const [followUpDate, setFollowUpDate] = useState('')
@@ -75,10 +81,10 @@ export default function CloseLostWizard({ engagementId, leadId, isMobile = false
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {wizLabel('Why is this lost?')}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          {CLOSE_LOST_REASONS.map(r => (
-            <button key={r.value} onClick={() => setReason(r.value)}
-              style={{ ...wizSeg(reason === r.value), textAlign: 'left', flex: 'none' }}>
-              {r.label}
+          {reasonList.map(r => (
+            <button key={r} onClick={() => setReason(r)}
+              style={{ ...wizSeg(reason === r), textAlign: 'left', flex: 'none' }}>
+              {r}
             </button>
           ))}
         </div>

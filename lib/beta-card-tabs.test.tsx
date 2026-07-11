@@ -654,7 +654,7 @@ describe('write paths', () => {
     // Wizard: reason step → follow-up step → commit (default reason, skip follow-up).
     await click(buttonContaining(host, 'Next')!)
     await click(buttonContaining(host, 'Close as lost')!)
-    expect(engPatches).toEqual([{ stage: 'Closed Lost', closed_reason: 'lost_no_response' }])
+    expect(engPatches).toEqual([{ stage: 'Closed Lost', closed_reason: 'No response' }])
     await unmount()
   })
 

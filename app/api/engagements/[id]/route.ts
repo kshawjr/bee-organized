@@ -36,9 +36,11 @@ import { writeSyncLog } from '@/lib/sync-log'
 import { ENGAGEMENT_STAGE_RANK, recoverEngagementStageDrift, type EngagementStage } from '@/lib/engagements'
 import { getEngagementAssignees } from '@/lib/engagement-assignee-sync'
 
-// Close-out vocabulary (doc §4). 'won' is the only Won reason; the rest
-// are the Lost picker's options.
-const CLOSE_REASONS = ['lost_no_response', 'lost_competitor', 'lost_not_fit', 'written_off', 'lost_other', 'won'] as const
+// Close-out vocabulary (doc §4). A WON close is always reason 'won'. LOST
+// reasons are admin-configured (lookups category 'closed_lost_reasons') and
+// the wizard sends the picked LABEL — engagements.closed_reason is free text
+// (no DB CHECK / no FK), so the route stores the label VERBATIM rather than
+// coercing to a fixed enum (the admin picklist is the source of truth).
 
 async function authAndLoad(id: string) {
   const supabase = await createServerSupabaseClient()
@@ -336,10 +338,17 @@ export async function PATCH(
       patch.stage_entered_at = nowIso
       if (targetTerminal) {
         patch.closed_at = nowIso
+        // Won is always 'won'. Lost stores the client-provided reason LABEL
+        // verbatim (the admin picklist is the source of truth and the column
+        // is unconstrained) — trimmed and length-capped, never coerced to a
+        // fixed enum. Falls back to 'Other' only when nothing usable was sent.
         const reasonRaw = body?.closed_reason
-        const reason = typeof reasonRaw === 'string' && (CLOSE_REASONS as readonly string[]).includes(reasonRaw)
-          ? reasonRaw
-          : (stage === 'Closed Won' ? 'won' : 'lost_other')
+        const reason =
+          stage === 'Closed Won'
+            ? 'won'
+            : (typeof reasonRaw === 'string' && reasonRaw.trim()
+                ? reasonRaw.trim().slice(0, 200)
+                : 'Other')
         patch.closed_reason = reason
         if (typeof body?.closed_note === 'string' && body.closed_note.trim()) {
           patch.closed_note = body.closed_note.trim().slice(0, 500)

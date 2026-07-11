@@ -207,7 +207,9 @@ describe('EngagementPanel — no Advance for any engagement; the action-bar Clos
     await fire(btnByText(container, 'Close as lost')!)  // commit
     expect(patchCalls.length).toBe(1)
     expect(patchCalls[0].body.stage).toBe(CLOSED_LOST)
-    expect(patchCalls[0].body.closed_reason).toBe('lost_no_response')
+    // No lookupOptions → wizard falls back to canonical labels; first is
+    // 'No response' (stored verbatim now that reasons are admin-driven).
+    expect(patchCalls[0].body.closed_reason).toBe('No response')
     expect(onChanged).toHaveBeenCalledWith(LOCAL.id, { stage: CLOSED_LOST })
   })
 

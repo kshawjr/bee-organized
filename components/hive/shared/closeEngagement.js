@@ -19,18 +19,22 @@
 
 import { CLOSED_WON, CLOSED_LOST } from './stageConfig'
 
-// Configurable close-LOST reasons — the same vocabulary the engagement
-// PATCH route validates against (CLOSE_REASONS there), surfaced as the
-// wizard/confirm picker. 'lost_other' is the free-form bucket and REQUIRES
-// a note (the wizard enforces it; the route tolerates either way).
-export const CLOSE_LOST_REASONS = [
-  { value: 'lost_no_response', label: 'No response' },
-  { value: 'lost_competitor',  label: 'Went with someone else' },
-  { value: 'lost_not_fit',     label: 'Not a fit' },
-  { value: 'written_off',      label: 'Written off' },
-  { value: 'lost_other',       label: 'Other' },
+// Close-LOST reasons are ADMIN-CONFIGURED (lookups category
+// 'closed_lost_reasons'): the wizard renders those labels and stores the
+// raw label string in engagements.closed_reason (free text — no DB CHECK/FK;
+// the PATCH route stores it verbatim). The admin picklist is the source of
+// truth; this const is only the code-level FALLBACK the wizard shows when
+// that category is unconfigured in an env (mirrors DEFAULT_CLOSE_REASONS in
+// BeeHub.jsx). These are the human labels of the original close-out
+// vocabulary. 'Other' still REQUIRES a note (the wizard enforces it).
+export const DEFAULT_CLOSE_LOST_REASONS = [
+  'No response',
+  'Went with someone else',
+  'Not a fit',
+  'Written off',
+  'Other',
 ]
-export const OTHER_LOST_REASON = 'lost_other'
+export const OTHER_LOST_REASON = 'Other'
 
 // Won gate — every invoice paid or zero balance (no invoices = clear).
 // The one settled-check both the confirm and the Won wizard's invoice

@@ -176,6 +176,8 @@ describe('Close-Lost wizard — reason (Other requires note) + follow-up marker'
     const { container, onChanged } = await mountPanel(eng(), emptyChildren())
     await openLost(container)
     // default reason lost_no_response, straight to Next
+    // no lookupOptions passed → wizard falls back to the canonical labels;
+    // the first is 'No response' (stored verbatim now, not a slug).
     await fire(btnByText(container, 'Next')!)
     await fire(btnByText(container, 'Yes, remind me')!)
     const date = container.querySelector('input[type="date"]')! as HTMLInputElement
@@ -194,7 +196,7 @@ describe('Close-Lost wizard — reason (Other requires note) + follow-up marker'
     await settle()
     expect(patchCalls).toHaveLength(1)
     expect(patchCalls[0].body.stage).toBe(CLOSED_LOST)
-    expect(patchCalls[0].body.closed_reason).toBe('lost_no_response')
+    expect(patchCalls[0].body.closed_reason).toBe('No response')
     expect(touchpointPosts).toHaveLength(1)
     expect(touchpointPosts[0].kind).toBe('reach_out')
     expect(touchpointPosts[0].label).toContain('Follow-up')
@@ -211,6 +213,36 @@ describe('Close-Lost wizard — reason (Other requires note) + follow-up marker'
     await settle()
     expect(patchCalls).toHaveLength(1)
     expect(touchpointPosts).toHaveLength(0)
+  })
+
+  // Admin picklist drives the wizard: the reason buttons are the
+  // admin-configured LABELS (via lookupOptions.closeLostReasons), NOT the
+  // hardcoded canonical fallback — and a brand-new admin reason is stored
+  // VERBATIM in closed_reason (the PATCH route no longer coerces it).
+  it('renders admin picklist labels and stores a net-new reason verbatim', async () => {
+    panelPayload = { engagement: eng(), children: emptyChildren(), client: client() }
+    const container = mount(
+      <EngagementPanel
+        engagementId="e-1"
+        seed={eng()}
+        onClose={() => {}}
+        lookupOptions={{ sources: [], projectTypes: [], closeLostReasons: ['Price too high', 'Budget on hold', 'Other'] }}
+      />,
+    )
+    await settle()
+    await openLost(container)
+    // admin labels present; canonical fallback label absent (picklist wins)
+    expect(btnByText(container, 'Price too high')).toBeTruthy()
+    expect(btnByText(container, 'Budget on hold')).toBeTruthy()
+    expect(btnByText(container, 'No response')).toBeUndefined()
+    // pick a net-new reason (not in any hardcoded enum), skip follow-up
+    await fire(btnByText(container, 'Budget on hold')!)
+    await fire(btnByText(container, 'Next')!)
+    await fire(btnByText(container, 'Close as lost')!)
+    await settle()
+    expect(patchCalls).toHaveLength(1)
+    expect(patchCalls[0].body.stage).toBe(CLOSED_LOST)
+    expect(patchCalls[0].body.closed_reason).toBe('Budget on hold')
   })
 })
 

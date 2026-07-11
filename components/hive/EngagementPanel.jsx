@@ -180,7 +180,7 @@ function MilestoneRow({ kind, primary, secondary = null, state = null, href = nu
   )
 }
 
-export default function EngagementPanel({ engagementId, seed = null, people = [], locationUsers = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onReopened = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [] }, readOnly = false }) {
+export default function EngagementPanel({ engagementId, seed = null, people = [], locationUsers = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onReopened = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [], closeLostReasons: [] }, readOnly = false }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -917,6 +917,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
         <CloseLostWizard
           engagementId={engagementId}
           leadId={client?.id}
+          reasons={lookupOptions?.closeLostReasons || []}
           isMobile={isMobile}
           onCancel={() => setWizard(null)}
           onClosed={onWizardClosed}

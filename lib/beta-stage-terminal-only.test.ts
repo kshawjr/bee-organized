@@ -142,6 +142,34 @@ describe('terminal closes remain the one human stage write', () => {
     expect(tp.ops.find(([m]) => m === 'insert')![1][0].kind).toBe('stage_change')
   })
 
+  it('Closed Lost stores a net-new admin reason LABEL verbatim (no enum coercion)', async () => {
+    arm(ENG({ stage: 'Estimate' }))
+    h.enqueue('engagements', null)                       // the update
+    h.enqueue('touchpoints', null)                       // stage_change trail
+    h.enqueue('leads', { location_id: 'loc1', name: 'Pat' }) // close trail lookup
+    h.enqueue('engagements', null, null, 0)              // other-open count
+    // 'Budget on hold' is NOT in any hardcoded enum — must be stored as-is
+    // (the admin picklist is the source of truth; the column is free text).
+    const res = await patch('e1', { stage: 'Closed Lost', closed_reason: 'Budget on hold' })
+    expect(res.status).toBe(200)
+    const update = engagementWrites().find(c => c.ops.some(([m]) => m === 'update'))!
+    const payload = update.ops.find(([m]) => m === 'update')![1][0]
+    expect(payload.closed_reason).toBe('Budget on hold')
+  })
+
+  it('Closed Won always commits reason "won" regardless of any sent reason', async () => {
+    arm(ENG({ stage: 'Final Processing' }))
+    h.enqueue('engagements', null)
+    h.enqueue('touchpoints', null)
+    h.enqueue('leads', { location_id: 'loc1', name: 'Pat' })
+    h.enqueue('engagements', null, null, 0)
+    const res = await patch('e1', { stage: 'Closed Won', closed_reason: 'anything else' })
+    expect(res.status).toBe(200)
+    const update = engagementWrites().find(c => c.ops.some(([m]) => m === 'update'))!
+    const payload = update.ops.find(([m]) => m === 'update')![1][0]
+    expect(payload.closed_reason).toBe('won')
+  })
+
   it('terminal → terminal stays rejected (Closed Lost → Closed Won is not a manual flip)', async () => {
     arm(ENG({ stage: 'Closed Lost', closed_reason: 'lost_other' }))
     const res = await patch('e1', { stage: 'Closed Won' })
