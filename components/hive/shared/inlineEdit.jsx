@@ -36,9 +36,12 @@ import { TEXT_SUCCESS, TEXT_MUTED } from '@/components/ui/tokens'
 export const PENCIL_INK = '#6b6a64'
 
 export function EditPencil({ size = 12 }) {
+  // cursor:pointer is load-bearing: host rows are cursor:text (editable-
+  // text idiom), so without it the pencil — the one element that SAYS
+  // "click me" — inherits the I-beam and the affordance goes mute.
   return (
     <span aria-hidden className="bee-edit-pencil"
-      style={{ fontSize: `${size}px`, lineHeight: 1, color: PENCIL_INK, flexShrink: 0, transition: 'color 120ms ease' }}>
+      style={{ fontSize: `${size}px`, lineHeight: 1, color: PENCIL_INK, flexShrink: 0, cursor: 'pointer', transition: 'color 120ms ease' }}>
       ✎
     </span>
   )

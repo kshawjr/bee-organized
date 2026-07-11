@@ -27,6 +27,9 @@ import { sendDripStep } from '@/lib/drip-send'
 import { mapLeadToPerson } from '@/lib/people-mapper'
 import { diffContactPatch, normalizePhoneDigits, normalizeEmail, type ContactWriteback } from '@/lib/jobber-contact-writeback'
 import { syncLeadContactToJobber } from '@/lib/jobber-contact-sync'
+import { diffAddressPatch } from '@/lib/lead-address'
+import { syncLeadAddressToJobber } from '@/lib/jobber-address-sync'
+import type { AddressWritebackOutcome } from '@/lib/jobber-address-writeback'
 
 const VALID_STAGES = [
   'New',
@@ -198,7 +201,7 @@ export async function PATCH(
   // ─── Load existing lead for scoping check ─────────────────────
   const { data: existing, error: loadError } = await supabaseService
     .from('leads')
-    .select('id, location_uuid, location_id, stage, jobber_client_id, phone, email')
+    .select('id, location_uuid, location_id, stage, jobber_client_id, phone, email, address, city, state, zip, addresses')
     .eq('id', id)
     .single()
 
@@ -269,6 +272,24 @@ export async function PATCH(
     }
   }
 
+  // ─── Address column coherence ─────────────────────────────────
+  // The hive AddressField PATCHes the LEGACY columns (address/city/
+  // state/zip — the import's storage). But lib/people-mapper prefers a
+  // non-empty `addresses` jsonb over them, so a classic-managed lead
+  // would keep SHOWING its old jsonb entry after a hive edit. When this
+  // patch really changes the address and doesn't manage `addresses`
+  // itself (the classic popup does), rewrite the first Service-type
+  // entry's value in step — other entries (Billing, Moving From…) are
+  // untouched. On a full clear the matched entry is dropped.
+  const addrDiff = diffAddressPatch(patch, existing as any)
+  if (addrDiff.changed && !('addresses' in patch) && Array.isArray((existing as any).addresses) && (existing as any).addresses.length > 0) {
+    const arr: any[] = (existing as any).addresses
+    const idx = Math.max(0, arr.findIndex(a => a && a.type === 'Service'))
+    patch.addresses = addrDiff.cleared
+      ? arr.filter((_, i) => i !== idx)
+      : arr.map((a, i) => (i === idx ? { ...a, value: addrDiff.display } : a))
+  }
+
   // ─── Write ────────────────────────────────────────────────────
   // updateLead handles Supabase + Zoho dual-write. For fields it doesn't
   // know how to sync to Zoho (drip_path, is_junk, addresses jsonb, etc.),
@@ -324,6 +345,27 @@ export async function PATCH(
         kind: 'system',
         label: next ? `${label} updated → ${next}` : `${label} removed`,
         notes: prev ? `was ${prev}` : null,
+        user_id: hubUser.id,
+        occurred_at: new Date().toISOString(),
+      })
+      .select('id, kind, method, label, notes, occurred_at, engagement_id, user_id')
+      .single()
+    if (tpRow) contactActivity.push(tpRow)
+  }
+
+  // Address edits get the same audit trail — one entry per REAL change
+  // (normalized display compare: a formatting-only reshuffle writes no
+  // entry, exactly as it fires no Jobber mutation). Label carries the
+  // new normalized display; notes retains the old one.
+  if (addrDiff.changed) {
+    const { data: tpRow } = await supabaseService
+      .from('touchpoints')
+      .insert({
+        lead_id: id,
+        location_uuid: existing.location_uuid,
+        kind: 'system',
+        label: addrDiff.display ? `Address updated → ${addrDiff.display}` : 'Address removed',
+        notes: addrDiff.prevDisplay ? `was ${addrDiff.prevDisplay}` : null,
         user_id: hubUser.id,
         occurred_at: new Date().toISOString(),
       })
@@ -397,6 +439,21 @@ export async function PATCH(
     })
   }
 
+  // ─── Jobber BILLING-address write-back on real address change ─
+  // Same rails, address flavor (lib/jobber-address-sync): fetch-current
+  // → diff → at most one clientEdit { billingAddress }, never a property
+  // mutation. A clearing edit never pushes (we don't erase Jobber-side
+  // data). Awaited but non-fatal; outcome rides the response.
+  let addressWriteback: AddressWritebackOutcome | null = null
+  if (addrDiff.changed && !addrDiff.cleared && existing.jobber_client_id && existing.location_id) {
+    addressWriteback = await syncLeadAddressToJobber({
+      leadId: id,
+      locationSlug: existing.location_id,
+      jobberClientId: String(existing.jobber_client_id),
+      target: { street: addrDiff.street, city: addrDiff.city, state: addrDiff.state, zip: addrDiff.zip },
+    })
+  }
+
   // ─── Return fresh row ─────────────────────────────────────────
   const { data: fresh, error: refetchError } = await supabaseService
     .from('leads')
@@ -413,6 +470,7 @@ export async function PATCH(
     {
       lead: fresh,
       ...(contactWriteback ? { contact_writeback: contactWriteback } : {}),
+      ...(addressWriteback ? { address_writeback: addressWriteback } : {}),
       ...(contactActivity.length ? { contact_activity: contactActivity } : {}),
     },
     { status: 200 },

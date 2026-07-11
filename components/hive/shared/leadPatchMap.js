@@ -23,6 +23,12 @@ const LEAD_COL_TO_PERSON_FIELD = {
   is_junk: 'isJunk',            // card ··· menu junk → Inbox row drops live
   phone: 'phone',               // ContactField inline edit → Inbox tel:/filters live
   email: 'email',
+  // AddressField inline edit. Person has ONE flat address field (the
+  // display string); city/state/zip live only inside the addresses
+  // jsonb → no Person keys to map, deliberately dropped. The composed
+  // `address` col the field PATCHes is the full display string, so the
+  // flat field stays correct on its own.
+  address: 'address',
 }
 
 export function leadColsToPersonFields(cols) {

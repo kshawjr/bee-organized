@@ -74,6 +74,15 @@ describe('EditPencil — readable, standard, no private forks', () => {
     await unmount()
   })
 
+  it('cursor pins: the ✎ shows a POINTER even inside cursor:text host rows (the affordance must not go mute)', async () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const { host, unmount } = await mount(
+      <ContactField kind="phone" leadId="l1" value="(561) 555-0100" onSaved={() => {}} setToast={() => {}} />
+    )
+    expect(pencil(host)!.style.cursor).toBe('pointer')
+    await unmount()
+  })
+
   it('source sweep: no hive file RENDERS a private ✎ — the glyph in code lives only in shared/inlineEdit.jsx (comment prose exempt)', () => {
     const root = 'components/hive'
     const isComment = (line: string) => /^(\/\/|\*|\/\*|\{\/\*)/.test(line.trim())
@@ -110,6 +119,11 @@ describe('ContactField — explicit ✓/✗ beside the input', () => {
     await openEdit(host)
     expect(saveBtn(host)).toBeTruthy()
     expect(cancelBtn(host)).toBeTruthy()
+    // Cursor pins for the edit-state row: both controls are pointers at
+    // rest (globals.css carries NO button cursor reset — audited 7/10;
+    // these inline styles are the single source, so pin them).
+    expect(saveBtn(host)!.style.cursor).toBe('pointer')
+    expect(cancelBtn(host)!.style.cursor).toBe('pointer')
     await type(host.querySelector('input')!, '(704) 555-0142')
     await click(saveBtn(host)!)
     expect(leadPatches).toEqual([{ phone: '(704) 555-0142' }])
@@ -138,6 +152,8 @@ describe('ContactField — explicit ✓/✗ beside the input', () => {
     await click(saveBtn(host)!) // PATCH now hanging
     expect(saveBtn(host)!.disabled).toBe(true)
     expect(cancelBtn(host)!.disabled).toBe(true)
+    expect(saveBtn(host)!.style.cursor).toBe('default') // busy: no false pointer
+    expect(cancelBtn(host)!.style.cursor).toBe('default')
     expect((host.querySelector('input') as HTMLInputElement).disabled).toBe(true)
     await click(saveBtn(host)!) // disabled + saving-ref guard
     await act(async () => { release({ ok: true, status: 200, json: async () => ({ lead: {} }) }) })

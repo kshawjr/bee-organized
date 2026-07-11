@@ -53,6 +53,7 @@ import NotesStream from './NotesStream'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
 import ContactField from './shared/ContactField'
+import AddressField from './shared/AddressField'
 import MetaSelect from './MetaSelect'
 import ReferrerField from './shared/ReferrerField'
 import Timeline from './shared/Timeline'
@@ -340,6 +341,14 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
             onSaved={(cols) => { setData(d => d ? { ...d, client: { ...d.client, ...cols } } : d); onLeadPatched(client.id, cols) }}
             setToast={setToast} />
           <ContactField kind="email" leadId={client.id} value={client.email}
+            onSaved={(cols) => { setData(d => d ? { ...d, client: { ...d.client, ...cols } } : d); onLeadPatched(client.id, cols) }}
+            setToast={setToast} />
+          {/* Address — LEAD-level like phone/email (shared AddressField,
+              same component ClientProfile mounts): Places autocomplete
+              in edit mode, normalized display, billing-address Jobber
+              write-back rides the PATCH response. */}
+          <AddressField leadId={client.id}
+            value={{ address: client.address, city: client.city, state: client.state, zip: client.zip }}
             onSaved={(cols) => { setData(d => d ? { ...d, client: { ...d.client, ...cols } } : d); onLeadPatched(client.id, cols) }}
             setToast={setToast} />
           {/* Source rides the LEAD; Type rides THIS engagement (seeded at

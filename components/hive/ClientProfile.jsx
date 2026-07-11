@@ -36,12 +36,13 @@ import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, formatFullDa
 import StatusChip from '@/components/ui/StatusChip'
 import VitalsStrip, { vitalsAge } from './shared/VitalsStrip'
 import {
-  IconPhone, IconMapPin, IconPlayerPause, IconExternalLink, IconSend,
+  IconPhone, IconPlayerPause, IconExternalLink, IconSend,
   IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPlus, IconPaperclip,
 } from '@/components/ui/icons'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
 import ContactField from './shared/ContactField'
+import AddressField from './shared/AddressField'
 import ReferrerField from './shared/ReferrerField'
 import Timeline from './shared/Timeline'
 import CardTabs from './shared/CardTabs'
@@ -236,25 +237,6 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
     } catch (e) { setToast({ kind: 'error', msg: `Junk failed: ${e.message}` }) }
   }
 
-  // Address only — phone/email moved to the shared ContactField (inline
-  // editable). Address stays read-only this pass (Places autofill
-  // decision pending).
-  const contactRow = (Icon, value, href, missingLabel) => value ? (
-    <p style={{ fontSize: '12px', color: '#1a1a18', display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
-      <span style={{ color: '#8a8a84', display: 'inline-flex' }}><Icon size={13} /></span>
-      {href ? (
-        <a className="bee-contact-link" href={href} style={{ color: ACCENT_BLUE, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</a>
-      ) : (
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
-      )}
-    </p>
-  ) : (
-    <p title="Edit in the classic view (beta editing soon)" style={{ fontSize: '12px', color: '#c9c7c0', display: 'flex', alignItems: 'center', gap: '7px', cursor: 'default' }}>
-      <span style={{ display: 'inline-flex' }}><Icon size={13} /></span>
-      <span style={{ borderBottom: '1px dashed rgba(0,0,0,0.15)' }}>{missingLabel}</span>
-    </p>
-  )
-
   // Contact save landed: merge into the profile's own state, prepend the
   // route's audit touchpoint(s) so Recent activity shows the change
   // instantly, and hand the lead columns UP (onLeadPatched →
@@ -269,8 +251,6 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
     } : d)
     onLeadPatched(c.id, cols)
   }
-
-  const address = c ? [c.address, [c.city, [c.state, c.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')].filter(Boolean).join(', ') : null
 
   const closedVisible = showClosed ? closed : closed.slice(0, 2)
 
@@ -292,12 +272,14 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
           affordance, shared with the other two cards). */}
       <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
         <MicroLabel>Key facts</MicroLabel>
-        {/* Phone/email: click-to-edit (shared ContactField — the same
-            component EngagementPanel mounts); the value stays a live
-            tel:/mailto: link. Address read-only this pass. */}
+        {/* Phone/email/address: click-to-edit (shared ContactField +
+            AddressField — the same components EngagementPanel mounts);
+            phone/email values stay live tel:/mailto: links. Address
+            display is formatLeadAddress-normalized (no duplicated
+            city/state) and edits through the Places autocomplete. */}
         <ContactField kind="phone" leadId={c.id} value={c.phone} onSaved={contactSaved} setToast={setToast} />
         <ContactField kind="email" leadId={c.id} value={c.email} onSaved={contactSaved} setToast={setToast} />
-        {contactRow(IconMapPin, address, null, 'add address')}
+        <AddressField leadId={c.id} value={{ address: c.address, city: c.city, state: c.state, zip: c.zip }} onSaved={contactSaved} setToast={setToast} />
         {(data.contacts || []).length > 0 && (
           <button onClick={() => setShowContacts(v => !v)} style={{ border: 'none', background: 'transparent', padding: 0, textAlign: 'left', fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
             +{data.contacts.length} contact{data.contacts.length === 1 ? '' : 's'}: {data.contacts[0].name}{data.contacts[0].role ? ` (${data.contacts[0].role})` : ''}{data.contacts.length > 1 ? ' …' : ''}

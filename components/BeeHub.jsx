@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useLeadsRealtime } from "@/lib/use-leads-realtime"
 import dynamic from "next/dynamic"
 import { canSeeBetaBoard, defaultHiveView, hydrateHiveView } from "@/components/hive/shared/betaGate"
+import AddressAutofill from "@/components/hive/shared/AddressAutofill"
 // Pure presentational icon set (inline SVG, zero deps) — safe to import
 // statically like betaGate; it pulls no beta-chunk surface code with it.
 import { IconBug, IconBulb, IconPlus, IconPaperclip } from "@/components/ui/icons"
@@ -2363,169 +2364,10 @@ function SendToJobberPopup({ person, engagementId = null, onDone, onClose }) {
 
 // ─── Add Address Popup ─────────────────────────────────────────────────────────
 // ─── Address Autofill Input ───────────────────────────────────────────────────
-// Parse "123 Main St, Denver CO 80202" → {street, city, state, zip, full}
-function parseAddress(s) {
-  const parts = s.split(',')
-  const street = (parts[0]||'').trim()
-  const rest   = (parts[1]||'').trim()
-  const tokens = rest.split(' ').filter(Boolean)
-  const zip    = /^\d{5}/.test(tokens[tokens.length-1]||'') ? tokens.pop() : ''
-  const state  = tokens.pop()||''
-  const city   = tokens.join(' ')
-  return { full:s, street, city, state, zip }
-}
-
-function AddressAutofill({ value, onChange, onSelect, onParsed, placeholder='Start typing a street address...', style:extraStyle={} }) {
-  // Google Places-backed typeahead. Replaces the old FAKE_SUGGESTIONS lookup.
-  // Same external API (value/onChange/onSelect/onParsed) so the 4 call sites
-  // don't need touching.
-  //
-  // How it works:
-  //   1. User types → debounced 300ms → POST /api/places/autocomplete
-  //   2. Show predictions → user clicks one → POST /api/places/details
-  //   3. Resolve to {street, city, state, zip}, fire onParsed
-  //   4. Regenerate session token (each cycle = one billable session)
-  //
-  // Failure modes are non-blocking: a Places error falls back to letting
-  // the user type manually. parseAddress() is the client-side fallback
-  // if /details fails after a successful /autocomplete.
-  const [suggestions, setSuggestions] = useState([])
-  const [showDrop, setShowDrop] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const debounceRef     = useRef(null)
-  const sessionTokenRef = useRef(null)
-  const reqIdRef        = useRef(0)
-
-  // Session token lifecycle: created on first use, regenerated after each
-  // pick. Reusing the token across keystrokes + /details bundles them under
-  // one billable session (Google's session-based pricing is ~10x cheaper
-  // than per-call). Token is opaque to us — any UUID works.
-  function newSessionToken() {
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-      sessionTokenRef.current = crypto.randomUUID()
-    } else {
-      sessionTokenRef.current = String(Date.now()) + '-' + Math.random().toString(36).slice(2)
-    }
-  }
-  if (sessionTokenRef.current === null) newSessionToken()
-
-  async function fetchPredictions(query) {
-    // reqId guards against stale responses: if user keeps typing while a
-    // request is in flight, only the most recent response's results show.
-    const myReqId = ++reqIdRef.current
-    setLoading(true)
-    try {
-      const res = await fetch('/api/places/autocomplete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: query, sessiontoken: sessionTokenRef.current }),
-      })
-      const json = await res.json().catch(() => ({}))
-      if (myReqId !== reqIdRef.current) return
-      if (!res.ok) {
-        setSuggestions([])
-        setShowDrop(false)
-        return
-      }
-      const preds = json.predictions || []
-      setSuggestions(preds)
-      setShowDrop(preds.length > 0)
-    } catch {
-      // Network/parse failure — graceful degrade to no suggestions.
-      // User can still type manually; the form's plain text input works.
-      if (myReqId === reqIdRef.current) {
-        setSuggestions([])
-        setShowDrop(false)
-      }
-    } finally {
-      if (myReqId === reqIdRef.current) setLoading(false)
-    }
-  }
-
-  function handleInput(val) {
-    onChange(val)
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    if (val.length > 2) {
-      debounceRef.current = setTimeout(() => fetchPredictions(val), 175)
-    } else {
-      setSuggestions([])
-      setShowDrop(false)
-      setLoading(false)
-    }
-  }
-
-  async function pick(prediction) {
-    // Optimistic UI: drop the prediction's description into the input
-    // immediately, then refine to the canonical formatted address once
-    // /details returns.
-    onChange(prediction.description)
-    setSuggestions([])
-    setShowDrop(false)
-    if (onSelect) onSelect(prediction.description)
-
-    try {
-      const res = await fetch('/api/places/details', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          place_id: prediction.place_id,
-          sessiontoken: sessionTokenRef.current,
-        }),
-      })
-      const json = await res.json().catch(() => ({}))
-      if (res.ok && onParsed) {
-        onParsed({
-          full:   json.formatted || prediction.description,
-          street: json.street    || '',
-          apt:    json.apt       || '',
-          city:   json.city      || '',
-          state:  json.state     || '',
-          zip:    json.zip       || '',
-        })
-      } else if (onParsed) {
-        // /details failed — best-effort parse from the description string.
-        onParsed(parseAddress(prediction.description))
-      }
-    } catch {
-      if (onParsed) onParsed(parseAddress(prediction.description))
-    } finally {
-      // Next autocomplete cycle starts a fresh session
-      newSessionToken()
-    }
-  }
-
-  return (
-    <div style={{ position:'relative' }}>
-      <input
-        value={value}
-        onChange={e=>handleInput(e.target.value)}
-        onBlur={()=>setTimeout(()=>setShowDrop(false),150)}
-        onFocus={()=>{ if(suggestions.length>0) setShowDrop(true) }}
-        placeholder={placeholder}
-        style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', ...extraStyle }}
-      />
-      {loading && value.length > 2 && (
-        <div style={{ position:'absolute', top:'50%', right:'12px', transform:'translateY(-50%)', fontSize:'11px', color:'#8a9e9a', pointerEvents:'none' }}>
-          Searching…
-        </div>
-      )}
-      {showDrop && suggestions.length > 0 && (
-        <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'white', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'10px', boxShadow:'0 6px 20px rgba(0,0,0,0.1)', zIndex:300, marginTop:'4px', overflow:'hidden' }}>
-          {suggestions.map((s,i)=>(
-            <button key={s.place_id||i} onMouseDown={()=>pick(s)} style={{ width:'100%', padding:'10px 14px', background:'white', border:'none', borderBottom:i<suggestions.length-1?'1px solid rgba(0,0,0,0.05)':'none', cursor:'pointer', textAlign:'left', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'8px' }}>
-              <span style={{ fontSize:'14px', flexShrink:0 }}>📍</span>
-              <div style={{ flex:1, minWidth:0 }}>
-                <p style={{ fontSize:'13px', color:'#1a2e2b', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.main_text || s.description.split(',')[0]}</p>
-                <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.secondary_text || s.description.split(',').slice(1).join(',').trim()}</p>
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
+// AddressAutofill + parseAddress moved VERBATIM to
+// components/hive/shared/AddressAutofill.jsx (imported at top) so the
+// hive AddressField mounts the same Places typeahead. Same external API;
+// the 4 classic call sites below are untouched.
 // Reusable address block: autofill + city/state/zip
 function AddressBlock({ street='', apt='', city='', state='', zip='', onChange, label='Address', required=false }) {
   const inp = { width:'100%', padding:'9px 11px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }
