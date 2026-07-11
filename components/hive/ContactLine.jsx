@@ -4,22 +4,23 @@
 // truncate; ellipsis stays as the overflow fallback). layout="inline"
 // keeps one line for wide hosts (the 540px+ panel strip).
 //
-// Link idiom (everywhere contact renders): ACCENT_BLUE value, no
-// underline at rest, underline on hover; icons stay muted gray so the
-// VALUE reads as the link. stopPropagation so taps never open the row's
-// panel. Renders nothing when both fields are missing. Beta chunk.
+// Link idiom (everywhere contact renders): the action accent
+// (T.accent.fg), no underline at rest, underline on hover; icons stay
+// muted so the VALUE reads as the link. stopPropagation so taps never
+// open the row's panel. Renders nothing when both fields are missing.
+// Beta chunk.
 'use client'
 
 import React from 'react'
 import { IconPhone, IconMail } from '@/components/ui/icons'
-import { ACCENT_BLUE } from './shared/stageConfig'
+import { T } from './shared/tokens'
 
 const linkStyle = {
-  color: ACCENT_BLUE, textDecoration: 'none',
+  color: T.accent.fg, textDecoration: 'none',
   display: 'inline-flex', alignItems: 'center', gap: '4px',
   minWidth: 0, overflow: 'hidden',
 }
-const iconStyle = { color: '#8a8a84', display: 'inline-flex', flexShrink: 0 }
+const iconStyle = { color: T.ink.muted, display: 'inline-flex', flexShrink: 0 }
 const valueStyle = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
 
 function Hover() {

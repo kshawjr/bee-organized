@@ -27,16 +27,17 @@
 
 import React, { useState } from 'react'
 import { IconPlayerPause } from '@/components/ui/icons'
+import { T } from './tokens'
 import { MicroLabel } from './cardKit'
 import { fmtShort } from './engagementStatus'
 
-const QUIET = '#f7f6f4'
+const QUIET = T.surface.sunken
 
 // Quiet inline action — the row's trailing verb.
 const rowBtn = (danger = false) => ({
-  marginLeft: 'auto', padding: '3px 10px', borderRadius: '8px', flexShrink: 0,
-  border: '0.5px solid rgba(0,0,0,0.15)', background: '#fff',
-  fontSize: '11px', fontWeight: 500, color: danger ? '#791F1F' : '#1a1a18',
+  marginLeft: 'auto', padding: '3px 10px', borderRadius: T.radius.control, flexShrink: 0,
+  border: T.border.control, background: T.surface.raised,
+  fontSize: '11px', fontWeight: 500, color: danger ? T.state.danger.fg : T.ink.primary,
   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
 })
 
@@ -122,22 +123,22 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
     } finally { setBusy(false) }
   }
 
-  const inputStyle = { padding: '6px 9px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '7px', fontSize: '12px', fontFamily: 'inherit', background: '#fff', outline: 'none' }
+  const inputStyle = { padding: '6px 9px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', background: T.surface.raised, outline: 'none' }
 
   return (
-    <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+    <div style={{ background: QUIET, borderRadius: T.radius.inset, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
       <MicroLabel>Preferences</MicroLabel>
 
       {/* Marketing — confirm the destructive direction only. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <p style={{ fontSize: '12px', color: c.marketing_opt_out ? '#791F1F' : '#6b6b66', minWidth: 0 }}>
+        <p style={{ fontSize: '12px', color: c.marketing_opt_out ? T.state.danger.fg : T.ink.secondary, minWidth: 0 }}>
           {c.marketing_opt_out ? 'Opted out of marketing' : 'Marketing emails OK'}
         </p>
         {c.marketing_opt_out ? (
           <button style={rowBtn()} disabled={busy} onClick={() => setMarketing(false)}>Re-subscribe</button>
         ) : confirmOptOut ? (
           <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: '6px', alignItems: 'center', flexShrink: 0 }}>
-            <span style={{ fontSize: '11px', color: '#791F1F' }}>Stop all marketing email?</span>
+            <span style={{ fontSize: '11px', color: T.state.danger.fg }}>Stop all marketing email?</span>
             <button style={{ ...rowBtn(true), marginLeft: 0 }} disabled={busy} onClick={() => setMarketing(true)}>Confirm opt-out</button>
             <button aria-label="Cancel opt-out" style={{ ...rowBtn(), marginLeft: 0 }} disabled={busy} onClick={() => setConfirmOptOut(false)}>✗</button>
           </span>
@@ -149,7 +150,7 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
       {/* Snooze — presets + custom date + note; un-snooze clears both. */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <p style={{ fontSize: '12px', color: snoozed ? '#633806' : '#6b6b66', minWidth: 0 }}>
+          <p style={{ fontSize: '12px', color: snoozed ? T.state.warning.deep : T.ink.secondary, minWidth: 0 }}>
             {snoozed ? `Snoozed until ${fmtShort(c.snoozed_until)}` : 'Not snoozed'}
           </p>
           {snoozed ? (
@@ -159,7 +160,7 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
           )}
         </div>
         {snoozed && (c.snoozed_note || '').trim() && (
-          <p style={{ fontSize: '11px', fontStyle: 'italic', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <p style={{ fontSize: '11px', fontStyle: 'italic', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             “{c.snoozed_note.trim()}”
           </p>
         )}
@@ -177,7 +178,7 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
             <input value={snoozeNote} onChange={e => setSnoozeNote(e.target.value)} placeholder="Note (optional)…" aria-label="Snooze note" style={inputStyle} />
             <div style={{ display: 'flex', gap: '6px' }}>
               <button style={{ ...rowBtn(), marginLeft: 0 }} disabled={busy} onClick={saveSnooze}>Snooze</button>
-              <button style={{ ...rowBtn(), marginLeft: 0, color: '#8a8a84' }} disabled={busy} onClick={() => setSnoozeOpen(false)}>Cancel</button>
+              <button style={{ ...rowBtn(), marginLeft: 0, color: T.ink.muted }} disabled={busy} onClick={() => setSnoozeOpen(false)}>Cancel</button>
             </div>
           </div>
         )}
@@ -186,7 +187,7 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
       {/* Nurture drip — hidden with live business (v4 rule). */}
       {openCount === 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <p style={{ fontSize: '12px', color: c.paused ? '#633806' : '#085041', display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
+          <p style={{ fontSize: '12px', color: c.paused ? T.state.warning.deep : T.accent.deep, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
             <IconPlayerPause size={13} /> {c.paused ? 'Nurture drips paused' : 'Nurture drips active'}
           </p>
           {c.paused ? (

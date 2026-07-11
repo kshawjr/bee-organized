@@ -21,6 +21,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
+import { T } from './tokens'
 import { MicroLabel } from './cardKit'
 
 export default function TagsRow({ leadId, tags = [], options = [], onChange = () => {}, setToast = () => {} }) {
@@ -61,36 +62,36 @@ export default function TagsRow({ leadId, tags = [], options = [], onChange = ()
       <MicroLabel>Tags</MicroLabel>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', position: 'relative' }}>
         {tags.map(t => (
-          <span key={t.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '3px 8px 3px 10px', borderRadius: '20px', border: '0.5px solid rgba(0,0,0,0.12)', background: '#fff', fontSize: '11px', color: '#1a1a18', whiteSpace: 'nowrap' }}>
+          <span key={t.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '3px 8px 3px 10px', borderRadius: T.radius.pill, border: T.border.thin, background: T.surface.raised, fontSize: '11px', color: T.ink.primary, whiteSpace: 'nowrap' }}>
             {t.label}
             <button aria-label={`Remove tag ${t.label}`} disabled={busyId === t.id}
               onClick={() => toggle(t)}
-              style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', lineHeight: 1, color: '#b5b3ac', cursor: 'pointer', fontFamily: 'inherit' }}>
+              style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', lineHeight: 1, color: T.ink.quiet, cursor: 'pointer', fontFamily: 'inherit' }}>
               ✗
             </button>
           </span>
         ))}
-        {tags.length === 0 && <span style={{ fontSize: '11px', color: '#b5b3ac' }}>No tags</span>}
+        {tags.length === 0 && <span style={{ fontSize: '11px', color: T.ink.quiet }}>No tags</span>}
         <span style={{ position: 'relative', display: 'inline-block' }}>
           <button onClick={() => setOpen(v => !v)} aria-label="Add tag"
-            style={{ padding: '3px 10px', borderRadius: '20px', border: '0.5px dashed rgba(0,0,0,0.18)', background: 'transparent', fontSize: '11px', color: '#8a8a84', fontFamily: 'inherit', cursor: 'pointer' }}>
+            style={{ padding: '3px 10px', borderRadius: T.radius.pill, border: T.border.dashed, background: 'transparent', fontSize: '11px', color: T.ink.muted, fontFamily: 'inherit', cursor: 'pointer' }}>
             + Tag
           </button>
           {open && (
             <>
               <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 10009 }} />
               <div onClick={e => e.stopPropagation()}
-                style={{ position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 10010, width: '210px', maxHeight: '46vh', overflowY: 'auto', background: '#fff', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '10px', boxShadow: '0 8px 30px rgba(26,26,24,0.12)', padding: '8px 12px' }}>
+                style={{ position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 10010, width: '210px', maxHeight: '46vh', overflowY: 'auto', background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset, boxShadow: T.shadow.pop, padding: '8px 12px' }}>
                 {options.map(o => (
                   <button key={o.id} disabled={busyId === o.id}
                     onClick={() => toggle(o)}
-                    style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '6px 8px', margin: '0 -8px', borderRadius: '8px', border: 'none', background: 'transparent', fontSize: '12px', color: has(o.id) ? '#1a1a18' : '#6b6b66', fontWeight: has(o.id) ? 500 : 400, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-                    <span style={{ width: '14px', display: 'inline-flex', justifyContent: 'center', color: '#1D9E75', flexShrink: 0 }}>{has(o.id) ? '✓' : ''}</span>
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '6px 8px', margin: '0 -8px', borderRadius: T.radius.control, border: 'none', background: 'transparent', fontSize: '12px', color: has(o.id) ? T.ink.primary : T.ink.secondary, fontWeight: has(o.id) ? 500 : 400, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+                    <span style={{ width: '14px', display: 'inline-flex', justifyContent: 'center', color: T.state.success.fg, flexShrink: 0 }}>{has(o.id) ? '✓' : ''}</span>
                     {o.label}
                   </button>
                 ))}
                 {options.length === 0 && (
-                  <p style={{ fontSize: '11px', color: '#b5b3ac', padding: '4px 0' }}>No tags configured — manage in Admin</p>
+                  <p style={{ fontSize: '11px', color: T.ink.quiet, padding: '4px 0' }}>No tags configured — manage in Admin</p>
                 )}
               </div>
             </>

@@ -22,13 +22,13 @@
 
 import React, { useState } from 'react'
 import { IconPhone, IconMail } from '@/components/ui/icons'
-import { ACCENT_BLUE } from './stageConfig'
+import { T } from './tokens'
 import { MicroLabel } from './cardKit'
 import { EditPencil, InlineEditControls } from './inlineEdit'
 
 const ROLE_PRESETS = ['Spouse', 'Partner', 'Family member', 'Assistant', 'Property manager', 'Tenant', 'Other']
 
-const inputStyle = { padding: '6px 9px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '7px', fontSize: '12px', fontFamily: 'inherit', background: '#fff', outline: 'none', minWidth: 0 }
+const inputStyle = { padding: '6px 9px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', background: T.surface.raised, outline: 'none', minWidth: 0 }
 
 function ContactForm({ initial = null, busy, err, onSave, onCancel, onDelete = null }) {
   const [draft, setDraft] = useState({
@@ -37,7 +37,7 @@ function ContactForm({ initial = null, busy, err, onSave, onCancel, onDelete = n
   })
   const set = (k) => (e) => setDraft(d => ({ ...d, [k]: e.target.value }))
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '8px', background: '#fff' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '8px 10px', border: T.border.thin, borderRadius: T.radius.control, background: T.surface.raised }}>
       <div style={{ display: 'flex', gap: '6px' }}>
         <input autoFocus value={draft.name} onChange={set('name')} placeholder="Name" aria-label="Contact name" style={{ ...inputStyle, flex: 1 }} />
         <select value={draft.role} onChange={set('role')} aria-label="Contact role" style={inputStyle}>
@@ -48,12 +48,12 @@ function ContactForm({ initial = null, busy, err, onSave, onCancel, onDelete = n
       </div>
       <input type="tel" value={draft.phone} onChange={set('phone')} placeholder="Phone (optional)" aria-label="Contact phone" style={inputStyle} />
       <input type="email" value={draft.email} onChange={set('email')} placeholder="Email (optional)" aria-label="Contact email" style={inputStyle} />
-      {err && <p style={{ fontSize: '11px', color: '#791F1F' }}>{err}</p>}
+      {err && <p style={{ fontSize: '11px', color: T.state.danger.fg }}>{err}</p>}
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
         <InlineEditControls busy={busy} onSave={() => onSave(draft)} onCancel={onCancel} />
         {onDelete && (
           <button disabled={busy} onClick={onDelete}
-            style={{ marginLeft: 'auto', border: 'none', background: 'transparent', fontSize: '11px', color: '#791F1F', cursor: 'pointer', fontFamily: 'inherit', padding: '2px 4px' }}>
+            style={{ marginLeft: 'auto', border: 'none', background: 'transparent', fontSize: '11px', color: T.state.danger.fg, cursor: 'pointer', fontFamily: 'inherit', padding: '2px 4px' }}>
             Remove contact
           </button>
         )}
@@ -117,23 +117,23 @@ export default function ContactsBlock({ leadId, contacts = [], onChange = () => 
             onSave={(d) => save(d, ct)} onCancel={close} onDelete={() => remove(ct)} />
         ) : (
           <div key={ct.id} onClick={() => { setErr(null); setEditingId(ct.id) }} title="Edit contact"
-            style={{ fontSize: '12px', color: '#1a1a18', cursor: 'pointer' }}>
+            style={{ fontSize: '12px', color: T.ink.primary, cursor: 'pointer' }}>
             <p style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {ct.name}{ct.role ? <span style={{ color: '#8a8a84' }}> · {ct.role}</span> : null}
+                {ct.name}{ct.role ? <span style={{ color: T.ink.muted }}> · {ct.role}</span> : null}
               </span>
               <EditPencil />
             </p>
             <p style={{ display: 'flex', gap: '10px', marginTop: '1px' }}>
               {ct.phone && (
                 <a className="bee-contact-link" href={`tel:${ct.phone}`} onClick={e => e.stopPropagation()}
-                  style={{ color: ACCENT_BLUE, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
+                  style={{ color: T.accent.fg, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
                   <IconPhone size={11} /> {ct.phone}
                 </a>
               )}
               {ct.email && (
                 <a className="bee-contact-link" href={`mailto:${ct.email}`} onClick={e => e.stopPropagation()}
-                  style={{ color: ACCENT_BLUE, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  style={{ color: T.accent.fg, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   <IconMail size={11} /> {ct.email}
                 </a>
               )}
@@ -144,7 +144,7 @@ export default function ContactsBlock({ leadId, contacts = [], onChange = () => 
           <ContactForm busy={busy} err={err} onSave={(d) => save(d)} onCancel={close} />
         ) : (
           <button onClick={() => { setErr(null); setEditingId('new') }}
-            style={{ alignSelf: 'flex-start', padding: '3px 10px', borderRadius: '20px', border: '0.5px dashed rgba(0,0,0,0.18)', background: 'transparent', fontSize: '11px', color: '#8a8a84', fontFamily: 'inherit', cursor: 'pointer' }}>
+            style={{ alignSelf: 'flex-start', padding: '3px 10px', borderRadius: T.radius.pill, border: T.border.dashed, background: 'transparent', fontSize: '11px', color: T.ink.muted, fontFamily: 'inherit', cursor: 'pointer' }}>
             + Add contact
           </button>
         )}

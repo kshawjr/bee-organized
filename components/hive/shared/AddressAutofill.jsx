@@ -20,6 +20,7 @@
 'use client'
 
 import React, { useState, useRef } from 'react'
+import { T } from './tokens'
 
 // Parse "123 Main St, Denver CO 80202" → {street, city, state, zip, full}
 export function parseAddress(s) {
@@ -150,21 +151,21 @@ export default function AddressAutofill({ value, onChange, onSelect, onParsed, p
         onFocus={()=>{ if(suggestions.length>0) setShowDrop(true) }}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
-        style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', ...extraStyle }}
+        style={{ width:'100%', padding:'10px 12px', border:`1.5px solid ${T.hairline.line}`, borderRadius:T.radius.control, fontSize:'16px', fontFamily:'inherit', color:T.ink.primary, outline:'none', boxSizing:'border-box', ...extraStyle }}
       />
       {loading && value.length > 2 && (
-        <div style={{ position:'absolute', top:'50%', right:'12px', transform:'translateY(-50%)', fontSize:'11px', color:'#8a9e9a', pointerEvents:'none' }}>
+        <div style={{ position:'absolute', top:'50%', right:'12px', transform:'translateY(-50%)', fontSize:'11px', color:T.ink.muted, pointerEvents:'none' }}>
           Searching…
         </div>
       )}
       {showDrop && suggestions.length > 0 && (
-        <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'white', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'10px', boxShadow:'0 6px 20px rgba(0,0,0,0.1)', zIndex:300, marginTop:'4px', overflow:'hidden' }}>
+        <div style={{ position:'absolute', top:'100%', left:0, right:0, background:T.surface.raised, border:T.border.thin, borderRadius:T.radius.inset, boxShadow:T.shadow.pop, zIndex:300, marginTop:'4px', overflow:'hidden' }}>
           {suggestions.map((s,i)=>(
-            <button key={s.place_id||i} onMouseDown={()=>pick(s)} style={{ width:'100%', padding:'10px 14px', background:'white', border:'none', borderBottom:i<suggestions.length-1?'1px solid rgba(0,0,0,0.05)':'none', cursor:'pointer', textAlign:'left', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'8px' }}>
+            <button key={s.place_id||i} onMouseDown={()=>pick(s)} style={{ width:'100%', padding:'10px 14px', background:T.surface.raised, border:'none', borderBottom:i<suggestions.length-1?T.border.divider:'none', cursor:'pointer', textAlign:'left', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'8px' }}>
               <span style={{ fontSize:'14px', flexShrink:0 }}>📍</span>
               <div style={{ flex:1, minWidth:0 }}>
-                <p style={{ fontSize:'13px', color:'#1a2e2b', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.main_text || s.description.split(',')[0]}</p>
-                <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.secondary_text || s.description.split(',').slice(1).join(',').trim()}</p>
+                <p style={{ fontSize:'13px', color:T.ink.primary, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.main_text || s.description.split(',')[0]}</p>
+                <p style={{ fontSize:'11px', color:T.ink.muted, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.secondary_text || s.description.split(',').slice(1).join(',').trim()}</p>
               </div>
             </button>
           ))}

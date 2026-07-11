@@ -5,13 +5,14 @@
 'use client'
 
 import React from 'react'
+import { T } from './tokens'
 
 const initialsOf = (name) =>
   (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?'
 
 export default function InitialsAvatar({ name, bg, text }) {
   return (
-    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: bg, color: text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 600, flexShrink: 0 }}>
+    <div style={{ width: '32px', height: '32px', borderRadius: T.radius.round, background: bg, color: text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 600, flexShrink: 0 }}>
       {initialsOf(name)}
     </div>
   )

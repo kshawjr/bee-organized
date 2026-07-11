@@ -29,6 +29,7 @@
 
 import React, { useMemo, useState } from 'react'
 import ReferrerPicker from '../ReferrerPicker'
+import { T } from './tokens'
 
 export default function ReferrerField({
   lead,               // { id, referred_by_kind, referred_by_id, referred_by_name, source }
@@ -96,22 +97,22 @@ export default function ReferrerField({
   if (!lead) return null
 
   return (
-    <div style={{ fontSize: '12px', color: '#8a8a84' }}>
+    <div style={{ fontSize: '12px', color: T.ink.muted }}>
       {lead.referred_by_kind ? (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
           <button type="button" aria-label="Edit referrer" onClick={() => setPicking(v => !v)}
-            style={{ border: 'none', background: 'transparent', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer', borderBottom: '1px dashed rgba(0,0,0,0.2)' }}>
+            style={{ border: 'none', background: 'transparent', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer', borderBottom: T.border.underline }}>
             {/* Kind-only fallback covers a dangling id whose row was deleted. */}
             Referred by {lead.referred_by_name || (lead.referred_by_kind === 'lead' ? 'a client' : 'a partner')}
           </button>
           <button type="button" aria-label="Clear referrer" onClick={clear}
-            style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', color: '#b5b3ac', fontSize: '13px', lineHeight: 1 }}>
+            style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', color: T.ink.quiet, fontSize: '13px', lineHeight: 1 }}>
             ×
           </button>
         </span>
       ) : (
         <button type="button" aria-label="Add referrer" onClick={() => setPicking(v => !v)}
-          style={{ border: 'none', background: 'transparent', padding: 0, font: 'inherit', cursor: 'pointer', color: '#8a8a84', borderBottom: '1px dashed rgba(0,0,0,0.2)' }}>
+          style={{ border: 'none', background: 'transparent', padding: 0, font: 'inherit', cursor: 'pointer', color: T.ink.muted, borderBottom: T.border.underline }}>
           ＋ Add referrer
         </button>
       )}

@@ -19,7 +19,7 @@
 
 import React, { useState } from 'react'
 import { relAge } from './shared/engagementStatus'
-import { ACCENT_BLUE } from './shared/stageConfig'
+import { T } from './shared/tokens'
 
 export default function BuzzDrawer({
   notes = [],           // [{id, text, user_label, created_at}]
@@ -43,9 +43,9 @@ export default function BuzzDrawer({
     onPost(text)
   }
 
-  const chevron = <span style={{ flexShrink: 0, fontSize: '9px', color: '#b5b3ac' }}>{open ? '▾' : '▸'}</span>
+  const chevron = <span style={{ flexShrink: 0, fontSize: '9px', color: T.ink.quiet }}>{open ? '▾' : '▸'}</span>
   const quietLine = (
-    <p style={{ fontSize: '11px', color: latest ? '#6b6b66' : '#b5b3ac', display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0 }}>
+    <p style={{ fontSize: '11px', color: latest ? T.ink.secondary : T.ink.quiet, display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0 }}>
       {!header && <span style={{ flexShrink: 0 }}>🐝</span>}
       <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{latest?.text || 'No buzz yet'}</span>
       {!header && chevron}
@@ -56,7 +56,7 @@ export default function BuzzDrawer({
     <div>
       {header ? (
         <p onClick={e => { e.stopPropagation(); onToggle() }}
-          style={{ fontSize: '11px', fontWeight: 500, color: '#8a8a84', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '8px', cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', gap: '5px' }}>
+          style={{ fontSize: '11px', fontWeight: 500, color: T.ink.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '8px', cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', gap: '5px' }}>
           <span style={{ letterSpacing: 0 }}>🐝</span> Buzz {chevron}
         </p>
       ) : (
@@ -69,17 +69,17 @@ export default function BuzzDrawer({
         <div onClick={e => e.stopPropagation()}
           style={{
             display: 'flex', flexDirection: 'column', gap: '8px',
-            ...(header ? {} : { marginTop: '10px', paddingTop: '10px', borderTop: '0.5px solid rgba(0,0,0,0.07)' }),
+            ...(header ? {} : { marginTop: '10px', paddingTop: '10px', borderTop: T.border.divider }),
           }}>
           <input value={draft} onChange={e => setDraft(e.target.value)} placeholder="Add buzz…" autoFocus
             onKeyDown={e => { if (e.key === 'Enter') post() }}
-            style={{ padding: '7px 10px', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none', background: '#fff' }} />
+            style={{ padding: '7px 10px', border: T.border.thin, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', outline: 'none', background: T.surface.raised }} />
           {visible.length > 0 && (
             <div style={{ maxHeight: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
               {visible.map(n => (
-                <p key={n.id} style={{ fontSize: '12px', color: '#1a1a18', lineHeight: 1.4 }}>
+                <p key={n.id} style={{ fontSize: '12px', color: T.ink.primary, lineHeight: 1.4 }}>
                   🐝 {n.text}
-                  <span style={{ fontSize: '10px', color: '#b5b3ac', marginLeft: '6px', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '10px', color: T.ink.quiet, marginLeft: '6px', whiteSpace: 'nowrap' }}>
                     {[n.user_label || '—', n.created_at ? `${relAge(new Date(n.created_at).getTime(), nowMs)} ago` : null].filter(Boolean).join(' · ')}
                   </span>
                 </p>
@@ -88,13 +88,13 @@ export default function BuzzDrawer({
           )}
           {showMoreCap && sorted.length > showMoreCap && !showAll && (
             <button onClick={() => setShowAll(true)}
-              style={{ border: 'none', background: 'transparent', padding: 0, textAlign: 'left', fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
+              style={{ border: 'none', background: 'transparent', padding: 0, textAlign: 'left', fontSize: '11px', color: T.ink.muted, cursor: 'pointer', fontFamily: 'inherit' }}>
               Show {sorted.length - showMoreCap} more
             </button>
           )}
           {onAllBuzz && (
             <button onClick={onAllBuzz}
-              style={{ border: 'none', background: 'transparent', padding: 0, textAlign: 'left', fontSize: '11px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit' }}>
+              style={{ border: 'none', background: 'transparent', padding: 0, textAlign: 'left', fontSize: '11px', fontWeight: 500, color: T.accent.fg, cursor: 'pointer', fontFamily: 'inherit' }}>
               All buzz →
             </button>
           )}

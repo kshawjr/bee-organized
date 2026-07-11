@@ -40,7 +40,8 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { CHIP_STYLES, stageDisplayLabel, ACCENT_BLUE } from './shared/stageConfig'
+import { CHIP_STYLES, stageDisplayLabel } from './shared/stageConfig'
+import { T } from './shared/tokens'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
 import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, daysSince, closedReasonLabel } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
@@ -69,7 +70,7 @@ import NotesStream from './NotesStream'
 import { MicroLabel, quietBtn, CardMenu, undoToast, ActionRow, actionBtn } from './shared/cardKit'
 import useIsMobile from './shared/useIsMobile'
 
-const QUIET = '#f7f6f4'
+const QUIET = T.surface.sunken
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
 const monthYear = (iso) => {
@@ -301,7 +302,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   // assigned-to, preferences. All display/inline-edit; no new writes.
   const leftCol = c && (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', minWidth: 0 }}>
-      <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+      <div style={{ background: QUIET, borderRadius: T.radius.control, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
         <MicroLabel>Contact</MicroLabel>
         {/* Phone/email/address: click-to-edit (shared ContactField +
             AddressField); values stay live tel:/mailto: links. Source
@@ -328,11 +329,11 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         {/* Reverse direction — leads this client referred. */}
         {(data.referred_us || []).length > 0 && (
           <div style={{ marginTop: '2px' }}>
-            <p style={{ fontSize: '11px', fontWeight: 500, color: '#8a8a84', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '3px' }}>
+            <p style={{ fontSize: '11px', fontWeight: 500, color: T.ink.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '3px' }}>
               Referred us · {data.referred_us.length}
             </p>
             {data.referred_us.map(r => (
-              <p key={r.id} style={{ fontSize: '12px', color: '#1a1a18' }}>{r.name}</p>
+              <p key={r.id} style={{ fontSize: '12px', color: T.ink.primary }}>{r.name}</p>
             ))}
           </div>
         )}
@@ -414,17 +415,17 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             const chip = deriveStatusChip(e, { nowMs })
             const StageIcon = STAGE_ICON[e.stage] || IconInbox
             const value = engagementValue(e)
-            const statusColor = chip ? (CHIP_STYLES[chip.styleKey] || CHIP_STYLES.gray).text : '#8a8a84'
+            const statusColor = chip ? (CHIP_STYLES[chip.styleKey] || CHIP_STYLES.gray).text : T.ink.muted
             return (
               <div key={e.id} onClick={() => onOpenEngagement(e)}
-                style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', background: '#fff', border: '0.5px solid rgba(0,0,0,0.08)', borderRadius: '8px', cursor: 'pointer' }}>
+                style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', background: T.surface.raised, border: T.border.divider, borderRadius: T.radius.control, cursor: 'pointer' }}>
                 <span style={{ color: (CHIP_STYLES[e.stage] || CHIP_STYLES.gray).text, display: 'inline-flex', flexShrink: 0 }}><StageIcon size={15} /></span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontSize: '13px', fontWeight: 500, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <p style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, fontVariantNumeric: T.type.tabular, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {displayTitle(e)}{value != null ? ` · ${fmtMoney(value)}` : ''}
                   </p>
                   {(e.description || '').trim() && (
-                    <p style={{ fontSize: '11px', color: '#8a8a84', marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <p style={{ fontSize: '11px', color: T.ink.muted, marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {e.description.trim().split('\n')[0]}
                     </p>
                   )}
@@ -440,7 +441,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             )
           })}
           {open.length === 0 && (
-            <div style={{ padding: '14px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px', border: '0.5px dashed rgba(0,0,0,0.12)', borderRadius: '8px' }}>
+            <div style={{ padding: '14px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px', border: T.border.dashedSoft, borderRadius: T.radius.control }}>
               No open engagements
             </div>
           )}
@@ -456,15 +457,15 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
               <div key={e.id} onClick={() => onOpenEngagement(e)}
                 style={{ display: 'flex', flexDirection: 'column', gap: '1px', padding: '5px 12px', cursor: 'pointer', opacity: 0.65 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                  <span style={{ color: won ? '#1D9E75' : '#b5b3ac', display: 'inline-flex', flexShrink: 0 }}>
+                  <span style={{ color: won ? T.state.success.fg : T.ink.quiet, display: 'inline-flex', flexShrink: 0 }}>
                     {won ? <IconCheck size={12} /> : <IconX size={12} />}
                   </span>
-                  <span style={{ flex: 1, minWidth: 0, fontSize: '11px', color: '#6b6b66', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: '11px', color: T.ink.secondary, fontVariantNumeric: T.type.tabular, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {displayTitle(e)}{Number(money) > 0 ? ` · ${fmtMoney(money)}` : ''} · {won ? 'won' : 'lost'} {monthYear(e.closed_at) || ''}{reason ? ` · ${reason}` : ''}
                   </span>
                 </span>
                 {note && (
-                  <span style={{ fontSize: '11px', fontStyle: 'italic', color: '#8a8a84', paddingLeft: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '11px', fontStyle: 'italic', color: T.ink.muted, paddingLeft: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     “{note}”
                   </span>
                 )}
@@ -472,7 +473,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             )
           })}
           {closed.length > 2 && !showClosed && (
-            <button onClick={() => setShowClosed(true)} style={{ border: 'none', background: 'transparent', padding: '2px 12px', textAlign: 'left', fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
+            <button onClick={() => setShowClosed(true)} style={{ border: 'none', background: 'transparent', padding: '2px 12px', textAlign: 'left', fontSize: '11px', color: T.ink.muted, cursor: 'pointer', fontFamily: 'inherit' }}>
               Show {closed.length - 2} more closed
             </button>
           )}
@@ -499,14 +500,14 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   // Jobber pre-link) · + New engagement.
   const actionBar = c && (
     <div style={{
-      position: 'sticky', bottom: 0, zIndex: 5, background: '#fff',
-      borderTop: '0.5px solid rgba(0,0,0,0.08)',
+      position: 'sticky', bottom: 0, zIndex: 5, background: T.surface.raised,
+      borderTop: T.border.divider,
       margin: isMobile ? '0 -16px' : '0 -24px',
       padding: isMobile ? '10px 16px calc(10px + env(safe-area-inset-bottom, 0px))' : '12px 24px',
     }}>
       <ActionRow>
         {c.phone && (
-          <a href={`tel:${c.phone}`} style={actionBtn('blue')}>
+          <a href={`tel:${c.phone}`} style={actionBtn('accent')}>
             <IconPhone size={14} /> Call
           </a>
         )}
@@ -519,13 +520,13 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
               <IconExternalLink size={14} /> Open in Jobber
             </a>
           ) : (
-            <span title="No Jobber record link available" style={{ ...actionBtn('gray'), color: '#c9c7c0', cursor: 'default' }}>
+            <span title="No Jobber record link available" style={{ ...actionBtn('gray'), color: T.ink.faint, cursor: 'default' }}>
               <IconExternalLink size={14} /> Open in Jobber
             </span>
           )
         ) : (
           onSendToJobber && (
-            <button style={actionBtn('green')} disabled={busy} onClick={() => onSendToJobber(c.id)}>
+            <button style={actionBtn('accent')} disabled={busy} onClick={() => onSendToJobber(c.id)}>
               <IconSend size={14} /> Send to Jobber
             </button>
           )
@@ -537,7 +538,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
       {touchOpen && (
         <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <select value={touchMethod} onChange={e => setTouchMethod(e.target.value)}
-            style={{ padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', background: '#fff' }}>
+            style={{ padding: '8px 10px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', background: T.surface.raised }}>
             <option value="call">Call</option>
             <option value="sms">Text</option>
             <option value="email">Email</option>
@@ -545,7 +546,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
           </select>
           <input value={touchNote} onChange={e => setTouchNote(e.target.value)} placeholder="Notes (optional)…"
             onKeyDown={e => { if (e.key === 'Enter') logTouchpoint() }}
-            style={{ flex: 1, minWidth: '140px', padding: '8px 12px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
+            style={{ flex: 1, minWidth: '140px', padding: '8px 12px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
           <button style={{ ...quietBtn(), minHeight: 0 }} disabled={busy} onClick={logTouchpoint}>Log</button>
         </div>
       )}
@@ -553,8 +554,8 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   )
 
   const filesTab = (
-    <div style={{ padding: '18px 12px', border: '0.5px dashed rgba(0,0,0,0.15)', borderRadius: '8px', textAlign: 'center' }}>
-      <p style={{ fontSize: '12px', color: '#b5b3ac', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+    <div style={{ padding: '18px 12px', border: T.border.dashed, borderRadius: T.radius.control, textAlign: 'center' }}>
+      <p style={{ fontSize: '12px', color: T.ink.quiet, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
         <IconPaperclip size={14} /> No files yet — quotes, photos, and attachments will land here
       </p>
     </div>
@@ -578,17 +579,17 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         <InitialsAvatar name={c.name} bg={fam.bg} text={fam.text} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: '16px', fontWeight: 500, color: '#1a1a18', display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+          <p style={{ fontSize: '16px', fontWeight: 500, color: T.ink.primary, letterSpacing: T.type.trackTitle, display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
             {statusMeta && <StatusChip label={statusMeta.label} styleKey={statusMeta.styleKey} />}
           </p>
-          <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {c.location_name ? `${c.location_name} · ` : ''}client since {monthYear(c.created_at) || '—'}
             {jobberHref && (
               <>
                 {' · '}
                 <a className="bee-contact-link" href={jobberHref} target="_blank" rel="noreferrer"
-                  style={{ color: ACCENT_BLUE, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                  style={{ color: T.accent.fg, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                   Jobber <IconExternalLink size={11} />
                 </a>
               </>
@@ -598,11 +599,11 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         {siblings && siblings.length > 1 && (
           <span style={{ display: 'inline-flex', gap: '2px', flexShrink: 0 }}>
             <button aria-label="Previous client" disabled={!prevId} onClick={() => prevId && onNavigate(prevId)}
-              style={{ width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', color: prevId ? '#6b6a64' : '#dedcd5', cursor: prevId ? 'pointer' : 'default', padding: 0 }}>
+              style={{ width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', color: prevId ? T.ink.secondary : T.ink.disabled, cursor: prevId ? 'pointer' : 'default', padding: 0 }}>
               <span style={{ display: 'inline-flex', transform: 'rotate(180deg)' }}><IconChevronRight size={16} /></span>
             </button>
             <button aria-label="Next client" disabled={!nextId} onClick={() => nextId && onNavigate(nextId)}
-              style={{ width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', color: nextId ? '#6b6a64' : '#dedcd5', cursor: nextId ? 'pointer' : 'default', padding: 0 }}>
+              style={{ width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', color: nextId ? T.ink.secondary : T.ink.disabled, cursor: nextId ? 'pointer' : 'default', padding: 0 }}>
               <IconChevronRight size={16} />
             </button>
           </span>
@@ -615,11 +616,11 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
 
       {/* Metric band — full-bleed money row (v4): Collected / Invoiced /
           Owing / Last touch. Owing spans ALL engagements incl. closed
-          (route aggregate — the closed-debt drift fix); red when owed. */}
+          (route aggregate — the closed-debt drift fix); accent when owed. */}
       <MetricBand bleed={isMobile ? 16 : 24} cells={[
         { label: 'Collected', value: (agg?.lifetime_paid || 0) > 0 ? fmtMoney(agg.lifetime_paid) : null },
         { label: 'Invoiced', value: (agg?.invoiced || 0) > 0 ? fmtMoney(agg.invoiced) : null },
-        { label: 'Owing', value: (agg?.owing || 0) > 0 ? fmtMoney(agg.owing) : null, color: '#791F1F' },
+        { label: 'Owing', value: (agg?.owing || 0) > 0 ? fmtMoney(agg.owing) : null, color: T.accent.fg },
         { label: 'Last touch', value: lastTouchTs ? vitalsAge(lastTouchTs, nowMs) : null },
       ]} />
 
@@ -651,10 +652,10 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   )
 
   const loading = !data && !loadErr && (
-    <div style={{ padding: '40px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px' }}>Loading…</div>
+    <div style={{ padding: '40px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px' }}>Loading…</div>
   )
   const errBlock = loadErr && (
-    <p style={{ margin: '0 24px 24px', fontSize: '12px', color: '#791F1F', background: '#FCEBEB', padding: '8px 12px', borderRadius: '8px' }}>
+    <p style={{ margin: '0 24px 24px', fontSize: '12px', color: T.state.danger.fg, background: T.state.danger.soft, padding: '8px 12px', borderRadius: T.radius.control }}>
       Couldn’t load client: {loadErr}
     </p>
   )

@@ -24,8 +24,9 @@
 
 import React, { useState, useRef } from 'react'
 import { EditPencil, InlineEditControls } from './shared/inlineEdit'
+import { T } from './shared/tokens'
 
-const QUIET = '#f7f6f4'
+const QUIET = T.surface.sunken
 
 export default function EditableDesc({ text, onSave, placeholder = 'Describe the request…', showEmpty = false, style = {} }) {
   const [editing, setEditing] = useState(false)
@@ -70,10 +71,10 @@ export default function EditableDesc({ text, onSave, placeholder = 'Describe the
           rows={3}
           maxLength={2000}
           placeholder={placeholder}
-          style={{ width: '100%', padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '6px', fontSize: '12px', lineHeight: 1.45, color: '#1a1a18', fontFamily: 'inherit', outline: 'none', resize: 'vertical', boxSizing: 'border-box' }}
+          style={{ width: '100%', padding: '8px 10px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', lineHeight: 1.45, color: T.ink.primary, fontFamily: 'inherit', outline: 'none', resize: 'vertical', boxSizing: 'border-box' }}
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-end', marginTop: '4px' }}>
-          {err && <p style={{ flex: 1, fontSize: '11px', color: '#791F1F' }}>{err}</p>}
+          {err && <p style={{ flex: 1, fontSize: '11px', color: T.state.danger.fg }}>{err}</p>}
           <InlineEditControls busy={busy} onSave={save} onCancel={cancel} saveHint="⌘-Enter" />
         </div>
       </div>
@@ -84,7 +85,7 @@ export default function EditableDesc({ text, onSave, placeholder = 'Describe the
     if (!showEmpty) return null
     return (
       <button onClick={e => { e.stopPropagation(); setDraft(''); setEditing(true) }}
-        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', border: '0.5px dashed rgba(0,0,0,0.15)', borderRadius: '6px', background: 'transparent', fontSize: '12px', color: '#b5b3ac', cursor: 'text', fontFamily: 'inherit', ...style }}>
+        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', border: T.border.dashed, borderRadius: T.radius.control, background: 'transparent', fontSize: '12px', color: T.ink.quiet, cursor: 'text', fontFamily: 'inherit', ...style }}>
         Add a description…
       </button>
     )
@@ -94,17 +95,17 @@ export default function EditableDesc({ text, onSave, placeholder = 'Describe the
   return (
     <div onClick={e => { e.stopPropagation(); setDraft(t); setEditing(true) }}
       title="Click to edit"
-      style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', cursor: 'text', background: QUIET, borderRadius: '6px', padding: '8px 10px', ...style }}>
+      style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', cursor: 'text', background: QUIET, borderRadius: T.radius.control, padding: '8px 10px', ...style }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <p style={{
-          fontSize: '12px', fontStyle: 'italic', color: '#6b6b66', lineHeight: 1.45, whiteSpace: 'pre-wrap',
+          fontSize: '12px', fontStyle: 'italic', color: T.ink.secondary, lineHeight: 1.45, whiteSpace: 'pre-wrap',
           ...(expanded ? {} : { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }),
         }}>
           {t}
         </p>
         {clampLikely && !expanded && (
           <button onClick={e => { e.stopPropagation(); setExpanded(true) }}
-            style={{ border: 'none', background: 'transparent', padding: 0, marginTop: '2px', fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
+            style={{ border: 'none', background: 'transparent', padding: 0, marginTop: '2px', fontSize: '11px', color: T.ink.muted, cursor: 'pointer', fontFamily: 'inherit' }}>
             Show more
           </button>
         )}

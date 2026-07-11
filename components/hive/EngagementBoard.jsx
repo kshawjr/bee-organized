@@ -32,6 +32,7 @@
 
 import React, { useState, useEffect, useRef } from 'react'
 import { ENGAGEMENT_STAGES, isTerminal, CLOSED_WON, CLOSED_LOST } from './shared/stageConfig'
+import { T } from './shared/tokens'
 import { SECTION_LABEL, SECTION_COUNT, TEXT_SUCCESS, TEXT_DANGER, TEXT_MUTED } from '@/components/ui/tokens'
 import FilterChips from '@/components/ui/FilterChips'
 // THE shared status derivation — board cards and list rows consume the
@@ -83,13 +84,15 @@ function EngagementCard({ e, onOpen, draggable, onDragStart, onDragEnd, accent =
   const rawValue = engagementValue(e)
   const value = rawValue != null ? fmtMoney(rawValue) : null
   return (
+    // The card lift (raised surface + warm border + two-layer shadow)
+    // lives in ui/Card itself — one primitive, no double chrome here.
     <div draggable={draggable || undefined} onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <Card onClick={onOpen} accent={accent}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '3px' }}>
-          <p style={{ flex: 1, minWidth: 0, fontSize: '13px', fontWeight: 500, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <p style={{ flex: 1, minWidth: 0, fontSize: '13px', fontWeight: 500, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {e.client_name}
           </p>
-          {value && <span style={{ fontSize: '12px', fontWeight: 500, color: '#1a1a18', flexShrink: 0 }}>{value}</span>}
+          {value && <span style={{ fontSize: '12px', fontWeight: 500, color: T.ink.primary, fontVariantNumeric: T.type.tabular, letterSpacing: T.type.trackNum, flexShrink: 0 }}>{value}</span>}
         </div>
         <p style={{ fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: '8px' }}>
           {displayTitle(e)}
@@ -232,7 +235,7 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
         data-board-col={stage.key}
         style={{
           width: isMobile ? '100%' : '220px', flexShrink: 0,
-          borderRadius: '10px',
+          borderRadius: T.radius.inset,
           padding: '2px',
         }}
       >
@@ -249,7 +252,7 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
             />
           ))}
           {cards.length === 0 && (
-            <div style={{ padding: '14px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px', border: '0.5px dashed rgba(0,0,0,0.12)', borderRadius: '10px' }}>
+            <div style={{ padding: '14px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px', border: T.border.dashedSoft, borderRadius: T.radius.inset }}>
               Empty
             </div>
           )}
@@ -263,8 +266,8 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
   // targets — won and lost. Dropping opens the pending close flow
   // (beginClose); it never PATCHes directly.
   const CLOSE_ZONES = [
-    { target: CLOSED_WON, label: 'Closed won', aria: 'Close as won', color: `var(--text-success, ${TEXT_SUCCESS})`, tint: 'rgba(29,158,117,0.08)' },
-    { target: CLOSED_LOST, label: 'Closed lost', aria: 'Close as lost', color: `var(--text-danger, ${TEXT_DANGER})`, tint: 'rgba(121,31,31,0.06)' },
+    { target: CLOSED_WON, label: 'Closed won', aria: 'Close as won', color: `var(--text-success, ${TEXT_SUCCESS})`, tint: T.state.success.wash },
+    { target: CLOSED_LOST, label: 'Closed lost', aria: 'Close as lost', color: `var(--text-danger, ${TEXT_DANGER})`, tint: T.state.danger.wash },
   ]
   const renderCloseZones = () => (
     <div key="closed-rail" style={{ width: '220px', flexShrink: 0, padding: '2px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -284,7 +287,7 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
           }}
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            minHeight: '96px', borderRadius: '10px',
+            minHeight: '96px', borderRadius: T.radius.inset,
             border: `1.5px dashed ${z.color}`,
             background: dragOverCol === z.target ? z.tint : 'transparent',
             fontSize: '12px', fontWeight: 500, color: z.color,
@@ -334,12 +337,12 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
           style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px',
             width: '34px', minHeight: '200px', padding: '12px 0', flexShrink: 0,
-            border: '0.5px solid rgba(0,0,0,0.08)', borderRadius: '10px',
+            border: T.border.divider, borderRadius: T.radius.inset,
             background: 'transparent', cursor: 'pointer', fontFamily: 'inherit',
           }}
         >
-          <IconChevronRight size={12} style={{ transform: 'rotate(180deg)', color: '#b5b3ac' }} />
-          <span style={{ writingMode: 'vertical-rl', ...SECTION_LABEL, color: '#8a8a84' }}>
+          <IconChevronRight size={12} style={{ transform: 'rotate(180deg)', color: T.ink.quiet }} />
+          <span style={{ writingMode: 'vertical-rl', ...SECTION_LABEL, color: T.ink.muted }}>
             Closed<span style={SECTION_COUNT}> · {scopedClosedTotal ?? '…'}</span>
           </span>
         </button>
@@ -387,19 +390,19 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
             />
           ))}
           {segLoading && (
-            <div style={{ padding: '14px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px' }}>Loading…</div>
+            <div style={{ padding: '14px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px' }}>Loading…</div>
           )}
           {!segLoading && segRows.length === 0 && (
-            <div style={{ padding: '14px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px', border: '0.5px dashed rgba(0,0,0,0.12)', borderRadius: '10px' }}>
+            <div style={{ padding: '14px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px', border: T.border.dashedSoft, borderRadius: T.radius.inset }}>
               Empty
             </div>
           )}
           {!segLoading && segData && segData.total != null && segRows.length < segData.total && (
-            <div style={{ fontSize: '11px', color: '#b5b3ac', padding: '2px 2px 8px' }}>
+            <div style={{ fontSize: '11px', color: T.ink.quiet, padding: '2px 2px 8px' }}>
               Showing {segRows.length} most recent ·{' '}
               <button
                 onClick={onViewClosedInList}
-                style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline', textUnderlineOffset: '2px' }}
+                style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', color: T.ink.muted, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline', textUnderlineOffset: '2px' }}
               >
                 view all in List
               </button>
@@ -431,18 +434,18 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
           <button onClick={() => setMobileCol(c => Math.max(0, c - 1))} disabled={mobileCol === 0}
-            style={{ border: 'none', background: 'transparent', fontSize: '18px', color: mobileCol === 0 ? '#c9c7c0' : '#6b6b66', cursor: 'pointer', padding: '4px 8px' }}><IconChevronRight size={16} style={{ transform: 'rotate(180deg)' }} /></button>
+            style={{ border: 'none', background: 'transparent', fontSize: '18px', color: mobileCol === 0 ? T.ink.faint : T.ink.secondary, cursor: 'pointer', padding: '4px 8px' }}><IconChevronRight size={16} style={{ transform: 'rotate(180deg)' }} /></button>
           <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
             <SectionHeader label={stage.displayLabel} count={count} style={{ marginBottom: 0 }} />
           </div>
           <button onClick={() => setMobileCol(c => Math.min(BOARD_STAGES.length - 1, c + 1))} disabled={mobileCol === BOARD_STAGES.length - 1}
-            style={{ border: 'none', background: 'transparent', fontSize: '18px', color: mobileCol === BOARD_STAGES.length - 1 ? '#c9c7c0' : '#6b6b66', cursor: 'pointer', padding: '4px 8px' }}><IconChevronRight size={16} /></button>
+            style={{ border: 'none', background: 'transparent', fontSize: '18px', color: mobileCol === BOARD_STAGES.length - 1 ? T.ink.faint : T.ink.secondary, cursor: 'pointer', padding: '4px 8px' }}><IconChevronRight size={16} /></button>
         </div>
         {renderColumn(stage)}
         <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', marginTop: '12px' }}>
           {BOARD_STAGES.map((s, i) => (
             <button key={s.key} onClick={() => setMobileCol(i)} aria-label={s.label}
-              style={{ width: '7px', height: '7px', borderRadius: '50%', border: 'none', padding: 0, cursor: 'pointer', background: i === mobileCol ? '#1a1a18' : 'rgba(0,0,0,0.15)' }} />
+              style={{ width: '7px', height: '7px', borderRadius: T.radius.round, border: 'none', padding: 0, cursor: 'pointer', background: i === mobileCol ? T.ink.primary : T.hairline.control }} />
           ))}
         </div>
       </div>

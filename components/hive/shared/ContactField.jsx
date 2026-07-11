@@ -40,7 +40,7 @@
 
 import React, { useState, useRef } from 'react'
 import { IconPhone, IconMail } from '@/components/ui/icons'
-import { ACCENT_BLUE } from './stageConfig'
+import { T } from './tokens'
 import { EditPencil, InlineEditControls } from './inlineEdit'
 import { normalizePhoneDigits } from '@/lib/jobber-contact-writeback'
 
@@ -118,7 +118,7 @@ export default function ContactField({ kind, leadId, value, onSaved = () => {}, 
     return (
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-          <span style={{ color: '#8a8a84', display: 'inline-flex', flexShrink: 0 }}><f.Icon size={13} /></span>
+          <span style={{ color: T.ink.muted, display: 'inline-flex', flexShrink: 0 }}><f.Icon size={13} /></span>
           <input
             autoFocus
             type={f.type}
@@ -132,29 +132,29 @@ export default function ContactField({ kind, leadId, value, onSaved = () => {}, 
               if (e.key === 'Escape') cancel()
             }}
             onBlur={save}
-            style={{ flex: 1, minWidth: 0, padding: '5px 8px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '6px', fontSize: '12px', fontFamily: 'inherit', color: '#1a1a18', background: '#fff', outline: 'none' }}
+            style={{ flex: 1, minWidth: 0, padding: '5px 8px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', color: T.ink.primary, background: T.surface.raised, outline: 'none' }}
           />
           <InlineEditControls busy={busy} onSave={save} onCancel={cancel} />
         </div>
-        {err && <p style={{ fontSize: '11px', color: '#791F1F', marginTop: '3px', paddingLeft: '20px' }}>{err}</p>}
+        {err && <p style={{ fontSize: '11px', color: T.state.danger.fg, marginTop: '3px', paddingLeft: '20px' }}>{err}</p>}
       </div>
     )
   }
 
   return value ? (
     <p onClick={open} title={`Edit ${kind}`}
-      style={{ fontSize: '12px', color: '#1a1a18', display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, cursor: 'text' }}>
-      <span style={{ color: '#8a8a84', display: 'inline-flex', flexShrink: 0 }}><f.Icon size={13} /></span>
+      style={{ fontSize: '12px', color: T.ink.primary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, cursor: 'text' }}>
+      <span style={{ color: T.ink.muted, display: 'inline-flex', flexShrink: 0 }}><f.Icon size={13} /></span>
       <a className="bee-contact-link" href={f.href(value)} onClick={e => e.stopPropagation()}
-        style={{ color: ACCENT_BLUE, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        style={{ color: T.accent.fg, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {value}
       </a>
       <EditPencil />
     </p>
   ) : (
-    <p onClick={open} style={{ fontSize: '12px', color: '#c9c7c0', display: 'flex', alignItems: 'center', gap: '7px', cursor: 'text' }}>
+    <p onClick={open} style={{ fontSize: '12px', color: T.ink.faint, display: 'flex', alignItems: 'center', gap: '7px', cursor: 'text' }}>
       <span style={{ display: 'inline-flex' }}><f.Icon size={13} /></span>
-      <span style={{ borderBottom: '1px dashed rgba(0,0,0,0.15)' }}>{f.empty}</span>
+      <span style={{ borderBottom: T.border.underline }}>{f.empty}</span>
     </p>
   )
 }

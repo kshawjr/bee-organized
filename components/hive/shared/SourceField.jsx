@@ -21,6 +21,7 @@
 import React, { useState } from 'react'
 import { IconSparkles } from '@/components/ui/icons'
 import MetaSelect from '../MetaSelect'
+import { T } from './tokens'
 import { EditPencil } from './inlineEdit'
 
 export default function SourceField({ leadId, value, options = [], onSaved = () => {}, setToast = () => {} }) {
@@ -55,17 +56,17 @@ export default function SourceField({ leadId, value, options = [], onSaved = () 
       onPick={save}
       renderTrigger={(toggle) => shown ? (
         <p onClick={toggle} title="Edit source"
-          style={{ fontSize: '12px', color: '#1a1a18', display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, cursor: 'pointer' }}>
-          <span style={{ color: '#8a8a84', display: 'inline-flex', flexShrink: 0 }}><IconSparkles size={13} /></span>
+          style={{ fontSize: '12px', color: T.ink.primary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, cursor: 'pointer' }}>
+          <span style={{ color: T.ink.muted, display: 'inline-flex', flexShrink: 0 }}><IconSparkles size={13} /></span>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            <span style={{ color: '#8a8a84' }}>Source: </span>{shown}
+            <span style={{ color: T.ink.muted }}>Source: </span>{shown}
           </span>
           <EditPencil />
         </p>
       ) : (
-        <p onClick={toggle} style={{ fontSize: '12px', color: '#c9c7c0', display: 'flex', alignItems: 'center', gap: '7px', cursor: 'pointer' }}>
+        <p onClick={toggle} style={{ fontSize: '12px', color: T.ink.faint, display: 'flex', alignItems: 'center', gap: '7px', cursor: 'pointer' }}>
           <span style={{ display: 'inline-flex' }}><IconSparkles size={13} /></span>
-          <span style={{ borderBottom: '1px dashed rgba(0,0,0,0.15)' }}>add source</span>
+          <span style={{ borderBottom: T.border.underline }}>add source</span>
         </p>
       )}
     />

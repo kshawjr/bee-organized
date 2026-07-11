@@ -26,17 +26,18 @@
 'use client'
 
 import React, { useEffect, useMemo, useState } from 'react'
+import { T } from './shared/tokens'
 
-const ACCENT = '#0F6E56'
+const ACCENT = T.accent.fg
 
 const sectionLbl = {
-  fontSize: '10px', fontWeight: 600, color: '#b5b3ac', letterSpacing: '0.6px',
+  fontSize: '10px', fontWeight: 600, color: T.ink.quiet, letterSpacing: '0.6px',
   textTransform: 'uppercase', padding: '8px 10px 3px',
 }
 const rowBtn = (selected) => ({
   display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '1px',
-  width: '100%', padding: '7px 10px', border: 'none', borderRadius: '6px',
-  background: selected ? 'rgba(15,110,86,0.08)' : 'transparent',
+  width: '100%', padding: '7px 10px', border: 'none', borderRadius: T.radius.control,
+  background: selected ? T.accent.soft : 'transparent',
   cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
 })
 
@@ -130,8 +131,8 @@ export default function ReferrerPicker({
 
   return (
     <div style={{
-      marginTop: '6px', border: '0.5px solid rgba(0,0,0,0.25)', borderRadius: '8px',
-      background: '#fff', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      marginTop: '6px', border: T.border.strong, borderRadius: T.radius.control,
+      background: T.surface.raised, display: 'flex', flexDirection: 'column', overflow: 'hidden',
     }}>
       <div style={{ padding: '8px 8px 4px', flexShrink: 0 }}>
         <input
@@ -141,28 +142,28 @@ export default function ReferrerPicker({
           placeholder="Search partners, contacts, clients…"
           aria-label="Search referrers"
           style={{
-            width: '100%', padding: '7px 10px', border: '0.5px solid rgba(0,0,0,0.2)',
-            borderRadius: '6px', fontSize: '13px', fontFamily: 'inherit', color: '#1a1a18',
+            width: '100%', padding: '7px 10px', border: T.border.strong,
+            borderRadius: T.radius.control, fontSize: '13px', fontFamily: 'inherit', color: T.ink.primary,
             outline: 'none', boxSizing: 'border-box',
           }}
         />
       </div>
       <div style={{ maxHeight: '240px', overflowY: 'auto', padding: '0 8px 8px' }}>
-        {partnerRows === null && <p style={{ fontSize: '12px', color: '#b5b3ac', padding: '8px 10px' }}>Loading partners…</p>}
-        {loadErr && <p style={{ fontSize: '11px', color: '#8a8a84', padding: '4px 10px' }}>Partners unavailable ({loadErr}) — clients still searchable.</p>}
+        {partnerRows === null && <p style={{ fontSize: '12px', color: T.ink.quiet, padding: '8px 10px' }}>Loading partners…</p>}
+        {loadErr && <p style={{ fontSize: '11px', color: T.ink.muted, padding: '4px 10px' }}>Partners unavailable ({loadErr}) — clients still searchable.</p>}
         {sections.map(s => s.items.length > 0 && (
           <React.Fragment key={s.key}>
             <p style={sectionLbl}>{s.label}</p>
             {s.items.map(it => (
               <button key={it.id} type="button" onClick={() => onSelect({ id: it.id, kind: s.kind, name: it.name })} style={rowBtn(selectedId === it.id)}>
-                <span style={{ fontSize: '13px', fontWeight: 500, color: '#1a1a18' }}>{it.name}</span>
-                {it.sub && <span style={{ fontSize: '11px', color: '#8a8a84' }}>{it.sub}</span>}
+                <span style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary }}>{it.name}</span>
+                {it.sub && <span style={{ fontSize: '11px', color: T.ink.muted }}>{it.sub}</span>}
               </button>
             ))}
           </React.Fragment>
         ))}
         {!hasAnyMatch && !q && partnerRows !== null && (
-          <p style={{ fontSize: '12px', color: '#8a8a84', textAlign: 'center', padding: '8px' }}>No matches</p>
+          <p style={{ fontSize: '12px', color: T.ink.muted, textAlign: 'center', padding: '8px' }}>No matches</p>
         )}
         {/* Create rows — shown once the user has typed. Partner/contact
             only; the Clients section is deliberately match-only. */}
@@ -170,7 +171,7 @@ export default function ReferrerPicker({
           <>
             {['partner', 'contact'].map(t => (
               <button key={t} type="button" disabled={!!creating} onClick={() => createReferrer(t)}
-                style={{ ...rowBtn(false), background: 'rgba(15,110,86,0.05)', marginTop: '4px', opacity: creating ? 0.6 : 1 }}>
+                style={{ ...rowBtn(false), background: T.accent.faint, marginTop: '4px', opacity: creating ? 0.6 : 1 }}>
                 <span style={{ fontSize: '13px', fontWeight: 500, color: ACCENT }}>
                   {creating === t ? 'Creating…' : `＋ Create “${search.trim()}” as ${t}`}
                 </span>
@@ -179,7 +180,7 @@ export default function ReferrerPicker({
           </>
         )}
         {createErr && (
-          <p style={{ fontSize: '12px', color: '#791F1F', background: '#FCEBEB', padding: '8px 12px', borderRadius: '8px', margin: '6px 2px 2px' }}>
+          <p style={{ fontSize: '12px', color: T.state.danger.fg, background: T.state.danger.soft, padding: '8px 12px', borderRadius: T.radius.control, margin: '6px 2px 2px' }}>
             Create failed: {createErr}
           </p>
         )}

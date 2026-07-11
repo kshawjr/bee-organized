@@ -53,10 +53,11 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { deriveClientStatus } from './shared/clientStatus'
-import { CHIP_STYLES, ACCENT_BLUE, CLOSED_WON, isTerminal } from './shared/stageConfig'
+import { CHIP_STYLES, CLOSED_WON, isTerminal } from './shared/stageConfig'
 import { formatInboxAgeParts } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
-import { GREEN_FILL, HAIRLINE_BORDER, TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY } from '@/components/ui/tokens'
+import { TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY } from '@/components/ui/tokens'
+import { T } from './shared/tokens'
 import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock, IconDots } from '@/components/ui/icons'
 import InitialsAvatar from './shared/InitialsAvatar'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty } from './shared/FilterPopover'
@@ -96,7 +97,7 @@ function SectionLabel({ glyph, color, label, count, hint }) {
 const ghostBtn = {
   width: '32px', height: '32px', padding: 0,
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-  border: 'none', background: 'transparent', borderRadius: '8px',
+  border: 'none', background: 'transparent', borderRadius: T.radius.control,
   color: `var(--text-muted, ${TEXT_MUTED})`,
   cursor: 'pointer', fontFamily: 'inherit',
 }
@@ -134,13 +135,13 @@ function MenuRow({ label, danger, disabled, onPick }) {
   return (
     <button disabled={disabled}
       onClick={(ev) => { ev.stopPropagation(); onPick() }}
-      onMouseEnter={(ev) => { ev.currentTarget.style.background = '#f7f6f4' }}
+      onMouseEnter={(ev) => { ev.currentTarget.style.background = T.surface.hover }}
       onMouseLeave={(ev) => { ev.currentTarget.style.background = 'transparent' }}
       style={{
         display: 'flex', alignItems: 'center', gap: '7px', width: '100%',
         padding: '8px 10px', border: 'none', background: 'transparent',
-        borderRadius: '7px', fontSize: '13px', fontWeight: 500,
-        fontFamily: 'inherit', color: danger ? '#b42318' : '#1a1a18',
+        borderRadius: T.radius.control, fontSize: '13px', fontWeight: 500,
+        fontFamily: 'inherit', color: danger ? T.state.danger.strong : T.ink.primary,
         cursor: 'pointer', textAlign: 'left', whiteSpace: 'nowrap',
       }}>
       {label}
@@ -149,7 +150,7 @@ function MenuRow({ label, danger, disabled, onPick }) {
 }
 
 // The open ··· menu rides a portal to <body>: cardStyle keeps
-// overflow:hidden (it's what clips rows to the 12px radius), so an
+// overflow:hidden (it's what clips rows to the card radius), so an
 // in-card absolute popover gets amputated at the card edge — and the
 // last row's menu would be lost entirely. Fixed-position coords derive
 // from the trigger's rect and re-derive on scroll/resize (capture-phase
@@ -206,9 +207,9 @@ function RowMenu({ anchorId, isMobile, onClose, children }) {
       style={{
         position: 'fixed', top: 0, left: 0, ...(pos || {}),
         visibility: pos ? 'visible' : 'hidden',
-        minWidth: '210px', zIndex: 80, background: '#fff',
-        border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`,
-        borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.14)',
+        minWidth: '210px', zIndex: 80, background: T.surface.raised,
+        border: T.border.thin,
+        borderRadius: T.radius.inset, boxShadow: T.shadow.pop,
         padding: '4px',
       }}>
       {children}
@@ -399,7 +400,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       <span>
         {text} ·{' '}
         <button onClick={onUndo}
-          style={{ background: 'none', border: 'none', padding: 0, color: '#fff', font: 'inherit', textDecoration: 'underline', cursor: 'pointer' }}>
+          style={{ background: 'none', border: 'none', padding: 0, color: T.ink.inverse, font: 'inherit', textDecoration: 'underline', cursor: 'pointer' }}>
           Undo
         </button>
       </span>
@@ -562,7 +563,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     const phoneLabel = (p.phone || '').trim()
     const phoneDigits = p.phoneNormalized || phoneLabel.replace(/\D/g, '')
     const actions = sent ? (
-      <span style={{ fontSize: '12px', color: GREEN_FILL, fontWeight: 500, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+      <span style={{ fontSize: '12px', color: T.accent.fg, fontWeight: 500, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
         <IconCheck size={13} /> Sent — engagement will appear on the board
       </span>
     ) : (
@@ -613,7 +614,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
         }}
         onPointerDown={() => pressStart(p)}
         onPointerUp={pressEnd} onPointerLeave={pressEnd} onPointerCancel={pressEnd}
-        style={{ padding: isMobile ? '12px 14px' : '13px 16px', borderBottom: '0.5px solid rgba(0,0,0,0.08)', cursor: 'pointer' }}>
+        style={{ padding: isMobile ? '12px 14px' : '13px 16px', borderBottom: T.border.divider, cursor: 'pointer' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {selectMode && (
             <input type="checkbox" checked={checked} disabled={linked}
@@ -623,7 +624,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
               onChange={() => toggleSelect(p)}
               style={{
                 width: '16px', height: '16px', flexShrink: 0, margin: 0,
-                accentColor: GREEN_FILL,
+                accentColor: T.accent.fg,
                 opacity: linked ? 0.35 : 1,
                 cursor: linked ? 'not-allowed' : 'pointer',
               }} />
@@ -644,7 +645,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
                 <a className="bee-inbox-tel" href={`tel:${phoneDigits}`}
                   onClick={(ev) => ev.stopPropagation()}
                   style={{
-                    color: ACCENT_BLUE, textDecoration: 'none', fontSize: '11px',
+                    color: T.accent.fg, textDecoration: 'none', fontSize: '11px',
                     display: 'inline-flex', alignItems: 'center', gap: '4px',
                     minWidth: 0, overflow: 'hidden',
                     // Expanded hit area (comfortable mobile tap) without
@@ -685,12 +686,12 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     )
   }
 
-  const cardStyle = { background: '#fff', border: '0.5px solid rgba(0,0,0,0.08)', borderRadius: '12px', overflow: 'hidden' }
+  const cardStyle = { background: T.surface.raised, border: T.border.card, boxShadow: T.shadow.card, borderRadius: T.radius.card, overflow: 'hidden' }
 
   return (
     <div>
       <style>{`
-        .bee-inbox-row:hover { background:#f7f6f4 }
+        .bee-inbox-row:hover { background:${T.surface.hover} }
         .bee-inbox-row:last-child { border-bottom:none !important }
         .bee-ghost-btn:hover:not(:disabled) { color: var(--text-primary, ${TEXT_PRIMARY}) !important }
         .bee-ghost-btn:disabled { opacity:.45; cursor:default }
@@ -713,7 +714,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
             style={{
               width: '16px', height: '16px', flexShrink: 0,
               margin: 0, marginLeft: isMobile ? '14px' : '16px',
-              accentColor: GREEN_FILL,
+              accentColor: T.accent.fg,
               opacity: selectableIds.size === 0 ? 0.35 : 1,
               cursor: selectableIds.size === 0 ? 'not-allowed' : 'pointer',
             }} />
@@ -757,28 +758,28 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
         <div role="toolbar" aria-label="Bulk actions"
           style={{
             display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '12px',
-            padding: '8px 12px', background: '#fff',
-            border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, borderRadius: '10px',
+            padding: '8px 12px', background: T.surface.raised,
+            border: T.border.card, boxShadow: T.shadow.card, borderRadius: T.radius.card,
           }}>
           <button onClick={toggleSelectAll} disabled={selectableIds.size === 0}
-            style={{ padding: '5px 10px', borderRadius: '8px', border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 500, color: selectableIds.size === 0 ? '#b5b3ac' : ACCENT_BLUE, cursor: selectableIds.size === 0 ? 'default' : 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+            style={{ padding: '5px 10px', borderRadius: T.radius.control, border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 500, color: selectableIds.size === 0 ? T.ink.quiet : T.accent.fg, cursor: selectableIds.size === 0 ? 'default' : 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
             {selCount === selectableIds.size && selCount > 0 ? 'Clear selection' : `Select all (${selectableIds.size})`}
           </button>
-          <span style={{ fontSize: '11px', fontWeight: 500, color: '#6b6b66', background: '#f2f1ee', borderRadius: '20px', padding: '3px 10px', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: '11px', fontWeight: 500, color: T.ink.secondary, background: T.surface.sunken, borderRadius: T.radius.pill, padding: '3px 10px', whiteSpace: 'nowrap' }}>
             {selCount} selected
           </span>
           <span style={{ flex: 1 }} />
           {confirmRemove && selCount > 5 ? (
             <>
-              <span style={{ fontSize: '12px', color: '#6b6b66' }}>
+              <span style={{ fontSize: '12px', color: T.ink.secondary }}>
                 Remove {selCount} leads? They move to the Bin and drips stop.
               </span>
               <button onClick={bulkRemoveSelected} disabled={busyId === 'bulk'}
-                style={{ padding: '6px 14px', borderRadius: '8px', border: 'none', background: '#b42318', fontSize: '12px', fontWeight: 600, color: '#fff', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', opacity: busyId === 'bulk' ? 0.6 : 1 }}>
+                style={{ padding: '6px 14px', borderRadius: T.radius.control, border: 'none', background: T.state.danger.strong, fontSize: '12px', fontWeight: 600, color: T.ink.inverse, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', opacity: busyId === 'bulk' ? 0.6 : 1 }}>
                 Remove {selCount}
               </button>
               <button onClick={() => setConfirmRemove(false)}
-                style={{ padding: '6px 12px', borderRadius: '8px', border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, background: 'transparent', fontSize: '12px', color: '#6b6b66', cursor: 'pointer', fontFamily: 'inherit' }}>
+                style={{ padding: '6px 12px', borderRadius: T.radius.control, border: T.border.control, background: 'transparent', fontSize: '12px', color: T.ink.secondary, cursor: 'pointer', fontFamily: 'inherit' }}>
                 Keep
               </button>
             </>
@@ -786,12 +787,12 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
             <>
               {selCount > 0 && (
                 <button onClick={requestRemove} disabled={busyId === 'bulk'}
-                  style={{ padding: '6px 14px', borderRadius: '8px', border: 'none', background: '#b42318', fontSize: '12px', fontWeight: 600, color: '#fff', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', opacity: busyId === 'bulk' ? 0.6 : 1 }}>
+                  style={{ padding: '6px 14px', borderRadius: T.radius.control, border: 'none', background: T.state.danger.strong, fontSize: '12px', fontWeight: 600, color: T.ink.inverse, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', opacity: busyId === 'bulk' ? 0.6 : 1 }}>
                   Remove ({selCount})
                 </button>
               )}
               <button onClick={exitSelect}
-                style={{ padding: '6px 12px', borderRadius: '8px', border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, background: 'transparent', fontSize: '12px', color: '#6b6b66', cursor: 'pointer', fontFamily: 'inherit' }}>
+                style={{ padding: '6px 12px', borderRadius: T.radius.control, border: T.border.control, background: 'transparent', fontSize: '12px', color: T.ink.secondary, cursor: 'pointer', fontFamily: 'inherit' }}>
                 Cancel
               </button>
             </>
@@ -803,7 +804,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
         inboxFilterCount(filters) > 0 ? (
           <FilteredEmpty count={inboxFilterCount(filters)} onClear={clearFilters} noun="inbox leads" />
         ) : (
-        <div style={{ padding: '36px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px', border: '0.5px dashed rgba(0,0,0,0.12)', borderRadius: '12px' }}>
+        <div style={{ padding: '36px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px', border: T.border.dashedSoft, borderRadius: T.radius.inset }}>
           New inquiries land here
         </div>
         )
@@ -816,7 +817,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
                 {fresh.map(p => <Row key={p.id} p={p} family={TEAL} pill="New" />)}
               </div>
             ) : (
-              <div style={{ padding: '20px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px', border: '0.5px dashed rgba(0,0,0,0.12)', borderRadius: '12px' }}>
+              <div style={{ padding: '20px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px', border: T.border.dashedSoft, borderRadius: T.radius.inset }}>
                 New inquiries land here
               </div>
             )}
@@ -829,7 +830,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
                 {working.map(p => <Row key={p.id} p={p} family={BLUE} pill="Attempting" />)}
               </div>
             ) : (
-              <div style={{ padding: '20px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px', border: '0.5px dashed rgba(0,0,0,0.12)', borderRadius: '12px' }}>
+              <div style={{ padding: '20px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px', border: T.border.dashedSoft, borderRadius: T.radius.inset }}>
                 Leads you’ve reached out to appear here — log a call or email from any client
               </div>
             )}

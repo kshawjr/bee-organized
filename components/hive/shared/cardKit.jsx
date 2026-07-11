@@ -20,11 +20,11 @@
 
 import React, { useEffect, useState } from 'react'
 import { IconDots } from '@/components/ui/icons'
-import { GREEN_TEXT } from '@/components/ui/tokens'
+import { T } from './tokens'
 
 export function MicroLabel({ children }) {
   return (
-    <p style={{ fontSize: '11px', fontWeight: 500, color: '#8a8a84', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '8px' }}>
+    <p style={{ fontSize: '11px', fontWeight: 500, color: T.ink.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '8px' }}>
       {children}
     </p>
   )
@@ -35,30 +35,34 @@ export function MicroLabel({ children }) {
 // inline mini-form controls (the touchpoint Log button).
 export const quietBtn = (accent = null) => ({
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px',
-  minHeight: '44px', padding: '9px 14px', borderRadius: '8px',
-  border: '0.5px solid rgba(0,0,0,0.15)', background: 'transparent',
-  fontSize: '12px', fontWeight: 500, color: accent || '#1a1a18',
+  minHeight: '44px', padding: '9px 14px', borderRadius: T.radius.control,
+  border: T.border.control, background: 'transparent',
+  fontSize: '12px', fontWeight: 500, color: accent || T.ink.primary,
   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', textDecoration: 'none',
 })
 
-// Action-row tones — soft tints of the action's own color family with a
-// matching-color icon + label:
-//   blue  — reach-the-human actions (Call)
-//   gray  — neutral (Log touchpoint, Open in Jobber, New engagement)
-//   green — forward motion (Send to Jobber — the founding door; the
-//           Advance button was removed 7/10, stages move via Jobber)
+// Action-row tones (design-system pass 7/11): ONE action accent — the
+// brand teal — for forward/primary actions; gray for neutral. The old
+// blue (Call) and forest-green (Send to Jobber) tones both unified to
+// `accent`, so the row never fights the chip families' blue:
+//   accent — reach-the-human + forward motion (Call, Send to Jobber)
+//   gray   — neutral (Log touchpoint, Open in Jobber, New engagement)
 export const ACTION_TONES = {
-  blue:  { bg: 'rgba(55,138,221,0.10)', text: '#2b6aad' },
-  gray:  { bg: 'rgba(0,0,0,0.06)',      text: '#444441' },
-  green: { bg: 'rgba(29,158,117,0.12)', text: GREEN_TEXT },
+  accent: { bg: T.accent.soft, text: T.accent.deep },
+  gray:   { bg: T.state.neutralSoft, text: T.ink.strong },
+  // legacy tone names — kept resolving so a missed call site degrades
+  // to the unified accent, never to a dead gray
+  blue:   { bg: T.accent.soft, text: T.accent.deep },
+  green:  { bg: T.accent.soft, text: T.accent.deep },
 }
 
-// One action button — 38px, radius 9, NO border, soft tinted fill.
+// One action button — 38px, radius from the token scale, NO border,
+// soft tinted fill.
 export const actionBtn = (tone = 'gray') => {
   const t = ACTION_TONES[tone] || ACTION_TONES.gray
   return {
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-    height: '38px', padding: '0 10px', borderRadius: '9px', border: 'none',
+    height: '38px', padding: '0 10px', borderRadius: T.radius.inset, border: 'none',
     background: t.bg, color: t.text, fontSize: '13px', fontWeight: 500,
     cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', textDecoration: 'none',
     minWidth: 0, overflow: 'hidden',
@@ -94,8 +98,8 @@ export function CardMenu({ items = [], label = 'More' }) {
         style={{
           width: '32px', height: '32px', padding: 0,
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          border: 'none', background: 'transparent', borderRadius: '8px',
-          color: 'var(--text-muted, #8a8a84)', cursor: 'pointer', fontFamily: 'inherit',
+          border: 'none', background: 'transparent', borderRadius: T.radius.control,
+          color: `var(--text-muted, ${T.ink.muted})`, cursor: 'pointer', fontFamily: 'inherit',
         }}
       >
         <IconDots size={17} />
@@ -106,9 +110,9 @@ export function CardMenu({ items = [], label = 'More' }) {
           <div style={{ position: 'fixed', inset: 0, zIndex: 10009 }} onClick={() => setOpen(false)} />
           <div style={{
             position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 10010,
-            minWidth: '210px', background: '#fff',
-            border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '10px',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.14)', padding: '4px',
+            minWidth: '210px', background: T.surface.raised,
+            border: T.border.thin, borderRadius: T.radius.inset,
+            boxShadow: T.shadow.pop, padding: '4px',
           }}>
             {items.map(it => <MenuRow key={it.key} item={it} close={() => setOpen(false)} />)}
           </div>
@@ -127,10 +131,10 @@ function MenuRow({ item, close }) {
       onMouseLeave={() => setHover(false)}
       style={{
         display: 'block', width: '100%', textAlign: 'left',
-        padding: '8px 10px', border: 'none', borderRadius: '7px',
-        background: hover ? '#f7f6f4' : 'transparent',
+        padding: '8px 10px', border: 'none', borderRadius: T.radius.control,
+        background: hover ? T.surface.hover : 'transparent',
         fontSize: '13px', fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer',
-        color: item.danger ? '#b42318' : '#1a1a18',
+        color: item.danger ? T.state.danger.strong : T.ink.primary,
       }}
     >
       {item.label}
@@ -147,7 +151,7 @@ export const undoToast = (text, onUndo) => ({
     <span>
       {text} ·{' '}
       <button onClick={onUndo}
-        style={{ background: 'none', border: 'none', padding: 0, color: '#fff', font: 'inherit', textDecoration: 'underline', cursor: 'pointer' }}>
+        style={{ background: 'none', border: 'none', padding: 0, color: T.ink.inverse, font: 'inherit', textDecoration: 'underline', cursor: 'pointer' }}>
         Undo
       </button>
     </span>

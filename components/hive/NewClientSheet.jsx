@@ -54,10 +54,11 @@ import { lastActivityTs } from './shared/engagementStatus'
 import { matchPeople, normalizeEmail, normalizePhone, queryLeadMatches, maskEmail, maskPhone } from './shared/clientMatch'
 import { createClient } from '@/lib/supabase'
 import { IconSearch, IconPlus, IconUserCheck, IconSparkles, IconAlertTriangle, IconCheck, IconSend } from '@/components/ui/icons'
+import { T } from './shared/tokens'
 
-const ACCENT = '#0F6E56' // the beta action green (SEND_GREEN family)
-const AMBER = { bg: '#FAEEDA', text: '#633806' } // warning tint (design language)
-const GREEN = { bg: '#EAF3DE', text: '#27500A' } // success tint
+const ACCENT = T.accent.fg // THE action accent
+const AMBER = T.family.amber // warning tint (design language)
+const GREEN = T.family.green // success tint
 
 const fmtDate = (d) => {
   if (!d) return null
@@ -70,24 +71,24 @@ const initialsOf = (name) =>
   (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?'
 
 const inp = {
-  width: '100%', padding: '9px 11px', border: '0.5px solid rgba(0,0,0,0.25)',
-  borderRadius: '8px', fontSize: '16px', fontFamily: 'inherit', color: '#1a1a18',
-  background: '#fff', outline: 'none', boxSizing: 'border-box',
+  width: '100%', padding: '9px 11px', border: T.border.strong,
+  borderRadius: T.radius.control, fontSize: '16px', fontFamily: 'inherit', color: T.ink.primary,
+  background: T.surface.raised, outline: 'none', boxSizing: 'border-box',
 }
 const lbl = {
-  fontSize: '11px', fontWeight: 500, color: '#8a8a84', letterSpacing: '0.6px',
+  fontSize: '11px', fontWeight: 500, color: T.ink.muted, letterSpacing: '0.6px',
   textTransform: 'uppercase', marginBottom: '4px', display: 'block',
 }
 const primaryBtn = {
   width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-  padding: '10px 14px', borderRadius: '8px', border: 'none',
-  background: ACCENT, color: '#fff', fontSize: '13px', fontWeight: 500,
+  padding: '10px 14px', borderRadius: T.radius.control, border: 'none',
+  background: ACCENT, color: T.accent.onFill, fontSize: '13px', fontWeight: 500,
   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
 }
 const secondaryBtn = {
-  width: '100%', padding: '10px 14px', borderRadius: '8px',
-  border: '0.5px solid rgba(0,0,0,0.25)', background: 'transparent',
-  fontSize: '13px', fontWeight: 500, color: '#1a1a18',
+  width: '100%', padding: '10px 14px', borderRadius: T.radius.control,
+  border: T.border.strong, background: 'transparent',
+  fontSize: '13px', fontWeight: 500, color: T.ink.primary,
   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
 }
 
@@ -95,7 +96,7 @@ function Badge({ tint, icon, label }) {
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: '5px',
-      padding: '3px 10px', borderRadius: '10px',
+      padding: '3px 10px', borderRadius: T.radius.chip,
       background: tint.bg, color: tint.text,
       fontSize: '12px', fontWeight: 500, lineHeight: 1.5, whiteSpace: 'nowrap',
     }}>
@@ -112,17 +113,17 @@ function Toggle({ on, onFlip, label }) {
       style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: 0, border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit' }}
     >
       <span style={{
-        width: '34px', height: '20px', borderRadius: '10px', flexShrink: 0,
-        background: on ? ACCENT : 'rgba(0,0,0,0.15)', position: 'relative',
+        width: '34px', height: '20px', borderRadius: T.radius.inset, flexShrink: 0,
+        background: on ? ACCENT : T.hairline.control, position: 'relative',
         transition: 'background 0.15s',
       }}>
         <span style={{
           position: 'absolute', top: '2px', left: on ? '16px' : '2px',
-          width: '16px', height: '16px', borderRadius: '50%', background: '#fff',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.25)', transition: 'left 0.15s',
+          width: '16px', height: '16px', borderRadius: T.radius.round, background: T.surface.raised,
+          boxShadow: T.shadow.knob, transition: 'left 0.15s',
         }} />
       </span>
-      <span style={{ fontSize: '13px', color: '#1a1a18' }}>{label}</span>
+      <span style={{ fontSize: '13px', color: T.ink.primary }}>{label}</span>
     </button>
   )
 }
@@ -340,14 +341,14 @@ export default function NewClientSheet({
     <div style={{ padding: isMobile ? '0 16px 28px' : '0 24px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
       {/* Title + the lookup gate — frame A, always first */}
       <div>
-        <h2 style={{ fontSize: '16px', fontWeight: 500, color: '#1a1a18' }}>New client</h2>
-        <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '4px' }}>Search first so you don't create a duplicate.</p>
+        <h2 style={{ fontSize: '16px', fontWeight: 500, color: T.ink.primary }}>New client</h2>
+        <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '4px' }}>Search first so you don't create a duplicate.</p>
       </div>
 
       {frame !== 'D' && frame !== 'F' && (
         <div>
           <div style={{ position: 'relative' }}>
-            <span style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', color: '#8a8a84', display: 'inline-flex' }}>
+            <span style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', color: T.ink.muted, display: 'inline-flex' }}>
               <IconSearch size={16} />
             </span>
             <input
@@ -359,7 +360,7 @@ export default function NewClientSheet({
               aria-label="Search clients"
             />
           </div>
-          <p style={{ fontSize: '11px', color: '#8a8a84', marginTop: '6px' }}>
+          <p style={{ fontSize: '11px', color: T.ink.muted, marginTop: '6px' }}>
             Matches on email or phone (digits only). Type to search — results appear as you go.
           </p>
         </div>
@@ -371,15 +372,15 @@ export default function NewClientSheet({
           <div><Badge tint={AMBER} icon={<IconUserCheck size={13} />} label="Returning client" /></div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <span style={{
-              width: '40px', height: '40px', borderRadius: '50%', flexShrink: 0,
-              background: '#F1EFE8', color: '#444441', display: 'inline-flex',
+              width: '40px', height: '40px', borderRadius: T.radius.round, flexShrink: 0,
+              background: T.family.gray.bg, color: T.family.gray.text, display: 'inline-flex',
               alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 500,
             }}>{initialsOf(activeMatch.person.name)}</span>
             <div style={{ minWidth: 0 }}>
-              <p style={{ fontSize: '15px', fontWeight: 500, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <p style={{ fontSize: '15px', fontWeight: 500, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {activeMatch.person.name}
               </p>
-              <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '2px' }}>
+              <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '2px' }}>
                 matched on {activeMatch.matchedOn}{activeMatch.matchedOn !== 'name' ? <> · {activeMatch.matchedValue}</> : null}
               </p>
             </div>
@@ -389,28 +390,28 @@ export default function NewClientSheet({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               {matches.filter(m => m.person.id !== activeMatch.person.id).slice(0, 4).map(m => (
                 <button key={m.person.id} onClick={() => setPickedId(m.person.id)}
-                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px', borderRadius: '8px', border: '0.5px solid rgba(0,0,0,0.1)', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-                  <span style={{ fontSize: '13px', color: '#1a1a18' }}>{m.person.name}</span>
-                  <span style={{ fontSize: '11px', color: '#8a8a84' }}>also matched on {m.matchedOn}</span>
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px', borderRadius: T.radius.control, border: T.border.thin, background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+                  <span style={{ fontSize: '13px', color: T.ink.primary }}>{m.person.name}</span>
+                  <span style={{ fontSize: '11px', color: T.ink.muted }}>also matched on {m.matchedOn}</span>
                 </button>
               ))}
             </div>
           )}
 
-          <div style={{ background: '#f7f6f4', borderRadius: '10px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ background: T.surface.sunken, borderRadius: T.radius.inset, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
-              <span style={{ fontSize: '12px', color: '#8a8a84' }}>Open engagements</span>
-              <span style={{ fontSize: '12px', fontWeight: 500, color: openEngs.length > 0 ? AMBER.text : '#1a1a18' }}>
+              <span style={{ fontSize: '12px', color: T.ink.muted }}>Open engagements</span>
+              <span style={{ fontSize: '12px', fontWeight: 500, color: openEngs.length > 0 ? AMBER.text : T.ink.primary }}>
                 {openEngs.length} open
               </span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
-              <span style={{ fontSize: '12px', color: '#8a8a84' }}>Last contact</span>
-              <span style={{ fontSize: '12px', fontWeight: 500, color: '#1a1a18' }}>{lastContact || '—'}</span>
+              <span style={{ fontSize: '12px', color: T.ink.muted }}>Last contact</span>
+              <span style={{ fontSize: '12px', fontWeight: 500, color: T.ink.primary }}>{lastContact || '—'}</span>
             </div>
           </div>
 
-          {errorMsg && <p style={{ fontSize: '12px', color: '#791F1F', background: '#FCEBEB', padding: '8px 12px', borderRadius: '8px' }}>{errorMsg}</p>}
+          {errorMsg && <p style={{ fontSize: '12px', color: T.state.danger.fg, background: T.state.danger.soft, padding: '8px 12px', borderRadius: T.radius.control }}>{errorMsg}</p>}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <button style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => startEngagement(activeMatch)}>
@@ -427,7 +428,7 @@ export default function NewClientSheet({
       {frame === 'C' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div><Badge tint={GREEN} icon={<IconSparkles size={13} />} label="No match — new person" /></div>
-          <p style={{ fontSize: '12px', color: '#8a8a84' }}>
+          <p style={{ fontSize: '12px', color: T.ink.muted }}>
             Founding-viable fields only. The card opens on create — fill the rest there.
           </p>
 
@@ -484,7 +485,7 @@ export default function NewClientSheet({
               {referrer ? (
                 <span style={{
                   display: 'inline-flex', alignItems: 'center', gap: '7px',
-                  padding: '5px 11px', borderRadius: '10px',
+                  padding: '5px 11px', borderRadius: T.radius.chip,
                   background: GREEN.bg, color: GREEN.text, fontSize: '13px', fontWeight: 500,
                 }}>
                   <button type="button" onClick={() => setPickReferrer(v => !v)} aria-label="Edit referrer"
@@ -517,7 +518,7 @@ export default function NewClientSheet({
 
           <Toggle on={form.drip} onFlip={() => set('drip', !form.drip)} label="Add to drip sequence" />
 
-          {errorMsg && <p style={{ fontSize: '12px', color: '#791F1F', background: '#FCEBEB', padding: '8px 12px', borderRadius: '8px' }}>{errorMsg}</p>}
+          {errorMsg && <p style={{ fontSize: '12px', color: T.state.danger.fg, background: T.state.danger.soft, padding: '8px 12px', borderRadius: T.radius.control }}>{errorMsg}</p>}
 
           <button style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={createPerson}>
             Create — opens card
@@ -527,16 +528,16 @@ export default function NewClientSheet({
 
       {/* Frame D — concurrent-engagement confirm (only when 1+ open) */}
       {frame === 'D' && activeMatch && (
-        <div style={{ border: `1px solid ${AMBER.text}40`, background: `${AMBER.bg}66`, borderRadius: '12px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <div style={{ border: `1px solid ${AMBER.text}40`, background: `${AMBER.bg}66`, borderRadius: T.radius.inset, padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: AMBER.text }}>
             <IconAlertTriangle size={18} />
-            <h3 style={{ fontSize: '14px', fontWeight: 500, color: '#1a1a18' }}>This client has an open engagement</h3>
+            <h3 style={{ fontSize: '14px', fontWeight: 500, color: T.ink.primary }}>This client has an open engagement</h3>
           </div>
-          <p style={{ fontSize: '13px', color: '#444441', lineHeight: 1.5 }}>
+          <p style={{ fontSize: '13px', color: T.ink.strong, lineHeight: 1.5 }}>
             {activeMatch.person.name} has an engagement started {fmtDate(openEngs[0]?.created_at) || '—'} that's still open.
             Starting a new one creates a second, concurrent engagement — both stay active.
           </p>
-          {errorMsg && <p style={{ fontSize: '12px', color: '#791F1F', background: '#FCEBEB', padding: '8px 12px', borderRadius: '8px' }}>{errorMsg}</p>}
+          {errorMsg && <p style={{ fontSize: '12px', color: T.state.danger.fg, background: T.state.danger.soft, padding: '8px 12px', borderRadius: T.radius.control }}>{errorMsg}</p>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <button style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => foundEngagementFor(activeMatch)}>
               Start another engagement
@@ -556,7 +557,7 @@ export default function NewClientSheet({
       {frame === 'F' && founded && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div><Badge tint={GREEN} icon={<IconCheck size={13} />} label="Engagement started" /></div>
-          <p style={{ fontSize: '13px', color: '#444441', lineHeight: 1.5 }}>
+          <p style={{ fontSize: '13px', color: T.ink.strong, lineHeight: 1.5 }}>
             {founded.person.name}&rsquo;s new engagement is on the board in Request.
             Send it to Jobber now, or keep it local — you can send any time from the engagement.
           </p>

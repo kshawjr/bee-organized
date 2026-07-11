@@ -4,7 +4,7 @@
 // system, but affordances must be FINDABLE: hairline ≠ washed out.
 //
 //   View mode  — <EditPencil />: ✎ at readable muted ink (PENCIL_INK,
-//     #6b6a64 — NOT the #c9c7c0 ghost tier), darkening when the host
+//     T.ink.secondary — NOT the ink.faint ghost tier), darkening when the host
 //     row is hovered (globals.css `.bee-edit-pencil`). Discovery never
 //     depends on hover — the base ink is legible at rest.
 //   Edit mode  — <InlineEditControls />: the input gains a trailing
@@ -31,9 +31,10 @@
 
 import React from 'react'
 import { TEXT_SUCCESS, TEXT_MUTED } from '@/components/ui/tokens'
+import { T } from './tokens'
 
 // Readable muted ink — the affordance floor for view-mode pencils.
-export const PENCIL_INK = '#6b6a64'
+export const PENCIL_INK = T.ink.secondary
 
 export function EditPencil({ size = 12 }) {
   // cursor:pointer is load-bearing: host rows are cursor:text (editable-
@@ -48,7 +49,7 @@ export function EditPencil({ size = 12 }) {
 }
 
 const btnBase = {
-  width: '22px', height: '22px', padding: 0, borderRadius: '6px',
+  width: '22px', height: '22px', padding: 0, borderRadius: T.radius.control,
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
   fontFamily: 'inherit', cursor: 'pointer', flexShrink: 0, lineHeight: 1,
   transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
@@ -63,18 +64,18 @@ export function InlineEditControls({ onSave, onCancel, busy = false, saveHint = 
         disabled={busy} onMouseDown={hold} onClick={onSave}
         style={{
           ...btnBase, fontWeight: 700, color: TEXT_SUCCESS,
-          background: 'rgba(29,158,117,0.12)', border: '0.5px solid rgba(29,158,117,0.4)',
+          background: T.state.success.soft, border: `0.5px solid ${T.state.success.ring}`,
           cursor: busy ? 'default' : 'pointer',
         }}>
         {busy
-          ? <span aria-hidden style={{ width: '10px', height: '10px', borderRadius: '50%', border: '1.5px solid rgba(29,158,117,0.3)', borderTopColor: TEXT_SUCCESS, animation: 'bee-inline-spin 700ms linear infinite' }} />
+          ? <span aria-hidden style={{ width: '10px', height: '10px', borderRadius: T.radius.round, border: `1.5px solid ${T.state.success.ringSoft}`, borderTopColor: TEXT_SUCCESS, animation: 'bee-inline-spin 700ms linear infinite' }} />
           : '✓'}
       </button>
       <button type="button" className="bee-inline-cancel" aria-label="Cancel" title="Cancel (Esc)"
         disabled={busy} onMouseDown={hold} onClick={onCancel}
         style={{
           ...btnBase, color: TEXT_MUTED,
-          background: 'transparent', border: '0.5px solid rgba(0,0,0,0.15)',
+          background: 'transparent', border: T.border.control,
           cursor: busy ? 'default' : 'pointer',
         }}>
         ✗

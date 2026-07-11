@@ -19,6 +19,7 @@
 import React from 'react'
 import { IconCheck, IconX } from '@/components/ui/icons'
 import { closedReasonLabel, formatFullDate } from './engagementStatus'
+import { T } from './tokens'
 
 export default function ClosedSummary({ engagement }) {
   const e = engagement
@@ -29,9 +30,9 @@ export default function ClosedSummary({ engagement }) {
   const reason = e.closed_reason === 'won' ? null : closedReasonLabel(e.closed_reason)
   const note = (e.closed_note || '').trim()
   return (
-    <div style={{ padding: '10px 14px', background: '#f7f6f4', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
-      <p style={{ fontSize: '12px', fontWeight: 500, color: won ? '#085041' : '#6b6b66', display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
-        <span style={{ color: won ? '#1D9E75' : '#b5b3ac', display: 'inline-flex', flexShrink: 0 }}>
+    <div style={{ padding: '10px 14px', background: T.surface.sunken, borderRadius: T.radius.inset, display: 'flex', flexDirection: 'column', gap: '3px' }}>
+      <p style={{ fontSize: '12px', fontWeight: 500, color: won ? T.accent.deep : T.ink.secondary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
+        <span style={{ color: won ? T.accent.fg : T.ink.quiet, display: 'inline-flex', flexShrink: 0 }}>
           {won ? <IconCheck size={13} /> : <IconX size={13} />}
         </span>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -41,7 +42,7 @@ export default function ClosedSummary({ engagement }) {
         </span>
       </p>
       {note && (
-        <p style={{ fontSize: '11px', fontStyle: 'italic', color: '#8a8a84', paddingLeft: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <p style={{ fontSize: '11px', fontStyle: 'italic', color: T.ink.muted, paddingLeft: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           “{note}”
         </p>
       )}

@@ -116,7 +116,7 @@ describe('beta mobile layout', () => {
   it('mobile overlay is a bottom sheet with contained overscroll', () => {
     setWidth(390)
     const html = renderToString(<PersonCard person={PEOPLE[0] as any} onClose={() => {}} />)
-    expect(html).toContain('border-radius:20px 20px 0 0')
+    expect(html).toContain('border-radius:16px 16px 0 0') // T.radius.card sheet corners
     expect(html).toContain('overscroll-behavior:contain')
     expect(html).toContain('-webkit-overflow-scrolling:touch')
     // Header close affordance rides every sheet (aria-labelled X).

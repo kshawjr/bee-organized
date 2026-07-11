@@ -18,7 +18,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { ENGAGEMENT_STAGE_RANK, isTerminal } from './stageRank'
-import { GREEN_TEXT } from '@/components/ui/tokens'
+import { T } from './tokens'
 
 // Re-export, not redeclare — stageRank.js is the authority.
 export const STAGE_RANK = ENGAGEMENT_STAGE_RANK
@@ -41,6 +41,35 @@ export const ENGAGEMENT_STAGES = [
 const DISPLAY_LABELS = Object.fromEntries(ENGAGEMENT_STAGES.map(s => [s.key, s.displayLabel]))
 export function stageDisplayLabel(stageKey) {
   return DISPLAY_LABELS[stageKey] || stageKey
+}
+
+// ── milestone records arc (design-system pass 7/11) ─────────────
+// Each working (non-terminal) stage owns ONE record family — the same
+// mapping the panel's currentType ternary used to inline. Single-homed
+// here so the milestone checklist's expected path derives from the
+// stage machine's canonical order (ENGAGEMENT_STAGES ranks), never a
+// hardcoded drifting list.
+export const STAGE_RECORD_FAMILY = {
+  'Request':          'request',
+  'Estimate':         'quote',
+  'Job in Progress':  'job',
+  'Final Processing': 'invoice',
+}
+
+// The expected milestone path: working stages in rank order, mapped to
+// their record family — Request → [Assessment →] Quote → Job → Invoice.
+// The Assessment step is NOT stage-owned (assessments ride the Request
+// stage) and creation_type is never persisted on engagements, so the
+// only honest signal that this engagement's arc includes one is the
+// presence of assessment child records — pass hasAssessment from those.
+export function milestoneFamilies({ hasAssessment = false } = {}) {
+  const arc = ENGAGEMENT_STAGES
+    .filter(s => !s.terminal)
+    .slice()
+    .sort((a, b) => a.rank - b.rank)
+    .map(s => STAGE_RECORD_FAMILY[s.key])
+  if (hasAssessment) arc.splice(arc.indexOf('request') + 1, 0, 'assessment')
+  return arc
 }
 
 // Terminal stage vocabulary — audited against prod 2026-07-04: the two
@@ -73,22 +102,20 @@ export const CLIENT_STATUSES = [
 // gray=past/closed. Dark text on light fills, always. These exact
 // pairs are the design language — do not tweak per-surface.
 
-// Teal's text stop = GREEN_TEXT (ui/tokens) — the dark stop of the brand-
-// green 3-stop scale; the unread badge and StatusChip resolve to THIS pair.
-const TEAL   = { bg: '#E1F5EE', text: GREEN_TEXT }
-const BLUE   = { bg: '#E6F1FB', text: '#0C447C' }
-const GREEN  = { bg: '#EAF3DE', text: '#27500A' }
-const AMBER  = { bg: '#FAEEDA', text: '#633806' }
-const RED    = { bg: '#FCEBEB', text: '#791F1F' }
-const PURPLE = { bg: '#EEEDFE', text: '#3C3489' }
-const GRAY   = { bg: '#F1EFE8', text: '#444441' }
+// The pairs live in shared/tokens (T.family — the ONE hex home); this
+// file only assigns them to stage/status vocabulary. Teal's text stop
+// is the dark stop of the brand-green 3-stop scale; the unread badge
+// and StatusChip resolve to THIS pair.
+const TEAL   = T.family.teal
+const BLUE   = T.family.blue
+const GREEN  = T.family.green
+const AMBER  = T.family.amber
+const RED    = T.family.red
+const PURPLE = T.family.purple
+const GRAY   = T.family.gray
 
 // Extra-quiet ghost for de-emphasized states (No-contact-info etc.).
-const QUIET_GRAY = { bg: '#F5F4EF', text: '#b5b3ac' }
-
-// THE accent for links ('View profile', tel:/mailto: values, deep
-// links). Same hue as the stage bar's current segment — one blue.
-export const ACCENT_BLUE = '#378ADD'
+const QUIET_GRAY = T.family.quiet
 
 export const CHIP_STYLES = {
   // base families — reach for these when no specific key fits

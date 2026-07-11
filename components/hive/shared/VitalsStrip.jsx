@@ -2,9 +2,9 @@
 // ─────────────────────────────────────────────────────────────
 // The four-cell deal-health strip riding every lead-detail card header —
 // BELOW the identity row, ABOVE the tabs, so the vitals stay visible on
-// every tab. Money-tile idiom (MetricCard's quiet surface): #f7f6f4,
-// radius 8, hairline cell dividers; labels 10px uppercase muted, values
-// 14px/500. ONE grid row always — cells truncate, never wrap, so four
+// every tab. Money-tile idiom (MetricCard's quiet surface): sunken
+// surface, inset radius, hairline cell dividers; labels 10px uppercase
+// muted, values 14px/500 tabular. ONE grid row always — cells truncate, never wrap, so four
 // fit the narrow mobile sheet. Absent values render '—', never a
 // blank or a fabricated zero.
 //
@@ -19,6 +19,7 @@
 
 import React from 'react'
 import { formatInboxAgeParts, formatInboxFutureParts } from './engagementStatus'
+import { T } from './tokens'
 
 export const EM_DASH = '—'
 
@@ -71,17 +72,17 @@ export default function VitalsStrip({ cells = [] }) {
     <div aria-label="Vitals" style={{
       display: 'grid',
       gridTemplateColumns: `repeat(${cells.length || 4}, minmax(0, 1fr))`,
-      background: '#f7f6f4', borderRadius: '8px',
+      background: T.surface.sunken, borderRadius: T.radius.inset,
     }}>
       {cells.map((c, i) => (
         <div key={c.label} style={{
           minWidth: 0, padding: '8px 10px',
-          borderLeft: i === 0 ? 'none' : '0.5px solid rgba(0,0,0,0.08)',
+          borderLeft: i === 0 ? 'none' : T.border.divider,
         }}>
-          <p style={{ fontSize: '10px', fontWeight: 500, color: '#8a8a84', letterSpacing: '0.5px', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <p style={{ fontSize: '10px', fontWeight: 500, color: T.ink.muted, letterSpacing: '0.5px', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {c.label}
           </p>
-          <p style={{ fontSize: '14px', fontWeight: 500, color: (c.value != null && c.color) || '#1a1a18', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <p style={{ fontSize: '14px', fontWeight: 500, fontVariantNumeric: T.type.tabular, letterSpacing: T.type.trackNum, color: (c.value != null && c.color) || T.ink.primary, marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {c.value ?? EM_DASH}
           </p>
         </div>

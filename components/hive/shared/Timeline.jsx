@@ -36,6 +36,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react'
 import { formatInboxAge, formatInboxFuture, fmtShort, fmtShortTime, fmtMoney } from './engagementStatus'
+import { T } from './tokens'
 import {
   IconMail, IconPhone, IconCalendar, IconClock, IconFileText, IconHammer,
   IconFileInvoice, IconInbox, IconCheck, IconChevronRight,
@@ -45,13 +46,13 @@ const METHOD_LABEL = { call: 'Call', sms: 'Text', email: 'Email', in_person: 'In
 
 // Color encodes CATEGORY; the icon encodes TYPE.
 const CAT_COLOR = {
-  email: { fg: '#378ADD', bg: 'rgba(55,138,221,0.10)' },   // accent
-  jobber: { fg: '#378ADD', bg: 'rgba(55,138,221,0.10)' },  // accent
-  call: { fg: '#1D9E75', bg: 'rgba(29,158,117,0.10)' },    // success
-  created: { fg: '#1D9E75', bg: 'rgba(29,158,117,0.10)' }, // success
-  note: { fg: '#1D9E75', bg: 'rgba(29,158,117,0.10)' },    // success
-  scheduled: { fg: '#B7791F', bg: 'rgba(183,121,31,0.12)' }, // warning
-  stage: { fg: '#8a8a84', bg: 'rgba(0,0,0,0.06)' },        // neutral
+  email: { fg: T.state.info.fg, bg: T.state.info.soft },
+  jobber: { fg: T.state.info.fg, bg: T.state.info.soft },
+  call: { fg: T.state.success.fg, bg: T.state.success.soft },
+  created: { fg: T.state.success.fg, bg: T.state.success.soft },
+  note: { fg: T.state.success.fg, bg: T.state.success.soft },
+  scheduled: { fg: T.state.warning.fg, bg: T.state.warning.soft },
+  stage: { fg: T.ink.muted, bg: T.state.neutralSoft },
 }
 const TYPE_ICON = {
   email: IconMail, drip: IconMail, welcome: IconMail, stage_email: IconMail,
@@ -288,7 +289,7 @@ function Dot({ type, category }) {
   const col = CAT_COLOR[category] || CAT_COLOR.stage
   return (
     <span style={{
-      width: '22px', height: '22px', borderRadius: '50%', background: col.bg, color: col.fg,
+      width: '22px', height: '22px', borderRadius: T.radius.round, background: col.bg, color: col.fg,
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
     }}>
       <Icon size={12} />
@@ -297,7 +298,7 @@ function Dot({ type, category }) {
 }
 
 function DetailLine({ children }) {
-  return <p style={{ fontSize: '11px', color: '#6b6b66', lineHeight: 1.5, overflowWrap: 'anywhere' }}>{children}</p>
+  return <p style={{ fontSize: '11px', color: T.ink.secondary, lineHeight: 1.5, overflowWrap: 'anywhere' }}>{children}</p>
 }
 
 function Row({ it, last, dashed, nowMs, expanded, onToggle, actionSlot }) {
@@ -306,7 +307,7 @@ function Row({ it, last, dashed, nowMs, expanded, onToggle, actionSlot }) {
     <div style={{ display: 'flex', gap: '10px' }}>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '22px', flexShrink: 0 }}>
         <Dot type={it.type} category={it.category} />
-        {!last && <span aria-hidden style={{ flex: 1, width: 0, minHeight: '10px', borderLeft: `1px ${dashed ? 'dashed' : 'solid'} rgba(0,0,0,0.15)` }} />}
+        {!last && <span aria-hidden style={{ flex: 1, width: 0, minHeight: '10px', borderLeft: `1px ${dashed ? 'dashed' : 'solid'} ${T.hairline.control}` }} />}
       </div>
       <div style={{ flex: 1, minWidth: 0, paddingBottom: last ? 0 : '12px' }}>
         <button
@@ -318,15 +319,15 @@ function Row({ it, last, dashed, nowMs, expanded, onToggle, actionSlot }) {
             font: 'inherit', textAlign: 'left', cursor: 'pointer',
           }}
         >
-          <span style={{ flex: 1, minWidth: 0, fontSize: '12px', color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{ flex: 1, minWidth: 0, fontSize: '12px', color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {it.summary}
           </span>
-          <span style={{ flexShrink: 0, fontSize: '11px', color: '#8a8a84', whiteSpace: 'nowrap' }}>
+          <span style={{ flexShrink: 0, fontSize: '11px', color: T.ink.muted, whiteSpace: 'nowrap' }}>
             {it.ts > nowMs ? formatInboxFuture(it.ts, nowMs) : formatInboxAge(it.ts, nowMs)}
           </span>
         </button>
         {expanded && (
-          <div style={{ marginTop: '4px', padding: '8px 10px', background: '#f7f6f4', borderRadius: '6px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+          <div style={{ marginTop: '4px', padding: '8px 10px', background: T.surface.sunken, borderRadius: T.radius.control, display: 'flex', flexDirection: 'column', gap: '3px' }}>
             {d.subject && <DetailLine>Subject: {d.subject}</DetailLine>}
             {d.body && <DetailLine>{d.body}</DetailLine>}
             {d.author && <DetailLine>— {d.author}</DetailLine>}
@@ -388,7 +389,7 @@ export default function Timeline({ leadId, engagementId = null, locationUuid = n
       <span>
         {text} ·{' '}
         <button onClick={onUndo}
-          style={{ background: 'none', border: 'none', padding: 0, color: '#fff', font: 'inherit', textDecoration: 'underline', cursor: 'pointer' }}>
+          style={{ background: 'none', border: 'none', padding: 0, color: T.ink.inverse, font: 'inherit', textDecoration: 'underline', cursor: 'pointer' }}>
           Undo
         </button>
       </span>
@@ -456,9 +457,9 @@ export default function Timeline({ leadId, engagementId = null, locationUuid = n
 
   // ≥44px tap target (mobile-tappable inside the narrow card).
   const actionBtn = {
-    marginTop: '6px', minHeight: '44px', padding: '10px 14px', borderRadius: '8px',
-    border: '0.5px solid rgba(0,0,0,0.15)', background: '#fff', fontSize: '12px',
-    fontWeight: 500, color: '#1a1a18', cursor: 'pointer', fontFamily: 'inherit',
+    marginTop: '6px', minHeight: '44px', padding: '10px 14px', borderRadius: T.radius.control,
+    border: T.border.control, background: T.surface.raised, fontSize: '12px',
+    fontWeight: 500, color: T.ink.primary, cursor: 'pointer', fontFamily: 'inherit',
     alignSelf: 'flex-start',
   }
   const actionSlotFor = (it) => {
@@ -482,13 +483,13 @@ export default function Timeline({ leadId, engagementId = null, locationUuid = n
   }
 
   if (loadErr) {
-    return <p style={{ fontSize: '11px', color: '#b5b3ac' }}>Couldn’t load timeline: {loadErr}</p>
+    return <p style={{ fontSize: '11px', color: T.ink.quiet }}>Couldn’t load timeline: {loadErr}</p>
   }
   if (!agg || !drips) {
-    return <p style={{ fontSize: '11px', color: '#b5b3ac' }}>Loading timeline…</p>
+    return <p style={{ fontSize: '11px', color: T.ink.quiet }}>Loading timeline…</p>
   }
   if (upcoming.length === 0 && past.length === 0) {
-    return <p style={{ fontSize: '11px', color: '#b5b3ac' }}>No activity yet</p>
+    return <p style={{ fontSize: '11px', color: T.ink.quiet }}>No activity yet</p>
   }
 
   const renderRow = (it, i, arr, dashed) => (
@@ -508,12 +509,12 @@ export default function Timeline({ leadId, engagementId = null, locationUuid = n
           <div>{upcoming.map((it, i, arr) => renderRow(it, i, arr, true))}</div>
           <div aria-label="Now" style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '10px 0' }}>
             <span style={{ width: '22px', display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#378ADD' }} />
+              <span style={{ width: '8px', height: '8px', borderRadius: T.radius.round, background: T.accent.fg }} />
             </span>
-            <span style={{ flexShrink: 0, fontSize: '11px', fontWeight: 500, color: '#378ADD', letterSpacing: '0.4px' }}>
+            <span style={{ flexShrink: 0, fontSize: '11px', fontWeight: 500, color: T.accent.fg, letterSpacing: '0.4px' }}>
               Now · {fmtShort(new Date(nowMs))}
             </span>
-            <span style={{ flex: 1, height: '1px', background: 'rgba(0,0,0,0.08)' }} />
+            <span style={{ flex: 1, height: '1px', background: T.hairline.soft }} />
           </div>
         </>
       )}

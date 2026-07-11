@@ -16,6 +16,7 @@
 import React from 'react'
 import { IconChevronRight } from '@/components/ui/icons'
 import { HAIRLINE_BORDER, TEXT_SUCCESS, TEXT_MUTED } from '@/components/ui/tokens'
+import { T } from './tokens'
 
 // ONE 'Clear all' rendering (12px, muted, underlined) — the popover
 // footer and FilteredEmpty both consume THIS so the two can't split.
@@ -33,7 +34,7 @@ export function ClearAllButton({ onClick, style = {} }) {
 export function FilterButton({ count = 0, open, onToggle, label = 'Filters' }) {
   return (
     <button onClick={onToggle}
-      style={{ padding: '5px 12px', borderRadius: '20px', border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, background: open || count > 0 ? '#fff' : 'transparent', fontSize: '12px', fontWeight: count > 0 ? 500 : 400, color: count > 0 ? '#1a1a18' : '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', lineHeight: 'inherit' }}>
+      style={{ padding: '5px 12px', borderRadius: T.radius.pill, border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, background: open || count > 0 ? T.surface.raised : 'transparent', fontSize: '12px', fontWeight: count > 0 ? 500 : 400, color: count > 0 ? T.ink.primary : T.ink.muted, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', lineHeight: 'inherit' }}>
       {label}{count > 0 ? ` · ${count}` : ''}
     </button>
   )
@@ -45,10 +46,10 @@ export function FilterButton({ count = 0, open, onToggle, label = 'Filters' }) {
 export function SortRows({ value, onChange, options }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      <style>{`.bee-sort-item:hover { background: #f7f6f4 }`}</style>
+      <style>{`.bee-sort-item:hover { background: ${T.surface.hover} }`}</style>
       {options.map(o => (
         <button key={o.key} className="bee-sort-item" onClick={() => onChange(o.key)}
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '6px 8px', margin: '0 -8px', borderRadius: '8px', border: 'none', background: 'transparent', fontSize: '12px', color: o.key === value ? '#1a1a18' : '#6b6b66', fontWeight: o.key === value ? 500 : 400, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '6px 8px', margin: '0 -8px', borderRadius: T.radius.control, border: 'none', background: 'transparent', fontSize: '12px', color: o.key === value ? T.ink.primary : T.ink.secondary, fontWeight: o.key === value ? 500 : 400, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
           <span style={{ width: '14px', display: 'inline-flex', justifyContent: 'center', color: `var(--text-success, ${TEXT_SUCCESS})`, flexShrink: 0 }}>{o.key === value ? '✓' : ''}</span>
           {o.label}
         </button>
@@ -63,7 +64,7 @@ export function FilterPopover({ open, count = 0, onClear, children, width = 260 
     // Height cap in dvh (vh fallback) — iOS vh is the large viewport, so
     // a vh-capped popover could run past the visible bottom (OverlayShell
     // has the full story).
-    <div className="bee-filter-pop" style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 50, width: `${width}px`, overflowY: 'auto', background: '#fff', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '10px', boxShadow: '0 8px 30px rgba(26,26,24,0.12)', padding: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+    <div className="bee-filter-pop" style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 50, width: `${width}px`, overflowY: 'auto', background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset, boxShadow: T.shadow.pop, padding: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
       <style>{`.bee-filter-pop { max-height: 62vh; max-height: 62dvh; }`}</style>
       {children}
       {count > 0 && <ClearAllButton onClick={onClear} style={{ textAlign: 'left' }} />}
@@ -74,7 +75,7 @@ export function FilterPopover({ open, count = 0, onClear, children, width = 260 
 export function FilterSection({ label, children }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-      <p style={{ fontSize: '10px', fontWeight: 500, color: '#8a8a84', letterSpacing: '0.6px', textTransform: 'uppercase' }}>{label}</p>
+      <p style={{ fontSize: '10px', fontWeight: 500, color: T.ink.muted, letterSpacing: '0.6px', textTransform: 'uppercase' }}>{label}</p>
       {children}
     </div>
   )
@@ -83,8 +84,8 @@ export function FilterSection({ label, children }) {
 export function CheckRow({ label, checked, onToggle }) {
   return (
     <button onClick={onToggle}
-      style={{ display: 'flex', alignItems: 'center', gap: '8px', border: 'none', background: 'transparent', padding: 0, fontSize: '12px', color: checked ? '#1a1a18' : '#8a8a84', fontWeight: checked ? 500 : 400, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-      <span style={{ width: '14px', height: '14px', borderRadius: '4px', border: `0.5px solid ${checked ? '#1a1a18' : 'rgba(0,0,0,0.25)'}`, background: checked ? '#1a1a18' : '#fff', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', flexShrink: 0 }}>{checked ? '✓' : ''}</span>
+      style={{ display: 'flex', alignItems: 'center', gap: '8px', border: 'none', background: 'transparent', padding: 0, fontSize: '12px', color: checked ? T.ink.primary : T.ink.muted, fontWeight: checked ? 500 : 400, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+      <span style={{ width: '14px', height: '14px', borderRadius: '4px', border: `0.5px solid ${checked ? T.ink.primary : T.hairline.strong}`, background: checked ? T.ink.primary : T.surface.raised, color: T.ink.inverse, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', flexShrink: 0 }}>{checked ? '✓' : ''}</span>
       {label}
     </button>
   )
@@ -93,11 +94,11 @@ export function CheckRow({ label, checked, onToggle }) {
 // Single-select pill row (null = off). options: [{ key, label }]
 export function TogglePills({ options, value, onChange, prefix = null }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#8a8a84', flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: T.ink.muted, flexWrap: 'wrap' }}>
       {prefix}
       {options.map(o => (
         <button key={o.key} onClick={() => onChange(value === o.key ? null : o.key)}
-          style={{ padding: '3px 10px', borderRadius: '20px', border: `0.5px solid ${value === o.key ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.12)'}`, background: value === o.key ? '#fff' : 'transparent', fontSize: '11px', fontWeight: value === o.key ? 500 : 400, color: value === o.key ? '#1a1a18' : '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
+          style={{ padding: '3px 10px', borderRadius: T.radius.pill, border: `0.5px solid ${value === o.key ? T.hairline.strong : T.hairline.line}`, background: value === o.key ? T.surface.raised : 'transparent', fontSize: '11px', fontWeight: value === o.key ? 500 : 400, color: value === o.key ? T.ink.primary : T.ink.muted, cursor: 'pointer', fontFamily: 'inherit' }}>
           {o.label}
         </button>
       ))}
@@ -110,23 +111,23 @@ export function TogglePills({ options, value, onChange, prefix = null }) {
 export function SortChevrons({ active, dir }) {
   if (!active) {
     return (
-      <span style={{ display: 'inline-flex', flexDirection: 'column', marginLeft: '3px', color: '#c9c7c0', lineHeight: 0 }}>
+      <span style={{ display: 'inline-flex', flexDirection: 'column', marginLeft: '3px', color: T.ink.faint, lineHeight: 0 }}>
         <IconChevronRight size={8} style={{ transform: 'rotate(-90deg)', marginBottom: '-3px' }} />
         <IconChevronRight size={8} style={{ transform: 'rotate(90deg)' }} />
       </span>
     )
   }
-  return <IconChevronRight size={10} style={{ transform: dir === 'asc' ? 'rotate(-90deg)' : 'rotate(90deg)', marginLeft: '3px', color: '#1a1a18' }} />
+  return <IconChevronRight size={10} style={{ transform: dir === 'asc' ? 'rotate(-90deg)' : 'rotate(90deg)', marginLeft: '3px', color: T.ink.primary }} />
 }
 
 export function SortHeaderStyle() {
-  return <style>{`.bee-sort-header { cursor: pointer } .bee-sort-header:hover { color: #1a1a18 !important; background: #f7f6f4 }`}</style>
+  return <style>{`.bee-sort-header { cursor: pointer } .bee-sort-header:hover { color: ${T.ink.primary} !important; background: ${T.surface.hover} }`}</style>
 }
 
 // Zero-match safety: never a silently empty surface.
 export function FilteredEmpty({ count, onClear, noun = 'rows' }) {
   return (
-    <div style={{ padding: '32px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px' }}>
+    <div style={{ padding: '32px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px' }}>
       No {noun} match the active filters (Filters · {count}).{' '}
       <ClearAllButton onClick={onClear} />
     </div>

@@ -349,14 +349,14 @@ describe('per-surface Overview content', () => {
     await unmount()
   })
 
-  it("ClientProfile: nonzero owing rides the metric band's Owing cell, red (route aggregate spans ALL engagements incl. closed)", async () => {
+  it("ClientProfile: nonzero owing rides the metric band's Owing cell in THE accent (design-system pass — Owing is money to collect, an action cue; route aggregate spans ALL engagements incl. closed)", async () => {
     profileOver = { aggregates: { lifetime_paid: 4200, invoiced: 5000, open_pipeline: 900, owing: 350, open_count: 1, total_count: 2 } }
     const { host, unmount } = await mountProfile()
     const band = host.querySelector('[aria-label="Metrics"]')!
     const owingCell = [...band.children].find(c => (c.textContent || '').includes('Owing'))! as HTMLElement
     expect(owingCell.textContent).toContain('$350')
     const value = owingCell.querySelectorAll('p')[1] as HTMLElement
-    expect(['#791F1F', 'rgb(121, 31, 31)']).toContain(value.style.color)
+    expect(['#0F6E56', 'rgb(15, 110, 86)']).toContain(value.style.color)
     await unmount()
   })
 })
@@ -380,7 +380,7 @@ const bandLabels = (host: Element) =>
 const bandValues = (host: Element) =>
   [...bandOf(host).children].map(cell => cell.querySelectorAll('p')[1])
 const chipSpan = (host: Element, label: string) =>
-  [...host.querySelectorAll('span')].find(sp => (sp as HTMLElement).style.borderRadius === '10px' && sp.textContent === label)
+  [...host.querySelectorAll('span')].find(sp => (sp as HTMLElement).style.borderRadius === '8px' && sp.textContent === label)
 
 describe('vitals strip / metric band', () => {
   it('PersonCard renders the 4-cell strip between the header identity row and the tab bar', async () => {
@@ -511,7 +511,7 @@ describe('header client identity (Option B)', () => {
     const { host, unmount } = await mountPanel({ onOpenClient: (id: string) => opened.push(id) })
     const view = buttonContaining(host, 'View profile')! as HTMLElement
     expect(view).toBeTruthy()
-    expect(['#378ADD', 'rgb(55, 138, 221)']).toContain(view.style.color)
+    expect(['#0F6E56', 'rgb(15, 110, 86)']).toContain(view.style.color) // THE accent (one-accent rule)
     // header region: above the tab bar in DOM order
     expect(view.compareDocumentPosition(tabButton(host, 'Overview')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // founding facts ride the same line, FULL-format date (created_at = 5d ago)
@@ -584,14 +584,14 @@ describe('action row', () => {
     }
   })
 
-  it('soft tints, matching text color, no hairline: Call blue, Send green, neutrals gray, 38px', async () => {
+  it('soft tints, matching text color, no hairline: Call + Send ride THE accent (one-accent rule), neutrals gray, 38px', async () => {
     const ep = await mountPanel({ onSendToJobber: () => {} })
     const call = [...ep.host.querySelectorAll('a')].find(a => (a.textContent || '').includes('Call'))!
-    expect(call.getAttribute('style')).toMatch(/rgba\(55,\s*138,\s*221/) // ~10% accent tint
+    expect(call.getAttribute('style')).toMatch(/rgba\(15,\s*110,\s*86/) // ~10% accent tint
     expect(call.getAttribute('style')).not.toContain('solid')           // no hairline border
-    expect(['#2b6aad', 'rgb(43, 106, 173)']).toContain((call as HTMLElement).style.color)
+    expect(['#085041', 'rgb(8, 80, 65)']).toContain((call as HTMLElement).style.color)
     const panelSend = buttonContaining(ep.host, 'Send to Jobber')!
-    expect(panelSend.getAttribute('style')).toMatch(/rgba\(29,\s*158,\s*117/) // ~12% success tint
+    expect(panelSend.getAttribute('style')).toMatch(/rgba\(15,\s*110,\s*86/) // same accent tint — the forest/blue split is dead
     const log = buttonContaining(ep.host, 'Log touchpoint')!
     expect(log.getAttribute('style')).toMatch(/rgba\(0,\s*0,\s*0/) // neutral gray tint
     expect((log as HTMLElement).style.height).toBe('38px')
@@ -599,7 +599,7 @@ describe('action row', () => {
 
     const pc = await mountPerson()
     const send = buttonContaining(pc.host, 'Send to Jobber')!
-    expect(send.getAttribute('style')).toMatch(/rgba\(29,\s*158,\s*117/) // founding door rides green
+    expect(send.getAttribute('style')).toMatch(/rgba\(15,\s*110,\s*86/) // founding door rides the accent
     await pc.unmount()
   })
 })

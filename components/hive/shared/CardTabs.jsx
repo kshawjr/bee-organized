@@ -19,10 +19,11 @@
 'use client'
 
 import React from 'react'
+import { T } from './tokens'
 
 export default function CardTabs({ tabs = [], active, onChange }) {
   return (
-    <div role="tablist" style={{ display: 'flex', gap: '2px', borderBottom: '0.5px solid rgba(0,0,0,0.08)' }}>
+    <div role="tablist" style={{ display: 'flex', gap: '2px', borderBottom: T.border.divider }}>
       {tabs.map(t => {
         const on = active === t.key
         return (
@@ -36,13 +37,14 @@ export default function CardTabs({ tabs = [], active, onChange }) {
               minHeight: '44px', padding: '0 14px',
               border: 'none', background: 'transparent', cursor: 'pointer',
               fontFamily: 'inherit', fontSize: '12px', fontWeight: 500,
-              color: on ? '#1a1a18' : '#8a8a84',
-              boxShadow: on ? 'inset 0 -2px 0 #1a1a18' : 'none',
+              color: on ? T.ink.primary : T.ink.muted,
+              // active state carries THE accent (one-accent rule)
+              boxShadow: on ? `inset 0 -2px 0 ${T.accent.fg}` : 'none',
             }}
           >
             {t.label}
             {t.count != null && (
-              <span style={{ marginLeft: '5px', fontSize: '11px', fontWeight: 400, color: '#b5b3ac' }}>{t.count}</span>
+              <span style={{ marginLeft: '5px', fontSize: '11px', fontWeight: 400, color: T.ink.quiet, fontVariantNumeric: T.type.tabular }}>{t.count}</span>
             )}
           </button>
         )

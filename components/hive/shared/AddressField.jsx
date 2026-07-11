@@ -44,6 +44,7 @@
 
 import React, { useState, useRef } from 'react'
 import { IconMapPin } from '@/components/ui/icons'
+import { T } from './tokens'
 import { EditPencil, InlineEditControls } from './inlineEdit'
 import AddressAutofill from './AddressAutofill'
 import { composeLeadAddress, deriveStreet, formatLeadAddress, normalizeAddressKey } from '@/lib/lead-address'
@@ -75,9 +76,9 @@ export function syncSuffix(wb) {
 }
 
 const INPUT_STYLE = {
-  minWidth: 0, padding: '5px 8px', border: '0.5px solid rgba(0,0,0,0.15)',
-  borderRadius: '6px', fontSize: '12px', fontFamily: 'inherit',
-  color: '#1a1a18', background: '#fff', outline: 'none', boxSizing: 'border-box',
+  minWidth: 0, padding: '5px 8px', border: T.border.control,
+  borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit',
+  color: T.ink.primary, background: T.surface.raised, outline: 'none', boxSizing: 'border-box',
 }
 
 export default function AddressField({ leadId, value, onSaved = () => {}, setToast = () => {} }) {
@@ -144,7 +145,7 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
     return (
       <div onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '7px' }}>
-          <span style={{ color: '#8a8a84', display: 'inline-flex', flexShrink: 0, paddingTop: '6px' }}><IconMapPin size={13} /></span>
+          <span style={{ color: T.ink.muted, display: 'inline-flex', flexShrink: 0, paddingTop: '6px' }}><IconMapPin size={13} /></span>
           <div style={{ flex: 1, minWidth: 0, display: 'grid', gap: '5px' }}>
             <AddressAutofill
               value={street}
@@ -173,22 +174,22 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
             <InlineEditControls busy={busy} onSave={save} onCancel={cancel} />
           </span>
         </div>
-        {err && <p style={{ fontSize: '11px', color: '#791F1F', marginTop: '3px', paddingLeft: '20px' }}>{err}</p>}
+        {err && <p style={{ fontSize: '11px', color: T.state.danger.fg, marginTop: '3px', paddingLeft: '20px' }}>{err}</p>}
       </div>
     )
   }
 
   return display ? (
     <p onClick={open} title="Edit address"
-      style={{ fontSize: '12px', color: '#1a1a18', display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, cursor: 'text' }}>
-      <span style={{ color: '#8a8a84', display: 'inline-flex', flexShrink: 0 }}><IconMapPin size={13} /></span>
+      style={{ fontSize: '12px', color: T.ink.primary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, cursor: 'text' }}>
+      <span style={{ color: T.ink.muted, display: 'inline-flex', flexShrink: 0 }}><IconMapPin size={13} /></span>
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{display}</span>
       <EditPencil />
     </p>
   ) : (
-    <p onClick={open} style={{ fontSize: '12px', color: '#c9c7c0', display: 'flex', alignItems: 'center', gap: '7px', cursor: 'text' }}>
+    <p onClick={open} style={{ fontSize: '12px', color: T.ink.faint, display: 'flex', alignItems: 'center', gap: '7px', cursor: 'text' }}>
       <span style={{ display: 'inline-flex' }}><IconMapPin size={13} /></span>
-      <span style={{ borderBottom: '1px dashed rgba(0,0,0,0.15)' }}>add address</span>
+      <span style={{ borderBottom: T.border.underline }}>add address</span>
     </p>
   )
 }

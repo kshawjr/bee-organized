@@ -12,6 +12,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { CHIP_STYLES, CLOSED_WON, isTerminal } from './shared/stageConfig'
+import { T } from './shared/tokens'
 import { deriveClientStatus, CLIENT_STATUS_ORDER, CLIENT_STATUS_META } from './shared/clientStatus'
 import { fmtMoney, relAge, lastActivityTs } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
@@ -199,7 +200,7 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
 
   return (
     <div>
-      <style>{`.bee-dir-row:hover { background:#f7f6f4 } .bee-dir-row:last-child { border-bottom:none !important }`}</style>
+      <style>{`.bee-dir-row:hover { background:${T.surface.hover} } .bee-dir-row:last-child { border-bottom:none !important }`}</style>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -221,10 +222,10 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
               <CheckRow label="Has open engagement" checked={filters.hasOpen} onToggle={() => setFilters(f => ({ ...f, hasOpen: !f.hasOpen }))} />
             </FilterSection>
             <FilterSection label="Lifetime value">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#8a8a84' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: T.ink.muted }}>
                 Min $
                 <input type="number" min="0" value={filters.minLifetime} onChange={e => setFilters(f => ({ ...f, minLifetime: e.target.value }))}
-                  style={{ flex: 1, minWidth: 0, padding: '5px 8px', border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
+                  style={{ flex: 1, minWidth: 0, padding: '5px 8px', border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
               </div>
             </FilterSection>
             <FilterSection label="Drips">
@@ -263,13 +264,15 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
         placeholder="Search name, email, phone…"
         style={{
           width: '100%', boxSizing: 'border-box', marginBottom: '12px',
-          padding: '9px 14px', borderRadius: '8px',
-          border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, background: '#fff',
-          fontSize: '13px', fontFamily: 'inherit', color: '#1a1a18', outline: 'none',
+          padding: '9px 14px', borderRadius: T.radius.control,
+          border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, background: T.surface.raised,
+          fontSize: '13px', fontFamily: 'inherit', color: T.ink.primary, outline: 'none',
         }}
       />
 
-      <div style={{ background: '#fff', border: '0.5px solid rgba(0,0,0,0.08)', borderRadius: '12px', overflow: 'hidden' }}>
+      {/* Raised container card (the card lift lives here — directory rows
+          inside keep dividers, matching the list's container treatment) */}
+      <div style={{ background: T.surface.raised, border: T.border.card, boxShadow: T.shadow.card, borderRadius: T.radius.card, overflow: 'hidden' }}>
         {rows.map(({ p, status }) => {
           const meta = CLIENT_STATUS_META[status]
           const fam = CHIP_STYLES[meta.styleKey] || CHIP_STYLES.gray
@@ -277,11 +280,11 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
           const detail = detailLine(p, status, openEngs, nowMs)
           return (
             <div key={p.id} className="bee-dir-row" onClick={() => onOpenClient(p.id, rows.map(r => r.p.id))}
-              style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: isMobile ? '12px 14px' : '13px 16px', borderBottom: '0.5px solid rgba(0,0,0,0.08)', cursor: 'pointer' }}>
+              style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: isMobile ? '12px 14px' : '13px 16px', borderBottom: T.border.divider, cursor: 'pointer' }}>
               <InitialsAvatar name={p.name} bg={fam.bg} text={fam.text} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontSize: '14px', fontWeight: 600, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
-                {detail && <p style={{ fontSize: '11px', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>{detail}</p>}
+                <p style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
+                {detail && <p style={{ fontSize: '11px', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>{detail}</p>}
               </div>
               <span style={{ flexShrink: 0 }}>
                 <StatusChip label={meta.label} styleKey={meta.styleKey} />
@@ -294,7 +297,7 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
           dirFilterCount(filters) > 0 && !q ? (
             <FilteredEmpty count={dirFilterCount(filters)} onClear={clearFilters} noun="clients" />
           ) : (
-            <div style={{ padding: '32px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px' }}>
+            <div style={{ padding: '32px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px' }}>
               {q ? 'No clients match that search' : 'No clients in this view'}
             </div>
           )

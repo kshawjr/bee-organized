@@ -29,8 +29,9 @@ import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCo
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
 import { IconInbox, IconLayoutKanban, IconList, IconUsers, IconPlus } from '@/components/ui/icons'
-import { TEXT_TOKENS, BORDER_TOKENS, WARNING_TOKENS, HAIRLINE_BORDER } from '@/components/ui/tokens'
+import { TEXT_TOKENS, BORDER_TOKENS, WARNING_TOKENS } from '@/components/ui/tokens'
 import { CHIP_STYLES } from './shared/stageConfig'
+import { T } from './shared/tokens'
 
 const TABS = [
   { key: 'inbox',   label: 'Inbox',   live: true, badge: true, Icon: IconInbox },
@@ -49,17 +50,17 @@ function TabPill({ tab, active, onSelect, badgeCount = null }) {
         title="Coming soon"
         style={{
           display: 'inline-flex', alignItems: 'center', gap: '5px',
-          padding: '6px 14px', borderRadius: '20px',
+          padding: '6px 14px', borderRadius: T.radius.pill,
           border: '0.5px solid transparent',
-          fontSize: '13px', fontWeight: 400, color: '#b5b3ac',
+          fontSize: '13px', fontWeight: 400, color: T.ink.quiet,
           cursor: 'default', userSelect: 'none', whiteSpace: 'nowrap',
         }}
       >
         {tab.label}
         {tab.badge && (
-          <span style={{ padding: '0 6px', borderRadius: '8px', background: '#F1EFE8', color: '#b5b3ac', fontSize: '10px', lineHeight: 1.6 }}>–</span>
+          <span style={{ padding: '0 6px', borderRadius: T.radius.control, background: T.family.gray.bg, color: T.ink.quiet, fontSize: '10px', lineHeight: 1.6 }}>–</span>
         )}
-        <span style={{ fontSize: '9px', color: '#c9c7c0', fontWeight: 400 }}>soon</span>
+        <span style={{ fontSize: '9px', color: T.ink.faint, fontWeight: 400 }}>soon</span>
       </span>
     )
   }
@@ -68,11 +69,12 @@ function TabPill({ tab, active, onSelect, badgeCount = null }) {
       onClick={onSelect}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: '6px',
-        padding: '6px 14px', borderRadius: '20px',
-        border: `0.5px solid ${active ? `var(--hairline-border, ${HAIRLINE_BORDER})` : 'transparent'}`,
-        background: active ? '#fff' : 'transparent',
+        padding: '6px 14px', borderRadius: T.radius.pill,
+        border: `0.5px solid ${active ? T.hairline.line : 'transparent'}`,
+        background: active ? T.surface.raised : 'transparent',
+        boxShadow: active ? T.shadow.card : 'none',
         fontSize: '13px', fontWeight: 500,
-        color: active ? '#1a1a18' : '#8a8a84',
+        color: active ? T.ink.primary : T.ink.muted,
         cursor: active ? 'default' : 'pointer', whiteSpace: 'nowrap',
         fontFamily: 'inherit',
       }}
@@ -82,7 +84,7 @@ function TabPill({ tab, active, onSelect, badgeCount = null }) {
       {tab.badge && badgeCount != null && badgeCount > 0 && (
         // Badge metrics are its own role (10px/600 count pill); the COLOR
         // pair is the one CHIP_STYLES teal — the same pair StatusChip uses.
-        <span style={{ marginLeft: '6px', padding: '0 6px', borderRadius: '8px', background: CHIP_STYLES.teal.bg, color: CHIP_STYLES.teal.text, fontSize: '10px', fontWeight: 600, lineHeight: 1.6 }}>
+        <span style={{ marginLeft: '6px', padding: '0 6px', borderRadius: T.radius.control, background: CHIP_STYLES.teal.bg, color: CHIP_STYLES.teal.text, fontSize: '10px', fontWeight: 600, lineHeight: 1.6, fontVariantNumeric: T.type.tabular }}>
           {badgeCount}
         </span>
       )}
@@ -246,8 +248,8 @@ export default function HiveShell({
       aria-label="New client"
       style={{
         display: 'inline-flex', alignItems: 'center', gap: '6px',
-        height: '34px', padding: '0 14px', borderRadius: '20px',
-        border: 'none', background: '#1a1a18', color: '#fff',
+        height: '34px', padding: '0 14px', borderRadius: T.radius.pill,
+        border: 'none', background: T.ink.primary, color: T.ink.inverse,
         fontSize: '13px', fontWeight: 500, cursor: 'pointer',
         fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0,
       }}
@@ -256,7 +258,7 @@ export default function HiveShell({
     </button>
   )
   const counterEl = (
-    <span style={{ fontSize: isMobile ? '11px' : '12px', color: '#8a8a84', whiteSpace: 'nowrap' }}>
+    <span style={{ fontSize: isMobile ? '11px' : '12px', color: T.ink.muted, whiteSpace: 'nowrap', fontVariantNumeric: T.type.tabular }}>
       Open engagements · {openCount}{engagementFilterCount(workFilters) > 0 ? ` of ${openFiltered.length}` : ''}
     </span>
   )
@@ -265,7 +267,7 @@ export default function HiveShell({
       onClick={onExitBeta}
       style={{
         border: 'none', background: 'transparent', padding: 0,
-        fontSize: '11px', color: '#b5b3ac', cursor: 'pointer',
+        fontSize: '11px', color: T.ink.quiet, cursor: 'pointer',
         fontFamily: 'inherit', textDecoration: 'underline',
         textUnderlineOffset: '2px', whiteSpace: 'nowrap',
       }}
@@ -277,7 +279,9 @@ export default function HiveShell({
   return (
     // min-height fills the VISIBLE viewport (dvh where supported — iOS
     // vh is the large viewport; vh kept as the old-browser fallback).
-    <div className="bee-hive-root" style={{ ...TEXT_TOKENS, ...BORDER_TOKENS, ...WARNING_TOKENS, background: '#fdfdfc', padding: '1rem 1rem 5rem', fontFamily: 'DM Sans,system-ui,sans-serif' }}>
+    // The canvas — a hair warm (T.surface.canvas) so raised white cards
+    // float on their border + two-layer shadow (the card-lift idiom).
+    <div className="bee-hive-root" style={{ ...TEXT_TOKENS, ...BORDER_TOKENS, ...WARNING_TOKENS, background: T.surface.canvas, padding: '1rem 1rem 5rem', fontFamily: 'DM Sans,system-ui,sans-serif' }}>
       <style>{`.bee-hive-root { min-height: 100vh; min-height: 100dvh; }`}</style>
       {isMobile ? (
         /* Mobile chrome STACKS (nothing may overlap at 320–430px):
@@ -363,10 +367,10 @@ export default function HiveShell({
             position: 'fixed',
             right: 'calc(16px + env(safe-area-inset-right, 0px))',
             bottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
-            width: '52px', height: '52px', borderRadius: '50%',
-            border: 'none', background: '#1a1a18', color: '#fff',
+            width: '52px', height: '52px', borderRadius: T.radius.round,
+            border: 'none', background: T.ink.primary, color: T.ink.inverse,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 4px 16px rgba(26,26,24,0.3)', cursor: 'pointer',
+            boxShadow: T.shadow.drawer, cursor: 'pointer',
             zIndex: 10000,
           }}
         >

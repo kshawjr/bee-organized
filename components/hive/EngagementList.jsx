@@ -18,6 +18,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { ENGAGEMENT_STAGES, STAGE_RANK, CHIP_STYLES, stageDisplayLabel } from './shared/stageConfig'
+import { T } from './shared/tokens'
 import { SECTION_LABEL, TEXT_SUCCESS, TEXT_DANGER, TEXT_MUTED } from '@/components/ui/tokens'
 import LoadMore from './shared/LoadMore'
 import { deriveStatusChip, displayTitle, engagementValue, fmtMoney, lastActivityTs, relAge } from './shared/engagementStatus'
@@ -66,7 +67,7 @@ function ClientCell({ e, nowMs }) {
   const isNew = e.repeat_count === 1 && (nowMs - new Date(e.created_at).getTime()) < 30 * 86400000
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-      <span style={{ fontSize: '14px', fontWeight: 600, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.client_name}</span>
+      <span style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.client_name}</span>
       {e.repeat_count > 1 && <StatusChip label="repeat" styleKey="repeat" />}
       {isNew && <StatusChip label="new" styleKey="teal" />}
     </div>
@@ -233,13 +234,13 @@ export default function EngagementList({ engagements = [], closedCount = 0, clos
   }
 
   // Column headers ride the board's SECTION_LABEL treatment (12px/500
-  // #6b6b66, sentence case) — no uppercase, no letter-spacing; the sort
+  // ink.secondary, sentence case) — no uppercase, no letter-spacing; the sort
   // carets and handlers are unchanged.
   const headerCell = { ...SECTION_LABEL }
 
   return (
     <div>
-      <style>{`.bee-englist-row:hover { background:#f7f6f4 } .bee-englist-row:last-child { border-bottom:none !important }`}</style>
+      <style>{`.bee-englist-row:hover { background:${T.surface.hover} } .bee-englist-row:last-child { border-bottom:none !important }`}</style>
       <SortHeaderStyle />
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -253,13 +254,14 @@ export default function EngagementList({ engagements = [], closedCount = 0, clos
         )}
       </div>
 
-      {/* White hairline card; table edge-to-edge inside */}
-      <div style={{ background: '#fff', border: '0.5px solid rgba(0,0,0,0.08)', borderRadius: '12px', overflow: 'hidden' }}>
+      {/* Raised container card (the card lift lives here — rows inside
+          keep dividers, no per-row lift); table edge-to-edge inside */}
+      <div style={{ background: T.surface.raised, border: T.border.card, boxShadow: T.shadow.card, borderRadius: T.radius.card, overflow: 'hidden' }}>
         {!isMobile && rows.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: '12px', padding: '12px 16px', alignItems: 'baseline', borderBottom: '0.5px solid rgba(0,0,0,0.08)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: '12px', padding: '12px 16px', alignItems: 'baseline', borderBottom: T.border.divider }}>
             {[['client', 'Client', 'left'], ['engagement', 'Engagement', 'left'], ['stage', 'Stage', 'left'], ['status', 'Status', 'left'], ['value', 'Value', 'right'], ['activity', 'Activity', 'right']].map(([col, label, align]) => (
               <button key={col} className="bee-sort-header" onClick={() => clickSort(col)}
-                style={{ ...headerCell, border: 'none', background: 'transparent', padding: '2px 4px', margin: '-2px -4px', borderRadius: '6px', fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', justifyContent: align === 'right' ? 'flex-end' : 'flex-start' }}>
+                style={{ ...headerCell, border: 'none', background: 'transparent', padding: '2px 4px', margin: '-2px -4px', borderRadius: T.radius.control, fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', justifyContent: align === 'right' ? 'flex-end' : 'flex-start' }}>
                 {label}<SortChevrons active={sort.col === col} dir={sort.dir} />
               </button>
             ))}
@@ -276,10 +278,10 @@ export default function EngagementList({ engagements = [], closedCount = 0, clos
             // Locked two-line compression, same tokens: name+value / title · status + stage chip.
             return (
               <div key={e.id} className="bee-englist-row" onClick={() => onOpenEngagement(e)}
-                style={{ padding: '13px 14px', borderBottom: '0.5px solid rgba(0,0,0,0.08)', cursor: 'pointer', opacity: muted ? 0.6 : 1 }}>
+                style={{ padding: '13px 14px', borderBottom: T.border.divider, cursor: 'pointer', opacity: muted ? 0.6 : 1 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '4px' }}>
                   <div style={{ flex: 1, minWidth: 0 }}><ClientCell e={e} nowMs={nowMs} /></div>
-                  <span style={{ fontSize: '14px', fontWeight: 600, color: value ? '#1a1a18' : '#b5b3ac', flexShrink: 0 }}>{value || '—'}</span>
+                  <span style={{ fontSize: '14px', fontWeight: 600, color: value ? T.ink.primary : T.ink.quiet, fontVariantNumeric: T.type.tabular, letterSpacing: T.type.trackNum, flexShrink: 0 }}>{value || '—'}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
@@ -293,21 +295,21 @@ export default function EngagementList({ engagements = [], closedCount = 0, clos
           }
           return (
             <div key={e.id} className="bee-englist-row" onClick={() => onOpenEngagement(e)}
-              style={{ display: 'grid', gridTemplateColumns: GRID, gap: '12px', alignItems: 'center', padding: '15px 16px', borderBottom: '0.5px solid rgba(0,0,0,0.08)', cursor: 'pointer', opacity: muted ? 0.6 : 1 }}>
+              style={{ display: 'grid', gridTemplateColumns: GRID, gap: '12px', alignItems: 'center', padding: '15px 16px', borderBottom: T.border.divider, cursor: 'pointer', opacity: muted ? 0.6 : 1 }}>
               <ClientCell e={e} nowMs={nowMs} />
               {/* displayTitle secondary text: 13px stays (table density) —
                   the COLOR is the unified token, same as board + mobile. */}
               <span style={{ fontSize: '13px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayTitle(e)}</span>
               <span><StatusChip label={stageDisplayLabel(e.stage)} styleKey={e.stage} /></span>
               <StatusText chip={chip} size={12} />
-              <span style={{ fontSize: '14px', fontWeight: 600, color: value ? '#1a1a18' : '#b5b3ac', textAlign: 'right', paddingRight: '10px' }}>{value || '—'}</span>
-              <span style={{ fontSize: '13px', color: '#8a8a84', textAlign: 'right' }}>{activity}</span>
+              <span style={{ fontSize: '14px', fontWeight: 600, color: value ? T.ink.primary : T.ink.quiet, fontVariantNumeric: T.type.tabular, letterSpacing: T.type.trackNum, textAlign: 'right', paddingRight: '10px' }}>{value || '—'}</span>
+              <span style={{ fontSize: '13px', color: T.ink.muted, textAlign: 'right' }}>{activity}</span>
             </div>
           )
         })}
 
         {rows.length === 0 && !loadingClosed && (
-          <div style={{ padding: '32px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px' }}>
+          <div style={{ padding: '32px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px' }}>
             {showingClosed
               ? 'No closed engagements in this view'
               : activeFilterCount > 0
@@ -316,7 +318,7 @@ export default function EngagementList({ engagements = [], closedCount = 0, clos
           </div>
         )}
         {loadingClosed && (
-          <div style={{ padding: '24px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px' }}>Loading closed engagements…</div>
+          <div style={{ padding: '24px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px' }}>Loading closed engagements…</div>
         )}
       </div>
 

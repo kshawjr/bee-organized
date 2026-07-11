@@ -22,6 +22,7 @@
 import React, { useState } from 'react'
 import { IconPin, IconPencil } from '@/components/ui/icons'
 import { WARNING_BG, WARNING_TEXT } from '@/components/ui/tokens'
+import { T } from './tokens'
 import { relAge } from './engagementStatus'
 
 export default function PinnedBuzz({ notes = [], onPost = () => {}, emptyLabel = 'Add a note about this client', nowMs = Date.now() }) {
@@ -47,18 +48,18 @@ export default function PinnedBuzz({ notes = [], onPost = () => {}, emptyLabel =
         style={{
           display: 'flex', alignItems: 'center', gap: '7px', width: '100%',
           border: 'none', background: 'transparent', padding: '4px 0', margin: 0,
-          fontFamily: 'inherit', fontSize: '12px', color: '#8a8a84',
+          fontFamily: 'inherit', fontSize: '12px', color: T.ink.muted,
           cursor: 'pointer', textAlign: 'left',
         }}
       >
         <IconPin size={13} />
-        <span style={{ borderBottom: '1px dashed rgba(0,0,0,0.2)' }}>{emptyLabel}</span>
+        <span style={{ borderBottom: T.border.underline }}>{emptyLabel}</span>
       </button>
     )
   }
 
   return (
-    <div style={{ background: `var(--bg-warning, ${WARNING_BG})`, borderRadius: '8px', padding: '8px 12px' }}>
+    <div style={{ background: `var(--bg-warning, ${WARNING_BG})`, borderRadius: T.radius.inset, padding: '8px 12px' }}>
       <div
         role="button"
         tabIndex={0}
@@ -76,7 +77,7 @@ export default function PinnedBuzz({ notes = [], onPost = () => {}, emptyLabel =
         }}>
           {latest ? latest.text : 'Buzz'}
         </span>
-        <span aria-label="Edit buzz" title="Edit buzz" style={{ color: '#b5b3ac', display: 'inline-flex', flexShrink: 0 }}>
+        <span aria-label="Edit buzz" title="Edit buzz" style={{ color: T.ink.quiet, display: 'inline-flex', flexShrink: 0 }}>
           <IconPencil size={13} />
         </span>
       </div>
@@ -93,16 +94,16 @@ export default function PinnedBuzz({ notes = [], onPost = () => {}, emptyLabel =
             placeholder="Add buzz…"
             aria-label="Add buzz note"
             style={{
-              padding: '7px 10px', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: '8px',
-              fontSize: '12px', fontFamily: 'inherit', outline: 'none', background: '#fff', width: '100%', boxSizing: 'border-box',
+              padding: '7px 10px', border: T.border.thin, borderRadius: T.radius.control,
+              fontSize: '12px', fontFamily: 'inherit', outline: 'none', background: T.surface.raised, width: '100%', boxSizing: 'border-box',
             }}
           />
           {sorted.length > 0 && (
             <div style={{ maxHeight: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '5px' }}>
               {sorted.map(n => (
-                <p key={n.id} style={{ fontSize: '12px', color: '#1a1a18', lineHeight: 1.4 }}>
+                <p key={n.id} style={{ fontSize: '12px', color: T.ink.primary, lineHeight: 1.4 }}>
                   {n.text}
-                  <span style={{ fontSize: '10px', color: '#b5b3ac', marginLeft: '6px', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '10px', color: T.ink.quiet, marginLeft: '6px', whiteSpace: 'nowrap' }}>
                     {[n.user_label || '—', n.created_at ? `${relAge(new Date(n.created_at).getTime(), nowMs)} ago` : null].filter(Boolean).join(' · ')}
                   </span>
                 </p>

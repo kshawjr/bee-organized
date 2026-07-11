@@ -41,7 +41,8 @@ import VitalsStrip, { vitalsAge, vitalsFuture, nextFromChildren } from './shared
 import { formatFullDate } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
-import { CHIP_STYLES, ACCENT_BLUE } from './shared/stageConfig'
+import { CHIP_STYLES } from './shared/stageConfig'
+import { T } from './shared/tokens'
 import { IconPhone, IconMail, IconSend } from '@/components/ui/icons'
 
 
@@ -215,10 +216,10 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
   const effSource = data ? (c?.source ?? null) : (person.source ?? null)
 
   const contactRow = (Icon, value, href) => value ? (
-    <p style={{ fontSize: '12px', color: '#1a1a18', display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
-      <span style={{ color: '#8a8a84', display: 'inline-flex' }}><Icon size={13} /></span>
+    <p style={{ fontSize: '12px', color: T.ink.primary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
+      <span style={{ color: T.ink.muted, display: 'inline-flex' }}><Icon size={13} /></span>
       {href ? (
-        <a href={href} style={{ color: ACCENT_BLUE, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</a>
+        <a href={href} style={{ color: T.accent.fg, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</a>
       ) : (
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
       )}
@@ -231,7 +232,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
       <PinnedBuzz notes={buzz} onPost={addBuzz} emptyLabel="Add a note about this client" nowMs={nowMs} />
 
       {/* Key facts */}
-      <div style={{ background: '#f7f6f4', borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ background: T.surface.sunken, borderRadius: T.radius.control, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <MicroLabel>Key facts</MicroLabel>
         {contactRow(IconPhone, person.phone, person.phone ? `tel:${person.phone}` : null)}
         {contactRow(IconMail, person.email, person.email ? `mailto:${person.email}` : null)}
@@ -263,7 +264,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
         <MicroLabel>What they want</MicroLabel>
         {data
           ? <EditableDesc text={c?.request_details} showEmpty onSave={saveDesc} placeholder="Describe the request…" />
-          : !loadErr && <div style={{ padding: '14px', textAlign: 'center', color: '#b5b3ac', fontSize: '12px' }}>Loading…</div>}
+          : !loadErr && <div style={{ padding: '14px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px' }}>Loading…</div>}
       </div>
 
       {/* Recent activity — quick-glance slice + composer; the exhaustive
@@ -275,7 +276,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
       <div>
         <ActionRow>
           {person.phone && (
-            <a href={`tel:${person.phone}`} style={actionBtn('blue')}>
+            <a href={`tel:${person.phone}`} style={actionBtn('accent')}>
               <IconPhone size={14} /> Call
             </a>
           )}
@@ -283,7 +284,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
             Log touchpoint
           </button>
           {canSend && onSendToJobber && (
-            <button style={actionBtn('green')} disabled={busy} onClick={() => onSendToJobber(person)}>
+            <button style={actionBtn('accent')} disabled={busy} onClick={() => onSendToJobber(person)}>
               <IconSend size={14} /> Send to Jobber
             </button>
           )}
@@ -291,7 +292,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
         {touchOpen && (
           <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <select value={touchMethod} onChange={e => setTouchMethod(e.target.value)}
-              style={{ padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', background: '#fff' }}>
+              style={{ padding: '8px 10px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', background: T.surface.raised }}>
               <option value="call">Call</option>
               <option value="sms">Text</option>
               <option value="email">Email</option>
@@ -299,7 +300,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
             </select>
             <input value={touchNote} onChange={e => setTouchNote(e.target.value)} placeholder="Notes (optional)…"
               onKeyDown={e => { if (e.key === 'Enter') logTouchpoint() }}
-              style={{ flex: 1, minWidth: '140px', padding: '8px 12px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
+              style={{ flex: 1, minWidth: '140px', padding: '8px 12px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
             <button style={{ ...quietBtn(), minHeight: 0 }} disabled={busy} onClick={logTouchpoint}>Log</button>
           </div>
         )}
@@ -310,7 +311,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
   const body = (
     <div style={{ padding: isMobile ? '0 16px 28px' : '0 24px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
       {loadErr && (
-        <p style={{ fontSize: '12px', color: '#791F1F', background: '#FCEBEB', padding: '8px 12px', borderRadius: '8px' }}>
+        <p style={{ fontSize: '12px', color: T.state.danger.fg, background: T.state.danger.soft, padding: '8px 12px', borderRadius: T.radius.control }}>
           Couldn’t load person: {loadErr}
         </p>
       )}
@@ -320,7 +321,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
         <InitialsAvatar name={person.name} bg={fam.bg} text={fam.text} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <h2 style={{ minWidth: 0, fontSize: '16px', fontWeight: 500, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <h2 style={{ minWidth: 0, fontSize: '16px', fontWeight: 500, color: T.ink.primary, letterSpacing: T.type.trackTitle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {person.name}
             </h2>
             {statusMeta && (
@@ -329,7 +330,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
               </span>
             )}
           </div>
-          <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '2px' }}>
+          <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '2px' }}>
             Prospect · inquired {formatFullDate(person.created) || '—'} · via {(effSource || 'unknown').toLowerCase()}
           </p>
         </div>
@@ -345,7 +346,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
         { label: 'Status', value: statusMeta?.label ?? null, color: fam.text },
         { label: 'Inquired', value: person.created ? vitalsAge(person.created, nowMs) : null },
         { label: 'Last touch', value: lastTouchTs ? vitalsAge(lastTouchTs, nowMs) : null },
-        { label: 'Next', value: nextTs ? vitalsFuture(nextTs, nowMs) : null, color: ACCENT_BLUE },
+        { label: 'Next', value: nextTs ? vitalsFuture(nextTs, nowMs) : null, color: T.accent.fg },
       ]} />
 
       {/* Tabs — Overview default; NO Files pre-founding. */}
