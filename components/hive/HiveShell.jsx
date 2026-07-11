@@ -12,7 +12,7 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import EngagementBoard from './EngagementBoard'
 import EngagementList from './EngagementList'
 import EngagementPanel from './EngagementPanel'
@@ -26,6 +26,7 @@ import { leadColsToPersonFields } from './shared/leadPatchMap'
 import { deriveClientStatus } from './shared/clientStatus'
 import { isTerminal, CLOSED_WON } from './shared/stageConfig'
 import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount } from './shared/engagementStatus'
+import { reconcileServerRows, mergeEngagements } from './shared/engagementRevalidate'
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
 import { IconInbox, IconLayoutKanban, IconList, IconUsers, IconPlus } from '@/components/ui/icons'
@@ -42,6 +43,10 @@ const TABS = [
 
 // The preferred lens (Board/List) sticks across sessions.
 const LENS_LS_KEY = 'bee_hive_beta_lens'
+
+// Focus/visibility revalidation guard — collapse a burst of focus events
+// (alt-tab flurries, OS focus echoes) into at most one refetch per window.
+const REVALIDATE_DEBOUNCE_MS = 4000
 
 function TabPill({ tab, active, onSelect, badgeCount = null }) {
   if (!tab.live) {
@@ -151,6 +156,9 @@ export default function HiveShell({
   //        | { type:'person', person }  ← pre-engagement card (Inbox rows)
   const [overlay, setOverlay] = useState(null)
   const [rowPatches, setRowPatches] = useState({})
+  // Server truth re-fetched on focus/visibility (below rowPatches in the
+  // merge). Keyed by id; each refetch overwrites — never holds local intent.
+  const [serverRevalidated, setServerRevalidated] = useState({})
   // Engagements REOPENED this session (Closed Lost → open, from the panel's
   // ··· Reopen). A reopened row isn't in the open server set, so its id is
   // handed to the board to EVICT it from the (separately-fetched) closed
@@ -220,12 +228,78 @@ export default function HiveShell({
     if (Object.keys(fields).length > 0) onPersonPatched(leadId, fields)
   }
 
+  // THE single engagement-row hand-up seam: the panel's onChanged (title/
+  // stage/close edits) AND the board's drag-to-close both merge through
+  // here, so every lens (board columns, open-count header, List) sees the
+  // same change without a reload. A terminal patch retires any session
+  // reopen-eviction for that row (a re-close should show in the rail again).
+  const applyEngagementPatch = useCallback((id, patch) => {
+    if (!id || !patch) return
+    setRowPatches(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))
+    if (patch.stage && isTerminal(patch.stage)) setReopenedIds(prev => prev.filter(x => x !== id))
+  }, [])
+
+  // ── revalidation: reconcile a fresh open set into serverRevalidated ──
+  // The MERGE half of the refresh fix (the pure logic lives in
+  // engagementRevalidate.js). A future Supabase realtime subscription can
+  // call this with the changed rows it receives — the merge doesn't change.
+  const reconcileEngagements = useCallback((freshRows) => {
+    setServerRevalidated(prev => {
+      const baseById = new Map()
+      for (const e of engagements) baseById.set(e.id, e)
+      for (const e of sessionEngagements) if (!baseById.has(e.id)) baseById.set(e.id, e)
+      return reconcileServerRows(prev, freshRows, baseById)
+    })
+  }, [engagements, sessionEngagements])
+
+  // ── revalidation TRIGGER: refetch the open set on focus/visibility ──
+  // The board's set is server-rendered once at page load; working-stage
+  // advances happen server-side (webhook/import) with no client event, so
+  // without this they need a reload to surface. In-flight + time guards
+  // stop rapid focus/visibility events from stacking fetches. Reuses the
+  // existing /api/engagements read path (?open=1) — no new endpoint, same
+  // shape _hub-page ships. REALTIME UPGRADE: a Supabase subscription
+  // replaces THIS trigger and feeds reconcileEngagements the same way.
+  const revalidateInFlight = useRef(false)
+  const revalidateLastAt = useRef(0)
+  const revalidateOpenEngagements = useCallback(async () => {
+    if (revalidateInFlight.current) return
+    const now = Date.now()
+    if (now - revalidateLastAt.current < REVALIDATE_DEBOUNCE_MS) return
+    revalidateInFlight.current = true
+    revalidateLastAt.current = now
+    try {
+      const params = new URLSearchParams({ open: '1' })
+      if (locFilter && locFilter !== 'all') params.set('location_uuid', locFilter)
+      const res = await fetch(`/api/engagements?${params}`)
+      if (!res.ok) return
+      const j = await res.json().catch(() => null)
+      if (j && Array.isArray(j.rows)) reconcileEngagements(j.rows)
+    } catch {
+      // best-effort — the page-load set stands if a revalidation fails
+    } finally {
+      revalidateInFlight.current = false
+    }
+  }, [locFilter, reconcileEngagements])
+
+  useEffect(() => {
+    const onFocus = () => { revalidateOpenEngagements() }
+    const onVisible = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') revalidateOpenEngagements()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [revalidateOpenEngagements])
+
   const allEngagements = sessionEngagements.length === 0
     ? engagements
     : [...sessionEngagements.filter(s => !engagements.some(e => e.id === s.id)), ...engagements]
-  const patched = Object.keys(rowPatches).length === 0
-    ? allEngagements
-    : allEngagements.map(e => (rowPatches[e.id] ? { ...e, ...rowPatches[e.id] } : e))
+  // Layer: base → server-revalidated truth → local rowPatches (win last).
+  const patched = mergeEngagements(allEngagements, serverRevalidated, rowPatches)
 
   const filtered = locFilter === 'all'
     ? patched
@@ -369,6 +443,8 @@ export default function HiveShell({
           onOpenClient={openClient}
           onOpenEngagement={openEngagement}
           onViewClosedInList={viewClosedInList}
+          // Drag-close hands terminal stage UP (panel seam).
+          onChanged={applyEngagementPatch}
           setToast={setToast}
           lookupOptions={lookupOptions}
           readOnly={readOnly}
@@ -442,12 +518,7 @@ export default function HiveShell({
           readOnly={readOnly}
           onClose={() => setOverlay(null)}
           onOpenClient={openClient}
-          onChanged={(id, patch) => {
-            setRowPatches(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))
-            // A re-close of a session-reopened row retires its rail-eviction
-            // so it shows in the closed rail again (correctly) on refetch.
-            if (patch?.stage && isTerminal(patch.stage)) setReopenedIds(prev => prev.filter(x => x !== id))
-          }}
+          onChanged={applyEngagementPatch}
           onReopened={(row) => {
             // Inject the freshly-open row into the session set (the founding
             // "show-without-reload" seam) so it lands in the OPEN columns
