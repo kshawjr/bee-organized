@@ -116,7 +116,7 @@ export async function queryLeadMatches(supabase, { email, phone, locationUuid } 
   if (!orFilter) return []
   let q = supabase
     .from('leads')
-    .select('id, name, email, phone, phone_normalized, address, city, state, zip, project_type, stage, is_junk, location_uuid, created_at')
+    .select('id, name, email, phone, phone_normalized, address, city, state, zip, project_type, request_details, preferred_contact, stage, is_junk, location_uuid, created_at')
     .or(orFilter)
     .not('is_junk', 'is', true)
     .range(0, 999)

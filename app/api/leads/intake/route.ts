@@ -124,9 +124,25 @@ export async function POST(req: NextRequest) {
     zip,
     project_type,
     message,
+    preferred_contact,
     source,
     metadata,
   } = body || {}
+
+  // `message` is the project-details free-text the form collects ("I have a
+  // medically complex condition…"). It is the CLIENT-level request record →
+  // leads.request_details (what /api/leads POST writes, EditableDesc edits,
+  // and engagements/people-mapper read as the description). Trimmed; empty
+  // stays null so the merge path never overwrites good data with a blank.
+  const requestDetails: string | null =
+    typeof message === 'string' && message.trim() ? message.trim() : null
+  // preferred_contact ("Text" | "Email" | "Phone" | …) — producer-agnostic
+  // free-text mirroring Zoho's Preferred_Method_of_Contact. Stored in the
+  // dedicated leads.preferred_contact column (see migrations/leads_preferred_contact.sql).
+  const preferredContact: string | null =
+    typeof preferred_contact === 'string' && preferred_contact.trim()
+      ? preferred_contact.trim()
+      : null
 
   // Email-or-phone: FB/IG lead ads are often phone-only. An email that
   // is present but unparseable is treated as absent (warned below) —
@@ -225,7 +241,7 @@ export async function POST(req: NextRequest) {
         matched: verdict.match,
         matchedOn: verdict.matchedOn ?? 'email',
         location,
-        submission: { email: validEmail, phone, address, city, state, zip, project_type, message },
+        submission: { email: validEmail, phone, address, city, state, zip, project_type, message, preferred_contact },
         source: source || 'web_form',
         baseWarnings: dedupWarnings,
         now,
@@ -280,7 +296,8 @@ export async function POST(req: NextRequest) {
       project_type: project_type || null,
       stage: 'New',
       source: source || 'web_form',
-      notes: message || null,
+      request_details: requestDetails,
+      preferred_contact: preferredContact,
       metadata: metadata || {},
       ...(possibleDuplicateIds.length
         ? { possible_duplicate_of: possibleDuplicateIds }
@@ -458,6 +475,8 @@ async function mergeResubmission(args: {
     state?: string | null
     zip?: string | null
     project_type?: string | null
+    request_details?: string | null
+    preferred_contact?: string | null
   }
   matchedOn: string
   location: { id: string; name: string; location_id: string; lifecycle_status: string | null }
@@ -470,6 +489,7 @@ async function mergeResubmission(args: {
     zip?: string | null
     project_type?: string | null
     message?: string | null
+    preferred_contact?: string | null
   }
   source: string
   baseWarnings: string[]
@@ -486,6 +506,10 @@ async function mergeResubmission(args: {
     state: submission.state || null,
     zip: submission.zip || null,
     project_type: submission.project_type || null,
+    // message → request_details, same fill-empty rule: only backfill when the
+    // matched lead has none and this submission carries a non-blank message.
+    request_details: submission.message?.trim() || null,
+    preferred_contact: submission.preferred_contact?.trim() || null,
   }
   const fills: Record<string, unknown> = {}
   for (const key of Object.keys(incoming)) {

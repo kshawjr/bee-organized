@@ -24,7 +24,8 @@ env var in Vercel. Wrong or missing key → `401` (not logged, not retryable —
 | `phone` | one of these two | Free-text accepted; must contain **≥7 digits** to count. Matching/dedup uses digits only. |
 | `address`, `city`, `state`, `zip` | no | Stored on the lead. |
 | `project_type` | no | Stored on the lead. |
-| `message` | no | Stored as the lead's notes; echoed into the resubmission touchpoint on a merge. |
+| `message` | no | The project-details free-text. Stored as the lead's `request_details` (the request record shown on the card and used as the engagement description); also echoed into the resubmission touchpoint on a merge. On a merge it only backfills when the matched lead has no `request_details` — an existing value is never overwritten. |
+| `preferred_contact` | no | Preferred contact method (e.g. `Text`, `Email`, `Phone`), mirroring Zoho's `Preferred_Method_of_Contact`. Stored on the lead's `preferred_contact` column. Fill-empty on a merge. |
 | `source` | no — **but set it** | Defaults to `web_form`. Make MUST set this explicitly per scenario (e.g. `facebook_lead_ad`, `instagram_lead_ad`, `website_form`) or every Make lead lands as a generic `web_form` lead and attribution is lost. |
 | `metadata` | no | Arbitrary JSON (raw ad/form IDs etc.). Stored as-is. |
 
@@ -70,6 +71,7 @@ X-API-Key: ****
   "state": "CO",
   "project_type": "Garage",
   "message": "Need the garage organized before winter",
+  "preferred_contact": "Text",
   "source": "facebook_lead_ad",
   "metadata": { "fb_form_id": "120211234567890123" }
 }

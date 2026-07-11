@@ -348,3 +348,101 @@ describe('classifyLeadMatches — NULL-safe tiers', () => {
     expect(realConflict).toMatchObject({ tier: 'in_question', reason: 'conflicting_keys' })
   })
 })
+
+// ═══ field capture — message → request_details + preferred_contact ═══
+// Bug (found live): the form POSTed `message` (project details) and
+// `preferred_contact`, but request_details came back null and there was
+// nowhere for preferred_contact. message now maps to leads.request_details
+// (NOT notes), preferred_contact to its own column, both on the create AND
+// the fill-empty merge path — and neither overwrites existing data.
+describe('intake capture — message → request_details, preferred_contact', () => {
+  it('NO MATCH insert: message → request_details (trimmed); preferred_contact stored; NOT notes', async () => {
+    h.enqueue('leads', [])                      // strong keys: none
+    h.enqueue('leads', [])                      // name: none
+    h.enqueue('leads', { id: 'lead-cap-1' })    // the insert
+    const res = await POST(makeReq(submission({
+      message: '  I have a medically complex condition and need careful handling.  ',
+      preferred_contact: 'Text',
+    })))
+    const body = await res.json()
+    expect(body.success).toBe(true)
+
+    const ins = insertPayloads('leads')
+    expect(ins).toHaveLength(1)
+    expect(ins[0].request_details).toBe(
+      'I have a medically complex condition and need careful handling.',
+    )
+    expect(ins[0].preferred_contact).toBe('Text')
+    // The bug was message landing in notes and request_details staying null —
+    // notes must not carry it anymore.
+    expect(ins[0].notes).toBeUndefined()
+  })
+
+  it('NO MATCH insert: missing message/preferred_contact → nulls, no error', async () => {
+    h.enqueue('leads', [])
+    h.enqueue('leads', [])
+    h.enqueue('leads', { id: 'lead-cap-2' })
+    const res = await POST(makeReq(submission())) // neither field present
+    const body = await res.json()
+    expect(body.success).toBe(true)
+    const ins = insertPayloads('leads')
+    expect(ins[0].request_details).toBeNull()
+    expect(ins[0].preferred_contact).toBeNull()
+  })
+
+  it('blank/whitespace values → null, never a blank string', async () => {
+    h.enqueue('leads', [])
+    h.enqueue('leads', [])
+    h.enqueue('leads', { id: 'lead-cap-3' })
+    await POST(makeReq(submission({ message: '   ', preferred_contact: '  ' })))
+    const ins = insertPayloads('leads')
+    expect(ins[0].request_details).toBeNull()
+    expect(ins[0].preferred_contact).toBeNull()
+  })
+
+  it('SOLID merge: backfills request_details + preferred_contact when matched lead has none', async () => {
+    h.enqueue('leads', [storedLead({ city: 'Boulder' })]) // both fields absent → empty
+    const res = await POST(makeReq(submission({
+      email: 'sarah@email.com',
+      message: 'Back again — need the pantry done',
+      preferred_contact: 'Email',
+    })))
+    const body = await res.json()
+    expect(body.merged).toBe(true)
+    const upd = updatePayloads('leads')
+    expect(upd).toHaveLength(1)
+    expect(upd[0]).toMatchObject({
+      request_details: 'Back again — need the pantry done',
+      preferred_contact: 'Email',
+    })
+    expect(upd[0], 'generated column must never be written').not.toHaveProperty('phone_normalized')
+  })
+
+  it('SOLID merge: existing request_details / preferred_contact are NEVER overwritten', async () => {
+    h.enqueue('leads', [storedLead({
+      phone: '(561) 555-0199',           // already set → no phone fill either
+      request_details: 'Original detailed request',
+      preferred_contact: 'Phone',
+    })])
+    const res = await POST(makeReq(submission({
+      email: 'sarah@email.com',
+      message: 'different follow-up text',
+      preferred_contact: 'Text',
+    })))
+    const body = await res.json()
+    expect(body.merged).toBe(true)
+    // Nothing empty to fill → no update at all; and if one runs it must omit both.
+    for (const u of updatePayloads('leads')) {
+      expect(u).not.toHaveProperty('request_details')
+      expect(u).not.toHaveProperty('preferred_contact')
+    }
+  })
+
+  it('SOLID merge: blank incoming message does not fill or overwrite', async () => {
+    h.enqueue('leads', [storedLead({ city: 'Boulder' })])
+    await POST(makeReq(submission({ email: 'sarah@email.com', message: '   ' })))
+    for (const u of updatePayloads('leads')) {
+      expect(u.request_details).toBeUndefined()
+    }
+  })
+})
