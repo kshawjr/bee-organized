@@ -123,6 +123,14 @@ const openMenuAnd = async (host: Element, label: string) => {
   await click(menuButton(label)!)
 }
 
+// Mark as junk is confirm-first: the menu item arms an in-menu danger
+// confirm, and only the confirm writes. This drives the full two-step.
+const junkVia = async (host: Element) => {
+  await click(moreButton(host)!)
+  await click(menuButton('Mark as junk')!)          // arms confirm — no write
+  await click(menuButton('Confirm — mark as junk')!) // the actual junk
+}
+
 beforeEach(() => {
   installFetch()
   lastToast = null
@@ -131,15 +139,24 @@ beforeEach(() => {
 
 // ═══ junk ══════════════════════════════════════════════════
 describe('Mark as junk', () => {
-  it('PATCHes is_junk=true, removes the row instantly, undo restores', async () => {
+  it('is confirm-first: the menu pick arms a confirm and writes nothing; the confirm PATCHes is_junk=true and removes the row; undo restores', async () => {
     const p = person()
     const m = await mount(inbox([p]))
     expect(m.host.textContent).toContain('Sarah Mitchell')
 
-    await openMenuAnd(m.host, 'Mark as junk')
+    // First pick only ARMS the confirm — no write, row still present.
+    await click(moreButton(m.host)!)
+    await click(menuButton('Mark as junk')!)
+    expect(patches).toHaveLength(0)
+    expect(menuButton('Confirm — mark as junk')).toBeTruthy()
+    expect(m.host.textContent).toContain('Sarah Mitchell')
 
+    // The confirm does the write.
+    await click(menuButton('Confirm — mark as junk')!)
     expect(patches).toEqual([{ id: p.id, body: { is_junk: true } }])
     expect(m.host.textContent).not.toContain('Sarah Mitchell')
+    // Destructive undo window is 6s (host honors an explicit duration).
+    expect(lastToast.duration).toBe(6000)
 
     await clickUndo(lastToast)
     expect(patches[1]).toEqual({ id: p.id, body: { is_junk: false } })
@@ -147,10 +164,21 @@ describe('Mark as junk', () => {
     await m.unmount()
   })
 
+  it('Keep lead backs out of the junk confirm with no write, row intact', async () => {
+    const p = person()
+    const m = await mount(inbox([p]))
+    await click(moreButton(m.host)!)
+    await click(menuButton('Mark as junk')!)
+    await click(menuButton('Keep lead')!)
+    expect(patches).toHaveLength(0)
+    expect(m.host.textContent).toContain('Sarah Mitchell')
+    await m.unmount()
+  })
+
   it('junkedIds HOLDS across a simulated Realtime re-insert (stale isJunk:false row)', async () => {
     const p = person()
     const m = await mount(inbox([p]))
-    await openMenuAnd(m.host, 'Mark as junk')
+    await junkVia(m.host)
     expect(m.host.textContent).not.toContain('Sarah Mitchell')
 
     // Realtime refetch re-inserts a FRESH person object for the same id —
@@ -282,6 +310,25 @@ describe('wiring', () => {
   it('deriveClientStatus stays blind to all three soft-removal signals', () => {
     const cs = src('components/hive/shared/clientStatus.js')
     expect(cs).not.toMatch(/inboxDismissed|snoozeUntil|isJunk/)
+  })
+
+  it('the BeeHub toast host honors an explicit duration (destructive undos get 6s, default stays 3s)', () => {
+    const hub = src('components/BeeHub.jsx')
+    // Auto-dismiss reads toast.duration with a 3000ms fallback — the global
+    // default is untouched; only toasts that opt in widen their window.
+    expect(hub).toMatch(/setToast\(null\),\s*toast\.duration\s*\|\|\s*3000/)
+  })
+
+  it('snooze / dismiss undos keep the 3s default — only junk opts into 6s', async () => {
+    const m = await mount(inbox([person()]))
+    await openMenuAnd(m.host, 'Snooze until tomorrow')
+    expect(lastToast.duration).toBeUndefined()
+    await m.unmount()
+
+    const m2 = await mount(inbox([person()]))
+    await openMenuAnd(m2.host, 'Dismiss')
+    expect(lastToast.duration).toBeUndefined()
+    await m2.unmount()
   })
 })
 

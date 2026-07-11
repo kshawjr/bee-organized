@@ -113,6 +113,13 @@ const rowCheckboxes = (host: Element) =>
 const menuButton = (text: string) =>
   [...document.querySelectorAll('[data-bee-row-menu] button')].find(b => (b.textContent || '').trim() === text)
 
+// Bulk Remove is confirm-first for ANY N now (not just >5): 'Remove (N)'
+// arms the confirm, 'Remove N' commits it. This drives both clicks.
+const bulkRemove = async (host: Element, n: number) => {
+  await click(buttonByText(host, `Remove (${n})`)!)
+  await click(buttonByText(host, `Remove ${n}`)!)
+}
+
 const clickUndo = async (toast: any) => {
   const kids = React.Children.toArray(toast.msg.props.children) as any[]
   const btn = kids.find(k => k?.type === 'button')
@@ -276,7 +283,7 @@ describe('select-all-visible', () => {
     await enterSelectAll(m.host)
     expect(m.host.textContent).toContain('2 selected')
 
-    await click(buttonByText(m.host, 'Remove (2)')!)
+    await bulkRemove(m.host, 2)
     expect(patches.map(x => x.id).sort()).toEqual([withPhoneA.id, withPhoneB.id].sort())
     expect(patches.every(x => x.body.is_junk === true)).toBe(true)
     await m.unmount()
@@ -304,7 +311,7 @@ describe('bulk Remove (mark-junk semantics) + batch Undo', () => {
     await enterSelectEmpty(m.host)
     await click(rowByName(m.host, 'Alice Apple')!)
     await click(rowByName(m.host, 'Bob Berry')!)
-    await click(buttonByText(m.host, 'Remove (2)')!)
+    await bulkRemove(m.host, 2)
 
     expect(patches.map(x => x.id).sort()).toEqual([a.id, b.id].sort())
     expect(patches.every(x => x.body.is_junk === true)).toBe(true)
@@ -312,6 +319,7 @@ describe('bulk Remove (mark-junk semantics) + batch Undo', () => {
     expect(m.host.textContent).not.toContain('Bob Berry')
     expect(m.host.textContent).toContain('Karla Keeper')
     expect(rowCheckboxes(m.host)).toHaveLength(0) // selection mode exited
+    expect(lastToast.duration).toBe(6000) // destructive undo window is 6s
 
     // Batch undo — every removed row PATCHed back and re-rendered.
     await clickUndo(lastToast)
@@ -323,7 +331,7 @@ describe('bulk Remove (mark-junk semantics) + batch Undo', () => {
     await m.unmount()
   })
 
-  it('N>5 requires the confirm step: no writes until confirmed, Keep backs out with selection intact', async () => {
+  it('confirm-first for a large batch: no writes until confirmed, Keep backs out with selection intact', async () => {
     const six = Array.from({ length: 6 }, (_, i) => person({ name: `Bulk Lead${i}` }))
     const m = await mount(inbox(six))
 
@@ -348,12 +356,20 @@ describe('bulk Remove (mark-junk semantics) + batch Undo', () => {
     await m.unmount()
   })
 
-  it('N<=5 removes without a confirm step', async () => {
-    const five = Array.from({ length: 5 }, (_, i) => person({ name: `Bulk Lead${i}` }))
-    const m = await mount(inbox(five))
-    await enterSelectAll(m.host)
-    await click(buttonByText(m.host, 'Remove (5)')!)
-    expect(patches).toHaveLength(5)
+  it('confirm-first at N=1: a single-lead bulk remove still requires the confirm step (not just N>5)', async () => {
+    const one = person({ name: 'Solo Lead' })
+    const m = await mount(inbox([one]))
+    await enterSelectAll(m.host) // mode + the 1 selectable row selected
+    expect(m.host.textContent).toContain('1 selected')
+
+    // 'Remove (1)' arms the confirm — no write yet (singular copy)
+    await click(buttonByText(m.host, 'Remove (1)')!)
+    expect(patches).toHaveLength(0)
+    expect(m.host.textContent).toContain('Remove 1 lead?')
+
+    // The confirm commits it
+    await click(buttonByText(m.host, 'Remove 1')!)
+    expect(patches).toEqual([{ id: one.id, body: { is_junk: true } }])
     await m.unmount()
   })
 })
@@ -377,7 +393,7 @@ describe('Jobber-linked rows in the Inbox', () => {
     await click(rowByName(m.host, 'Judy Jobber')!)
     expect(m.host.textContent).toContain('1 selected')
 
-    await click(buttonByText(m.host, 'Remove (1)')!)
+    await bulkRemove(m.host, 1)
     expect(patches).toHaveLength(1)
     expect(patches[0].id).toBe(free.id)
     expect(m.host.textContent).toContain('Judy Jobber') // untouched

@@ -232,13 +232,14 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
   const [snoozedIds, setSnoozedIds] = useState(() => new Set())
   const [dismissedIds, setDismissedIds] = useState(() => new Set())
   const [menuFor, setMenuFor] = useState(null) // row id whose ··· menu is open
+  const [confirmJunkId, setConfirmJunkId] = useState(null) // row id awaiting single junk confirm
   // Bulk selection (feedback #5) — the Inbox is the ONLY surface where
   // leads are removable (pre-Jobber; Kevin 7/10). Remove = the same
   // mark-junk write path as the ··· row action, batched. Selection is
   // session-only state; Jobber-linked rows are never selectable.
   const [selectMode, setSelectMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState(() => new Set())
-  const [confirmRemove, setConfirmRemove] = useState(false) // N>5 confirm step
+  const [confirmRemove, setConfirmRemove] = useState(false) // bulk remove confirm step (any N)
   const [sortRaw, setSort] = useStoredState('bee_hive_inbox_sort', { key: 'newest' })
   const inboxSort = INBOX_SORTS.some(o => o.key === sortRaw.key) ? sortRaw.key : 'newest'
   const [filters, setFilters, clearFilters] = useStoredState('bee_hive_inbox_filters', INBOX_FILTER_DEFAULTS)
@@ -260,6 +261,11 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     document.addEventListener('click', close)
     return () => document.removeEventListener('click', close)
   }, [menuFor])
+
+  // The single mark-as-junk confirm is scoped to the open menu — any close
+  // path (outside click, Escape, reopening another row) disarms it, so a
+  // stale "confirm junk" can never fire against a row whose menu is shut.
+  useEffect(() => { if (!menuFor) setConfirmJunkId(null) }, [menuFor])
 
   const scoped = useMemo(() => (
     locFilter === 'all' ? people : people.filter(p => p.locationId === locFilter)
@@ -393,9 +399,13 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
 
   // InlineToast (BeeHub scope) renders {msg} verbatim, so a React node
   // rides through untouched — the Undo button lives inside the toast.
-  // The undo window is the host's toast auto-dismiss (~3s).
-  const undoToast = (text, onUndo) => ({
+  // The undo window is the host's toast auto-dismiss (~3s by default); the
+  // host now honors an explicit `duration`, so DESTRUCTIVE undos (junk /
+  // bulk remove) pass 6s to give a real window to catch a stray click —
+  // scoped here, never a global toast-default change.
+  const undoToast = (text, onUndo, duration) => ({
     kind: 'success',
+    ...(duration ? { duration } : {}),
     msg: (
       <span>
         {text} ·{' '}
@@ -423,7 +433,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
         } catch (e) {
           setToast({ kind: 'error', msg: `Undo failed: ${e.message}` })
         }
-      }))
+      }, 6000))
     } catch (e) {
       setToast({ kind: 'error', msg: `Junk failed: ${e.message}` })
     } finally {
@@ -439,7 +449,9 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
   // so; Undo restores exactly the rows that were removed.
   function requestRemove() {
     if (selCount === 0) return
-    if (selCount > 5 && !confirmRemove) { setConfirmRemove(true); return }
+    // Confirm-first is the rule for every destructive bulk remove, not a
+    // >5 special case (Kevin 7/11) — one deliberate confirm, then the write.
+    if (!confirmRemove) { setConfirmRemove(true); return }
     bulkRemoveSelected()
   }
 
@@ -466,7 +478,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
         setJunkedIds(prev => { const n = new Set(prev); restored.forEach(p => n.delete(p.id)); return n })
         if (restored.length === done.length) setToast({ kind: 'success', msg: `${restored.length} restored` })
         else setToast({ kind: 'error', msg: `Undo failed for ${done.length - restored.length} of ${done.length}` })
-      }))
+      }, 6000))
     } finally {
       setBusyId(null)
     }
@@ -594,10 +606,27 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
             <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); dismissLead(p) }}
               label={<><IconCheck size={13} />Dismiss</>} />
             {/* Jobber-owns-deletion rule: no junk door on linked rows
-                (the API 409s it anyway — this keeps the UI honest). */}
+                (the API 409s it anyway — this keeps the UI honest). Junk is
+                destructive (stops drips), so it's confirm-first: the first
+                pick arms a danger confirm in place rather than firing — a
+                stray click can't junk a lead. Undo still rides the toast. */}
             {!linked && (
-              <MenuRow danger disabled={busyId === p.id} onPick={() => { setMenuFor(null); markJunk(p) }}
-                label="Mark as junk" />
+              confirmJunkId === p.id ? (
+                <>
+                  <div style={{ padding: '6px 10px 4px', fontSize: '12px', color: T.ink.secondary, whiteSpace: 'nowrap' }}>
+                    Mark as junk? Drips stop.
+                  </div>
+                  <MenuRow danger disabled={busyId === p.id}
+                    onPick={() => { setConfirmJunkId(null); setMenuFor(null); markJunk(p) }}
+                    label="Confirm — mark as junk" />
+                  <MenuRow disabled={busyId === p.id}
+                    onPick={() => setConfirmJunkId(null)}
+                    label="Keep lead" />
+                </>
+              ) : (
+                <MenuRow danger disabled={busyId === p.id} onPick={() => setConfirmJunkId(p.id)}
+                  label="Mark as junk" />
+              )
             )}
           </RowMenu>
         )}
@@ -753,7 +782,8 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       </div>
 
       {/* Bulk action bar — select-all-visible (respects active filters),
-          count chip, Remove (N) + Cancel; N>5 swaps in a confirm step. */}
+          count chip, Remove (N) + Cancel; Remove always swaps in a confirm
+          step (confirm-first for any N), Undo still follows. */}
       {selectMode && (
         <div role="toolbar" aria-label="Bulk actions"
           style={{
@@ -769,10 +799,10 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
             {selCount} selected
           </span>
           <span style={{ flex: 1 }} />
-          {confirmRemove && selCount > 5 ? (
+          {confirmRemove && selCount > 0 ? (
             <>
               <span style={{ fontSize: '12px', color: T.ink.secondary }}>
-                Remove {selCount} leads? They move to the Bin and drips stop.
+                Remove {selCount} {selCount === 1 ? 'lead' : 'leads'}? They move to the Bin and drips stop.
               </span>
               <button onClick={bulkRemoveSelected} disabled={busyId === 'bulk'}
                 style={{ padding: '6px 14px', borderRadius: T.radius.control, border: 'none', background: T.state.danger.strong, fontSize: '12px', fontWeight: 600, color: T.ink.inverse, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', opacity: busyId === 'bulk' ? 0.6 : 1 }}>

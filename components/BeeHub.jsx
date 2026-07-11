@@ -20351,7 +20351,10 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   const [toast, setToast] = useState(null)
   useEffect(() => {
     if (!toast) return
-    const t = setTimeout(() => setToast(null), 3000)
+    // Default auto-dismiss is 3s; a toast may carry an explicit `duration`
+    // to widen its window (destructive undo toasts pass 6s) without moving
+    // the global default.
+    const t = setTimeout(() => setToast(null), toast.duration || 3000)
     return () => clearTimeout(t)
   }, [toast])
   // Client-side override to dismiss onboarding after a milestone (e.g. import
