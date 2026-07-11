@@ -294,6 +294,48 @@ describe('ClientProfile — referral display', () => {
     await unmount()
   })
 
+  it('forward: route-flagged removed referrer says "a removed referrer"', async () => {
+    profilePayload = profileWith({ referred_by_kind: 'partner', referred_by_id: 'gone', referred_by_name: null, referred_by_missing: true })
+    const { host, unmount } = await mount(<ClientProfile clientId="lead-1" onClose={() => {}} />)
+    await flush()
+    expect(host.textContent).toContain('Referred by a removed referrer')
+    await unmount()
+  })
+
+  it('reverse: total count comes from referred_us_total, not the row count', async () => {
+    // 7 rows returned, but the client actually referred 300 (past the
+    // fetch ceiling). Header shows the true total; "show more" reveals
+    // the rest of the page; the truncation note is honest about the cap.
+    const rows = Array.from({ length: 7 }, (_, i) => ({ id: `r${i}`, name: `Ref ${i}`, created_at: daysAgo(i) }))
+    profilePayload = profileWith({}, { referred_us: rows, referred_us_total: 300 })
+    const { host, unmount } = await mount(<ClientProfile clientId="lead-1" onClose={() => {}} />)
+    await flush()
+    expect(host.textContent).toContain('Referred us · 300')
+    // First 6 shown, one collapsed behind "Show 1 more".
+    expect(host.textContent).toContain('Ref 0')
+    expect(host.textContent).not.toContain('Ref 6')
+    const more = buttonContaining(host, 'Show 1 more')!
+    expect(more).toBeTruthy()
+    await click(more)
+    expect(host.textContent).toContain('Ref 6')
+    expect(host.textContent).toContain('Showing first 7 of 300')
+    await unmount()
+  })
+
+  it('reverse: no "show more" and no total-fallback drama for a small list', async () => {
+    profilePayload = profileWith({}, {
+      referred_us: [{ id: 'r1', name: 'Alice Alvarez', created_at: daysAgo(10) }],
+      referred_us_total: 1,
+    })
+    const { host, unmount } = await mount(<ClientProfile clientId="lead-1" onClose={() => {}} />)
+    await flush()
+    expect(host.textContent).toContain('Referred us · 1')
+    const showMore = [...host.querySelectorAll('button')].find(b => /Show \d+ more/.test(b.textContent || ''))
+    expect(showMore).toBeFalsy()
+    expect(host.textContent).not.toContain('Showing first')
+    await unmount()
+  })
+
   it('reverse: "Referred us" lists the people this client referred', async () => {
     profilePayload = profileWith({}, {
       referred_us: [

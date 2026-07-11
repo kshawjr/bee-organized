@@ -18,6 +18,13 @@ import { profileAggregates } from '@/lib/profile-aggregates'
 
 const isOpen = (s: string) => s !== 'Closed Won' && s !== 'Closed Lost'
 
+// Reverse-referral fetch ceiling. Was a hard .range(0, 49) — referrals
+// 51+ never loaded, so a prolific referral partner's later referrals
+// were absent from the payload (not a scroll gap). Raised to a sane
+// ceiling + a total count so the UI can say "showing N of M". A single
+// client realistically never out-refers this; the count guards the case.
+const REFERRED_US_CAP = 200
+
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -75,7 +82,9 @@ export async function GET(
     referrerQuery,
     // Reverse direction — leads THIS client referred (kind='lead' rows
     // pointing back here). Junk exclusion via .not(is,true) — NULL stays.
-    supabaseService.from('leads').select('id, name, created_at').eq('referred_by_kind', 'lead').eq('referred_by_id', id).not('is_junk', 'is', true).order('created_at', { ascending: false }).range(0, 49),
+    // count:'exact' returns the FULL match total alongside the capped
+    // page so the UI can show "showing N of M" past the ceiling.
+    supabaseService.from('leads').select('id, name, created_at', { count: 'exact' }).eq('referred_by_kind', 'lead').eq('referred_by_id', id).not('is_junk', 'is', true).order('created_at', { ascending: false }).range(0, REFERRED_US_CAP - 1),
     // Tag junction rows — resolved to lookup LABELS below (the v4 tags
     // row renders labels, not the classic attrs.key ids).
     supabaseService.from('lead_tags').select('id, tag_lookup_id').eq('lead_id', id),
@@ -116,6 +125,15 @@ export async function GET(
       .map((r: any) => ({ id: r.id, label: r.label }))
   }
 
+  // Dangling-referrer detection — referred_by_id may point at a
+  // partner/lead row that has since been deleted. .maybeSingle() already
+  // fails soft (data:null, no throw), but null alone can't tell "no
+  // referrer" from "referrer removed". When a referrer IS set yet the
+  // lookup found nothing, flag it so the UI can say "removed referrer"
+  // instead of a blank/generic line.
+  const referrerSet = !!(lead.referred_by_kind && lead.referred_by_id)
+  const referredByMissing = referrerSet && !referrerRes.data
+
   const engagements = engagementsRes.data ?? []
   const openIds = engagements.filter(e => isOpen(e.stage)).map(e => e.id)
 
@@ -150,9 +168,11 @@ export async function GET(
       ...lead,
       location_name: locRes.data?.name ?? null,
       referred_by_name: referrerRes.data?.name ?? null,
+      referred_by_missing: referredByMissing,
       assigned_to_name: lead.assigned_to ? (authorById[lead.assigned_to] ?? null) : null,
     },
     referred_us: referredUsRes.data ?? [],
+    referred_us_total: referredUsRes.count ?? (referredUsRes.data?.length ?? 0),
     contacts: contactsRes.data ?? [],
     engagements: withChildren,
     touchpoints,

@@ -102,8 +102,12 @@ export default function ReferrerField({
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
           <button type="button" aria-label="Edit referrer" onClick={() => setPicking(v => !v)}
             style={{ border: 'none', background: 'transparent', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer', borderBottom: T.border.underline }}>
-            {/* Kind-only fallback covers a dangling id whose row was deleted. */}
-            Referred by {lead.referred_by_name || (lead.referred_by_kind === 'lead' ? 'a client' : 'a partner')}
+            {/* Dangling id (route flagged referred_by_missing) → an
+                explicit "removed referrer"; a name-less-but-not-flagged
+                lead (older payloads) still degrades to the kind. */}
+            Referred by {lead.referred_by_name
+              || (lead.referred_by_missing ? 'a removed referrer'
+                : lead.referred_by_kind === 'lead' ? 'a client' : 'a partner')}
           </button>
           <button type="button" aria-label="Clear referrer" onClick={clear}
             style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', color: T.ink.quiet, fontSize: '13px', lineHeight: 1 }}>

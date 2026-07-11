@@ -91,6 +91,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
   const [showClosed, setShowClosed] = useState(false)
+  const [showAllReferred, setShowAllReferred] = useState(false)
   const [touchOpen, setTouchOpen] = useState(false)
   const [touchMethod, setTouchMethod] = useState('call')
   const [touchNote, setTouchNote] = useState('')
@@ -342,17 +343,41 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
           onPartnerCreated={onPartnerCreated}
           setToast={setToast}
         />
-        {/* Reverse direction — leads this client referred. */}
-        {(data.referred_us || []).length > 0 && (
-          <div style={{ marginTop: '2px' }}>
-            <p style={{ fontSize: '11px', fontWeight: 500, color: T.ink.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '3px' }}>
-              Referred us · {data.referred_us.length}
-            </p>
-            {data.referred_us.map(r => (
-              <p key={r.id} style={{ fontSize: '12px', color: T.ink.primary }}>{r.name}</p>
-            ))}
-          </div>
-        )}
+        {/* Reverse direction — leads this client referred. The count is
+            the FULL server total (referred_us_total); the rows are the
+            capped page. A prolific referrer collapses to the first few
+            with a "show all" toggle, and if the total exceeds what the
+            route returned we say so honestly. */}
+        {(() => {
+          const rows = data.referred_us || []
+          if (rows.length === 0) return null
+          const total = data.referred_us_total ?? rows.length
+          const REVERSE_INITIAL = 6
+          const shown = showAllReferred ? rows : rows.slice(0, REVERSE_INITIAL)
+          const hiddenLocal = rows.length - shown.length
+          const beyondCeiling = total - rows.length // referrals past the fetch cap
+          return (
+            <div style={{ marginTop: '2px' }}>
+              <p style={{ fontSize: '11px', fontWeight: 500, color: T.ink.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '3px' }}>
+                Referred us · {total}
+              </p>
+              {shown.map(r => (
+                <p key={r.id} style={{ fontSize: '12px', color: T.ink.primary }}>{r.name}</p>
+              ))}
+              {hiddenLocal > 0 && (
+                <button type="button" onClick={() => setShowAllReferred(true)}
+                  style={{ border: 'none', background: 'transparent', padding: '2px 0 0', font: 'inherit', fontSize: '12px', cursor: 'pointer', color: T.ink.muted, borderBottom: T.border.underline }}>
+                  Show {hiddenLocal} more
+                </button>
+              )}
+              {showAllReferred && beyondCeiling > 0 && (
+                <p style={{ fontSize: '11px', color: T.ink.quiet, marginTop: '3px' }}>
+                  Showing first {rows.length} of {total}
+                </p>
+              )}
+            </div>
+          )
+        })()}
       </div>
 
       {/* Secondary contacts — full CRUD (build 3) via the existing
