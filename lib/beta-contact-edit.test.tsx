@@ -258,11 +258,12 @@ describe('ContactField — toast reflects the whole contact_writeback truth', ()
 
 // ── C) mounts + propagation ────────────────────────────────────
 describe('two mounts, one implementation + cross-view propagation', () => {
-  it('source pin: ClientProfile and EngagementPanel both mount shared/ContactField; no private contact-edit fork', () => {
+  it('source pin: ClientProfile mounts shared/ContactField; the panel does NOT (build-2 person-vs-deal — contact is person-scoped, one View-profile tap away)', () => {
     const profile = readFileSync('components/hive/ClientProfile.jsx', 'utf8')
     const panel = readFileSync('components/hive/EngagementPanel.jsx', 'utf8')
     expect(profile).toContain("from './shared/ContactField'")
-    expect(panel).toContain("from './shared/ContactField'")
+    expect(panel).not.toContain('ContactField')
+    expect(panel).not.toContain('AddressField')
   })
 
   it('ClientProfile: phone edit PATCHes, prepends the audit row into Recent activity, hands cols up', async () => {
@@ -287,10 +288,10 @@ describe('two mounts, one implementation + cross-view propagation', () => {
     await unmount()
   })
 
-  it('EngagementPanel: same shared row edits the email and hands cols up', async () => {
+  it('ClientProfile: the same shared row edits the email and hands cols up (the panel dropped its mount in build 2)', async () => {
     const onLeadPatched = vi.fn()
     const { host, unmount } = await mount(
-      <EngagementPanel engagementId="eng-1" onClose={() => {}} onLeadPatched={onLeadPatched} setToast={() => {}} />
+      <ClientProfile clientId="lead-9" onClose={() => {}} onLeadPatched={onLeadPatched} setToast={() => {}} />
     )
     const emailRow = host.querySelector('a[href^="mailto:"]')!.parentElement as HTMLElement
     await click(emailRow)

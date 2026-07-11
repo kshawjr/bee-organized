@@ -1,46 +1,53 @@
 // components/hive/ClientProfile.jsx
 // ─────────────────────────────────────────────────────────────
-// The CLIENT-level card (fullest of the three) — tabbed layout
-// (approved): compact header → VITALS STRIP (Status / Lifetime / Last
-// touch / Open — the four-cell client-health row, visible on every tab)
-// → tabs (Overview / Timeline / Files) → content. Fetches
-// GET /api/clients/:id/profile on open.
-//
-// The strip REPLACED the Overview money-tiles row (Lifetime/Open/Owing).
-// Owing keeps a red Key-facts line when nonzero (plus each Final
-// Processing engagement row's 'Owes $X' chip) — nothing silently drops.
-//
-// Overview: pinned buzz (client-level — the SAME note every engagement
-// panel inherits) → key facts (contact + editable Source row + shared
-// ReferrerField + referred-us) → request details
-// (pre-Jobber only) → engagements list (open tappable → swaps to
-// EngagementPanel; closed capped at 2, with closed reason + note) →
-// recent activity (client-WIDE
-// slice: kind='job' notes — INCLUDING client-level ones posted on
-// PersonCard, the old inventory gap — + touchpoints, engagement-scoped
-// items tagged '· re: <title>') + composer → soft-tinted equal-grid
-// actions (cardKit ActionRow).
+// The CLIENT-level card — v4 layout (card-restore build 2, Kevin's
+// 7/10 mockup session; 840px desktop modal), top to bottom:
+//   header   — avatar, name + derived-status chip, subtitle
+//              '{location} · client since {Mon YYYY} · Jobber ↗';
+//              prev/next chevrons (ONLY when the opener passed a
+//              sibling ordering — the directory does; a panel swap
+//              doesn't) + ··· on the right
+//   METRIC BAND — full-bleed hairline row, tabular numerals:
+//              Collected / Invoiced / Owing / Last touch. Owing spans
+//              ALL engagements INCLUDING closed (the closed-debt drift
+//              fix — the route aggregates own the math)
+//   tabs     — Overview · Timeline (count) · Files (count)
+//   Overview — TWO columns (stacks under ~700px):
+//              LEFT  contact stack (phone/email/address/source — the
+//                    Build-1 inline-edit components) + secondary
+//                    contacts (display + tel:/mailto:) + tags (display
+//                    pills; editing is Build 3) + assigned-to (display)
+//                    + Preferences (marketing/snooze display; the
+//                    nurture-drip row HIDES when the client has live
+//                    business — v4 rule)
+//              RIGHT pinned buzz → request details (pre-Jobber only) →
+//                    engagements (repeat/new chips; closed rows keep
+//                    Build-1 reason + note) → recent activity + composer
+//   action bar — PINNED (sticky bottom): Call · Log touchpoint ·
+//              Open in Jobber (or Send to Jobber pre-link) · + New
+//              engagement
+// Fetches GET /api/clients/:id/profile on open.
 //
 // Overlay model: HiveShell holds ONE overlay slot — ClientProfile and
 // EngagementPanel REPLACE each other (no stacking); two taps loop,
 // zero modal piles.
 //
-// Source is EDITABLE here since card-restore build 1 (Kevin's
-// person-vs-deal split: source is first-touch, PERSON-scoped — this is
-// its ONE edit home; the engagement panel dropped its Source pill the
-// same build). Project type is deal-scoped and lives on the
-// EngagementPanel header only — never duplicated here. Beta chunk.
+// Source is EDITABLE here (Kevin's person-vs-deal split: source is
+// first-touch, PERSON-scoped — this is its ONE edit home). Project
+// type is deal-scoped and lives on the EngagementPanel masthead only —
+// never duplicated here. Beta chunk.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
 import React, { useState, useEffect } from 'react'
 import { CHIP_STYLES, stageDisplayLabel, ACCENT_BLUE } from './shared/stageConfig'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
-import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, formatFullDate, closedReasonLabel } from './shared/engagementStatus'
+import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, fmtShort, daysSince, closedReasonLabel } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
-import VitalsStrip, { vitalsAge } from './shared/VitalsStrip'
+import { vitalsAge } from './shared/VitalsStrip'
+import MetricBand from './shared/MetricBand'
 import {
-  IconPhone, IconPlayerPause, IconExternalLink, IconSend,
+  IconPhone, IconPlayerPause, IconExternalLink, IconSend, IconChevronRight, IconMail,
   IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPlus, IconPaperclip,
 } from '@/components/ui/icons'
 import EditableDesc from './EditableDesc'
@@ -72,11 +79,13 @@ const STAGE_ICON = {
   'Job in Progress': IconHammer, 'Final Processing': IconFileInvoice,
 }
 
-export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
+// siblings/onNavigate: the opener's natural ordering (e.g. the client
+// directory's visible rows). When absent the prev/next chevrons hide —
+// a panel→profile swap or a fresh create has no "next client".
+export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, lookupOptions = { sources: [], projectTypes: [] }, siblings = null, onNavigate = () => {} }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
-  const [showContacts, setShowContacts] = useState(false)
   const [showClosed, setShowClosed] = useState(false)
   const [touchOpen, setTouchOpen] = useState(false)
   const [touchMethod, setTouchMethod] = useState('call')
@@ -136,6 +145,25 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   // route doesn't ship child *_url columns, and even if it did, a
   // client link that lands on one arbitrary job would be wrong.
   const jobberHref = jobberClientUrl(c?.jobber_client_id)
+
+  const tags = data?.tags ?? []
+  const lastTouchTs = touches.reduce((m, t) => Math.max(m, new Date(t.occurred_at).getTime() || 0), 0) || null
+  // Earliest engagement anchors the repeat/new chips: everything after
+  // the first is repeat business; the first chips New while it's fresh.
+  const earliestEngId = engagements.length
+    ? [...engagements].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0].id
+    : null
+  const engChip = (e) => {
+    if (!earliestEngId) return null
+    if (e.id !== earliestEngId) return { label: 'Repeat', styleKey: 'teal' }
+    if (daysSince(e.created_at, nowMs) < 30) return { label: 'New', styleKey: 'gray' }
+    return null
+  }
+
+  // Prev/next within the opener's ordering (chevrons hide without one).
+  const sibIdx = siblings ? siblings.indexOf(clientId) : -1
+  const prevId = sibIdx > 0 ? siblings[sibIdx - 1] : null
+  const nextId = sibIdx >= 0 && sibIdx < (siblings?.length ?? 0) - 1 ? siblings[sibIdx + 1] : null
 
   async function patchLead(patch) {
     const res = await fetch(`/api/leads/${c.id}`, {
@@ -265,57 +293,18 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
     ...touches.map(tp => ({ t: 'touch', ts: tp.occurred_at, tag: tp.engagement_id ? engTitleById[tp.engagement_id] : null, ...tp })),
   ].sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 8)
 
-  const overview = c && (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      {/* Pinned buzz — the client's standing note; the SAME rows show on
-          this client's EngagementPanel(s). */}
-      <PinnedBuzz notes={buzz} onPost={addBuzzNote} emptyLabel="Add a note about this client" nowMs={nowMs} />
-
-      {/* Key facts — contact + marketing state; Source is editable here
-          (its ONE home — person-scoped first-touch, Kevin's 7/10 split)
-          via the shared SourceField row; ReferrerField stays the
-          referrer affordance. */}
+  // LEFT column — the person: contact stack, secondary contacts, tags,
+  // assigned-to, preferences. All display/inline-edit; no new writes.
+  const leftCol = c && (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', minWidth: 0 }}>
       <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
-        <MicroLabel>Key facts</MicroLabel>
+        <MicroLabel>Contact</MicroLabel>
         {/* Phone/email/address: click-to-edit (shared ContactField +
-            AddressField — the same components EngagementPanel mounts);
-            phone/email values stay live tel:/mailto: links. Address
-            display is formatLeadAddress-normalized (no duplicated
-            city/state) and edits through the Places autocomplete. */}
+            AddressField); values stay live tel:/mailto: links. Source
+            is the person-scoped first-touch — its ONE edit home. */}
         <ContactField kind="phone" leadId={c.id} value={c.phone} onSaved={contactSaved} setToast={setToast} />
         <ContactField kind="email" leadId={c.id} value={c.email} onSaved={contactSaved} setToast={setToast} />
         <AddressField leadId={c.id} value={{ address: c.address, city: c.city, state: c.state, zip: c.zip }} onSaved={contactSaved} setToast={setToast} />
-        {(data.contacts || []).length > 0 && (
-          <button onClick={() => setShowContacts(v => !v)} style={{ border: 'none', background: 'transparent', padding: 0, textAlign: 'left', fontSize: '11px', color: '#8a8a84', cursor: 'pointer', fontFamily: 'inherit' }}>
-            +{data.contacts.length} contact{data.contacts.length === 1 ? '' : 's'}: {data.contacts[0].name}{data.contacts[0].role ? ` (${data.contacts[0].role})` : ''}{data.contacts.length > 1 ? ' …' : ''}
-          </button>
-        )}
-        {showContacts && data.contacts.map(ct => (
-          <p key={ct.id} style={{ fontSize: '11px', color: '#6b6b66', paddingLeft: '20px' }}>
-            {ct.name}{ct.role ? ` (${ct.role})` : ''}{ct.phone ? ` · ${ct.phone}` : ''}{ct.email ? ` · ${ct.email}` : ''}
-          </p>
-        ))}
-        {jobberLinked && (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-            <StatusChip label="Jobber linked" styleKey="teal" />
-            {jobberHref && (
-              <a className="bee-contact-link" href={jobberHref} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: ACCENT_BLUE, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                <IconExternalLink size={11} /> open
-              </a>
-            )}
-          </span>
-        )}
-        {/* Nonzero owing stays loud after the money tiles' removal — the
-            strip has no Owing cell (Open replaced it). */}
-        {(agg?.owing || 0) > 0 && (
-          <p style={{ fontSize: '12px', fontWeight: 500, color: '#791F1F' }}>Owing {fmtMoney(agg.owing)}</p>
-        )}
-        <p style={{ fontSize: '12px', color: c.paused ? '#633806' : '#085041', display: 'flex', alignItems: 'center', gap: '7px' }}>
-          <IconPlayerPause size={13} /> {c.paused ? 'Drips paused' : 'Drips active'}
-        </p>
-        {c.marketing_opt_out && (
-          <p style={{ fontSize: '12px', color: '#791F1F' }}>Opted out of marketing</p>
-        )}
         <SourceField
           leadId={c.id}
           value={c.source}
@@ -345,10 +334,91 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         )}
       </div>
 
+      {/* Secondary contacts — display + live links; add/edit is Build 3. */}
+      {(data.contacts || []).length > 0 && (
+        <div>
+          <MicroLabel>Contacts · {data.contacts.length}</MicroLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {data.contacts.map(ct => (
+              <div key={ct.id} style={{ fontSize: '12px', color: '#1a1a18' }}>
+                <p>{ct.name}{ct.role ? <span style={{ color: '#8a8a84' }}> · {ct.role}</span> : null}</p>
+                <p style={{ display: 'flex', gap: '10px', marginTop: '1px' }}>
+                  {ct.phone && (
+                    <a className="bee-contact-link" href={`tel:${ct.phone}`} style={{ color: ACCENT_BLUE, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
+                      <IconPhone size={11} /> {ct.phone}
+                    </a>
+                  )}
+                  {ct.email && (
+                    <a className="bee-contact-link" href={`mailto:${ct.email}`} style={{ color: ACCENT_BLUE, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <IconMail size={11} /> {ct.email}
+                    </a>
+                  )}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tags — display pills; the + is a Build-3 placeholder. */}
+      <div>
+        <MicroLabel>Tags</MicroLabel>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+          {tags.map(t => (
+            <span key={t} style={{ padding: '3px 10px', borderRadius: '20px', border: '0.5px solid rgba(0,0,0,0.12)', background: '#fff', fontSize: '11px', color: '#1a1a18', whiteSpace: 'nowrap' }}>
+              {t}
+            </span>
+          ))}
+          {tags.length === 0 && <span style={{ fontSize: '11px', color: '#b5b3ac' }}>No tags</span>}
+          <button disabled title="Tag editing is coming in a later build"
+            style={{ padding: '3px 10px', borderRadius: '20px', border: '0.5px dashed rgba(0,0,0,0.18)', background: 'transparent', fontSize: '11px', color: '#c9c7c0', fontFamily: 'inherit', cursor: 'default' }}>
+            + Tag
+          </button>
+        </div>
+      </div>
+
+      {/* Assigned to — display only (assignment moves are Build 3). */}
+      <div>
+        <MicroLabel>Assigned to</MicroLabel>
+        <p style={{ fontSize: '12px', color: c.assigned_to_name ? '#1a1a18' : '#b5b3ac' }}>
+          {c.assigned_to_name || 'Unassigned'}
+        </p>
+      </div>
+
+      {/* Preferences — DISPLAY only (toggles are Build 3). Replaces the
+          old paused chip + opt-out line. The nurture-drip row hides
+          when the client has live business (v4 rule: drips are a
+          no-open-work concern). */}
+      <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+        <MicroLabel>Preferences</MicroLabel>
+        <p style={{ fontSize: '12px', color: c.marketing_opt_out ? '#791F1F' : '#6b6b66' }}>
+          {c.marketing_opt_out ? 'Opted out of marketing' : 'Marketing emails OK'}
+        </p>
+        <p style={{ fontSize: '12px', color: c.snoozed_until && new Date(c.snoozed_until).getTime() > nowMs ? '#633806' : '#6b6b66' }}>
+          {c.snoozed_until && new Date(c.snoozed_until).getTime() > nowMs
+            ? `Snoozed until ${fmtShort(c.snoozed_until)}`
+            : 'Not snoozed'}
+        </p>
+        {open.length === 0 && (
+          <p style={{ fontSize: '12px', color: c.paused ? '#633806' : '#085041', display: 'flex', alignItems: 'center', gap: '7px' }}>
+            <IconPlayerPause size={13} /> {c.paused ? 'Nurture drips paused' : 'Nurture drips active'}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+
+  // RIGHT column — the business: buzz, request details (pre-Jobber),
+  // engagements, activity.
+  const rightCol = c && (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', minWidth: 0 }}>
+      {/* Pinned buzz — the client's standing note; the panel's masthead
+          links here (View profile) rather than duplicating it. */}
+      <PinnedBuzz notes={buzz} onPost={addBuzzNote} emptyLabel="Add a note about this client" nowMs={nowMs} />
+
       {/* Request details — pre-Jobber people whose request hasn't founded
           an engagement yet (the SAME field the Inbox edits and
-          foundEngagement seeds from). No client-level job description
-          exists — each engagement owns its own. */}
+          foundEngagement seeds from). */}
       {!jobberLinked && (
         <div>
           <MicroLabel>Request details</MicroLabel>
@@ -380,7 +450,12 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
                   )}
                   {chip && <p style={{ fontSize: '11px', fontWeight: 500, color: statusColor, marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{chip.label}</p>}
                 </div>
-                <span style={{ flexShrink: 0 }}><StatusChip label={stageDisplayLabel(e.stage)} styleKey={e.stage} /></span>
+                <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                  {/* repeat/new — first-ever engagement chips New while
+                      fresh; everything after chips Repeat (v4). */}
+                  {engChip(e) && <StatusChip label={engChip(e).label} styleKey={engChip(e).styleKey} />}
+                  <StatusChip label={stageDisplayLabel(e.stage)} styleKey={e.stage} />
+                </span>
               </div>
             )
           })}
@@ -427,55 +502,73 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
       {/* Recent activity — client-wide quick-glance slice + composer;
           the exhaustive merged stream is the Timeline tab. */}
       <NotesStream label="Recent activity" items={stream} onPost={addNote} nowMs={nowMs} />
+    </div>
+  )
 
-      {/* Actions — soft-tinted equal-width grid (cardKit ActionRow). */}
-      <div>
-        <ActionRow>
-          {c.phone && (
-            <a href={`tel:${c.phone}`} style={actionBtn('blue')}>
-              <IconPhone size={14} /> Call
-            </a>
-          )}
-          <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
-            Log touchpoint
-          </button>
-          {jobberLinked ? (
-            jobberHref ? (
-              <a href={jobberHref} target="_blank" rel="noreferrer" style={actionBtn('gray')}>
-                <IconExternalLink size={14} /> Open in Jobber
-              </a>
-            ) : (
-              <span title="No Jobber record link available" style={{ ...actionBtn('gray'), color: '#c9c7c0', cursor: 'default' }}>
-                <IconExternalLink size={14} /> Open in Jobber
-              </span>
-            )
-          ) : (
-            onSendToJobber && (
-              <button style={actionBtn('green')} disabled={busy} onClick={() => onSendToJobber(c.id)}>
-                <IconSend size={14} /> Send to Jobber
-              </button>
-            )
-          )}
-          <button style={actionBtn('gray')} disabled={busy} onClick={newEngagement}>
-            <IconPlus size={14} /> New engagement
-          </button>
-        </ActionRow>
-        {touchOpen && (
-          <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <select value={touchMethod} onChange={e => setTouchMethod(e.target.value)}
-              style={{ padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', background: '#fff' }}>
-              <option value="call">Call</option>
-              <option value="sms">Text</option>
-              <option value="email">Email</option>
-              <option value="in_person">In person</option>
-            </select>
-            <input value={touchNote} onChange={e => setTouchNote(e.target.value)} placeholder="Notes (optional)…"
-              onKeyDown={e => { if (e.key === 'Enter') logTouchpoint() }}
-              style={{ flex: 1, minWidth: '140px', padding: '8px 12px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
-            <button style={{ ...quietBtn(), minHeight: 0 }} disabled={busy} onClick={logTouchpoint}>Log</button>
-          </div>
+  // Overview = the two-column grid (stacks under ~700px — the media
+  // query rides the body's <style> tag; inline styles can't).
+  const overview = c && (
+    <div className="bee-card-cols">
+      {leftCol}
+      {rightCol}
+    </div>
+  )
+
+  // Action bar — PINNED (sticky) to the card bottom, visible from every
+  // tab: Call (primary) · Log touchpoint · Open in Jobber (Send to
+  // Jobber pre-link) · + New engagement.
+  const actionBar = c && (
+    <div style={{
+      position: 'sticky', bottom: 0, zIndex: 5, background: '#fff',
+      borderTop: '0.5px solid rgba(0,0,0,0.08)',
+      margin: isMobile ? '0 -16px' : '0 -24px',
+      padding: isMobile ? '10px 16px calc(10px + env(safe-area-inset-bottom, 0px))' : '12px 24px',
+    }}>
+      <ActionRow>
+        {c.phone && (
+          <a href={`tel:${c.phone}`} style={actionBtn('blue')}>
+            <IconPhone size={14} /> Call
+          </a>
         )}
-      </div>
+        <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
+          Log touchpoint
+        </button>
+        {jobberLinked ? (
+          jobberHref ? (
+            <a href={jobberHref} target="_blank" rel="noreferrer" style={actionBtn('gray')}>
+              <IconExternalLink size={14} /> Open in Jobber
+            </a>
+          ) : (
+            <span title="No Jobber record link available" style={{ ...actionBtn('gray'), color: '#c9c7c0', cursor: 'default' }}>
+              <IconExternalLink size={14} /> Open in Jobber
+            </span>
+          )
+        ) : (
+          onSendToJobber && (
+            <button style={actionBtn('green')} disabled={busy} onClick={() => onSendToJobber(c.id)}>
+              <IconSend size={14} /> Send to Jobber
+            </button>
+          )
+        )}
+        <button style={actionBtn('gray')} disabled={busy} onClick={newEngagement}>
+          <IconPlus size={14} /> New engagement
+        </button>
+      </ActionRow>
+      {touchOpen && (
+        <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <select value={touchMethod} onChange={e => setTouchMethod(e.target.value)}
+            style={{ padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', background: '#fff' }}>
+            <option value="call">Call</option>
+            <option value="sms">Text</option>
+            <option value="email">Email</option>
+            <option value="in_person">In person</option>
+          </select>
+          <input value={touchNote} onChange={e => setTouchNote(e.target.value)} placeholder="Notes (optional)…"
+            onKeyDown={e => { if (e.key === 'Enter') logTouchpoint() }}
+            style={{ flex: 1, minWidth: '140px', padding: '8px 12px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
+          <button style={{ ...quietBtn(), minHeight: 0 }} disabled={busy} onClick={logTouchpoint}>Log</button>
+        </div>
+      )}
     </div>
   )
 
@@ -487,11 +580,21 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
     </div>
   )
 
-  const body = c && (
-    <div style={{ padding: isMobile ? '0 16px 28px' : '0 24px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-      <style>{`.bee-contact-link:hover { text-decoration: underline !important; text-underline-offset: 2px }`}</style>
+  // Quick-glance timeline volume from data already in hand (touches +
+  // job notes) — the Timeline tab's own fetch stays lazy.
+  const timelineCount = touches.length + jobNotes.length
 
-      {/* Header — compact: tinted avatar + name + chip + subtitle + ··· */}
+  const body = c && (
+    <div style={{ padding: isMobile ? '0 16px 0' : '0 24px 0', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      <style>{`
+        .bee-contact-link:hover { text-decoration: underline !important; text-underline-offset: 2px }
+        .bee-card-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+        @media (max-width: 700px) { .bee-card-cols { grid-template-columns: 1fr; } }
+      `}</style>
+
+      {/* Header — avatar + name + status chip; v4 subtitle: location ·
+          client since Mon YYYY · Jobber ↗ (the Build-1 client link).
+          Prev/next chevrons only when the opener passed an ordering. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         <InitialsAvatar name={c.name} bg={fam.bg} text={fam.text} />
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -499,43 +602,71 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
             {statusMeta && <StatusChip label={statusMeta.label} styleKey={statusMeta.styleKey} />}
           </p>
-          {/* 'client since' rides the full prose date (header has the
-              room); closed-engagement rows below keep compact monthYear. */}
-          <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '2px' }}>
-            {fmtMoney(agg?.lifetime_paid || 0)} lifetime · client since {formatFullDate(c.created_at) || '—'}{c.location_name ? ` · ${c.location_name}` : ''}
+          <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {c.location_name ? `${c.location_name} · ` : ''}client since {monthYear(c.created_at) || '—'}
+            {jobberHref && (
+              <>
+                {' · '}
+                <a className="bee-contact-link" href={jobberHref} target="_blank" rel="noreferrer"
+                  style={{ color: ACCENT_BLUE, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                  Jobber <IconExternalLink size={11} />
+                </a>
+              </>
+            )}
           </p>
         </div>
+        {siblings && siblings.length > 1 && (
+          <span style={{ display: 'inline-flex', gap: '2px', flexShrink: 0 }}>
+            <button aria-label="Previous client" disabled={!prevId} onClick={() => prevId && onNavigate(prevId)}
+              style={{ width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', color: prevId ? '#6b6a64' : '#dedcd5', cursor: prevId ? 'pointer' : 'default', padding: 0 }}>
+              <span style={{ display: 'inline-flex', transform: 'rotate(180deg)' }}><IconChevronRight size={16} /></span>
+            </button>
+            <button aria-label="Next client" disabled={!nextId} onClick={() => nextId && onNavigate(nextId)}
+              style={{ width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', color: nextId ? '#6b6a64' : '#dedcd5', cursor: nextId ? 'pointer' : 'default', padding: 0 }}>
+              <IconChevronRight size={16} />
+            </button>
+          </span>
+        )}
         {/* Jobber-owns-deletion rule (Kevin 7/10): linked records are
             never junkable here — Jobber's *_DESTROY webhooks are their
             only deletion path. CardMenu renders nothing on empty items. */}
         <CardMenu items={jobberLinked ? [] : [{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]} />
       </div>
 
-      {/* Vitals strip — client-health row; Status in its status color.
-          Replaces the old Overview money tiles (owing → Key facts line). */}
-      <VitalsStrip cells={[
-        { label: 'Status', value: statusMeta?.label ?? null, color: fam.text },
-        { label: 'Lifetime', value: (agg?.lifetime_paid || 0) > 0 ? fmtMoney(agg.lifetime_paid) : null },
-        { label: 'Last touch', value: touches.length ? vitalsAge(touches.reduce((m, t) => Math.max(m, new Date(t.occurred_at).getTime() || 0), 0), nowMs) : null },
-        { label: 'Open', value: (agg?.open_pipeline || 0) > 0 ? fmtMoney(agg.open_pipeline) : null },
+      {/* Metric band — full-bleed money row (v4): Collected / Invoiced /
+          Owing / Last touch. Owing spans ALL engagements incl. closed
+          (route aggregate — the closed-debt drift fix); red when owed. */}
+      <MetricBand bleed={isMobile ? 16 : 24} cells={[
+        { label: 'Collected', value: (agg?.lifetime_paid || 0) > 0 ? fmtMoney(agg.lifetime_paid) : null },
+        { label: 'Invoiced', value: (agg?.invoiced || 0) > 0 ? fmtMoney(agg.invoiced) : null },
+        { label: 'Owing', value: (agg?.owing || 0) > 0 ? fmtMoney(agg.owing) : null, color: '#791F1F' },
+        { label: 'Last touch', value: lastTouchTs ? vitalsAge(lastTouchTs, nowMs) : null },
       ]} />
 
       <CardTabs
-        tabs={[{ key: 'overview', label: 'Overview' }, { key: 'timeline', label: 'Timeline' }, { key: 'files', label: 'Files' }]}
+        tabs={[
+          { key: 'overview', label: 'Overview' },
+          { key: 'timeline', label: 'Timeline', count: timelineCount },
+          { key: 'files', label: 'Files', count: 0 },
+        ]}
         active={tab}
         onChange={setTab}
       />
 
-      {tab === 'overview' && overview}
-      {tab === 'timeline' && (
-        <Timeline
-          leadId={c.id}
-          locationUuid={c.location_uuid}
-          setToast={setToast}
-          onLeadPatched={onLeadPatched}
-        />
-      )}
-      {tab === 'files' && filesTab}
+      <div style={{ paddingBottom: '10px' }}>
+        {tab === 'overview' && overview}
+        {tab === 'timeline' && (
+          <Timeline
+            leadId={c.id}
+            locationUuid={c.location_uuid}
+            setToast={setToast}
+            onLeadPatched={onLeadPatched}
+          />
+        )}
+        {tab === 'files' && filesTab}
+      </div>
+
+      {actionBar}
     </div>
   )
 
@@ -548,5 +679,5 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
     </p>
   )
 
-  return <OverlayShell isMobile={isMobile} onClose={onClose}>{loading}{errBlock}{body}</OverlayShell>
+  return <OverlayShell isMobile={isMobile} onClose={onClose} maxWidth={840}>{loading}{errBlock}{body}</OverlayShell>
 }

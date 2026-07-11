@@ -276,7 +276,7 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
           const openEngs = openByClient.get(p.id) || []
           const detail = detailLine(p, status, openEngs, nowMs)
           return (
-            <div key={p.id} className="bee-dir-row" onClick={() => onOpenClient(p.id)}
+            <div key={p.id} className="bee-dir-row" onClick={() => onOpenClient(p.id, rows.map(r => r.p.id))}
               style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: isMobile ? '12px 14px' : '13px 16px', borderBottom: '0.5px solid rgba(0,0,0,0.08)', cursor: 'pointer' }}>
               <InitialsAvatar name={p.name} bg={fam.bg} text={fam.text} />
               <div style={{ flex: 1, minWidth: 0 }}>

@@ -1,45 +1,38 @@
 // components/hive/EngagementPanel.jsx
 // ─────────────────────────────────────────────────────────────
-// The ONE-DEAL work card — the board's click-through. Tabbed layout
-// (approved): compact header, Option B hierarchy — the CLIENT NAME is
-// the headline (the primary fact; the ONE place the name renders) +
-// stage chip + ··· menu, with a quiet subtitle underneath ('View
-// profile' accent link → onOpenClient, then 'opened {full date} ·
-// founded by {…}'). The auto-generated engagement title is NOT
-// rendered (noise — the date lives in the subtitle). → VITALS STRIP
-// (Stage / Value / Last touch / Next — the four-cell deal-health row,
-// visible on every tab, compact dates) → tabs (Overview / Timeline /
-// Files) → content. Fetches
-// GET /api/engagements/:id on open (board rows stay lightweight;
-// `seed` renders the shell synchronously).
+// The ONE-DEAL work card — v2 layout (card-restore build 2, Kevin's
+// 7/10 mockup session; 840px desktop modal):
+//   MASTHEAD (persistent above the tabs, every tab):
+//     line 1 — client name (h2, the ONE place the name renders) +
+//              location + Repeat chip (prior engagements exist);
+//              engagement VALUE right-aligned, tabular
+//     line 2 — 'View profile' accent link (→ onOpenClient) · opened
+//              {full date} · founded by {…}
+//     line 3 — engagement title (displayTitle — v2 RENDERS it again) +
+//              stage chip + 'N days in stage' muted (Build 1)
+//     line 4 — Type MetaSelect (deal-scoped; its ONE home)
+//   ClosedSummary (closed) / DRIP BANNER (live or paused drip only —
+//     'Drip · step N of M · next {date}'; hidden once stopped/completed/
+//     absent per Kevin's gone-after-Jobber rule; display only, pause
+//     control is Build 3) ride the slot under the masthead.
+//   tabs — Overview · Timeline (count) · Files
+//   Overview — TWO columns (stacks under ~700px):
+//     LEFT  Jobber records checklist (Build-1 ↗ deep links) + invoice
+//           detail inset (INV- number/dates + DISABLED-ghost Build-3
+//           action placeholders)
+//     RIGHT description (EditableDesc) + engagement-scoped activity +
+//           composer
+//   action bar — PINNED (sticky): Call · Log touchpoint · (Send to
+//     Jobber, founded-not-sent only) · Open in Jobber · Close… (the
+//     same shared CloseEngagementConfirm inline on Overview — moved out
+//     of the ··· menu in build 2)
+// Fetches GET /api/engagements/:id on open (board rows stay
+// lightweight; `seed` renders the shell synchronously).
 //
-// The strip REPLACED the Overview's standalone 5-segment stage bar and
-// the money-tiles row (both redundant with it). Invoiced/paid detail
-// moved onto the invoice record row ('$X of $Y paid'); owing keeps its
-// red trailing state there — no financial info lost.
-//
-// Overview: pinned buzz (INHERITED from the client — the same
-// lead_notes kind='buzz' rows ClientProfile shows) → key facts
-// (phone/email via the shared ContactField — click-to-edit, still
-// tappable tel:/mailto:, LEAD-level write; shared ReferrerField — the
-// client NAME moved up to the header) → job description
-// (engagements.description) → Jobber records checklist (status view —
-// the chronological version lives in the Timeline tab; each Jobber-
-// backed row carries a quiet trailing ↗ deep link) →
-// engagement-scoped recent activity + composer → soft-tinted equal-grid
-// actions (Call / Log / Send to Jobber / Open in Jobber — cardKit
-// ActionRow). Close lives in the ··· menu → the same inline Won/Lost
-// confirm as before (Won gated on settled invoices).
-//
-// SOURCE/TYPE single-home (card-restore build 1, Kevin's person-vs-deal
-// split): source is FIRST-TOUCH, person-scoped — it edits on
-// ClientProfile Key Facts ONLY (the panel's Source pill was removed);
-// project type is DEAL-scoped (a client can have many jobs) — its Type
-// MetaSelect lives in THIS panel's header area, nowhere on the profile.
-// A closed engagement shows the shared ClosedSummary (reason + note)
-// under the header, where an open engagement's drip banner would sit;
-// open engagements show 'N days in stage' muted beside the stage chip
-// (latest stage_change touchpoint, created_at fallback).
+// PERSON-vs-DEAL (Kevin's split): contact/address/referrer/source and
+// the pinned buzz are PERSON-scoped — they live on ClientProfile (one
+// 'View profile' tap away) and were removed from this card in build 2.
+// Project type is DEAL-scoped — masthead only, never on the profile.
 //
 // NO manual stage mover (decision 2026-07-10, Kevin): all business
 // flows through Jobber — a local engagement's stage assertion is
@@ -57,22 +50,17 @@ import useIsMobile from './shared/useIsMobile'
 import { isTerminal, stageDisplayLabel, ACCENT_BLUE, CHIP_STYLES } from './shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
 import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconExternalLink, IconCalendar, IconSend, IconPaperclip } from '@/components/ui/icons'
-import VitalsStrip, { vitalsAge, vitalsFuture, nextFromChildren } from './shared/VitalsStrip'
 import NotesStream from './NotesStream'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
-import ContactField from './shared/ContactField'
-import AddressField from './shared/AddressField'
 import MetaSelect from './MetaSelect'
-import ReferrerField from './shared/ReferrerField'
 import Timeline from './shared/Timeline'
 import CardTabs from './shared/CardTabs'
-import PinnedBuzz from './shared/PinnedBuzz'
 import InitialsAvatar from './shared/InitialsAvatar'
-import { MicroLabel, quietBtn, CardMenu, ActionRow, actionBtn } from './shared/cardKit'
+import { MicroLabel, quietBtn, ActionRow, actionBtn } from './shared/cardKit'
 import CloseEngagementConfirm from './shared/CloseEngagementConfirm'
 import ClosedSummary from './shared/ClosedSummary'
-import { fmtTime, engagementValue, formatFullDate, invoiceNumber, daysInStage } from './shared/engagementStatus'
+import { fmtTime, fmtShort, engagementValue, displayTitle, formatFullDate, invoiceNumber, daysInStage } from './shared/engagementStatus'
 import { recordJobberUrl } from './shared/jobberLinks'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
@@ -184,25 +172,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     }
   }
 
-  // Client-level buzz — posted from the pinned band (append-only; the
-  // band owns the draft, we own the notes array + optimistic prepend).
-  // Same rows ClientProfile shows: buzz is the CLIENT's standing note.
-  async function addBuzz(text) {
-    if (!text || !client) return
-    try {
-      const res = await fetch('/api/lead-notes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lead_id: client.id, kind: 'buzz', text }),
-      })
-      const j = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      setData(d => d ? { ...d, client: { ...d.client, buzz: [j.note, ...(d.client.buzz || [])] } } : d)
-    } catch (e) {
-      setToast({ kind: 'error', msg: `Buzz failed: ${e.message}` })
-    }
-  }
-
   // Engagement note (kind='job', anchored to THIS engagement) — posted
   // from the shared NotesStream composer.
   async function addEngagementNote(text) {
@@ -289,15 +258,9 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     i.status === 'paid' ? DONE
     : { label: `owing ${fmtMoney(i.balance_owing != null ? i.balance_owing : i.total)}`, color: '#791F1F' }
 
-  // Vitals-strip inputs — everything already fetched, no new queries.
-  // Value: total_invoiced once real, best quote before that, null → '—'.
-  // Last touch: most recent touchpoint. Next: soonest future assessment
-  // or job start among THIS engagement's children (lead-level drip
-  // projections stay with the Timeline tab's own fetch).
-  const stripValue = eng ? engagementValue({ ...eng, quotes: children.quotes }) : null
-  const lastTouchTs = (children.touchpoints || [])
-    .reduce((m, t) => Math.max(m, new Date(t.occurred_at).getTime() || 0), 0) || null
-  const nextTs = nextFromChildren(children, nowMs)
+  // Masthead value — total_invoiced once real, best quote before that;
+  // hidden (not '$0') when neither exists.
+  const dealValue = eng ? engagementValue({ ...eng, quotes: children.quotes }) : null
 
   // Close-out (doc §4): the trigger lives in the ··· menu; the SHARED
   // human close flow (shared/CloseEngagementConfirm — same component +
@@ -318,66 +281,10 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     />
   )
 
-  const overview = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      {/* Pinned buzz — inherited from the CLIENT (same note as the
-          profile); every engagement of this client shows it. */}
-      {client && <PinnedBuzz notes={client.buzz || []} onPost={addBuzz} emptyLabel="Add a note about this client" nowMs={nowMs} />}
-
-      {closeConfirm}
-
-      {/* Key facts — contact + the shared editable meta (the client
-          NAME is the header headline; View profile lives up there). */}
-      {client && eng && (
-        <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <MicroLabel>Key facts</MicroLabel>
-          {/* Phone/email: click-to-edit (shared ContactField — the same
-              component ClientProfile mounts); LEAD-level write like
-              Source. The audit touchpoint the route writes is lead-
-              level, so it lands in the Timeline tab (this panel's
-              Recent activity stays engagement-scoped). */}
-          <ContactField kind="phone" leadId={client.id} value={client.phone}
-            onSaved={(cols) => { setData(d => d ? { ...d, client: { ...d.client, ...cols } } : d); onLeadPatched(client.id, cols) }}
-            setToast={setToast} />
-          <ContactField kind="email" leadId={client.id} value={client.email}
-            onSaved={(cols) => { setData(d => d ? { ...d, client: { ...d.client, ...cols } } : d); onLeadPatched(client.id, cols) }}
-            setToast={setToast} />
-          {/* Address — LEAD-level like phone/email (shared AddressField,
-              same component ClientProfile mounts): Places autocomplete
-              in edit mode, normalized display, billing-address Jobber
-              write-back rides the PATCH response. */}
-          <AddressField leadId={client.id}
-            value={{ address: client.address, city: client.city, state: client.state, zip: client.zip }}
-            onSaved={(cols) => { setData(d => d ? { ...d, client: { ...d.client, ...cols } } : d); onLeadPatched(client.id, cols) }}
-            setToast={setToast} />
-          {/* Source/Type moved out (single-home, build 1): Source edits
-              on ClientProfile Key Facts (person-scoped first-touch);
-              Type rides this panel's HEADER (deal-scoped). */}
-          {/* Referrer — LEAD-level like Source: PATCHes client.id, never
-              an engagement field. */}
-          <ReferrerField
-            lead={client}
-            locationUuid={eng.location_uuid}
-            people={people}
-            onApply={fields => setData(d => d ? { ...d, client: { ...d.client, ...fields } } : d)}
-            onSaved={cols => onLeadPatched(client.id, cols)}
-            onPartnerCreated={onPartnerCreated}
-            setToast={setToast}
-          />
-        </div>
-      )}
-
-      {/* Job description — engagements.description via the shared
-          EditableDesc idiom (⌘-Enter/blur/✓ saves, Esc/✗ cancels;
-          patchEngagement's boolean keeps a failed save open inline). */}
-      {eng && data && (
-        <div>
-          <MicroLabel>Description</MicroLabel>
-          <EditableDesc text={eng.description} showEmpty placeholder="Describe the work…"
-            onSave={t => patchEngagement({ description: t })} />
-        </div>
-      )}
-
+  // LEFT column — the Jobber paper trail: records checklist + the
+  // invoice detail inset (number/dates + Build-3 ghost actions).
+  const leftCol = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', minWidth: 0 }}>
       {/* Records checklist — STATUS view (✓ / scheduled-date / dashed
           pending); the chronological version is the Timeline tab. */}
       <div>
@@ -420,16 +327,11 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           ))}
           {/* '$X of $Y paid' rides the invoice row — the strip carries no
               paid column, so this is where the paid detail lives now.
-              The number is the classic INV- derivation (no DB column). */}
+              Number + dates moved to the detail INSET below (v2). */}
           {children.invoices.map(inv => (
             <RecordRow key={inv.id} icon={<IconFileInvoice size={15} />} iconColor="#791F1F" current={currentType === 'invoice'}
               primary={`Invoice · ${fmtMoney(inv.total)}`}
-              secondary={[
-                invoiceNumber(inv),
-                `${fmtMoney(inv.paid_amount != null ? inv.paid_amount : Math.max(0, (Number(inv.total) || 0) - (Number(inv.balance_owing) || 0)))} of ${fmtMoney(inv.total)} paid`,
-                inv.issued_at && `issued ${fmtDate(inv.issued_at)}`,
-                inv.paid_at && `paid ${fmtDate(inv.paid_at)}`,
-              ].filter(Boolean).join(' · ')}
+              secondary={`${fmtMoney(inv.paid_amount != null ? inv.paid_amount : Math.max(0, (Number(inv.total) || 0) - (Number(inv.balance_owing) || 0)))} of ${fmtMoney(inv.total)} paid`}
               state={invoiceState(inv)}
               href={recordJobberUrl('invoice', inv)}
             />
@@ -445,54 +347,120 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
         </div>
       </div>
 
+      {/* Invoice detail inset — number (classic INV- derivation, no DB
+          column) + dates; the action buttons are Build-3 placeholders,
+          DISABLED-ghost per the blessed design. */}
+      {children.invoices.length > 0 && (
+        <div style={{ background: QUIET, borderRadius: '8px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <MicroLabel>Invoice detail</MicroLabel>
+          {children.invoices.map(inv => (
+            <p key={inv.id} style={{ fontSize: '12px', color: '#1a1a18', fontVariantNumeric: 'tabular-nums', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {[
+                invoiceNumber(inv),
+                inv.issued_at && `issued ${fmtDate(inv.issued_at)}`,
+                inv.paid_at && `paid ${fmtDate(inv.paid_at)}`,
+              ].filter(Boolean).join(' · ')}
+            </p>
+          ))}
+          <div style={{ display: 'flex', gap: '8px', marginTop: '2px' }}>
+            <button disabled title="Coming in a later build"
+              style={{ padding: '5px 12px', borderRadius: '8px', border: '0.5px dashed rgba(0,0,0,0.18)', background: 'transparent', fontSize: '11px', color: '#c9c7c0', fontFamily: 'inherit', cursor: 'default' }}>
+              Record payment
+            </button>
+            <button disabled title="Coming in a later build"
+              style={{ padding: '5px 12px', borderRadius: '8px', border: '0.5px dashed rgba(0,0,0,0.18)', background: 'transparent', fontSize: '11px', color: '#c9c7c0', fontFamily: 'inherit', cursor: 'default' }}>
+              Send reminder
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+
+  // RIGHT column — the working surface: description + deal-scoped
+  // activity/composer.
+  const rightCol = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', minWidth: 0 }}>
+      {/* Job description — engagements.description via the shared
+          EditableDesc idiom (⌘-Enter/blur/✓ saves, Esc/✗ cancels;
+          patchEngagement's boolean keeps a failed save open inline). */}
+      {eng && data && (
+        <div>
+          <MicroLabel>Description</MicroLabel>
+          <EditableDesc text={eng.description} showEmpty placeholder="Describe the work…"
+            onSave={t => patchEngagement({ description: t })} />
+        </div>
+      )}
+
       {/* Recent activity — engagement-scoped quick-glance slice +
           composer; the merged past/future stream is the Timeline tab. */}
       <NotesStream label="Recent activity" items={activity} onPost={addEngagementNote} nowMs={nowMs} />
+    </div>
+  )
 
-      {/* Actions — soft-tinted equal-width grid (cardKit ActionRow;
-          the repeat(N,1fr) grid counts rendered children). NO manual
-          stage mover here (7/10 decision, Kevin): stages move ONLY via
-          Jobber derivation — Send to Jobber is the forward door for
-          local engagements. Close lives in the ··· menu for BOTH
-          (inline confirm above — there is no Jobber auto-Lost, so the
-          manual close path must always exist). */}
-      <div>
-        <ActionRow>
-          {client?.phone && (
-            <a href={`tel:${client.phone}`} style={actionBtn('blue')}>
-              <IconPhone size={14} /> Call
-            </a>
-          )}
-          <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
-            Log touchpoint
-          </button>
-          {canSendToJobber && client && (
-            <button style={actionBtn('green')} disabled={busy} onClick={() => onSendToJobber(client.id, { engagementId })}>
-              <IconSend size={14} /> Send to Jobber
-            </button>
-          )}
-          {jobberHref && (
-            <a href={jobberHref} target="_blank" rel="noreferrer" style={actionBtn('gray')}>
-              <IconExternalLink size={14} /> Open in Jobber
-            </a>
-          )}
-        </ActionRow>
-        {touchOpen && (
-          <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <select value={touchMethod} onChange={e => setTouchMethod(e.target.value)}
-              style={{ padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', background: '#fff' }}>
-              <option value="call">Call</option>
-              <option value="sms">Text</option>
-              <option value="email">Email</option>
-              <option value="in_person">In person</option>
-            </select>
-            <input value={touchNote} onChange={e => setTouchNote(e.target.value)} placeholder="Notes (optional)…"
-              onKeyDown={e => { if (e.key === 'Enter') logTouchpoint() }}
-              style={{ flex: 1, minWidth: '140px', padding: '8px 12px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
-            <button style={{ ...quietBtn(), minHeight: 0 }} disabled={busy} onClick={logTouchpoint}>Log</button>
-          </div>
-        )}
+  const overview = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+      {closeConfirm}
+      <div className="bee-card-cols">
+        {leftCol}
+        {rightCol}
       </div>
+    </div>
+  )
+
+  // Action bar — PINNED (sticky) to the card bottom, every tab. NO
+  // manual stage mover (7/10 decision): Send to Jobber is the forward
+  // door for local engagements; Close… (build 2: moved out of the ···
+  // menu) opens the SAME shared CloseEngagementConfirm inline on
+  // Overview — there is no Jobber auto-Lost, so the manual close path
+  // must always exist.
+  const actionBar = (
+    <div style={{
+      position: 'sticky', bottom: 0, zIndex: 5, background: '#fff',
+      borderTop: '0.5px solid rgba(0,0,0,0.08)',
+      margin: isMobile ? '0 -16px' : '0 -24px',
+      padding: isMobile ? '10px 16px calc(10px + env(safe-area-inset-bottom, 0px))' : '12px 24px',
+    }}>
+      <ActionRow>
+        {client?.phone && (
+          <a href={`tel:${client.phone}`} style={actionBtn('blue')}>
+            <IconPhone size={14} /> Call
+          </a>
+        )}
+        <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
+          Log touchpoint
+        </button>
+        {canSendToJobber && client && (
+          <button style={actionBtn('green')} disabled={busy} onClick={() => onSendToJobber(client.id, { engagementId })}>
+            <IconSend size={14} /> Send to Jobber
+          </button>
+        )}
+        {jobberHref && (
+          <a href={jobberHref} target="_blank" rel="noreferrer" style={actionBtn('gray')}>
+            <IconExternalLink size={14} /> Open in Jobber
+          </a>
+        )}
+        {eng && !isTerminal(eng.stage) && (
+          <button style={actionBtn('gray')} disabled={busy} onClick={() => { setTab('overview'); setCloseOpen(true) }}>
+            Close…
+          </button>
+        )}
+      </ActionRow>
+      {touchOpen && (
+        <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <select value={touchMethod} onChange={e => setTouchMethod(e.target.value)}
+            style={{ padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', background: '#fff' }}>
+            <option value="call">Call</option>
+            <option value="sms">Text</option>
+            <option value="email">Email</option>
+            <option value="in_person">In person</option>
+          </select>
+          <input value={touchNote} onChange={e => setTouchNote(e.target.value)} placeholder="Notes (optional)…"
+            onKeyDown={e => { if (e.key === 'Enter') logTouchpoint() }}
+            style={{ flex: 1, minWidth: '140px', padding: '8px 12px', border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: '8px', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
+          <button style={{ ...quietBtn(), minHeight: 0 }} disabled={busy} onClick={logTouchpoint}>Log</button>
+        </div>
+      )}
     </div>
   )
 
@@ -503,10 +471,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
       </p>
     </div>
   )
-
-  const menuItems = eng && !isTerminal(eng.stage)
-    ? [{ key: 'close', label: 'Close engagement…', danger: true, onPick: () => { setTab('overview'); setCloseOpen(true) } }]
-    : []
 
   const stageFam = eng ? (CHIP_STYLES[eng.stage] || CHIP_STYLES.gray) : CHIP_STYLES.gray
 
@@ -521,58 +485,82 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     ? daysInStage(eng, children.touchpoints, nowMs)
     : null
 
+  const drip = data?.drip ?? null
+
   const body = (
-    <div style={{ padding: isMobile ? '0 16px 28px' : '0 24px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+    <div style={{ padding: isMobile ? '0 16px 0' : '0 24px 0', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      <style>{`
+        .bee-contact-link:hover { text-decoration: underline !important; text-underline-offset: 2px }
+        .bee-card-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+        @media (max-width: 700px) { .bee-card-cols { grid-template-columns: 1fr; } }
+      `}</style>
+
       {loadErr && (
         <p style={{ fontSize: '12px', color: '#791F1F', background: '#FCEBEB', padding: '8px 12px', borderRadius: '8px' }}>
           Couldn’t load engagement: {loadErr}
         </p>
       )}
 
-      {/* Header (Option B) — the CLIENT NAME is the headline (whose
-          deal this is — the primary fact, the ONE place the name
-          renders) + stage chip + ···; the auto-generated engagement
-          title is NOT rendered. Quiet subtitle: 'View profile' accent
-          link (same onOpenClient swap as the old View client →) +
-          full-format opened date + founded-by. */}
+      {/* MASTHEAD (v2) — persistent above the tabs on every tab.
+          Line 1: client identity (name = the ONE place it renders +
+          location + Repeat chip) with the deal VALUE right-aligned.
+          Line 2: View profile · opened · founded by.
+          Line 3: the deal — title (v2 renders it again) + stage chip +
+          days-in-stage. Line 4: Type (deal-scoped, its one home). */}
       {eng && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <InitialsAvatar name={client?.name || eng.client_name || '?'} bg={stageFam.bg} text={stageFam.text} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <h2 style={{ flex: 1, minWidth: 0, fontSize: '19px', fontWeight: 600, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {client?.name || eng.client_name || 'Client'}
-              </h2>
-              <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
-                <StatusChip label={stageDisplayLabel(eng.stage)} styleKey={eng.stage} />
-                {stageDays != null && (
-                  <span style={{ fontSize: '11px', color: '#8a8a84', whiteSpace: 'nowrap' }}>
-                    {stageDays} day{stageDays === 1 ? '' : 's'} in stage
-                  </span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <InitialsAvatar name={client?.name || eng.client_name || '?'} bg={stageFam.bg} text={stageFam.text} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h2 style={{ minWidth: 0, fontSize: '19px', fontWeight: 600, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {client?.name || eng.client_name || 'Client'}
+                </h2>
+                {client?.location_name && (
+                  <span style={{ fontSize: '12px', color: '#8a8a84', whiteSpace: 'nowrap', flexShrink: 0 }}>{client.location_name}</span>
                 )}
-              </span>
+                {(client?.prior_engagements || 0) > 0 && (
+                  <span style={{ flexShrink: 0 }}><StatusChip label="Repeat" styleKey="teal" /></span>
+                )}
+              </div>
+              <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {client && (
+                  <>
+                    <button onClick={() => onOpenClient(client.id)}
+                      style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', padding: 0 }}>
+                      View profile
+                    </button>
+                    {' · '}
+                  </>
+                )}
+                opened {formatFullDate(eng.created_at) || '—'} · founded by {eng.founded_by}
+              </p>
             </div>
-            <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {client && (
-                <>
-                  <button onClick={() => onOpenClient(client.id)}
-                    style={{ border: 'none', background: 'transparent', fontSize: '12px', fontWeight: 500, color: ACCENT_BLUE, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', padding: 0 }}>
-                    View profile
-                  </button>
-                  {' · '}
-                </>
-              )}
-              opened {formatFullDate(eng.created_at) || '—'} · founded by {eng.founded_by}
-            </p>
-            {/* Type — DEAL-scoped (Kevin's person-vs-deal split), so it
-                rides the deal's header; ENGAGEMENT-level write. Its one
-                home — the profile never shows it. */}
-            <div style={{ marginTop: '6px' }}>
-              <MetaSelect label="Type" value={eng.project_type || null} options={lookupOptions.projectTypes}
-                onPick={(v) => patchEngagement({ project_type: v })} />
-            </div>
+            {dealValue != null && (
+              <p style={{ flexShrink: 0, fontSize: '18px', fontWeight: 600, color: '#1a1a18', fontVariantNumeric: 'tabular-nums' }}>
+                {fmtMoney(dealValue)}
+              </p>
+            )}
           </div>
-          <CardMenu items={menuItems} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+            <span style={{ fontSize: '13px', fontWeight: 500, color: '#1a1a18', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {displayTitle(eng)}
+            </span>
+            <span style={{ flexShrink: 0 }}>
+              <StatusChip label={stageDisplayLabel(eng.stage)} styleKey={eng.stage} />
+            </span>
+            {stageDays != null && (
+              <span style={{ fontSize: '11px', color: '#8a8a84', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                {stageDays} day{stageDays === 1 ? '' : 's'} in stage
+              </span>
+            )}
+          </div>
+          {/* Type — DEAL-scoped (Kevin's person-vs-deal split); its one
+              home — the profile never shows it. ENGAGEMENT-level write. */}
+          <div>
+            <MetaSelect label="Type" value={eng.project_type || null} options={lookupOptions.projectTypes}
+              onPick={(v) => patchEngagement({ project_type: v })} />
+          </div>
         </div>
       )}
 
@@ -581,36 +569,47 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           write-path source pin). */}
       {eng && <ClosedSummary engagement={eng} />}
 
-      {/* Vitals strip — the deal-health row; Stage in its status color,
-          Next in the accent. Replaces the old stage bar + money tiles. */}
-      {eng && (
-        <VitalsStrip cells={[
-          { label: 'Stage', value: stageDisplayLabel(eng.stage), color: stageFam.text },
-          { label: 'Value', value: stripValue != null ? fmtMoney(stripValue) : null },
-          { label: 'Last touch', value: lastTouchTs ? vitalsAge(lastTouchTs, nowMs) : null },
-          { label: 'Next', value: nextTs ? vitalsFuture(nextTs, nowMs) : null, color: ACCENT_BLUE },
-        ]} />
+      {/* Drip banner — ONLY while the lead's drip is LIVE (or paused);
+          stopped/completed/absent renders NOTHING (Kevin's rule: gone
+          after Jobber). Display only — the pause control is Build 3. */}
+      {eng && !isTerminal(eng.stage) && drip && (
+        <div aria-label="Drip banner" style={{ background: QUIET, borderRadius: '8px', padding: '9px 12px', display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', color: '#6b6b66' }}>
+          <span style={{ color: '#8a8a84', display: 'inline-flex', flexShrink: 0 }}><IconSend size={13} /></span>
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            Drip · step {drip.current_step}{drip.total_steps != null ? ` of ${drip.total_steps}` : ''}
+            {drip.next_send_at ? ` · next ${fmtShort(drip.next_send_at)}` : ''}
+            {drip.paused ? ' · paused' : ''}
+          </span>
+        </div>
       )}
 
       <CardTabs
-        tabs={[{ key: 'overview', label: 'Overview' }, { key: 'timeline', label: 'Timeline' }, { key: 'files', label: 'Files' }]}
+        tabs={[
+          { key: 'overview', label: 'Overview' },
+          { key: 'timeline', label: 'Timeline', count: (children.notes || []).length + (children.touchpoints || []).length },
+          { key: 'files', label: 'Files' },
+        ]}
         active={tab}
         onChange={setTab}
       />
 
-      {tab === 'overview' && overview}
-      {tab === 'timeline' && client && eng && (
-        <Timeline
-          leadId={client.id}
-          engagementId={engagementId}
-          locationUuid={eng.location_uuid}
-          setToast={setToast}
-          onLeadPatched={onLeadPatched}
-        />
-      )}
-      {tab === 'files' && filesTab}
+      <div style={{ paddingBottom: '10px' }}>
+        {tab === 'overview' && overview}
+        {tab === 'timeline' && client && eng && (
+          <Timeline
+            leadId={client.id}
+            engagementId={engagementId}
+            locationUuid={eng.location_uuid}
+            setToast={setToast}
+            onLeadPatched={onLeadPatched}
+          />
+        )}
+        {tab === 'files' && filesTab}
+      </div>
+
+      {actionBar}
     </div>
   )
 
-  return <OverlayShell isMobile={isMobile} onClose={onClose}>{body}</OverlayShell>
+  return <OverlayShell isMobile={isMobile} onClose={onClose} maxWidth={840}>{body}</OverlayShell>
 }

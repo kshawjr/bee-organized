@@ -177,7 +177,11 @@ export default function HiveShell({
   const [listInitialView, setListInitialView] = useState(null)
   const viewClosedInList = () => { setListInitialView('closed'); pickLens('list') }
   const openEngagement = (e) => setOverlay({ type: 'engagement', engagement: e })
-  const openClient = (clientId) => setOverlay({ type: 'client', clientId })
+  // siblings: the opener's visible ordering (directory rows) — powers
+  // the profile's prev/next chevrons; openers without a natural order
+  // pass nothing and the chevrons hide.
+  const openClient = (clientId, siblings = null) =>
+    setOverlay({ type: 'client', clientId, siblings: Array.isArray(siblings) && siblings.length > 1 ? siblings : null })
   const openPerson = (person) => setOverlay({ type: 'person', person })
 
   // Cards emit lead-COLUMN patches after a confirmed PATCH; translate to
@@ -432,6 +436,8 @@ export default function HiveShell({
         <ClientProfile
           key={overlay.clientId}
           clientId={overlay.clientId}
+          siblings={overlay.siblings ?? null}
+          onNavigate={(id) => setOverlay(o => (o && o.type === 'client' ? { ...o, clientId: id } : o))}
           people={people}
           onClose={() => setOverlay(null)}
           onOpenEngagement={openEngagement}

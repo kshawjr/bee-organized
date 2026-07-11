@@ -229,7 +229,7 @@ describe('tabbed skeleton', () => {
     await click(tabButton(host, 'Timeline')!)
     expect(host.textContent).toContain('Client created')
     expect(host.textContent).not.toContain('Engagements ·') // stepper, not display:none
-    expect(host.querySelector('[aria-label="Vitals"]')).toBeTruthy() // header strip persists across tabs
+    expect(host.querySelector('[aria-label="Metrics"]')).toBeTruthy() // header metric band persists across tabs
     await click(tabButton(host, 'Files')!)
     expect(host.textContent).toContain('No files yet')
     await click(tabButton(host, 'Overview')!)
@@ -254,43 +254,32 @@ describe('tabbed skeleton', () => {
 
 // ═══ pinned buzz ═══════════════════════════════════════════
 describe('pinned buzz', () => {
-  it('shows on every Overview, latest note first', async () => {
-    for (const m of [mountPerson, mountProfile, mountPanel]) {
+  it('shows on the PERSON-scoped Overviews (PersonCard + ClientProfile) — the panel dropped it in build 2 (person-vs-deal)', async () => {
+    for (const m of [mountPerson, mountProfile]) {
       const { host, unmount } = await m()
       expect(host.textContent).toContain('Gate code 4321')
       await unmount()
     }
   })
 
-  it('is the SAME client-level note on ClientProfile and the EngagementPanel — one standing note, one write path', async () => {
-    // Same underlying lead_notes rows arrive via both endpoints.
-    const cp = await mountProfile()
-    expect(cp.host.textContent).toContain('Gate code 4321')
-    await cp.unmount()
-
+  it('the note is CLIENT-level (lead_id, no engagement scoping) from the profile band; the panel shows NO buzz since build 2', async () => {
     const ep = await mountPanel()
-    expect(ep.host.textContent).toContain('Gate code 4321')
-    // Appending from the panel writes the CLIENT's buzz (lead_id, no
-    // engagement scoping) — the same path the profile's band uses.
-    await click(ep.host.querySelector('[aria-label="Expand buzz"]')!)
-    const input = ep.host.querySelector('input[aria-label="Add buzz note"]')!
-    await type(input, 'Prefers afternoon calls')
-    await keydown(input, 'Enter')
+    expect(ep.host.textContent).not.toContain('Gate code 4321') // person-scoped — lives on the profile now
+    expect(ep.host.querySelector('[aria-label="Expand buzz"]')).toBeNull()
     await ep.unmount()
 
-    const cp2 = await mountProfile()
-    await click(cp2.host.querySelector('[aria-label="Expand buzz"]')!)
-    const input2 = cp2.host.querySelector('input[aria-label="Add buzz note"]')!
+    const cp = await mountProfile()
+    expect(cp.host.textContent).toContain('Gate code 4321')
+    await click(cp.host.querySelector('[aria-label="Expand buzz"]')!)
+    const input2 = cp.host.querySelector('input[aria-label="Add buzz note"]')!
     await type(input2, 'Second note')
     await keydown(input2, 'Enter')
-    await cp2.unmount()
+    await cp.unmount()
 
-    expect(notePosts).toHaveLength(2)
-    for (const p of notePosts) {
-      expect(p.lead_id).toBe('lead-9')
-      expect(p.kind).toBe('buzz')
-      expect(p.engagement_id ?? null).toBeNull()
-    }
+    expect(notePosts).toHaveLength(1)
+    expect(notePosts[0].lead_id).toBe('lead-9')
+    expect(notePosts[0].kind).toBe('buzz')
+    expect(notePosts[0].engagement_id ?? null).toBeNull()
   })
 
   it('no buzz yet → quiet add affordance, not an empty band', async () => {
@@ -360,10 +349,14 @@ describe('per-surface Overview content', () => {
     await unmount()
   })
 
-  it('ClientProfile: nonzero owing keeps a red Key-facts line (not silently dropped with the tiles)', async () => {
-    profileOver = { aggregates: { lifetime_paid: 4200, open_pipeline: 900, owing: 350, open_count: 1, total_count: 2 } }
+  it("ClientProfile: nonzero owing rides the metric band's Owing cell, red (route aggregate spans ALL engagements incl. closed)", async () => {
+    profileOver = { aggregates: { lifetime_paid: 4200, invoiced: 5000, open_pipeline: 900, owing: 350, open_count: 1, total_count: 2 } }
     const { host, unmount } = await mountProfile()
-    expect(host.textContent).toContain('Owing $350')
+    const band = host.querySelector('[aria-label="Metrics"]')!
+    const owingCell = [...band.children].find(c => (c.textContent || '').includes('Owing'))! as HTMLElement
+    expect(owingCell.textContent).toContain('$350')
+    const value = owingCell.querySelectorAll('p')[1] as HTMLElement
+    expect(['#791F1F', 'rgb(121, 31, 31)']).toContain(value.style.color)
     await unmount()
   })
 })
@@ -378,62 +371,68 @@ const stripLabels = (host: Element) =>
 const stripValues = (host: Element) =>
   [...stripOf(host).children].map(cell => cell.querySelectorAll('p')[1])
 
-describe('vitals strip', () => {
-  it('every card renders the 4-cell strip between the header identity row and the tab bar', async () => {
-    for (const m of [mountPerson, mountProfile, mountPanel]) {
-      const { host, unmount } = await m()
-      const strip = stripOf(host)
-      expect(strip).toBeTruthy()
-      expect(stripLabels(host)).toHaveLength(4)
-      // DOM order: name (header) → strip → tab bar
-      const name = [...host.querySelectorAll('h2, p')].find(el => (el.textContent || '').includes('Dana Client') || (el.textContent || '').includes('Kitchen + Pantry'))!
-      const tabBar = tabButton(host, 'Overview')!
-      expect(name.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-      expect(strip.compareDocumentPosition(tabBar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-      await unmount()
-    }
-  })
+// Build 2 split: PersonCard keeps the tinted VitalsStrip; ClientProfile
+// runs the full-bleed METRIC BAND; the panel's masthead carries
+// stage/value itself (no strip at all).
+const bandOf = (host: Element) => host.querySelector('[aria-label="Metrics"]')!
+const bandLabels = (host: Element) =>
+  [...bandOf(host).children].map(cell => cell.querySelectorAll('p')[0].textContent)
+const bandValues = (host: Element) =>
+  [...bandOf(host).children].map(cell => cell.querySelectorAll('p')[1])
+const chipSpan = (host: Element, label: string) =>
+  [...host.querySelectorAll('span')].find(sp => (sp as HTMLElement).style.borderRadius === '10px' && sp.textContent === label)
 
-  it("EngagementPanel: Stage/Value/Last touch/Next — missing values render '—', never zero", async () => {
-    // Default payload: no quotes/invoicing, no touchpoints, nothing scheduled.
-    const { host, unmount } = await mountPanel()
-    expect(stripLabels(host)).toEqual(['Stage', 'Value', 'Last touch', 'Next'])
-    expect(stripValues(host).map(p => p.textContent)).toEqual(['Request', '—', '—', '—'])
+describe('vitals strip / metric band', () => {
+  it('PersonCard renders the 4-cell strip between the header identity row and the tab bar', async () => {
+    const { host, unmount } = await mountPerson()
+    const strip = stripOf(host)
+    expect(strip).toBeTruthy()
+    expect(stripLabels(host)).toHaveLength(4)
+    const name = [...host.querySelectorAll('h2, p')].find(el => (el.textContent || '').includes('Dana Client'))!
+    const tabBar = tabButton(host, 'Overview')!
+    expect(name.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(strip.compareDocumentPosition(tabBar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     await unmount()
   })
 
-  it('EngagementPanel: Value = best quote pre-invoicing; Last touch abbreviated; Next = soonest future child, accent-colored', async () => {
-    engOver = {
-      children: {
-        quotes: [{ id: 'q1', status: 'sent', total: 900, sent_at: daysAgo(3) }],
-        touchpoints: [{ id: 'tp1', kind: 'reach_out', method: 'call', label: 'Reach-out', occurred_at: daysAgo(2), user_label: 'Kevin' }],
-        assessments: [{ id: 'a1', scheduled_at: inDays(5), completed_at: null, status: 'scheduled' }],
-      },
-    }
-    const { host, unmount } = await mountPanel()
-    const values = stripValues(host)
-    expect(values.map(p => p.textContent)).toEqual(['Request', '$900', '2d', shortDate(now + 5 * 86400000)])
-    // Next in the accent — happy-dom may serialize hex as rgb()
-    expect(['#378ADD', 'rgb(55, 138, 221)']).toContain((values[3] as HTMLElement).style.color)
-    await unmount()
-  })
-
-  it('EngagementPanel: Value flips to total_invoiced once real money exists', async () => {
-    engOver = {
-      engagement: { total_invoiced: 1200 },
-      children: { quotes: [{ id: 'q1', status: 'approved', total: 900 }] },
-    }
-    const { host, unmount } = await mountPanel()
-    expect(stripValues(host)[1].textContent).toBe('$1,200')
-    await unmount()
-  })
-
-  it('ClientProfile: Status/Lifetime/Last touch/Open from the already-fetched profile aggregates', async () => {
+  it('ClientProfile renders the METRIC BAND (Collected/Invoiced/Owing/Last touch) between header and tabs — full-bleed hairline, tabular numerals', async () => {
     const { host, unmount } = await mountProfile()
-    expect(stripLabels(host)).toEqual(['Status', 'Lifetime', 'Last touch', 'Open'])
-    // open engagement → Active; lifetime 4200; touchpoint 1d ago; open pipeline 900
-    expect(stripValues(host).map(p => p.textContent)).toEqual(['Active', '$4,200', '1d', '$900'])
+    const band = bandOf(host)
+    expect(band).toBeTruthy()
+    expect(bandLabels(host)).toEqual(['Collected', 'Invoiced', 'Owing', 'Last touch'])
+    // default payload: lifetime 4200 collected; nothing invoiced/owing → '—'; touchpoint 1d ago
+    expect(bandValues(host).map(pEl => pEl.textContent)).toEqual(['$4,200', '—', '—', '1d'])
+    expect((bandValues(host)[0] as HTMLElement).style.fontVariantNumeric).toBe('tabular-nums')
+    // full-bleed: negative margins cancel the body padding; hairline rules
+    expect((band as HTMLElement).style.margin).toContain('-')
+    expect((band as HTMLElement).style.borderTop).toContain('0.5px')
+    // DOM order: header → band → tab bar
+    const tabBar = tabButton(host, 'Overview')!
+    expect(band.compareDocumentPosition(tabBar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // the strip idiom is GONE from this card
+    expect(host.querySelector('[aria-label="Vitals"]')).toBeNull()
     await unmount()
+  })
+
+  it('EngagementPanel: NO strip — the masthead itself carries stage chip + right-aligned value', async () => {
+    engOver = { engagement: { total_invoiced: 1200 }, children: { quotes: [{ id: 'q1', status: 'approved', total: 900 }] } }
+    const { host, unmount } = await mountPanel()
+    expect(host.querySelector('[aria-label="Vitals"]')).toBeNull()
+    expect(host.querySelector('[aria-label="Metrics"]')).toBeNull()
+    expect(host.textContent).toContain('$1,200') // total_invoiced wins over the quote
+    await unmount()
+  })
+
+  it('EngagementPanel masthead value: best quote pre-invoicing; HIDDEN (not $0) when neither exists', async () => {
+    engOver = { children: { quotes: [{ id: 'q1', status: 'sent', total: 900, sent_at: daysAgo(3) }] } }
+    const quoted = await mountPanel()
+    expect(quoted.host.textContent).toContain('$900')
+    await quoted.unmount()
+
+    engOver = {}
+    const bare = await mountPanel()
+    expect(bare.host.textContent).not.toContain('$0')
+    await bare.unmount()
   })
 
   it('ClientProfile: $0 engagement sum does not mask the leads.paid_amount denorm — chips Past client', async () => {
@@ -446,7 +445,7 @@ describe('vitals strip', () => {
       aggregates: { lifetime_paid: 0, open_pipeline: 0, owing: 0, open_count: 0, total_count: 0 },
     }
     const { host, unmount } = await mountProfile()
-    expect(stripValues(host).map(p => p.textContent)).toEqual(['Past client', '—', '—', '—'])
+    expect(chipSpan(host, 'Past client')).toBeTruthy() // header status chip — the strip's Status cell retired with it
     await unmount()
   })
 
@@ -459,7 +458,7 @@ describe('vitals strip', () => {
       aggregates: { lifetime_paid: 0, open_pipeline: 0, owing: 0, open_count: 0, total_count: 1 },
     }
     const { host, unmount } = await mountProfile()
-    expect(stripValues(host).map(p => p.textContent)).toEqual(['Client', '—', '—', '—'])
+    expect(chipSpan(host, 'Client')).toBeTruthy() // header status chip (exact-label span — 'Dana Client' prose can't match)
     await unmount()
   })
 
@@ -496,16 +495,15 @@ describe('header client identity (Option B)', () => {
     await unmount()
   })
 
-  it('the engagement title is NOT rendered — auto-generated or custom, the header dropped it', async () => {
-    engOver = { engagement: { title: 'Engagement – Jul 2026' } }
-    const auto = await mountPanel()
-    expect(auto.host.textContent).not.toContain('Engagement – Jul 2026')
-    await auto.unmount()
-
-    engOver = {} // default payload carries the custom title 'Kitchen + Pantry'
-    const custom = await mountPanel()
-    expect(custom.host.textContent).not.toContain('Kitchen + Pantry')
-    await custom.unmount()
+  it('the engagement title RENDERS in the masthead deal line (v2 restored it — displayTitle, once, below the client name)', async () => {
+    const { host, unmount } = await mountPanel() // default payload title 'Kitchen + Pantry'
+    expect(host.textContent!.split('Kitchen + Pantry').length - 1).toBe(1)
+    // deal line sits between the name headline and the tab bar
+    const title = [...host.querySelectorAll('span')].find(sp => sp.textContent === 'Kitchen + Pantry')!
+    const h2 = host.querySelector('h2')!
+    expect(h2.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(title.compareDocumentPosition(tabButton(host, 'Overview')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await unmount()
   })
 
   it("subtitle: 'View profile' accent link + full opened date + founded-by; click fires onOpenClient; old View client → gone", async () => {
@@ -527,12 +525,12 @@ describe('header client identity (Option B)', () => {
     await unmount()
   })
 
-  it('bottom action row: Call / Log touchpoint / Send to Jobber, equal-width grid — NO Advance (removed 7/10)', async () => {
+  it('bottom action bar: Call / Log touchpoint / Send to Jobber / Close…, equal-width grid — NO Advance (removed 7/10)', async () => {
     const { host, unmount } = await mountPanel({ onSendToJobber: () => {} })
     const row = buttonContaining(host, 'Log touchpoint')!.parentElement as HTMLElement
-    expect([...row.children].map(el => (el.textContent || '').trim())).toEqual(['Call', 'Log touchpoint', 'Send to Jobber'])
+    expect([...row.children].map(el => (el.textContent || '').trim())).toEqual(['Call', 'Log touchpoint', 'Send to Jobber', 'Close…'])
     expect(row.style.display).toBe('grid')
-    expect(row.getAttribute('style')).toMatch(/repeat\(3,\s*1fr\)/)
+    expect(row.getAttribute('style')).toMatch(/repeat\(4,\s*1fr\)/)
     await unmount()
   })
 })
@@ -546,9 +544,12 @@ describe('full-date treatment (formatFullDate)', () => {
     expect(formatFullDate('not-a-date')).toBeNull()
   })
 
-  it("ClientProfile subtitle: 'client since' rides the full date now", async () => {
+  it("ClientProfile subtitle (v4): '{location} · client since Mon YYYY' — compact month-year, location leads", async () => {
     const { host, unmount } = await mountProfile()
-    expect(host.textContent).toContain(`client since ${fullDate(now - 40 * 86400000)}`)
+    const d = new Date(now - 40 * 86400000)
+    const MON3 = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    expect(host.textContent).toContain(`Denver · client since ${MON3[d.getUTCMonth()]} ${d.getUTCFullYear()}`)
+    expect(host.textContent).not.toContain(`client since ${fullDate(now - 40 * 86400000)}`)
     await unmount()
   })
 
@@ -558,12 +559,11 @@ describe('full-date treatment (formatFullDate)', () => {
     await unmount()
   })
 
-  it('the vitals strip stays COMPACT — full dates never leak into the tight cells', async () => {
-    engOver = { children: { assessments: [{ id: 'a1', scheduled_at: inDays(5), completed_at: null, status: 'scheduled' }] } }
-    const { host, unmount } = await mountPanel()
-    const next = stripValues(host)[3].textContent!
-    expect(next).toBe(shortDate(now + 5 * 86400000)) // 'Jul 14', not 'July 14, 2026'
-    expect(next).not.toContain(String(new Date(now).getFullYear()))
+  it('the metric band stays COMPACT — full dates never leak into the tight cells', async () => {
+    const { host, unmount } = await mountProfile()
+    const last = bandValues(host)[3].textContent!
+    expect(last).toBe('1d') // relative, not 'July …, 2026'
+    expect(last).not.toContain(String(new Date(now).getFullYear()))
     await unmount()
   })
 })
@@ -641,10 +641,9 @@ describe('write paths', () => {
     expect(src).toContain('manual_stage_move_rejected') // terminal-only stage writes
   })
 
-  it('Close moved to the ··· menu, same inline Won/Lost confirm + write', async () => {
+  it('Close… rides the pinned action bar (build 2 — out of the ··· menu), same inline Won/Lost confirm + write', async () => {
     const { host, unmount } = await mountPanel()
-    await click(host.querySelector('button[aria-label="More"]')!)
-    await click(buttonContaining(host, 'Close engagement…')!)
+    await click(buttonContaining(host, 'Close…')!)
     expect(host.textContent).toContain('Close as')
     await click(buttonContaining(host, 'Close as lost')!)
     expect(engPatches).toEqual([{ stage: 'Closed Lost', closed_reason: 'lost_no_response' }])

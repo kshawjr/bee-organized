@@ -9,6 +9,11 @@
 //
 // ≥44px tap targets (the cards are the primary mobile triage surface);
 // active tab = inset underline (no layout shift), inactive muted.
+//
+// count (optional per tab, card-restore build 2): a muted trailing
+// figure — 'Timeline 12'. Rendered only when the host passes a number
+// (0 included: an honest empty count beats a mystery). aria-label stays
+// `${label} tab` — every tab-driving test keys on it.
 // §8.5: pure presentational, props only.
 // ─────────────────────────────────────────────────────────────
 'use client'
@@ -36,6 +41,9 @@ export default function CardTabs({ tabs = [], active, onChange }) {
             }}
           >
             {t.label}
+            {t.count != null && (
+              <span style={{ marginLeft: '5px', fontSize: '11px', fontWeight: 400, color: '#b5b3ac' }}>{t.count}</span>
+            )}
           </button>
         )
       })}

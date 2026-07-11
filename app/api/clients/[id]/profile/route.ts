@@ -14,9 +14,9 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { profileAggregates } from '@/lib/profile-aggregates'
 
 const isOpen = (s: string) => s !== 'Closed Won' && s !== 'Closed Lost'
-const num = (v: any) => (v == null ? 0 : Number(v) || 0)
 
 export async function GET(
   req: Request,
@@ -39,7 +39,7 @@ export async function GET(
 
   const { data: lead, error: leadError } = await supabaseService
     .from('leads')
-    .select('id, name, first_name, last_name, email, phone, address, city, state, zip, created_at, source, paused, marketing_opt_out, referred_by_kind, referred_by_id, jobber_client_id, location_uuid, location_id, paid_amount, request_details, project_type')
+    .select('id, name, first_name, last_name, email, phone, address, city, state, zip, created_at, source, paused, marketing_opt_out, snoozed_until, assigned_to, referred_by_kind, referred_by_id, jobber_client_id, location_uuid, location_id, paid_amount, request_details, project_type')
     .eq('id', id)
     .maybeSingle()
   if (leadError || !lead) {
@@ -61,7 +61,7 @@ export async function GET(
         .maybeSingle()
     : Promise.resolve({ data: null } as { data: { id: string, name: string } | null })
 
-  const [contactsRes, engagementsRes, touchesRes, notesRes, jobNotesRes, locRes, referrerRes, referredUsRes] = await Promise.all([
+  const [contactsRes, engagementsRes, touchesRes, notesRes, jobNotesRes, locRes, referrerRes, referredUsRes, tagsRes] = await Promise.all([
     supabaseService.from('lead_contacts').select('id, name, role, phone, email').eq('lead_id', id).order('created_at', { ascending: true }),
     supabaseService.from('engagements').select('id, title, description, stage, founded_by, created_at, stage_entered_at, closed_at, closed_reason, closed_note, nurture_started_at, total_invoiced, total_paid, balance_owing').eq('client_id', id).order('created_at', { ascending: false }),
     supabaseService.from('touchpoints').select('id, kind, method, label, notes, occurred_at, engagement_id, user_id').eq('lead_id', id).order('occurred_at', { ascending: false }).limit(50),
@@ -76,12 +76,19 @@ export async function GET(
     // Reverse direction — leads THIS client referred (kind='lead' rows
     // pointing back here). Junk exclusion via .not(is,true) — NULL stays.
     supabaseService.from('leads').select('id, name, created_at').eq('referred_by_kind', 'lead').eq('referred_by_id', id).not('is_junk', 'is', true).order('created_at', { ascending: false }).range(0, 49),
+    // Tag junction rows — resolved to lookup LABELS below (the v4 tags
+    // row renders labels, not the classic attrs.key ids).
+    supabaseService.from('lead_tags').select('id, tag_lookup_id').eq('lead_id', id),
   ])
 
   // touchpoints carry user_id but no user_label — resolve author names
   // (same as the engagement GET) so note/touch streams can say who.
+  // leads.assigned_to is a hub_user id too — ride the same fetch so the
+  // v4 assigned-to row can show a name.
   const touchRows = touchesRes.data ?? []
-  const authorIds = Array.from(new Set(touchRows.map(t => t.user_id).filter(Boolean)))
+  const authorIds = Array.from(new Set(
+    [...touchRows.map(t => t.user_id), lead.assigned_to].filter(Boolean)
+  ))
   const authorById: Record<string, string> = {}
   if (authorIds.length > 0) {
     const { data: authors } = await supabaseService
@@ -93,6 +100,20 @@ export async function GET(
     }
   }
   const touchpoints = touchRows.map(t => ({ ...t, user_label: t.user_id ? (authorById[t.user_id] ?? null) : null }))
+
+  // Tag labels — junction → lookups.label (display vocabulary; classic's
+  // attrs.key ids stay classic's concern via people-mapper).
+  const tagLookupIds = Array.from(new Set((tagsRes.data ?? []).map((lt: any) => lt.tag_lookup_id).filter(Boolean)))
+  let tags: string[] = []
+  if (tagLookupIds.length > 0) {
+    const { data: tagRows } = await supabaseService
+      .from('lookups')
+      .select('id, label')
+      .in('id', tagLookupIds)
+    tags = (tagsRes.data ?? [])
+      .map((lt: any) => (tagRows ?? []).find(r => r.id === lt.tag_lookup_id)?.label)
+      .filter(Boolean) as string[]
+  }
 
   const engagements = engagementsRes.data ?? []
   const openIds = engagements.filter(e => isOpen(e.stage)).map(e => e.id)
@@ -123,20 +144,12 @@ export async function GET(
     assessments: assessByEng[e.id] ?? [],
   }))
 
-  const engValue = (e: any) => {
-    if (num(e.total_invoiced) > 0) return num(e.total_invoiced)
-    return Math.max(0, ...(e.quotes || []).map((q: any) => num(q.total)))
-  }
-  const open = withChildren.filter(e => isOpen(e.stage))
-  const lifetimePaid = engagements.reduce((s, e) => s + num(e.total_paid), 0)
-  const openPipeline = open.reduce((s, e) => s + engValue(e), 0)
-  const owing = open.reduce((s, e) => s + num(e.balance_owing), 0)
-
   return NextResponse.json({
     client: {
       ...lead,
       location_name: locRes.data?.name ?? null,
       referred_by_name: referrerRes.data?.name ?? null,
+      assigned_to_name: lead.assigned_to ? (authorById[lead.assigned_to] ?? null) : null,
     },
     referred_us: referredUsRes.data ?? [],
     contacts: contactsRes.data ?? [],
@@ -144,12 +157,9 @@ export async function GET(
     touchpoints,
     buzz_notes: notesRes.data ?? [],
     job_notes: jobNotesRes.data ?? [],
-    aggregates: {
-      lifetime_paid: lifetimePaid,
-      open_pipeline: openPipeline,
-      owing,
-      open_count: open.length,
-      total_count: engagements.length,
-    },
+    tags,
+    // Shared pure math (lib/profile-aggregates) — the v4 metric band's
+    // numbers; owing spans ALL engagements incl. closed (drift fix).
+    aggregates: profileAggregates(withChildren),
   })
 }

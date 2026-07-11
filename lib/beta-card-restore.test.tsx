@@ -344,12 +344,12 @@ describe('source/type — person-vs-deal split (single home each)', () => {
     await unmount()
   })
 
-  it("panel header carries the Type pill ABOVE the vitals strip (header area, not Key facts); pick still PATCHes the engagement", async () => {
+  it("panel masthead carries the Type pill ABOVE the tab bar (header area, not Overview content)", async () => {
     const { host, unmount } = await mountPanel()
     const typePill = [...host.querySelectorAll('button')].find(b => (b.textContent || '').includes('Type: Client'))!
     expect(typePill).toBeTruthy()
-    const strip = host.querySelector('[aria-label="Vitals"]')!
-    expect(typePill.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const tabBar = [...host.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Overview tab')!
+    expect(typePill.compareDocumentPosition(tabBar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     await unmount()
   })
 })

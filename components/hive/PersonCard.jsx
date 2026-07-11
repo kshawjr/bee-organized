@@ -235,9 +235,14 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
         <MicroLabel>Key facts</MicroLabel>
         {contactRow(IconPhone, person.phone, person.phone ? `tel:${person.phone}` : null)}
         {contactRow(IconMail, person.email, person.email ? `mailto:${person.email}` : null)}
+        {/* Source only — leads are pre-deal, source is theirs. The Type
+            pill left in card-restore build 2: project type is
+            DEAL-scoped and edits on the EngagementPanel masthead once
+            an engagement exists (leads.project_type still seeds
+            founding server-side — no write path lost, just no
+            pre-engagement editor). */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <MetaSelect label="Source" value={effSource} options={lookupOptions.sources} onPick={(v) => saveLeadField('source', v)} />
-          <MetaSelect label="Type" value={c?.project_type || null} options={lookupOptions.projectTypes} onPick={(v) => saveLeadField('project_type', v)} />
         </div>
         {/* Referrer — the shared field (lead-level, same as the profile). */}
         {c && (

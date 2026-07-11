@@ -140,8 +140,8 @@ describe('isJobberLinked — any child record makes an engagement linked', () =>
   })
 })
 
-// ── B) panel: no manual mover + shared menu close ─────────────
-describe('EngagementPanel — no Advance for any engagement; ··· Close is the shared confirm', () => {
+// ── B) panel: no manual mover + shared action-bar close ───────
+describe('EngagementPanel — no Advance for any engagement; the action-bar Close… is the shared confirm', () => {
   const mountPanel = async (engagement: any, children: any) => {
     panelPayload = { engagement, children, client: clientPayload }
     const onChanged = vi.fn()
@@ -166,10 +166,9 @@ describe('EngagementPanel — no Advance for any engagement; ··· Close is the
     expect(patchCalls.length).toBe(0)
   })
 
-  it('··· menu Close opens the shared confirm for LINKED too; cancel writes nothing', async () => {
+  it('action-bar Close… opens the shared confirm for LINKED too; cancel writes nothing (moved out of the ··· menu, build 2)', async () => {
     const { container } = await mountPanel(LINKED, { ...emptyChildren(), quotes: [{ id: 'q1', status: 'sent', total: 800 }] })
-    await fire(container.querySelector('[aria-label="More"]')!)
-    await fire(btnByText(container, 'Close engagement…')!)
+    await fire(btnByText(container, 'Close…')!)
     expect(container.textContent).toContain('Close as')
     expect(container.querySelector('select')).toBeTruthy() // Lost reason picker (Lost is the default)
     await fire(btnByText(container, 'Cancel')!)
@@ -179,8 +178,7 @@ describe('EngagementPanel — no Advance for any engagement; ··· Close is the
 
   it('confirming Lost PATCHes the terminal stage + reason through the one write path', async () => {
     const { container, onChanged } = await mountPanel(LOCAL, emptyChildren())
-    await fire(container.querySelector('[aria-label="More"]')!)
-    await fire(btnByText(container, 'Close engagement…')!)
+    await fire(btnByText(container, 'Close…')!)
     await fire(btnByText(container, 'Close as lost')!)
     expect(patchCalls.length).toBe(1)
     expect(patchCalls[0].body.stage).toBe(CLOSED_LOST)
@@ -191,8 +189,7 @@ describe('EngagementPanel — no Advance for any engagement; ··· Close is the
   it('Won gate: owing invoices disable the Won segment and its confirm', async () => {
     const owing = { ...emptyChildren(), jobs: [{ id: 'j1', completed_at: daysAgo(1) }], invoices: [{ id: 'i1', status: 'sent', total: 900, balance_owing: 900 }] }
     const { container } = await mountPanel(eng({ id: 'e-owing', stage: 'Final Processing' }), owing)
-    await fire(container.querySelector('[aria-label="More"]')!)
-    await fire(btnByText(container, 'Close engagement…')!)
+    await fire(btnByText(container, 'Close…')!)
     const wonSeg = buttons(container).find(b => (b.textContent || '') === 'Won')!
     expect(wonSeg.disabled).toBe(true)
   })

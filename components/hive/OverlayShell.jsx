@@ -37,7 +37,10 @@ const GeometryStyle = () => (
   `}</style>
 )
 
-export default function OverlayShell({ isMobile, onClose, children }) {
+// maxWidth: desktop modal width cap. 740 is the classic card width;
+// ClientProfile + EngagementPanel pass 840 (card-restore build 2 — the
+// blessed two-column layouts assume it). Mobile sheet ignores it.
+export default function OverlayShell({ isMobile, onClose, children, maxWidth = 740 }) {
   const touchY = useRef(null)
   const scrollRef = useRef(null)
 
@@ -76,7 +79,7 @@ export default function OverlayShell({ isMobile, onClose, children }) {
     <div style={{ position: 'fixed', inset: 0, zIndex: 10005, background: 'rgba(26,26,24,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }} onClick={onClose}>
       <GeometryStyle />
       <div ref={scrollRef} className="bee-overlay-modal" onClick={e => e.stopPropagation()}
-        style={{ width: '100%', maxWidth: '740px', overflowY: 'auto', overscrollBehavior: 'contain', background: '#fff', borderRadius: '16px', boxShadow: '0 24px 80px rgba(26,26,24,0.25)' }}>
+        style={{ width: '100%', maxWidth: `${maxWidth}px`, overflowY: 'auto', overscrollBehavior: 'contain', background: '#fff', borderRadius: '16px', boxShadow: '0 24px 80px rgba(26,26,24,0.25)' }}>
         <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '14px 16px 4px' }}>
           <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: '#b5b3ac', cursor: 'pointer', lineHeight: 1, padding: '2px 4px' }}><IconX size={16} /></button>
         </div>

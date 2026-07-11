@@ -77,7 +77,7 @@ export async function GET(
   if ('error' in auth) return auth.error
   const { engagement } = auth
 
-  const [srRes, quotesRes, jobsRes, invoicesRes, clientRes, clientEngsRes, assessRes, notesRes, buzzRes, touchRes] = await Promise.all([
+  const [srRes, quotesRes, jobsRes, invoicesRes, clientRes, clientEngsRes, assessRes, notesRes, buzzRes, touchRes, locRes, dripRes] = await Promise.all([
     supabaseService.from('service_requests').select('*').eq('engagement_id', id).order('requested_at', { ascending: true, nullsFirst: false }),
     supabaseService.from('quotes').select('*').eq('engagement_id', id).order('sent_at', { ascending: true, nullsFirst: false }),
     supabaseService.from('jobs').select('*').eq('engagement_id', id).order('scheduled_start', { ascending: true, nullsFirst: false }),
@@ -93,7 +93,39 @@ export async function GET(
     // THIS engagement's touchpoints — interleaved with notes in the
     // panel's activity stream.
     supabaseService.from('touchpoints').select('id, kind, method, label, notes, occurred_at, user_id').eq('engagement_id', id).order('occurred_at', { ascending: false }).limit(50),
+    // Location name for the v2 masthead's client line.
+    supabaseService.from('locations').select('name').eq('id', engagement.location_uuid).maybeSingle(),
+    // LIVE drip only (stopped/completed excluded — Kevin's rule: the
+    // banner is gone once the drip ends; paused still shows). Same
+    // active-row filter the outreach-timeline endpoint uses.
+    supabaseService.from('lead_drip_progress')
+      .select('id, drip_path_id, current_step, next_send_at, paused_at, drip_paths(name)')
+      .eq('lead_id', engagement.client_id)
+      .is('stopped_at', null)
+      .is('completed_at', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ])
+
+  // Drip banner summary — step count is one extra tiny query, only when
+  // a live drip exists (most engagements are past Jobber and have none).
+  let drip: { path_name: string | null, current_step: number, total_steps: number | null, next_send_at: string | null, paused: boolean } | null = null
+  const prog: any = dripRes.data
+  if (prog) {
+    const { count: totalSteps } = await supabaseService
+      .from('drip_path_steps')
+      .select('id', { count: 'exact', head: true })
+      .eq('drip_path_id', prog.drip_path_id)
+    const path = Array.isArray(prog.drip_paths) ? prog.drip_paths[0] : prog.drip_paths
+    drip = {
+      path_name: path?.name ?? null,
+      current_step: prog.current_step,
+      total_steps: totalSteps ?? null,
+      next_send_at: prog.next_send_at ?? null,
+      paused: !!prog.paused_at,
+    }
+  }
 
   // touchpoints carry user_id but no user_label — resolve author names
   // from hub_users in one shot so the activity stream can say who.
@@ -175,8 +207,10 @@ export async function GET(
       notes: notesRes.data ?? [],
       touchpoints,
     },
+    drip,
     client: {
       id: engagement.client_id,
+      location_name: locRes.data?.name ?? null,
       name: clientRes.data?.name ?? 'Unknown',
       email: clientRes.data?.email ?? null,
       phone: clientRes.data?.phone ?? null,

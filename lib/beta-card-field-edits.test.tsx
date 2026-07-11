@@ -216,12 +216,11 @@ describe('PersonCard — field edits', () => {
     await unmount()
   })
 
-  it('None clears Type too: PATCH { project_type: null }', async () => {
+  it('Type pill is GONE from PersonCard (build 2: project type is DEAL-scoped — edits on the EngagementPanel masthead only; Source stays, leads are pre-deal)', async () => {
     const { host, unmount } = await mountPersonCard()
-    await click(buttonContaining(host, 'Type: Client')!)
-    await click(buttonByText(host, 'None')!)
-    expect(leadPatches).toEqual([{ url: expect.stringContaining('/api/leads/lead-9'), body: { project_type: null } }])
-    expect(buttonContaining(host, 'Type · add')).toBeTruthy()
+    expect(buttonContaining(host, 'Type: Client')).toBeUndefined()
+    expect(buttonContaining(host, 'Type · add')).toBeUndefined()
+    expect(buttonContaining(host, 'Source: Webform')).toBeTruthy() // source keeps its pre-deal home
     await unmount()
   })
 
@@ -300,32 +299,12 @@ describe('EngagementPanel — field edits', () => {
     await unmount()
   })
 
-  it("has the shared ReferrerField and writes the LEAD's columns — /api/leads/<lead id>, never an engagement field", async () => {
-    const { host, unmount, onLeadPatched } = await mountPanel()
-    await click(host.querySelector('button[aria-label="Add referrer"]')!)
-    await flush()
-    await click(buttonContaining(host, 'Karen Partner')!)
-    expect(leadPatches).toEqual([{
-      url: expect.stringContaining('/api/leads/lead-9'), // the lead beneath, NOT eng-1
-      body: { referred_by_kind: 'partner', referred_by_id: 'pt-1', source: 'Referral' },
-    }])
-    expect(engPatches).toEqual([])
-    expect(host.textContent).toContain('Referred by Karen Partner')
-    expect(onLeadPatched).toHaveBeenCalledWith('lead-9', { referred_by_kind: 'partner', referred_by_id: 'pt-1', source: 'Referral' })
+  it('the panel carries NO person-scoped edit rows (build 2 person-vs-deal): no referrer, no contact fields — those live on ClientProfile, one View-profile tap away', async () => {
+    const { host, unmount } = await mountPanel()
+    expect(host.querySelector('button[aria-label="Add referrer"]')).toBeNull()
+    expect(host.querySelector('a[href^="tel:"]:not([href=""])')).toBeNull() // no contact rows (the action-bar Call needs client.phone, null here)
+    expect(host.textContent).not.toContain('Key facts')
     await unmount()
   })
 
-  it('clear from the panel nulls the referrer fields only (source untouched)', async () => {
-    const { host, unmount } = await mountPanel()
-    await click(host.querySelector('button[aria-label="Add referrer"]')!)
-    await flush()
-    await click(buttonContaining(host, 'Karen Partner')!)
-    await click(host.querySelector('button[aria-label="Clear referrer"]')!)
-    // The asymmetry lives in the PATCH body: no source key may ride the
-    // clear. (The panel's Source pill is gone — single home on
-    // ClientProfile since card-restore 1 — so the body IS the proof.)
-    expect(leadPatches[1].body).toEqual({ referred_by_kind: null, referred_by_id: null })
-    expect(leadPatches.every(p => !('source' in p.body) || p.body.source === 'Referral')).toBe(true)
-    await unmount()
-  })
 })
