@@ -10,6 +10,7 @@ import {
   scheduleStageEmails,
   cancelStageEmails,
 } from './stage-emails'
+import { cancelPendingWelcomeEmail } from './welcome-email'
 
 // Any of these stages = drip should stop (only 'New' / 'Attempting' keep
 // the drip active).
@@ -28,6 +29,7 @@ export type DripStopReason =
   | 'junk'
   | 'manual_pause'
   | 'no_email'
+  | 'opted_out'
 
 interface LocationCtx {
   id: string
@@ -47,7 +49,7 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
   try {
     const { data: leadRow, error: leadErr } = await supabaseService
       .from('leads')
-      .select('paused')
+      .select('paused, marketing_opt_out')
       .eq('id', leadId)
       .maybeSingle()
     if (leadErr) {
@@ -56,6 +58,11 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
     }
     if (leadRow?.paused) {
       // Imported lead — owner must explicitly activate drips first.
+      return
+    }
+    if (leadRow?.marketing_opt_out) {
+      // Opted out of marketing — never enroll. sendDripStepForRow also
+      // enforces this at send time (the authoritative gate).
       return
     }
 
@@ -328,6 +335,12 @@ export async function applyDripSideEffects(args: {
       // Only stop drips on a real transition. A fresh lead can't have
       // active drips to stop, and the lookup just wastes a round trip.
       tasks.push(stopActiveDripsForLead(leadId, 'stage_changed'))
+      // The pending Welcome Email rides the new-lead drip — once the
+      // lead moves past New/Attempting (booked, nurturing, closed) a
+      // "thanks for reaching out" 24h follow-up reads wrong. Cancel it
+      // alongside the drip stop. Stage emails are deliberately NOT
+      // touched here beyond the existing trigger-stage logic below.
+      tasks.push(cancelPendingWelcomeEmail(leadId, 'stage_changed'))
     }
 
     // Opportunity Stage emails — independent of the drip-stop logic above.
@@ -348,6 +361,19 @@ export async function applyDripSideEffects(args: {
   if ('is_junk' in patch && patch.is_junk === true) {
     tasks.push(stopActiveDripsForLead(leadId, 'junk'))
     tasks.push(cancelStageEmails({ leadId, reason: 'junk' }))
+    // Junk also kills a pending Welcome Email (sendWelcomeEmail
+    // double-checks is_junk at send time as the backstop).
+    tasks.push(cancelPendingWelcomeEmail(leadId, 'junk'))
+  }
+
+  if ('marketing_opt_out' in patch && patch.marketing_opt_out === true) {
+    // Compliance: opting out silences everything immediately — active
+    // drips stop, pending stage emails cancel, pending welcome cancels.
+    // The three send paths also each re-check the flag at send time, so
+    // this hook is belt-and-braces, not the sole gate.
+    tasks.push(stopActiveDripsForLead(leadId, 'opted_out'))
+    tasks.push(cancelStageEmails({ leadId, reason: 'opted_out' }))
+    tasks.push(cancelPendingWelcomeEmail(leadId, 'opted_out'))
   }
 
   if ('paused' in patch) {

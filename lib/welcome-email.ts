@@ -46,12 +46,55 @@ export async function scheduleWelcomeEmail(leadId: string): Promise<void> {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Cancel
+// ──────────────────────────────────────────────────────────────────────
+// Clears a PENDING welcome (scheduled, not yet sent) back to the
+// documented steady state (both columns NULL — "no welcome pending or
+// sent"). Used when the lead is junked, opts out of marketing, or exits
+// New/Attempting: the welcome is an extension of the new-lead drip, and
+// a "thanks for reaching out" email after any of those transitions
+// reads wrong. Clearing scheduled_at (rather than tombstoning sent_at
+// the way the no-email path does) deliberately leaves the lead eligible
+// for a future re-schedule if a fresh drip ever fires step 1 again —
+// e.g. an opt-out that later gets reversed.
+//
+// PAUSE IS DIFFERENT: pause does NOT cancel. A paused lead's welcome is
+// HELD by the send-time gate in sendWelcomeEmail (pause is temporary;
+// the cron re-picks the row every tick and sends on the first tick
+// after resume). Junk / opt-out / stage-exit cancel; pause holds.
+
+export async function cancelPendingWelcomeEmail(
+  leadId: string,
+  reason: 'junk' | 'opted_out' | 'stage_changed',
+): Promise<void> {
+  try {
+    const { error } = await supabaseService
+      .from('leads')
+      .update({ welcome_email_scheduled_at: null })
+      .eq('id', leadId)
+      .is('welcome_email_sent_at', null)
+      .not('welcome_email_scheduled_at', 'is', null)
+
+    if (error) {
+      console.error('[welcome] cancelPendingWelcomeEmail: update failed', { leadId, reason, error })
+    }
+  } catch (err) {
+    console.error('[welcome] cancelPendingWelcomeEmail: unexpected error', { leadId, reason, err })
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Send
 // ──────────────────────────────────────────────────────────────────────
 // Render the Welcome master template against the lead's context and
 // send. Sets welcome_email_sent_at on success (idempotent: stops the
 // row from being picked up again by the cron). Records a 'drip'
 // touchpoint so it shows up in the Outreach timeline.
+//
+// Send-time gates (authoritative — the lifecycle cancel hooks are best
+// effort): junk and marketing_opt_out CANCEL the pending welcome;
+// paused HOLDS it (row untouched, released by the first cron tick after
+// resume).
 
 export type SendWelcomeResult = {
   sent: boolean
@@ -62,7 +105,7 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
   // Lead
   const { data: lead, error: leadErr } = await supabaseService
     .from('leads')
-    .select('id, name, first_name, email, location_uuid, assigned_to, welcome_email_sent_at')
+    .select('id, name, first_name, email, location_uuid, assigned_to, welcome_email_sent_at, is_junk, paused, marketing_opt_out')
     .eq('id', leadId)
     .maybeSingle()
 
@@ -72,6 +115,26 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
 
   // Already sent (cron raced itself, or this was called twice). No-op.
   if (lead.welcome_email_sent_at) return { sent: false, error: 'already_sent' }
+
+  // Junked → cancel the pending welcome (the lifecycle hook already
+  // tries this on the is_junk PATCH; this is the authoritative backstop).
+  if (lead.is_junk === true) {
+    await cancelPendingWelcomeEmail(leadId, 'junk')
+    return { sent: false, error: 'junk' }
+  }
+
+  // Opted out of marketing → cancel, never send.
+  if (lead.marketing_opt_out === true) {
+    await cancelPendingWelcomeEmail(leadId, 'opted_out')
+    return { sent: false, error: 'opted_out' }
+  }
+
+  // Paused → HOLD, don't cancel. Leaving the row untouched means the
+  // cron re-considers it every tick and the welcome goes out on the
+  // first tick after the lead is resumed.
+  if (lead.paused === true) {
+    return { sent: false, error: 'paused' }
+  }
 
   // No email → mark sent so it never gets retried, log skip.
   if (!lead.email || typeof lead.email !== 'string' || !lead.email.trim()) {

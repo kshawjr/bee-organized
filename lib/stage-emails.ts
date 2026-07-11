@@ -88,6 +88,20 @@ export async function scheduleStageEmails(args: {
 }): Promise<void> {
   try {
     const { leadId, newStage, projectType } = args
+
+    // Cheap scheduling-time opt-out gate — don't queue what can never
+    // send. sendStageEmail re-checks at send time (authoritative: the
+    // lead can opt out after scheduling).
+    const { data: optCheck } = await supabaseService
+      .from('leads')
+      .select('marketing_opt_out')
+      .eq('id', leadId)
+      .maybeSingle()
+    if (optCheck?.marketing_opt_out === true) {
+      console.log(`[stage-emails] lead ${leadId} opted out of marketing — not scheduling`)
+      return
+    }
+
     let triggers: StageTrigger[] = []
 
     if (newStage === 'Closed Won') {
@@ -130,7 +144,7 @@ export async function scheduleStageEmails(args: {
 
 export async function cancelStageEmails(args: {
   leadId: string
-  reason: 'stage_changed' | 'junk' | 'manual'
+  reason: 'stage_changed' | 'junk' | 'manual' | 'opted_out'
 }): Promise<void> {
   try {
     const { leadId, reason } = args
@@ -189,12 +203,21 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
   // Lead
   const { data: lead, error: leadErr } = await supabaseService
     .from('leads')
-    .select('id, name, first_name, email, location_uuid, assigned_to')
+    .select('id, name, first_name, email, location_uuid, assigned_to, marketing_opt_out')
     .eq('id', row.lead_id)
     .maybeSingle()
 
   if (leadErr || !lead) {
     return { sent: false, error: `lead_lookup: ${leadErr?.message ?? 'missing'}` }
+  }
+  if (lead.marketing_opt_out === true) {
+    // Opted out → cancel so the row never retries. Same shape as the
+    // no-email cancel below; cancelled_reason is free text (no CHECK).
+    await supabaseService
+      .from('scheduled_stage_emails')
+      .update({ cancelled_at: new Date().toISOString(), cancelled_reason: 'opted_out' })
+      .eq('id', row.id)
+    return { sent: false, error: 'opted_out' }
   }
   if (!lead.email || typeof lead.email !== 'string' || !lead.email.trim()) {
     // Cancel — no point retrying for a lead without an email.

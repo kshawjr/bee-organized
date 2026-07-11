@@ -2,10 +2,15 @@
 //
 // POST /api/leads/:id/drip-pause — manually pause a lead's active drips.
 // Sets paused_at on every lead_drip_progress row for this lead that is
-// not already paused, stopped, or completed.
+// not already paused, stopped, or completed, AND sets leads.paused=true
+// so the flag (what the beta chip / Classic badge / welcome-hold read)
+// stays in lockstep with the row state (what the cron obeys). Before
+// the flag sync these two signals could diverge and the chip would show
+// "Drips active" on a paused drip.
 //
 // Auth: hub_user required. Location scoping matches PATCH /api/leads/:id.
-// (Not wired to the UI yet — Session 3 will hook it up.)
+// Wired to Classic's DripSection + Outreach tab pause buttons
+// (components/BeeHub.jsx).
 
 import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
@@ -48,6 +53,19 @@ export async function POST(
     }
   }
 
+  // Row state first — it's what actually stops sends — then the flag.
+  // A failed flag write is logged and surfaced but doesn't undo the
+  // pause: better a stale chip than an email that shouldn't have gone.
   await pauseActiveDripsForLead(id)
+
+  const { error: flagErr } = await supabaseService
+    .from('leads')
+    .update({ paused: true, updated_at: new Date().toISOString() })
+    .eq('id', id)
+  if (flagErr) {
+    console.error('[drip-pause] leads.paused flag sync failed', { id, flagErr })
+    return NextResponse.json({ ok: true, warning: 'flag_sync_failed' })
+  }
+
   return NextResponse.json({ ok: true })
 }

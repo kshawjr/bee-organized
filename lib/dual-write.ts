@@ -38,38 +38,15 @@ interface LeadPayload {
   zoho_contact_id?: string | null // Zoho Contacts module record ID
 }
 
-export async function createLead(payload: LeadPayload): Promise<{ id: string }> {
-  const now = new Date().toISOString()
-
-  // 1. Write to Supabase
-  const { data, error } = await supabase
-    .from('leads')
-    .insert({
-      location_id:      payload.location_id,
-      name:             payload.name,
-      first_name:       payload.first_name || null,
-      last_name:        payload.last_name  || null,
-      email:            payload.email      || null,
-      phone:            payload.phone      || null,
-      address:          payload.address    || null,
-      stage:            payload.stage      || 'New',
-      source:           payload.source     || null,
-      project_type:     payload.project_type || null,
-      assigned_to:      payload.assigned_to || null,
-      jobber_client_id: payload.jobber_client_id || null,
-      created_at:       now,
-      updated_at:       now,
-    })
-    .select('id')
-    .single()
-
-  if (error) throw new Error(`Supabase createLead failed: ${error.message}`)
-
-  // 2. Write to Zoho (if we have a Zoho record to update)
-  await syncLeadToZoho(payload, data.id)
-
-  return { id: data.id }
-}
+// NOTE: a `createLead` insert helper used to live here. It was removed
+// deliberately (2026-07 email-send-integrity pass): it had zero callers
+// and inserted leads with paused defaulting to FALSE and stage
+// defaulting to 'New' — an unguarded door past the imported-lead pause
+// and drip-enrollment gates. Lead creation goes through POST /api/leads
+// (manual), POST /api/leads/intake (webform), or lib/jobber-import.ts
+// upsertLead (imports, paused=true). Do NOT re-add a create here without
+// wiring the same paused / marketing_opt_out / drip-side-effect
+// handling those doors carry. Pinned by lib/email-send-integrity.test.ts.
 
 export async function updateLead(
   id: string,
