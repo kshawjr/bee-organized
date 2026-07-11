@@ -21,6 +21,8 @@ const LEAD_COL_TO_PERSON_FIELD = {
   request_details: 'jobDetail',
   snoozed_until: 'snoozeUntil', // Timeline's un-snooze → Inbox reflects live
   is_junk: 'isJunk',            // card ··· menu junk → Inbox row drops live
+  phone: 'phone',               // ContactField inline edit → Inbox tel:/filters live
+  email: 'email',
 }
 
 export function leadColsToPersonFields(cols) {
@@ -29,5 +31,10 @@ export function leadColsToPersonFields(cols) {
     const personKey = LEAD_COL_TO_PERSON_FIELD[k]
     if (personKey) out[personKey] = v
   }
+  // phone_normalized is a GENERATED column — the client never knows the
+  // server's new value. Null the stale copy so consumers fall back to
+  // digits-of-phone (InboxScreen's tel: href does exactly that); leaving
+  // it would dial the OLD number after an edit.
+  if ('phone' in out) out.phoneNormalized = null
   return out
 }

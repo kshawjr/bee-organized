@@ -20,9 +20,11 @@
 //
 // Overview: pinned buzz (INHERITED from the client — the same
 // lead_notes kind='buzz' rows ClientProfile shows) → key facts
-// (tappable phone/email, Source MetaSelect [LEAD-level write], Type
-// MetaSelect [ENGAGEMENT-level write], shared ReferrerField — the
-// client NAME moved up to the header) → job description
+// (phone/email via the shared ContactField — click-to-edit, still
+// tappable tel:/mailto:, LEAD-level write like Source; Source
+// MetaSelect [LEAD-level write], Type MetaSelect [ENGAGEMENT-level
+// write], shared ReferrerField — the client NAME moved up to the
+// header) → job description
 // (engagements.description) → Jobber records checklist (status view —
 // the chronological version lives in the Timeline tab) →
 // engagement-scoped recent activity + composer → soft-tinted equal-grid
@@ -45,10 +47,11 @@ import React, { useState, useEffect } from 'react'
 import useIsMobile from './shared/useIsMobile'
 import { isTerminal, stageDisplayLabel, ACCENT_BLUE, CHIP_STYLES } from './shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
-import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconMail, IconExternalLink, IconCalendar, IconSend, IconPaperclip } from '@/components/ui/icons'
+import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconPhone, IconExternalLink, IconCalendar, IconSend, IconPaperclip } from '@/components/ui/icons'
 import VitalsStrip, { vitalsAge, vitalsFuture, nextFromChildren } from './shared/VitalsStrip'
 import NotesStream from './NotesStream'
 import OverlayShell from './OverlayShell'
+import ContactField from './shared/ContactField'
 import MetaSelect from './MetaSelect'
 import ReferrerField from './shared/ReferrerField'
 import Timeline from './shared/Timeline'
@@ -391,18 +394,17 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
       {client && eng && (
         <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <MicroLabel>Key facts</MicroLabel>
-          {client.phone && (
-            <p style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
-              <span style={{ color: '#8a8a84', display: 'inline-flex' }}><IconPhone size={13} /></span>
-              <a href={`tel:${client.phone}`} style={{ color: ACCENT_BLUE, textDecoration: 'none' }}>{client.phone}</a>
-            </p>
-          )}
-          {client.email && (
-            <p style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
-              <span style={{ color: '#8a8a84', display: 'inline-flex' }}><IconMail size={13} /></span>
-              <a href={`mailto:${client.email}`} style={{ color: ACCENT_BLUE, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{client.email}</a>
-            </p>
-          )}
+          {/* Phone/email: click-to-edit (shared ContactField — the same
+              component ClientProfile mounts); LEAD-level write like
+              Source. The audit touchpoint the route writes is lead-
+              level, so it lands in the Timeline tab (this panel's
+              Recent activity stays engagement-scoped). */}
+          <ContactField kind="phone" leadId={client.id} value={client.phone}
+            onSaved={(cols) => { setData(d => d ? { ...d, client: { ...d.client, ...cols } } : d); onLeadPatched(client.id, cols) }}
+            setToast={setToast} />
+          <ContactField kind="email" leadId={client.id} value={client.email}
+            onSaved={(cols) => { setData(d => d ? { ...d, client: { ...d.client, ...cols } } : d); onLeadPatched(client.id, cols) }}
+            setToast={setToast} />
           {/* Source rides the LEAD; Type rides THIS engagement (seeded at
               founding). label may be null — None clears. */}
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>

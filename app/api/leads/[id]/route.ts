@@ -25,7 +25,7 @@ import { isAdmin } from '@/lib/auth'
 import { applyDripSideEffects } from '@/lib/drip-lifecycle'
 import { sendDripStep } from '@/lib/drip-send'
 import { mapLeadToPerson } from '@/lib/people-mapper'
-import { diffContactPatch, type ContactWriteback } from '@/lib/jobber-contact-writeback'
+import { diffContactPatch, normalizePhoneDigits, normalizeEmail, type ContactWriteback } from '@/lib/jobber-contact-writeback'
 import { syncLeadContactToJobber } from '@/lib/jobber-contact-sync'
 
 const VALID_STAGES = [
@@ -296,6 +296,42 @@ export async function PATCH(
     })
   }
 
+  // ─── Touchpoint on contact change (audit trail) ───────────────
+  // Mirror of the stage_change auto-log above, for phone/email edits:
+  // one lead-level entry per REAL change (normalized compare — the same
+  // normalization diffContactPatch uses, so a formatting-only reformat
+  // writes no entry, exactly as it fires no Jobber mutation). kind is
+  // 'system' with method null: the touchpoints_kind_check vocabulary
+  // has no contact_change value and migrations are SQL-editor-only —
+  // 'system' renders through NotesStream/Timeline via the label, which
+  // carries the new value; notes retains the old one. Inserted rows
+  // ride the response (contact_activity) so open cards can prepend
+  // them into Recent activity without a refetch.
+  const contactActivity: any[] = []
+  for (const field of ['phone', 'email'] as const) {
+    const raw = patch[field]
+    if (typeof raw !== 'string') continue
+    const next = raw.trim()
+    const prev = String((existing as any)[field] ?? '').trim()
+    const norm = field === 'phone' ? normalizePhoneDigits : normalizeEmail
+    if (norm(next) === norm(prev)) continue // formatting-only — not a change
+    const label = field === 'phone' ? 'Phone' : 'Email'
+    const { data: tpRow } = await supabaseService
+      .from('touchpoints')
+      .insert({
+        lead_id: id,
+        location_uuid: existing.location_uuid,
+        kind: 'system',
+        label: next ? `${label} updated → ${next}` : `${label} removed`,
+        notes: prev ? `was ${prev}` : null,
+        user_id: hubUser.id,
+        occurred_at: new Date().toISOString(),
+      })
+      .select('id, kind, method, label, notes, occurred_at, engagement_id, user_id')
+      .single()
+    if (tpRow) contactActivity.push(tpRow)
+  }
+
   // ─── Drip lifecycle side-effects ─────────────────────────────
   // Fire-and-forget by default: start on stage→'New', stop on exit,
   // pause/resume on paused toggle, stop on junk. Each branch swallows
@@ -377,6 +413,7 @@ export async function PATCH(
     {
       lead: fresh,
       ...(contactWriteback ? { contact_writeback: contactWriteback } : {}),
+      ...(contactActivity.length ? { contact_activity: contactActivity } : {}),
     },
     { status: 200 },
   )
