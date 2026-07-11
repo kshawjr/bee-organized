@@ -111,7 +111,10 @@ const mountPanel = async (engagement: any, children: any, cl: any = client()) =>
 
 // ── Part 1: the ··· portal menu ───────────────────────────────
 describe('··· masthead menu — portal, close actions, reopen visibility', () => {
-  it('open engagement: menu portals OUT of the panel container and offers Won + Lost (no action-bar Close)', async () => {
+  it('open engagement: menu portals OUT of the panel container and offers Lost (Won is gated to final+paid; Reopen is closed-only)', async () => {
+    // eng() defaults to the Request stage — Lost is always available on an
+    // OPEN engagement, but Won now only surfaces at Final Processing + fully
+    // paid (the full matrix lives in beta-record-menu-visibility.test).
     const { container } = await mountPanel(eng(), emptyChildren())
     expect(btnByText(container, 'Close…')).toBeUndefined()
     await openMenu(container)
@@ -121,8 +124,8 @@ describe('··· masthead menu — portal, close actions, reopen visibility', ()
     expect(m.parentElement).toBe(document.body)
     expect(container.contains(m)).toBe(false)
     expect(m.style.position).toBe('fixed')
-    expect(menuItem('Mark as Closed Won')).toBeTruthy()
     expect(menuItem('Mark as Closed Lost')).toBeTruthy()
+    expect(menuItem('Mark as Closed Won')).toBeFalsy() // not final-stage / not paid
     expect(menuItem('Reopen')).toBeFalsy()
   })
 

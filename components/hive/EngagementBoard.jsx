@@ -108,7 +108,7 @@ function EngagementCard({ e, onOpen, draggable, onDragStart, onDragEnd, accent =
   )
 }
 
-export default function EngagementBoard({ engagements = [], closedCount = 0, locFilter = 'all', workFilters = ENGAGEMENT_FILTER_DEFAULTS, setWorkFilters = () => {}, clearWorkFilters = () => {}, onOpenClient = () => {}, onOpenEngagement = null, onViewClosedInList = () => {}, setToast = () => {}, readOnly = false }) {
+export default function EngagementBoard({ engagements = [], closedCount = 0, reopenedIds = [], locFilter = 'all', workFilters = ENGAGEMENT_FILTER_DEFAULTS, setWorkFilters = () => {}, clearWorkFilters = () => {}, onOpenClient = () => {}, onOpenEngagement = null, onViewClosedInList = () => {}, setToast = () => {}, readOnly = false }) {
   // Local rows for optimistic drag moves; resync when the server prop changes.
   const [rows, setRows] = useState(engagements)
   useEffect(() => { setRows(engagements) }, [engagements])
@@ -357,7 +357,10 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
     // Each segment renders its own server-narrowed window — no in-memory
     // stage filtering (that design starved Won behind 40 recent losses).
     const segData = closedData[closedSeg]
-    const segRows = segData?.rows || []
+    // Evict rows reopened this session — the fetched window predates the
+    // reopen, so drop them here rather than force a rail refetch (HiveShell
+    // owns reopenedIds; the row already shows in the open columns).
+    const segRows = (segData?.rows || []).filter(r => !reopenedIds.includes(r.id))
     const segLoading = !!closedLoading[closedSeg]
     return (
       <div key="closed-rail" style={{ width: '220px', flexShrink: 0, padding: '2px' }}>

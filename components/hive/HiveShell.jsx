@@ -151,6 +151,11 @@ export default function HiveShell({
   //        | { type:'person', person }  ← pre-engagement card (Inbox rows)
   const [overlay, setOverlay] = useState(null)
   const [rowPatches, setRowPatches] = useState({})
+  // Engagements REOPENED this session (Closed Lost → open, from the panel's
+  // ··· Reopen). A reopened row isn't in the open server set, so its id is
+  // handed to the board to EVICT it from the (separately-fetched) closed
+  // rail without a reload — the other half of the manual-refresh fix.
+  const [reopenedIds, setReopenedIds] = useState([])
   // Engagements founded THIS SESSION (NewClientSheet frames B/D — the
   // decoupled manual founding). Merged ahead of the server-hydrated set
   // so the founded row shows on the Board in Request without a reload,
@@ -353,6 +358,7 @@ export default function HiveShell({
         <EngagementBoard
           engagements={filtered}
           closedCount={closedCount}
+          reopenedIds={reopenedIds}
           locFilter={locFilter}
           workFilters={workFilters}
           setWorkFilters={setWorkFilters}
@@ -432,7 +438,22 @@ export default function HiveShell({
           readOnly={readOnly}
           onClose={() => setOverlay(null)}
           onOpenClient={openClient}
-          onChanged={(id, patch) => setRowPatches(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))}
+          onChanged={(id, patch) => {
+            setRowPatches(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))
+            // A re-close of a session-reopened row retires its rail-eviction
+            // so it shows in the closed rail again (correctly) on refetch.
+            if (patch?.stage && isTerminal(patch.stage)) setReopenedIds(prev => prev.filter(x => x !== id))
+          }}
+          onReopened={(row) => {
+            // Inject the freshly-open row into the session set (the founding
+            // "show-without-reload" seam) so it lands in the OPEN columns
+            // instantly; clear any terminal rowPatch; flag it for closed-rail
+            // eviction. The next server refetch carries the real row and the
+            // session copy dedups out by id.
+            setSessionEngagements(prev => [row, ...prev.filter(e => e.id !== row.id)])
+            setRowPatches(prev => { const n = { ...prev }; delete n[row.id]; return n })
+            setReopenedIds(prev => prev.includes(row.id) ? prev : [...prev, row.id])
+          }}
           onLeadPatched={handleLeadPatched}
           onPartnerCreated={onPartnerCreated}
           onSendToJobber={(clientId, opts) => {

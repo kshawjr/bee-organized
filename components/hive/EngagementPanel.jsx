@@ -73,6 +73,8 @@ import RecordMenu from './shared/RecordMenu'
 import CloseLostWizard from './shared/CloseLostWizard'
 import CloseWonWizard from './shared/CloseWonWizard'
 import ClosedSummary from './shared/ClosedSummary'
+import { invoicesSettled } from './shared/closeEngagement'
+import { Celebration, useReducedMotion, useMotionKeyframes, chipMoveStyle } from './shared/motion'
 import { fmtTime, fmtShort, engagementValue, displayTitle, formatFullDate, invoiceNumber, daysInStage } from './shared/engagementStatus'
 import { recordJobberUrl } from './shared/jobberLinks'
 import { T } from './shared/tokens'
@@ -179,7 +181,7 @@ function MilestoneRow({ kind, primary, secondary = null, state = null, href = nu
   )
 }
 
-export default function EngagementPanel({ engagementId, seed = null, people = [], locationUsers = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [] }, readOnly = false }) {
+export default function EngagementPanel({ engagementId, seed = null, people = [], locationUsers = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onReopened = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [] }, readOnly = false }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -190,7 +192,17 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   // The ··· masthead menu drives the close-out wizards (Won/Lost) and
   // Reopen — the standalone action-bar Close… button was retired here.
   const [wizard, setWizard] = useState(null) // null | 'won' | 'lost'
+  // Terminal-close celebration (§C motion) — 'won' | 'lost' | null, fired
+  // AFTER a commit lands so it never celebrates a move that didn't persist.
+  const [celebrate, setCelebrate] = useState(null)
+  // Reopen in flight — an OPTIMISTIC marker: the panel leaves the closed
+  // state instantly (ClosedSummary hides, Reopen item drops) while the
+  // server re-derives the open stage; a failure rolls it back.
+  const [reopening, setReopening] = useState(false)
   const nowMs = Date.now()
+
+  const reducedMotion = useReducedMotion()
+  useMotionKeyframes()
 
   const isMobile = useIsMobile()
 
@@ -341,9 +353,16 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   // closes after a beat, mirroring the old inline confirm's behavior.
   const onWizardClosed = (stage, j) => {
     setWizard(null)
+    // The wizard already COMMITTED (it awaits commitEngagementClose and only
+    // calls back on success), so reflecting here shows a persisted move, not
+    // an optimistic guess. Animate the stage chip + fire the celebration.
     setData(d => d ? { ...d, engagement: { ...d.engagement, stage: j.stage } } : d)
     onChanged(engagementId, { stage: j.stage })
-    setTimeout(onClose, 900)
+    setCelebrate(j.stage === 'Closed Won' ? 'won' : 'lost')
+    // Hold the panel open long enough for the flourish to read (won lingers
+    // for the confetti; lost is quick). Reduced motion closes promptly.
+    const hold = reducedMotion ? 700 : j.stage === 'Closed Won' ? 1500 : 950
+    setTimeout(onClose, hold)
   }
 
   // Reopen (resurrect) — Closed Lost only; the server route re-derives the
@@ -352,28 +371,67 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   async function reopenEngagement() {
     if (!eng || eng.stage !== 'Closed Lost') return
     setBusy(true)
+    // OPTIMISTIC: leave the closed state immediately (ClosedSummary hides,
+    // the Reopen item drops) so the click feels instant. We do NOT fabricate
+    // a stage — the open stage is a SERVER re-derivation (deriveEngagementStage,
+    // server-only by design; no client stage derivation exists to drift), so
+    // the authoritative value lands from the response and the chip animates
+    // in. On failure this optimistic flag rolls back and the row stays Lost.
+    setReopening(true)
     try {
       const res = await fetch(`/api/engagements/${engagementId}/reopen`, { method: 'POST' })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      // Set the derived open stage; ClosedSummary hides for any open
-      // stage, so the stale terminal fields need no explicit clearing
-      // here (and the write-path source pin keeps those literals out of
-      // this host file). A reopen from the panel is a rare click — the
-      // next fetch carries the fully-cleared row.
+      // Commit the derived open stage; ClosedSummary hides for any open
+      // stage, so the stale terminal fields need no explicit clearing here
+      // (and the write-path source pin keeps those literals out of this host
+      // file). onReopened hands the freshly-open row UP so the board injects
+      // it into the open columns + evicts it from the closed rail WITHOUT a
+      // reload — the manual-refresh bug this fixes.
       setData(d => d ? { ...d, engagement: { ...d.engagement, stage: j.stage } } : d)
       onChanged(engagementId, { stage: j.stage })
+      // Hand a FULL board-row shape up (seed is the row we opened from — it
+      // carries client_name + the child arrays the board card reads); the
+      // fresh open stage + this engagement's child records let the board
+      // place the card in the right column with no reload. The board keys
+      // every consumer off `stage` (isTerminal), so the row's now-open stage
+      // is enough — the stale terminal columns are inert until the next
+      // server refetch carries the fully-cleared row (and the write-path
+      // source pin keeps those closed-field literals out of this host file).
+      onReopened({
+        ...(seed || {}), ...eng, stage: j.stage,
+        client_name: seed?.client_name ?? client?.name ?? eng.client_name,
+        service_requests: children.service_requests, quotes: children.quotes,
+        jobs: children.jobs, invoices: children.invoices, assessments: children.assessments,
+      })
       setToast({ kind: 'success', msg: `Reopened · ${j.stage}` })
     } catch (e) {
+      // ROLLBACK: the write never landed — stay Closed Lost, tell the truth.
       setToast({ kind: 'error', msg: `Reopen failed: ${e.message}` })
-    } finally { setBusy(false) }
+    } finally {
+      setReopening(false)
+      setBusy(false)
+    }
   }
 
+  // Won is offered ONLY at the final working stage (Final Processing — the
+  // invoicing stage, the last non-terminal rank) AND only once the money is
+  // in: reuse the wizard's ONE settled derivation (invoicesSettled over the
+  // engagement's invoices) so the menu gate and the wizard's invoice step
+  // can never disagree. Absent — not disabled — everywhere else.
+  const canCloseWon = !!eng && eng.stage === 'Final Processing' && invoicesSettled(children.invoices || [])
+
   // Masthead ··· menu items — grows with more record actions later.
+  // Visibility rules (beta-record-menu-visibility pin):
+  //   Won    → Final Processing + fully-paid only (canCloseWon)
+  //   Lost   → any OPEN (non-terminal) engagement; never on a closed one
+  //   Reopen → Closed Lost only (never Won — settled money is out of scope)
+  // While a reopen is in flight the closed actions drop optimistically.
+  // readOnly (868kawwmh) hides EVERY write affordance — the whole menu drops.
   const menuItems = (eng && !readOnly) ? [
-    !isTerminal(eng.stage) && { key: 'won', label: 'Mark as Closed Won', icon: <IconCheck size={15} />, onClick: () => setWizard('won') },
+    canCloseWon && { key: 'won', label: 'Mark as Closed Won', icon: <IconCheck size={15} />, onClick: () => setWizard('won') },
     !isTerminal(eng.stage) && { key: 'lost', label: 'Mark as Closed Lost', icon: <IconX size={15} />, onClick: () => setWizard('lost') },
-    eng.stage === 'Closed Lost' && { key: 'reopen', label: 'Reopen', icon: <IconClock size={15} />, onClick: reopenEngagement },
+    eng.stage === 'Closed Lost' && !reopening && { key: 'reopen', label: 'Reopen', icon: <IconClock size={15} />, onClick: reopenEngagement },
   ].filter(Boolean) : []
 
   // ── The milestone checklist rows (design-system pass 7/11) ────
@@ -718,10 +776,13 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
             <span style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, letterSpacing: T.type.trackTitle, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {displayTitle(eng)}
             </span>
-            <span style={{ flexShrink: 0 }}>
-              <StatusChip label={stageDisplayLabel(eng.stage)} styleKey={eng.stage} />
+            {/* Keyed on the stage so a MOVE (close / reopen / drift fix)
+                remounts + replays the chip animation — the user SEES it
+                land instead of a silent swap. Reduced motion skips it. */}
+            <span key={eng.stage} style={{ flexShrink: 0, ...chipMoveStyle(reducedMotion) }}>
+              <StatusChip label={reopening ? 'Reopening…' : stageDisplayLabel(eng.stage)} styleKey={reopening ? 'blue' : eng.stage} />
             </span>
-            {stageDays != null && (
+            {stageDays != null && !reopening && (
               <span style={{ fontSize: '11px', color: T.ink.muted, fontVariantNumeric: T.type.tabular, whiteSpace: 'nowrap', flexShrink: 0 }}>
                 {stageDays} day{stageDays === 1 ? '' : 's'} in stage
               </span>
@@ -774,7 +835,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
       {/* Closed outcome — reason + note where an open engagement's drip
           banner would sit (shared component; see beta-stage-control's
           write-path source pin). */}
-      {eng && <ClosedSummary engagement={eng} />}
+      {eng && !reopening && <ClosedSummary engagement={eng} />}
 
       {/* Drip banner — ONLY while the lead's drip is LIVE (or paused);
           stopped/completed/absent renders NOTHING (Kevin's rule: gone
@@ -851,6 +912,11 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           setToast={setToast}
         />
       )}
+      {/* Terminal-close flourish (§C) — body-portalled, above the overlay,
+          pointer-events-none; won = confetti, lost = a quick sad nod.
+          Fired only from onWizardClosed (post-commit), so it can never
+          celebrate a move that didn't persist. Reduced-motion honored. */}
+      <Celebration kind={celebrate} onDone={() => setCelebrate(null)} />
     </>
   )
 }

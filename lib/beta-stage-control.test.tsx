@@ -97,13 +97,22 @@ beforeEach(() => {
   lsStore.clear()
   document.body.innerHTML = ''
 })
-afterEach(() => { vi.unstubAllGlobals() })
+// Track mounted roots so afterEach can UNMOUNT them (runs effect cleanups →
+// clears any pending timers, e.g. the close-out celebration's self-dismiss).
+// Without this, a leaked setTimeout from a panel close test fires mid-render
+// in a later board test ("Should not already be working" / stray removeChild).
+const roots: any[] = []
+afterEach(() => {
+  roots.splice(0).forEach(r => { try { act(() => r.unmount()) } catch {} })
+  vi.unstubAllGlobals()
+})
 
 function mount(el: React.ReactElement) {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
   act(() => { root.render(el) })
+  roots.push(root)
   return container
 }
 async function fire(node: Element, type = 'click') {
@@ -179,7 +188,9 @@ describe('EngagementPanel — no Advance for any engagement; the action-bar Clos
     expect(btnByText(container, 'Close…')).toBeUndefined()
     expect(recordTrigger(container)).toBeTruthy()
     await openRecordMenu(container)
-    expect(menuItem('Mark as Closed Won')).toBeTruthy()
+    // LINKED is at Estimate — Won is now gated to Final Processing + paid,
+    // so only Lost surfaces here (full matrix: beta-record-menu-visibility).
+    expect(menuItem('Mark as Closed Won')).toBeFalsy()
     expect(menuItem('Mark as Closed Lost')).toBeTruthy()
     await fire(menuItem('Mark as Closed Lost')!)
     expect(container.textContent).toContain('Close as lost')  // wizard open
@@ -200,15 +211,24 @@ describe('EngagementPanel — no Advance for any engagement; the action-bar Clos
     expect(onChanged).toHaveBeenCalledWith(LOCAL.id, { stage: CLOSED_LOST })
   })
 
-  it('Won gate: owing invoices block the Won wizard at the invoice step (Next disabled, no write)', async () => {
+  it('Won gate (panel menu): owing invoices HIDE Mark as Closed Won entirely — Final Processing but not settled', async () => {
+    // The Won gate now lives at the MENU: at the final stage with an open
+    // balance, the item is absent (not a disabled wizard step). The wizard's
+    // own owing gate still guards the board drag-close path (see §C below).
     const owing = { ...emptyChildren(), jobs: [{ id: 'j1', completed_at: daysAgo(1) }], invoices: [{ id: 'i1', status: 'sent', total: 900, balance_owing: 900 }] }
     const { container } = await mountPanel(eng({ id: 'e-owing', stage: 'Final Processing', total_invoiced: 900 }), owing)
     await openRecordMenu(container)
-    await fire(menuItem('Mark as Closed Won')!)
-    expect(container.textContent).toContain('Still owing')
-    const next = btnByText(container, 'Next')! as HTMLButtonElement
-    expect(next.disabled).toBe(true)
+    expect(menuItem('Mark as Closed Won')).toBeFalsy()
+    // Lost is still available on an open engagement.
+    expect(menuItem('Mark as Closed Lost')).toBeTruthy()
     expect(patchCalls.length).toBe(0)
+  })
+
+  it('Won gate (panel menu): Final Processing + fully PAID shows Mark as Closed Won', async () => {
+    const paid = { ...emptyChildren(), jobs: [{ id: 'j1', completed_at: daysAgo(1) }], invoices: [{ id: 'i1', status: 'paid', total: 900, balance_owing: 0 }] }
+    const { container } = await mountPanel(eng({ id: 'e-paid', stage: 'Final Processing', total_invoiced: 900 }), paid)
+    await openRecordMenu(container)
+    expect(menuItem('Mark as Closed Won')).toBeTruthy()
   })
 
   it('drift-corrected stage from the GET propagates to the board via onChanged', async () => {
