@@ -73,9 +73,8 @@ import RecordMenu from './shared/RecordMenu'
 import CloseLostWizard from './shared/CloseLostWizard'
 import CloseWonWizard from './shared/CloseWonWizard'
 import ClosedSummary from './shared/ClosedSummary'
-import { invoicesSettled } from './shared/closeEngagement'
 import { Celebration, useReducedMotion, useMotionKeyframes, chipMoveStyle } from './shared/motion'
-import { fmtTime, fmtShort, engagementValue, displayTitle, formatFullDate, invoiceNumber, daysInStage } from './shared/engagementStatus'
+import { fmtTime, fmtShort, engagementValue, displayTitle, formatFullDate, invoiceNumber, daysInStage, invoicesFullyPaid } from './shared/engagementStatus'
 import { recordJobberUrl } from './shared/jobberLinks'
 import { T } from './shared/tokens'
 
@@ -416,10 +415,13 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
 
   // Won is offered ONLY at the final working stage (Final Processing — the
   // invoicing stage, the last non-terminal rank) AND only once the money is
-  // in: reuse the wizard's ONE settled derivation (invoicesSettled over the
-  // engagement's invoices) so the menu gate and the wizard's invoice step
-  // can never disagree. Absent — not disabled — everywhere else.
-  const canCloseWon = !!eng && eng.stage === 'Final Processing' && invoicesSettled(children.invoices || [])
+  // in: the SAME predicate the import's stage derivation keys on to move a
+  // done job to Closed Won (invoicesFullyPaid — ≥1 invoice AND every invoice
+  // paid; engagementStatus.js), so the button/menu gate and import can never
+  // drift. An engagement with ZERO invoices is NOT wrapping up (never
+  // invoiced) — hence length>0 is required, unlike the wizard's looser
+  // invoicesSettled display check. Absent — not disabled — everywhere else.
+  const canCloseWon = !!eng && eng.stage === 'Final Processing' && invoicesFullyPaid(children.invoices || [])
 
   // Masthead ··· menu items — grows with more record actions later.
   // Visibility rules (beta-record-menu-visibility pin):
@@ -830,6 +832,27 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
             )}
           </div>
         </div>
+      )}
+
+      {/* READY-TO-CLOSE cue — the primary, obvious win path. Surfaces
+          ONLY when canCloseWon (Final Processing + ≥1 invoice all paid —
+          the import's own wrapping-up-settled rule): the deal is done and
+          the money is in, so we say so and offer the win in one tap. The
+          ··· menu keeps "Mark as Closed Won" for consistency; this is the
+          affirmative front door. Opens the EXISTING CloseWonWizard
+          (setWizard('won')) — same commit + confetti path. readOnly hides
+          every write affordance, this included. */}
+      {eng && canCloseWon && !readOnly && (
+        <button data-bee-ready-to-close onClick={() => setWizard('won')}
+          aria-label="Ready to close — mark this engagement Closed Won"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+            width: '100%', padding: '11px 16px', borderRadius: T.radius.inset,
+            border: 'none', background: T.accent.fg, color: T.accent.onFill,
+            fontSize: '13px', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
+            letterSpacing: T.type.trackTitle }}>
+          <IconCheck size={16} />
+          Ready to close — Mark won
+        </button>
       )}
 
       {/* Closed outcome — reason + note where an open engagement's drip

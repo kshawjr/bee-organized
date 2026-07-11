@@ -106,6 +106,22 @@ export function daysInStage(e, touchpoints = [], nowMs = Date.now()) {
   return Math.max(0, Math.floor((nowMs - anchor) / 86400000))
 }
 
+// THE import/derivation rule for a fully-paid, wrapping-up engagement:
+// at least one invoice AND every invoice paid — the exact gate
+// deriveEngagementStage (lib/engagements.ts) uses to move a done job from
+// Final Processing to Closed Won. Kept HERE, in the pure any-bundle
+// module, so the server derivation and the panel's Close-Won gate read
+// ONE predicate and can never drift. length > 0 is LOAD-BEARING: an
+// engagement with zero invoices never got invoiced, so it is NOT wrapping
+// up (this is the empty-list hole the wizard's looser invoicesSettled
+// left open). 'paid' is Jobber's own settled status; balance_owing is
+// deliberately NOT consulted — import keys on status alone, and this
+// matches import, not the wizard's display check.
+export const invoicePaid = (i) => (i?.status ?? null) === 'paid'
+export function invoicesFullyPaid(invoices = []) {
+  return invoices.length > 0 && invoices.every(invoicePaid)
+}
+
 // Display invoice number — no invoice_number column exists, so this is
 // the SAME derivation classic uses (lib/people-mapper.ts): 'INV-' + the
 // last 6 of the Jobber id (falling back to the row id). Keep the two in

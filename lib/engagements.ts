@@ -22,6 +22,7 @@ import { supabaseService } from './supabase-service'
 import { writeSyncLog } from './sync-log'
 import { isUnbookedJobStatus } from './jobber-import'
 import { ENGAGEMENT_STAGE_RANK as RAW_ENGAGEMENT_STAGE_RANK } from '@/components/hive/shared/stageRank'
+import { invoicesFullyPaid } from '@/components/hive/shared/engagementStatus'
 
 export type EngagementStage =
   | 'Request'
@@ -90,7 +91,6 @@ export const engagementJobDone = (j: { status?: string | null; completed_at?: st
 const jobUnbooked = (j: { status?: string | null; completed_at?: string | null }) =>
   !j.completed_at && isUnbookedJobStatus(j.status)
 
-const invoicePaid = (i: { status?: string | null }) => i.status === 'paid'
 const quoteActivity = (q: { sent_at?: string | null; approved_at?: string | null; created_at?: string | null }) =>
   Math.max(ts(q.approved_at), ts(q.sent_at), ts(q.created_at))
 
@@ -107,7 +107,11 @@ export function deriveEngagementStage(
 
   if (bookedJobs.length > 0) {
     if (bookedJobs.some(j => !engagementJobDone(j))) return { stage: 'Job in Progress' }
-    if (invoices.length > 0 && invoices.every(invoicePaid)) {
+    // ≥1 invoice AND all paid → the job is wrapping up settled. THE single
+    // predicate (invoicesFullyPaid, engagementStatus.js) the panel's
+    // Close-Won gate also reads — so import and UI can never disagree on
+    // what "fully paid" means.
+    if (invoicesFullyPaid(invoices)) {
       const lastPaidAt = Math.max(0, ...invoices.map(i => ts(i.paid_at)))
       return {
         stage: 'Closed Won',

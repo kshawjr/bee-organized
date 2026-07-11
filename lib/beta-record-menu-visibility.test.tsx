@@ -4,8 +4,11 @@
 //
 //   A) CONDITIONAL VISIBILITY (the matrix):
 //      · Mark as Closed Won  → ONLY at Final Processing (the last working
-//        stage) AND when invoices are fully settled (the wizard's ONE
-//        invoicesSettled derivation). Absent — not disabled — otherwise.
+//        stage) AND when invoicesFullyPaid — ≥1 invoice AND every invoice
+//        paid, the SAME predicate the import's stage derivation uses to
+//        move a done job to Closed Won (engagementStatus.js). ZERO invoices
+//        does NOT qualify (never invoiced = not wrapping up). Absent — not
+//        disabled — otherwise.
 //      · Mark as Closed Lost → any OPEN engagement; NEVER on a closed one
 //        (so it can't leak onto a Closed Won).
 //      · Reopen → Closed Lost ONLY (never Won — settled money out of scope).
@@ -125,6 +128,13 @@ describe('··· menu — conditional visibility (Won gated to final+paid; Lost 
 
   it('Mark as Closed Won is ABSENT at Final Processing while an invoice is still owing', async () => {
     const { container } = await mountPanel(eng({ stage: 'Final Processing', total_invoiced: 900 }), { ...emptyChildren(), invoices: owingInvoices() })
+    await openMenu(container)
+    expect(menuItem('Mark as Closed Won')).toBeFalsy()
+    expect(menuItem('Mark as Closed Lost')).toBeTruthy()
+  })
+
+  it('Mark as Closed Won is ABSENT at Final Processing with ZERO invoices (the empty-list fix — un-invoiced is not wrapping up)', async () => {
+    const { container } = await mountPanel(eng({ stage: 'Final Processing' }), { ...emptyChildren(), invoices: [] })
     await openMenu(container)
     expect(menuItem('Mark as Closed Won')).toBeFalsy()
     expect(menuItem('Mark as Closed Lost')).toBeTruthy()
