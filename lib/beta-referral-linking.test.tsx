@@ -364,7 +364,8 @@ describe('ClientProfile — referrer add/edit/clear on an existing lead', () => 
     // Exact body — no source key may appear in the clear patch.
     expect(patchBodies).toEqual([{ referred_by_kind: null, referred_by_id: null }])
     expect(host.textContent).not.toContain('Referred by')
-    expect(host.textContent).toContain('Source: referral') // untouched
+    // untouched (raw label since the editable SourceField — no more lowercasing)
+    expect(host.textContent).toContain('Source: Referral')
     await unmount()
   })
 

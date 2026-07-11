@@ -11,10 +11,11 @@
 // Processing engagement row's 'Owes $X' chip) — nothing silently drops.
 //
 // Overview: pinned buzz (client-level — the SAME note every engagement
-// panel inherits) → key facts (contact + display-only
-// source line + shared ReferrerField + referred-us) → request details
+// panel inherits) → key facts (contact + editable Source row + shared
+// ReferrerField + referred-us) → request details
 // (pre-Jobber only) → engagements list (open tappable → swaps to
-// EngagementPanel; closed capped at 2) → recent activity (client-WIDE
+// EngagementPanel; closed capped at 2, with closed reason + note) →
+// recent activity (client-WIDE
 // slice: kind='job' notes — INCLUDING client-level ones posted on
 // PersonCard, the old inventory gap — + touchpoints, engagement-scoped
 // items tagged '· re: <title>') + composer → soft-tinted equal-grid
@@ -24,15 +25,18 @@
 // EngagementPanel REPLACE each other (no stacking); two taps loop,
 // zero modal piles.
 //
-// Source stays display-only here (no meta pill — deliberate); the
-// ReferrerField is the shared edit affordance. Beta chunk.
+// Source is EDITABLE here since card-restore build 1 (Kevin's
+// person-vs-deal split: source is first-touch, PERSON-scoped — this is
+// its ONE edit home; the engagement panel dropped its Source pill the
+// same build). Project type is deal-scoped and lives on the
+// EngagementPanel header only — never duplicated here. Beta chunk.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
 import React, { useState, useEffect } from 'react'
 import { CHIP_STYLES, stageDisplayLabel, ACCENT_BLUE } from './shared/stageConfig'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
-import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, formatFullDate } from './shared/engagementStatus'
+import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, formatFullDate, closedReasonLabel } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import VitalsStrip, { vitalsAge } from './shared/VitalsStrip'
 import {
@@ -43,7 +47,9 @@ import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
 import ContactField from './shared/ContactField'
 import AddressField from './shared/AddressField'
+import SourceField from './shared/SourceField'
 import ReferrerField from './shared/ReferrerField'
+import { jobberClientUrl } from './shared/jobberLinks'
 import Timeline from './shared/Timeline'
 import CardTabs from './shared/CardTabs'
 import PinnedBuzz from './shared/PinnedBuzz'
@@ -66,7 +72,7 @@ const STAGE_ICON = {
   'Job in Progress': IconHammer, 'Final Processing': IconFileInvoice,
 }
 
-export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {} }) {
+export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -125,13 +131,11 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   const fam = statusMeta ? (CHIP_STYLES[statusMeta.styleKey] || CHIP_STYLES.gray) : CHIP_STYLES.gray
 
   const jobberLinked = !!c?.jobber_client_id
-  const jobberHref = (() => {
-    for (const e of open.concat(closed)) {
-      const j = (e.jobs || [])[0]
-      if (j?.job_url) return j.job_url
-    }
-    return null
-  })()
+  // CLIENT-level deep link — /clients/{jobber_client_id} (classic's
+  // pattern). Never derived from a child record's URL: the profile
+  // route doesn't ship child *_url columns, and even if it did, a
+  // client link that lands on one arbitrary job would be wrong.
+  const jobberHref = jobberClientUrl(c?.jobber_client_id)
 
   async function patchLead(patch) {
     const res = await fetch(`/api/leads/${c.id}`, {
@@ -267,9 +271,10 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
           this client's EngagementPanel(s). */}
       <PinnedBuzz notes={buzz} onPost={addBuzzNote} emptyLabel="Add a note about this client" nowMs={nowMs} />
 
-      {/* Key facts — contact + marketing state; Source stays display-only
-          on this surface (deliberate: the ReferrerField below is the edit
-          affordance, shared with the other two cards). */}
+      {/* Key facts — contact + marketing state; Source is editable here
+          (its ONE home — person-scoped first-touch, Kevin's 7/10 split)
+          via the shared SourceField row; ReferrerField stays the
+          referrer affordance. */}
       <div style={{ background: QUIET, borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
         <MicroLabel>Key facts</MicroLabel>
         {/* Phone/email/address: click-to-edit (shared ContactField +
@@ -311,9 +316,13 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         {c.marketing_opt_out && (
           <p style={{ fontSize: '12px', color: '#791F1F' }}>Opted out of marketing</p>
         )}
-        <p style={{ fontSize: '12px', color: '#8a8a84' }}>
-          {c.source ? `Source: ${String(c.source).toLowerCase()}` : 'Source unknown'}
-        </p>
+        <SourceField
+          leadId={c.id}
+          value={c.source}
+          options={lookupOptions.sources}
+          onSaved={cols => { setData(d => d ? { ...d, client: { ...d.client, ...cols } } : d); onLeadPatched(c.id, cols) }}
+          setToast={setToast}
+        />
         <ReferrerField
           lead={c}
           locationUuid={c.location_uuid}
@@ -383,15 +392,27 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
           {closedVisible.map(e => {
             const won = e.stage === 'Closed Won'
             const money = Number(e.total_paid) > 0 ? e.total_paid : e.total_invoiced
+            // Closed reason rides the row (card-restore build 1 — fetched
+            // all along, never rendered); 'won' as a reason is redundant
+            // beside the won/lost word, so it stays suppressed.
+            const reason = e.closed_reason === 'won' ? null : closedReasonLabel(e.closed_reason)
+            const note = (e.closed_note || '').trim()
             return (
               <div key={e.id} onClick={() => onOpenEngagement(e)}
-                style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 12px', cursor: 'pointer', opacity: 0.65 }}>
-                <span style={{ color: won ? '#1D9E75' : '#b5b3ac', display: 'inline-flex', flexShrink: 0 }}>
-                  {won ? <IconCheck size={12} /> : <IconX size={12} />}
+                style={{ display: 'flex', flexDirection: 'column', gap: '1px', padding: '5px 12px', cursor: 'pointer', opacity: 0.65 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                  <span style={{ color: won ? '#1D9E75' : '#b5b3ac', display: 'inline-flex', flexShrink: 0 }}>
+                    {won ? <IconCheck size={12} /> : <IconX size={12} />}
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: '11px', color: '#6b6b66', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {displayTitle(e)}{Number(money) > 0 ? ` · ${fmtMoney(money)}` : ''} · {won ? 'won' : 'lost'} {monthYear(e.closed_at) || ''}{reason ? ` · ${reason}` : ''}
+                  </span>
                 </span>
-                <span style={{ flex: 1, minWidth: 0, fontSize: '11px', color: '#6b6b66', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {displayTitle(e)}{Number(money) > 0 ? ` · ${fmtMoney(money)}` : ''} · {won ? 'won' : 'lost'} {monthYear(e.closed_at) || ''}
-                </span>
+                {note && (
+                  <span style={{ fontSize: '11px', fontStyle: 'italic', color: '#8a8a84', paddingLeft: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    “{note}”
+                  </span>
+                )}
               </div>
             )
           })}

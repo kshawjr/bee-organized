@@ -70,6 +70,51 @@ export function displayTitle(e) {
   return `Engagement – ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
 }
 
+// Human labels for engagements.closed_reason — the SAME vocabulary the
+// CloseEngagementConfirm picker offers, plus the machine-stamped
+// 'stale_on_import'. DISPLAY ONLY: the column is asymmetric
+// ('won'/'stale_on_import' historically) so unknown values humanize via
+// the underscore fallback rather than erroring — never bind logic to it.
+// 'won' returns null on a Closed Won row context by the caller's choice;
+// here it just maps.
+const CLOSED_REASON_LABELS = {
+  won: 'Won',
+  lost_no_response: 'No response',
+  lost_competitor: 'Went with someone else',
+  lost_not_fit: 'Not a fit',
+  written_off: 'Written off',
+  lost_other: 'Other',
+  stale_on_import: 'Stale on import',
+}
+export function closedReasonLabel(reason) {
+  if (!reason) return null
+  return CLOSED_REASON_LABELS[reason] || String(reason).replace(/_/g, ' ')
+}
+
+// Days the engagement has sat in its CURRENT stage — anchored on the
+// latest stage_change touchpoint (the trail the engagement PATCH writes
+// on every close, and the leads-PATCH mirror before it). Engagements
+// that never moved (or predate the trail — it's forward-only, never
+// backfilled) fall back to created_at. Returns an integer ≥ 0, or null
+// when even created_at is missing (seed rows mid-load).
+export function daysInStage(e, touchpoints = [], nowMs = Date.now()) {
+  const latestChange = (touchpoints || [])
+    .filter(t => t && t.kind === 'stage_change')
+    .reduce((m, t) => Math.max(m, ts(t.occurred_at)), 0)
+  const anchor = latestChange || ts(e?.created_at)
+  if (!anchor) return null
+  return Math.max(0, Math.floor((nowMs - anchor) / 86400000))
+}
+
+// Display invoice number — no invoice_number column exists, so this is
+// the SAME derivation classic uses (lib/people-mapper.ts): 'INV-' + the
+// last 6 of the Jobber id (falling back to the row id). Keep the two in
+// lockstep or the same invoice reads differently per surface.
+export function invoiceNumber(inv) {
+  const ref = String(inv?.jobber_invoice_id || inv?.id || '')
+  return ref ? `INV-${ref.slice(-6).toUpperCase()}` : null
+}
+
 // LINKED vs LOCAL. "Linked" = the engagement has ANY Jobber child
 // record (the inverse of the panel's canSendToJobber "zero child
 // records" check, and the same derivation family as jobberHref).

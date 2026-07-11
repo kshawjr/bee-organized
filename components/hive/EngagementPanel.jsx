@@ -21,16 +21,25 @@
 // Overview: pinned buzz (INHERITED from the client — the same
 // lead_notes kind='buzz' rows ClientProfile shows) → key facts
 // (phone/email via the shared ContactField — click-to-edit, still
-// tappable tel:/mailto:, LEAD-level write like Source; Source
-// MetaSelect [LEAD-level write], Type MetaSelect [ENGAGEMENT-level
-// write], shared ReferrerField — the client NAME moved up to the
-// header) → job description
+// tappable tel:/mailto:, LEAD-level write; shared ReferrerField — the
+// client NAME moved up to the header) → job description
 // (engagements.description) → Jobber records checklist (status view —
-// the chronological version lives in the Timeline tab) →
+// the chronological version lives in the Timeline tab; each Jobber-
+// backed row carries a quiet trailing ↗ deep link) →
 // engagement-scoped recent activity + composer → soft-tinted equal-grid
 // actions (Call / Log / Send to Jobber / Open in Jobber — cardKit
 // ActionRow). Close lives in the ··· menu → the same inline Won/Lost
 // confirm as before (Won gated on settled invoices).
+//
+// SOURCE/TYPE single-home (card-restore build 1, Kevin's person-vs-deal
+// split): source is FIRST-TOUCH, person-scoped — it edits on
+// ClientProfile Key Facts ONLY (the panel's Source pill was removed);
+// project type is DEAL-scoped (a client can have many jobs) — its Type
+// MetaSelect lives in THIS panel's header area, nowhere on the profile.
+// A closed engagement shows the shared ClosedSummary (reason + note)
+// under the header, where an open engagement's drip banner would sit;
+// open engagements show 'N days in stage' muted beside the stage chip
+// (latest stage_change touchpoint, created_at fallback).
 //
 // NO manual stage mover (decision 2026-07-10, Kevin): all business
 // flows through Jobber — a local engagement's stage assertion is
@@ -62,7 +71,9 @@ import PinnedBuzz from './shared/PinnedBuzz'
 import InitialsAvatar from './shared/InitialsAvatar'
 import { MicroLabel, quietBtn, CardMenu, ActionRow, actionBtn } from './shared/cardKit'
 import CloseEngagementConfirm from './shared/CloseEngagementConfirm'
-import { fmtTime, engagementValue, formatFullDate } from './shared/engagementStatus'
+import ClosedSummary from './shared/ClosedSummary'
+import { fmtTime, engagementValue, formatFullDate, invoiceNumber, daysInStage } from './shared/engagementStatus'
+import { recordJobberUrl } from './shared/jobberLinks'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
 const fmtDate = (d) => {
@@ -81,7 +92,10 @@ const BAR_CURRENT = '#378ADD'
 // One RECORDS checklist row (mockup anatomy): leading family-colored
 // glyph, primary 13px, secondary 11px muted, trailing state — green ✓
 // done / colored status word (scheduled-date in accent) otherwise.
-function RecordRow({ icon, iconColor, primary, secondary, state, current }) {
+// href (card-restore build 1): the record's Jobber deep link — a quiet
+// trailing ↗ after the state. Absent for records without one
+// (assessments carry no url/id columns; local records were never sent).
+function RecordRow({ icon, iconColor, primary, secondary, state, current, href = null }) {
   return (
     <div style={{
       padding: '10px 12px', background: '#fff',
@@ -98,6 +112,13 @@ function RecordRow({ icon, iconColor, primary, secondary, state, current }) {
           <span style={{ flexShrink: 0, fontSize: state.check ? '14px' : '12px', fontWeight: 500, color: state.color, whiteSpace: 'nowrap' }}>
             {state.check ? <IconCheck size={14} /> : state.label}
           </span>
+        )}
+        {href && (
+          <a className="bee-contact-link" href={href} target="_blank" rel="noreferrer" aria-label="Open in Jobber"
+            onClick={e => e.stopPropagation()}
+            style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', color: '#8a8a84' }}>
+            <IconExternalLink size={12} />
+          </a>
         )}
       </div>
     </div>
@@ -160,28 +181,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
       return false
     } finally {
       setBusy(false)
-    }
-  }
-
-  // Source is LEAD-level (marketing attribution belongs to the person's
-  // arrival) — saves through the lead PATCH, not the engagement's.
-  // label may be null — None clears the field.
-  async function saveSource(label) {
-    if (!client) return
-    const prev = client.source ?? null
-    setData(d => d ? { ...d, client: { ...d.client, source: label } } : d)
-    try {
-      const res = await fetch(`/api/leads/${client.id}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: label }),
-      })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
-      // Propagate to the shell's people state — the Inbox row / filters
-      // read the lead's source from there.
-      onLeadPatched(client.id, { source: label })
-    } catch (e) {
-      setData(d => d ? { ...d, client: { ...d.client, source: prev } } : d)
-      setToast({ kind: 'error', msg: `Save failed: ${e.message}` })
     }
   }
 
@@ -351,12 +350,9 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
             value={{ address: client.address, city: client.city, state: client.state, zip: client.zip }}
             onSaved={(cols) => { setData(d => d ? { ...d, client: { ...d.client, ...cols } } : d); onLeadPatched(client.id, cols) }}
             setToast={setToast} />
-          {/* Source rides the LEAD; Type rides THIS engagement (seeded at
-              founding). label may be null — None clears. */}
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <MetaSelect label="Source" value={client?.source || null} options={lookupOptions.sources} onPick={saveSource} />
-            <MetaSelect label="Type" value={eng.project_type || null} options={lookupOptions.projectTypes} onPick={(v) => patchEngagement({ project_type: v })} />
-          </div>
+          {/* Source/Type moved out (single-home, build 1): Source edits
+              on ClientProfile Key Facts (person-scoped first-touch);
+              Type rides this panel's HEADER (deal-scoped). */}
           {/* Referrer — LEAD-level like Source: PATCHes client.id, never
               an engagement field. */}
           <ReferrerField
@@ -392,6 +388,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
               primary={`Request · ${fmtDate(sr.requested_at || sr.created_at) || '—'}`}
               secondary={sr.source ? `source: ${sr.source}` : null}
               state={currentType === 'request' ? { label: 'active', color: BAR_CURRENT } : DONE}
+              href={recordJobberUrl('request', sr)}
             />
           ))}
           {(children.assessments || []).map(a => {
@@ -410,6 +407,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
               primary={`Quote · ${fmtMoney(q.total)}`}
               secondary={[q.sent_at && `sent ${fmtDate(q.sent_at)}`, q.approved_at && `approved ${fmtDate(q.approved_at)}`].filter(Boolean).join(' · ') || null}
               state={quoteState(q)}
+              href={recordJobberUrl('quote', q)}
             />
           ))}
           {children.jobs.map(j => (
@@ -417,19 +415,23 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
               primary={`Job · ${j.title || 'Untitled'}${j.total != null ? ` · ${fmtMoney(j.total)}` : ''}`}
               secondary={[j.scheduled_start && `scheduled ${fmtDate(j.scheduled_start)}`, j.completed_at && `completed ${fmtDate(j.completed_at)}`].filter(Boolean).join(' · ') || null}
               state={jobState(j)}
+              href={recordJobberUrl('job', j)}
             />
           ))}
           {/* '$X of $Y paid' rides the invoice row — the strip carries no
-              paid column, so this is where the paid detail lives now. */}
+              paid column, so this is where the paid detail lives now.
+              The number is the classic INV- derivation (no DB column). */}
           {children.invoices.map(inv => (
             <RecordRow key={inv.id} icon={<IconFileInvoice size={15} />} iconColor="#791F1F" current={currentType === 'invoice'}
               primary={`Invoice · ${fmtMoney(inv.total)}`}
               secondary={[
+                invoiceNumber(inv),
                 `${fmtMoney(inv.paid_amount != null ? inv.paid_amount : Math.max(0, (Number(inv.total) || 0) - (Number(inv.balance_owing) || 0)))} of ${fmtMoney(inv.total)} paid`,
                 inv.issued_at && `issued ${fmtDate(inv.issued_at)}`,
                 inv.paid_at && `paid ${fmtDate(inv.paid_at)}`,
               ].filter(Boolean).join(' · ')}
               state={invoiceState(inv)}
+              href={recordJobberUrl('invoice', inv)}
             />
           ))}
           {children.jobs.length > 0 && children.invoices.length === 0 && (
@@ -508,6 +510,17 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
 
   const stageFam = eng ? (CHIP_STYLES[eng.stage] || CHIP_STYLES.gray) : CHIP_STYLES.gray
 
+  // Days in the CURRENT stage — latest stage_change touchpoint among
+  // this engagement's children, created_at fallback (the trail is
+  // forward-only, never backfilled). Gated on the fetch (seed rows
+  // carry no touchpoints — an anchor guessed from created_at alone
+  // would flash wrong then correct). Terminal stages show the
+  // ClosedSummary's closed date instead — a closed deal isn't "in" a
+  // stage anymore.
+  const stageDays = data && eng && !isTerminal(eng.stage)
+    ? daysInStage(eng, children.touchpoints, nowMs)
+    : null
+
   const body = (
     <div style={{ padding: isMobile ? '0 16px 28px' : '0 24px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
       {loadErr && (
@@ -530,8 +543,13 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
               <h2 style={{ flex: 1, minWidth: 0, fontSize: '19px', fontWeight: 600, color: '#1a1a18', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {client?.name || eng.client_name || 'Client'}
               </h2>
-              <span style={{ flexShrink: 0 }}>
+              <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
                 <StatusChip label={stageDisplayLabel(eng.stage)} styleKey={eng.stage} />
+                {stageDays != null && (
+                  <span style={{ fontSize: '11px', color: '#8a8a84', whiteSpace: 'nowrap' }}>
+                    {stageDays} day{stageDays === 1 ? '' : 's'} in stage
+                  </span>
+                )}
               </span>
             </div>
             <p style={{ fontSize: '12px', color: '#8a8a84', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -546,10 +564,22 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
               )}
               opened {formatFullDate(eng.created_at) || '—'} · founded by {eng.founded_by}
             </p>
+            {/* Type — DEAL-scoped (Kevin's person-vs-deal split), so it
+                rides the deal's header; ENGAGEMENT-level write. Its one
+                home — the profile never shows it. */}
+            <div style={{ marginTop: '6px' }}>
+              <MetaSelect label="Type" value={eng.project_type || null} options={lookupOptions.projectTypes}
+                onPick={(v) => patchEngagement({ project_type: v })} />
+            </div>
           </div>
           <CardMenu items={menuItems} />
         </div>
       )}
+
+      {/* Closed outcome — reason + note where an open engagement's drip
+          banner would sit (shared component; see beta-stage-control's
+          write-path source pin). */}
+      {eng && <ClosedSummary engagement={eng} />}
 
       {/* Vitals strip — the deal-health row; Stage in its status color,
           Next in the accent. Replaces the old stage bar + money tiles. */}

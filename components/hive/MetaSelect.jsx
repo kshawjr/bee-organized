@@ -5,12 +5,17 @@
 // Escape/outside closes. Empty state: '{label} · add' dashed-quiet.
 // Options are admin-managed lookup labels. Used by PersonCard +
 // EngagementPanel's meta row. Beta chunk only.
+//
+// renderTrigger (optional): swap the pill for a host-supplied trigger —
+// receives a toggle callback; the popover menu (None + options, the ONE
+// options idiom) anchors beneath it. SourceField's ContactField-anatomy
+// row composes this so the menu never forks. Default pill unchanged.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
 import React, { useState, useEffect } from 'react'
 
-export default function MetaSelect({ label, value, options = [], onPick }) {
+export default function MetaSelect({ label, value, options = [], onPick, renderTrigger = null }) {
   const [open, setOpen] = useState(false)
   useEffect(() => {
     if (!open) return
@@ -29,11 +34,15 @@ export default function MetaSelect({ label, value, options = [], onPick }) {
     fontFamily: 'inherit', whiteSpace: 'nowrap',
   }
 
+  const toggle = (e) => { if (e) e.stopPropagation(); setOpen(v => !v) }
+
   return (
-    <span style={{ position: 'relative', display: 'inline-block' }}>
-      <button onClick={e => { e.stopPropagation(); setOpen(v => !v) }} style={pill}>
-        {value ? <><span style={{ color: '#8a8a84' }}>{label}: </span>{value}</> : `${label} · add`}
-      </button>
+    <span style={{ position: 'relative', display: renderTrigger ? 'block' : 'inline-block' }}>
+      {renderTrigger ? renderTrigger(toggle) : (
+        <button onClick={toggle} style={pill}>
+          {value ? <><span style={{ color: '#8a8a84' }}>{label}: </span>{value}</> : `${label} · add`}
+        </button>
+      )}
       {open && (
         <>
           <div onClick={e => { e.stopPropagation(); setOpen(false) }} style={{ position: 'fixed', inset: 0, zIndex: 10009 }} />

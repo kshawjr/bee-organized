@@ -443,6 +443,7 @@ export default function HiveShell({
             else setToast({ kind: 'error', msg: 'Client record not loaded — try the classic view' })
           }}
           setToast={setToast}
+          lookupOptions={lookupOptions}
         />
       )}
     </div>

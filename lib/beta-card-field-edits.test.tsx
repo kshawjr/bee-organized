@@ -279,13 +279,14 @@ const mountPanel = async () => {
 }
 
 describe('EngagementPanel — field edits', () => {
-  it('Source pick updates immediately and PATCHes the LEAD (client id), propagating out', async () => {
-    const { host, unmount, onLeadPatched } = await mountPanel()
-    await click(buttonContaining(host, 'Source: Webform')!)
-    await click(buttonByText(host, 'Website')!)
-    expect(buttonContaining(host, 'Source: Website')).toBeTruthy()
-    expect(leadPatches).toEqual([{ url: expect.stringContaining('/api/leads/lead-9'), body: { source: 'Website' } }])
-    expect(onLeadPatched).toHaveBeenCalledWith('lead-9', { source: 'Website' })
+  it('Source pill is GONE from the panel (single home since card-restore 1: ClientProfile — source is person-scoped first-touch)', async () => {
+    const { host, unmount } = await mountPanel()
+    expect(buttonContaining(host, 'Source: Webform')).toBeUndefined()
+    expect(buttonContaining(host, 'Source · add')).toBeUndefined()
+    // Type stays — deal-scoped, riding the header area now.
+    expect(buttonContaining(host, 'Type: Client')).toBeTruthy()
+    // The lead-level Source WRITE path lives on ClientProfile's
+    // SourceField (beta-card-restore covers it).
     await unmount()
   })
 
@@ -320,8 +321,11 @@ describe('EngagementPanel — field edits', () => {
     await flush()
     await click(buttonContaining(host, 'Karen Partner')!)
     await click(host.querySelector('button[aria-label="Clear referrer"]')!)
+    // The asymmetry lives in the PATCH body: no source key may ride the
+    // clear. (The panel's Source pill is gone — single home on
+    // ClientProfile since card-restore 1 — so the body IS the proof.)
     expect(leadPatches[1].body).toEqual({ referred_by_kind: null, referred_by_id: null })
-    expect(buttonContaining(host, 'Source: Referral')).toBeTruthy() // not reverted
+    expect(leadPatches.every(p => !('source' in p.body) || p.body.source === 'Referral')).toBe(true)
     await unmount()
   })
 })
