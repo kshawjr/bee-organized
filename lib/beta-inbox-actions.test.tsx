@@ -113,9 +113,14 @@ const inbox = (people: any[], over: any = {}) => (
 const moreButton = (host: Element) =>
   host.querySelector('button[aria-label="More"]') as HTMLButtonElement | null
 
+// The open menu portals to <body> (the cards clip overflow), so its
+// items are found through the portal container, not the mount host.
+const menuButton = (text: string) =>
+  [...document.querySelectorAll('[data-bee-row-menu] button')].find(b => (b.textContent || '').trim() === text)
+
 const openMenuAnd = async (host: Element, label: string) => {
   await click(moreButton(host)!)
-  await click(buttonByText(host, label)!)
+  await click(menuButton(label)!)
 }
 
 beforeEach(() => {

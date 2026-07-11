@@ -8,10 +8,14 @@
 // for it via onSendToJobber). 'Log call' posts the existing
 // /api/touchpoints reach_out.
 //
-// Bulk selection (feedback #5): Select toggle in the header (or row
-// long-press) → checkboxes + select-all-visible (respects filters) +
-// Remove (N), which is mark-junk batched over the selection with one
-// batch Undo. The Jobber-owns-deletion rule (Kevin 7/10) applies
+// Bulk selection (feedback #5): the entry is the select-all checkbox at
+// the TOP-LEFT of the control row above the list (the column-header
+// convention, aligned to the rows' checkbox column) — one gesture enters
+// selection mode AND selects all visible selectable rows; in mode it's
+// the usual tri-state all↔none toggle. Row long-press stays the
+// secondary door in. Then checkboxes + Remove (N), which is mark-junk
+// batched over the selection with one batch Undo.
+// The Jobber-owns-deletion rule (Kevin 7/10) applies
 // throughout: leads are removable ONLY pre-Jobber — any row with a
 // jobberRef is excluded from selection (grayed checkbox, 'Managed in
 // Jobber') and gets no junk row in its ··· menu; the API 409s
@@ -46,7 +50,8 @@
 // ─────────────────────────────────────────────────────────────
 'use client'
 
-import React, { useState, useEffect, useMemo, useRef } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { deriveClientStatus } from './shared/clientStatus'
 import { CHIP_STYLES, ACCENT_BLUE, CLOSED_WON, isTerminal } from './shared/stageConfig'
 import { formatInboxAgeParts } from './shared/engagementStatus'
@@ -96,10 +101,10 @@ const ghostBtn = {
   cursor: 'pointer', fontFamily: 'inherit',
 }
 
-function GhostIconButton({ label, icon: Icon, disabled, onClick }) {
+function GhostIconButton({ label, icon: Icon, disabled, onClick, ...rest }) {
   return (
     <button className="bee-ghost-btn" aria-label={label} title={label}
-      disabled={disabled} style={ghostBtn} onClick={onClick}>
+      disabled={disabled} style={ghostBtn} onClick={onClick} {...rest}>
       <Icon size={17} />
     </button>
   )
@@ -143,6 +148,75 @@ function MenuRow({ label, danger, disabled, onPick }) {
   )
 }
 
+// The open ··· menu rides a portal to <body>: cardStyle keeps
+// overflow:hidden (it's what clips rows to the 12px radius), so an
+// in-card absolute popover gets amputated at the card edge — and the
+// last row's menu would be lost entirely. Fixed-position coords derive
+// from the trigger's rect and re-derive on scroll/resize (capture-phase
+// scroll catches scrolling ancestors too), so the menu stays glued to
+// its ···; it flips ABOVE the trigger when the viewport bottom would
+// clip it. Horizontal anchoring keeps the pre-portal semantics: mobile
+// triggers sit left-of-center so the menu grows rightward from the
+// trigger's left edge (viewport-clamped); desktop hugs the trigger's
+// right edge. First paint is hidden — useLayoutEffect measures the real
+// menu box and positions it before the browser shows anything.
+//
+// The trigger is found by data attribute on EVERY placement, never held
+// as an element: Row is redefined per InboxScreen render, so React
+// remounts the row DOM on every render — an element captured at click
+// time is already detached (rect all zeros) by the time the open
+// re-render lands.
+function RowMenu({ anchorId, isMobile, onClose, children }) {
+  const ref = useRef(null)
+  const [pos, setPos] = useState(null)
+
+  useLayoutEffect(() => {
+    const place = () => {
+      const anchor = document.querySelector(`[data-bee-menu-trigger="${anchorId}"]`)
+      if (!anchor) return
+      const r = anchor.getBoundingClientRect()
+      const w = ref.current?.offsetWidth || 0
+      const h = ref.current?.offsetHeight || 0
+      const below = r.bottom + 4
+      const top = h && below + h > window.innerHeight - 8 && r.top - h - 4 > 8
+        ? r.top - h - 4
+        : below
+      const left = isMobile
+        ? Math.max(8, Math.min(r.left, window.innerWidth - w - 8))
+        : Math.max(8, r.right - w)
+      setPos({ top, left })
+    }
+    place()
+    window.addEventListener('scroll', place, true)
+    window.addEventListener('resize', place)
+    return () => {
+      window.removeEventListener('scroll', place, true)
+      window.removeEventListener('resize', place)
+    }
+  }, [anchorId, isMobile])
+
+  useEffect(() => {
+    const onKey = (ev) => { if (ev.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return createPortal(
+    <div ref={ref} data-bee-row-menu onClick={(ev) => ev.stopPropagation()}
+      style={{
+        position: 'fixed', top: 0, left: 0, ...(pos || {}),
+        visibility: pos ? 'visible' : 'hidden',
+        minWidth: '210px', zIndex: 80, background: '#fff',
+        border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`,
+        borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.14)',
+        padding: '4px',
+      }}>
+      {children}
+    </div>,
+    document.body
+  )
+}
+
 export default function InboxScreen({ people = [], engagements = [], locFilter = 'all', onOpenPerson = () => {}, onSendToJobber = () => {}, setToast = () => {} }) {
   const [busyId, setBusyId] = useState(null)
   // Local session overrides: a logged call moves the row to Attempting
@@ -173,10 +247,15 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
   const isMobile = useIsMobile()
 
   // Any click that bubbles to the document closes the open ··· menu.
-  // The trigger + menu items stopPropagation, so only outside clicks land.
+  // The trigger + menu items stopPropagation; the target check covers
+  // the portal explicitly (its DOM lives under <body>, so don't lean on
+  // delegation order alone) — only genuinely-outside clicks close.
   useEffect(() => {
     if (!menuFor) return
-    const close = () => setMenuFor(null)
+    const close = (ev) => {
+      if (ev.target instanceof Element && ev.target.closest('[data-bee-row-menu]')) return
+      setMenuFor(null)
+    }
     document.addEventListener('click', close)
     return () => document.removeEventListener('click', close)
   }, [menuFor])
@@ -271,6 +350,16 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
   const toggleSelectAll = () => {
     setConfirmRemove(false)
     setSelectedIds(selCount === selectableIds.size ? new Set() : new Set(selectableIds))
+  }
+  // The top-left header checkbox (THE entry affordance): out of selection
+  // mode, one gesture enters it AND selects everything visible+selectable;
+  // in mode it's the standard all↔none toggle the bulk bar button mirrors.
+  const headerSelectAll = () => {
+    if (!selectMode) {
+      setSelectMode(true)
+      setConfirmRemove(false)
+      setSelectedIds(new Set(selectableIds))
+    } else toggleSelectAll()
   }
 
   // Long-press on a row (mobile path into selection mode). Cancelled by
@@ -488,38 +577,29 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
           <GhostIconButton label="Send to Jobber" icon={IconSend} disabled={busyId === p.id}
             onClick={(ev) => { ev.stopPropagation(); onSendToJobber(p) }} />
         )}
-        {/* Soft actions stay behind ··· — same overflow menu, only the
-            trigger restyled. */}
-        <div style={{ position: 'relative' }}>
-          <GhostIconButton label="More" icon={IconDots} disabled={busyId === p.id}
-            onClick={(ev) => { ev.stopPropagation(); setMenuFor(menuFor === p.id ? null : p.id) }} />
-          {menuFor === p.id && (
-            <div onClick={(ev) => ev.stopPropagation()}
-              style={{
-                position: 'absolute', top: 'calc(100% + 4px)', minWidth: '210px',
-                // Mobile: the trigger sits left-of-center, so the menu
-                // grows rightward; desktop hugs the right edge as before.
-                ...(isMobile ? { left: 0 } : { right: 0 }),
-                zIndex: 80, background: '#fff',
-                border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`,
-                borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.14)',
-                padding: '4px',
-              }}>
-              <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); snoozeLead(p, 1) }}
-                label={<><IconClock size={13} />Snooze until tomorrow</>} />
-              <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); snoozeLead(p, 7) }}
-                label={<><IconClock size={13} />Snooze until next week</>} />
-              <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); dismissLead(p) }}
-                label={<><IconCheck size={13} />Dismiss</>} />
-              {/* Jobber-owns-deletion rule: no junk door on linked rows
-                  (the API 409s it anyway — this keeps the UI honest). */}
-              {!linked && (
-                <MenuRow danger disabled={busyId === p.id} onPick={() => { setMenuFor(null); markJunk(p) }}
-                  label="Mark as junk" />
-              )}
-            </div>
-          )}
-        </div>
+        {/* Soft actions stay behind ··· — same overflow menu, rendered
+            through the RowMenu portal (the card's overflow:hidden would
+            amputate an in-card popover). The data attribute is how the
+            portal finds its trigger to position to. */}
+        <GhostIconButton label="More" icon={IconDots} disabled={busyId === p.id}
+          data-bee-menu-trigger={p.id}
+          onClick={(ev) => { ev.stopPropagation(); setMenuFor(menuFor === p.id ? null : p.id) }} />
+        {menuFor === p.id && (
+          <RowMenu anchorId={p.id} isMobile={isMobile} onClose={() => setMenuFor(null)}>
+            <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); snoozeLead(p, 1) }}
+              label={<><IconClock size={13} />Snooze until tomorrow</>} />
+            <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); snoozeLead(p, 7) }}
+              label={<><IconClock size={13} />Snooze until next week</>} />
+            <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); dismissLead(p) }}
+              label={<><IconCheck size={13} />Dismiss</>} />
+            {/* Jobber-owns-deletion rule: no junk door on linked rows
+                (the API 409s it anyway — this keeps the UI honest). */}
+            {!linked && (
+              <MenuRow danger disabled={busyId === p.id} onPick={() => { setMenuFor(null); markJunk(p) }}
+                label="Mark as junk" />
+            )}
+          </RowMenu>
+        )}
       </>
     )
     return (
@@ -617,15 +697,28 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
         .bee-inbox-tel:hover { text-decoration:underline !important; text-underline-offset:2px }
       `}</style>
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', marginBottom: '12px' }}>
-        {/* Selection mode toggle — FilterButton's pill vocabulary. The
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+        {/* Selection entry — the column-header convention Kevin expects:
+            a select-all checkbox at the TOP-LEFT above the rows' checkbox
+            column (left inset matches the row padding so they line up).
+            One gesture enters selection mode and select-alls; in mode
+            it's tri-state (indeterminate on a partial selection). The
             other door in is a row long-press. */}
         {visibleRows.length > 0 && (
-          <button onClick={() => (selectMode ? exitSelect() : setSelectMode(true))} aria-pressed={selectMode}
-            style={{ padding: '5px 12px', borderRadius: '20px', border: `0.5px solid var(--hairline-border, ${HAIRLINE_BORDER})`, background: selectMode ? '#fff' : 'transparent', fontSize: '12px', fontWeight: selectMode ? 500 : 400, color: selectMode ? '#1a1a18' : '#8a8a84', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', lineHeight: 'inherit' }}>
-            Select
-          </button>
+          <input type="checkbox" aria-label="Select all" title="Select all"
+            disabled={selectableIds.size === 0}
+            checked={selectMode && selCount > 0 && selCount === selectableIds.size}
+            ref={(el) => { if (el) el.indeterminate = selectMode && selCount > 0 && selCount < selectableIds.size }}
+            onChange={headerSelectAll}
+            style={{
+              width: '16px', height: '16px', flexShrink: 0,
+              margin: 0, marginLeft: isMobile ? '14px' : '16px',
+              accentColor: GREEN_FILL,
+              opacity: selectableIds.size === 0 ? 0.35 : 1,
+              cursor: selectableIds.size === 0 ? 'not-allowed' : 'pointer',
+            }} />
         )}
+        <span style={{ flex: 1 }} />
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <FilterButton count={inboxFilterCount(filters)} open={fltOpen} onToggle={() => setFltOpen(v => !v)} label="Filter & sort" />
           <FilterPopover open={fltOpen} count={inboxFilterCount(filters)} onClear={clearFilters}>

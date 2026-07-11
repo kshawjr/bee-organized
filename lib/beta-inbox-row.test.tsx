@@ -123,11 +123,13 @@ describe('ghost icon actions', () => {
     await linked.unmount()
   })
 
-  it('More opens the existing overflow — Junk / Snooze / Dismiss intact', async () => {
+  it('More opens the existing overflow — Junk / Snooze / Dismiss intact (portaled past the card clip)', async () => {
     const m = await mount(inbox([person()]))
     await click(byLabel(m.host, 'More')!)
+    const menu = document.querySelector('[data-bee-row-menu]')
+    expect(menu, 'menu rides the portal to <body>').toBeTruthy()
     for (const label of ['Snooze until tomorrow', 'Snooze until next week', 'Dismiss', 'Mark as junk']) {
-      expect([...m.host.querySelectorAll('button')].some(b => (b.textContent || '').trim() === label),
+      expect([...menu!.querySelectorAll('button')].some(b => (b.textContent || '').trim() === label),
         `overflow must still offer "${label}"`).toBe(true)
     }
     await m.unmount()

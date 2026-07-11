@@ -2,8 +2,12 @@
 // Inbox bulk selection (feedback #5) + the Jobber-owns-deletion rule
 // (Kevin 7/10: leads are deletable ONLY pre-Jobber; linked records'
 // lifecycle belongs to Jobber). Covers:
-//   - selection mechanics: Select toggle → checkboxes, row click
-//     toggles instead of opening, count chip, Cancel exits + clears
+//   - entry affordance: the TOP-LEFT header select-all checkbox (the
+//     column-header convention) — one gesture enters selection mode AND
+//     selects all visible selectable rows; tri-state in mode; row
+//     long-press stays the secondary door in
+//   - selection mechanics: checkboxes, row click toggles instead of
+//     opening, count chip, Cancel exits + clears
 //   - select-all-visible respects active filters
 //   - bulk Remove = mark-junk batched (is_junk=true per row), rows
 //     leave instantly, ONE batch Undo restores every removed row
@@ -100,8 +104,14 @@ const buttonByText = (host: Element, text: string) =>
   [...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === text)
 const rowByName = (host: Element, name: string) =>
   [...host.querySelectorAll('.bee-inbox-row')].find(r => (r.textContent || '').includes(name))
-const checkboxes = (host: Element) =>
-  [...host.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[]
+// Row-scoped: the header select-all checkbox is a permanent fixture now,
+// so 'are we in selection mode' reads off the per-row checkboxes only.
+const rowCheckboxes = (host: Element) =>
+  [...host.querySelectorAll('.bee-inbox-row input[type="checkbox"]')] as HTMLInputElement[]
+// The ··· menu portals to <body> (the cards clip overflow) — menu items
+// are queried through the portal container, not the mount host.
+const menuButton = (text: string) =>
+  [...document.querySelectorAll('[data-bee-row-menu] button')].find(b => (b.textContent || '').trim() === text)
 
 const clickUndo = async (toast: any) => {
   const kids = React.Children.toArray(toast.msg.props.children) as any[]
@@ -117,7 +127,17 @@ const inbox = (people: any[], over: any = {}) => (
   <InboxScreen people={people} engagements={[]} locFilter="all" setToast={setToast} {...over} />
 )
 
-const enterSelect = async (host: Element) => { await click(buttonByText(host, 'Select')!) }
+// THE entry affordance: the top-left header select-all checkbox. One
+// click = selection mode + everything visible+selectable selected.
+const headerCheckbox = (host: Element) =>
+  host.querySelector('input[aria-label="Select all"]') as HTMLInputElement | null
+const enterSelectAll = async (host: Element) => { await click(headerCheckbox(host)!) }
+// Mode with an EMPTY selection: enter (selects all), uncheck (clears,
+// stays in mode).
+const enterSelectEmpty = async (host: Element) => {
+  await click(headerCheckbox(host)!)
+  await click(headerCheckbox(host)!)
+}
 
 beforeEach(() => {
   installFetch()
@@ -125,16 +145,81 @@ beforeEach(() => {
   ;(globalThis as any).window?.localStorage?.clear?.()
 })
 
-// ═══ selection mechanics ═══════════════════════════════════
-describe('selection mechanics', () => {
-  it('Select toggle shows checkboxes; row clicks toggle; count chip tracks; Cancel exits + clears', async () => {
+// ═══ entry affordances ═════════════════════════════════════
+describe('entry affordances', () => {
+  it('header checkbox: ONE gesture enters selection mode AND selects all visible; tri-state tracks; in-mode uncheck clears', async () => {
     const a = person({ name: 'Alice Apple' })
     const b = person({ name: 'Bob Berry' })
     const m = await mount(inbox([a, b]))
 
-    expect(checkboxes(m.host)).toHaveLength(0)
-    await enterSelect(m.host)
-    expect(checkboxes(m.host)).toHaveLength(2)
+    // the old header Select pill is gone — the checkbox IS the entry
+    expect(buttonByText(m.host, 'Select')).toBeFalsy()
+    expect(rowCheckboxes(m.host)).toHaveLength(0)
+
+    await click(headerCheckbox(m.host)!)
+    expect(rowCheckboxes(m.host)).toHaveLength(2)
+    expect(m.host.textContent).toContain('2 selected')
+    expect(buttonByText(m.host, 'Remove (2)')).toBeTruthy()
+    expect(headerCheckbox(m.host)!.checked).toBe(true)
+
+    // deselecting one row → partial → indeterminate, not checked
+    await click(rowByName(m.host, 'Alice Apple')!)
+    expect(m.host.textContent).toContain('1 selected')
+    expect(headerCheckbox(m.host)!.checked).toBe(false)
+    expect(headerCheckbox(m.host)!.indeterminate).toBe(true)
+
+    // in-mode uncheck-all: clears the selection but STAYS in mode
+    await click(rowByName(m.host, 'Alice Apple')!)
+    expect(m.host.textContent).toContain('2 selected')
+    await click(headerCheckbox(m.host)!)
+    expect(m.host.textContent).toContain('0 selected')
+    expect(rowCheckboxes(m.host)).toHaveLength(2)
+    expect(patches).toHaveLength(0) // selection alone never writes
+    await m.unmount()
+  })
+
+  it('header checkbox is disabled when every visible row is Jobber-linked', async () => {
+    const m = await mount(inbox([
+      person({ name: 'Judy Jobber', jobberRef: '111', created: daysAgo(2) }),
+      person({ name: 'Jack Jobber', jobberRef: '222', created: daysAgo(2) }),
+    ]))
+    expect(headerCheckbox(m.host)!.disabled).toBe(true)
+    await m.unmount()
+  })
+
+  it('long-press on a row still enters selection with that row selected; the release click is swallowed', async () => {
+    const a = person({ name: 'Alice Apple' })
+    const b = person({ name: 'Bob Berry' })
+    const m = await mount(inbox([a, b]))
+
+    // Rows remount on every render — re-query after each state change.
+    await act(async () => {
+      const row = rowByName(m.host, 'Alice Apple')!
+      row.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+      await new Promise(r => setTimeout(r, 600)) // past the 500ms threshold
+      row.dispatchEvent(new Event('pointerup', { bubbles: true }))
+    })
+    expect(rowCheckboxes(m.host)).toHaveLength(2) // mode entered
+    expect(m.host.textContent).toContain('1 selected')
+
+    // the click that trails the long-press release is swallowed…
+    await click(rowByName(m.host, 'Alice Apple')!)
+    expect(m.host.textContent).toContain('1 selected')
+    // …and the NEXT click toggles normally
+    await click(rowByName(m.host, 'Alice Apple')!)
+    expect(m.host.textContent).toContain('0 selected')
+    await m.unmount()
+  })
+})
+
+// ═══ selection mechanics ═══════════════════════════════════
+describe('selection mechanics', () => {
+  it('row clicks toggle; count chip tracks; Cancel exits + clears', async () => {
+    const a = person({ name: 'Alice Apple' })
+    const b = person({ name: 'Bob Berry' })
+    const m = await mount(inbox([a, b]))
+
+    await enterSelectEmpty(m.host)
     expect(m.host.textContent).toContain('0 selected')
 
     await click(rowByName(m.host, 'Alice Apple')!)
@@ -149,9 +234,9 @@ describe('selection mechanics', () => {
     // Cancel exits selection mode AND clears the set
     await click(rowByName(m.host, 'Bob Berry')!)
     await click(buttonByText(m.host, 'Cancel')!)
-    expect(checkboxes(m.host)).toHaveLength(0)
+    expect(rowCheckboxes(m.host)).toHaveLength(0)
     expect(patches).toHaveLength(0) // selection alone never writes
-    await enterSelect(m.host)
+    await enterSelectEmpty(m.host)
     expect(m.host.textContent).toContain('0 selected')
     await m.unmount()
   })
@@ -161,7 +246,7 @@ describe('selection mechanics', () => {
     const onOpenPerson = vi.fn()
     const m = await mount(inbox([p], { onOpenPerson }))
 
-    await enterSelect(m.host)
+    await enterSelectEmpty(m.host)
     await click(rowByName(m.host, 'Alice Apple')!)
     expect(onOpenPerson).not.toHaveBeenCalled()
 
@@ -187,8 +272,8 @@ describe('select-all-visible', () => {
     await click(buttonByText(m.host, 'Has phone')!)
     expect(m.host.textContent).not.toContain('Nadia NoPhone') // filtered out
 
-    await enterSelect(m.host)
-    await click(buttonByText(m.host, 'Select all (2)')!)
+    // the top-left checkbox selects only what the filters left visible
+    await enterSelectAll(m.host)
     expect(m.host.textContent).toContain('2 selected')
 
     await click(buttonByText(m.host, 'Remove (2)')!)
@@ -197,13 +282,13 @@ describe('select-all-visible', () => {
     await m.unmount()
   })
 
-  it('toggles to Clear selection when everything visible is selected', async () => {
+  it("bulk bar 'Select all' stays and mirrors the header checkbox: Clear selection when everything is selected", async () => {
     const m = await mount(inbox([person({ name: 'Alice Apple' })]))
-    await enterSelect(m.host)
-    await click(buttonByText(m.host, 'Select all (1)')!)
+    await enterSelectAll(m.host)
     expect(buttonByText(m.host, 'Clear selection')).toBeTruthy()
     await click(buttonByText(m.host, 'Clear selection')!)
     expect(m.host.textContent).toContain('0 selected')
+    expect(buttonByText(m.host, 'Select all (1)')).toBeTruthy()
     await m.unmount()
   })
 })
@@ -216,7 +301,7 @@ describe('bulk Remove (mark-junk semantics) + batch Undo', () => {
     const keep = person({ name: 'Karla Keeper' })
     const m = await mount(inbox([a, b, keep]))
 
-    await enterSelect(m.host)
+    await enterSelectEmpty(m.host)
     await click(rowByName(m.host, 'Alice Apple')!)
     await click(rowByName(m.host, 'Bob Berry')!)
     await click(buttonByText(m.host, 'Remove (2)')!)
@@ -226,7 +311,7 @@ describe('bulk Remove (mark-junk semantics) + batch Undo', () => {
     expect(m.host.textContent).not.toContain('Alice Apple')
     expect(m.host.textContent).not.toContain('Bob Berry')
     expect(m.host.textContent).toContain('Karla Keeper')
-    expect(checkboxes(m.host)).toHaveLength(0) // selection mode exited
+    expect(rowCheckboxes(m.host)).toHaveLength(0) // selection mode exited
 
     // Batch undo — every removed row PATCHed back and re-rendered.
     await clickUndo(lastToast)
@@ -242,8 +327,7 @@ describe('bulk Remove (mark-junk semantics) + batch Undo', () => {
     const six = Array.from({ length: 6 }, (_, i) => person({ name: `Bulk Lead${i}` }))
     const m = await mount(inbox(six))
 
-    await enterSelect(m.host)
-    await click(buttonByText(m.host, 'Select all (6)')!)
+    await enterSelectAll(m.host) // header checkbox: mode + all 6 selected
     await click(buttonByText(m.host, 'Remove (6)')!)
 
     // Confirm step, not a write
@@ -267,8 +351,7 @@ describe('bulk Remove (mark-junk semantics) + batch Undo', () => {
   it('N<=5 removes without a confirm step', async () => {
     const five = Array.from({ length: 5 }, (_, i) => person({ name: `Bulk Lead${i}` }))
     const m = await mount(inbox(five))
-    await enterSelect(m.host)
-    await click(buttonByText(m.host, 'Select all (5)')!)
+    await enterSelectAll(m.host)
     await click(buttonByText(m.host, 'Remove (5)')!)
     expect(patches).toHaveLength(5)
     await m.unmount()
@@ -283,14 +366,12 @@ describe('Jobber-linked rows in the Inbox', () => {
     const m = await mount(inbox([linked, free]))
     expect(m.host.textContent).toContain('Judy Jobber') // renders normally
 
-    await enterSelect(m.host)
-    const linkedBox = checkboxes(m.host).find(c => c.title === 'Managed in Jobber')
+    // header select-all skips the linked row: only the unlinked one lands
+    await enterSelectAll(m.host)
+    expect(m.host.textContent).toContain('1 selected')
+    const linkedBox = rowCheckboxes(m.host).find(c => c.title === 'Managed in Jobber')
     expect(linkedBox).toBeTruthy()
     expect(linkedBox!.disabled).toBe(true)
-
-    // select-all counts ONLY the unlinked row
-    await click(buttonByText(m.host, 'Select all (1)')!)
-    expect(m.host.textContent).toContain('1 selected')
 
     // clicking the linked row cannot select it
     await click(rowByName(m.host, 'Judy Jobber')!)
@@ -307,13 +388,13 @@ describe('Jobber-linked rows in the Inbox', () => {
     const linked = person({ name: 'Judy Jobber', jobberRef: '12345' })
     const m = await mount(inbox([linked]))
     await click(m.host.querySelector('button[aria-label="More"]')!)
-    expect(buttonByText(m.host, 'Dismiss')).toBeTruthy()
-    expect(buttonByText(m.host, 'Mark as junk')).toBeFalsy()
+    expect(menuButton('Dismiss')).toBeTruthy()
+    expect(menuButton('Mark as junk')).toBeFalsy()
     await m.unmount()
 
     const m2 = await mount(inbox([person({ name: 'Frank Free' })]))
     await click(m2.host.querySelector('button[aria-label="More"]')!)
-    expect(buttonByText(m2.host, 'Mark as junk')).toBeTruthy()
+    expect(menuButton('Mark as junk')).toBeTruthy()
     await m2.unmount()
   })
 })

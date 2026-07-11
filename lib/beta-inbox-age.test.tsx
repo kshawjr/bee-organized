@@ -174,8 +174,11 @@ describe('restyle behavior intact', () => {
     const onOpenPerson = vi.fn()
     const m = await mount(inbox([person()], { onOpenPerson }))
     await click(byLabel(m.host, 'More')!)
+    // The open menu portals to <body> (the cards clip overflow).
+    const menu = document.querySelector('[data-bee-row-menu]')
+    expect(menu).toBeTruthy()
     for (const label of ['Snooze until tomorrow', 'Snooze until next week', 'Dismiss', 'Mark as junk']) {
-      expect([...m.host.querySelectorAll('button')].some(b => (b.textContent || '').trim() === label)).toBe(true)
+      expect([...menu!.querySelectorAll('button')].some(b => (b.textContent || '').trim() === label)).toBe(true)
     }
     expect(onOpenPerson).not.toHaveBeenCalled()
     await m.unmount()
