@@ -24,7 +24,7 @@ import MetaSelect from '../MetaSelect'
 import { T } from './tokens'
 import { EditPencil } from './inlineEdit'
 
-export default function SourceField({ leadId, value, options = [], onSaved = () => {}, setToast = () => {} }) {
+export default function SourceField({ leadId, value, options = [], onSaved = () => {}, setToast = () => {}, readOnly = false }) {
   // undefined = no optimistic override in flight; null is a real value
   // (None clears the column).
   const [pending, setPending] = useState(undefined)
@@ -46,6 +46,19 @@ export default function SourceField({ leadId, value, options = [], onSaved = () 
       return
     }
     setPending(undefined) // prop now carries the saved value
+  }
+
+  // Read-only: render the source value as static — no MetaSelect trigger,
+  // no edit pencil. Empty stays empty (no 'add source' affordance).
+  if (readOnly) {
+    return shown ? (
+      <p style={{ fontSize: '12px', color: T.ink.primary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
+        <span style={{ color: T.ink.muted, display: 'inline-flex', flexShrink: 0 }}><IconSparkles size={13} /></span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{ color: T.ink.muted }}>Source: </span>{shown}
+        </span>
+      </p>
+    ) : null
   }
 
   return (

@@ -36,7 +36,9 @@ import { T } from './tokens'
 // Readable muted ink — the affordance floor for view-mode pencils.
 export const PENCIL_INK = T.ink.secondary
 
-export function EditPencil({ size = 12 }) {
+export function EditPencil({ size = 12, readOnly = false }) {
+  // Read-only mode hides the edit entry point entirely.
+  if (readOnly) return null
   // cursor:pointer is load-bearing: host rows are cursor:text (editable-
   // text idiom), so without it the pencil — the one element that SAYS
   // "click me" — inherits the I-beam and the affordance goes mute.

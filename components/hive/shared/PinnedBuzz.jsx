@@ -25,7 +25,7 @@ import { WARNING_BG, WARNING_TEXT } from '@/components/ui/tokens'
 import { T } from './tokens'
 import { relAge } from './engagementStatus'
 
-export default function PinnedBuzz({ notes = [], onPost = () => {}, emptyLabel = 'Add a note about this client', nowMs = Date.now() }) {
+export default function PinnedBuzz({ notes = [], onPost = () => {}, emptyLabel = 'Add a note about this client', nowMs = Date.now(), readOnly = false }) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState('')
 
@@ -39,7 +39,9 @@ export default function PinnedBuzz({ notes = [], onPost = () => {}, emptyLabel =
     onPost(t)
   }
 
-  // Empty state — quiet affordance, no band.
+  // Empty state — quiet affordance, no band. In read-only there's no buzz
+  // to display and the add affordance is a write trigger, so render nothing.
+  if (!latest && readOnly) return null
   if (!latest && !open) {
     return (
       <button
@@ -77,27 +79,31 @@ export default function PinnedBuzz({ notes = [], onPost = () => {}, emptyLabel =
         }}>
           {latest ? latest.text : 'Buzz'}
         </span>
-        <span aria-label="Edit buzz" title="Edit buzz" style={{ color: T.ink.quiet, display: 'inline-flex', flexShrink: 0 }}>
-          <IconPencil size={13} />
-        </span>
+        {!readOnly && (
+          <span aria-label="Edit buzz" title="Edit buzz" style={{ color: T.ink.quiet, display: 'inline-flex', flexShrink: 0 }}>
+            <IconPencil size={13} />
+          </span>
+        )}
       </div>
 
       {open && (
         <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }} onClick={e => e.stopPropagation()}>
           {/* Append path — buzz is authored history; a new note goes on
               top, nothing is edited in place. */}
-          <input
-            autoFocus
-            value={draft}
-            onChange={e => setDraft(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') post(); if (e.key === 'Escape') setOpen(false) }}
-            placeholder="Add buzz…"
-            aria-label="Add buzz note"
-            style={{
-              padding: '7px 10px', border: T.border.thin, borderRadius: T.radius.control,
-              fontSize: '12px', fontFamily: 'inherit', outline: 'none', background: T.surface.raised, width: '100%', boxSizing: 'border-box',
-            }}
-          />
+          {!readOnly && (
+            <input
+              autoFocus
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') post(); if (e.key === 'Escape') setOpen(false) }}
+              placeholder="Add buzz…"
+              aria-label="Add buzz note"
+              style={{
+                padding: '7px 10px', border: T.border.thin, borderRadius: T.radius.control,
+                fontSize: '12px', fontFamily: 'inherit', outline: 'none', background: T.surface.raised, width: '100%', boxSizing: 'border-box',
+              }}
+            />
+          )}
           {sorted.length > 0 && (
             <div style={{ maxHeight: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '5px' }}>
               {sorted.map(n => (

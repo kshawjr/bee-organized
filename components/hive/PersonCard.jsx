@@ -46,7 +46,7 @@ import { T } from './shared/tokens'
 import { IconPhone, IconMail, IconSend } from '@/components/ui/icons'
 
 
-export default function PersonCard({ person, people = [], onClose, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
+export default function PersonCard({ person, people = [], onClose, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, lookupOptions = { sources: [], projectTypes: [] }, readOnly = false }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -229,7 +229,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
   const overview = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
       {/* Pinned buzz — lead-level; carries forward at founding. */}
-      <PinnedBuzz notes={buzz} onPost={addBuzz} emptyLabel="Add a note about this client" nowMs={nowMs} />
+      <PinnedBuzz notes={buzz} onPost={addBuzz} emptyLabel="Add a note about this client" nowMs={nowMs} readOnly={readOnly} />
 
       {/* Key facts */}
       <div style={{ background: T.surface.sunken, borderRadius: T.radius.control, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -243,7 +243,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
             founding server-side — no write path lost, just no
             pre-engagement editor). */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <MetaSelect label="Source" value={effSource} options={lookupOptions.sources} onPick={(v) => saveLeadField('source', v)} />
+          <MetaSelect label="Source" value={effSource} options={lookupOptions.sources} onPick={(v) => saveLeadField('source', v)} readOnly={readOnly} />
         </div>
         {/* Referrer — the shared field (lead-level, same as the profile). */}
         {c && (
@@ -255,6 +255,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
             onSaved={cols => onLeadPatched(person.id, cols)}
             onPartnerCreated={onPartnerCreated}
             setToast={setToast}
+            readOnly={readOnly}
           />
         )}
       </div>
@@ -263,13 +264,13 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
       <div>
         <MicroLabel>What they want</MicroLabel>
         {data
-          ? <EditableDesc text={c?.request_details} showEmpty onSave={saveDesc} placeholder="Describe the request…" />
+          ? <EditableDesc text={c?.request_details} showEmpty onSave={saveDesc} placeholder="Describe the request…" readOnly={readOnly} />
           : !loadErr && <div style={{ padding: '14px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px' }}>Loading…</div>}
       </div>
 
       {/* Recent activity — quick-glance slice + composer; the exhaustive
           merged stream (incl. future) is the Timeline tab. */}
-      <NotesStream label="Recent activity" items={stream} onPost={addNote} nowMs={nowMs} />
+      <NotesStream label="Recent activity" items={stream} onPost={addNote} nowMs={nowMs} readOnly={readOnly} />
 
       {/* Actions — soft-tinted equal-width grid (cardKit ActionRow);
           Send (the founding door) carries the green forward tone. */}
@@ -280,16 +281,18 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
               <IconPhone size={14} /> Call
             </a>
           )}
-          <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
-            Log touchpoint
-          </button>
-          {canSend && onSendToJobber && (
+          {!readOnly && (
+            <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
+              Log touchpoint
+            </button>
+          )}
+          {!readOnly && canSend && onSendToJobber && (
             <button style={actionBtn('accent')} disabled={busy} onClick={() => onSendToJobber(person)}>
               <IconSend size={14} /> Send to Jobber
             </button>
           )}
         </ActionRow>
-        {touchOpen && (
+        {!readOnly && touchOpen && (
           <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <select value={touchMethod} onChange={e => setTouchMethod(e.target.value)}
               style={{ padding: '8px 10px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', background: T.surface.raised }}>
@@ -337,7 +340,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
         {/* Jobber-owns-deletion rule (Kevin 7/10): linked records are
             never junkable here — Jobber's *_DESTROY webhooks are their
             only deletion path. CardMenu renders nothing on empty items. */}
-        <CardMenu items={jobberLinked ? [] : [{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]} />
+        <CardMenu items={(readOnly || jobberLinked) ? [] : [{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]} />
       </div>
 
       {/* Vitals strip — lead-health row; Status in its status color,
@@ -363,6 +366,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
           locationUuid={c?.location_uuid}
           setToast={setToast}
           onLeadPatched={onLeadPatched}
+          readOnly={readOnly}
         />
       )}
     </div>

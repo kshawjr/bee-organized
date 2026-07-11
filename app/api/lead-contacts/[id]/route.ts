@@ -7,6 +7,7 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { readOnlyWriteBlock } from '@/lib/read-only-access'
 
 const PATCHABLE_FIELDS = new Set(['name', 'role', 'phone', 'email'])
 
@@ -50,6 +51,11 @@ async function authorize(id: string) {
       }
     }
   }
+
+  // Read-only guard (868kawwmh) — paused/inactive location (lite_user
+  // already blocked above). past_due keeps full access.
+  const roBlock = await readOnlyWriteBlock(hubUser, contact.location_uuid)
+  if (roBlock) return { error: roBlock }
 
   return { hubUser, contact }
 }

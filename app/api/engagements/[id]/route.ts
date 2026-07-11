@@ -31,6 +31,7 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { writeSyncLog } from '@/lib/sync-log'
 import { ENGAGEMENT_STAGE_RANK, recoverEngagementStageDrift, type EngagementStage } from '@/lib/engagements'
 import { getEngagementAssignees } from '@/lib/engagement-assignee-sync'
@@ -248,7 +249,13 @@ export async function PATCH(
   const { id } = await params
   const auth = await authAndLoad(id)
   if ('error' in auth) return auth.error
-  const { engagement } = auth
+  const { hubUser, engagement } = auth
+
+  // ─── Read-only guard (868kawwmh) ──────────────────────────────
+  // Terminal close is a write — lite_user + paused/inactive locations
+  // are blocked before any mutation (past_due keeps full access).
+  const roBlock = await readOnlyWriteBlock(hubUser, engagement.location_uuid)
+  if (roBlock) return roBlock
 
   let body: any = {}
   try { body = await req.json() } catch {

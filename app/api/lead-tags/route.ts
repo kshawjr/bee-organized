@@ -17,6 +17,7 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { readOnlyWriteBlock } from '@/lib/read-only-access'
 
 async function authorize() {
   const supabase = await createServerSupabaseClient()
@@ -65,6 +66,11 @@ async function checkLocationAccess(
       }
     }
   }
+
+  // Read-only guard (868kawwmh) — paused/inactive location (lite_user
+  // already blocked in authorize()). past_due keeps full access.
+  const roBlock = await readOnlyWriteBlock(hubUser, lead.location_uuid)
+  if (roBlock) return { error: roBlock }
 
   return { lead }
 }

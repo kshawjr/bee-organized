@@ -218,7 +218,7 @@ function RowMenu({ anchorId, isMobile, onClose, children }) {
   )
 }
 
-export default function InboxScreen({ people = [], engagements = [], locFilter = 'all', onOpenPerson = () => {}, onSendToJobber = () => {}, setToast = () => {} }) {
+export default function InboxScreen({ people = [], engagements = [], locFilter = 'all', onOpenPerson = () => {}, onSendToJobber = () => {}, setToast = () => {}, readOnly = false }) {
   const [busyId, setBusyId] = useState(null)
   // Local session overrides: a logged call moves the row to Attempting
   // immediately (the real touchpoint is written; derivation catches up
@@ -362,6 +362,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
   // mode, one gesture enters it AND selects everything visible+selectable;
   // in mode it's the standard all↔none toggle the bulk bar button mirrors.
   const headerSelectAll = () => {
+    if (readOnly) return
     if (!selectMode) {
       setSelectMode(true)
       setConfirmRemove(false)
@@ -375,6 +376,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
   const lpTimer = useRef(null)
   const lpFired = useRef(false)
   const pressStart = (p) => {
+    if (readOnly) return
     lpFired.current = false
     clearTimeout(lpTimer.current)
     lpTimer.current = setTimeout(() => {
@@ -578,7 +580,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       <span style={{ fontSize: '12px', color: T.accent.fg, fontWeight: 500, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
         <IconCheck size={13} /> Sent — engagement will appear on the board
       </span>
-    ) : (
+    ) : readOnly ? null : (
       <>
         {/* Ghost cluster — Log call RECORDS a touchpoint (the tel: link
             in the secondary line is the one that dials). */}
@@ -645,7 +647,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
         onPointerUp={pressEnd} onPointerLeave={pressEnd} onPointerCancel={pressEnd}
         style={{ padding: isMobile ? '12px 14px' : '13px 16px', borderBottom: T.border.divider, cursor: 'pointer' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {selectMode && (
+          {!readOnly && selectMode && (
             <input type="checkbox" checked={checked} disabled={linked}
               title={linked ? 'Managed in Jobber' : `Select ${p.name}`}
               aria-label={linked ? 'Managed in Jobber' : `Select ${p.name}`}
@@ -734,7 +736,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
             One gesture enters selection mode and select-alls; in mode
             it's tri-state (indeterminate on a partial selection). The
             other door in is a row long-press. */}
-        {visibleRows.length > 0 && (
+        {!readOnly && visibleRows.length > 0 && (
           <input type="checkbox" aria-label="Select all" title="Select all"
             disabled={selectableIds.size === 0}
             checked={selectMode && selCount > 0 && selCount === selectableIds.size}
@@ -784,7 +786,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       {/* Bulk action bar — select-all-visible (respects active filters),
           count chip, Remove (N) + Cancel; Remove always swaps in a confirm
           step (confirm-first for any N), Undo still follows. */}
-      {selectMode && (
+      {!readOnly && selectMode && (
         <div role="toolbar" aria-label="Bulk actions"
           style={{
             display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '12px',

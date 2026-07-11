@@ -21,6 +21,7 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import {
   getEngagementAssignees,
   syncEngagementAssignmentToJobber,
@@ -79,6 +80,10 @@ export async function POST(
   if ('error' in auth) return auth.error
   const { hubUser, engagement } = auth
 
+  // Read-only guard (868kawwmh) — block lite_user + paused locations.
+  const roBlock = await readOnlyWriteBlock(hubUser, engagement.location_uuid)
+  if (roBlock) return roBlock
+
   let body: any = {}
   try { body = await req.json() } catch {
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
@@ -125,7 +130,11 @@ export async function DELETE(
   const { id } = await params
   const auth = await authAndLoad(id)
   if ('error' in auth) return auth.error
-  const { engagement } = auth
+  const { hubUser, engagement } = auth
+
+  // Read-only guard (868kawwmh) — block lite_user + paused locations.
+  const roBlock = await readOnlyWriteBlock(hubUser, engagement.location_uuid)
+  if (roBlock) return roBlock
 
   const url = new URL(req.url)
   const hubUserId = url.searchParams.get('hub_user_id')

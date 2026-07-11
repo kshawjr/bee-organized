@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
+import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import {
   PARTNER_COLS,
   mapPartnerRow,
@@ -76,6 +77,11 @@ export async function POST(request: NextRequest) {
   if (!canWriteLocation(caller, locationId)) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
+
+  // Read-only guard (868kawwmh) — paused/inactive location (lite_user
+  // already excluded by canWriteLocation). past_due keeps full access.
+  const roBlock = await readOnlyWriteBlock({ role: caller.role }, locationId)
+  if (roBlock) return roBlock
 
   // Map the client object to a DB row. partnerPatchToRow only copies known
   // fields, so client-only junk (id, isDeleted, etc.) is dropped.

@@ -48,7 +48,7 @@ const SNOOZE_PRESETS = [
   { key: '3m', label: '3 months', days: 90 },
 ]
 
-export default function PreferencesBlock({ client, openCount = 0, onPatched = () => {}, setToast = () => {}, nowMs = Date.now() }) {
+export default function PreferencesBlock({ client, openCount = 0, onPatched = () => {}, setToast = () => {}, nowMs = Date.now(), readOnly = false }) {
   const c = client
   const [busy, setBusy] = useState(false)
   const [confirmOptOut, setConfirmOptOut] = useState(false)
@@ -134,7 +134,7 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
         <p style={{ fontSize: '12px', color: c.marketing_opt_out ? T.state.danger.fg : T.ink.secondary, minWidth: 0 }}>
           {c.marketing_opt_out ? 'Opted out of marketing' : 'Marketing emails OK'}
         </p>
-        {c.marketing_opt_out ? (
+        {readOnly ? null : c.marketing_opt_out ? (
           <button style={rowBtn()} disabled={busy} onClick={() => setMarketing(false)}>Re-subscribe</button>
         ) : confirmOptOut ? (
           <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: '6px', alignItems: 'center', flexShrink: 0 }}>
@@ -153,7 +153,7 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
           <p style={{ fontSize: '12px', color: snoozed ? T.state.warning.deep : T.ink.secondary, minWidth: 0 }}>
             {snoozed ? `Snoozed until ${fmtShort(c.snoozed_until)}` : 'Not snoozed'}
           </p>
-          {snoozed ? (
+          {readOnly ? null : snoozed ? (
             <button style={rowBtn()} disabled={busy} onClick={unSnooze}>Un-snooze</button>
           ) : !snoozeOpen && (
             <button style={rowBtn()} disabled={busy} onClick={() => setSnoozeOpen(true)}>Snooze…</button>
@@ -164,7 +164,7 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
             “{c.snoozed_note.trim()}”
           </p>
         )}
-        {snoozeOpen && !snoozed && (
+        {snoozeOpen && !snoozed && !readOnly && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
               <select value={snoozePick} onChange={e => setSnoozePick(e.target.value)} aria-label="Snooze length" style={inputStyle}>
@@ -190,7 +190,7 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
           <p style={{ fontSize: '12px', color: c.paused ? T.state.warning.deep : T.accent.deep, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
             <IconPlayerPause size={13} /> {c.paused ? 'Nurture drips paused' : 'Nurture drips active'}
           </p>
-          {c.paused ? (
+          {readOnly ? null : c.paused ? (
             <button style={rowBtn()} disabled={busy} onClick={() => setDrip(false)}>Activate</button>
           ) : (
             <button style={rowBtn()} disabled={busy} onClick={() => setDrip(true)}>Pause</button>

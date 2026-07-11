@@ -52,6 +52,7 @@ export default function ReferrerPicker({
   // partners state Classic's PartnersScreen reads). Mirrors onPersonCreated.
   onPartnerCreated = () => {},
   setToast = () => {},
+  readOnly = false,
 }) {
   const [search, setSearch] = useState('')
   const [partnerRows, setPartnerRows] = useState(null) // null = loading
@@ -166,8 +167,9 @@ export default function ReferrerPicker({
           <p style={{ fontSize: '12px', color: T.ink.muted, textAlign: 'center', padding: '8px' }}>No matches</p>
         )}
         {/* Create rows — shown once the user has typed. Partner/contact
-            only; the Clients section is deliberately match-only. */}
-        {q && (
+            only; the Clients section is deliberately match-only.
+            Hidden in read-only (defensive — no create affordance). */}
+        {q && !readOnly && (
           <>
             {['partner', 'contact'].map(t => (
               <button key={t} type="button" disabled={!!creating} onClick={() => createReferrer(t)}

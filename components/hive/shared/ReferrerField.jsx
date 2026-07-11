@@ -39,6 +39,7 @@ export default function ReferrerField({
   onSaved = () => {}, // (colPatch) => propagation after a confirmed PATCH
   onPartnerCreated = () => {}, // confirmed inline-created partner row → Classic seam
   setToast = () => {},
+  readOnly = false,
 }) {
   const [picking, setPicking] = useState(false)
 
@@ -99,22 +100,31 @@ export default function ReferrerField({
   return (
     <div style={{ fontSize: '12px', color: T.ink.muted }}>
       {lead.referred_by_kind ? (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
-          <button type="button" aria-label="Edit referrer" onClick={() => setPicking(v => !v)}
-            style={{ border: 'none', background: 'transparent', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer', borderBottom: T.border.underline }}>
-            {/* Dangling id (route flagged referred_by_missing) → an
-                explicit "removed referrer"; a name-less-but-not-flagged
-                lead (older payloads) still degrades to the kind. */}
+        readOnly ? (
+          // Read-only: referrer display stays; no edit toggle, no × clear.
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
             Referred by {lead.referred_by_name
               || (lead.referred_by_missing ? 'a removed referrer'
                 : lead.referred_by_kind === 'lead' ? 'a client' : 'a partner')}
-          </button>
-          <button type="button" aria-label="Clear referrer" onClick={clear}
-            style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', color: T.ink.quiet, fontSize: '13px', lineHeight: 1 }}>
-            ×
-          </button>
-        </span>
-      ) : (
+          </span>
+        ) : (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
+            <button type="button" aria-label="Edit referrer" onClick={() => setPicking(v => !v)}
+              style={{ border: 'none', background: 'transparent', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer', borderBottom: T.border.underline }}>
+              {/* Dangling id (route flagged referred_by_missing) → an
+                  explicit "removed referrer"; a name-less-but-not-flagged
+                  lead (older payloads) still degrades to the kind. */}
+              Referred by {lead.referred_by_name
+                || (lead.referred_by_missing ? 'a removed referrer'
+                  : lead.referred_by_kind === 'lead' ? 'a client' : 'a partner')}
+            </button>
+            <button type="button" aria-label="Clear referrer" onClick={clear}
+              style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', color: T.ink.quiet, fontSize: '13px', lineHeight: 1 }}>
+              ×
+            </button>
+          </span>
+        )
+      ) : readOnly ? null : (
         <button type="button" aria-label="Add referrer" onClick={() => setPicking(v => !v)}
           style={{ border: 'none', background: 'transparent', padding: 0, font: 'inherit', cursor: 'pointer', color: T.ink.muted, borderBottom: T.border.underline }}>
           ＋ Add referrer
@@ -128,6 +138,7 @@ export default function ReferrerField({
           onSelect={save}
           onPartnerCreated={onPartnerCreated}
           setToast={setToast}
+          readOnly={readOnly}
         />
       )}
     </div>

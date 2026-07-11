@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { applyDripSideEffects } from '@/lib/drip-lifecycle'
 import { sendDripStep } from '@/lib/drip-send'
 
@@ -108,6 +109,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'forbidden_wrong_location' }, { status: 403 })
     }
   }
+
+  // ─── Read-only guard (868kawwmh) ──────────────────────────────
+  const roBlock = await readOnlyWriteBlock(hubUser, body.location_uuid)
+  if (roBlock) return roBlock
 
   // Resolve the slug — leads.location_id stores the slug, not the UUID
   // (matches dual-write + jobber-clients import).

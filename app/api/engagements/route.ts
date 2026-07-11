@@ -26,6 +26,7 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { foundManualEngagement } from '@/lib/engagements'
 // PURE zero-import module (§8.5) — safe from the server route; ONE
 // source for the terminal stage strings ('Closed Won' / 'Closed Lost').
@@ -143,6 +144,10 @@ export async function POST(req: Request) {
   if (!isAdmin(hubUser.role) && hubUser.location_id !== lead.location_uuid) {
     return NextResponse.json({ error: 'forbidden_wrong_location' }, { status: 403 })
   }
+
+  // ─── Read-only guard (868kawwmh) ──────────────────────────────
+  const roBlock = await readOnlyWriteBlock(hubUser, lead.location_uuid)
+  if (roBlock) return roBlock
 
   const founded = await foundManualEngagement({
     clientId: lead.id,

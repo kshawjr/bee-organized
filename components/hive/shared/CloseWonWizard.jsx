@@ -50,7 +50,7 @@ function defaultReactivationDate() {
 
 export default function CloseWonWizard({
   engagementId, leadId, invoices = [], totalInvoiced = 0, reviewsLink = null,
-  isMobile = false, onCancel = () => {}, onClosed = () => {}, setToast = () => {},
+  isMobile = false, onCancel = () => {}, onClosed = () => {}, setToast = () => {}, readOnly = false,
 }) {
   const [step, setStep] = useState(0)
   const [satisfaction, setSatisfaction] = useState(null) // 'happy' | 'unhappy'
@@ -217,7 +217,7 @@ export default function CloseWonWizard({
     footer = (
       <>
         <button onClick={() => setStep(2)} disabled={busy} style={wizQuietBtn()}>Back</button>
-        <button onClick={confirm} disabled={busy} style={wizAccentBtn(busy)}>Close as won</button>
+        <button onClick={confirm} disabled={readOnly || busy} style={wizAccentBtn(readOnly || busy)}>Close as won</button>
       </>
     )
   }

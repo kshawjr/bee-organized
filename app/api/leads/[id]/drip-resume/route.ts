@@ -23,6 +23,7 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { resumePausedDripsForLead } from '@/lib/drip-lifecycle'
 import { sendDripStep } from '@/lib/drip-send'
 
@@ -60,6 +61,10 @@ export async function POST(
       return NextResponse.json({ error: 'forbidden_read_only_role' }, { status: 403 })
     }
   }
+
+  // ─── Read-only guard (868kawwmh) ──────────────────────────────
+  const roBlock = await readOnlyWriteBlock(hubUser, lead.location_uuid)
+  if (roBlock) return roBlock
 
   // Flag first (see header: the seed path reads it), then rows. A
   // failed flag write aborts — resuming rows while the flag still says

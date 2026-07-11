@@ -21,7 +21,7 @@ import { T } from './shared/tokens'
 
 export const METHOD_LABEL = { call: 'Call', sms: 'Text', email: 'Email', in_person: 'In person', call_prompt: 'Call prompt', system: 'System' }
 
-export default function NotesStream({ label, items = [], onPost, placeholder = 'Add a note…', nowMs = Date.now() }) {
+export default function NotesStream({ label, items = [], onPost, placeholder = 'Add a note…', nowMs = Date.now(), readOnly = false }) {
   const [draft, setDraft] = useState('')
   const post = () => {
     const t = draft.trim()
@@ -35,11 +35,13 @@ export default function NotesStream({ label, items = [], onPost, placeholder = '
       <p style={{ fontSize: '11px', fontWeight: 500, color: T.ink.muted, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '8px' }}>
         {label}
       </p>
-      <div style={{ display: 'flex', marginBottom: sorted.length ? '10px' : 0 }}>
-        <input value={draft} onChange={e => setDraft(e.target.value)} placeholder={placeholder}
-          onKeyDown={e => { if (e.key === 'Enter') post() }}
-          style={{ flex: 1, padding: '8px 12px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
-      </div>
+      {!readOnly && (
+        <div style={{ display: 'flex', marginBottom: sorted.length ? '10px' : 0 }}>
+          <input value={draft} onChange={e => setDraft(e.target.value)} placeholder={placeholder}
+            onKeyDown={e => { if (e.key === 'Enter') post() }}
+            style={{ flex: 1, padding: '8px 12px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
+        </div>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
         {sorted.map(a => a.t === 'note' ? (
           <p key={`n-${a.id}`} style={{ fontSize: '12px', color: T.ink.primary, lineHeight: 1.45 }}>

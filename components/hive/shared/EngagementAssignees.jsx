@@ -54,7 +54,7 @@ function MiniAvatar({ id, name }) {
 
 export default function EngagementAssignees({
   engagementId, assignees = [], users = [], jobberConnected = false,
-  onChange = () => {}, setToast = () => {},
+  onChange = () => {}, setToast = () => {}, readOnly = false,
 }) {
   const [open, setOpen] = useState(false)
   const [busyId, setBusyId] = useState(null)
@@ -117,15 +117,18 @@ export default function EngagementAssignees({
               {unmapped && (
                 <span aria-label="Not linked to Jobber" style={{ color: T.state.warning.deep, fontSize: '10px', fontWeight: 600 }}>⚠</span>
               )}
-              <button aria-label={`Unassign ${nameFor(a)}`} disabled={busyId === a.hub_user_id}
-                onClick={() => toggle({ id: a.hub_user_id, name: nameFor(a), email: a.email, jobberUserId: jobberIdFor(a) })}
-                style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', lineHeight: 1, color: T.ink.quiet, cursor: 'pointer', fontFamily: 'inherit' }}>
-                ✗
-              </button>
+              {!readOnly && (
+                <button aria-label={`Unassign ${nameFor(a)}`} disabled={busyId === a.hub_user_id}
+                  onClick={() => toggle({ id: a.hub_user_id, name: nameFor(a), email: a.email, jobberUserId: jobberIdFor(a) })}
+                  style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', lineHeight: 1, color: T.ink.quiet, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  ✗
+                </button>
+              )}
             </span>
           )
         })}
         {assignees.length === 0 && <span style={{ fontSize: '11px', color: T.ink.quiet }}>Unassigned</span>}
+        {!readOnly && (
         <span style={{ position: 'relative', display: 'inline-block' }}>
           <button onClick={() => setOpen(v => !v)} aria-label="Assign a team member"
             style={{ ...pillStyle({ dashed: true }), cursor: 'pointer' }}>
@@ -160,6 +163,7 @@ export default function EngagementAssignees({
             </>
           )}
         </span>
+        )}
       </div>
     </div>
   )

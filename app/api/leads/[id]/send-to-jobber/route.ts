@@ -41,6 +41,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { jobberGraphQL, jobberMutation } from '@/lib/jobber'
 import { writeSyncLog } from '@/lib/sync-log'
 import { requireIanaTimezone } from '@/lib/drip-time'
+import { isLocationReadOnly } from '@/lib/read-only-access'
 import { upsertServiceRequest } from '@/lib/jobber-import'
 import { attachToEngagement } from '@/lib/engagements'
 import {
@@ -357,6 +358,21 @@ export async function POST(
     }
     if (hubUser.location_id !== lead.location_uuid) {
       return fail('auth', 'forbidden_wrong_location', 403)
+    }
+  }
+
+  // ─── Read-only guard (868kawwmh) ──────────────────────────────
+  // lite_user blocked above; here catch paused/inactive locations
+  // (owner/manager) before any Jobber mutation. past_due keeps full
+  // access during grace. Elevated (isAdminRole) bypasses.
+  if (!isAdminRole) {
+    const { data: locRow } = await supabaseService
+      .from('locations')
+      .select('lifecycle_status, subscription_status')
+      .eq('id', lead.location_uuid)
+      .maybeSingle()
+    if (isLocationReadOnly(locRow)) {
+      return fail('auth', 'forbidden_read_only_location', 403)
     }
   }
 

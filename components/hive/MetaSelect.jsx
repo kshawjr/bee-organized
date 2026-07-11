@@ -16,7 +16,7 @@
 import React, { useState, useEffect } from 'react'
 import { T } from './shared/tokens'
 
-export default function MetaSelect({ label, value, options = [], onPick, renderTrigger = null }) {
+export default function MetaSelect({ label, value, options = [], onPick, renderTrigger = null, readOnly = false }) {
   const [open, setOpen] = useState(false)
   useEffect(() => {
     if (!open) return
@@ -36,6 +36,15 @@ export default function MetaSelect({ label, value, options = [], onPick, renderT
   }
 
   const toggle = (e) => { if (e) e.stopPropagation(); setOpen(v => !v) }
+
+  // Read-only: show the value as static text — no trigger, no popover.
+  if (readOnly) {
+    return (
+      <span style={{ fontSize: '11px', color: T.ink.primary, whiteSpace: 'nowrap', fontFamily: 'inherit' }}>
+        <span style={{ color: T.ink.muted }}>{label}: </span>{value || '—'}
+      </span>
+    )
+  }
 
   return (
     <span style={{ position: 'relative', display: renderTrigger ? 'block' : 'inline-block' }}>

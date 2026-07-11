@@ -20,6 +20,7 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { readOnlyWriteBlock } from '@/lib/read-only-access'
 
 const VALID_KINDS = ['reach_out', 'drip', 'system', 'stage_change', 'note'] as const
 const VALID_METHODS = ['call', 'sms', 'email', 'system', 'call_prompt', 'in_person'] as const
@@ -112,6 +113,10 @@ export async function POST(req: Request) {
       )
     }
   }
+
+  // ─── Read-only guard (868kawwmh) ──────────────────────────────
+  const roBlock = await readOnlyWriteBlock(hubUser, lead.location_uuid)
+  if (roBlock) return roBlock
 
   // Build insert row
   const insertRow: Record<string, unknown> = {

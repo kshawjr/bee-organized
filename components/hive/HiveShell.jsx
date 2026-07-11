@@ -127,6 +127,12 @@ export default function HiveShell({
   onPartnerCreated = null,
   setToast = () => {},
   onExitBeta = () => {},
+  // Read-only mode (868kawwmh) — lite_user or paused/inactive location.
+  // When true every write affordance in the beta tree is hidden/disabled;
+  // the server (lib/read-only-access) rejects independently. past_due
+  // keeps full access, so it never reaches here as readOnly. Policy lives
+  // in betaGate.js resolveBetaReadOnly; BeeHub threads the boolean down.
+  readOnly = false,
 }) {
   // Board/List/Clients lens — default 'board', hydrated from localStorage
   // after mount (SSR-safe, same pattern as the legacy view toggle).
@@ -241,8 +247,9 @@ export default function HiveShell({
 
   const tabPills = TABS.map(t => <TabPill key={t.key} tab={t} active={t.key === lens} onSelect={() => pickLens(t.key)} badgeCount={t.badge ? inboxCount : null} />)
   // Desktop "New" pill — the ONE solid chrome element, visible from all
-  // four tabs, left of the counter. Mobile gets the FAB instead.
-  const newPillEl = (
+  // four tabs, left of the counter. Mobile gets the FAB instead. Hidden
+  // for read-only users (creating a client is a write).
+  const newPillEl = readOnly ? null : (
     <button
       onClick={() => setNewClientOpen(true)}
       aria-label="New client"
@@ -319,6 +326,7 @@ export default function HiveShell({
           onOpenPerson={openPerson}
           onSendToJobber={onSendToJobber}
           setToast={setToast}
+          readOnly={readOnly}
         />
       ) : lens === 'clients' ? (
         <ClientDirectory
@@ -353,13 +361,14 @@ export default function HiveShell({
           onOpenEngagement={openEngagement}
           onViewClosedInList={viewClosedInList}
           setToast={setToast}
+          readOnly={readOnly}
         />
       )}
 
       {/* Mobile FAB — classic FAB position (bottom-right, safe-area
           aware). Hidden whenever any sheet is open so it isn't live
           behind the sheet's actions row. */}
-      {isMobile && !anySheetOpen && (
+      {isMobile && !anySheetOpen && !readOnly && (
         <button
           onClick={() => setNewClientOpen(true)}
           aria-label="New client"
@@ -381,6 +390,7 @@ export default function HiveShell({
       {newClientOpen && (
         <NewClientSheet
           people={people}
+          readOnly={readOnly}
           onPartnerCreated={onPartnerCreated}
           engagements={filtered}
           locFilter={locFilter}
@@ -419,6 +429,7 @@ export default function HiveShell({
           seed={overlay.engagement}
           people={people}
           locationUsers={locationUsers}
+          readOnly={readOnly}
           onClose={() => setOverlay(null)}
           onOpenClient={openClient}
           onChanged={(id, patch) => setRowPatches(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))}
@@ -440,6 +451,7 @@ export default function HiveShell({
           key={overlay.person.id}
           person={overlay.person}
           people={people}
+          readOnly={readOnly}
           onClose={() => setOverlay(null)}
           onSendToJobber={onSendToJobber}
           setToast={setToast}
@@ -452,6 +464,7 @@ export default function HiveShell({
         <ClientProfile
           key={overlay.clientId}
           clientId={overlay.clientId}
+          readOnly={readOnly}
           siblings={overlay.siblings ?? null}
           onNavigate={(id) => setOverlay(o => (o && o.type === 'client' ? { ...o, clientId: id } : o))}
           people={people}

@@ -108,7 +108,7 @@ function EngagementCard({ e, onOpen, draggable, onDragStart, onDragEnd, accent =
   )
 }
 
-export default function EngagementBoard({ engagements = [], closedCount = 0, locFilter = 'all', workFilters = ENGAGEMENT_FILTER_DEFAULTS, setWorkFilters = () => {}, clearWorkFilters = () => {}, onOpenClient = () => {}, onOpenEngagement = null, onViewClosedInList = () => {}, setToast = () => {} }) {
+export default function EngagementBoard({ engagements = [], closedCount = 0, locFilter = 'all', workFilters = ENGAGEMENT_FILTER_DEFAULTS, setWorkFilters = () => {}, clearWorkFilters = () => {}, onOpenClient = () => {}, onOpenEngagement = null, onViewClosedInList = () => {}, setToast = () => {}, readOnly = false }) {
   // Local rows for optimistic drag moves; resync when the server prop changes.
   const [rows, setRows] = useState(engagements)
   useEffect(() => { setRows(engagements) }, [engagements])
@@ -246,9 +246,9 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
               key={e.id}
               e={e}
               onOpen={() => openCard(e)}
-              draggable={!isMobile}
-              onDragStart={!isMobile ? () => { dragId.current = e.id; setDragging(true) } : undefined}
-              onDragEnd={!isMobile ? () => { setDragging(false); setDragOverCol(null) } : undefined}
+              draggable={!isMobile && !readOnly}
+              onDragStart={!isMobile && !readOnly ? () => { dragId.current = e.id; setDragging(true) } : undefined}
+              onDragEnd={!isMobile && !readOnly ? () => { setDragging(false); setDragOverCol(null) } : undefined}
             />
           ))}
           {cards.length === 0 && (
@@ -477,7 +477,7 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, loc
             {BOARD_STAGES.map(stage => renderColumn(stage))}
             {/* 5th-column slot: pending close (popup open) > live-drag
                 drop zones > the closed rail. */}
-            {pendingClose ? renderPendingClose() : dragging ? renderCloseZones() : renderClosedRail()}
+            {!readOnly && pendingClose ? renderPendingClose() : !readOnly && dragging ? renderCloseZones() : renderClosedRail()}
           </div>
         </div>
       )}

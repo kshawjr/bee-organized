@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, createContext, useContext } from "r
 import { useRouter } from "next/navigation"
 import { useLeadsRealtime } from "@/lib/use-leads-realtime"
 import dynamic from "next/dynamic"
-import { canSeeBetaBoard, defaultHiveView, hydrateHiveView } from "@/components/hive/shared/betaGate"
+import { canSeeBetaBoard, defaultHiveView, hydrateHiveView, resolveBetaReadOnly } from "@/components/hive/shared/betaGate"
 import { splitNameForPrefill } from "@/lib/name-prefill"
 import AddressAutofill from "@/components/hive/shared/AddressAutofill"
 // Pure presentational icon set (inline SVG, zero deps) — safe to import
@@ -10170,6 +10170,7 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
           closedCount={engagementsClosedCount}
           closedWonCount={engagementsClosedWonCount}
           people={people}
+          readOnly={readOnly}
           locFilter={locFilter}
           currentLocationUuid={locFilter!=='all' ? locFilter : (hiveCurrentLocationCtx?.id || hiveCurrentUserCtx?.locationId || null)}
           currentUserId={hiveCurrentUserCtx?.id || null}
@@ -31669,6 +31670,13 @@ if (Array.isArray(initialPeople)) return
     return 'active'
   })()
 
+  // Read-only mode for the beta Hive surface (868kawwmh). Single policy
+  // point in betaGate.js: read-only for lite_user (viewer/light/readonly)
+  // and paused/inactive locations; past_due keeps FULL access during its
+  // grace window; elevated roles always write. Threaded into HiveScreen →
+  // HiveShell; the server (lib/read-only-access) enforces independently.
+  const betaReadOnly = resolveBetaReadOnly({ role, franchiseRole, crmStatus: effectiveCrmStatus })
+
   function nav(key) {
     setActiveNav(key)
     window.scrollTo(0,0)
@@ -32102,7 +32110,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     )
     if (activeNav==='hive') return (
       <div style={pageStyle}>
-        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} />
+        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} />
         {toast && <InlineToast {...toast} />}
       </div>
     )

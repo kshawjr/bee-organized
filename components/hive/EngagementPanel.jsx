@@ -179,7 +179,7 @@ function MilestoneRow({ kind, primary, secondary = null, state = null, href = nu
   )
 }
 
-export default function EngagementPanel({ engagementId, seed = null, people = [], locationUsers = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [] } }) {
+export default function EngagementPanel({ engagementId, seed = null, people = [], locationUsers = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [] }, readOnly = false }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -370,7 +370,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   }
 
   // Masthead ··· menu items — grows with more record actions later.
-  const menuItems = eng ? [
+  const menuItems = (eng && !readOnly) ? [
     !isTerminal(eng.stage) && { key: 'won', label: 'Mark as Closed Won', icon: <IconCheck size={15} />, onClick: () => setWizard('won') },
     !isTerminal(eng.stage) && { key: 'lost', label: 'Mark as Closed Lost', icon: <IconX size={15} />, onClick: () => setWizard('lost') },
     eng.stage === 'Closed Lost' && { key: 'reopen', label: 'Reopen', icon: <IconClock size={15} />, onClick: reopenEngagement },
@@ -534,13 +534,13 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
         <div>
           <MicroLabel>Description</MicroLabel>
           <EditableDesc text={eng.description} showEmpty placeholder="Describe the work…"
-            onSave={t => patchEngagement({ description: t })} />
+            onSave={t => patchEngagement({ description: t })} readOnly={readOnly} />
         </div>
       )}
 
       {/* Recent activity — engagement-scoped quick-glance slice +
           composer; the merged past/future stream is the Timeline tab. */}
-      <NotesStream label="Recent activity" items={activity} onPost={addEngagementNote} nowMs={nowMs} />
+      <NotesStream label="Recent activity" items={activity} onPost={addEngagementNote} nowMs={nowMs} readOnly={readOnly} />
     </div>
   )
 
@@ -572,10 +572,12 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
             <IconPhone size={14} /> Call
           </a>
         )}
-        <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
-          Log touchpoint
-        </button>
-        {canSendToJobber && client && (
+        {!readOnly && (
+          <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
+            Log touchpoint
+          </button>
+        )}
+        {!readOnly && canSendToJobber && client && (
           <button style={actionBtn('accent')} disabled={busy} onClick={() => onSendToJobber(client.id, { engagementId })}>
             <IconSend size={14} /> Send to Jobber
           </button>
@@ -588,7 +590,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
         {/* Close… moved to the masthead ··· menu (Part 1) — the close-out
             wizards live there now, not as a standalone action-bar button. */}
       </ActionRow>
-      {touchOpen && (
+      {!readOnly && touchOpen && (
         <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <select value={touchMethod} onChange={e => setTouchMethod(e.target.value)}
             style={{ padding: '8px 10px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', background: T.surface.raised }}>
@@ -743,6 +745,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
               <MetaSelect
                 label="Type" value={eng.project_type || null} options={lookupOptions.projectTypes}
                 onPick={(v) => patchEngagement({ project_type: v })}
+                readOnly={readOnly}
                 renderTrigger={(toggle) => (
                   <button onClick={toggle} aria-label="Edit type" style={metaValueBtn(!!eng.project_type)}>
                     <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{eng.project_type || 'Add type'}</span>
@@ -760,6 +763,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                   jobberConnected={!!client?.jobber_connected}
                   onChange={next => setData(d => d ? { ...d, assignees: next } : d)}
                   setToast={setToast}
+                  readOnly={readOnly}
                 />
               </div>
             )}
@@ -783,10 +787,12 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
             {drip.next_send_at ? ` · next ${fmtShort(drip.next_send_at)}` : ''}
             {drip.paused ? ' · paused' : ''}
           </span>
-          <button disabled={dripBusy} onClick={() => setDripPaused(!drip.paused)}
-            style={{ flexShrink: 0, padding: '3px 10px', borderRadius: T.radius.control, border: T.border.control, background: T.surface.raised, fontSize: '11px', fontWeight: 500, color: T.ink.primary, cursor: dripBusy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
-            {drip.paused ? 'Resume' : 'Pause'}
-          </button>
+          {!readOnly && (
+            <button disabled={dripBusy} onClick={() => setDripPaused(!drip.paused)}
+              style={{ flexShrink: 0, padding: '3px 10px', borderRadius: T.radius.control, border: T.border.control, background: T.surface.raised, fontSize: '11px', fontWeight: 500, color: T.ink.primary, cursor: dripBusy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+              {drip.paused ? 'Resume' : 'Pause'}
+            </button>
+          )}
         </div>
       )}
 
@@ -809,6 +815,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
             locationUuid={eng.location_uuid}
             setToast={setToast}
             onLeadPatched={onLeadPatched}
+            readOnly={readOnly}
           />
         )}
         {tab === 'files' && filesTab}

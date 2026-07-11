@@ -28,7 +28,7 @@ import { T } from './shared/tokens'
 
 const QUIET = T.surface.sunken
 
-export default function EditableDesc({ text, onSave, placeholder = 'Describe the request…', showEmpty = false, style = {} }) {
+export default function EditableDesc({ text, onSave, placeholder = 'Describe the request…', showEmpty = false, style = {}, readOnly = false }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [expanded, setExpanded] = useState(false)
@@ -82,7 +82,7 @@ export default function EditableDesc({ text, onSave, placeholder = 'Describe the
   }
 
   if (!t) {
-    if (!showEmpty) return null
+    if (!showEmpty || readOnly) return null
     return (
       <button onClick={e => { e.stopPropagation(); setDraft(''); setEditing(true) }}
         style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', border: T.border.dashed, borderRadius: T.radius.control, background: 'transparent', fontSize: '12px', color: T.ink.quiet, cursor: 'text', fontFamily: 'inherit', ...style }}>
@@ -93,9 +93,9 @@ export default function EditableDesc({ text, onSave, placeholder = 'Describe the
 
   const clampLikely = t.length > 120 || t.includes('\n')
   return (
-    <div onClick={e => { e.stopPropagation(); setDraft(t); setEditing(true) }}
-      title="Click to edit"
-      style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', cursor: 'text', background: QUIET, borderRadius: T.radius.control, padding: '8px 10px', ...style }}>
+    <div onClick={readOnly ? undefined : (e => { e.stopPropagation(); setDraft(t); setEditing(true) })}
+      title={readOnly ? undefined : 'Click to edit'}
+      style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', cursor: readOnly ? 'default' : 'text', background: QUIET, borderRadius: T.radius.control, padding: '8px 10px', ...style }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <p style={{
           fontSize: '12px', fontStyle: 'italic', color: T.ink.secondary, lineHeight: 1.45, whiteSpace: 'pre-wrap',
@@ -110,7 +110,7 @@ export default function EditableDesc({ text, onSave, placeholder = 'Describe the
           </button>
         )}
       </div>
-      <EditPencil />
+      <EditPencil readOnly={readOnly} />
     </div>
   )
 }

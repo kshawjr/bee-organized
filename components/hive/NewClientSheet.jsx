@@ -143,6 +143,7 @@ export default function NewClientSheet({
   onOpenEngagement = () => {},
   onSendToJobber = null,
   setToast = () => {},
+  readOnly = false,
 }) {
   const isMobile = useIsMobile()
   const [query, setQuery] = useState('')
@@ -414,7 +415,7 @@ export default function NewClientSheet({
           {errorMsg && <p style={{ fontSize: '12px', color: T.state.danger.fg, background: T.state.danger.soft, padding: '8px 12px', borderRadius: T.radius.control }}>{errorMsg}</p>}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <button style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => startEngagement(activeMatch)}>
+            <button style={{ ...primaryBtn, opacity: (readOnly || busy) ? 0.6 : 1 }} disabled={readOnly || busy} onClick={() => startEngagement(activeMatch)}>
               <IconPlus size={14} /> Start new engagement
             </button>
             <button style={secondaryBtn} onClick={() => onOpenClient(activeMatch.person.id)}>
@@ -511,6 +512,7 @@ export default function NewClientSheet({
                   onSelect={r => { setReferrer(r); setPickReferrer(false) }}
                   onPartnerCreated={onPartnerCreated}
                   setToast={setToast}
+                  readOnly={readOnly}
                 />
               )}
             </div>
@@ -520,7 +522,7 @@ export default function NewClientSheet({
 
           {errorMsg && <p style={{ fontSize: '12px', color: T.state.danger.fg, background: T.state.danger.soft, padding: '8px 12px', borderRadius: T.radius.control }}>{errorMsg}</p>}
 
-          <button style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={createPerson}>
+          <button style={{ ...primaryBtn, opacity: (readOnly || busy) ? 0.6 : 1 }} disabled={readOnly || busy} onClick={createPerson}>
             Create — opens card
           </button>
         </div>
@@ -539,7 +541,7 @@ export default function NewClientSheet({
           </p>
           {errorMsg && <p style={{ fontSize: '12px', color: T.state.danger.fg, background: T.state.danger.soft, padding: '8px 12px', borderRadius: T.radius.control }}>{errorMsg}</p>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <button style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => foundEngagementFor(activeMatch)}>
+            <button style={{ ...primaryBtn, opacity: (readOnly || busy) ? 0.6 : 1 }} disabled={readOnly || busy} onClick={() => foundEngagementFor(activeMatch)}>
               Start another engagement
             </button>
             <button style={secondaryBtn} onClick={() => (openEngs[0] ? onOpenEngagement(openEngs[0]) : setConfirming(false))}>

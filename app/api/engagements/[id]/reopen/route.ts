@@ -30,6 +30,7 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { writeSyncLog } from '@/lib/sync-log'
 import { deriveEngagementStage } from '@/lib/engagements'
 
@@ -67,6 +68,10 @@ export async function POST(
   if (!isAdmin(hubUser.role) && hubUser.location_id !== engagement.location_uuid) {
     return NextResponse.json({ error: 'forbidden_wrong_location' }, { status: 403 })
   }
+
+  // ─── Read-only guard (868kawwmh) ──────────────────────────────
+  const roBlock = await readOnlyWriteBlock(hubUser, engagement.location_uuid)
+  if (roBlock) return roBlock
 
   // Closed LOST only — enforced server-side, never trusting the UI.
   if (engagement.stage === 'Closed Won') {

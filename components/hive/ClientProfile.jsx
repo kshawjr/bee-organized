@@ -86,7 +86,7 @@ const STAGE_ICON = {
 // siblings/onNavigate: the opener's natural ordering (e.g. the client
 // directory's visible rows). When absent the prev/next chevrons hide —
 // a panel→profile swap or a fresh create has no "next client".
-export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, lookupOptions = { sources: [], projectTypes: [], clientTags: [] }, locationUsers = [], siblings = null, onNavigate = () => {} }) {
+export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, lookupOptions = { sources: [], projectTypes: [], clientTags: [] }, locationUsers = [], siblings = null, onNavigate = () => {}, readOnly = false }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -324,15 +324,16 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         {/* Phone/email/address: click-to-edit (shared ContactField +
             AddressField); values stay live tel:/mailto: links. Source
             is the person-scoped first-touch — its ONE edit home. */}
-        <ContactField kind="phone" leadId={c.id} value={c.phone} onSaved={contactSaved} setToast={setToast} />
-        <ContactField kind="email" leadId={c.id} value={c.email} onSaved={contactSaved} setToast={setToast} />
-        <AddressField leadId={c.id} value={{ address: c.address, city: c.city, state: c.state, zip: c.zip }} onSaved={contactSaved} setToast={setToast} />
+        <ContactField kind="phone" leadId={c.id} value={c.phone} onSaved={contactSaved} setToast={setToast} readOnly={readOnly} />
+        <ContactField kind="email" leadId={c.id} value={c.email} onSaved={contactSaved} setToast={setToast} readOnly={readOnly} />
+        <AddressField leadId={c.id} value={{ address: c.address, city: c.city, state: c.state, zip: c.zip }} onSaved={contactSaved} setToast={setToast} readOnly={readOnly} />
         <SourceField
           leadId={c.id}
           value={c.source}
           options={lookupOptions.sources}
           onSaved={cols => { setData(d => d ? { ...d, client: { ...d.client, ...cols } } : d); onLeadPatched(c.id, cols) }}
           setToast={setToast}
+          readOnly={readOnly}
         />
         <ReferrerField
           lead={c}
@@ -342,6 +343,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
           onSaved={cols => onLeadPatched(c.id, cols)}
           onPartnerCreated={onPartnerCreated}
           setToast={setToast}
+          readOnly={readOnly}
         />
         {/* Reverse direction — leads this client referred. The count is
             the FULL server total (referred_us_total); the rows are the
@@ -387,6 +389,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         contacts={data.contacts || []}
         onChange={next => setData(d => d ? { ...d, contacts: next } : d)}
         setToast={setToast}
+        readOnly={readOnly}
       />
 
       {/* Tags — live popover (build 3): lead_tags junction writes over
@@ -397,6 +400,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         options={lookupOptions.clientTags || []}
         onChange={next => setData(d => d ? { ...d, tags: next } : d)}
         setToast={setToast}
+        readOnly={readOnly}
       />
 
       {/* Assigned-to moved to the ENGAGEMENT (engagement-assigned-to-multi
@@ -416,6 +420,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
           onLeadPatched(c.id, cols)
         }}
         setToast={setToast}
+        readOnly={readOnly}
       />
     </div>
   )
@@ -426,7 +431,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', minWidth: 0 }}>
       {/* Pinned buzz — the client's standing note; the panel's masthead
           links here (View profile) rather than duplicating it. */}
-      <PinnedBuzz notes={buzz} onPost={addBuzzNote} emptyLabel="Add a note about this client" nowMs={nowMs} />
+      <PinnedBuzz notes={buzz} onPost={addBuzzNote} emptyLabel="Add a note about this client" nowMs={nowMs} readOnly={readOnly} />
 
       {/* Request details — pre-Jobber people whose request hasn't founded
           an engagement yet (the SAME field the Inbox edits and
@@ -434,7 +439,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
       {!jobberLinked && (
         <div>
           <MicroLabel>Request details</MicroLabel>
-          <EditableDesc text={c.request_details} showEmpty onSave={saveReqDetails} />
+          <EditableDesc text={c.request_details} showEmpty onSave={saveReqDetails} readOnly={readOnly} />
         </div>
       )}
 
@@ -496,7 +501,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
                   </span>
                   {/* Reopen (resurrect) — Closed LOST only; re-derives the
                       open stage server-side. Closed Won is out of scope. */}
-                  {!won && (
+                  {!won && !readOnly && (
                     <button onClick={(ev) => reopenEngagement(e.id, ev)} disabled={busy} aria-label="Reopen engagement"
                       style={{ flexShrink: 0, border: T.border.control, background: T.surface.raised, borderRadius: T.radius.control, padding: '2px 8px', fontSize: '11px', fontWeight: 500, color: T.ink.secondary, cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
                       Reopen
@@ -521,7 +526,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
 
       {/* Recent activity — client-wide quick-glance slice + composer;
           the exhaustive merged stream is the Timeline tab. */}
-      <NotesStream label="Recent activity" items={stream} onPost={addNote} nowMs={nowMs} />
+      <NotesStream label="Recent activity" items={stream} onPost={addNote} nowMs={nowMs} readOnly={readOnly} />
     </div>
   )
 
@@ -550,9 +555,11 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             <IconPhone size={14} /> Call
           </a>
         )}
-        <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
-          Log touchpoint
-        </button>
+        {!readOnly && (
+          <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
+            Log touchpoint
+          </button>
+        )}
         {jobberLinked ? (
           jobberHref ? (
             <a href={jobberHref} target="_blank" rel="noreferrer" style={actionBtn('gray')}>
@@ -564,17 +571,19 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             </span>
           )
         ) : (
-          onSendToJobber && (
+          !readOnly && onSendToJobber && (
             <button style={actionBtn('accent')} disabled={busy} onClick={() => onSendToJobber(c.id)}>
               <IconSend size={14} /> Send to Jobber
             </button>
           )
         )}
-        <button style={actionBtn('gray')} disabled={busy} onClick={newEngagement}>
-          <IconPlus size={14} /> New engagement
-        </button>
+        {!readOnly && (
+          <button style={actionBtn('gray')} disabled={busy} onClick={newEngagement}>
+            <IconPlus size={14} /> New engagement
+          </button>
+        )}
       </ActionRow>
-      {touchOpen && (
+      {touchOpen && !readOnly && (
         <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <select value={touchMethod} onChange={e => setTouchMethod(e.target.value)}
             style={{ padding: '8px 10px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', background: T.surface.raised }}>
@@ -650,7 +659,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         {/* Jobber-owns-deletion rule (Kevin 7/10): linked records are
             never junkable here — Jobber's *_DESTROY webhooks are their
             only deletion path. CardMenu renders nothing on empty items. */}
-        <CardMenu items={jobberLinked ? [] : [{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]} />
+        <CardMenu items={(jobberLinked || readOnly) ? [] : [{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]} />
       </div>
 
       {/* Metric band — full-bleed money row (v4): Collected / Invoiced /
@@ -681,6 +690,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             locationUuid={c.location_uuid}
             setToast={setToast}
             onLeadPatched={onLeadPatched}
+            readOnly={readOnly}
           />
         )}
         {tab === 'files' && filesTab}

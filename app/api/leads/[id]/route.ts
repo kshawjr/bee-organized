@@ -22,6 +22,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { updateLead } from '@/lib/dual-write'
 import { isAdmin } from '@/lib/auth'
+import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { applyDripSideEffects } from '@/lib/drip-lifecycle'
 import { sendDripStep } from '@/lib/drip-send'
 import { mapLeadToPerson } from '@/lib/people-mapper'
@@ -219,11 +220,13 @@ export async function PATCH(
         { status: 403 }
       )
     }
-    // lite_users are read-only — block writes outright
-    if (hubUser.role === 'lite_user') {
-      return NextResponse.json({ error: 'forbidden_read_only_role' }, { status: 403 })
-    }
   }
+
+  // ─── Read-only guard (868kawwmh) ──────────────────────────────
+  // lite_user (role) and paused/inactive locations are read-only; a
+  // clean 403 before any write. past_due keeps full access during grace.
+  const roBlock = await readOnlyWriteBlock(hubUser, existing.location_uuid)
+  if (roBlock) return roBlock
 
   // ─── Validate + filter patch ──────────────────────────────────
   const patch: Record<string, unknown> = {}
@@ -552,10 +555,11 @@ export async function DELETE(
     if (hubUser.location_id !== existing.location_uuid) {
       return NextResponse.json({ error: 'forbidden_wrong_location' }, { status: 403 })
     }
-    if (hubUser.role === 'lite_user') {
-      return NextResponse.json({ error: 'forbidden_read_only_role' }, { status: 403 })
-    }
   }
+
+  // ─── Read-only guard (868kawwmh) ──────────────────────────────
+  const roBlock = await readOnlyWriteBlock(hubUser, existing.location_uuid)
+  if (roBlock) return roBlock
 
   // ─── Safety: only soft-deleted rows are eligible for hard delete ──
   if (!existing.is_junk) {

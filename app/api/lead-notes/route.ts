@@ -17,6 +17,7 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { readOnlyWriteBlock } from '@/lib/read-only-access'
 
 const VALID_KINDS = ['buzz', 'job', 'close', 'system'] as const
 type NoteKind = (typeof VALID_KINDS)[number]
@@ -93,6 +94,10 @@ export async function POST(req: Request) {
       )
     }
   }
+
+  // ─── Read-only guard (868kawwmh) ──────────────────────────────
+  const roBlock = await readOnlyWriteBlock(hubUser, lead.location_uuid)
+  if (roBlock) return roBlock
 
   // Optional engagement anchor (kind='job' engagement notes) — must be a
   // real engagement belonging to THIS lead, or the note is rejected.

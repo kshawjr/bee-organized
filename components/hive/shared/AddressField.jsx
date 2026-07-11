@@ -81,7 +81,7 @@ const INPUT_STYLE = {
   color: T.ink.primary, background: T.surface.raised, outline: 'none', boxSizing: 'border-box',
 }
 
-export default function AddressField({ leadId, value, onSaved = () => {}, setToast = () => {} }) {
+export default function AddressField({ leadId, value, onSaved = () => {}, setToast = () => {}, readOnly = false }) {
   // value: { address, city, state, zip } — the lead's four address columns.
   const [editing, setEditing] = useState(false)
   const [street, setStreet] = useState('')
@@ -180,13 +180,13 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
   }
 
   return display ? (
-    <p onClick={open} title="Edit address"
-      style={{ fontSize: '12px', color: T.ink.primary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, cursor: 'text' }}>
+    <p onClick={readOnly ? undefined : open} title={readOnly ? undefined : 'Edit address'}
+      style={{ fontSize: '12px', color: T.ink.primary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, cursor: readOnly ? 'default' : 'text' }}>
       <span style={{ color: T.ink.muted, display: 'inline-flex', flexShrink: 0 }}><IconMapPin size={13} /></span>
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{display}</span>
-      <EditPencil />
+      {!readOnly && <EditPencil />}
     </p>
-  ) : (
+  ) : readOnly ? null : (
     <p onClick={open} style={{ fontSize: '12px', color: T.ink.faint, display: 'flex', alignItems: 'center', gap: '7px', cursor: 'text' }}>
       <span style={{ display: 'inline-flex' }}><IconMapPin size={13} /></span>
       <span style={{ borderBottom: T.border.underline }}>add address</span>

@@ -34,6 +34,7 @@ export default function CloseEngagementConfirm({
   onClosed = () => {},            // (stage, patchJson) after the PATCH commits
   onCancel = () => {},            // no write happened — safe to snap back
   setToast = () => {},
+  readOnly = false,               // defensive — its trigger is gated upstream
 }) {
   const [closeAs, setCloseAs] = useState(initialCloseAs)
   const [closeReason, setCloseReason] = useState('lost_no_response')
@@ -93,7 +94,7 @@ export default function CloseEngagementConfirm({
           style={{ padding: '7px 12px', borderRadius: T.radius.control, border: 'none', background: 'transparent', fontSize: '12px', color: T.ink.muted, cursor: 'pointer', fontFamily: 'inherit' }}>
           Cancel
         </button>
-        <button onClick={confirmClose} disabled={busy || (closeAs === CLOSED_WON && !settled)}
+        <button onClick={confirmClose} disabled={readOnly || busy || (closeAs === CLOSED_WON && !settled)}
           style={{ padding: '7px 14px', borderRadius: T.radius.control, border: 'none', background: T.ink.primary, color: T.ink.inverse, fontSize: '12px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>
           Close as {closeAs === CLOSED_WON ? 'won' : 'lost'}
         </button>

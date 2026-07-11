@@ -347,7 +347,7 @@ function Row({ it, last, dashed, nowMs, expanded, onToggle, actionSlot }) {
   )
 }
 
-export default function Timeline({ leadId, engagementId = null, locationUuid = null, setToast = () => {}, onLeadPatched = () => {}, nowMs: nowMsProp = null }) {
+export default function Timeline({ leadId, engagementId = null, locationUuid = null, setToast = () => {}, onLeadPatched = () => {}, nowMs: nowMsProp = null, readOnly = false }) {
   const [agg, setAgg] = useState(null)
   const [drips, setDrips] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
@@ -463,6 +463,7 @@ export default function Timeline({ leadId, engagementId = null, locationUuid = n
     alignSelf: 'flex-start',
   }
   const actionSlotFor = (it) => {
+    if (readOnly) return null // read-only: rows stay visible, write actions hidden
     if (it.action === 'cancel_stage_email') {
       return (
         <button aria-label="Cancel scheduled email" disabled={busy} style={actionBtn}

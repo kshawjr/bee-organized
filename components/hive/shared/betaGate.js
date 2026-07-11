@@ -10,15 +10,45 @@
 // 'franchise'). Never gate on initialFranchiseRole or raw DB roles.
 // ─────────────────────────────────────────────────────────────
 
-// TODO before onboarding any lite_user or hitting past-due: beta ignores
-// readOnly — lite/past-due users get edit chrome with 403 writes. Must add
-// read-only mode to the beta surfaces before those user states exist.
-//
 // GO-LIVE 2026-07-09: gate opened — beta is the default for ALL roles.
 // Rollback = restore `return role === 'super_admin'`. Keep this function
 // (don't inline at call sites); it stays the single flip point.
 export function canSeeBetaBoard(role) {
   return true
+}
+
+// ─────────────────────────────────────────────────────────────
+// Read-only policy for the beta surfaces (868kawwmh). The beta
+// board is a WRITE surface; two user classes are look-but-don't-
+// touch and must reach it with every edit affordance hidden:
+//
+//   • lite_user — read-only by definition (their own location).
+//     mapRole lands DB `lite_user` on franchiseRole='viewer'; the
+//     client-side role/view-as pickers also emit 'light'/'readonly'.
+//     All three mean read-only.
+//   • paused / inactive locations — the subscription state machine
+//     drops a location to paused = read-only (recoverable).
+//
+// past_due is NOT read-only: it keeps FULL write access through its
+// 14-day grace window (crmStatus 'pastdue'); only 'inactive' (paused)
+// locks. And the full-access roles (super_admin, corporate/admin,
+// owner, manager) always write — including corporate managing a
+// paused location — so elevated roles short-circuit to writable.
+//
+// This is the single policy point (mirrors canSeeBetaBoard): callers
+// pass the mapRole vocabulary + crmStatus and thread the boolean into
+// the beta tree; the server enforces the same shape independently
+// (lib/read-only-access).
+const READ_ONLY_FRANCHISE_ROLES = ['viewer', 'light', 'readonly']
+
+export function resolveBetaReadOnly({ role, franchiseRole, crmStatus }) {
+  // Elevated roles are never read-only via this gate (they write on
+  // every location, paused ones included).
+  if (role === 'super_admin' || role === 'corporate') return false
+  if (READ_ONLY_FRANCHISE_ROLES.includes(franchiseRole)) return true
+  // Paused/inactive location → read-only for its owner/manager too.
+  // NOT 'pastdue' — grace-period customers keep writing.
+  return crmStatus === 'inactive'
 }
 
 // Landing-view policy — lives here so the flip point and its landing

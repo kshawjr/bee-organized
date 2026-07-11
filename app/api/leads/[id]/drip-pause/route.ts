@@ -16,6 +16,7 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { pauseActiveDripsForLead } from '@/lib/drip-lifecycle'
 
 export async function POST(
@@ -52,6 +53,10 @@ export async function POST(
       return NextResponse.json({ error: 'forbidden_read_only_role' }, { status: 403 })
     }
   }
+
+  // ─── Read-only guard (868kawwmh) ──────────────────────────────
+  const roBlock = await readOnlyWriteBlock(hubUser, lead.location_uuid)
+  if (roBlock) return roBlock
 
   // Row state first — it's what actually stops sends — then the flag.
   // A failed flag write is logged and surfaced but doesn't undo the

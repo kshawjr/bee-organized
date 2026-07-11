@@ -61,7 +61,7 @@ const FIELD = {
   },
 }
 
-export default function ContactField({ kind, leadId, value, onSaved = () => {}, setToast = () => {} }) {
+export default function ContactField({ kind, leadId, value, onSaved = () => {}, setToast = () => {}, readOnly = false }) {
   const f = FIELD[kind]
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -142,16 +142,16 @@ export default function ContactField({ kind, leadId, value, onSaved = () => {}, 
   }
 
   return value ? (
-    <p onClick={open} title={`Edit ${kind}`}
-      style={{ fontSize: '12px', color: T.ink.primary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, cursor: 'text' }}>
+    <p onClick={readOnly ? undefined : open} title={readOnly ? undefined : `Edit ${kind}`}
+      style={{ fontSize: '12px', color: T.ink.primary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, cursor: readOnly ? 'default' : 'text' }}>
       <span style={{ color: T.ink.muted, display: 'inline-flex', flexShrink: 0 }}><f.Icon size={13} /></span>
       <a className="bee-contact-link" href={f.href(value)} onClick={e => e.stopPropagation()}
         style={{ color: T.accent.fg, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {value}
       </a>
-      <EditPencil />
+      {!readOnly && <EditPencil />}
     </p>
-  ) : (
+  ) : readOnly ? null : (
     <p onClick={open} style={{ fontSize: '12px', color: T.ink.faint, display: 'flex', alignItems: 'center', gap: '7px', cursor: 'text' }}>
       <span style={{ display: 'inline-flex' }}><f.Icon size={13} /></span>
       <span style={{ borderBottom: T.border.underline }}>{f.empty}</span>

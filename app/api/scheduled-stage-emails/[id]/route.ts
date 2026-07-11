@@ -15,6 +15,7 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { readOnlyWriteBlock } from '@/lib/read-only-access'
 
 export async function PATCH(
   req: Request,
@@ -32,7 +33,6 @@ export async function PATCH(
     .eq('id', user.id)
     .single()
   if (!hubUser) return NextResponse.json({ error: 'no_hub_user_profile' }, { status: 403 })
-  if (hubUser.role === 'lite_user') return NextResponse.json({ error: 'forbidden' }, { status: 403 })
 
   let body: any = {}
   try { body = await req.json() } catch {
@@ -58,6 +58,13 @@ export async function PATCH(
   if (!isAdmin(hubUser.role) && hubUser.location_id !== lead.location_uuid) {
     return NextResponse.json({ error: 'forbidden_wrong_location' }, { status: 403 })
   }
+
+  // ─── Read-only guard (868kawwmh) ──────────────────────────────
+  // lite_user + paused/inactive locations blocked (mirrors the
+  // forbidden_read_only_role precedent — the prior inline lite check
+  // returned a bare 'forbidden'). past_due keeps full access.
+  const roBlock = await readOnlyWriteBlock(hubUser, lead.location_uuid)
+  if (roBlock) return roBlock
 
   if (row.sent_at) return NextResponse.json({ error: 'already_sent' }, { status: 409 })
 

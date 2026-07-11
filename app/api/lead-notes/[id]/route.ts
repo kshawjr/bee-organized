@@ -9,6 +9,7 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { readOnlyWriteBlock } from '@/lib/read-only-access'
 
 export async function DELETE(
   _req: Request,
@@ -50,6 +51,12 @@ export async function DELETE(
       { status: 403 }
     )
   }
+
+  // ─── Read-only guard (868kawwmh) ──────────────────────────────
+  // A read-only user (lite_user, or paused/inactive location) can't
+  // delete even a note they authored. past_due keeps full access.
+  const roBlock = await readOnlyWriteBlock(hubUser, note.location_uuid)
+  if (roBlock) return roBlock
 
   const isAuthor = note.user_id === hubUser.id
   const inLocation = hubUser.location_id === note.location_uuid

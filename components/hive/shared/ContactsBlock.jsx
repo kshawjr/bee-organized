@@ -30,7 +30,7 @@ const ROLE_PRESETS = ['Spouse', 'Partner', 'Family member', 'Assistant', 'Proper
 
 const inputStyle = { padding: '6px 9px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', background: T.surface.raised, outline: 'none', minWidth: 0 }
 
-function ContactForm({ initial = null, busy, err, onSave, onCancel, onDelete = null }) {
+function ContactForm({ initial = null, busy, err, onSave, onCancel, onDelete = null, readOnly = false }) {
   const [draft, setDraft] = useState({
     name: initial?.name || '', role: initial?.role || '',
     phone: initial?.phone || '', email: initial?.email || '',
@@ -51,7 +51,7 @@ function ContactForm({ initial = null, busy, err, onSave, onCancel, onDelete = n
       {err && <p style={{ fontSize: '11px', color: T.state.danger.fg }}>{err}</p>}
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
         <InlineEditControls busy={busy} onSave={() => onSave(draft)} onCancel={onCancel} />
-        {onDelete && (
+        {onDelete && !readOnly && (
           <button disabled={busy} onClick={onDelete}
             style={{ marginLeft: 'auto', border: 'none', background: 'transparent', fontSize: '11px', color: T.state.danger.fg, cursor: 'pointer', fontFamily: 'inherit', padding: '2px 4px' }}>
             Remove contact
@@ -62,7 +62,7 @@ function ContactForm({ initial = null, busy, err, onSave, onCancel, onDelete = n
   )
 }
 
-export default function ContactsBlock({ leadId, contacts = [], onChange = () => {}, setToast = () => {} }) {
+export default function ContactsBlock({ leadId, contacts = [], onChange = () => {}, setToast = () => {}, readOnly = false }) {
   const [editingId, setEditingId] = useState(null) // contact id | 'new' | null
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
@@ -112,17 +112,17 @@ export default function ContactsBlock({ leadId, contacts = [], onChange = () => 
     <div>
       <MicroLabel>Contacts{contacts.length ? ` · ${contacts.length}` : ''}</MicroLabel>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-        {contacts.map(ct => editingId === ct.id ? (
+        {contacts.map(ct => (editingId === ct.id && !readOnly) ? (
           <ContactForm key={ct.id} initial={ct} busy={busy} err={err}
-            onSave={(d) => save(d, ct)} onCancel={close} onDelete={() => remove(ct)} />
+            onSave={(d) => save(d, ct)} onCancel={close} onDelete={() => remove(ct)} readOnly={readOnly} />
         ) : (
-          <div key={ct.id} onClick={() => { setErr(null); setEditingId(ct.id) }} title="Edit contact"
-            style={{ fontSize: '12px', color: T.ink.primary, cursor: 'pointer' }}>
+          <div key={ct.id} onClick={readOnly ? undefined : () => { setErr(null); setEditingId(ct.id) }} title={readOnly ? undefined : 'Edit contact'}
+            style={{ fontSize: '12px', color: T.ink.primary, cursor: readOnly ? 'default' : 'pointer' }}>
             <p style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {ct.name}{ct.role ? <span style={{ color: T.ink.muted }}> · {ct.role}</span> : null}
               </span>
-              <EditPencil />
+              {!readOnly && <EditPencil />}
             </p>
             <p style={{ display: 'flex', gap: '10px', marginTop: '1px' }}>
               {ct.phone && (
@@ -140,9 +140,9 @@ export default function ContactsBlock({ leadId, contacts = [], onChange = () => 
             </p>
           </div>
         ))}
-        {editingId === 'new' ? (
+        {editingId === 'new' && !readOnly ? (
           <ContactForm busy={busy} err={err} onSave={(d) => save(d)} onCancel={close} />
-        ) : (
+        ) : readOnly ? null : (
           <button onClick={() => { setErr(null); setEditingId('new') }}
             style={{ ...pillStyle({ dashed: true }), alignSelf: 'flex-start', cursor: 'pointer' }}>
             + Add contact

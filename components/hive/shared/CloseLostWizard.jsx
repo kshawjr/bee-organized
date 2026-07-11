@@ -28,7 +28,7 @@ import { T } from './tokens'
 
 const STEPS = [{ key: 'reason', label: 'Reason' }, { key: 'followup', label: 'Follow-up' }]
 
-export default function CloseLostWizard({ engagementId, leadId, isMobile = false, onCancel = () => {}, onClosed = () => {}, setToast = () => {} }) {
+export default function CloseLostWizard({ engagementId, leadId, isMobile = false, onCancel = () => {}, onClosed = () => {}, setToast = () => {}, readOnly = false }) {
   const [step, setStep] = useState(0)
   const [reason, setReason] = useState(CLOSE_LOST_REASONS[0].value)
   const [note, setNote] = useState('')
@@ -128,7 +128,7 @@ export default function CloseLostWizard({ engagementId, leadId, isMobile = false
   ) : (
     <>
       <button onClick={() => setStep(0)} disabled={busy} style={wizQuietBtn()}>Back</button>
-      <button onClick={confirm} disabled={busy || !followUpReady} style={wizPrimaryBtn(busy || !followUpReady)}>
+      <button onClick={confirm} disabled={readOnly || busy || !followUpReady} style={wizPrimaryBtn(readOnly || busy || !followUpReady)}>
         Close as lost
       </button>
     </>
