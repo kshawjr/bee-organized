@@ -27,11 +27,16 @@
 // `address` is composeLeadAddress's full string (the import's storage
 // convention). The route writes the audit touchpoint, keeps the
 // addresses jsonb coherent, and — for Jobber-linked leads — pushes the
-// BILLING address via the write-back rails. The toast tells the whole
-// truth from address_writeback:
-//   'Address updated · synced to Jobber'            (updated/added)
-//   'Address updated'                               (not linked / already there)
-//   'Address updated · Jobber sync failed — saved in Bee Hub only'
+// BILLING address AND (managed blast radius: exactly-one-property
+// clients only) the PROPERTY/service address. The toast tells the
+// whole truth from address_writeback { billing, property }:
+//   both/either synced   → '· synced to Jobber'
+//   multiple properties  → '· synced to Jobber billing — client has
+//                           multiple properties, service address not
+//                           changed' (deliberate skip, said out loud)
+//   one target failed    → '· Jobber sync partial — …'
+//   nothing landed       → '· Jobber sync failed — saved in Bee Hub only'
+//   not linked/all no-op → plain 'Address updated'
 // Clearing all fields is allowed ('Address removed') — Bee Hub only;
 // the write-back never deletes Jobber-side data by design.
 // ─────────────────────────────────────────────────────────────
@@ -42,6 +47,32 @@ import { IconMapPin } from '@/components/ui/icons'
 import { EditPencil, InlineEditControls } from './inlineEdit'
 import AddressAutofill from './AddressAutofill'
 import { composeLeadAddress, deriveStreet, formatLeadAddress, normalizeAddressKey } from '@/lib/lead-address'
+
+// The whole-truth suffix from the per-target write-back outcomes.
+// Exported for the toast-truth tests.
+export function syncSuffix(wb) {
+  if (!wb) return ''
+  const bOk = wb.billing === 'updated' || wb.billing === 'added'
+  const bFail = wb.billing === 'failed'
+  const pOk = wb.property === 'updated'
+  const pFail = wb.property === 'failed'
+  if (wb.property === 'skipped_multiple') {
+    // The deliberate skip is said out loud (policy) — unless billing
+    // ALSO failed, in which case nothing landed at all.
+    return bFail
+      ? ' · Jobber sync failed — saved in Bee Hub only'
+      : ' · synced to Jobber billing — client has multiple properties, service address not changed'
+  }
+  if (bFail && pFail) return ' · Jobber sync failed — saved in Bee Hub only'
+  if (pFail) return ' · Jobber sync partial — billing synced, service address failed'
+  if (bFail) {
+    return pOk
+      ? ' · Jobber sync partial — service address synced, billing failed'
+      : ' · Jobber sync failed — saved in Bee Hub only'
+  }
+  if (bOk || pOk) return ' · synced to Jobber'
+  return '' // everything already converged — no claim to make
+}
 
 const INPUT_STYLE = {
   minWidth: 0, padding: '5px 8px', border: '0.5px solid rgba(0,0,0,0.15)',
@@ -93,14 +124,7 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
       setEditing(false)
       onSaved(cols, j)
       const verb = !display ? 'added' : !composed ? 'removed' : 'updated'
-      const outcome = j?.address_writeback
-      const msg =
-        outcome === 'updated' || outcome === 'added'
-          ? `Address ${verb} · synced to Jobber`
-          : outcome === 'failed'
-            ? `Address ${verb} · Jobber sync failed — saved in Bee Hub only`
-            : `Address ${verb}`
-      setToast({ kind: 'success', msg })
+      setToast({ kind: 'success', msg: `Address ${verb}${syncSuffix(j?.address_writeback)}` })
     } catch (e) {
       // The standard: never silently drop a draft — stay open with the error.
       setErr(`Save failed: ${e.message}`)

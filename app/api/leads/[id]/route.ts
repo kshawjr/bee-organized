@@ -29,7 +29,7 @@ import { diffContactPatch, normalizePhoneDigits, normalizeEmail, type ContactWri
 import { syncLeadContactToJobber } from '@/lib/jobber-contact-sync'
 import { diffAddressPatch } from '@/lib/lead-address'
 import { syncLeadAddressToJobber } from '@/lib/jobber-address-sync'
-import type { AddressWritebackOutcome } from '@/lib/jobber-address-writeback'
+import type { AddressWriteback } from '@/lib/jobber-address-writeback'
 
 const VALID_STAGES = [
   'New',
@@ -353,26 +353,9 @@ export async function PATCH(
     if (tpRow) contactActivity.push(tpRow)
   }
 
-  // Address edits get the same audit trail — one entry per REAL change
-  // (normalized display compare: a formatting-only reshuffle writes no
-  // entry, exactly as it fires no Jobber mutation). Label carries the
-  // new normalized display; notes retains the old one.
-  if (addrDiff.changed) {
-    const { data: tpRow } = await supabaseService
-      .from('touchpoints')
-      .insert({
-        lead_id: id,
-        location_uuid: existing.location_uuid,
-        kind: 'system',
-        label: addrDiff.display ? `Address updated → ${addrDiff.display}` : 'Address removed',
-        notes: addrDiff.prevDisplay ? `was ${addrDiff.prevDisplay}` : null,
-        user_id: hubUser.id,
-        occurred_at: new Date().toISOString(),
-      })
-      .select('id, kind, method, label, notes, occurred_at, engagement_id, user_id')
-      .single()
-    if (tpRow) contactActivity.push(tpRow)
-  }
+  // Address audit is written AFTER the Jobber sync (below) so its note
+  // can carry the sync annotations (multi-property skip, upcoming
+  // visits) — see the block after the write-back.
 
   // ─── Drip lifecycle side-effects ─────────────────────────────
   // Fire-and-forget by default: start on stage→'New', stop on exit,
@@ -439,12 +422,14 @@ export async function PATCH(
     })
   }
 
-  // ─── Jobber BILLING-address write-back on real address change ─
-  // Same rails, address flavor (lib/jobber-address-sync): fetch-current
-  // → diff → at most one clientEdit { billingAddress }, never a property
-  // mutation. A clearing edit never pushes (we don't erase Jobber-side
-  // data). Awaited but non-fatal; outcome rides the response.
-  let addressWriteback: AddressWritebackOutcome | null = null
+  // ─── Jobber address write-back on real address change ─────────
+  // Same rails, address flavor (lib/jobber-address-sync): ONE fetch-
+  // current → per-target diff → clientEdit { billingAddress } + —
+  // managed blast radius — propertyEdit on the client's SINGLE property
+  // (multiple → deliberate skip; zero → nothing). A clearing edit never
+  // pushes (we don't erase Jobber-side data). Awaited but non-fatal;
+  // per-target outcomes ride the response.
+  let addressWriteback: AddressWriteback | null = null
   if (addrDiff.changed && !addrDiff.cleared && existing.jobber_client_id && existing.location_id) {
     addressWriteback = await syncLeadAddressToJobber({
       leadId: id,
@@ -452,6 +437,37 @@ export async function PATCH(
       jobberClientId: String(existing.jobber_client_id),
       target: { street: addrDiff.street, city: addrDiff.city, state: addrDiff.state, zip: addrDiff.zip },
     })
+  }
+
+  // ─── Address audit touchpoint (after sync — the note tells the ──
+  // whole truth). One entry per REAL change (normalized display
+  // compare: a formatting-only reshuffle writes no entry, exactly as it
+  // fires no Jobber mutation). Label carries the new normalized
+  // display; notes retains the old value plus the sync annotations the
+  // policy requires said explicitly.
+  if (addrDiff.changed) {
+    const noteParts: string[] = []
+    if (addrDiff.prevDisplay) noteParts.push(`was ${addrDiff.prevDisplay}`)
+    if (addressWriteback?.property === 'skipped_multiple') {
+      noteParts.push('synced to Jobber billing — client has multiple properties, service address not changed')
+    }
+    if (addressWriteback?.upcoming_visits) {
+      noteParts.push('property has upcoming visits — verify schedule')
+    }
+    const { data: tpRow } = await supabaseService
+      .from('touchpoints')
+      .insert({
+        lead_id: id,
+        location_uuid: existing.location_uuid,
+        kind: 'system',
+        label: addrDiff.display ? `Address updated → ${addrDiff.display}` : 'Address removed',
+        notes: noteParts.length ? noteParts.join(' · ') : null,
+        user_id: hubUser.id,
+        occurred_at: new Date().toISOString(),
+      })
+      .select('id, kind, method, label, notes, occurred_at, engagement_id, user_id')
+      .single()
+    if (tpRow) contactActivity.push(tpRow)
   }
 
   // ─── Return fresh row ─────────────────────────────────────────

@@ -277,31 +277,76 @@ describe('AddressField — the toast tells the whole truth', () => {
     await click(saveBtn(host)!)
   }
 
-  it("address_writeback updated → 'Address updated · synced to Jobber'", async () => {
-    installFetch({ patchJson: { address_writeback: 'updated' } })
+  const wb = (billing: string, property: string, upcoming_visits = false) =>
+    ({ address_writeback: { billing, property, upcoming_visits } })
+
+  it("both targets landed → 'Address updated · synced to Jobber'", async () => {
+    installFetch({ patchJson: wb('updated', 'updated') })
     const { host, unmount } = await mountField()
     await editAndSave(host)
     expect(toasts[0]).toEqual({ kind: 'success', msg: 'Address updated · synced to Jobber' })
     await unmount()
   })
 
-  it("added outcome on a previously-empty lead → 'Address added · synced to Jobber'", async () => {
-    installFetch({ patchJson: { address_writeback: 'added' } })
+  it("billing added on a previously-empty lead, no properties → 'Address added · synced to Jobber'", async () => {
+    installFetch({ patchJson: wb('added', 'none') })
     const { host, unmount } = await mountField({ address: null, city: null, state: null, zip: null })
     await editAndSave(host)
     expect(toasts[0]).toEqual({ kind: 'success', msg: 'Address added · synced to Jobber' })
     await unmount()
   })
 
-  it("failed → 'Jobber sync failed — saved in Bee Hub only'", async () => {
-    installFetch({ patchJson: { address_writeback: 'failed' } })
+  it('MULTIPLE properties → the deliberate skip is said out loud (exact policy copy)', async () => {
+    installFetch({ patchJson: wb('updated', 'skipped_multiple') })
+    const { host, unmount } = await mountField()
+    await editAndSave(host)
+    expect(toasts[0].msg).toBe(
+      'Address updated · synced to Jobber billing — client has multiple properties, service address not changed',
+    )
+    await unmount()
+  })
+
+  it("property failed, billing landed → partial truth ('billing synced, service address failed')", async () => {
+    installFetch({ patchJson: wb('updated', 'failed') })
+    const { host, unmount } = await mountField()
+    await editAndSave(host)
+    expect(toasts[0].msg).toBe('Address updated · Jobber sync partial — billing synced, service address failed')
+    await unmount()
+  })
+
+  it("billing failed, property landed → partial truth ('service address synced, billing failed')", async () => {
+    installFetch({ patchJson: wb('failed', 'updated') })
+    const { host, unmount } = await mountField()
+    await editAndSave(host)
+    expect(toasts[0].msg).toBe('Address updated · Jobber sync partial — service address synced, billing failed')
+    await unmount()
+  })
+
+  it("both failed → 'Jobber sync failed — saved in Bee Hub only'", async () => {
+    installFetch({ patchJson: wb('failed', 'failed') })
     const { host, unmount } = await mountField()
     await editAndSave(host)
     expect(toasts[0].msg).toBe('Address updated · Jobber sync failed — saved in Bee Hub only')
     await unmount()
   })
 
-  it('no writeback (unlinked / unchanged in Jobber) → plain truth, no Jobber claim', async () => {
+  it('multi-property skip AND billing failed → nothing landed, failed copy (not the skip copy)', async () => {
+    installFetch({ patchJson: wb('failed', 'skipped_multiple') })
+    const { host, unmount } = await mountField()
+    await editAndSave(host)
+    expect(toasts[0].msg).toBe('Address updated · Jobber sync failed — saved in Bee Hub only')
+    await unmount()
+  })
+
+  it('everything already converged in Jobber → plain truth, no sync claim', async () => {
+    installFetch({ patchJson: wb('unchanged', 'unchanged') })
+    const { host, unmount } = await mountField()
+    await editAndSave(host)
+    expect(toasts[0].msg).toBe('Address updated')
+    await unmount()
+  })
+
+  it('no writeback (unlinked lead) → plain truth, no Jobber claim', async () => {
     installFetch()
     const { host, unmount } = await mountField()
     await editAndSave(host)
