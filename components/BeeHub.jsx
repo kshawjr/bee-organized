@@ -13452,8 +13452,8 @@ const TOUCHPOINT_TYPES = [
 // PartnersContext / CompaniesContext. See App() for the persistence helpers.
 
 
-function partnerStageConf(key) { return PARTNER_STAGES.find(s=>s.key===key)||PARTNER_STAGES[0] }
-function specialtyConf(id) { return SPECIALTIES.find(s=>s.id===id) }
+function partnerStageConf(key) { const stages=getPartnerStages(); return stages.find(s=>s.key===key)||stages[0] }
+function specialtyConf(id) { return getSpecialties().find(s=>s.id===id) }
 
 // ─── Add Partner Modal ────────────────────────────────────────────────────────
 // ─── Business Card Viewer Modal ───────────────────────────────────────────────
@@ -13762,7 +13762,7 @@ function AddPartnerModal({ onAdd, onClose, defaultType='partner', defaultName=''
             <div>
             <label style={lbl}>Specialty / Industry <span style={{ fontSize:'10px', color:'#8a9e9a', textTransform:'none', letterSpacing:0, fontWeight:400 }}>— select all that apply</span></label>
             <div style={{ display:'grid', gap:'6px', maxHeight:'200px', overflowY:'auto', padding:'2px' }}>
-              {SPECIALTIES.map(s=>{
+              {getSpecialties().map(s=>{
                 const active = form.specialties.includes(s.id)
                 return (
                   <button key={s.id} onClick={()=>toggleSpec(s.id)} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'9px 12px', borderRadius:'9px', cursor:'pointer', border:'1.5px solid', borderColor:active?s.color+'60':'rgba(0,0,0,0.08)', background:active?s.bg:'white', fontFamily:'inherit', textAlign:'left' }}>
@@ -13810,7 +13810,7 @@ function TouchpointPopup({ partner, onAdd, onClose }) {
 
   function save() {
     if (!type) return
-    const t = TOUCHPOINT_TYPES.find(x=>x.key===type)
+    const t = getTouchpointTypes().find(x=>x.key===type)
     onAdd({ type, label:`${t.label}${note?' - '+note:''}`, ts:'Just now', user:'You' })
     onClose()
   }
@@ -13825,7 +13825,7 @@ function TouchpointPopup({ partner, onAdd, onClose }) {
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'7px', marginBottom:'1rem' }}>
-          {TOUCHPOINT_TYPES.map(t=>(
+          {getTouchpointTypes().map(t=>(
             <button key={t.key} onClick={()=>setType(t.key)} style={{ padding:'10px 12px', borderRadius:'10px', cursor:'pointer', border:'1.5px solid', borderColor:type===t.key?'#a8c9c4':'rgba(0,0,0,0.08)', background:type===t.key?'rgba(168,201,196,0.12)':'white', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'8px', fontSize:'13px', fontWeight:type===t.key?600:400, color:'#1a2e2b' }}>
               <span style={{ fontSize:'16px' }}>{t.icon}</span>{t.label}
             </button>
@@ -13854,7 +13854,7 @@ function PartnerStagePopup({ partner, onSave, onClose }) {
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
         </div>
         <div style={{ display:'grid', gap:'7px', marginBottom:'1.25rem' }}>
-          {PARTNER_STAGES.map(s=>(
+          {getPartnerStages().map(s=>(
             <button key={s.key} onClick={()=>setStage(s.key)} style={{ padding:'11px 14px', background:stage===s.key?s.bg:'white', border:`1.5px solid ${stage===s.key?s.color+'60':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
               <span style={{ fontSize:'18px' }}>{s.icon}</span>
               <span style={{ fontSize:'13px', fontWeight:stage===s.key?600:400, color:stage===s.key?s.color:'#1a2e2b' }}>{s.label}</span>
@@ -13945,7 +13945,7 @@ function PartnerSpecialtyPopup({ partner, onSave, onClose }) {
         </div>
         <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'1rem' }}>Select all that apply</p>
         <div style={{ display:'grid', gap:'6px', marginBottom:'1.25rem' }}>
-          {SPECIALTIES.map(s=>{
+          {getSpecialties().map(s=>{
             const active = selected.includes(s.id)
             return (
               <button key={s.id} onClick={()=>toggle(s.id)} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 14px', background:active?s.bg:'white', border:`1.5px solid ${active?s.color+'60':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit' }}>
@@ -15066,7 +15066,7 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
               {partnerTab==='partners'&&<div>
                 <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>Stage</p>
                 <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
-                  {PARTNER_STAGES.map(s=>{ const on=stageFilter===s.key; return(
+                  {getPartnerStages().map(s=>{ const on=stageFilter===s.key; return(
                     <button key={s.key} onClick={()=>setStageFilter(on?'':s.key)} style={{ padding:'5px 12px', borderRadius:'20px', cursor:'pointer', background:on?s.bg:'white', border:'1.5px solid '+(on?s.color+'50':'rgba(0,0,0,0.08)'), fontFamily:'inherit', fontSize:'12px', fontWeight:on?600:400, color:on?s.color:'#4a5e5a' }}>
                       {s.icon} {s.label}
                     </button>
@@ -15090,7 +15090,7 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
               <div>
                 <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>Specialty</p>
                 <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
-                  {SPECIALTIES.map(s=>{ const on=specFilter===s.id; return(
+                  {getSpecialties().map(s=>{ const on=specFilter===s.id; return(
                     <button key={s.id} onClick={()=>setSpecFilter(on?'':s.id)} style={{ padding:'5px 12px', borderRadius:'20px', cursor:'pointer', background:on?s.bg:'white', border:'1.5px solid '+(on?s.color+'40':'rgba(0,0,0,0.08)'), fontFamily:'inherit', fontSize:'12px', fontWeight:on?600:400, color:on?s.color:'#4a5e5a' }}>
                       {s.label}
                     </button>
