@@ -11376,26 +11376,92 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   // Pass 2 — opts.activeStepOpen lets callers override the captured closure
   // value, needed when setActiveStepOpen was just called in the same handler
   // (the new state isn't visible in this closure until next render).
-  function persistStep(stepId, metadata, opts) {
-    if (typeof window === 'undefined') return
-    if (!currentUserCtx?.id) return
+  // Returns { ok, completedSteps? }. NEVER throws — a network error resolves
+  // to { ok:false } so callers can surface it instead of it vanishing. The
+  // fail-silent bug this replaced was a bare fire-and-forget whose only .catch
+  // caught network errors (fetch doesn't reject on 4xx/5xx), so a route reject
+  // was invisible AND the completion was never persisted (employee_setup writes
+  // only the audit log, which the client had no read-back path for).
+  async function persistStep(stepId, metadata, opts) {
+    if (typeof window === 'undefined') return { ok: false }
+    // view-as / demo paths (no real user) intentionally skip the network and
+    // are treated as success so local-only flows still advance.
+    if (!currentUserCtx?.id) return { ok: true }
     const aso = opts && Object.prototype.hasOwnProperty.call(opts, 'activeStepOpen')
       ? opts.activeStepOpen
       : activeStepOpen
-    fetch('/api/onboarding/progress', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        step: stepId,
-        metadata: metadata || {},
-        activeStepOpen: aso,
-      }),
-    }).catch(err => console.error('[persistStep]', stepId, err?.message || err))
+    try {
+      const res = await fetch('/api/onboarding/progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          step: stepId,
+          metadata: metadata || {},
+          activeStepOpen: aso,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        console.error('[persistStep]', stepId, res.status, json?.error || '')
+        return { ok: false }
+      }
+      return { ok: true, completedSteps: json?.completedSteps || null }
+    } catch (err) {
+      console.error('[persistStep]', stepId, err?.message || err)
+      return { ok: false }
+    }
   }
 
-  function markDone(id, metadata)  {
+  // Union-merge a server-authoritative { [step]: true } map into local state.
+  // Only adds completions, so it can never regress an existing seed.
+  function mergeCompletedSteps(server) {
+    if (!server) return
+    setCompletedSteps(prev => {
+      let changed = false
+      const next = { ...prev }
+      for (const k of Object.keys(server)) {
+        if (server[k] && !next[k]) { next[k] = true; changed = true }
+      }
+      return changed ? next : prev
+    })
+  }
+
+  // Restore completed steps from the authoritative audit log on mount. This is
+  // the read-back path for employee_setup (manager / lite_user), whose progress
+  // is NOT mirrored into the owner-owned locations.onboarding_state cache the
+  // lazy initializer seeds from — without it their completions reverted to
+  // "0 of N" on every reload.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!currentUserCtx?.id) return
+    let cancelled = false
+    fetch('/api/onboarding/progress')
+      .then(res => (res.ok ? res.json() : null))
+      .then(json => { if (!cancelled) mergeCompletedSteps(json?.completedSteps) })
+      .catch(err => console.error('[onboarding hydrate]', err?.message || err))
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUserCtx?.id])
+
+  // markDone is the checklist "mark complete" path. Optimistically flip the
+  // step, persist, and — critically — FAIL LOUD: if the save is rejected, roll
+  // the step back, reopen it, and toast an error instead of silently appearing
+  // to do nothing. On success, reconcile against the server's authoritative set.
+  async function markDone(id, metadata)  {
     setCompletedSteps(prev=>({...prev,[id]:true}))
-    persistStep(id, metadata)
+    const r = await persistStep(id, metadata)
+    if (!r.ok) {
+      setCompletedSteps(prev => {
+        if (!prev[id]) return prev
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+      setActiveStepOpen(id)
+      setToast({ kind: 'error', msg: "Couldn't save your progress — please try again" })
+      return
+    }
+    mergeCompletedSteps(r.completedSteps)
   }
   function isDone(id)    { return !!completedSteps[id] }
   function isLocked(id)  {
@@ -11536,6 +11602,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
           )
         })}
       </div>
+      {toast && <InlineToast {...toast} />}
     </div>
   )
 
