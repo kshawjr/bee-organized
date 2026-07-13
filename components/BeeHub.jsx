@@ -16573,6 +16573,32 @@ function AddStepInline({ pathId, order, templates, onSave, onCancel, smsEnabled 
 }
 
 
+// ─── Jobber connection status derivation ──────────────────────────────────────
+// Single source of truth for the three-state Jobber badge. The stored
+// `jobber_connected` boolean only flips at OAuth callback / manual Disconnect —
+// it NEVER reflects token validity, so a location keeps showing "Connected"
+// while its refresh token is dead (the 2-month token-death bug that this hid).
+// Derive the real status from the token-health signals that already exist:
+//   connected          — connected AND token not expired AND status not RECONNECT REQUIRED
+//   reconnect_required — connected BUT token_expiry is past OR last_sync_status
+//                        starts with "RECONNECT REQUIRED" (the fail-loud 401 stamp)
+//   disconnected       — never connected / manually disconnected
+// The three location shapes name these fields differently (currentLocationCtx is
+// snake_case, initialLocations/selectedLoc mixes camel + snake, ALL_LOCATIONS is
+// a mock with neither), so callers pass normalized values here.
+export function deriveJobberStatus({ connected, tokenExpiry, lastSyncStatus }) {
+  if (!connected) return 'disconnected'
+  // token_expiry is stored as epoch-ms (string or number); mirror the parse in
+  // lib/jobber.ts getValidJobberToken so "expired" means the same thing.
+  const expiryMs = (tokenExpiry !== null && tokenExpiry !== undefined && tokenExpiry !== '')
+    ? parseInt(tokenExpiry, 10) : 0
+  const expired = expiryMs > 0 && Date.now() >= expiryMs
+  const reconnectStamp = typeof lastSyncStatus === 'string'
+    && lastSyncStatus.startsWith('RECONNECT REQUIRED')
+  if (expired || reconnectStamp) return 'reconnect_required'
+  return 'connected'
+}
+
 // ─── Jobber Connection Card ───────────────────────────────────────────────────
 function JobberConnectionCard({ settings, updateLocation }) {
   const [status, setStatus]       = useState(settings.location.jobberStatus||'disconnected')
@@ -16620,10 +16646,15 @@ function JobberConnectionCard({ settings, updateLocation }) {
   }
 
   const statusConf = {
-    connected:    { color:'#22c55e', bg:'rgba(34,197,94,0.08)',  border:'rgba(34,197,94,0.2)',  icon:'✅', label:'Connected'     },
-    disconnected: { color:'#ef4444', bg:'rgba(239,68,68,0.08)',  border:'rgba(239,68,68,0.2)',  icon:'❌', label:'Disconnected'  },
+    connected:          { color:'#22c55e', bg:'rgba(34,197,94,0.08)',  border:'rgba(34,197,94,0.2)',  icon:'✅', label:'Connected'          },
+    reconnect_required: { color:'#d97706', bg:'rgba(217,119,6,0.10)',  border:'rgba(217,119,6,0.3)',  icon:'⚠️', label:'Reconnect required'  },
+    disconnected:       { color:'#ef4444', bg:'rgba(239,68,68,0.08)',  border:'rgba(239,68,68,0.2)',  icon:'❌', label:'Disconnected'       },
   }
   const sc = statusConf[status]||statusConf.disconnected
+  // "Connected" account exists (green) OR token has gone stale (amber) — both
+  // show the workspace + Disconnect/Reconnect controls; only a truly
+  // disconnected location shows the initial Connect button.
+  const hasConnection = status==='connected' || status==='reconnect_required'
 
   return (
     <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', border:'1px solid rgba(0,0,0,0.07)', background:'white' }}>
@@ -16635,10 +16666,12 @@ function JobberConnectionCard({ settings, updateLocation }) {
         <div style={{ flex:1, minWidth:0 }}>
           <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Jobber</p>
           <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-            {status==='connected' ? 'Syncing clients, jobs & invoices' : 'Not connected'}
+            {status==='connected' ? 'Syncing clients, jobs & invoices'
+              : status==='reconnect_required' ? 'Token expired — reconnect to resume syncing'
+              : 'Not connected'}
           </p>
         </div>
-        {status==='connected' ? (
+        {hasConnection ? (
           <span style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:sc.bg, color:sc.color, border:`1px solid ${sc.border}`, fontWeight:600, flexShrink:0 }}>{sc.icon} {sc.label}</span>
         ) : (
           <button onClick={goConnect} style={{ padding:'6px 12px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', flexShrink:0 }}>
@@ -16646,8 +16679,13 @@ function JobberConnectionCard({ settings, updateLocation }) {
           </button>
         )}
       </div>
-      {status==='connected'&&(
+      {hasConnection&&(
         <div style={{ padding:'9px 14px 11px', borderTop:'1px solid rgba(0,0,0,0.05)', background:'rgba(0,0,0,0.015)' }}>
+          {status==='reconnect_required'&&(
+            <div style={{ marginBottom:'9px', padding:'8px 10px', borderRadius:'8px', background:sc.bg, border:`1px solid ${sc.border}` }}>
+              <p style={{ fontSize:'11px', color:sc.color, fontWeight:600 }}>⚠️ Jobber rejected this connection — reconnect to resume syncing.</p>
+            </div>
+          )}
           <p style={{ fontSize:'11px', color:'#5a6e6a' }}>
             <span style={{ color:'#8a9e9a' }}>Workspace: </span>
             {accountName
@@ -18604,7 +18642,11 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
       timezone:        currentLocationCtx.timezone || '',
       reviewsLink:     currentLocationCtx.reviews_link || '',
       bookingLink:     currentLocationCtx.calendar_link || '',
-      jobberStatus:    currentLocationCtx.jobber_connected ? 'connected' : 'disconnected',
+      jobberStatus:    deriveJobberStatus({
+                         connected:      currentLocationCtx.jobber_connected,
+                         tokenExpiry:    currentLocationCtx.token_expiry,
+                         lastSyncStatus: currentLocationCtx.last_sync_status,
+                       }),
       jobberAccountId: currentLocationCtx.jobber_account_id || '',
       jobberAccountName: currentLocationCtx.jobber_account_name || '',
       jobberInitialImportCompletedAt: currentLocationCtx.jobber_initial_import_completed_at || null,
@@ -18628,9 +18670,14 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     assessmentType: selectedLoc.assessmentType,
     smsEnabled:     selectedLoc.smsEnabled,
     // initialLocations rows expose jobberConnected (boolean) not jobberStatus.
-    // Derive the string form here so JobberConnectionCard / ClientImportCard
-    // don't fall back to 'disconnected' when a real DB row is present.
-    jobberStatus:   selectedLoc.jobberConnected ? 'connected' : 'disconnected',
+    // Derive the three-state form here (token_expiry + last_sync_status thread
+    // through from _hub-page.tsx) so a dead-token location reads as
+    // reconnect_required rather than a false "Connected".
+    jobberStatus:   deriveJobberStatus({
+                      connected:      selectedLoc.jobberConnected,
+                      tokenExpiry:    selectedLoc.token_expiry,
+                      lastSyncStatus: selectedLoc.last_sync_status,
+                    }),
     jobberAccountId:selectedLoc.jobberAccountId,
     jobberAccountName: selectedLoc.jobberAccountName || '',
     jobberInitialImportCompletedAt: selectedLoc.jobberInitialImportCompletedAt || null,
@@ -18661,7 +18708,11 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
       timezone:       loc.timezone||'',
       assessmentType: loc.assessmentType||'in-person',
       smsEnabled:     loc.smsEnabled||false,
-      jobberStatus:   loc.jobberStatus||loc.jobberConnected?'connected':'disconnected',
+      jobberStatus:   deriveJobberStatus({
+                        connected:      loc.jobberStatus==='connected'||loc.jobberConnected,
+                        tokenExpiry:    loc.token_expiry,
+                        lastSyncStatus: loc.last_sync_status,
+                      }),
       jobberAccountId:loc.jobberAccountId||'',
       crmStatus:      loc.crmStatus||'active',
       sendFromName:   loc.name ? `Bee Organized ${loc.name}` : '',
@@ -19349,7 +19400,12 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             <JobberConnectionCard settings={settings} updateLocation={updateLocation} />
             <div style={{ height:'8px' }} />
             <ClientImportCard
-              isJobberConnected={settings.location.jobberStatus==='connected'}
+              // A connected account (green) OR a stale token (reconnect_required)
+              // both count as "has a Jobber connection" for the import card — the
+              // badge above surfaces the reconnect prompt. Only a truly
+              // disconnected location hides import. (Preserves the pre-fix
+              // behavior where a dead-token location still showed as connected.)
+              isJobberConnected={settings.location.jobberStatus!=='disconnected'}
               locationId={settings.location.locId||'loc1'}
               initialImportCompletedAt={settings.location.jobberInitialImportCompletedAt}
             />
