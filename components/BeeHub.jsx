@@ -17344,99 +17344,232 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
   )
 }
 
-// ─── Client Notifications Card ─────────────────────────────────────────────────
-function LeadNotificationsCard({ settings, updateLocation, locationId, ownerEmail }) {
-  // Real hub_users roster (LocationUsersContext) with USERS_DATA fallback for
-  // view-as / demo paths where the context is null.
-  const notifUsers = useContext(LocationUsersContext) || USERS_DATA
-  const teamMembers = notifUsers.filter(u => u.locationId === locationId)
-  const [checkedIds, setCheckedIds] = useState(() => {
-    // Default: owner checked
-    const owner = teamMembers.find(u => u.role === 'owner')
-    return owner ? [owner.id] : []
-  })
-  const [extraEmails, setExtraEmails] = useState(
-    settings.location.notifEmails?.filter(e => !teamMembers.find(u => u.email === e)) || []
+// ─── Lead Notification Recipients ──────────────────────────────────────────────
+// Owner/super_admin-only manager for WHO gets emailed when a new client comes
+// in. Two kinds of recipient, both with an All/Moving/Organizing category:
+//   • INTERFACE USERS (hub_users: owner/managers) — auto-listed, default All +
+//     subscribed. Owner sets each user's category or unsubscribes/removes them
+//     (this is how a terminated manager is instantly cut from lead emails).
+//     Name/email are read live from hub_users server-side — never copied.
+//   • EXTERNAL RECIPIENTS (non-users) — added by hand (name/email/phone/cat).
+// Persistence is server-side via /api/locations/:id/notification-recipients
+// (owner+elevated gated; a manager is rejected even on a direct hit). The
+// section itself only renders in the owner+super_admin-only "My Location"
+// Settings module, so managers never see it. readOnly hides all controls.
+const LEAD_NOTIF_CATEGORIES = [
+  { key:'all',        label:'All' },
+  { key:'moving',     label:'Moving' },
+  { key:'organizing', label:'Organizing' },
+]
+const LEAD_NOTIF_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function LeadNotifCategorySelect({ value, disabled, onChange }) {
+  return (
+    <select
+      value={value}
+      disabled={disabled}
+      onClick={e=>e.stopPropagation()}
+      onChange={e=>onChange(e.target.value)}
+      style={{ padding:'6px 26px 6px 10px', borderRadius:'8px', border:'1.5px solid rgba(0,0,0,0.1)', background:'#f7f5f0', color:'#1a2e2b', fontFamily:'inherit', fontSize:'12px', fontWeight:600, cursor:disabled?'default':'pointer', appearance:'none', backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%231a2e2b' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat:'no-repeat', backgroundPosition:'right 8px center' }}>
+      {LEAD_NOTIF_CATEGORIES.map(c=>(
+        <option key={c.key} value={c.key}>{c.label}</option>
+      ))}
+    </select>
   )
+}
+
+function LeadNotificationRecipients({ realLocId, readOnly=false }) {
+  const [users, setUsers] = useState([])
+  const [externals, setExternals] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [adding, setAdding] = useState(false)
-  const [newEmail, setNewEmail] = useState('')
+  const [form, setForm] = useState({ first_name:'', last_name:'', email:'', phone:'', category:'all' })
+  const [formErr, setFormErr] = useState('')
+  const [busy, setBusy] = useState(false)
 
-  function toggleMember(id) {
-    setCheckedIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id])
+  const base = realLocId ? `/api/locations/${realLocId}/notification-recipients` : null
+
+  async function load() {
+    if (!base) { setLoading(false); return }
+    setLoading(true); setError(null)
+    try {
+      const r = await fetch(base, { credentials:'include' })
+      if (!r.ok) throw new Error('load_failed')
+      const data = await r.json()
+      setUsers(data.users || [])
+      setExternals(data.externals || [])
+    } catch {
+      setError('Could not load recipients.')
+    } finally {
+      setLoading(false)
+    }
   }
 
-  function addExtra() {
-    if (!newEmail.trim().includes('@')) return
-    setExtraEmails(prev => [...prev, newEmail.trim()])
-    setNewEmail('')
-    setAdding(false)
+  useEffect(() => { load() /* eslint-disable-next-line */ }, [realLocId])
+
+  async function patchUser(hubUserId, patch) {
+    if (!base) return
+    // Optimistic
+    setUsers(prev => prev.map(u => u.hub_user_id===hubUserId ? { ...u, ...patch } : u))
+    const r = await fetch(base, {
+      method:'PATCH', credentials:'include',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ hub_user_id: hubUserId, ...patch }),
+    })
+    if (!r.ok) load() // revert to server truth on failure
   }
 
-  function removeExtra(i) {
-    setExtraEmails(prev => prev.filter((_,idx) => idx !== i))
+  async function addExternal() {
+    if (!base) return
+    const email = form.email.trim()
+    if (!LEAD_NOTIF_EMAIL_RE.test(email)) { setFormErr('Enter a valid email address.'); return }
+    setFormErr(''); setBusy(true)
+    try {
+      const r = await fetch(base, {
+        method:'POST', credentials:'include',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({
+          first_name: form.first_name.trim() || null,
+          last_name: form.last_name.trim() || null,
+          email,
+          phone: form.phone.trim() || null,
+          category: form.category,
+        }),
+      })
+      if (!r.ok) { setFormErr('Could not add recipient.'); return }
+      const { external } = await r.json()
+      setExternals(prev => [...prev, {
+        type:'external', id: external.id,
+        first_name: external.first_name, last_name: external.last_name,
+        name: [external.first_name, external.last_name].filter(Boolean).join(' ') || external.email,
+        email: external.email, phone: external.phone, category: external.category,
+      }])
+      setForm({ first_name:'', last_name:'', email:'', phone:'', category:'all' })
+      setAdding(false)
+    } finally { setBusy(false) }
   }
 
-  const totalCount = checkedIds.length + extraEmails.length
+  async function patchExternal(id, patch) {
+    if (!base) return
+    setExternals(prev => prev.map(e => e.id===id ? { ...e, ...patch } : e))
+    const r = await fetch(`${base}/externals/${id}`, {
+      method:'PATCH', credentials:'include',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(patch),
+    })
+    if (!r.ok) load()
+  }
+
+  async function removeExternal(id) {
+    if (!base) return
+    setExternals(prev => prev.filter(e => e.id !== id))
+    const r = await fetch(`${base}/externals/${id}`, { method:'DELETE', credentials:'include' })
+    if (!r.ok) load()
+  }
+
+  if (!realLocId) {
+    return (
+      <div style={{ margin:'0 12px', borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', background:'white', padding:'16px' }}>
+        <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>Recipients become available once your location is saved.</p>
+      </div>
+    )
+  }
+
+  const subCount = users.filter(u => u.subscribed).length + externals.length
 
   return (
     <div style={{ margin:'0 12px', borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
 
-      {/* Team members */}
-      {teamMembers.length > 0 && (
-        <div style={{ background:'white' }}>
-          <div style={{ padding:'8px 16px 4px', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
-            <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px' }}>Team Members</p>
-          </div>
-          {teamMembers.map((u, i) => {
-            const rc = FRANCHISE_ROLES.find(r => r.key === u.role)
-            const checked = checkedIds.includes(u.id)
-            return (
-              <div key={u.id} onClick={() => toggleMember(u.id)} style={{ padding:'11px 16px', display:'flex', alignItems:'center', gap:'12px', borderBottom: i < teamMembers.length - 1 ? '1px solid rgba(0,0,0,0.04)' : 'none', cursor:'pointer', background: checked ? 'rgba(168,201,196,0.04)' : 'white' }}>
-                <div style={{ width:'20px', height:'20px', borderRadius:'5px', border:`2px solid ${checked ? '#1a2e2b' : 'rgba(0,0,0,0.15)'}`, background: checked ? '#1a2e2b' : 'white', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                  {checked && <span style={{ color:'white', fontSize:'11px', fontWeight:700 }}>✓</span>}
-                </div>
-                <div style={{ width:'30px', height:'30px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'11px', fontWeight:700, color:'white', flexShrink:0 }}>{u.initials}</div>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{u.name}</p>
-                  <p title={u.email} style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.email}</p>
-                </div>
-                <span style={{ fontSize:'10px', padding:'2px 7px', borderRadius:'20px', background:rc?.bg, color:rc?.color, fontWeight:600, flexShrink:0 }}>{rc?.icon} {rc?.label}</span>
-              </div>
-            )
-          })}
+      {/* Interface users */}
+      <div style={{ background:'white' }}>
+        <div style={{ padding:'8px 16px 4px', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
+          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px' }}>Team Members</p>
         </div>
-      )}
+        {loading ? (
+          <div style={{ padding:'16px', fontSize:'12px', color:'#8a9e9a' }}>Loading…</div>
+        ) : error ? (
+          <div style={{ padding:'16px', fontSize:'12px', color:'#e5a0a0' }}>{error}</div>
+        ) : users.length === 0 ? (
+          <div style={{ padding:'16px', fontSize:'12px', color:'#8a9e9a' }}>No team members at this location yet.</div>
+        ) : users.map((u, i) => {
+          const rc = FRANCHISE_ROLES.find(r => r.key === u.role)
+          return (
+            <div key={u.hub_user_id} style={{ padding:'11px 16px', display:'flex', alignItems:'center', gap:'12px', borderBottom: i < users.length - 1 ? '1px solid rgba(0,0,0,0.04)' : 'none', opacity: u.subscribed ? 1 : 0.55 }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{u.name}</p>
+                <p title={u.email} style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.email}</p>
+              </div>
+              {rc && <span style={{ fontSize:'10px', padding:'2px 7px', borderRadius:'20px', background:rc.bg, color:rc.color, fontWeight:600, flexShrink:0 }}>{rc.icon} {rc.label}</span>}
+              {readOnly ? (
+                <span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{u.subscribed ? (LEAD_NOTIF_CATEGORIES.find(c=>c.key===u.category)?.label || u.category) : 'Off'}</span>
+              ) : (
+                <>
+                  <LeadNotifCategorySelect value={u.category} disabled={!u.subscribed} onChange={v=>patchUser(u.hub_user_id, { category:v })} />
+                  <button
+                    onClick={()=>patchUser(u.hub_user_id, { subscribed: !u.subscribed })}
+                    title={u.subscribed ? 'Unsubscribe from lead emails' : 'Re-subscribe to lead emails'}
+                    style={{ flexShrink:0, padding:'6px 10px', borderRadius:'8px', border:'1px solid', borderColor: u.subscribed ? 'rgba(229,160,160,0.5)' : 'rgba(168,201,196,0.5)', background:'transparent', color: u.subscribed ? '#c96a6a' : '#4a5e5a', fontFamily:'inherit', fontSize:'12px', fontWeight:600, cursor:'pointer' }}>
+                    {u.subscribed ? 'Remove' : 'Add back'}
+                  </button>
+                </>
+              )}
+            </div>
+          )
+        })}
+      </div>
 
-      {/* Extra external emails */}
-      {extraEmails.length > 0 && (
+      {/* External recipients */}
+      {externals.length > 0 && (
         <div style={{ background:'white', borderTop:'1px solid rgba(0,0,0,0.05)' }}>
           <div style={{ padding:'8px 16px 4px' }}>
-            <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px' }}>Additional Emails</p>
+            <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px' }}>Additional Recipients</p>
           </div>
-          {extraEmails.map((email, i) => (
-            <div key={i} style={{ padding:'10px 16px', display:'flex', alignItems:'center', gap:'10px', borderTop:'1px solid rgba(0,0,0,0.04)' }}>
-              <span style={{ fontSize:'14px' }}>✉️</span>
-              <p title={email} style={{ flex:1, fontSize:'13px', color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{email}</p>
-              <button onClick={() => removeExtra(i)} style={{ background:'none', border:'none', color:'#e5a0a0', cursor:'pointer', fontSize:'16px', flexShrink:0 }}>×</button>
+          {externals.map((e, i) => (
+            <div key={e.id} style={{ padding:'10px 16px', display:'flex', alignItems:'center', gap:'10px', borderTop:'1px solid rgba(0,0,0,0.04)' }}>
+              <span style={{ fontSize:'14px', flexShrink:0 }}>✉️</span>
+              <div style={{ flex:1, minWidth:0 }}>
+                {e.name && e.name !== e.email && <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{e.name}</p>}
+                <p title={e.email} style={{ fontSize:'12px', color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{e.email}</p>
+                {e.phone && <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{e.phone}</p>}
+              </div>
+              {readOnly ? (
+                <span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{LEAD_NOTIF_CATEGORIES.find(c=>c.key===e.category)?.label || e.category}</span>
+              ) : (
+                <>
+                  <LeadNotifCategorySelect value={e.category} onChange={v=>patchExternal(e.id, { category:v })} />
+                  <button onClick={()=>removeExternal(e.id)} title="Remove recipient" style={{ background:'none', border:'none', color:'#e5a0a0', cursor:'pointer', fontSize:'18px', flexShrink:0, lineHeight:1 }}>×</button>
+                </>
+              )}
             </div>
           ))}
         </div>
       )}
 
-      {/* Add email / summary */}
-      {adding ? (
-        <div style={{ background:'#f7f5f0', padding:'10px 14px', display:'flex', gap:'8px', alignItems:'center', borderTop:'1px solid rgba(0,0,0,0.05)' }}>
-          <input autoFocus value={newEmail} onChange={e=>setNewEmail(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter') addExtra(); if(e.key==='Escape') setAdding(false) }} placeholder="email@example.com" type="email"
-            style={{ flex:1, padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
-          <button onClick={addExtra} style={{ padding:'9px 14px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Add</button>
-          <button onClick={()=>setAdding(false)} style={{ padding:'9px 10px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', color:'#8a9e9a', cursor:'pointer', fontFamily:'inherit' }}>✕</button>
+      {/* Add external recipient */}
+      {!readOnly && (adding ? (
+        <div style={{ background:'#f7f5f0', padding:'12px 14px', borderTop:'1px solid rgba(0,0,0,0.05)', display:'grid', gap:'8px' }}>
+          <div style={{ display:'flex', gap:'8px' }}>
+            <input value={form.first_name} onChange={e=>setForm(f=>({...f,first_name:e.target.value}))} placeholder="First name" style={{ flex:1, padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
+            <input value={form.last_name} onChange={e=>setForm(f=>({...f,last_name:e.target.value}))} placeholder="Last name" style={{ flex:1, padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
+          </div>
+          <input value={form.email} onChange={e=>{ setForm(f=>({...f,email:e.target.value})); setFormErr('') }} placeholder="email@example.com *" type="email" style={{ padding:'9px 12px', border:`1.5px solid ${formErr?'#e5a0a0':'rgba(0,0,0,0.1)'}`, borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
+          <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
+            <input value={form.phone} onChange={e=>setForm(f=>({...f,phone:e.target.value}))} placeholder="Phone (optional)" type="tel" style={{ flex:1, padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
+            <LeadNotifCategorySelect value={form.category} onChange={v=>setForm(f=>({...f,category:v}))} />
+          </div>
+          {formErr && <p style={{ fontSize:'11px', color:'#c96a6a' }}>{formErr}</p>}
+          <div style={{ display:'flex', gap:'8px', justifyContent:'flex-end' }}>
+            <button onClick={()=>{ setAdding(false); setFormErr('') }} style={{ padding:'9px 14px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', color:'#8a9e9a', cursor:'pointer', fontFamily:'inherit' }}>Cancel</button>
+            <button onClick={addExternal} disabled={busy} style={{ padding:'9px 16px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor: busy?'default':'pointer', opacity: busy?0.6:1 }}>{busy ? 'Adding…' : 'Add recipient'}</button>
+          </div>
         </div>
       ) : (
         <div style={{ background:'white', borderTop:'1px solid rgba(0,0,0,0.05)', padding:'10px 16px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-          <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{totalCount} recipient{totalCount !== 1 ? 's' : ''} selected</span>
-          <button onClick={() => setAdding(true)} style={{ padding:'6px 12px', background:'transparent', border:'1px solid rgba(168,201,196,0.4)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>+ Add email</button>
+          <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{subCount} active recipient{subCount !== 1 ? 's' : ''}</span>
+          <button onClick={()=>setAdding(true)} style={{ padding:'6px 12px', background:'transparent', border:'1px solid rgba(168,201,196,0.4)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>+ Add external recipient</button>
         </div>
-      )}
+      ))}
     </div>
   )
 }
@@ -19646,8 +19779,8 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
               <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>updateLocation('replyToEmail',v)}  hint="Where client replies land (defaults to Send From)" type="email" />
             </div>
 
-            <SectionHeader title="Client Notifications" desc="Who gets emailed when a new client comes in" />
-            <LeadNotificationsCard settings={settings} updateLocation={updateLocation} locationId={settings.location.locId} ownerEmail={settings.profile.email} />
+            <SectionHeader title="Lead Notification Recipients" desc="Who gets emailed when a new client comes in" />
+            <LeadNotificationRecipients realLocId={realLocId} readOnly={false} />
 
             <SectionHeader title="Integrations" />
             {/* One unified Jobber card: connection status + import next-step in a
