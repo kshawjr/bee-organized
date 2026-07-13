@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useLeadsRealtime } from "@/lib/use-leads-realtime"
 import dynamic from "next/dynamic"
 import { canSeeBetaBoard, defaultHiveView, hydrateHiveView, resolveBetaReadOnly } from "@/components/hive/shared/betaGate"
+import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { financialsVisible } from "@/lib/financial-access"
 import { splitNameForPrefill } from "@/lib/name-prefill"
 import { captureViewAsSnapshot, revertViewAsCancel } from "@/lib/view-as-identity"
@@ -16574,30 +16575,13 @@ function AddStepInline({ pathId, order, templates, onSave, onCancel, smsEnabled 
 
 
 // ─── Jobber connection status derivation ──────────────────────────────────────
-// Single source of truth for the three-state Jobber badge. The stored
-// `jobber_connected` boolean only flips at OAuth callback / manual Disconnect —
-// it NEVER reflects token validity, so a location keeps showing "Connected"
-// while its refresh token is dead (the 2-month token-death bug that this hid).
-// Derive the real status from the token-health signals that already exist:
-//   connected          — connected AND token not expired AND status not RECONNECT REQUIRED
-//   reconnect_required — connected BUT token_expiry is past OR last_sync_status
-//                        starts with "RECONNECT REQUIRED" (the fail-loud 401 stamp)
-//   disconnected       — never connected / manually disconnected
-// The three location shapes name these fields differently (currentLocationCtx is
-// snake_case, initialLocations/selectedLoc mixes camel + snake, ALL_LOCATIONS is
-// a mock with neither), so callers pass normalized values here.
-export function deriveJobberStatus({ connected, tokenExpiry, lastSyncStatus }) {
-  if (!connected) return 'disconnected'
-  // token_expiry is stored as epoch-ms (string or number); mirror the parse in
-  // lib/jobber.ts getValidJobberToken so "expired" means the same thing.
-  const expiryMs = (tokenExpiry !== null && tokenExpiry !== undefined && tokenExpiry !== '')
-    ? parseInt(tokenExpiry, 10) : 0
-  const expired = expiryMs > 0 && Date.now() >= expiryMs
-  const reconnectStamp = typeof lastSyncStatus === 'string'
-    && lastSyncStatus.startsWith('RECONNECT REQUIRED')
-  if (expired || reconnectStamp) return 'reconnect_required'
-  return 'connected'
-}
+// The canonical three-state derivation now lives in lib/jobber-status.ts (pure,
+// server-safe) so the SAME logic feeds this card AND the super_admin all-
+// locations health view — no drifting copies (that inconsistency WAS the bug
+// class). Re-exported here so existing `@/components/BeeHub` importers (and the
+// pinning tests) keep resolving it unchanged. jobberStatusView splits the single
+// 'connected' state into the "Connected" vs "Auto-refreshing" display labels.
+export { deriveJobberStatus, jobberStatusView }
 
 // Format the token-health metadata line for the connection card. Pure so the
 // formatting is unit-tested without mounting the card. The connection state was
@@ -16649,8 +16633,13 @@ export function jobberTokenHealth({ lastSyncStatus = null, tokenExpiry = null } 
   let validityLabel = null
   if (expiryMs > 0) {
     const d = new Date(expiryMs)
+    // This meta line only renders on a CONNECTED card (the amber
+    // reconnect_required state shows its own banner instead). So an expired
+    // access token here is the auto-refreshable case — pair it with the same
+    // "auto-refresh" reassurance the future-expiry branch uses, rather than a
+    // bare "token expired" that reads like a failure under a green badge.
     validityLabel = Date.now() >= expiryMs
-      ? `token expired ${fmtWhen(d)}`
+      ? `token expired ${fmtWhen(d)} · auto-refreshing`
       : `token valid through ${fmtClock(d)} · auto-refreshes`
   }
   return { syncedLabel, validityLabel }
@@ -16755,7 +16744,17 @@ export function JobberConnectionCard({ settings, updateLocation }) {
             <span style={{ color:'#8a9e9a' }}>Workspace: </span>
             {accountName
               ? <span style={{ fontWeight:600, color:'#1a2e2b', fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{accountName}</span>
-              : <span style={{ fontStyle:'italic', color:'#8a9e9a' }}>Unknown (reconnect to verify)</span>}
+              /* Workspace name derives from the same helper-driven `status` as
+                 the badge so the two can never contradict. A missing name under
+                 an amber badge → "reconnect to verify" (reconnect IS the fix).
+                 A missing name under a GREEN badge is a genuinely-connected
+                 location whose OAuth callback never captured account.name (the
+                 probe returned null / errored — the callback treats the name as
+                 non-required and proceeds). Don't fake it and don't tell a
+                 healthy connection to reconnect — say plainly it wasn't stored. */
+              : status==='reconnect_required'
+                ? <span style={{ fontStyle:'italic', color:'#8a9e9a' }}>Unknown (reconnect to verify)</span>
+                : <span style={{ fontStyle:'italic', color:'#8a9e9a' }}>name not captured at connect</span>}
           </p>
           {status==='connected' && healthMeta && (
             <p style={{ fontSize:'10.5px', color:'#8a9e9a', marginTop:'5px' }}>{healthMeta}</p>
@@ -29360,6 +29359,122 @@ function SuperAdminProfile({ currentUser, role }) {
   )
 }
 
+// ─── JobberHealthAdmin ─────────────────────────────────────────────────────────
+// super_admin-only all-locations Jobber connection health. Reads
+// /api/admin/jobber-health (route enforces the role; token presence is computed
+// server-side and only the derived status + booleans cross the wire — no raw
+// tokens). Every row's status comes from the SAME shared helper
+// (jobberStatusView) the connection card uses, so the admin view and the card
+// can never disagree. reconnect_required rows are grouped first.
+function JobberHealthAdmin() {
+  const [state, setState]   = useState('loading') // loading | ready | error
+  const [data, setData]     = useState(null)
+  const [error, setError]   = useState(null)
+
+  const load = React.useCallback(async () => {
+    setState('loading'); setError(null)
+    try {
+      const r = await fetch('/api/admin/jobber-health')
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) { setError(d.error || `HTTP ${r.status}`); setState('error'); return }
+      setData(d); setState('ready')
+    } catch (e) {
+      setError(String(e?.message || e)); setState('error')
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  // tone → pill colors (mirrors the card's statusConf palette).
+  const TONE = {
+    ok:   { color:'#22c55e', bg:'rgba(34,197,94,0.10)',  border:'rgba(34,197,94,0.25)' },
+    info: { color:'#0284c7', bg:'rgba(2,132,199,0.10)',  border:'rgba(2,132,199,0.25)' },
+    warn: { color:'#d97706', bg:'rgba(217,119,6,0.12)',  border:'rgba(217,119,6,0.30)' },
+    muted:{ color:'#8a9e9a', bg:'rgba(138,158,154,0.10)',border:'rgba(138,158,154,0.25)' },
+  }
+
+  if (state === 'loading') {
+    return <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Loading connection health…</p>
+  }
+  if (state === 'error') {
+    return (
+      <div style={{ padding:'14px', borderRadius:'10px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.2)' }}>
+        <p style={{ fontSize:'13px', color:'#ef4444', fontWeight:600 }}>Couldn't load Jobber health: {error}</p>
+        <button onClick={load} style={{ marginTop:'8px', padding:'6px 12px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Retry</button>
+      </div>
+    )
+  }
+
+  const { summary, locations, generatedAt } = data
+  const fmtExpiry = (loc) => {
+    if (loc.tokenExpiryDisplay) return `${loc.tokenExpiryDisplay.replace('T', ' ')} UTC`
+    if (loc.tokenExpiry) { const d = new Date(parseInt(String(loc.tokenExpiry), 10)); return isNaN(d.getTime()) ? '—' : d.toISOString().slice(0,19).replace('T',' ') + ' UTC' }
+    return '—'
+  }
+
+  return (
+    <div>
+      {/* Summary counts */}
+      <div style={{ display:'flex', flexWrap:'wrap', gap:'8px', marginBottom:'16px' }}>
+        {[
+          { label:'Reconnect required', n:summary.reconnect_required, tone:'warn' },
+          { label:'Connected',          n:summary.connected,          tone:'ok'   },
+          { label:'Auto-refreshing',    n:summary.auto_refreshing,    tone:'info' },
+          { label:'Never connected',    n:summary.disconnected,       tone:'muted'},
+        ].map(s => {
+          const t = TONE[s.tone]
+          return (
+            <div key={s.label} style={{ padding:'8px 12px', borderRadius:'10px', background:t.bg, border:`1px solid ${t.border}`, minWidth:'110px' }}>
+              <div style={{ fontSize:'20px', fontWeight:700, color:t.color, lineHeight:1.1 }}>{s.n}</div>
+              <div style={{ fontSize:'11px', color:'#5a6e6a', marginTop:'2px' }}>{s.label}</div>
+            </div>
+          )
+        })}
+        <div style={{ marginLeft:'auto', alignSelf:'flex-end', display:'flex', alignItems:'center', gap:'10px' }}>
+          <span style={{ fontSize:'11px', color:'#8a9e9a' }}>{summary.total} locations</span>
+          <button onClick={load} style={{ padding:'6px 12px', background:'white', border:'1px solid rgba(0,0,0,0.15)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:'pointer' }}>↻ Refresh</button>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div style={{ overflowX:'auto', borderRadius:'12px', border:'1px solid rgba(0,0,0,0.08)', background:'white' }}>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'12.5px', minWidth:'720px' }}>
+          <thead>
+            <tr style={{ background:'rgba(0,0,0,0.02)', textAlign:'left', color:'#8a9e9a' }}>
+              <th style={{ padding:'9px 12px', fontWeight:600 }}>Location</th>
+              <th style={{ padding:'9px 12px', fontWeight:600 }}>Slug</th>
+              <th style={{ padding:'9px 12px', fontWeight:600 }}>Status</th>
+              <th style={{ padding:'9px 12px', fontWeight:600 }}>Workspace</th>
+              <th style={{ padding:'9px 12px', fontWeight:600 }}>Token expiry</th>
+              <th style={{ padding:'9px 12px', fontWeight:600 }}>Last sync</th>
+            </tr>
+          </thead>
+          <tbody>
+            {locations.map(loc => {
+              const t = TONE[loc.tone] || TONE.muted
+              return (
+                <tr key={loc.slug} style={{ borderTop:'1px solid rgba(0,0,0,0.05)' }}>
+                  <td style={{ padding:'9px 12px', fontWeight:600, color:'#1a2e2b' }}>{loc.name}</td>
+                  <td style={{ padding:'9px 12px', color:'#8a9e9a', fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{loc.slug}</td>
+                  <td style={{ padding:'9px 12px' }}>
+                    <span style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:t.bg, color:t.color, border:`1px solid ${t.border}`, fontWeight:600, whiteSpace:'nowrap' }}>{loc.label}</span>
+                  </td>
+                  <td style={{ padding:'9px 12px', color:loc.accountName ? '#1a2e2b' : '#8a9e9a', fontStyle:loc.accountName ? 'normal' : 'italic' }}>
+                    {loc.accountName || (loc.status==='reconnect_required' ? '—' : 'not captured')}
+                  </td>
+                  <td style={{ padding:'9px 12px', color:'#5a6e6a', whiteSpace:'nowrap' }}>{fmtExpiry(loc)}</td>
+                  <td style={{ padding:'9px 12px', color:'#5a6e6a', maxWidth:'320px', overflow:'hidden', textOverflow:'ellipsis' }} title={loc.lastSyncStatus || ''}>{loc.lastSyncStatus || '—'}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      {generatedAt && <p style={{ fontSize:'10.5px', color:'#8a9e9a', marginTop:'8px' }}>Generated {new Date(generatedAt).toLocaleString()}</p>}
+    </div>
+  )
+}
+
 // ─── SuperAdminLayout ──────────────────────────────────────────────────────────
 // Unified admin experience for super_admin and corporate roles.
 // Replaces the old AdminScreen tab-strip + separate Settings sidebar with a
@@ -29505,6 +29620,10 @@ function SuperAdminLayout({
         // Webhook observability is operational/sensitive — super_admin only,
         // matching the legacy AdminScreen gate (corporate stays out).
         { key:'webhooks',  label:'Webhooks',    icon:'🔌' },
+        // All-locations Jobber connection health — Kevin's operational truth
+        // for which locations actually need a manual reconnect vs. will
+        // auto-refresh. super_admin only (reads token presence server-side).
+        { key:'jobber',    label:'Jobber Health', icon:'⚡' },
         { key:'bin',       label:'Recycle Bin', icon:'🗑' },
       ],
     }] : []),
@@ -29522,6 +29641,7 @@ function SuperAdminLayout({
     profile:     { label:'Profile',        cluster:'My Account'   },
     configure:   { label:'Configure',      cluster:'Advanced'     },
     webhooks:    { label:'Webhooks',       cluster:'Advanced'     },
+    jobber:      { label:'Jobber Health',  cluster:'Advanced'     },
     bin:         { label:'Recycle Bin',    cluster:'Advanced'     },
   }
 
@@ -29744,6 +29864,17 @@ function SuperAdminLayout({
           // (headline + counts) — reduced wrapper padding, no serif h1.
           <div style={{ padding:'14px 8px 48px' }}>
             <AdminWebhookLogScreen />
+          </div>
+        )
+
+      case 'jobber':
+        return (
+          <div style={{ padding:'28px 28px 48px' }}>
+            <div style={{ marginBottom:'20px' }}>
+              <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'3px' }}>Jobber Health</h1>
+              <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Every location's true Jobber connection state — reconnect-required locations grouped first</p>
+            </div>
+            <JobberHealthAdmin />
           </div>
         )
 
