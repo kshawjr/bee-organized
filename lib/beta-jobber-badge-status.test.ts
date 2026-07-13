@@ -132,8 +132,8 @@ describe('single-helper invariant — no drifting copies', () => {
     expect(src).not.toMatch(/jobberConnected\s*\?\s*'connected'\s*:\s*'disconnected'/)
   })
 
-  it('the card renders a distinct reconnect_required state', () => {
-    expect(src).toMatch(/reconnect_required:/)          // statusConf entry
-    expect(src).toMatch(/Reconnect required/)           // pill label
+  it('the card renders a distinct reconnect_required state with a prominent action', () => {
+    expect(src).toMatch(/reconnect_required:/)          // per-state presentation entry
+    expect(src).toMatch(/Reconnect Jobber/)             // the prominent reconnect CTA
   })
 })

@@ -16652,17 +16652,12 @@ export function JobberConnectionCard({ settings, updateLocation }) {
   const [busy, setBusy]           = useState(false)
   const [error, setError]         = useState(null)
   const [toast, setToast]         = useState(null)
+  // The rare admin actions (switch account / disconnect) live behind a quiet
+  // expander when connected, so a healthy card carries no alarming buttons.
+  const [managing, setManaging]   = useState(false)
 
   const locationId   = settings.location.locId || null
   const accountName  = settings.location.jobberAccountName || ''
-  // Token-health metadata line (connected state only — the amber banner is the
-  // reconnect_required signal). Built from the same token_expiry /
-  // last_sync_status that drive deriveJobberStatus above.
-  const tokenHealth  = jobberTokenHealth({
-    lastSyncStatus: settings.location.jobberLastSyncStatus,
-    tokenExpiry:    settings.location.jobberTokenExpiry,
-  })
-  const healthMeta   = [tokenHealth.syncedLabel, tokenHealth.validityLabel].filter(Boolean).join(' · ')
 
   // OAuth entry point — same flow used by initial Connect and by Reconnect.
   function goConnect() {
@@ -16699,88 +16694,111 @@ export function JobberConnectionCard({ settings, updateLocation }) {
     }
   }
 
-  const statusConf = {
-    connected:          { color:'#22c55e', bg:'rgba(34,197,94,0.08)',  border:'rgba(34,197,94,0.2)',  icon:'✅', label:'Connected'          },
-    reconnect_required: { color:'#d97706', bg:'rgba(217,119,6,0.10)',  border:'rgba(217,119,6,0.3)',  icon:'⚠️', label:'Reconnect required'  },
-    disconnected:       { color:'#ef4444', bg:'rgba(239,68,68,0.08)',  border:'rgba(239,68,68,0.2)',  icon:'❌', label:'Disconnected'       },
+  // State-driven presentation. Each state gives ONE unmistakable message: a
+  // full-width status strip co-located with a warm, literal explanation — no
+  // corner pill to hunt for, no token/expiry jargon (that detail lives in the
+  // super_admin Jobber Health view). A healthy connection is calm with no
+  // alarming buttons; only a genuinely dead one shows a prominent action.
+  const V = {
+    connected: {
+      accent:'#16a34a', softBg:'rgba(22,163,74,0.09)', softBorder:'rgba(22,163,74,0.22)',
+      stripIcon:'✓', stripLabel:'Connected & syncing',
+      headline:'Jobber is connected',
+      body:'Your clients, jobs, and invoices flow into Bee Hub automatically. There’s nothing you need to do here.',
+    },
+    reconnect_required: {
+      accent:'#b45309', softBg:'rgba(217,119,6,0.11)', softBorder:'rgba(217,119,6,0.30)',
+      stripIcon:'!', stripLabel:'Action needed',
+      headline:'Reconnect Jobber to keep syncing',
+      body:'Your Jobber connection needs to be refreshed, so new clients and jobs have paused. Reconnecting takes about 30 seconds — none of your existing information is lost.',
+    },
+    disconnected: {
+      accent:'#5a6e6a', softBg:'rgba(0,0,0,0.025)', softBorder:'rgba(0,0,0,0.09)',
+      stripIcon:'', stripLabel:'',
+      headline:'Connect Jobber',
+      body:'Link your Jobber account to bring your clients, jobs, and invoices into Bee Hub automatically.',
+    },
   }
-  const sc = statusConf[status]||statusConf.disconnected
-  // "Connected" account exists (green) OR token has gone stale (amber) — both
-  // show the workspace + Disconnect/Reconnect controls; only a truly
-  // disconnected location shows the initial Connect button.
-  const hasConnection = status==='connected' || status==='reconnect_required'
+  const v = V[status] || V.disconnected
+  const primaryBtn = (label, bg) => (
+    <button onClick={goConnect} disabled={busy}
+      style={{ width:'100%', padding:'13px', background:bg, border:'none', borderRadius:'11px', fontSize:'14px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
+      ⚡ {label}
+    </button>
+  )
 
   return (
-    <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', border:'1px solid rgba(0,0,0,0.07)', background:'white' }}>
+    <div style={{ borderRadius:'14px', overflow:'hidden', margin:'0 12px', border:`1px solid ${v.softBorder}`, background:'white' }}>
       {toast && <InlineToast kind={toast.kind} msg={toast.msg} />}
-      <div style={{ padding:'12px 14px', display:'flex', alignItems:'center', gap:'12px' }}>
-        <div style={{ width:'34px', height:'34px', borderRadius:'8px', background:'rgba(255,107,53,0.1)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-          <span style={{ fontSize:'16px' }}>⚡</span>
+
+      {/* Full-width status strip — the state is unmissable and sits right above
+          its own explanation, not in a far corner. */}
+      {v.stripLabel && (
+        <div style={{ display:'flex', alignItems:'center', gap:'9px', padding:'10px 16px', background:v.softBg, borderBottom:`1px solid ${v.softBorder}` }}>
+          <span style={{ width:'20px', height:'20px', borderRadius:'50%', background:v.accent, color:'white', fontSize:'12px', fontWeight:800, display:'inline-flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>{v.stripIcon}</span>
+          <span style={{ fontSize:'12.5px', fontWeight:700, color:v.accent, letterSpacing:'0.2px' }}>{v.stripLabel}</span>
         </div>
-        <div style={{ flex:1, minWidth:0 }}>
-          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Jobber</p>
-          <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-            {status==='connected' ? 'Syncing clients, jobs & invoices'
-              : status==='reconnect_required' ? 'Token expired — reconnect to resume syncing'
-              : 'Not connected'}
-          </p>
+      )}
+
+      <div style={{ padding:'16px' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'9px' }}>
+          <div style={{ width:'42px', height:'42px', borderRadius:'11px', background:'rgba(255,107,53,0.1)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+            <span style={{ fontSize:'21px' }}>⚡</span>
+          </div>
+          <div style={{ minWidth:0 }}>
+            <p style={{ fontSize:'15.5px', fontWeight:700, color:'#1a2e2b', lineHeight:1.2 }}>{v.headline}</p>
+            {status==='connected' && accountName && (
+              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'2px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                Linked to <span style={{ fontWeight:600, color:'#5a6e6a' }}>{accountName}</span>
+              </p>
+            )}
+          </div>
         </div>
-        {hasConnection ? (
-          <span style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:sc.bg, color:sc.color, border:`1px solid ${sc.border}`, fontWeight:600, flexShrink:0 }}>{sc.icon} {sc.label}</span>
-        ) : (
-          <button onClick={goConnect} style={{ padding:'6px 12px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', flexShrink:0 }}>
-            ⚡ Connect Jobber
+
+        <p style={{ fontSize:'13px', color:'#5a6e6a', lineHeight:1.55, marginBottom: status==='connected' ? '4px' : '14px' }}>{v.body}</p>
+
+        {/* Prominent action ONLY where an action is genuinely required. */}
+        {status==='reconnect_required' && primaryBtn('Reconnect Jobber', v.accent)}
+        {status==='disconnected'       && primaryBtn('Connect Jobber', '#1a2e2b')}
+
+        {/* Healthy: no scary buttons. The rare "switch account / disconnect"
+            controls hide behind a quiet expander. */}
+        {status==='connected' && (
+          <div>
+            <button onClick={()=>setManaging(m=>!m)}
+              style={{ background:'none', border:'none', padding:'6px 0', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer', display:'inline-flex', alignItems:'center', gap:'5px' }}>
+              Manage connection <span style={{ fontSize:'9px' }}>{managing ? '▲' : '▼'}</span>
+            </button>
+            {managing && (
+              <div style={{ marginTop:'6px', padding:'12px', borderRadius:'10px', background:'rgba(0,0,0,0.02)', border:'1px solid rgba(0,0,0,0.06)' }}>
+                <p style={{ fontSize:'12px', color:'#5a6e6a', lineHeight:1.5, marginBottom:'10px' }}>
+                  Switching to a different Jobber account, or stopping sync? Either way, the clients and leads already imported stay in Bee Hub.
+                </p>
+                <div style={{ display:'flex', flexWrap:'wrap', gap:'8px' }}>
+                  <button onClick={goConnect} disabled={busy}
+                    style={{ padding:'9px 14px', background:'white', border:'1px solid rgba(0,0,0,0.15)', borderRadius:'9px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
+                    Reconnect to a different account
+                  </button>
+                  <button onClick={()=>setConfirming(true)} disabled={busy}
+                    style={{ padding:'9px 14px', background:'white', border:'1px solid rgba(239,68,68,0.35)', borderRadius:'9px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:600, color:'#ef4444', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
+                    Disconnect
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* reconnect_required: keep a disconnect escape hatch, but quiet. */}
+        {status==='reconnect_required' && (
+          <button onClick={()=>setConfirming(true)} disabled={busy}
+            style={{ display:'block', margin:'12px auto 0', background:'none', border:'none', padding:'4px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', textDecoration:'underline', cursor:busy?'default':'pointer' }}>
+            Disconnect instead
           </button>
         )}
+
+        {error && <p style={{ fontSize:'12px', color:'#ef4444', marginTop:'10px' }}>Something went wrong: {error}</p>}
       </div>
-      {hasConnection&&(
-        <div style={{ padding:'9px 14px 11px', borderTop:'1px solid rgba(0,0,0,0.05)', background:'rgba(0,0,0,0.015)' }}>
-          {status==='reconnect_required'&&(
-            <div style={{ marginBottom:'9px', padding:'8px 10px', borderRadius:'8px', background:sc.bg, border:`1px solid ${sc.border}` }}>
-              <p style={{ fontSize:'11px', color:sc.color, fontWeight:600 }}>⚠️ Jobber rejected this connection — reconnect to resume syncing.</p>
-            </div>
-          )}
-          <p style={{ fontSize:'11px', color:'#5a6e6a' }}>
-            <span style={{ color:'#8a9e9a' }}>Workspace: </span>
-            {accountName
-              ? <span style={{ fontWeight:600, color:'#1a2e2b', fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{accountName}</span>
-              /* Workspace name derives from the same helper-driven `status` as
-                 the badge so the two can never contradict. A missing name under
-                 an amber badge → "reconnect to verify" (reconnect IS the fix).
-                 A missing name under a GREEN badge is a genuinely-connected
-                 location whose OAuth callback never captured account.name (the
-                 probe returned null / errored — the callback treats the name as
-                 non-required and proceeds). Don't fake it and don't tell a
-                 healthy connection to reconnect — say plainly it wasn't stored. */
-              : status==='reconnect_required'
-                ? <span style={{ fontStyle:'italic', color:'#8a9e9a' }}>Unknown (reconnect to verify)</span>
-                : <span style={{ fontStyle:'italic', color:'#8a9e9a' }}>name not captured at connect</span>}
-          </p>
-          {status==='connected' && healthMeta && (
-            <p style={{ fontSize:'10.5px', color:'#8a9e9a', marginTop:'5px' }}>{healthMeta}</p>
-          )}
-          <div style={{ display:'flex', gap:'8px', marginTop:'9px' }}>
-            <button onClick={()=>setConfirming(true)} disabled={busy}
-              style={{ padding:'6px 12px', background:'white', border:'1px solid rgba(239,68,68,0.4)', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#ef4444', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
-              Disconnect
-            </button>
-            <button onClick={goConnect} disabled={busy}
-              style={{ padding:'6px 12px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
-              ⚡ Reconnect
-            </button>
-          </div>
-          <p style={{ fontSize:'10.5px', color:'#8a9e9a', marginTop:'7px' }}>
-            Disconnect to clear the connection, then reconnect to a different Jobber workspace. Your imported leads stay.
-          </p>
-          {error&&<p style={{ fontSize:'10.5px', color:'#ef4444', marginTop:'5px' }}>Couldn't disconnect: {error}</p>}
-        </div>
-      )}
-      {status==='disconnected'&&(
-        <div style={{ padding:'8px 14px 10px', borderTop:'1px solid rgba(0,0,0,0.05)', background:'rgba(239,68,68,0.03)' }}>
-          <p style={{ fontSize:'11px', color:'#ef4444' }}>Not connected — connect to sync clients, jobs, and invoices.</p>
-          {error&&<p style={{ fontSize:'10.5px', color:'#ef4444', marginTop:'5px' }}>{error}</p>}
-        </div>
-      )}
 
       {confirming&&(
         <div onClick={()=>{ if(!busy) setConfirming(false) }}
