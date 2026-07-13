@@ -510,7 +510,31 @@ export async function upsertLead(
     })
     .select('id, stage')
     .single()
-  if (error) throw new Error(error.message)
+  if (error) {
+    // Insert–insert race: a concurrent webhook for the SAME new client (e.g.
+    // REQUEST_CREATE + REQUEST_UPDATE landing ms apart) already inserted the
+    // lead between our SELECT above and this INSERT, tripping the unique
+    // index leads_jobber_client_id_location_idx. Recover idempotently by
+    // treating the winner's row as the target: re-select and update it,
+    // exactly as the `existing` branch would have.
+    const isClientIdDup =
+      (error as any).code === '23505' &&
+      ((error.message?.includes('leads_jobber_client_id_location_idx')) ||
+       (error as any).details?.includes('jobber_client_id'))
+    if (isClientIdDup) {
+      const { data: winner } = await supabaseService
+        .from('leads')
+        .select('id, stage')
+        .eq('jobber_client_id', jobberClientId)
+        .eq('location_id', location_id)
+        .maybeSingle()
+      if (winner) {
+        await supabaseService.from('leads').update(payload).eq('id', winner.id)
+        return { id: winner.id, created: false, stage: winner.stage as string | null }
+      }
+    }
+    throw new Error(error.message)
+  }
   return { id: data.id, created: true, stage: data.stage as string | null }
 }
 
