@@ -69,6 +69,7 @@ import {
   upsertJob,
   upsertInvoice,
   extractJobberId,
+  writeImportCompletionStamp,
 } from '@/lib/jobber-import'
 import {
   ensureEngagementForServiceRequest,
@@ -972,21 +973,31 @@ export async function POST(req: NextRequest) {
 
         // One-time gate: mark initial import done. Set even when some rows
         // errored — webhook sync handles missed records going forward, and
-        // re-running the bulk import would create duplicates in tables that
-        // don't yet have UNIQUE constraints on jobber_*_id.
-        try {
-          await supabaseService
-            .from('locations')
-            .update({ jobber_initial_import_completed_at: new Date().toISOString() })
-            .eq('id', locUuid)
-        } catch (err) {
-          console.error('[jobber-initial-import flag write failed]', err)
+        // re-running the bulk import is idempotent (upserts dedupe on
+        // jobber_*_id). This write FAILS LOUD (writeImportCompletionStamp
+        // inspects the returned error + retries) so a completed-but-unstamped
+        // import can never silently keep the "Start Import" CTA up again.
+        const stamp = await writeImportCompletionStamp(locUuid, {
+          label: `${location.name} (${locSlug}) job=${jobId}`,
+        })
+        if (!stamp.ok) {
+          // Every record landed but the gate never set — the location still
+          // shows "Start Import" over finished data. Surface it on the job so
+          // it reads as needing attention, not clean success (mirrors the
+          // completed + error_message convention used for row errors above).
+          await updateProgress(jobId, {
+            error_message:
+              `Import completed but the completion-stamp write FAILED — ` +
+              `${location.name} (${locSlug}) is unstamped and will still show "Start Import". ` +
+              `Set locations.jobber_initial_import_completed_at manually. Cause: ${stamp.error}`,
+          })
         }
 
         // 2️⃣ final chunk: summary
         emit({
           done: true,
-          success: true,
+          success: stamp.ok,
+          ...(stamp.ok ? {} : { stamp_failed: true, stamp_error: stamp.error }),
           job_id: jobId,
           location: location.name,
           location_slug: locSlug,

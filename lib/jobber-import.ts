@@ -346,6 +346,45 @@ export function encodeJobberId(type: JobberIdType, rawId: string): string {
   return Buffer.from(`gid://Jobber/${type}/${numeric}`, 'utf8').toString('base64')
 }
 
+export type ImportStampResult = { ok: true } | { ok: false; error: string }
+
+// One-time completion gate. The bulk import calls this AFTER every record
+// is processed to set locations.jobber_initial_import_completed_at, which is
+// what clears the prominent "Start Import" CTA (an unset stamp = the import
+// never ran, as far as the UI is concerned).
+//
+// This MUST fail loud. Supabase's .update() resolves with { error } instead
+// of throwing, so a bare `await update(...)` in a try/catch swallows real DB
+// failures silently — which is exactly how NW Arkansas landed a genuinely-
+// completed import (233/233 clients, 2026-07-09) with no stamp, leaving the
+// CTA showing over finished data. Here we inspect the returned error, retry
+// once, log the location + job on failure, and hand the caller a result it
+// must surface instead of reporting clean success over a failed stamp.
+export async function writeImportCompletionStamp(
+  locUuid: string,
+  opts: { label?: string; stampedAt?: string } = {},
+): Promise<ImportStampResult> {
+  const label = opts.label ?? locUuid
+  let lastError = ''
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const { error } = await supabaseService
+        .from('locations')
+        .update({ jobber_initial_import_completed_at: opts.stampedAt ?? new Date().toISOString() })
+        .eq('id', locUuid)
+      // .update() reports DB failures via `error`, not by throwing — check it.
+      if (error) throw new Error(error.message || JSON.stringify(error))
+      return { ok: true }
+    } catch (err: any) {
+      lastError = String(err?.message || err)
+      console.error(
+        `[jobber-initial-import STAMP WRITE FAILED] attempt ${attempt}/2 — ${label}: ${lastError}`,
+      )
+    }
+  }
+  return { ok: false, error: lastError }
+}
+
 export function determineStage(request: any): string {
   if (request._hasInvoice)    return 'Final Processing'
   if (request._hasJob)        return 'Job in Progress'
