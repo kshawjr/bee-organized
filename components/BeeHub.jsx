@@ -16645,19 +16645,32 @@ export function jobberTokenHealth({ lastSyncStatus = null, tokenExpiry = null } 
   return { syncedLabel, validityLabel }
 }
 
-// ─── Jobber Connection Card ───────────────────────────────────────────────────
-export function JobberConnectionCard({ settings, updateLocation }) {
+// ─── Jobber Card (unified connection + import) ─────────────────────────────────
+// ONE card for the whole Jobber integration. The two old cards (connection +
+// import) forced a non-technical owner to mentally reconcile two statuses; this
+// derives a SINGLE state from deriveJobberStatus + jobber_initial_import_
+// completed_at + the live import phase, and shows one plain-language status with
+// one clear next step. The connection actions (connect / reconnect / disconnect)
+// and the import ENGINE (via chromeless ClientImportCard) are reused unchanged —
+// only the presentation is combined.
+export function JobberCard({ settings, updateLocation }) {
   const [status, setStatus]       = useState(settings.location.jobberStatus||'disconnected')
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy]           = useState(false)
   const [error, setError]         = useState(null)
   const [toast, setToast]         = useState(null)
-  // The rare admin actions (switch account / disconnect) live behind a quiet
-  // expander when connected, so a healthy card carries no alarming buttons.
+  // The rare admin actions (switch account / disconnect / re-sync) live behind a
+  // quiet expander when connected, so a healthy card carries no alarming buttons.
   const [managing, setManaging]   = useState(false)
+  // Live import phase, lifted from the embedded (chromeless) ClientImportCard so
+  // the single status header can read "bringing in your clients now" etc.
+  const [importPhase, setImportPhase] = useState('idle') // idle|running|complete|error
+  const importApiRef = useRef(null)                       // { startImport } from the engine
 
   const locationId   = settings.location.locId || null
   const accountName  = settings.location.jobberAccountName || ''
+  const hasImported  = !!settings.location.jobberInitialImportCompletedAt || importPhase === 'complete'
+  const importing    = importPhase === 'running'
 
   // OAuth entry point — same flow used by initial Connect and by Reconnect.
   function goConnect() {
@@ -16727,6 +16740,18 @@ export function JobberConnectionCard({ settings, updateLocation }) {
     </button>
   )
 
+  // Connected splits by import phase into ONE status + ONE next step. Everything
+  // "fine to an owner" (connected AND auto-refreshing AND already imported)
+  // reads the same calm way; the only healthy call-to-action is a first import.
+  const connectedHeadline = importing ? 'Bringing in your clients' : 'Jobber is connected'
+  const connectedBody =
+      importing              ? 'Bringing in your existing clients now — this usually takes a few minutes. You can leave this page; it keeps going.'
+    : importPhase === 'error'? 'Your connection is fine, but the last import didn’t finish. You can try again below.'
+    : hasImported            ? 'Your clients, jobs, and invoices are in Bee Hub and stay up to date automatically. There’s nothing you need to do here.'
+    :                          'Next step: bring your existing clients into Bee Hub so everything’s in one place. New clients then sync automatically.'
+  const headline = status === 'connected' ? connectedHeadline : v.headline
+  const body     = status === 'connected' ? connectedBody     : v.body
+
   return (
     <div style={{ borderRadius:'14px', overflow:'hidden', margin:'0 12px', border:`1px solid ${v.softBorder}`, background:'white' }}>
       {toast && <InlineToast kind={toast.kind} msg={toast.msg} />}
@@ -16746,7 +16771,7 @@ export function JobberConnectionCard({ settings, updateLocation }) {
             <span style={{ fontSize:'21px' }}>⚡</span>
           </div>
           <div style={{ minWidth:0 }}>
-            <p style={{ fontSize:'15.5px', fontWeight:700, color:'#1a2e2b', lineHeight:1.2 }}>{v.headline}</p>
+            <p style={{ fontSize:'15.5px', fontWeight:700, color:'#1a2e2b', lineHeight:1.2 }}>{headline}</p>
             {status==='connected' && accountName && (
               <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'2px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                 Linked to <span style={{ fontWeight:600, color:'#5a6e6a' }}>{accountName}</span>
@@ -16755,38 +16780,61 @@ export function JobberConnectionCard({ settings, updateLocation }) {
           </div>
         </div>
 
-        <p style={{ fontSize:'13px', color:'#5a6e6a', lineHeight:1.55, marginBottom: status==='connected' ? '4px' : '14px' }}>{v.body}</p>
+        <p style={{ fontSize:'13px', color:'#5a6e6a', lineHeight:1.55, marginBottom: status==='connected' ? '2px' : '14px' }}>{body}</p>
 
         {/* Prominent action ONLY where an action is genuinely required. */}
         {status==='reconnect_required' && primaryBtn('Reconnect Jobber', v.accent)}
         {status==='disconnected'       && primaryBtn('Connect Jobber', '#1a2e2b')}
 
-        {/* Healthy: no scary buttons. The rare "switch account / disconnect"
-            controls hide behind a quiet expander. */}
+        {/* Connected: the import next-step (CTA / live progress / retry) comes
+            from the reused import engine, rendered chromeless so it sits inside
+            this one card. It self-hides once the initial import is done. */}
         {status==='connected' && (
-          <div>
-            <button onClick={()=>setManaging(m=>!m)}
-              style={{ background:'none', border:'none', padding:'6px 0', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer', display:'inline-flex', alignItems:'center', gap:'5px' }}>
-              Manage connection <span style={{ fontSize:'9px' }}>{managing ? '▲' : '▼'}</span>
-            </button>
-            {managing && (
-              <div style={{ marginTop:'6px', padding:'12px', borderRadius:'10px', background:'rgba(0,0,0,0.02)', border:'1px solid rgba(0,0,0,0.06)' }}>
-                <p style={{ fontSize:'12px', color:'#5a6e6a', lineHeight:1.5, marginBottom:'10px' }}>
-                  Switching to a different Jobber account, or stopping sync? Either way, the clients and leads already imported stay in Bee Hub.
-                </p>
-                <div style={{ display:'flex', flexWrap:'wrap', gap:'8px' }}>
-                  <button onClick={goConnect} disabled={busy}
-                    style={{ padding:'9px 14px', background:'white', border:'1px solid rgba(0,0,0,0.15)', borderRadius:'9px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
-                    Reconnect to a different account
-                  </button>
-                  <button onClick={()=>setConfirming(true)} disabled={busy}
-                    style={{ padding:'9px 14px', background:'white', border:'1px solid rgba(239,68,68,0.35)', borderRadius:'9px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:600, color:'#ef4444', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
-                    Disconnect
-                  </button>
+          <>
+            <ClientImportCard
+              chromeless
+              isJobberConnected
+              locationId={locationId||'loc1'}
+              initialImportCompletedAt={settings.location.jobberInitialImportCompletedAt}
+              onPhaseChange={setImportPhase}
+              apiRef={importApiRef}
+            />
+
+            {/* Healthy card carries no alarming buttons — the rare switch /
+                disconnect / re-sync controls hide behind a quiet expander. */}
+            <div style={{ marginTop: importing ? '12px' : '8px' }}>
+              <button onClick={()=>setManaging(m=>!m)}
+                style={{ background:'none', border:'none', padding:'6px 0', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer', display:'inline-flex', alignItems:'center', gap:'5px' }}>
+                Manage connection <span style={{ fontSize:'9px' }}>{managing ? '▲' : '▼'}</span>
+              </button>
+              {managing && (
+                <div style={{ marginTop:'6px', padding:'12px', borderRadius:'10px', background:'rgba(0,0,0,0.02)', border:'1px solid rgba(0,0,0,0.06)' }}>
+                  <p style={{ fontSize:'12px', color:'#5a6e6a', lineHeight:1.5, marginBottom:'10px' }}>
+                    Switching to a different Jobber account, or stopping sync? Either way, the clients and leads already imported stay in Bee Hub.
+                  </p>
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:'8px' }}>
+                    <button onClick={goConnect} disabled={busy}
+                      style={{ padding:'9px 14px', background:'white', border:'1px solid rgba(0,0,0,0.15)', borderRadius:'9px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
+                      Reconnect to a different account
+                    </button>
+                    {hasImported && !importing && (
+                      <button onClick={()=>importApiRef.current?.startImport?.()} disabled={busy}
+                        style={{ padding:'9px 14px', background:'white', border:'1px solid rgba(0,0,0,0.15)', borderRadius:'9px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
+                        Re-sync from Jobber
+                      </button>
+                    )}
+                    <button onClick={()=>setConfirming(true)} disabled={busy}
+                      style={{ padding:'9px 14px', background:'white', border:'1px solid rgba(239,68,68,0.35)', borderRadius:'9px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:600, color:'#ef4444', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
+                      Disconnect
+                    </button>
+                  </div>
+                  <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.45, marginTop:'8px' }}>
+                    Re-sync only if records may have been missed during a disconnection — it never creates duplicates.
+                  </p>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          </>
         )}
 
         {/* reconnect_required: keep a disconnect escape hatch, but quiet. */}
@@ -16838,7 +16886,14 @@ export function JobberConnectionCard({ settings, updateLocation }) {
 // a read-only "Initial import completed [date]" label and the manual button
 // is hidden. Ongoing data flows via Jobber webhooks (re-running the bulk
 // import would create duplicates in tables without UNIQUE on jobber_*_id).
-export function ClientImportCard({ isJobberConnected, locationId, initialImportCompletedAt }) {
+// `chromeless` (used by the unified JobberCard) renders ONLY the actionable
+// next-step — no outer card, no title header, no Skip — because the unified
+// card owns the status header/messaging. `onPhaseChange` lifts importState up so
+// the unified header can read "Bringing in your clients now" etc.; `apiRef`
+// exposes startImport so the unified card's "Re-sync" (in the Manage expander)
+// can trigger it. All three are additive — the default (standalone) render and
+// the import ENGINE are untouched.
+export function ClientImportCard({ isJobberConnected, locationId, initialImportCompletedAt, chromeless = false, onPhaseChange, apiRef }) {
   const router = useRouter()
   const [importState, setImportState] = useState('idle') // idle | running | complete | error
   const [jobId, setJobId]             = useState(null)
@@ -16945,6 +17000,13 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
     }
   }, [importState, jobId, locationId])
 
+  // Lift import phase up to the unified JobberCard header (additive; no-op when
+  // rendered standalone). Effect runs unconditionally, before any early return.
+  useEffect(() => { onPhaseChange && onPhaseChange(importState) }, [importState, onPhaseChange])
+  // Expose startImport so the unified card's Manage → "Re-sync from Jobber" can
+  // trigger it. startImport is a hoisted function declaration below.
+  useEffect(() => { if (apiRef) apiRef.current = { startImport } })
+
   if (!isJobberConnected) return null
 
   // One-time gate: after the first successful initial import, hide the
@@ -16953,6 +17015,9 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
   // import would create duplicates in tables that don't yet have UNIQUE
   // constraints on jobber_*_id.
   if (initialImportCompletedAt && importState !== 'running' && importState !== 'complete') {
+    // Chromeless: the unified card shows "up to date" and hosts the quiet
+    // re-sync in its Manage expander, so render nothing here.
+    if (chromeless) return null
     const completedDate = (() => {
       try {
         const d = new Date(initialImportCompletedAt)
@@ -17065,6 +17130,70 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
   const etaText = importState === 'running'
     ? importEtaText(etaSamplesRef, lastProgressRef, status)
     : null
+
+  // ─── Chromeless: just the next-step, embedded in the unified JobberCard.
+  // The unified card owns the status strip + header + plain-language message;
+  // this supplies only the action/progress region for the connected states.
+  if (chromeless) {
+    if (importState === 'running') {
+      return (
+        <div style={{ marginTop:'12px' }}>
+          <style>{`@keyframes beeImportIndeterminate2 { 0%{left:-30%} 100%{left:100%} } @keyframes bee-fly-u { 0%{transform:translate(0,0) rotate(-10deg)} 25%{transform:translate(34px,-7px) rotate(6deg)} 50%{transform:translate(68px,5px) rotate(-5deg)} 75%{transform:translate(32px,12px) rotate(9deg)} 100%{transform:translate(0,0) rotate(-10deg)} }`}</style>
+          <div style={{ position:'relative', height:'44px', overflow:'hidden', marginBottom:'8px' }}>
+            <span style={{ position:'absolute', top:'12px', left:'12%', fontSize:'22px', animation:'bee-fly-u 3.2s ease-in-out infinite' }}>🐝</span>
+            <span style={{ position:'absolute', top:'16px', left:'46%', fontSize:'22px', animation:'bee-fly-u 4.1s ease-in-out infinite' }}>🐝</span>
+            <span style={{ position:'absolute', top:'10px', left:'78%', fontSize:'22px', animation:'bee-fly-u 3.7s ease-in-out infinite' }}>🐝</span>
+          </div>
+          {progressPct == null ? (
+            <div style={{ height:'6px', background:'rgba(168,201,196,0.25)', borderRadius:'3px', overflow:'hidden', position:'relative' }}>
+              <div style={{ position:'absolute', top:0, bottom:0, width:'30%', background:'linear-gradient(90deg,transparent,#a8c9c4,transparent)', borderRadius:'3px', animation:'beeImportIndeterminate2 1.4s ease-in-out infinite' }} />
+            </div>
+          ) : (
+            <div>
+              <div style={{ height:'6px', background:'rgba(168,201,196,0.25)', borderRadius:'3px', overflow:'hidden' }}>
+                <div style={{ height:'100%', width:`${progressPct}%`, background:'linear-gradient(90deg,#1a2e2b,#a8c9c4)', borderRadius:'3px', transition:'width 0.2s ease' }} />
+              </div>
+              <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'6px', textAlign:'right' }}>
+                {preCount ? humanizeImportPhase(rawPhase) : `${processed} of ${status?.total_records ?? '?'} · ${progressPct}%`}
+              </p>
+            </div>
+          )}
+        </div>
+      )
+    }
+    if (importState === 'error') {
+      return (
+        <div style={{ marginTop:'12px' }}>
+          <p style={{ fontSize:'12.5px', color:'#ef4444', marginBottom:'8px' }}>{error || 'Something interrupted the import.'} You can try again.</p>
+          <button onClick={startImport} disabled={!locationId}
+            style={{ width:'100%', padding:'12px', background:'#1a2e2b', border:'none', borderRadius:'11px', fontSize:'14px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:'pointer' }}>
+            Try again
+          </button>
+        </div>
+      )
+    }
+    if (importState === 'complete') {
+      return (
+        <div style={{ marginTop:'10px' }}>
+          <p style={{ fontSize:'12.5px', color:'#16a34a', fontWeight:600 }}>
+            ✓ {summary?.total_clients ?? status?.processed_records ?? 0} clients brought in. Updating your view…
+          </p>
+        </div>
+      )
+    }
+    // idle & not-yet-imported → the single primary "bring in clients" action.
+    return (
+      <div style={{ marginTop:'12px' }}>
+        <button onClick={startImport} disabled={!locationId}
+          style={{ width:'100%', padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'11px', fontSize:'14px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:'pointer' }}>
+          ⚡ Bring in my clients
+        </button>
+        <p style={{ fontSize:'11.5px', color:'#8a9e9a', textAlign:'center', marginTop:'8px', lineHeight:1.45 }}>
+          {importEstimateLine(clientCount)}
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div style={{ margin:'0 12px', borderRadius:'12px', background:'white', border:'1px solid rgba(0,0,0,0.07)', overflow:'hidden' }}>
@@ -19521,18 +19650,10 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             <LeadNotificationsCard settings={settings} updateLocation={updateLocation} locationId={settings.location.locId} ownerEmail={settings.profile.email} />
 
             <SectionHeader title="Integrations" />
-            <JobberConnectionCard settings={settings} updateLocation={updateLocation} />
-            <div style={{ height:'8px' }} />
-            <ClientImportCard
-              // A connected account (green) OR a stale token (reconnect_required)
-              // both count as "has a Jobber connection" for the import card — the
-              // badge above surfaces the reconnect prompt. Only a truly
-              // disconnected location hides import. (Preserves the pre-fix
-              // behavior where a dead-token location still showed as connected.)
-              isJobberConnected={settings.location.jobberStatus!=='disconnected'}
-              locationId={settings.location.locId||'loc1'}
-              initialImportCompletedAt={settings.location.jobberInitialImportCompletedAt}
-            />
+            {/* One unified Jobber card: connection status + import next-step in a
+                single plain-language card, driven by deriveJobberStatus +
+                jobber_initial_import_completed_at + the live import phase. */}
+            <JobberCard settings={settings} updateLocation={updateLocation} />
 
           </>
         )}

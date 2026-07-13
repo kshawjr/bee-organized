@@ -31,7 +31,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
 }))
 
-import { jobberTokenHealth, ClientImportCard, JobberConnectionCard } from '@/components/BeeHub'
+import { jobberTokenHealth, ClientImportCard, JobberCard } from '@/components/BeeHub'
 
 const HOUR = 60 * 60 * 1000
 
@@ -119,59 +119,77 @@ const settingsFor = (over: Record<string, any>) => ({
   },
 })
 
-// The card is state-driven and plain-language for a non-technical audience
-// (professional organizers, 45–65, limited tech): one unmistakable message per
-// state, NO token/expiry jargon, and no alarming buttons on a healthy
-// connection. The technical detail (expiry, auto-refresh) lives in the
-// super_admin Jobber Health view instead.
-describe('JobberConnectionCard — plain-language, state-driven UI', () => {
-  it('connected: reassures in plain words, names the workspace, shows NO scary buttons or token jargon', async () => {
+// The UNIFIED card (connection + import in one) is state-driven and plain-
+// language for a non-technical audience (professional organizers, 45–65, limited
+// tech): one unmistakable status + one clear next step per state, NO token/expiry
+// jargon, and no alarming buttons on a healthy card. The technical detail
+// (expiry, auto-refresh) lives in the super_admin Jobber Health view instead.
+describe('JobberCard — unified connection + import, plain-language & state-driven', () => {
+  it('connected + already imported: calm "up to date" status, no CTA, no jargon', async () => {
     const { host, unmount } = await mount(
-      <JobberConnectionCard
+      <JobberCard
         settings={settingsFor({
           jobberStatus: 'connected',
           jobberAccountName: 'Bee Organized NWA',
-          jobberLastSyncStatus: `Token refreshed: ${new Date().toISOString().slice(0, 19)}`,
-          jobberTokenExpiry: String(Date.now() + HOUR),
+          jobberInitialImportCompletedAt: '2026-07-09T12:00:00Z',
         })}
         updateLocation={() => {}}
       />,
     )
     expect(host.textContent).toContain('Connected & syncing')
     expect(host.textContent).toContain('Jobber is connected')
-    expect(host.textContent).toContain('automatically')
+    expect(host.textContent).toContain('up to date automatically')
     expect(host.textContent).toContain('Bee Organized NWA')
-    // No token/expiry jargon leaks to the owner, and no prominent Reconnect
-    // button (it's tucked behind the collapsed "Manage connection" expander).
+    // Nothing to do: no import CTA, and no token/expiry jargon.
+    expect(host.textContent).not.toContain('Bring in my clients')
+    expect(host.textContent).not.toContain('Start Import')
     expect(host.textContent).not.toMatch(/token|expire|auto-refresh/i)
-    expect(host.textContent).not.toContain('Reconnect Jobber')
-    // The quiet manage affordance IS present.
     expect(host.textContent).toContain('Manage connection')
     await unmount()
   })
 
-  it('connected: the manage expander reveals the rare switch/disconnect controls on demand', async () => {
+  it('connected + NOT yet imported: one healthy call-to-action — bring in clients', async () => {
     const { host, unmount } = await mount(
-      <JobberConnectionCard
-        settings={settingsFor({ jobberStatus: 'connected', jobberAccountName: 'Bee Organized NWA' })}
+      <JobberCard
+        settings={settingsFor({
+          jobberStatus: 'connected',
+          jobberAccountName: 'Bee Organized NWA',
+          jobberInitialImportCompletedAt: null,
+        })}
+        updateLocation={() => {}}
+      />,
+    )
+    expect(host.textContent).toContain('Connected & syncing')
+    expect(host.textContent).toContain('Next step')
+    expect(buttonByText(host, 'Bring in my clients')).toBeTruthy()
+    expect(host.textContent).not.toContain('Reconnect Jobber')
+    await unmount()
+  })
+
+  it('connected: Manage expander hides switch / re-sync / disconnect until opened', async () => {
+    const { host, unmount } = await mount(
+      <JobberCard
+        settings={settingsFor({ jobberStatus: 'connected', jobberAccountName: 'Bee Organized NWA', jobberInitialImportCompletedAt: '2026-07-09T12:00:00Z' })}
         updateLocation={() => {}}
       />,
     )
     expect(host.textContent).not.toContain('Disconnect')
+    expect(host.textContent).not.toContain('Re-sync from Jobber')
     const manage = buttonByText(host, 'Manage connection')!
     await act(async () => { manage.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     expect(host.textContent).toContain('Reconnect to a different account')
+    expect(host.textContent).toContain('Re-sync from Jobber')
     expect(host.textContent).toContain('Disconnect')
     await unmount()
   })
 
-  it('reconnect_required: prominent Reconnect action + plain "what happened / what to do", no jargon', async () => {
+  it('reconnect_required: amber Action needed + one Reconnect button, never offers import, no jargon', async () => {
     const { host, unmount } = await mount(
-      <JobberConnectionCard
+      <JobberCard
         settings={settingsFor({
           jobberStatus: 'reconnect_required',
+          jobberInitialImportCompletedAt: '2026-07-09T12:00:00Z',
           jobberLastSyncStatus: 'RECONNECT REQUIRED — Jobber rejected refresh token (401) @ 2026-05-01T00:00:00',
-          jobberTokenExpiry: String(Date.now() - HOUR),
         })}
         updateLocation={() => {}}
       />,
@@ -180,14 +198,16 @@ describe('JobberConnectionCard — plain-language, state-driven UI', () => {
     expect(host.textContent).toContain('Reconnect Jobber')
     expect(host.textContent).toContain('30 seconds')
     expect(host.textContent).toContain('none of your existing information is lost')
-    // Still no raw token/expiry vocabulary in front of the owner.
+    // A dead connection never offers import, and never shows raw token vocab.
+    expect(host.textContent).not.toContain('Bring in my clients')
+    expect(host.textContent).not.toContain('Manage connection')
     expect(host.textContent).not.toMatch(/token|401|expire/i)
     await unmount()
   })
 
   it('disconnected: a single clear Connect action, no status strip', async () => {
     const { host, unmount } = await mount(
-      <JobberConnectionCard
+      <JobberCard
         settings={settingsFor({ jobberStatus: 'disconnected', jobberAccountName: '' })}
         updateLocation={() => {}}
       />,
@@ -195,6 +215,7 @@ describe('JobberConnectionCard — plain-language, state-driven UI', () => {
     expect(host.textContent).toContain('Connect Jobber')
     expect(host.textContent).not.toContain('Connected & syncing')
     expect(host.textContent).not.toContain('Action needed')
+    expect(host.textContent).not.toContain('Bring in my clients')
     await unmount()
   })
 })
