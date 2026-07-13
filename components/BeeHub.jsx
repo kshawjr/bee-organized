@@ -16599,8 +16599,65 @@ export function deriveJobberStatus({ connected, tokenExpiry, lastSyncStatus }) {
   return 'connected'
 }
 
+// Format the token-health metadata line for the connection card. Pure so the
+// formatting is unit-tested without mounting the card. The connection state was
+// invisible behind a bare boolean for 2 months (the token-death bug), so a
+// connected card now surfaces the underlying evidence — when we last
+// synced/refreshed and how long the current access token is valid — rather than
+// just a green pill.
+//   lastSyncStatus — locations.last_sync_status, one of:
+//       "Connected via Hub: <toLocaleString>"   (OAuth callback)
+//       "Token refreshed: <ISO-19>"              (successful refresh)
+//       "RECONNECT REQUIRED — … @ <ISO-19>"      (fail-loud 401 stamp)
+//   tokenExpiry    — locations.token_expiry, epoch-ms (string|number)
+// Returns { syncedLabel, validityLabel }; either is null when its signal is
+// absent or unparseable (absence is never rendered, never guessed).
+export function jobberTokenHealth({ lastSyncStatus = null, tokenExpiry = null } = {}) {
+  const fmtClock = (d) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  const sameDay = (d) => {
+    const now = new Date()
+    return d.getFullYear() === now.getFullYear()
+      && d.getMonth() === now.getMonth()
+      && d.getDate() === now.getDate()
+  }
+  // Same-day → time only ("2:40 PM"); older → "Jul 9, 2:40 PM" so a stale
+  // connection reads as stale.
+  const fmtWhen = (d) => sameDay(d)
+    ? fmtClock(d)
+    : `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${fmtClock(d)}`
+  const stripPrefix = (s, p) => (s.startsWith(p) ? s.slice(p.length).trim() : null)
+
+  // ── last sync / refresh ──
+  let syncedLabel = null
+  if (typeof lastSyncStatus === 'string' && lastSyncStatus.trim()) {
+    const raw = stripPrefix(lastSyncStatus, 'Connected via Hub:')
+      ?? stripPrefix(lastSyncStatus, 'Token refreshed:')
+      ?? (lastSyncStatus.includes(' @ ') ? lastSyncStatus.split(' @ ').pop().trim() : null)
+    if (raw) {
+      const d = new Date(raw)
+      if (!isNaN(d.getTime())) syncedLabel = `Last synced ${fmtWhen(d)}`
+    }
+  }
+
+  // ── token validity ──
+  // Mirror deriveJobberStatus's parse so "expired" means the same thing. The
+  // access token is short-lived by design and refreshed silently, so a future
+  // expiry pairs the horizon with the "auto-refreshes" reassurance (a bare
+  // hour-out time reads as alarming otherwise).
+  const expiryMs = (tokenExpiry !== null && tokenExpiry !== undefined && tokenExpiry !== '')
+    ? parseInt(tokenExpiry, 10) : 0
+  let validityLabel = null
+  if (expiryMs > 0) {
+    const d = new Date(expiryMs)
+    validityLabel = Date.now() >= expiryMs
+      ? `token expired ${fmtWhen(d)}`
+      : `token valid through ${fmtClock(d)} · auto-refreshes`
+  }
+  return { syncedLabel, validityLabel }
+}
+
 // ─── Jobber Connection Card ───────────────────────────────────────────────────
-function JobberConnectionCard({ settings, updateLocation }) {
+export function JobberConnectionCard({ settings, updateLocation }) {
   const [status, setStatus]       = useState(settings.location.jobberStatus||'disconnected')
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy]           = useState(false)
@@ -16609,6 +16666,14 @@ function JobberConnectionCard({ settings, updateLocation }) {
 
   const locationId   = settings.location.locId || null
   const accountName  = settings.location.jobberAccountName || ''
+  // Token-health metadata line (connected state only — the amber banner is the
+  // reconnect_required signal). Built from the same token_expiry /
+  // last_sync_status that drive deriveJobberStatus above.
+  const tokenHealth  = jobberTokenHealth({
+    lastSyncStatus: settings.location.jobberLastSyncStatus,
+    tokenExpiry:    settings.location.jobberTokenExpiry,
+  })
+  const healthMeta   = [tokenHealth.syncedLabel, tokenHealth.validityLabel].filter(Boolean).join(' · ')
 
   // OAuth entry point — same flow used by initial Connect and by Reconnect.
   function goConnect() {
@@ -16692,6 +16757,9 @@ function JobberConnectionCard({ settings, updateLocation }) {
               ? <span style={{ fontWeight:600, color:'#1a2e2b', fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{accountName}</span>
               : <span style={{ fontStyle:'italic', color:'#8a9e9a' }}>Unknown (reconnect to verify)</span>}
           </p>
+          {status==='connected' && healthMeta && (
+            <p style={{ fontSize:'10.5px', color:'#8a9e9a', marginTop:'5px' }}>{healthMeta}</p>
+          )}
           <div style={{ display:'flex', gap:'8px', marginTop:'9px' }}>
             <button onClick={()=>setConfirming(true)} disabled={busy}
               style={{ padding:'6px 12px', background:'white', border:'1px solid rgba(239,68,68,0.4)', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#ef4444', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
@@ -16875,18 +16943,46 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
       } catch { return null }
     })()
     return (
-      <div style={{ margin:'0 12px', borderRadius:'12px', background:'white', border:'1px solid rgba(0,0,0,0.07)', padding:'12px 14px', display:'flex', alignItems:'center', gap:'12px' }}>
-        <div style={{ width:'34px', height:'34px', borderRadius:'8px', background:'rgba(34,197,94,0.12)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-          <span style={{ fontSize:'16px' }}>✓</span>
+      <div style={{ margin:'0 12px', borderRadius:'12px', background:'white', border:'1px solid rgba(0,0,0,0.07)', overflow:'hidden' }}>
+        <div style={{ padding:'12px 14px', display:'flex', alignItems:'center', gap:'12px' }}>
+          <div style={{ width:'34px', height:'34px', borderRadius:'8px', background:'rgba(34,197,94,0.12)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+            <span style={{ fontSize:'16px' }}>✓</span>
+          </div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>
+              Jobber Client Import
+            </p>
+            <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.45 }}>
+              {completedDate ? `Initial import completed ${completedDate}.` : 'Initial import completed.'}
+              {' '}Ongoing data syncs automatically via Jobber webhooks.
+            </p>
+          </div>
         </div>
-        <div style={{ flex:1, minWidth:0 }}>
-          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>
-            Jobber Client Import
+        {/* Quiet re-sync — the prominent "Start Import" CTA never returns once
+            the initial import is done (a re-appearing big button reads as
+            "import again" and invites confusion/duplication, including after a
+            reconnect). But reconnection can follow a disconnection gap where
+            webhooks were missed (locations sat disconnected up to 2 months), so
+            keep a low-emphasis catch-up available. This reuses the SAME
+            idempotent import mechanism — upsertLead / upsertServiceRequest /
+            the quote·job·invoice onConflict upserts all dedupe on the
+            jobber_*_id keys, so a re-run updates rows in place and never
+            duplicates. It is NOT a since-timestamp differential engine
+            (true gap-backfill / missed-webhook reconciliation is a separate
+            future task). */}
+        {error && (
+          <div style={{ padding:'0 14px 8px' }}>
+            <p style={{ fontSize:'10.5px', color:'#ef4444' }}>{error}</p>
+          </div>
+        )}
+        <div style={{ padding:'10px 14px', borderTop:'1px solid rgba(0,0,0,0.05)', background:'rgba(0,0,0,0.015)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px' }}>
+          <p style={{ fontSize:'10.5px', color:'#8a9e9a', lineHeight:1.4, flex:1, minWidth:0 }}>
+            Re-sync only if records may have been missed during a disconnection.
           </p>
-          <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.45 }}>
-            {completedDate ? `Initial import completed ${completedDate}.` : 'Initial import completed.'}
-            {' '}Ongoing data syncs automatically via Jobber webhooks.
-          </p>
+          <button onClick={startImport}
+            style={{ fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#5a6e6a', background:'transparent', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'8px', padding:'6px 11px', cursor:'pointer', flexShrink:0 }}>
+            ↻ Re-sync from Jobber
+          </button>
         </div>
       </div>
     )
@@ -18650,6 +18746,11 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
       jobberAccountId: currentLocationCtx.jobber_account_id || '',
       jobberAccountName: currentLocationCtx.jobber_account_name || '',
       jobberInitialImportCompletedAt: currentLocationCtx.jobber_initial_import_completed_at || null,
+      // Token-health evidence for the connection card's metadata line (same
+      // signals deriveJobberStatus reads, surfaced verbatim so a connection
+      // is verifiable at a glance, not just a green pill).
+      jobberTokenExpiry:    currentLocationCtx.token_expiry || null,
+      jobberLastSyncStatus: currentLocationCtx.last_sync_status || null,
       sendFromName:    currentLocationCtx.sender_name || '',
       sendFromEmail:   currentLocationCtx.send_from_email || '',
       replyToEmail:    currentLocationCtx.reply_to_email || '',
@@ -18681,6 +18782,10 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     jobberAccountId:selectedLoc.jobberAccountId,
     jobberAccountName: selectedLoc.jobberAccountName || '',
     jobberInitialImportCompletedAt: selectedLoc.jobberInitialImportCompletedAt || null,
+    // Token-health evidence for the connection card (threaded from
+    // _hub-page.tsx alongside token_expiry / last_sync_status).
+    jobberTokenExpiry:    selectedLoc.token_expiry || null,
+    jobberLastSyncStatus: selectedLoc.last_sync_status || null,
     jobberTeamRoster: selectedLoc.jobberTeamRoster || [],
     jobberTeamRosterSyncedAt: selectedLoc.jobberTeamRosterSyncedAt || null,
     crmStatus:      selectedLoc.crmStatus,
@@ -18714,6 +18819,8 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                         lastSyncStatus: loc.last_sync_status,
                       }),
       jobberAccountId:loc.jobberAccountId||'',
+      jobberTokenExpiry:    loc.token_expiry || null,
+      jobberLastSyncStatus: loc.last_sync_status || null,
       crmStatus:      loc.crmStatus||'active',
       sendFromName:   loc.name ? `Bee Organized ${loc.name}` : '',
       sendFromEmail:  loc.email||'',
