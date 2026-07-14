@@ -17408,7 +17408,12 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
 // rejected even on a direct hit). Only renders inside the owner-only My
 // Location module. Warns (doesn't block) when a picked sender's email domain
 // differs from the base sender's — it likely isn't verified and won't deliver.
-function ProjectTypeSenders({ realLocId, readOnly=false }) {
+function ProjectTypeSenders({ realLocId, readOnly=false, embedded=false }) {
+  // embedded = render as a hairline-divided SECTION inside a parent card
+  // (no own border/radius/margin); standalone = its own bordered card.
+  const outerWrap = embedded
+    ? { borderTop:'0.5px solid rgba(26,46,43,0.08)' }
+    : { margin:'0 12px', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.09)', background:'white' }
   const [cfg, setCfg] = useState(null)   // { enabled, base_sender_email, base_sender_domain, project_types, assignments, people }
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -17459,7 +17464,7 @@ function ProjectTypeSenders({ realLocId, readOnly=false }) {
 
   if (!realLocId) {
     return (
-      <div style={{ margin:'0 12px', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.09)', background:'white', padding:'12px 14px' }}>
+      <div style={{ ...outerWrap, padding:'12px 14px' }}>
         <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>Sender routing becomes available once your location is saved.</p>
       </div>
     )
@@ -17479,7 +17484,7 @@ function ProjectTypeSenders({ realLocId, readOnly=false }) {
   const selectedPerson = (cfg?.people || []).find(p => p.id === sel.personId)
 
   return (
-    <div style={{ margin:'0 12px', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.09)', background:'white' }}>
+    <div style={outerWrap}>
       {/* Toggle */}
       <div style={{ padding:'10px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', borderBottom: enabled ? '1px solid rgba(0,0,0,0.06)' : 'none' }}>
         <div style={{ flex:1, minWidth:0 }}>
@@ -17492,8 +17497,8 @@ function ProjectTypeSenders({ realLocId, readOnly=false }) {
           disabled={readOnly || loading}
           onClick={()=>setEnabled(!enabled)}
           role="switch" aria-checked={enabled}
-          style={{ flexShrink:0, width:'44px', height:'26px', borderRadius:'20px', border:'none', cursor: readOnly?'default':'pointer', background: enabled ? '#a8c9c4' : 'rgba(0,0,0,0.15)', position:'relative', transition:'background 0.15s' }}>
-          <span style={{ position:'absolute', top:'3px', left: enabled ? '21px' : '3px', width:'20px', height:'20px', borderRadius:'50%', background:'white', transition:'left 0.15s', boxShadow:'0 1px 3px rgba(0,0,0,0.2)' }} />
+          style={{ flexShrink:0, width:'34px', height:'19px', borderRadius:'20px', border:'none', cursor: readOnly?'default':'pointer', background: enabled ? '#a8c9c4' : 'rgba(0,0,0,0.15)', position:'relative', transition:'background 0.15s' }}>
+          <span style={{ position:'absolute', top:'2px', left: enabled ? '17px' : '2px', width:'15px', height:'15px', borderRadius:'50%', background:'white', transition:'left 0.15s', boxShadow:'0 1px 2px rgba(0,0,0,0.2)' }} />
         </button>
       </div>
 
@@ -17833,8 +17838,8 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
           onClick={()=>setAdvanced(!advanced)}
           role="switch" aria-checked={advanced}
           title={projectTypes.length===0 ? 'No project types configured yet' : undefined}
-          style={{ flexShrink:0, width:'44px', height:'26px', borderRadius:'20px', border:'none', cursor:(readOnly||projectTypes.length===0)?'default':'pointer', background: advanced ? '#a8c9c4' : 'rgba(0,0,0,0.15)', position:'relative', transition:'background 0.15s', opacity:(readOnly||projectTypes.length===0)?0.5:1 }}>
-          <span style={{ position:'absolute', top:'3px', left: advanced ? '21px' : '3px', width:'20px', height:'20px', borderRadius:'50%', background:'white', transition:'left 0.15s', boxShadow:'0 1px 3px rgba(0,0,0,0.2)' }} />
+          style={{ flexShrink:0, width:'34px', height:'19px', borderRadius:'20px', border:'none', cursor:(readOnly||projectTypes.length===0)?'default':'pointer', background: advanced ? '#a8c9c4' : 'rgba(0,0,0,0.15)', position:'relative', transition:'background 0.15s', opacity:(readOnly||projectTypes.length===0)?0.5:1 }}>
+          <span style={{ position:'absolute', top:'2px', left: advanced ? '17px' : '2px', width:'15px', height:'15px', borderRadius:'50%', background:'white', transition:'left 0.15s', boxShadow:'0 1px 2px rgba(0,0,0,0.2)' }} />
         </button>
       </div>
 
@@ -17865,7 +17870,7 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
                   <button
                     onClick={()=>patchUser(u.hub_user_id, { subscribed: !u.subscribed })}
                     title={u.subscribed ? 'Unsubscribe from lead emails' : 'Re-subscribe to lead emails'}
-                    style={{ flexShrink:0, padding:'6px 10px', borderRadius:'8px', border:'1px solid', borderColor: u.subscribed ? 'rgba(192,57,43,0.35)' : 'rgba(47,125,111,0.4)', background:'transparent', color: u.subscribed ? '#c0392b' : '#2f7d6f', fontFamily:'inherit', fontSize:'12px', fontWeight:600, cursor:'pointer' }}>
+                    style={{ flexShrink:0, padding:'2px 8px', borderRadius:'6px', border:'1px solid', borderColor: u.subscribed ? 'rgba(192,57,43,0.35)' : 'rgba(47,125,111,0.4)', background:'transparent', color: u.subscribed ? '#c0392b' : '#2f7d6f', fontFamily:'inherit', fontSize:'11px', fontWeight:600, cursor:'pointer' }}>
                     {u.subscribed ? 'Remove' : 'Add back'}
                   </button>
                 )}
@@ -17897,7 +17902,7 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
                 {readOnly ? (
                   advanced && <span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{catSummaryJS(e.category)}</span>
                 ) : (
-                  <button onClick={()=>removeExternal(e.id)} title="Remove recipient" style={{ background:'none', border:'none', color:'#c0392b', cursor:'pointer', fontSize:'18px', flexShrink:0, lineHeight:1 }}>×</button>
+                  <button onClick={()=>removeExternal(e.id)} title="Remove recipient" style={{ flexShrink:0, padding:'2px 8px', borderRadius:'6px', border:'1px solid rgba(192,57,43,0.35)', background:'transparent', color:'#c0392b', fontFamily:'inherit', fontSize:'11px', fontWeight:600, cursor:'pointer' }}>Remove</button>
                 )}
               </div>
               {advanced && (
@@ -17953,7 +17958,7 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
       ) : (
         <div style={{ background:'#fafbfa', borderTop:'1px solid rgba(0,0,0,0.06)', padding:'8px 14px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
           <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{subCount} active recipient{subCount !== 1 ? 's' : ''}</span>
-          <button onClick={()=>setAdding(true)} style={{ padding:'6px 12px', background:'transparent', border:'1px solid rgba(47,125,111,0.35)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#2f7d6f', cursor:'pointer' }}>+ Add outside email</button>
+          <button onClick={()=>setAdding(true)} style={{ padding:'3px 9px', background:'transparent', border:'1px solid rgba(47,125,111,0.35)', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#2f7d6f', cursor:'pointer' }}>+ Add outside email</button>
         </div>
       ))}
     </div>
@@ -19283,30 +19288,9 @@ function CommsLabel({ children }) {
   )
 }
 
-// Channel badge — exact tint background + same-family text, small precise radius,
-// tight padding, flat (never a shadow on a badge).
-function CommsChannelBadge({ channel }) {
-  if (channel === 'sms') return (
-    <span style={{ display:'inline-flex', alignItems:'center', gap:'4px', fontSize:'10px', fontWeight:600, color:'#0a7d5f', background:'rgba(16,185,129,0.12)', padding:'2px 7px', borderRadius:'6px' }}>
-      <CommsIcon name="message" size={11} color="#0a7d5f" stroke={2} />SMS soon
-    </span>
-  )
-  return (
-    <span style={{ display:'inline-flex', alignItems:'center', gap:'4px', fontSize:'10px', fontWeight:600, color:'#4f46e5', background:'rgba(99,102,241,0.10)', padding:'2px 7px', borderRadius:'6px' }}>
-      <CommsIcon name="mail" size={11} color="#4f46e5" stroke={2} />Email
-    </span>
-  )
-}
-
-// Static composition data for the Communication tab's lighter tiers. The Client
-// Alerts + Templates tiers here are PRESENTATIONAL previews that deep-link to
-// their own owner tabs ('notifs' / 'templates') — the live wiring stays there.
-const COMMS_ALERT_PREVIEW = [
-  { icon:'users',   label:'New client enters the pipeline',   channels:['email','sms'] },
-  { icon:'bell',    label:'Assessment reminder',              channels:['email','sms'] },
-  { icon:'check',   label:'Invoice paid',                     channels:['email'] },
-  { icon:'phone',   label:'Client goes quiet',                channels:['email'] },
-]
+// Static composition data for the Communication tab's Templates tier. These
+// tiles open a center modal (CommsTemplatesModal) that previews the location's
+// templates of the tapped type — no navigation off the Communications tab.
 const COMMS_TEMPLATE_TILES = [
   { type:'email', icon:'mail',    label:'Email',        sub:'Subjects & bodies', accent:'#4f46e5', tint:'rgba(99,102,241,0.10)' },
   { type:'sms',   icon:'message', label:'SMS',          sub:'Text templates',    accent:'#0a7d5f', tint:'rgba(16,185,129,0.12)' },
@@ -19436,6 +19420,108 @@ function TemplatePreviewModal({ template, settings, onClose }) {
             </div>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Communications tab — Templates center modal ─────────────────────────────
+// Opened from the Templates tiles on the Communications tab so the user stays
+// on the tab (no redirect). Shows the location's templates of ONE type in a
+// read/preview list; each row previews via the shared TemplatePreviewModal.
+// Full authoring (create/edit/delete/duplicate) still lives on the Templates
+// tab — reachable here through the explicit, labeled "Open full editor" button
+// (a clear path, not a silent redirect). Center overlay: backdrop + X +
+// Escape-to-close + click-backdrop-to-close.
+function CommsTemplatesModal({ type, templates, settings, onPreview, onOpenEditor, onClose }) {
+  React.useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', onKey) }
+  }, [onClose])
+
+  const meta = (COMMS_TEMPLATE_TILES.find(t => t.type === type)) || COMMS_TEMPLATE_TILES[0]
+  const rows = (templates || []).filter(t => t.type === type)
+  const masters = rows.filter(t => t.isMaster)
+  const customs = rows.filter(t => t.isOwnCustom)
+  const isLocked = type === 'sms' && !settings?.location?.smsEnabled
+
+  function Row({ tpl }) {
+    return (
+      <div style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 13px', borderTop:'0.5px solid rgba(26,46,43,0.06)' }}>
+        <div style={{ width:'28px', height:'28px', borderRadius:'8px', background:meta.tint, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+          <CommsIcon name={meta.icon} size={15} color={meta.accent} />
+        </div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+            <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{tpl.name}</p>
+            {tpl.tag && <span style={{ fontSize:'10px', color:'#8a9e9a', background:'rgba(0,0,0,0.05)', padding:'1px 7px', borderRadius:'6px', fontWeight:600, flexShrink:0 }}>{tpl.tag}</span>}
+          </div>
+          <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+            {type === 'email' && tpl.subject ? tpl.subject : (tpl.body || '').slice(0, 60) + '…'}
+          </p>
+        </div>
+        <button onClick={()=>onPreview(tpl)}
+          style={{ flexShrink:0, padding:'2px 8px', borderRadius:'6px', border:'0.5px solid rgba(99,102,241,0.30)', background:'rgba(99,102,241,0.08)', color:'#4f46e5', fontFamily:'inherit', fontSize:'11px', fontWeight:600, cursor:'pointer' }}>Preview</button>
+      </div>
+    )
+  }
+
+  function Group({ label, list }) {
+    if (list.length === 0) return null
+    return (
+      <div style={{ margin:'0 14px 12px' }}>
+        <p style={{ fontSize:'10px', fontWeight:700, color:'#a3aeaa', textTransform:'uppercase', letterSpacing:'0.06em', margin:'12px 2px 2px' }}>{label}</p>
+        <div style={{ borderRadius:'10px', overflow:'hidden', border:'0.5px solid rgba(26,46,43,0.10)', background:'white' }}>
+          {list.map((tpl, i) => (
+            <div key={tpl.dbId || tpl.id} style={i === 0 ? { marginTop:'-0.5px' } : undefined}><Row tpl={tpl} /></div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.55)' }} onClick={onClose} />
+      <div style={{ position:'relative', zIndex:1, background:'#fbfcfb', width:'100%', maxWidth:'460px', maxHeight:'86vh', borderRadius:'16px', display:'flex', flexDirection:'column', overflow:'hidden', boxShadow:'0 12px 40px rgba(26,46,43,0.22)' }}>
+        {/* Header */}
+        <div style={{ padding:'14px 16px', borderBottom:'0.5px solid rgba(26,46,43,0.08)', display:'flex', alignItems:'center', gap:'11px', flexShrink:0, background:'white' }}>
+          <div style={{ width:'34px', height:'34px', borderRadius:'10px', background:meta.tint, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+            <CommsIcon name={meta.icon} size={18} color={meta.accent} />
+          </div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{meta.label} templates</p>
+            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{rows.length} template{rows.length === 1 ? '' : 's'} · {meta.sub}</p>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{ flexShrink:0, background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>×</button>
+        </div>
+
+        {/* Body — read/preview list */}
+        <div style={{ overflowY:'auto', flex:1, paddingBottom:'6px' }}>
+          {isLocked && (
+            <div style={{ margin:'14px 14px 0', padding:'10px 12px', background:'rgba(212,160,70,0.08)', border:'0.5px solid rgba(212,160,70,0.30)', borderRadius:'10px' }}>
+              <p style={{ fontSize:'11px', color:'#7a5d24', lineHeight:1.5 }}>SMS is an add-on — these templates are locked until it's activated (see My Location).</p>
+            </div>
+          )}
+          {rows.length === 0 ? (
+            <p style={{ fontSize:'12px', color:'#8a9e9a', textAlign:'center', padding:'28px 16px', lineHeight:1.5 }}>No {meta.label.toLowerCase()} templates yet. Open the full editor to create one.</p>
+          ) : (
+            <>
+              <Group label="Master templates · from Bee Organized HQ" list={masters} />
+              <Group label="Your custom templates" list={customs} />
+            </>
+          )}
+        </div>
+
+        {/* Footer — the explicit "clear path" to full authoring */}
+        <div style={{ padding:'11px 16px', borderTop:'0.5px solid rgba(26,46,43,0.08)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px', flexShrink:0, background:'white' }}>
+          <span style={{ fontSize:'11px', color:'#8a9e9a' }}>Editing lives in the Templates tab.</span>
+          <button onClick={onOpenEditor}
+            style={{ flexShrink:0, padding:'7px 13px', borderRadius:'8px', border:'none', background:'#1a2e2b', color:'white', fontFamily:'inherit', fontSize:'12px', fontWeight:600, cursor:'pointer' }}>Open full editor →</button>
+        </div>
       </div>
     </div>
   )
@@ -19718,6 +19804,9 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   const [expandedPath, setExpandedPath]       = useState(null)
   // Communication tab — which follow-up sequence's step editor is open (null = none).
   const [openSequence, setOpenSequence]       = useState(null)
+  // Communication tab — Templates tile opens a center modal previewing that
+  // type's templates in-place (null | 'email' | 'sms' | 'call'), no tab change.
+  const [commsTemplateType, setCommsTemplateType] = useState(null)
   // Templates tab: one collapse state per type section (email/sms/call), all closed by default.
   const [tplTypeExpanded, setTplTypeExpanded] = useState({ email:false, sms:false, call:false })
   const [tplTypeHover, setTplTypeHover]       = useState(null)
@@ -20515,11 +20604,11 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                 <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>updateLocation('sendFromEmail',v)} hint="Must be a verified sender in your email provider" type="email" />
                 <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>updateLocation('replyToEmail',v)}  hint="Where client replies land (defaults to Send From)" type="email" />
               </div>
+              {/* Per-project-type sender split — grouped INSIDE the identity card
+                  (one unified container, hairline-divided, toggle inside), so the
+                  sending section matches the "Who hears about new leads" card. */}
+              <ProjectTypeSenders realLocId={realLocId} readOnly={false} embedded />
             </div>
-
-            {/* Per-project-type sender split — attached to the identity hero. */}
-            <p style={{ fontSize:'11px', fontWeight:600, color:'#8a9e9a', margin:'12px 16px 7px' }}>Send some project types from someone else</p>
-            <ProjectTypeSenders realLocId={realLocId} readOnly={false} />
 
             {/* ── TIER 2 · MEDIUM — who's notified about new leads ─────────── */}
             <CommsLabel>Who hears about new leads</CommsLabel>
@@ -20700,29 +20789,16 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             )}
             <p style={{ fontSize:'11px', color:'#b0c0bc', margin:'9px 16px 0', lineHeight:1.5 }}>Pick a sequence above to review its steps. Tap a step's delay to change timing; tap the radio to set the default.</p>
 
-            {/* ── TIER 4 · DENSE — client alerts (compact rows; preview) ───── */}
-            <CommsLabel>Client alerts</CommsLabel>
-            <div style={{ margin:'0 12px', borderRadius:'12px', overflow:'hidden', border:'0.5px solid rgba(26,46,43,0.10)', background:'white' }}>
-              {COMMS_ALERT_PREVIEW.map((a,i)=>(
-                <div key={a.label} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'9px 13px', borderBottom: i<COMMS_ALERT_PREVIEW.length-1 ? '0.5px solid rgba(26,46,43,0.06)' : 'none' }}>
-                  <CommsIcon name={a.icon} size={16} color="#5a6e6a" />
-                  <p style={{ flex:1, minWidth:0, fontSize:'12px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{a.label}</p>
-                  <div style={{ display:'flex', gap:'5px', flexShrink:0 }}>
-                    {a.channels.map(ch => <CommsChannelBadge key={ch} channel={ch} />)}
-                  </div>
-                </div>
-              ))}
-              <button onClick={()=>{ setActiveSection('notifs'); window.scrollTo(0,0) }}
-                style={{ width:'100%', textAlign:'left', padding:'9px 13px', border:'none', borderTop:'0.5px solid rgba(26,46,43,0.06)', background:'#fafbfa', color:'#2f7d6f', fontFamily:'inherit', fontSize:'11px', fontWeight:600, cursor:'pointer' }}>Manage alerts →</button>
-            </div>
+            {/* Client Alerts tier removed (needs product planning before it's
+                built). Automatic follow-up (above) + Templates (below) stay. */}
 
-            {/* ── TIER 5 · TILES — template library (lightest; preview) ────── */}
+            {/* ── TILES — template library (lightest; opens a center modal) ─── */}
             <CommsLabel>Templates</CommsLabel>
             <div style={{ margin:'0 12px', display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'8px' }}>
               {COMMS_TEMPLATE_TILES.map(t=>{
                 const n = templates ? templates.filter(x=>x.type===t.type).length : 0
                 return (
-                  <button key={t.type} onClick={()=>{ setActiveSection('templates'); window.scrollTo(0,0) }}
+                  <button key={t.type} onClick={()=>setCommsTemplateType(t.type)}
                     style={{ padding:'13px 9px', borderRadius:'10px', border:'0.5px solid rgba(26,46,43,0.10)', background:'white', cursor:'pointer', fontFamily:'inherit', display:'flex', flexDirection:'column', alignItems:'center', gap:'7px', textAlign:'center' }}>
                     <div style={{ width:'30px', height:'30px', borderRadius:'8px', background:t.tint, display:'flex', alignItems:'center', justifyContent:'center' }}>
                       <CommsIcon name={t.icon} size={17} color={t.accent} />
@@ -21146,6 +21222,17 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
 
       {/* Template editor popup */}
       {previewTemplate&&<TemplatePreviewModal template={previewTemplate} settings={settings} onClose={()=>setPreviewTemplate(null)} />}
+      {/* Communications tab — Templates tile center modal (no off-tab redirect). */}
+      {commsTemplateType&&(
+        <CommsTemplatesModal
+          type={commsTemplateType}
+          templates={templates}
+          settings={settings}
+          onPreview={(tpl)=>setPreviewTemplate(tpl)}
+          onOpenEditor={()=>{ setCommsTemplateType(null); setActiveSection('templates'); window.scrollTo(0,0) }}
+          onClose={()=>setCommsTemplateType(null)}
+        />
+      )}
       {/* Quick-peek from the Paths overview step rows — Close-only, no selection. */}
       <TemplateQuickPeekModal template={peekTemplate} onClose={()=>setPeekTemplate(null)} />
       {editingTemplate&&(
