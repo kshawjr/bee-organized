@@ -39,6 +39,10 @@ export type SlackLead = {
   project_type: string | null
   request_details: string | null
   preferred_contact: string | null
+  // Where the lead came from (leads.source). Human labels already ('Referral',
+  // 'Instagram', …); the webform slug 'web_form' is humanized in the card.
+  // Optional so the two callers that omit it typecheck + the line omits cleanly.
+  source?: string | null
 }
 
 export type SlackPostResult = { ok: boolean; skipped?: string; error?: string }
@@ -97,22 +101,56 @@ const mailtoLink = (email: string | null | undefined): string => {
   return `<mailto:${e}|${e}>`
 }
 
+// ── Card accents ──────────────────────────────────────────────
+// The attachment `color` draws a left stripe on the whole card. Keyed by
+// project type so a move visually reads different from an organizing job.
+const TYPE_BLUE = '#2563eb' // moving / relocation
+const TYPE_TEAL = '#0d9488' // organizing
+const TYPE_GRAY = '#6b7280' // anything else / unknown / absent
+
+// Distinct color by project type. Case-insensitive keyword match; organizing
+// is checked BEFORE move so "Move-In/Out Organization" (organizing services)
+// correctly read teal, while a pure "Moving" reads blue. Unmapped → gray.
+export function projectTypeColor(type: string | null | undefined): string {
+  const t = (type || '').toLowerCase()
+  if (!t.trim()) return TYPE_GRAY
+  if (t.includes('organiz')) return TYPE_TEAL
+  if (t.includes('mov')) return TYPE_BLUE
+  return TYPE_GRAY
+}
+
+// Source → human-friendly. leads.source is mostly already labels; the only
+// slug in the wild is the webform's 'web_form'. null/blank → null (omit).
+const humanizeSource = (s: string | null | undefined): string | null => {
+  if (!s || !s.trim()) return null
+  const v = s.trim()
+  const low = v.toLowerCase()
+  if (low === 'web_form' || low === 'webform' || low === 'website') return 'Website'
+  // Slug (all-lower with separators) → Title Case; otherwise trust the label.
+  if (v === low && /[_-]/.test(v)) {
+    return v.split(/[_-]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ')
+  }
+  return v
+}
+
 // ── Pure message builder ──────────────────────────────────────
-// Formats the new-lead Slack notification as Block Kit blocks so each lead
-// reads as a distinct card (header + section + divider), with tap-to-call /
-// tap-to-email hyperlinks and an interactive "Log call" button. Returns BOTH:
-//   • blocks — the rendered card (what Slack shows when present)
-//   • text   — a plain mrkdwn fallback (notification preview + accessibility;
-//              unchanged from the pre-card format, so it stays backward-safe)
-// Pure + testable (no Slack, no Supabase). Returns the chat.postMessage body
-// sans `channel` (postToSlack fills that from the location row).
+// Formats the new-lead notification as a polished card: an `attachments`
+// wrapper gives a color stripe (by project type) down the left edge, and the
+// Block Kit body inside reads top-to-bottom — eyebrow, name, a "Prefers … from
+// …" line, a 2-column field grid, an optional request-details quote, action
+// buttons, and a footer. Every soft field omits cleanly when absent (no empty
+// labels, no dangling separators): a name+phone-only lead still renders clean.
+// Returns:
+//   • text        — plain mrkdwn fallback (notification preview; UNCHANGED)
+//   • attachments — [{ color, blocks }] — what Slack renders as the card
+// Pure + testable (no Slack, no Supabase). postToSlack fills `channel`.
 export function buildLeadSlackMessage(args: {
   lead: SlackLead
   locationName: string
   // Absolute Hub origin (no trailing slash) → `${baseUrl}/clients/${lead.id}`.
   // Null when no base URL is available — the Open button/link is omitted.
   leadUrl: string | null
-}): { text: string; blocks: any[] } {
+}): { text: string; attachments: any[] } {
   const { lead, locationName, leadUrl } = args
   const name = dash(lead.name)
 
@@ -134,25 +172,50 @@ export function buildLeadSlackMessage(args: {
   }
   const text = lines.join('\n')
 
-  // ── Block Kit card ─────────────────────────────────────────
-  const blocks: any[] = [
-    {
-      type: 'header',
-      text: { type: 'plain_text', text: `🐝 New lead — ${locationName}`, emoji: true },
-    },
-    {
-      type: 'section',
-      fields: [
-        { type: 'mrkdwn', text: `*Name:*\n${name}` },
-        { type: 'mrkdwn', text: `*Project type:*\n${dash(lead.project_type)}` },
-        { type: 'mrkdwn', text: `*Email:*\n${mailtoLink(lead.email)}` },
-        { type: 'mrkdwn', text: `*Phone:*\n${telLink(lead.phone)}` },
-        { type: 'mrkdwn', text: `*Preferred contact:*\n${dash(lead.preferred_contact)}` },
-      ],
-    },
-  ]
+  // ── Resolved, display-ready soft fields (null = omit) ──────
+  const projectLabel = lead.project_type?.trim() ? escapeMrkdwn(lead.project_type.trim()) : null
+  const sourceRaw = humanizeSource(lead.source)
+  const sourceLabel = sourceRaw ? escapeMrkdwn(sourceRaw) : null
+  const prefLabel = lead.preferred_contact?.trim()
+    ? escapeMrkdwn(lead.preferred_contact.trim().toLowerCase())
+    : null
+  const hasPhone = !!lead.phone?.trim()
+  const hasEmail = !!lead.email?.trim()
 
-  // Request details — only when present (no empty label).
+  const blocks: any[] = []
+
+  // 2. Eyebrow — "🐝 New lead" + project type as a short inline badge.
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: projectLabel ? `🐝 *New lead*   ·   \`${projectLabel}\`` : '🐝 *New lead*',
+      },
+    ],
+  })
+
+  // 3. Name — the prominent bold line.
+  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${name}*` } })
+
+  // 4. Preferred contact line — "Prefers <label> · from <source>". Each half
+  //    omits independently; both missing → the whole line is skipped.
+  const metaBits: string[] = []
+  if (prefLabel) metaBits.push(`Prefers ${prefLabel}`)
+  if (sourceLabel) metaBits.push(`from ${sourceLabel}`)
+  if (metaBits.length) {
+    blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: metaBits.join('   ·   ') }] })
+  }
+
+  // 5. Fields — 2-column grid; each field omitted when its value is absent.
+  const fields: any[] = []
+  if (hasPhone) fields.push({ type: 'mrkdwn', text: `*Phone:*\n${telLink(lead.phone)}` })
+  if (hasEmail) fields.push({ type: 'mrkdwn', text: `*Email:*\n${mailtoLink(lead.email)}` })
+  if (projectLabel) fields.push({ type: 'mrkdwn', text: `*Project:*\n${projectLabel}` })
+  if (sourceLabel) fields.push({ type: 'mrkdwn', text: `*Source:*\n${sourceLabel}` })
+  if (fields.length) blocks.push({ type: 'section', fields })
+
+  // 6. What they told us — labeled quote, only when present.
   if (lead.request_details?.trim()) {
     blocks.push({
       type: 'section',
@@ -160,12 +223,14 @@ export function buildLeadSlackMessage(args: {
     })
   }
 
-  // Actions: "Log call" button (carries the lead id for the interactivity
-  // handler) + an optional "Open in Bee Hub" link button.
+  // 7. Actions — Log call (primary/green) + optional Open in Bee Hub. The
+  //    log_call action_id + value (lead id) are the interactivity contract —
+  //    DO NOT change them.
   const elements: any[] = [
     {
       type: 'button',
       text: { type: 'plain_text', text: '📞 Log call', emoji: true },
+      style: 'primary',
       action_id: 'log_call',
       value: lead.id,
     },
@@ -179,11 +244,16 @@ export function buildLeadSlackMessage(args: {
   }
   blocks.push({ type: 'actions', elements })
 
-  // Trailing divider gives the card a visible bottom edge, separating adjacent
-  // lead posts (Slack has no literal border).
+  // 8. Footer — location provenance (time omitted; the builder is pure).
+  blocks.push({
+    type: 'context',
+    elements: [{ type: 'mrkdwn', text: `${escapeMrkdwn(locationName)} · via Bee Hub` }],
+  })
+
+  // 9. Trailing divider so consecutive lead cards visually separate.
   blocks.push({ type: 'divider' })
 
-  return { text, blocks }
+  return { text, attachments: [{ color: projectTypeColor(lead.project_type), blocks }] }
 }
 
 // ── Transport: chat.postMessage ───────────────────────────────
@@ -193,7 +263,7 @@ export function buildLeadSlackMessage(args: {
 // email location with zero recipients.
 export async function postToSlack(
   locationId: string,
-  message: { text: string; blocks?: any[] },
+  message: { text: string; blocks?: any[]; attachments?: any[] },
 ): Promise<SlackPostResult> {
   const loc = await getSlackLocation(locationId)
   if (!loc) {

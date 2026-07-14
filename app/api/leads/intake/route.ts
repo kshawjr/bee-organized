@@ -496,6 +496,7 @@ export async function POST(req: NextRequest) {
         project_type: project_type || null,
         request_details: requestDetails,
         preferred_contact: preferredContact,
+        source: source || 'web_form',
       },
     })
     // Only a real send failure warns; a quiet skip (not connected / not yet

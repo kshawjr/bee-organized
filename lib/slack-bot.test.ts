@@ -82,53 +82,99 @@ describe('buildLeadSlackMessage (pure builder)', () => {
   })
 })
 
-describe('buildLeadSlackMessage — Block Kit card', () => {
+describe('buildLeadSlackMessage — card (attachments + blocks)', () => {
+  // The card lives in attachments[0].blocks; the attachment color is the stripe.
+  const card = (over: Partial<typeof LEAD> = {}, leadUrl: string | null = 'https://app.example.com/clients/lead-1') =>
+    buildLeadSlackMessage({ lead: { ...LEAD, ...over }, locationName: 'Boulder', leadUrl })
+  const blocksOf = (msg: any) => msg.attachments[0].blocks
   const flat = (blocks: any[]) => JSON.stringify(blocks)
+  const actionsOf = (blocks: any[]) => blocks.find((b: any) => b.type === 'actions')
 
-  it('renders a header + section card with tel:/mailto: hyperlinks and a Log call button', () => {
-    const { blocks } = buildLeadSlackMessage({
-      lead: LEAD,
-      locationName: 'Boulder',
-      leadUrl: 'https://app.example.com/clients/lead-1',
-    })
-    // Header block gives each lead its own card heading.
-    expect(blocks[0]).toMatchObject({ type: 'header' })
-    expect(blocks[0].text.text).toContain('New lead — Boulder')
-    // Trailing divider = the card's bottom edge (separates adjacent posts).
+  it('wraps the card in an attachment with a color stripe; trailing divider separates posts', () => {
+    const msg = card()
+    expect(Array.isArray(msg.attachments)).toBe(true)
+    expect(msg.attachments).toHaveLength(1)
+    expect(typeof msg.attachments[0].color).toBe('string')
+    const blocks = blocksOf(msg)
     expect(blocks[blocks.length - 1]).toEqual({ type: 'divider' })
-
-    const s = flat(blocks)
-    // Phone → tel: link (digits only, +1 for a 10-digit US number); display kept.
-    expect(s).toContain('<tel:+15551112222|(555) 111-2222>')
-    // Email → mailto: link.
-    expect(s).toContain('<mailto:jane@example.com|jane@example.com>')
-
-    // The interactive Log call button carries the lead id in its value.
-    const actions = blocks.find((b: any) => b.type === 'actions')
-    const logBtn = actions.elements.find((e: any) => e.action_id === 'log_call')
-    expect(logBtn).toBeTruthy()
-    expect(logBtn.value).toBe('lead-1')
-    // Open button links to the deep-link when a URL is present.
-    expect(actions.elements.some((e: any) => e.url === 'https://app.example.com/clients/lead-1')).toBe(true)
+    // Eyebrow + prominent name.
+    expect(flat(blocks)).toContain('New lead')
+    expect(flat(blocks)).toContain('*Jane Prospect*')
   })
 
-  it('includes the request-details section only when present; drops Open button + tel/mailto blanks', () => {
-    const withDetails = buildLeadSlackMessage({ lead: LEAD, locationName: 'Boulder', leadUrl: null }).blocks
-    expect(flat(withDetails)).toContain('What they told us')
-    // No leadUrl → no Open button (only the Log call button remains).
-    const actions = withDetails.find((b: any) => b.type === 'actions')
-    expect(actions.elements).toHaveLength(1)
-    expect(actions.elements[0].action_id).toBe('log_call')
+  it('renders tel:/mailto: hyperlinks and the primary Log call button with the exact contract', () => {
+    const blocks = blocksOf(card())
+    const s = flat(blocks)
+    expect(s).toContain('<tel:+15551112222|(555) 111-2222>')
+    expect(s).toContain('<mailto:jane@example.com|jane@example.com>')
 
-    const noDetails = buildLeadSlackMessage({
-      lead: { ...LEAD, request_details: null, phone: null, email: null },
-      locationName: 'Boulder',
-      leadUrl: null,
-    }).blocks
-    expect(flat(noDetails)).not.toContain('What they told us')
-    // Blank phone/email fall back to em-dash, not a broken tel:/mailto: link.
-    expect(flat(noDetails)).not.toContain('tel:')
-    expect(flat(noDetails)).not.toContain('mailto:')
+    const logBtn = actionsOf(blocks).elements.find((e: any) => e.action_id === 'log_call')
+    expect(logBtn).toBeTruthy()
+    expect(logBtn.value).toBe('lead-1')        // interactivity contract — unchanged
+    expect(logBtn.style).toBe('primary')        // green
+    // Open button carries the deep-link when a URL is present.
+    expect(actionsOf(blocks).elements.some((e: any) => e.url === 'https://app.example.com/clients/lead-1')).toBe(true)
+  })
+
+  describe('color-by-project-type stripe', () => {
+    it('Moving → blue, Organizing → teal, unknown/absent → gray', () => {
+      expect(card({ project_type: 'Moving' }).attachments[0].color).toBe('#2563eb')
+      expect(card({ project_type: 'Organizing' }).attachments[0].color).toBe('#0d9488')
+      // Real-world: "Move-In Organization" is an organizing job → teal (organizing wins).
+      expect(card({ project_type: 'Move-In Organization' }).attachments[0].color).toBe('#0d9488')
+      expect(card({ project_type: 'Garage' }).attachments[0].color).toBe('#6b7280')
+      expect(card({ project_type: null }).attachments[0].color).toBe('#6b7280')
+    })
+  })
+
+  describe('graceful omission', () => {
+    it('shows "Prefers <label> · from <source>" and both field cells when present', () => {
+      const s = flat(blocksOf(card({ preferred_contact: 'Phone', source: 'Referral' })))
+      expect(s).toContain('Prefers phone   ·   from Referral')
+      expect(s).toContain('*Source:*\\nReferral') // JSON-escaped newline
+    })
+
+    it('humanizes the webform source slug to Website', () => {
+      expect(flat(blocksOf(card({ source: 'web_form' })))).toContain('from Website')
+    })
+
+    it('omits the source half when source is absent (no dangling separator)', () => {
+      const s = flat(blocksOf(card({ preferred_contact: 'Text', source: null })))
+      expect(s).toContain('Prefers text')
+      expect(s).not.toContain('from ')
+      expect(s).not.toContain('·   from')
+    })
+
+    it('drops the whole meta line when BOTH preferred-contact and source are absent', () => {
+      const s = flat(blocksOf(card({ preferred_contact: null, source: null })))
+      expect(s).not.toContain('Prefers')
+      expect(s).not.toContain('from ')
+    })
+
+    it('a name+phone-only lead still renders a clean card (no empty labels, no details)', () => {
+      const s = flat(blocksOf(card(
+        { email: null, project_type: null, preferred_contact: null, source: null, request_details: null },
+        null,
+      )))
+      expect(s).toContain('<tel:+15551112222|(555) 111-2222>')
+      expect(s).not.toContain('mailto:')
+      expect(s).not.toContain('*Email:*')
+      expect(s).not.toContain('*Source:*')
+      expect(s).not.toContain('*Project:*')
+      expect(s).not.toContain('What they told us')
+      // No leadUrl → only the Log call button.
+      const actions = actionsOf(blocksOf(card(
+        { email: null, project_type: null, preferred_contact: null, source: null, request_details: null },
+        null,
+      )))
+      expect(actions.elements).toHaveLength(1)
+      expect(actions.elements[0].action_id).toBe('log_call')
+    })
+
+    it('includes What they told us only when request_details present', () => {
+      expect(flat(blocksOf(card({ request_details: 'Need packing help' })))).toContain('What they told us')
+      expect(flat(blocksOf(card({ request_details: null })))).not.toContain('What they told us')
+    })
   })
 })
 

@@ -279,6 +279,7 @@ export async function POST(req: NextRequest) {
           project_type: lead.project_type,
           request_details: lead.request_details,
           preferred_contact: lead.preferred_contact ?? null,
+          source: lead.source ?? null,
         },
       })
       if (slackRes.error) warnings.push(`slack_notification_failed: ${slackRes.error}`)
