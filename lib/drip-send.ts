@@ -94,7 +94,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // Lead
   const { data: lead, error: leadErr } = await supabaseService
     .from('leads')
-    .select('id, name, first_name, email, location_uuid, assigned_to, marketing_opt_out')
+    .select('id, name, first_name, email, location_uuid, assigned_to, marketing_opt_out, project_type')
     .eq('id', row.lead_id)
     .maybeSingle()
 
@@ -230,8 +230,14 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   const text = rendered.body
   const html = bodyToHtml(rendered.body)
 
+  // Per-project-type SENDER routing. If the location split senders by project
+  // type, this drip sends AS the sender assigned to the lead's project_type;
+  // otherwise (split off / type unassigned) sendEmail falls back to the base
+  // sender. Sender identity only — content, path, and the interface-active gate
+  // are unchanged. A drip is never dropped for want of a per-type sender.
   const result = await sendEmail({
     locationId: loc.id,
+    senderProjectType: lead.project_type ?? null,
     to: lead.email.trim(),
     subject: rendered.subject || `(no subject)`,
     html,

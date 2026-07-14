@@ -17344,6 +17344,211 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
   )
 }
 
+// ─── Split Senders by Project Type ──────────────────────────────────────────
+// Owner/super_admin-only. Route the FROM sender of client drips by the lead's
+// project type. OFF (default) = the location's base Outreach Email sends every
+// type (single-person location needs zero config). ON = assign specific project
+// types to a specific person (picked from the location's team; name+email
+// copied). One sender may own many types; a type maps to at most one sender;
+// unassigned types fall back to the base sender. Persistence is server-side via
+// /api/locations/:id/project-type-senders (owner+elevated gated; a manager is
+// rejected even on a direct hit). Only renders inside the owner-only My
+// Location module. Warns (doesn't block) when a picked sender's email domain
+// differs from the base sender's — it likely isn't verified and won't deliver.
+function ProjectTypeSenders({ realLocId, readOnly=false }) {
+  const [cfg, setCfg] = useState(null)   // { enabled, base_sender_email, base_sender_domain, project_types, assignments, people }
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [adding, setAdding] = useState(false)
+  const [sel, setSel] = useState({ personId:'', types:[] })
+  const [busy, setBusy] = useState(false)
+
+  const base = realLocId ? `/api/locations/${realLocId}/project-type-senders` : null
+
+  async function load() {
+    if (!base) { setLoading(false); return }
+    setLoading(true); setError(null)
+    try {
+      const r = await fetch(base, { credentials:'include' })
+      if (!r.ok) throw new Error('load_failed')
+      setCfg(await r.json())
+    } catch { setError('Could not load sender routing.') }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { load() /* eslint-disable-next-line */ }, [realLocId])
+
+  async function setEnabled(enabled) {
+    if (!base) return
+    setCfg(c => c ? { ...c, enabled } : c)   // optimistic
+    const r = await fetch(base, { method:'PATCH', credentials:'include', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ enabled }) })
+    if (!r.ok) load()
+  }
+
+  async function saveAssignment() {
+    if (!base) return
+    const person = (cfg?.people || []).find(p => p.id === sel.personId)
+    if (!person || sel.types.length === 0) return
+    setBusy(true)
+    try {
+      const r = await fetch(base, {
+        method:'POST', credentials:'include', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ sender_name: person.name, sender_email: person.email, source_user_id: person.id, project_types: sel.types }),
+      })
+      if (r.ok) { setCfg(await r.json()); setAdding(false); setSel({ personId:'', types:[] }) }
+    } finally { setBusy(false) }
+  }
+
+  async function unassign(projectType) {
+    if (!base) return
+    const r = await fetch(base, { method:'DELETE', credentials:'include', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ project_types:[projectType] }) })
+    if (r.ok) setCfg(await r.json())
+  }
+
+  if (!realLocId) {
+    return (
+      <div style={{ margin:'0 12px', borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', background:'white', padding:'16px' }}>
+        <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>Sender routing becomes available once your location is saved.</p>
+      </div>
+    )
+  }
+
+  const enabled = !!cfg?.enabled
+  const assignments = cfg?.assignments || []
+  const assignedTypes = new Set(assignments.map(a => a.project_type))
+  const availableTypes = (cfg?.project_types || []).filter(t => !assignedTypes.has(t))
+  // Group assignments by sender email for display.
+  const bySender = []
+  for (const a of assignments) {
+    let g = bySender.find(x => x.email === a.sender_email)
+    if (!g) { g = { name:a.sender_name, email:a.sender_email, domain_warning:a.domain_warning, types:[] }; bySender.push(g) }
+    g.types.push(a.project_type)
+  }
+  const selectedPerson = (cfg?.people || []).find(p => p.id === sel.personId)
+
+  return (
+    <div style={{ margin:'0 12px', borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', background:'white' }}>
+      {/* Toggle */}
+      <div style={{ padding:'14px 16px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', borderBottom: enabled ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
+        <div style={{ flex:1, minWidth:0 }}>
+          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Split senders by project type</p>
+          <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>
+            {enabled ? 'Assigned types send from their sender; the rest use your base Outreach Email.' : 'Off — every project type sends from your base Outreach Email.'}
+          </p>
+        </div>
+        <button
+          disabled={readOnly || loading}
+          onClick={()=>setEnabled(!enabled)}
+          role="switch" aria-checked={enabled}
+          style={{ flexShrink:0, width:'44px', height:'26px', borderRadius:'20px', border:'none', cursor: readOnly?'default':'pointer', background: enabled ? '#a8c9c4' : 'rgba(0,0,0,0.15)', position:'relative', transition:'background 0.15s' }}>
+          <span style={{ position:'absolute', top:'3px', left: enabled ? '21px' : '3px', width:'20px', height:'20px', borderRadius:'50%', background:'white', transition:'left 0.15s', boxShadow:'0 1px 3px rgba(0,0,0,0.2)' }} />
+        </button>
+      </div>
+
+      {loading ? (
+        <div style={{ padding:'16px', fontSize:'12px', color:'#8a9e9a' }}>Loading…</div>
+      ) : error ? (
+        <div style={{ padding:'16px', fontSize:'12px', color:'#e5a0a0' }}>{error}</div>
+      ) : enabled && (
+        <div>
+          {/* Current assignments */}
+          {bySender.map((g, i) => (
+            <div key={g.email} style={{ padding:'11px 16px', borderBottom:'1px solid rgba(0,0,0,0.04)' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{g.name}</p>
+                  <p title={g.email} style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{g.email}</p>
+                </div>
+                {g.domain_warning && (
+                  <span title={`Not on your sending domain${cfg?.base_sender_domain ? ` (@${cfg.base_sender_domain})` : ''} — may not deliver`} style={{ fontSize:'10px', padding:'2px 7px', borderRadius:'20px', background:'rgba(229,180,120,0.18)', color:'#b07d3a', fontWeight:600, flexShrink:0 }}>⚠ Unverified domain</span>
+                )}
+              </div>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
+                {g.types.map(t => (
+                  <span key={t} style={{ fontSize:'11px', padding:'3px 8px', borderRadius:'20px', background:'rgba(168,201,196,0.18)', color:'#3a5e58', fontWeight:600, display:'inline-flex', alignItems:'center', gap:'5px' }}>
+                    {t}
+                    {!readOnly && <span onClick={()=>unassign(t)} title="Unassign (falls back to base sender)" style={{ cursor:'pointer', color:'#8a9e9a', fontWeight:700 }}>×</span>}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          {/* Unassigned types → default sender */}
+          {availableTypes.length > 0 && (
+            <div style={{ padding:'11px 16px', borderBottom: (!readOnly) ? '1px solid rgba(0,0,0,0.04)' : 'none', background:'#faf9f6' }}>
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px' }}>→ Default sender</p>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
+                {availableTypes.map(t => (
+                  <span key={t} style={{ fontSize:'11px', padding:'3px 8px', borderRadius:'20px', background:'rgba(0,0,0,0.05)', color:'#8a9e9a', fontWeight:600 }}>{t}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {(cfg?.project_types || []).length === 0 && (
+            <div style={{ padding:'12px 16px', fontSize:'12px', color:'#8a9e9a' }}>No project types configured yet.</div>
+          )}
+
+          {/* Add assignment */}
+          {!readOnly && (
+            <div style={{ padding:'12px 16px', background:'white' }}>
+              {!adding ? (
+                <button
+                  disabled={availableTypes.length === 0 || (cfg?.people || []).length === 0}
+                  onClick={()=>setAdding(true)}
+                  style={{ padding:'8px 14px', borderRadius:'8px', border:'1.5px dashed rgba(168,201,196,0.7)', background:'transparent', color:'#4a5e5a', fontFamily:'inherit', fontSize:'12px', fontWeight:600, cursor: (availableTypes.length===0||(cfg?.people||[]).length===0)?'default':'pointer', opacity:(availableTypes.length===0||(cfg?.people||[]).length===0)?0.5:1 }}>
+                  + Assign a sender
+                </button>
+              ) : (
+                <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
+                  <div>
+                    <label style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', display:'block', marginBottom:'4px' }}>Sender</label>
+                    <select value={sel.personId} onChange={e=>setSel(s=>({ ...s, personId:e.target.value }))}
+                      style={{ width:'100%', padding:'8px 10px', borderRadius:'8px', border:'1.5px solid rgba(0,0,0,0.1)', background:'#f7f5f0', color:'#1a2e2b', fontFamily:'inherit', fontSize:'12px', fontWeight:600 }}>
+                      <option value="">Choose a team member…</option>
+                      {(cfg?.people || []).map(p => (
+                        <option key={p.id} value={p.id}>{p.name} — {p.email}</option>
+                      ))}
+                    </select>
+                    {selectedPerson?.domain_warning && (
+                      <p style={{ fontSize:'11px', color:'#b07d3a', marginTop:'4px' }}>
+                        ⚠ {selectedPerson.email.split('@')[1]} isn’t your sending domain{cfg?.base_sender_domain ? ` (@${cfg.base_sender_domain})` : ''} — drips from this sender may not deliver until it’s verified.
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', display:'block', marginBottom:'4px' }}>Project types (unassigned only)</label>
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
+                      {availableTypes.map(t => {
+                        const on = sel.types.includes(t)
+                        return (
+                          <span key={t} onClick={()=>setSel(s=>({ ...s, types: on ? s.types.filter(x=>x!==t) : [...s.types, t] }))}
+                            style={{ fontSize:'11px', padding:'4px 10px', borderRadius:'20px', cursor:'pointer', fontWeight:600, border:'1.5px solid', borderColor: on ? '#a8c9c4' : 'rgba(0,0,0,0.12)', background: on ? 'rgba(168,201,196,0.2)' : 'transparent', color: on ? '#3a5e58' : '#8a9e9a' }}>
+                            {on ? '✓ ' : ''}{t}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  <div style={{ display:'flex', gap:'8px' }}>
+                    <button disabled={busy || !sel.personId || sel.types.length===0} onClick={saveAssignment}
+                      style={{ padding:'8px 16px', borderRadius:'8px', border:'none', background:'#a8c9c4', color:'#1a2e2b', fontFamily:'inherit', fontSize:'12px', fontWeight:700, cursor:(busy||!sel.personId||sel.types.length===0)?'default':'pointer', opacity:(busy||!sel.personId||sel.types.length===0)?0.5:1 }}>
+                      {busy ? 'Saving…' : 'Save'}
+                    </button>
+                    <button disabled={busy} onClick={()=>{ setAdding(false); setSel({ personId:'', types:[] }) }}
+                      style={{ padding:'8px 16px', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.1)', background:'transparent', color:'#8a9e9a', fontFamily:'inherit', fontSize:'12px', fontWeight:600, cursor:'pointer' }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Lead Notification Recipients ──────────────────────────────────────────────
 // Owner/super_admin-only manager for WHO gets emailed when a new client comes
 // in. Two kinds of recipient, both with an All/Moving/Organizing category:
@@ -19831,6 +20036,9 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
 
             <SectionHeader title="Lead Notification Recipients" desc="Who gets emailed when a new client comes in" />
             <LeadNotificationRecipients realLocId={realLocId} readOnly={false} />
+
+            <SectionHeader title="Drip Sender Routing" desc="Send drips from a different person based on the lead's project type" />
+            <ProjectTypeSenders realLocId={realLocId} readOnly={false} />
 
             <SectionHeader title="Integrations" />
             {/* One unified Jobber card: connection status + import next-step in a

@@ -29,6 +29,13 @@ interface SendEmailArgs {
   subject: string
   html: string
   text?: string
+  // Per-project-type sender routing. When set, the send resolves the location's
+  // assigned sender for this project type (locations.split_senders_enabled +
+  // location_project_type_senders) and sends AS that identity, falling back to
+  // the base sender when the split is off, the type is unassigned, or the table
+  // isn't present yet. Omitted → base sender (unchanged; B2 notifications,
+  // welcome, and stage emails never pass this).
+  senderProjectType?: string | null
 }
 
 interface SendEmailDirectArgs {
@@ -104,7 +111,7 @@ export function renderTemplate(
 }
 
 export async function sendEmail(args: SendEmailArgs): Promise<SendResult> {
-  const { locationId, to, subject, html, text } = args
+  const { locationId, to, subject, html, text, senderProjectType } = args
 
   if (!locationId || !to || !subject || !html) {
     const error = 'sendEmail: missing required field (locationId, to, subject, html)'
@@ -131,15 +138,71 @@ export async function sendEmail(args: SendEmailArgs): Promise<SendResult> {
     return { success: false, error }
   }
 
+  // Per-project-type sender routing. The base trio above IS the default sender.
+  // When this drip carries a project type AND the location has split enabled +
+  // an assignment for that type, send AS that sender; name/reply-to each fall
+  // back to base individually. Any miss (split off, unassigned, or the table /
+  // flag not present yet) → base sender: a drip NEVER fails to send for want of
+  // a per-type sender.
+  let from = send_from_email
+  let fromName = sender_name
+  let replyTo = reply_to_email
+  if (senderProjectType) {
+    const override = await resolveProjectTypeSenderOverride(locationId, senderProjectType)
+    if (override?.sender_email) {
+      from = override.sender_email
+      fromName = override.sender_name ?? sender_name
+      replyTo = override.sender_reply_to ?? reply_to_email
+    }
+  }
+
   return sendEmailDirect({
-    from: send_from_email,
-    fromName: sender_name,
-    replyTo: reply_to_email,
+    from,
+    fromName,
+    replyTo,
     to,
     subject,
     html,
     text,
   })
+}
+
+// Resolve a location's assigned sender for a project type (B-split routing).
+// Defensive and forward-compatible: gated on locations.split_senders_enabled,
+// then the location_project_type_senders row. If the split is off, the type is
+// unassigned, OR the column/table doesn't exist yet (migration not run —
+// PostgREST returns a "does not exist" error), we swallow it and return null so
+// the caller uses the base sender. Never throws.
+type ProjectTypeSenderOverride = {
+  sender_name: string | null
+  sender_email: string | null
+  sender_reply_to: string | null
+}
+async function resolveProjectTypeSenderOverride(
+  locationId: string,
+  projectType: string,
+): Promise<ProjectTypeSenderOverride | null> {
+  try {
+    // Master toggle first — the common single-sender location short-circuits
+    // here without touching the assignments table.
+    const { data: loc, error: locErr } = await supabaseService
+      .from('locations')
+      .select('split_senders_enabled')
+      .eq('id', locationId)
+      .single()
+    if (locErr || loc?.split_senders_enabled !== true) return null
+
+    const { data, error } = await supabaseService
+      .from('location_project_type_senders')
+      .select('sender_name, sender_email, sender_reply_to')
+      .eq('location_id', locationId)
+      .eq('project_type', projectType)
+      .maybeSingle()
+    if (error || !data) return null
+    return data as ProjectTypeSenderOverride
+  } catch {
+    return null
+  }
 }
 
 export async function sendEmailDirect(args: SendEmailDirectArgs): Promise<SendResult> {
