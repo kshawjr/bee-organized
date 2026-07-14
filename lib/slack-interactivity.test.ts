@@ -21,6 +21,12 @@ vi.mock('@/lib/supabase-service', () => {
     const b: any = {}
     for (const m of ['select', 'eq', 'ilike', 'update']) b[m] = () => b
     b.maybeSingle = async () => ({ data: (rows as any)[table], error: null })
+    // hub_users lookup now fetches a candidate set (.limit) and compares in JS.
+    // Normalize the preset row to an array so the handler's .find can run.
+    b.limit = async () => {
+      const r = (rows as any)[table]
+      return { data: Array.isArray(r) ? r : r ? [r] : [], error: null }
+    }
     return b
   }
   return { supabaseService: { from: (t: string) => make(t) } }
@@ -88,7 +94,7 @@ describe('signature verification (the security boundary)', () => {
 describe('verified log_call', () => {
   it('attributes the call to the resolved hub_user and acks 200', async () => {
     getSlackUserEmail.mockResolvedValue('jane@bmave.com')
-    rows.hub_users = { id: 'hub-9', full_name: 'Jane Staff', first_name: 'Jane' }
+    rows.hub_users = { id: 'hub-9', full_name: 'Jane Staff', first_name: 'Jane', email: 'jane@bmave.com' }
 
     const res = await POST(signedReq(logCallPayload))
     expect(res.status).toBe(200)
@@ -102,6 +108,24 @@ describe('verified log_call', () => {
     const ephemeral = (globalThis.fetch as any).mock.calls.find((c: any[]) => c[0] === 'https://hooks.slack.com/actions/resp')
     expect(ephemeral).toBeTruthy()
     expect(JSON.parse(ephemeral[1].body).text).toContain('Jane Staff')
+  })
+
+  it('attributes when the Slack email differs only in case/whitespace from the hub_user', async () => {
+    // Confirmed live case: Slack returns a differently-cased (and here, padded)
+    // email than what's stored. Normalizing + comparing both sides lowercased
+    // must still resolve the user — never fall back to unattributed.
+    getSlackUserEmail.mockResolvedValue('  ADMIN@BeeOrganized.COM ')
+    rows.hub_users = { id: 'hub-admin', full_name: 'Admin User', first_name: 'Admin', email: 'admin@beeorganized.com' }
+
+    const res = await POST(signedReq(logCallPayload))
+    expect(res.status).toBe(200)
+    expect(logCallTouchpoint).toHaveBeenCalledWith({
+      leadId: 'lead-1',
+      locationUuid: 'loc-uuid-1',
+      userId: 'hub-admin',
+    })
+    const ephemeral = (globalThis.fetch as any).mock.calls.find((c: any[]) => c[0] === 'https://hooks.slack.com/actions/resp')
+    expect(JSON.parse(ephemeral[1].body).text).toContain('Admin User')
   })
 
   it('logs unattributed (user_id null) when the clicker is not a known hub_user', async () => {

@@ -104,13 +104,24 @@ async function handleLogCall(args: {
   let who = ''
   try {
     if (loc?.slack_bot_token && slackUserId) {
-      const email = await getSlackUserEmail(loc.slack_bot_token, slackUserId)
+      // Normalize the Slack email so case/whitespace can't drop attribution.
+      const email = ((await getSlackUserEmail(loc.slack_bot_token, slackUserId)) || '')
+        .trim()
+        .toLowerCase()
       if (email) {
-        const { data: hu } = await supabaseService
+        // Case-insensitive DB prefilter (ILIKE), THEN a trim+lowercase compare
+        // on BOTH sides in JS. We fetch a small candidate set rather than
+        // .maybeSingle(): two hub_users rows sharing an email (common for an
+        // admin) would make maybeSingle return null+error and silently fall
+        // through to unattributed — the confirmed live symptom.
+        const { data: candidates } = await supabaseService
           .from('hub_users')
-          .select('id, full_name, first_name')
+          .select('id, full_name, first_name, email')
           .ilike('email', escapeLike(email))
-          .maybeSingle()
+          .limit(10)
+        const hu = (candidates || []).find(
+          (c: any) => (c.email || '').trim().toLowerCase() === email,
+        )
         if (hu) {
           userId = hu.id
           who = hu.full_name || hu.first_name || email
