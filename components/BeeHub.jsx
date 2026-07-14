@@ -17428,7 +17428,7 @@ function ProjectTypeSenders({ realLocId, readOnly=false }) {
 
   if (!realLocId) {
     return (
-      <div style={{ margin:'0 12px', borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', background:'white', padding:'16px' }}>
+      <div style={{ margin:'0 12px', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.08)', background:'white', padding:'12px 14px' }}>
         <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>Sender routing becomes available once your location is saved.</p>
       </div>
     )
@@ -17448,9 +17448,9 @@ function ProjectTypeSenders({ realLocId, readOnly=false }) {
   const selectedPerson = (cfg?.people || []).find(p => p.id === sel.personId)
 
   return (
-    <div style={{ margin:'0 12px', borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', background:'white' }}>
+    <div style={{ margin:'0 12px', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.08)', background:'white' }}>
       {/* Toggle */}
-      <div style={{ padding:'14px 16px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', borderBottom: enabled ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
+      <div style={{ padding:'11px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', borderBottom: enabled ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
         <div style={{ flex:1, minWidth:0 }}>
           <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Send certain project types from someone else</p>
           <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>
@@ -17474,7 +17474,7 @@ function ProjectTypeSenders({ realLocId, readOnly=false }) {
         <div>
           {/* Current assignments */}
           {bySender.map((g, i) => (
-            <div key={g.email} style={{ padding:'11px 16px', borderBottom:'1px solid rgba(0,0,0,0.04)' }}>
+            <div key={g.email} style={{ padding:'10px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
               <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}>
                 <div style={{ flex:1, minWidth:0 }}>
                   <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{g.name}</p>
@@ -17497,7 +17497,7 @@ function ProjectTypeSenders({ realLocId, readOnly=false }) {
 
           {/* Unassigned types → default sender */}
           {availableTypes.length > 0 && (
-            <div style={{ padding:'11px 16px', borderBottom: (!readOnly) ? '1px solid rgba(0,0,0,0.04)' : 'none', background:'#faf9f6' }}>
+            <div style={{ padding:'10px 14px', borderBottom: (!readOnly) ? '1px solid rgba(0,0,0,0.05)' : 'none', background:'#faf9f6' }}>
               <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px' }}>→ Default sender</p>
               <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
                 {availableTypes.map(t => (
@@ -17507,21 +17507,20 @@ function ProjectTypeSenders({ realLocId, readOnly=false }) {
             </div>
           )}
           {(cfg?.project_types || []).length === 0 && (
-            <div style={{ padding:'12px 16px', fontSize:'12px', color:'#8a9e9a' }}>No project types configured yet.</div>
+            <div style={{ padding:'10px 14px', fontSize:'12px', color:'#8a9e9a' }}>No project types configured yet.</div>
           )}
 
-          {/* Add assignment */}
+          {/* Add assignment — a flush row, not a floating box */}
           {!readOnly && (
-            <div style={{ padding:'12px 16px', background:'white' }}>
-              {!adding ? (
-                <button
-                  disabled={availableTypes.length === 0 || (cfg?.people || []).length === 0}
-                  onClick={()=>setAdding(true)}
-                  style={{ padding:'8px 14px', borderRadius:'8px', border:'1.5px dashed rgba(168,201,196,0.7)', background:'transparent', color:'#4a5e5a', fontFamily:'inherit', fontSize:'12px', fontWeight:600, cursor: (availableTypes.length===0||(cfg?.people||[]).length===0)?'default':'pointer', opacity:(availableTypes.length===0||(cfg?.people||[]).length===0)?0.5:1 }}>
-                  + Assign a sender
-                </button>
-              ) : (
-                <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
+            !adding ? (
+              <button
+                disabled={availableTypes.length === 0 || (cfg?.people || []).length === 0}
+                onClick={()=>setAdding(true)}
+                style={{ width:'100%', textAlign:'left', padding:'10px 14px', border:'none', borderTop:'1px solid rgba(0,0,0,0.05)', background:'transparent', color:'#4a7a74', fontFamily:'inherit', fontSize:'12px', fontWeight:600, cursor: (availableTypes.length===0||(cfg?.people||[]).length===0)?'default':'pointer', opacity:(availableTypes.length===0||(cfg?.people||[]).length===0)?0.5:1 }}>
+                + Assign a sender
+              </button>
+            ) : (
+              <div style={{ padding:'10px 14px', borderTop:'1px solid rgba(0,0,0,0.05)', display:'flex', flexDirection:'column', gap:'10px' }}>
                   <div>
                     <label style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', display:'block', marginBottom:'4px' }}>Sender</label>
                     <select value={sel.personId} onChange={e=>setSel(s=>({ ...s, personId:e.target.value }))}
@@ -17561,9 +17560,8 @@ function ProjectTypeSenders({ realLocId, readOnly=false }) {
                       Cancel
                     </button>
                   </div>
-                </div>
-              )}
-            </div>
+              </div>
+            )
           )}
         </div>
       )}
@@ -17774,7 +17772,7 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
 
   if (!realLocId) {
     return (
-      <div style={{ margin:'0 12px', borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', background:'white', padding:'16px' }}>
+      <div style={{ margin:'0 12px', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.08)', background:'white', padding:'12px 14px' }}>
         <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>Recipients become available once your location is saved.</p>
       </div>
     )
@@ -17789,10 +17787,10 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
   const subscribedUsers = users.filter(u => u.subscribed)
 
   return (
-    <div style={{ margin:'0 12px', borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
+    <div style={{ margin:'0 12px', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.08)', background:'white' }}>
 
       {/* Advanced toggle (project-type routing) */}
-      <div style={{ background:'white', padding:'12px 16px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
+      <div style={{ background:'white', padding:'11px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
         <div style={{ flex:1, minWidth:0 }}>
           <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Notify different people by project type</p>
           <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>
@@ -17811,7 +17809,7 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
 
       {/* Team members */}
       <div style={{ background:'white' }}>
-        <div style={{ padding:'8px 16px 4px', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
+        <div style={{ padding:'8px 14px 4px', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
           <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px' }}>Team Members</p>
         </div>
         {loading ? (
@@ -17823,7 +17821,7 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
         ) : users.map((u, i) => {
           const rc = FRANCHISE_ROLES.find(r => r.key === u.role)
           return (
-            <div key={u.hub_user_id} style={{ padding:'11px 16px', borderBottom: i < users.length - 1 ? '1px solid rgba(0,0,0,0.04)' : 'none', opacity: u.subscribed ? 1 : 0.55 }}>
+            <div key={u.hub_user_id} style={{ padding:'10px 14px', borderBottom: i < users.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none', opacity: u.subscribed ? 1 : 0.55 }}>
               <div style={{ display:'flex', alignItems:'center', gap:'12px' }}>
                 <div style={{ flex:1, minWidth:0 }}>
                   <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{u.name}</p>
@@ -17853,11 +17851,11 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
       {/* External recipients */}
       {externals.length > 0 && (
         <div style={{ background:'white', borderTop:'1px solid rgba(0,0,0,0.05)' }}>
-          <div style={{ padding:'8px 16px 4px' }}>
+          <div style={{ padding:'8px 14px 4px' }}>
             <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px' }}>Outside Emails</p>
           </div>
           {externals.map((e) => (
-            <div key={e.id} style={{ padding:'10px 16px', borderTop:'1px solid rgba(0,0,0,0.04)' }}>
+            <div key={e.id} style={{ padding:'10px 14px', borderTop:'1px solid rgba(0,0,0,0.05)' }}>
               <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
                 <span style={{ fontSize:'14px', flexShrink:0 }}>✉️</span>
                 <div style={{ flex:1, minWidth:0 }}>
@@ -17882,7 +17880,7 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
 
       {/* Everything else → whole team (advanced only) */}
       {advanced && projectTypes.length > 0 && (
-        <div style={{ background:'#faf9f6', borderTop:'1px solid rgba(0,0,0,0.05)', padding:'11px 16px' }}>
+        <div style={{ background:'#faf9f6', borderTop:'1px solid rgba(0,0,0,0.05)', padding:'10px 14px' }}>
           <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Everything else → whole team</p>
           {leftoverTypes.length === 0 ? (
             <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Every project type is assigned to someone specific.</p>
@@ -17922,7 +17920,7 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
           </div>
         </div>
       ) : (
-        <div style={{ background:'white', borderTop:'1px solid rgba(0,0,0,0.05)', padding:'10px 16px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        <div style={{ background:'white', borderTop:'1px solid rgba(0,0,0,0.05)', padding:'9px 14px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
           <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{subCount} active recipient{subCount !== 1 ? 's' : ''}</span>
           <button onClick={()=>setAdding(true)} style={{ padding:'6px 12px', background:'transparent', border:'1px solid rgba(168,201,196,0.4)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>+ Add outside email</button>
         </div>
@@ -19078,7 +19076,7 @@ function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdate
   )
 }
 
-function SettingsEditRow({ label, value, onSave, readOnly, hint, type='text', required=false, validate=null }) {
+function SettingsEditRow({ label, value, onSave, readOnly, hint, type='text', required=false, validate=null, trailing=null }) {
   const [editing, setEditing] = useState(false)
   const [val, setVal] = useState(value)
 
@@ -19116,6 +19114,7 @@ function SettingsEditRow({ label, value, onSave, readOnly, hint, type='text', re
           {editing && errorMsg && <p style={{ fontSize:'11px', color:'#b91c1c', marginTop:'4px' }}>{errorMsg}</p>}
           {hint&&!editing&&<p style={{ fontSize:'11px', color:'#b0c0bc', marginTop:'2px' }}>{hint}</p>}
         </div>
+        {trailing&&!editing&&<div style={{ flexShrink:0 }}>{trailing}</div>}
         {!readOnly&&(
           editing ? (
             <div style={{ display:'flex', gap:'6px', flexShrink:0 }}>
@@ -20197,21 +20196,22 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             <NewLeadNotifications realLocId={realLocId} readOnly={false} />
 
             {/* PART 2 — Sending identity */}
-            <div style={{ padding:'16px 16px 6px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px' }}>
-              <div style={{ flex:1, minWidth:0 }}>
-                <p style={{ fontSize:'11px', fontWeight:700, color:'#4a5e5a' }}>2 · Who follow-up emails come from</p>
-                <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>The From name &amp; address on your new-lead follow-up drip.</p>
-              </div>
-              {settings.location.sendFromEmail
-                ? <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'20px', background:'rgba(168,201,196,0.2)', color:'#3a5e58', fontWeight:600, flexShrink:0 }}>✓ Verified sender</span>
-                : <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'20px', background:'rgba(212,160,70,0.14)', color:'#b07d3a', fontWeight:600, flexShrink:0 }}>Not set</span>}
+            <div style={{ padding:'16px 16px 6px' }}>
+              <p style={{ fontSize:'11px', fontWeight:700, color:'#4a5e5a' }}>2 · Who follow-up emails come from</p>
+              <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>The From name &amp; address on your new-lead follow-up drip.</p>
             </div>
-            <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-              <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>updateLocation('sendFromName',v)}  hint="e.g. Bee Organized Kansas City" />
+            {/* (a) Default identity — ONE bordered container, hairline-divided rows;
+                the Verified pill rides the From-name row (right-aligned). */}
+            <div style={{ borderRadius:'10px', overflow:'hidden', margin:'0 12px', border:'1px solid rgba(0,0,0,0.08)', background:'white' }}>
+              <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>updateLocation('sendFromName',v)}  hint="e.g. Bee Organized Kansas City"
+                trailing={settings.location.sendFromEmail
+                  ? <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'20px', background:'rgba(168,201,196,0.2)', color:'#3a5e58', fontWeight:600 }}>✓ Verified sender</span>
+                  : <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'20px', background:'rgba(212,160,70,0.14)', color:'#b07d3a', fontWeight:600 }}>Not set</span>} />
               <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>updateLocation('sendFromEmail',v)} hint="Must be a verified sender in your email provider" type="email" />
               <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>updateLocation('replyToEmail',v)}  hint="Where client replies land (defaults to Send From)" type="email" />
             </div>
             <div style={{ height:'8px' }} />
+            {/* (b) Per-type sender split — ONE bordered container (see component) */}
             <ProjectTypeSenders realLocId={realLocId} readOnly={false} />
 
             <SectionHeader title="Integrations" />
