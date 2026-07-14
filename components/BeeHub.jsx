@@ -17428,7 +17428,7 @@ function ProjectTypeSenders({ realLocId, readOnly=false }) {
 
   if (!realLocId) {
     return (
-      <div style={{ margin:'0 12px', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.08)', background:'white', padding:'12px 14px' }}>
+      <div style={{ margin:'0 12px', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.09)', background:'white', padding:'12px 14px' }}>
         <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>Sender routing becomes available once your location is saved.</p>
       </div>
     )
@@ -17448,9 +17448,9 @@ function ProjectTypeSenders({ realLocId, readOnly=false }) {
   const selectedPerson = (cfg?.people || []).find(p => p.id === sel.personId)
 
   return (
-    <div style={{ margin:'0 12px', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.08)', background:'white' }}>
+    <div style={{ margin:'0 12px', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.09)', background:'white' }}>
       {/* Toggle */}
-      <div style={{ padding:'11px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', borderBottom: enabled ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
+      <div style={{ padding:'10px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', borderBottom: enabled ? '1px solid rgba(0,0,0,0.06)' : 'none' }}>
         <div style={{ flex:1, minWidth:0 }}>
           <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Send certain project types from someone else</p>
           <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>
@@ -17474,19 +17474,19 @@ function ProjectTypeSenders({ realLocId, readOnly=false }) {
         <div>
           {/* Current assignments */}
           {bySender.map((g, i) => (
-            <div key={g.email} style={{ padding:'10px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}>
+            <div key={g.email} style={{ padding:'8px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'7px' }}>
                 <div style={{ flex:1, minWidth:0 }}>
                   <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{g.name}</p>
                   <p title={g.email} style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{g.email}</p>
                 </div>
                 {g.domain_warning && (
-                  <span title={`Not on your sending domain${cfg?.base_sender_domain ? ` (@${cfg.base_sender_domain})` : ''} — may not deliver`} style={{ fontSize:'10px', padding:'2px 7px', borderRadius:'20px', background:'rgba(229,180,120,0.18)', color:'#b07d3a', fontWeight:600, flexShrink:0 }}>⚠ Unverified domain</span>
+                  <span title={`Not on your sending domain${cfg?.base_sender_domain ? ` (@${cfg.base_sender_domain})` : ''} — may not deliver`} style={{ fontSize:'10px', padding:'3px 9px', borderRadius:'8px', background:'#fbf1de', color:'#c98a2b', fontWeight:600, flexShrink:0 }}>⚠ Unverified domain</span>
                 )}
               </div>
-              <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:'5px' }}>
                 {g.types.map(t => (
-                  <span key={t} style={{ fontSize:'11px', padding:'3px 8px', borderRadius:'20px', background:'rgba(168,201,196,0.18)', color:'#3a5e58', fontWeight:600, display:'inline-flex', alignItems:'center', gap:'5px' }}>
+                  <span key={t} style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'8px', background:'rgba(168,201,196,0.18)', color:'#3a5e58', fontWeight:600, display:'inline-flex', alignItems:'center', gap:'5px' }}>
                     {t}
                     {!readOnly && <span onClick={()=>unassign(t)} title="Unassign (falls back to base sender)" style={{ cursor:'pointer', color:'#8a9e9a', fontWeight:700 }}>×</span>}
                   </span>
@@ -17497,17 +17497,17 @@ function ProjectTypeSenders({ realLocId, readOnly=false }) {
 
           {/* Unassigned types → default sender */}
           {availableTypes.length > 0 && (
-            <div style={{ padding:'10px 14px', borderBottom: (!readOnly) ? '1px solid rgba(0,0,0,0.05)' : 'none', background:'#faf9f6' }}>
-              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px' }}>→ Default sender</p>
-              <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
+            <div style={{ padding:'8px 14px', borderBottom: (!readOnly) ? '1px solid rgba(0,0,0,0.06)' : 'none', background:'#fafbfa' }}>
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#a3aeaa', textTransform:'uppercase', letterSpacing:'0.045em', marginBottom:'5px' }}>→ Default sender</p>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:'5px' }}>
                 {availableTypes.map(t => (
-                  <span key={t} style={{ fontSize:'11px', padding:'3px 8px', borderRadius:'20px', background:'rgba(0,0,0,0.05)', color:'#8a9e9a', fontWeight:600 }}>{t}</span>
+                  <span key={t} style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'8px', background:'rgba(0,0,0,0.05)', color:'#8a9e9a', fontWeight:600 }}>{t}</span>
                 ))}
               </div>
             </div>
           )}
           {(cfg?.project_types || []).length === 0 && (
-            <div style={{ padding:'10px 14px', fontSize:'12px', color:'#8a9e9a' }}>No project types configured yet.</div>
+            <div style={{ padding:'8px 14px', fontSize:'12px', color:'#8a9e9a' }}>No project types configured yet.</div>
           )}
 
           {/* Add assignment — a flush row, not a floating box */}
@@ -17516,11 +17516,11 @@ function ProjectTypeSenders({ realLocId, readOnly=false }) {
               <button
                 disabled={availableTypes.length === 0 || (cfg?.people || []).length === 0}
                 onClick={()=>setAdding(true)}
-                style={{ width:'100%', textAlign:'left', padding:'10px 14px', border:'none', borderTop:'1px solid rgba(0,0,0,0.05)', background:'transparent', color:'#4a7a74', fontFamily:'inherit', fontSize:'12px', fontWeight:600, cursor: (availableTypes.length===0||(cfg?.people||[]).length===0)?'default':'pointer', opacity:(availableTypes.length===0||(cfg?.people||[]).length===0)?0.5:1 }}>
+                style={{ width:'100%', textAlign:'left', padding:'8px 14px', border:'none', borderTop:'1px solid rgba(0,0,0,0.06)', background:'#fafbfa', color:'#2f7d6f', fontFamily:'inherit', fontSize:'12px', fontWeight:600, cursor: (availableTypes.length===0||(cfg?.people||[]).length===0)?'default':'pointer', opacity:(availableTypes.length===0||(cfg?.people||[]).length===0)?0.5:1 }}>
                 + Assign a sender
               </button>
             ) : (
-              <div style={{ padding:'10px 14px', borderTop:'1px solid rgba(0,0,0,0.05)', display:'flex', flexDirection:'column', gap:'10px' }}>
+              <div style={{ padding:'10px 14px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', flexDirection:'column', gap:'10px' }}>
                   <div>
                     <label style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', display:'block', marginBottom:'4px' }}>Sender</label>
                     <select value={sel.personId} onChange={e=>setSel(s=>({ ...s, personId:e.target.value }))}
@@ -17538,12 +17538,12 @@ function ProjectTypeSenders({ realLocId, readOnly=false }) {
                   </div>
                   <div>
                     <label style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', display:'block', marginBottom:'4px' }}>Project types (unassigned only)</label>
-                    <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:'5px' }}>
                       {availableTypes.map(t => {
                         const on = sel.types.includes(t)
                         return (
                           <span key={t} onClick={()=>setSel(s=>({ ...s, types: on ? s.types.filter(x=>x!==t) : [...s.types, t] }))}
-                            style={{ fontSize:'11px', padding:'4px 10px', borderRadius:'20px', cursor:'pointer', fontWeight:600, border:'1.5px solid', borderColor: on ? '#a8c9c4' : 'rgba(0,0,0,0.12)', background: on ? 'rgba(168,201,196,0.2)' : 'transparent', color: on ? '#3a5e58' : '#8a9e9a' }}>
+                            style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'8px', cursor:'pointer', fontWeight:600, border:'1.5px solid', borderColor: on ? '#a8c9c4' : 'rgba(0,0,0,0.12)', background: on ? 'rgba(168,201,196,0.2)' : 'transparent', color: on ? '#3a5e58' : '#8a9e9a' }}>
                             {on ? '✓ ' : ''}{t}
                           </span>
                         )
@@ -17620,7 +17620,7 @@ function TypePill({ label, on, disabled, muted, onClick }) {
       onClick={disabled ? undefined : onClick}
       title={label}
       style={{
-        fontSize:'11px', padding:'3px 9px', borderRadius:'20px', fontWeight:600,
+        fontSize:'11px', padding:'3px 9px', borderRadius:'8px', fontWeight:600,
         cursor: disabled ? 'default' : 'pointer',
         border:'1px solid',
         borderColor: on ? 'rgba(168,201,196,0.9)' : 'rgba(0,0,0,0.10)',
@@ -17647,11 +17647,11 @@ function RecipientTypePicker({ category, projectTypes, readOnly, onChange }) {
     onChange(serializeCatJS(next.length===0, next))
   }
   return (
-    <div style={{ marginTop:'8px', paddingTop:'8px', borderTop:'1px dashed rgba(0,0,0,0.07)' }}>
-      <div style={{ display:'flex', flexWrap:'wrap', gap:'6px', alignItems:'center' }}>
+    <div style={{ marginTop:'7px', paddingTop:'7px', borderTop:'1px dashed rgba(0,0,0,0.07)' }}>
+      <div style={{ display:'flex', flexWrap:'wrap', gap:'5px', alignItems:'center' }}>
         <span
           onClick={readOnly ? undefined : ()=>onChange('all')}
-          style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', fontWeight:600, cursor: readOnly?'default':'pointer', border:'1px solid', borderColor: p.all ? '#a8c9c4' : 'rgba(0,0,0,0.10)', background: p.all ? 'rgba(168,201,196,0.28)' : 'transparent', color: p.all ? '#2f5049' : '#8a9e9a', whiteSpace:'nowrap' }}>
+          style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'8px', fontWeight:600, cursor: readOnly?'default':'pointer', border:'1px solid', borderColor: p.all ? '#a8c9c4' : 'rgba(0,0,0,0.10)', background: p.all ? 'rgba(168,201,196,0.28)' : 'transparent', color: p.all ? '#2f5049' : '#8a9e9a', whiteSpace:'nowrap' }}>
           {p.all ? '✓ ' : ''}All leads
         </span>
         <span style={{ width:'1px', height:'16px', background:'rgba(0,0,0,0.08)', margin:'0 2px' }} />
@@ -17772,7 +17772,7 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
 
   if (!realLocId) {
     return (
-      <div style={{ margin:'0 12px', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.08)', background:'white', padding:'12px 14px' }}>
+      <div style={{ margin:'0 12px', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.09)', background:'white', padding:'12px 14px' }}>
         <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>Recipients become available once your location is saved.</p>
       </div>
     )
@@ -17787,10 +17787,10 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
   const subscribedUsers = users.filter(u => u.subscribed)
 
   return (
-    <div style={{ margin:'0 12px', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.08)', background:'white' }}>
+    <div style={{ margin:'0 12px', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.09)', background:'white' }}>
 
       {/* Advanced toggle (project-type routing) */}
-      <div style={{ background:'white', padding:'11px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
+      <div style={{ background:'white', padding:'10px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
         <div style={{ flex:1, minWidth:0 }}>
           <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Notify different people by project type</p>
           <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>
@@ -17809,8 +17809,8 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
 
       {/* Team members */}
       <div style={{ background:'white' }}>
-        <div style={{ padding:'8px 14px 4px', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
-          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px' }}>Team Members</p>
+        <div style={{ padding:'7px 14px 4px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
+          <p style={{ fontSize:'10px', fontWeight:700, color:'#a3aeaa', textTransform:'uppercase', letterSpacing:'0.045em' }}>Team Members</p>
         </div>
         {loading ? (
           <div style={{ padding:'16px', fontSize:'12px', color:'#8a9e9a' }}>Loading…</div>
@@ -17821,20 +17821,20 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
         ) : users.map((u, i) => {
           const rc = FRANCHISE_ROLES.find(r => r.key === u.role)
           return (
-            <div key={u.hub_user_id} style={{ padding:'10px 14px', borderBottom: i < users.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none', opacity: u.subscribed ? 1 : 0.55 }}>
+            <div key={u.hub_user_id} style={{ padding:'8px 14px', borderBottom: i < users.length - 1 ? '1px solid rgba(0,0,0,0.06)' : 'none', opacity: u.subscribed ? 1 : 0.55 }}>
               <div style={{ display:'flex', alignItems:'center', gap:'12px' }}>
                 <div style={{ flex:1, minWidth:0 }}>
                   <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{u.name}</p>
                   <p title={u.email} style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.email}</p>
                 </div>
-                {rc && <span style={{ fontSize:'10px', padding:'2px 7px', borderRadius:'20px', background:rc.bg, color:rc.color, fontWeight:600, flexShrink:0 }}>{rc.icon} {rc.label}</span>}
+                {rc && <span style={{ fontSize:'10px', padding:'3px 9px', borderRadius:'8px', background:rc.bg, color:rc.color, fontWeight:600, flexShrink:0 }}>{rc.icon} {rc.label}</span>}
                 {readOnly ? (
                   <span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{u.subscribed ? (advanced ? catSummaryJS(u.category) : 'On') : 'Off'}</span>
                 ) : (
                   <button
                     onClick={()=>patchUser(u.hub_user_id, { subscribed: !u.subscribed })}
                     title={u.subscribed ? 'Unsubscribe from lead emails' : 'Re-subscribe to lead emails'}
-                    style={{ flexShrink:0, padding:'6px 10px', borderRadius:'8px', border:'1px solid', borderColor: u.subscribed ? 'rgba(229,160,160,0.5)' : 'rgba(168,201,196,0.5)', background:'transparent', color: u.subscribed ? '#c96a6a' : '#4a5e5a', fontFamily:'inherit', fontSize:'12px', fontWeight:600, cursor:'pointer' }}>
+                    style={{ flexShrink:0, padding:'6px 10px', borderRadius:'8px', border:'1px solid', borderColor: u.subscribed ? 'rgba(192,57,43,0.35)' : 'rgba(47,125,111,0.4)', background:'transparent', color: u.subscribed ? '#c0392b' : '#2f7d6f', fontFamily:'inherit', fontSize:'12px', fontWeight:600, cursor:'pointer' }}>
                     {u.subscribed ? 'Remove' : 'Add back'}
                   </button>
                 )}
@@ -17850,12 +17850,12 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
 
       {/* External recipients */}
       {externals.length > 0 && (
-        <div style={{ background:'white', borderTop:'1px solid rgba(0,0,0,0.05)' }}>
-          <div style={{ padding:'8px 14px 4px' }}>
-            <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px' }}>Outside Emails</p>
+        <div style={{ background:'white', borderTop:'1px solid rgba(0,0,0,0.06)' }}>
+          <div style={{ padding:'7px 14px 4px' }}>
+            <p style={{ fontSize:'10px', fontWeight:700, color:'#a3aeaa', textTransform:'uppercase', letterSpacing:'0.045em' }}>Outside Emails</p>
           </div>
           {externals.map((e) => (
-            <div key={e.id} style={{ padding:'10px 14px', borderTop:'1px solid rgba(0,0,0,0.05)' }}>
+            <div key={e.id} style={{ padding:'8px 14px', borderTop:'1px solid rgba(0,0,0,0.06)' }}>
               <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
                 <span style={{ fontSize:'14px', flexShrink:0 }}>✉️</span>
                 <div style={{ flex:1, minWidth:0 }}>
@@ -17866,7 +17866,7 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
                 {readOnly ? (
                   advanced && <span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{catSummaryJS(e.category)}</span>
                 ) : (
-                  <button onClick={()=>removeExternal(e.id)} title="Remove recipient" style={{ background:'none', border:'none', color:'#e5a0a0', cursor:'pointer', fontSize:'18px', flexShrink:0, lineHeight:1 }}>×</button>
+                  <button onClick={()=>removeExternal(e.id)} title="Remove recipient" style={{ background:'none', border:'none', color:'#c0392b', cursor:'pointer', fontSize:'18px', flexShrink:0, lineHeight:1 }}>×</button>
                 )}
               </div>
               {advanced && (
@@ -17880,22 +17880,22 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
 
       {/* Everything else → whole team (advanced only) */}
       {advanced && projectTypes.length > 0 && (
-        <div style={{ background:'#faf9f6', borderTop:'1px solid rgba(0,0,0,0.05)', padding:'10px 14px' }}>
-          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Everything else → whole team</p>
+        <div style={{ background:'#fafbfa', borderTop:'1px solid rgba(0,0,0,0.06)', padding:'8px 14px' }}>
+          <p style={{ fontSize:'10px', fontWeight:700, color:'#a3aeaa', textTransform:'uppercase', letterSpacing:'0.045em', marginBottom:'6px' }}>Everything else → whole team</p>
           {leftoverTypes.length === 0 ? (
             <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Every project type is assigned to someone specific.</p>
           ) : (
             <>
-              <div style={{ display:'flex', flexWrap:'wrap', gap:'6px', marginBottom:'8px' }}>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:'5px', marginBottom:'8px' }}>
                 {leftoverTypes.map(t => (
-                  <span key={t} style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:'rgba(0,0,0,0.05)', color:'#8a9e9a', fontWeight:600 }}>{t}</span>
+                  <span key={t} style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'8px', background:'rgba(0,0,0,0.05)', color:'#8a9e9a', fontWeight:600 }}>{t}</span>
                 ))}
               </div>
-              <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:'5px' }}>
                 {subscribedUsers.length === 0 ? (
                   <span style={{ fontSize:'11px', color:'#c96a6a' }}>No subscribed team members — these leads fall back to the full list.</span>
                 ) : subscribedUsers.map(u => (
-                  <span key={u.hub_user_id} style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:'rgba(168,201,196,0.18)', color:'#3a5e58', fontWeight:600 }}>{u.name}</span>
+                  <span key={u.hub_user_id} style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'8px', background:'rgba(168,201,196,0.18)', color:'#3a5e58', fontWeight:600 }}>{u.name}</span>
                 ))}
               </div>
             </>
@@ -17920,9 +17920,9 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
           </div>
         </div>
       ) : (
-        <div style={{ background:'white', borderTop:'1px solid rgba(0,0,0,0.05)', padding:'9px 14px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        <div style={{ background:'#fafbfa', borderTop:'1px solid rgba(0,0,0,0.06)', padding:'8px 14px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
           <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{subCount} active recipient{subCount !== 1 ? 's' : ''}</span>
-          <button onClick={()=>setAdding(true)} style={{ padding:'6px 12px', background:'transparent', border:'1px solid rgba(168,201,196,0.4)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>+ Add outside email</button>
+          <button onClick={()=>setAdding(true)} style={{ padding:'6px 12px', background:'transparent', border:'1px solid rgba(47,125,111,0.35)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#2f7d6f', cursor:'pointer' }}>+ Add outside email</button>
         </div>
       ))}
     </div>
@@ -20189,24 +20189,24 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             </div>
 
             {/* PART 1 — Notifications */}
-            <div style={{ padding:'6px 16px 6px' }}>
-              <p style={{ fontSize:'11px', fontWeight:700, color:'#4a5e5a' }}>1 · Who gets notified</p>
-              <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>Emailed the moment a new lead comes in through your website.</p>
+            <div style={{ padding:'10px 16px 6px' }}>
+              <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', marginBottom:'1px' }}>1 · Who gets notified</p>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.4 }}>Emailed the moment a new lead comes in through your website.</p>
             </div>
             <NewLeadNotifications realLocId={realLocId} readOnly={false} />
 
             {/* PART 2 — Sending identity */}
-            <div style={{ padding:'16px 16px 6px' }}>
-              <p style={{ fontSize:'11px', fontWeight:700, color:'#4a5e5a' }}>2 · Who follow-up emails come from</p>
-              <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>The From name &amp; address on your new-lead follow-up drip.</p>
+            <div style={{ padding:'18px 16px 6px' }}>
+              <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', marginBottom:'1px' }}>2 · Who follow-up emails come from</p>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.4 }}>The From name &amp; address on your new-lead follow-up drip.</p>
             </div>
             {/* (a) Default identity — ONE bordered container, hairline-divided rows;
                 the Verified pill rides the From-name row (right-aligned). */}
-            <div style={{ borderRadius:'10px', overflow:'hidden', margin:'0 12px', border:'1px solid rgba(0,0,0,0.08)', background:'white' }}>
+            <div style={{ borderRadius:'10px', overflow:'hidden', margin:'0 12px', border:'1px solid rgba(0,0,0,0.09)', background:'white' }}>
               <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>updateLocation('sendFromName',v)}  hint="e.g. Bee Organized Kansas City"
                 trailing={settings.location.sendFromEmail
-                  ? <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'20px', background:'rgba(168,201,196,0.2)', color:'#3a5e58', fontWeight:600 }}>✓ Verified sender</span>
-                  : <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'20px', background:'rgba(212,160,70,0.14)', color:'#b07d3a', fontWeight:600 }}>Not set</span>} />
+                  ? <span style={{ fontSize:'10px', padding:'3px 9px', borderRadius:'8px', background:'#e7f2ee', color:'#2f7d6f', fontWeight:600 }}>✓ Verified sender</span>
+                  : <span style={{ fontSize:'10px', padding:'3px 9px', borderRadius:'8px', background:'#fbf1de', color:'#c98a2b', fontWeight:600 }}>Not set</span>} />
               <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>updateLocation('sendFromEmail',v)} hint="Must be a verified sender in your email provider" type="email" />
               <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>updateLocation('replyToEmail',v)}  hint="Where client replies land (defaults to Send From)" type="email" />
             </div>
