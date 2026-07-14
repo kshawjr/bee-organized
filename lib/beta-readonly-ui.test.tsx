@@ -160,7 +160,10 @@ describe('read-only wiring (source pins)', () => {
 
   it('HiveShell threads readOnly to every write-bearing child', () => {
     const src = readFileSync('components/hive/HiveShell.jsx', 'utf8')
-    for (const child of ['InboxScreen', 'EngagementBoard', 'NewClientSheet', 'EngagementPanel', 'PersonCard', 'ClientProfile']) {
+    // PersonCard is no longer a HiveShell overlay child — lead detail is
+    // unified on ClientProfile (record-id-in-URL work). It still accepts
+    // readOnly as a standalone component; it's just not mounted here.
+    for (const child of ['InboxScreen', 'EngagementBoard', 'NewClientSheet', 'EngagementPanel', 'ClientProfile']) {
       const re = new RegExp(`<${child}[\\s\\S]{0,600}readOnly=\\{readOnly\\}`)
       expect(src, `${child} should receive readOnly`).toMatch(re)
     }

@@ -3,6 +3,7 @@
 import { Suspense, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import { safeNextPath } from '@/lib/safe-next'
 
 function LoginForm() {
   const [loading, setLoading] = useState(false)
@@ -10,14 +11,22 @@ function LoginForm() {
   const supabase = createClient()
   const searchParams = useSearchParams()
   const errorParam = searchParams.get('error')
+  // Post-login destination (e.g. a deep-linked lead). Sanitized to a
+  // same-origin relative path so a crafted ?next can't redirect off-site,
+  // then forwarded to the OAuth callback which honors ?next.
+  const nextParam = safeNextPath(searchParams.get('next'))
 
   async function handleGoogleLogin() {
     setLoading(true)
     setError('')
+    const callbackUrl =
+      nextParam && nextParam !== '/'
+        ? `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextParam)}`
+        : `${window.location.origin}/auth/callback`
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: callbackUrl,
       },
     })
     if (error) {

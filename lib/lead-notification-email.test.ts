@@ -81,7 +81,7 @@ describe('notifyNewLead', () => {
   it('includes the captured lead fields in the email body', async () => {
     resolveMock.mockResolvedValue([recip('owner@biz.com')])
 
-    await notifyNewLead({ location: LOCATION, lead: LEAD })
+    await notifyNewLead({ location: LOCATION, lead: LEAD, baseUrl: 'https://hub.example.com' })
 
     const { subject, html, text } = sendEmailDirectMock.mock.calls[0][0]
     expect(subject).toContain('Jane Prospect')
@@ -94,6 +94,30 @@ describe('notifyNewLead', () => {
       expect(body).toContain('medically complex condition')
       expect(body).toContain('Text')
     }
+  })
+
+  it('includes the "open this lead" deep-link button (html + text) when a baseUrl is given', async () => {
+    resolveMock.mockResolvedValue([recip('owner@biz.com')])
+
+    await notifyNewLead({ location: LOCATION, lead: LEAD, baseUrl: 'https://hub.example.com/' })
+
+    const { html, text } = sendEmailDirectMock.mock.calls[0][0]
+    // Trailing slash on baseUrl is trimmed → exactly one slash before /clients.
+    expect(html).toContain('href="https://hub.example.com/clients/lead-1"')
+    expect(html).toContain('Open this lead in Bee Hub')
+    expect(text).toContain('https://hub.example.com/clients/lead-1')
+  })
+
+  it('omits the deep-link button when no baseUrl is available (email still sends)', async () => {
+    resolveMock.mockResolvedValue([recip('owner@biz.com')])
+
+    const res = await notifyNewLead({ location: LOCATION, lead: LEAD })
+
+    const { html, text } = sendEmailDirectMock.mock.calls[0][0]
+    expect(html).not.toContain('/clients/lead-1')
+    expect(html).not.toContain('Open this lead in Bee Hub')
+    expect(text).not.toContain('/clients/lead-1')
+    expect(res.sent).toBe(true)
   })
 
   it('sends nothing (no error) when the location has zero recipients', async () => {

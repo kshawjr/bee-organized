@@ -431,8 +431,17 @@ export async function POST(req: NextRequest) {
   // Zero recipients is a normal quiet no-send.
   let notifiedCount = 0
   try {
+    // Base URL for the "open this lead" deep-link — same pattern the invite
+    // emails use: the NEXT_PUBLIC_SITE_URL override (for proxy-fronted deploys)
+    // falls back to the request origin so prod / preview / local each build a
+    // correct absolute link to /clients/<lead.id>.
+    const baseUrl =
+      process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
+      req.nextUrl?.origin ||
+      null
     const notify = await notifyNewLead({
       location: { id: location.id, name: location.name },
+      baseUrl,
       lead: {
         id: lead.id,
         name: full_name.trim(),

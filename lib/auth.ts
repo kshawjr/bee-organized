@@ -1,14 +1,26 @@
 import { createServerSupabaseClient } from './supabase-server'
 import { redirect } from 'next/navigation'
+import { safeNextPath } from './safe-next'
 
 export type HubRole = 'super_admin' | 'admin' | 'owner' | 'manager' | 'lite_user'
 
-export async function requireAuth() {
+// Build the login redirect, threading a post-login return-to when the caller
+// knows where the user was headed (e.g. a /clients/<id> deep-link from a lead
+// notification email). `returnTo` is sanitized to a same-origin relative path
+// (open-redirect guard) before it becomes ?next=…; the callback reads it back.
+function loginRedirectTarget(returnTo?: string | null): string {
+  if (!returnTo) return '/auth/login'
+  const safe = safeNextPath(returnTo)
+  if (safe === '/') return '/auth/login'
+  return `/auth/login?next=${encodeURIComponent(safe)}`
+}
+
+export async function requireAuth(returnTo?: string | null) {
   const supabase = await createServerSupabaseClient()
   const {
     data: { user },
   } = await supabase.auth.getUser()
-  if (!user) redirect('/auth/login')
+  if (!user) redirect(loginRedirectTarget(returnTo))
   return user
 }
 

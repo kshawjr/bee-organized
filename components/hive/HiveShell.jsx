@@ -19,7 +19,6 @@ import EngagementPanel from './EngagementPanel'
 import ClientDirectory from './ClientDirectory'
 import InboxScreen from './InboxScreen'
 import ClientProfile from './ClientProfile'
-import PersonCard from './PersonCard'
 import NewClientSheet from './NewClientSheet'
 import { mapLeadToPerson } from '@/lib/people-mapper'
 import { leadColsToPersonFields } from './shared/leadPatchMap'
@@ -233,7 +232,13 @@ export default function HiveShell({
     setOverlay({ type: 'client', clientId, siblings: Array.isArray(siblings) && siblings.length > 1 ? siblings : null })
     onOpenClient(clientId)
   }
-  const openPerson = (person) => { setOverlay({ type: 'person', person }); onCloseRecord() }
+  // A lead and a client are the SAME record (one leads row, one uuid). The
+  // Inbox opens leads through here — route them onto the SAME ClientProfile
+  // overlay a click/deep-link opens, and drive the URL, so a lead is
+  // deep-linkable everywhere (no PersonCard/ClientProfile two-UI split, the
+  // same unification 3c0ad3a did for clients). ClientProfile is a superset of
+  // the old PersonCard (junk/buzz/source/referrer/request-details/touchpoints).
+  const openPerson = (person) => { if (person?.id) openClient(person.id) }
 
   // URL → overlay sync: when the URL-named client id changes (deep-link on
   // mount, browser back/forward), open/close the ClientProfile overlay to
@@ -522,11 +527,12 @@ export default function HiveShell({
           onCreated={(leadRow) => {
             // CONFIRMED insert only — map the real returned row (never an
             // optimistic stub), hand it up through onPersonCreated so the
-            // Inbox "New" row appears without a reload, then open the card.
+            // Inbox "New" row appears without a reload, then open the card on
+            // the unified ClientProfile overlay (+ URL), same as any lead open.
             const person = mapLeadToPerson(leadRow, {})
             if (onPersonCreated) onPersonCreated(person)
             setNewClientOpen(false)
-            setOverlay({ type: 'person', person })
+            if (person?.id) openClient(person.id)
           }}
         />
       )}
@@ -567,20 +573,11 @@ export default function HiveShell({
           lookupOptions={lookupOptions}
         />
       )}
-      {overlay?.type === 'person' && (
-        <PersonCard
-          key={overlay.person.id}
-          person={overlay.person}
-          people={people}
-          readOnly={readOnly}
-          onClose={() => setOverlay(null)}
-          onSendToJobber={onSendToJobber}
-          setToast={setToast}
-          onLeadPatched={handleLeadPatched}
-          onPartnerCreated={onPartnerCreated}
-          lookupOptions={lookupOptions}
-        />
-      )}
+      {/* Lead detail is UNIFIED on ClientProfile below — the old PersonCard
+          overlay path is retired so a lead click, a new-lead create, and a
+          /clients/<id> deep-link all open the SAME panel and drive the URL.
+          PersonCard the component still exists (standalone-tested) but is no
+          longer a HiveShell overlay slot. */}
       {overlay?.type === 'client' && (
         <ClientProfile
           key={overlay.clientId}

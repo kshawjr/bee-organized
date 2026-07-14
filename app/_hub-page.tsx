@@ -115,7 +115,17 @@ export default async function HubPage({
   initialSelectedLeadId?: string
   notFoundToast?: boolean
 } = {}) {
-  const authUser = await requireAuth()
+  // Where a logged-OUT visitor was actually headed, so login can send them
+  // back (e.g. a /clients/<leadId> deep-link from a lead notification email
+  // → login → land on the lead, not home). A /clients/[id] route carries the
+  // lead id; other Hub routes fall back to the tab. requireAuth sanitizes it
+  // (same-origin relative only) before it becomes ?next=…
+  const returnTo = initialSelectedLeadId
+    ? `/clients/${initialSelectedLeadId}`
+    : initialRoute && initialRoute !== 'home'
+      ? `/${initialRoute}`
+      : null
+  const authUser = await requireAuth(returnTo)
   const hubUser = await getHubUser()
 
   if (!hubUser) {

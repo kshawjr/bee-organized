@@ -80,8 +80,12 @@ const dash = (v: string | null | undefined): string =>
 function buildLeadNotificationEmail(args: {
   lead: NewLeadForNotification
   locationName: string
+  // Absolute deep-link to the lead in Bee Hub (/clients/<id>). Null when no
+  // base URL is available (e.g. a caller without a request origin) — the
+  // button is simply omitted, the rest of the email is unchanged.
+  leadUrl: string | null
 }): { subject: string; html: string; text: string } {
-  const { lead, locationName } = args
+  const { lead, locationName, leadUrl } = args
   const leadName = dash(lead.name)
 
   const subject = `New lead: ${leadName} — ${locationName}`
@@ -109,6 +113,20 @@ function buildLeadNotificationEmail(args: {
                 <p style="margin:0 0 8px;font-size:14px;line-height:1.55;color:#1a2e2b;white-space:pre-wrap;">${escapeHtml(lead.request_details.trim())}</p>`
     : ''
 
+  // Deep-link button → opens this exact lead in Bee Hub (/clients/<id>).
+  // Recipients must be signed-in Hub users with location access; a logged-out
+  // click routes through login and lands back on the lead (?next threading).
+  // escapeHtml the URL too so a stray quote can't break out of the href.
+  const buttonHtml = leadUrl
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 4px;">
+                  <tr>
+                    <td style="border-radius:10px;background:#1a2e2b;">
+                      <a href="${escapeHtml(leadUrl)}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:10px;">Open this lead in Bee Hub →</a>
+                    </td>
+                  </tr>
+                </table>`
+    : ''
+
   const html = `<!doctype html>
 <html>
   <body style="margin:0;padding:0;background:#f7f5f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1a2e2b;">
@@ -125,6 +143,7 @@ function buildLeadNotificationEmail(args: {
                   ${rowsHtml}
                 </table>
                 ${detailsHtml}
+                ${buttonHtml}
               </td>
             </tr>
             <tr>
@@ -149,6 +168,9 @@ function buildLeadNotificationEmail(args: {
   if (lead.request_details?.trim()) {
     textLines.push('', 'What they told us:', lead.request_details.trim())
   }
+  if (leadUrl) {
+    textLines.push('', `Open this lead in Bee Hub: ${leadUrl}`)
+  }
   textLines.push(
     '',
     '—',
@@ -165,9 +187,17 @@ function buildLeadNotificationEmail(args: {
 export async function notifyNewLead(args: {
   location: NotifyLocation
   lead: NewLeadForNotification
+  // Absolute origin of the Hub (no trailing slash), used to build the
+  // "open this lead" deep-link → `${baseUrl}/clients/${lead.id}`. The caller
+  // (intake route) derives it as NEXT_PUBLIC_SITE_URL || request origin. When
+  // absent the email still sends, just without the button.
+  baseUrl?: string | null
 }): Promise<NotifyResult> {
-  const { location, lead } = args
+  const { location, lead, baseUrl } = args
   const locationName = location.name?.trim() || 'your location'
+  const leadUrl = baseUrl
+    ? `${baseUrl.replace(/\/$/, '')}/clients/${lead.id}`
+    : null
 
   let recipients
   try {
@@ -203,7 +233,7 @@ export async function notifyNewLead(args: {
     return { sent: false, recipientCount: 0 }
   }
 
-  const { subject, html, text } = buildLeadNotificationEmail({ lead, locationName })
+  const { subject, html, text } = buildLeadNotificationEmail({ lead, locationName, leadUrl })
 
   // ONE message to all recipients — the whole list on `to`, not a loop.
   // Reply-To is the prospect's email when captured so a recipient can reply

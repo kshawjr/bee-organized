@@ -75,6 +75,9 @@ const LOC = {
 const makeReq = (body: any, key = 'test-key') => ({
   headers: { get: (k: string) => (k.toLowerCase() === 'x-api-key' ? key : null) },
   json: async () => body,
+  // Intake derives the lead-notification deep-link base from the request
+  // origin (NEXT_PUBLIC_SITE_URL override falls back to this).
+  nextUrl: { origin: 'https://hub.example.com' },
 }) as any
 
 const submission = (over: any = {}) => ({
