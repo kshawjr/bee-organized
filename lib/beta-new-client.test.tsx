@@ -234,11 +234,16 @@ describe('NewClientSheet frames', () => {
     const create = buttonByText(host, 'Create — opens card')!
     expect(create, 'create button missing').toBeTruthy()
 
-    // Name prefilled from the query; defaults Source=Manual Type=Client, drip on.
+    // Name prefilled from the query; defaults Source=Manual Type=Client.
     expect((host.querySelector('input[aria-label="Name"]') as HTMLInputElement).value).toBe('Fresh Person')
     expect((host.querySelector('select[aria-label="Source"]') as HTMLSelectElement).value).toBe('Manual')
     expect((host.querySelector('select[aria-label="Type"]') as HTMLSelectElement).value).toBe('Client')
-    expect(host.querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('true')
+    // On-create notification multi-select — all three pills default OFF.
+    const pills = [...host.querySelectorAll('[role="checkbox"]')]
+    expect(pills.map(p => p.getAttribute('aria-label'))).toEqual([
+      'Send notification email', 'Post to Slack', 'Start drip emails',
+    ])
+    expect(pills.every(p => p.getAttribute('aria-checked') === 'false')).toBe(true)
 
     await click(create)
     expect(createdBodies).toHaveLength(1)
@@ -251,10 +256,37 @@ describe('NewClientSheet frames', () => {
       source: 'Manual',
       project_type: 'Client',
       stage: 'New',
-      skip_drip: false, // drip toggle defaults ON, matching classic
+      // All three opt-in actions default OFF → silent create.
+      notifyEmail: false,
+      notifySlack: false,
+      startDrip: false,
     })
     expect(onCreated).toHaveBeenCalledTimes(1)
     expect(onCreated.mock.calls[0][0].id).toBe('lead-new-1') // the REAL returned row
+    await unmount()
+  })
+
+  it('frame C: on-create pills fire INDEPENDENTLY — selecting Email + Drip sends only those two', async () => {
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[person()]} locFilter="loc-uuid-1" currentUserId="user-1" onClose={() => {}} onCreated={() => {}} />
+    )
+    await type(host.querySelector('input[aria-label="Search clients"]')!, 'Fresh Person')
+
+    const pill = (aria: string) => host.querySelector(`[role="checkbox"][aria-label="${aria}"]`)! as HTMLElement
+    await click(pill('Send notification email'))
+    await click(pill('Start drip emails'))
+    // Slack left OFF; the two selected read checked.
+    expect(pill('Send notification email').getAttribute('aria-checked')).toBe('true')
+    expect(pill('Post to Slack').getAttribute('aria-checked')).toBe('false')
+    expect(pill('Start drip emails').getAttribute('aria-checked')).toBe('true')
+
+    await click(buttonByText(host, 'Create — opens card')!)
+    expect(createdBodies).toHaveLength(1)
+    expect(createdBodies[0]).toMatchObject({
+      notifyEmail: true,
+      notifySlack: false, // independent — not selected, not sent
+      startDrip: true,
+    })
     await unmount()
   })
 

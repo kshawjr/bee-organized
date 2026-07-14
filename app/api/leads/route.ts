@@ -7,9 +7,15 @@
 // Modal in components/BeeHub.jsx calls when an owner/admin/super_admin
 // creates a record by hand.
 //
-// On stage='New' inserts (the default), kicks off applyDripSideEffects so
-// the drip path auto-starts — same behavior the PATCH route gets on stage
-// transitions into 'New'. Caller can pass skip_drip:true to opt out.
+// OPT-IN NOTIFICATIONS (manual create): the create form offers three
+// independent, default-OFF actions — notifyEmail / notifySlack / startDrip
+// — each reusing the SAME underlying function the webhook intake path uses
+// (notifyNewLead / notifyNewLeadSlack / applyDripSideEffects+sendDripStep).
+// Each fires only when selected, each is fail-soft (own try/catch → warnings)
+// and NEVER blocks the lead row or the response. Nothing selected = silent.
+// Legacy callers that omit startDrip fall back to the historical skip_drip
+// default-ON drip behavior. The X-API-Key webhook route /api/leads/intake is
+// SEPARATE and unchanged — it always fires all three automatically.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
@@ -18,6 +24,8 @@ import { isAdmin } from '@/lib/auth'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { applyDripSideEffects } from '@/lib/drip-lifecycle'
 import { sendDripStep } from '@/lib/drip-send'
+import { notifyNewLead } from '@/lib/lead-notification-email'
+import { notifyNewLeadSlack } from '@/lib/slack-bot'
 
 export const runtime = 'nodejs'
 
@@ -47,6 +55,13 @@ type Body = {
   notes?: string | null
   stage?: string
   skip_drip?: boolean
+  // Opt-in notification actions (manual create form). All default OFF; each
+  // fires independently, reusing the intake path's functions. startDrip is
+  // the explicit successor to skip_drip — when present it wins; when absent
+  // the legacy skip_drip default-ON behavior applies (classic modal).
+  notifyEmail?: boolean
+  notifySlack?: boolean
+  startDrip?: boolean
 }
 
 const VALID_STAGES = new Set([
@@ -202,14 +217,87 @@ export async function POST(req: NextRequest) {
     user_id:       null,
   })
 
-  // ─── Drip side-effects ───────────────────────────────────────
-  // When stage='New' lands on a fresh lead, start the drip. prevStage=null
-  // signals "no prior state" to applyDripSideEffects, which treats it as a
-  // valid start trigger. Awaited (not fire-and-forget) because Vercel
-  // serverless terminates background work once the response is sent —
-  // without the await the row never gets inserted. Errors are swallowed so
-  // a drip-bookkeeping failure doesn't fail the lead create itself.
-  if (stage === 'New' && body.skip_drip !== true) {
+  // ─── Opt-in notifications (manual create only) ────────────────
+  // The create form offers three INDEPENDENT, default-OFF actions. Each
+  // fires ONLY when selected, each reuses the SAME function the webhook
+  // intake path uses, and each is fully fail-soft: a failure is collected
+  // as a warning and NEVER blocks the others, the lead row (already
+  // inserted above), or the 201 response. Nothing selected = silent —
+  // matches the pre-notification manual behavior. This is opt-in ONLY;
+  // /api/leads/intake (website/webhook) always fires all three and is
+  // untouched.
+  const warnings: string[] = []
+
+  // Base URL for the "open this lead" deep-links — same fallback chain the
+  // intake path uses (proxy-fronted override → site url → request origin).
+  const baseUrl =
+    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ||
+    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
+    req.nextUrl?.origin ||
+    null
+
+  // 1) Notification email → the SAME notifyNewLead the intake path calls
+  //    (B1 recipient resolution + template). Zero recipients is a quiet
+  //    no-send, not an error.
+  if (body.notifyEmail === true) {
+    try {
+      const notify = await notifyNewLead({
+        location: { id: location.id, name: location.name },
+        baseUrl,
+        lead: {
+          id: lead.id,
+          name: lead.name,
+          email: lead.email,
+          phone: lead.phone,
+          project_type: lead.project_type,
+          request_details: lead.request_details,
+          preferred_contact: lead.preferred_contact ?? null,
+        },
+      })
+      if (notify.error) warnings.push(`lead_notification_failed: ${notify.error}`)
+    } catch (err: any) {
+      console.error('[leads] notifyNewLead threw', err)
+      warnings.push(`lead_notification_failed: ${err?.message || String(err)}`)
+    }
+  }
+
+  // 2) Slack post → the SAME notifyNewLeadSlack the intake path calls. It
+  //    does its own fail-soft slack_connected read (a not-connected or
+  //    not-yet-migrated location returns a quiet skip), so the slack_connected
+  //    gate is enforced inside, exactly as on intake.
+  if (body.notifySlack === true) {
+    try {
+      const slackRes = await notifyNewLeadSlack({
+        locationId: location.id,
+        locationName: location.name,
+        baseUrl,
+        lead: {
+          id: lead.id,
+          name: lead.name,
+          email: lead.email,
+          phone: lead.phone,
+          project_type: lead.project_type,
+          request_details: lead.request_details,
+          preferred_contact: lead.preferred_contact ?? null,
+        },
+      })
+      if (slackRes.error) warnings.push(`slack_notification_failed: ${slackRes.error}`)
+    } catch (err: any) {
+      console.error('[leads] notifyNewLeadSlack threw', err)
+      warnings.push(`slack_notification_failed: ${err?.message || String(err)}`)
+    }
+  }
+
+  // 3) Drip → the SAME start path the intake create path uses:
+  //    applyDripSideEffects on stage='New' delegates to startDripForLead
+  //    (which carries the interface-active + paused + marketing-opt-out
+  //    gates), then an inline sendDripStep so step 1 lands in seconds rather
+  //    than waiting up to ~60 min for the next hourly cron tick (cron stays
+  //    the backstop). Gate: explicit startDrip wins; legacy callers that
+  //    omit it fall back to the historical skip_drip default-ON behavior.
+  const wantsDrip =
+    typeof body.startDrip === 'boolean' ? body.startDrip : body.skip_drip !== true
+  if (stage === 'New' && wantsDrip) {
     try {
       await applyDripSideEffects({
         leadId:        lead.id,
@@ -217,22 +305,21 @@ export async function POST(req: NextRequest) {
         prevStage:     null,
         patch:         { stage: 'New' },
       })
-    } catch (err) {
+    } catch (err: any) {
       console.error('[drip] applyDripSideEffects on create threw', err)
+      warnings.push(`drip_side_effects_failed: ${err?.message || String(err)}`)
     }
 
-    // ─── Inline step-1 send ──────────────────────────────────────
-    // applyDripSideEffects scheduled the row with next_send_at=now();
-    // firing here means the welcome email lands in seconds rather than
-    // waiting up to ~60 minutes for the next hourly cron tick. The
-    // cron remains as the backstop — any failure here just gets
-    // retried then.
     try {
       await sendDripStep(lead.id)
-    } catch (err) {
+    } catch (err: any) {
       console.error('[drip] inline sendDripStep on create threw', err)
+      warnings.push(`drip_send_failed: ${err?.message || String(err)}`)
     }
   }
 
-  return NextResponse.json({ lead }, { status: 201 })
+  return NextResponse.json(
+    { lead, ...(warnings.length ? { warnings } : {}) },
+    { status: 201 },
+  )
 }

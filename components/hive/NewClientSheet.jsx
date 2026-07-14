@@ -106,25 +106,52 @@ function Badge({ tint, icon, label }) {
   )
 }
 
-function Toggle({ on, onFlip, label }) {
+// On-create notification actions — ONE unified multi-select folding the old
+// standalone "Add to drip sequence" toggle in as the Drip pill. Three
+// INDEPENDENT options, ALL default OFF: each rides the POST /api/leads create
+// as its own boolean (notifyEmail / notifySlack / startDrip) and fires its own
+// server-side path. Nothing selected = silent (the prior manual behavior).
+const NOTIFY_OPTIONS = [
+  { key: 'notifyEmail', label: 'Email', aria: 'Send notification email' },
+  { key: 'notifySlack', label: 'Slack', aria: 'Post to Slack' },
+  { key: 'startDrip',   label: 'Drip',  aria: 'Start drip emails' },
+]
+
+// Compact sharp pills (§8.6 language): 0.5px border, chip radius, flat fill,
+// no shadow; selected = accent soft fill + accent border + whole-pixel check.
+function NotifyPills({ value, onToggle }) {
   return (
-    <button
-      role="switch" aria-checked={on} onClick={onFlip}
-      style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: 0, border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit' }}
-    >
-      <span style={{
-        width: '34px', height: '20px', borderRadius: T.radius.inset, flexShrink: 0,
-        background: on ? ACCENT : T.hairline.control, position: 'relative',
-        transition: 'background 0.15s',
-      }}>
-        <span style={{
-          position: 'absolute', top: '2px', left: on ? '16px' : '2px',
-          width: '16px', height: '16px', borderRadius: T.radius.round, background: T.surface.raised,
-          boxShadow: T.shadow.knob, transition: 'left 0.15s',
-        }} />
-      </span>
-      <span style={{ fontSize: '13px', color: T.ink.primary }}>{label}</span>
-    </button>
+    <div>
+      <label style={lbl}>Send on create</label>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+        {NOTIFY_OPTIONS.map(opt => {
+          const on = !!value[opt.key]
+          return (
+            <button
+              key={opt.key}
+              type="button"
+              role="checkbox"
+              aria-checked={on}
+              aria-label={opt.aria}
+              title={opt.aria}
+              onClick={() => onToggle(opt.key)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '5px',
+                padding: '5px 11px', borderRadius: T.radius.chip,
+                border: on ? `0.5px solid ${T.accent.fg}` : T.border.control,
+                background: on ? T.accent.soft : T.surface.raised,
+                color: on ? T.accent.deep : T.ink.muted,
+                fontSize: '12px', fontWeight: 500, fontFamily: 'inherit',
+                lineHeight: 1.4, cursor: 'pointer',
+              }}
+            >
+              {on && <IconCheck size={12} />}
+              {opt.label}
+            </button>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -148,7 +175,10 @@ export default function NewClientSheet({
   const isMobile = useIsMobile()
   const [query, setQuery] = useState('')
   // null = derive from the query; a string = the user took the field over.
-  const [form, setForm] = useState({ name: null, email: null, phone: null, source: 'Manual', projectType: 'Client', drip: true })
+  // notifyEmail / notifySlack / startDrip: the on-create multi-select, all
+  // default OFF (a manual lead with nothing selected is silent). startDrip
+  // replaces the old `drip` toggle default-ON.
+  const [form, setForm] = useState({ name: null, email: null, phone: null, source: 'Manual', projectType: 'Client', notifyEmail: false, notifySlack: false, startDrip: false })
   // Referral-source referrer link (frame C) — { id, kind, name } | null.
   // kind is 'lead' or 'partner' (contacts store as 'partner' too); maps
   // straight onto leads.referred_by_kind / referred_by_id at POST.
@@ -282,7 +312,10 @@ export default function NewClientSheet({
         // is skippable, matching Classic; never block founding on it).
         referred_by_kind: form.source === 'Referral' && referrer ? referrer.kind : null,
         referred_by_id: form.source === 'Referral' && referrer ? referrer.id : null,
-        skip_drip: !form.drip,
+        // On-create multi-select — each independent, all default OFF.
+        notifyEmail: form.notifyEmail,
+        notifySlack: form.notifySlack,
+        startDrip:   form.startDrip,
       })
       // Frame C stays person-world by design: a genuinely NEW inquiry
       // lands in the Inbox as a person (doctrine above). Manual founding
@@ -518,7 +551,7 @@ export default function NewClientSheet({
             </div>
           )}
 
-          <Toggle on={form.drip} onFlip={() => set('drip', !form.drip)} label="Add to drip sequence" />
+          <NotifyPills value={form} onToggle={(k) => set(k, !form[k])} />
 
           {errorMsg && <p style={{ fontSize: '12px', color: T.state.danger.fg, background: T.state.danger.soft, padding: '8px 12px', borderRadius: T.radius.control }}>{errorMsg}</p>}
 
