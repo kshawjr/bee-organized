@@ -38,6 +38,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { writeSyncLog } from '@/lib/sync-log'
 import { applyDripSideEffects, startDripForLead } from '@/lib/drip-lifecycle'
 import { sendDripStep } from '@/lib/drip-send'
+import { notifyNewLead } from '@/lib/lead-notification-email'
 import {
   queryLeadMatches,
   classifyLeadMatches,
@@ -421,6 +422,36 @@ export async function POST(req: NextRequest) {
     )
   }
 
+  // ─── New-lead notification (CREATE path only) ─────────────────
+  // A genuinely new lead just landed: notify the location's effective
+  // recipients (B1 resolveLeadRecipients) with ONE email to all of them.
+  // Deliberately NOT called on the merge/resubmit path above — a returning
+  // client's resubmission must never re-notify. Non-fatal: a send failure
+  // logs + warns but never flips the lead capture, which already succeeded.
+  // Zero recipients is a normal quiet no-send.
+  let notifiedCount = 0
+  try {
+    const notify = await notifyNewLead({
+      location: { id: location.id, name: location.name },
+      lead: {
+        id: lead.id,
+        name: full_name.trim(),
+        email: validEmail,
+        phone: phone || null,
+        project_type: project_type || null,
+        request_details: requestDetails,
+        preferred_contact: preferredContact,
+      },
+    })
+    notifiedCount = notify.sent ? notify.recipientCount : 0
+    if (notify.error) {
+      warnings.push(`lead_notification_failed: ${notify.error}`)
+    }
+  } catch (err: any) {
+    console.error('[intake] notifyNewLead threw', err)
+    warnings.push(`lead_notification_failed: ${err?.message || String(err)}`)
+  }
+
   // Success row. Warnings never flip status — the lead row landed and
   // that's the primary goal — but they must be readable off the row.
   const dedupTier = possibleDuplicateIds.length
@@ -431,7 +462,7 @@ export async function POST(req: NextRequest) {
     entityId: lead.id,
     detail:
       `lead=${lead.id} source=${source || 'web_form'} dedup=${dedupTier}` +
-      ` drip_enrolled=${dripEnrolled}` +
+      ` drip_enrolled=${dripEnrolled} notified=${notifiedCount}` +
       (dripSkippedReason ? ` drip_skipped_reason=${dripSkippedReason}` : '') +
       (warnings.length ? ` — warnings: ${warnings.join('; ')}` : ''),
   })
