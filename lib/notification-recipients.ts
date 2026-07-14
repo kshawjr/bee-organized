@@ -20,10 +20,16 @@
 
 import { supabaseService } from './supabase-service'
 import { getZohoLocationNotificationContacts } from './zoho'
+import { categoryMatchesLead, isSpecificSelection } from './notification-project-types'
 
+// Legacy single-value categories (B1). Retained for the API's backward-compat
+// validation and for tests; the unified UI now writes a project-type SET (or
+// 'all') into the same free-text category field — see notification-project-
+// types.ts. A recipient's stored category is therefore a plain string, not a
+// closed enum.
 export const RECIPIENT_CATEGORIES = ['all', 'moving', 'organizing'] as const
 export type RecipientCategory = (typeof RECIPIENT_CATEGORIES)[number]
-export const DEFAULT_CATEGORY: RecipientCategory = 'all'
+export const DEFAULT_CATEGORY = 'all'
 
 export function isRecipientCategory(v: unknown): v is RecipientCategory {
   return typeof v === 'string' && (RECIPIENT_CATEGORIES as readonly string[]).includes(v)
@@ -41,7 +47,9 @@ export type InterfaceRecipient = {
   name: string
   email: string
   role: string
-  category: RecipientCategory
+  // Free-text project-type routing: 'all' | JSON array of project-type labels
+  // | legacy 'moving'/'organizing'. See notification-project-types.ts.
+  category: string
   subscribed: boolean
 }
 
@@ -53,7 +61,7 @@ export type ExternalRecipient = {
   name: string
   email: string
   phone: string | null
-  category: RecipientCategory
+  category: string
 }
 
 export type ManageableRecipients = {
@@ -69,7 +77,7 @@ export type EffectiveRecipient = {
   hub_user_id: string | null
   name: string
   email: string
-  category: RecipientCategory
+  category: string
 }
 
 function fullName(first?: string | null, last?: string | null): string {
@@ -109,7 +117,9 @@ export async function getManageableRecipients(
 
   const users: InterfaceRecipient[] = (usersRes.data || []).map((u) => {
     const pref = prefByUser.get(u.id)
-    const category = pref && isRecipientCategory(pref.category) ? pref.category : DEFAULT_CATEGORY
+    // Pass the stored category through verbatim (widened to a project-type set
+    // in the unified section); only absence/empty falls back to the default.
+    const category = pref?.category ? String(pref.category) : DEFAULT_CATEGORY
     const subscribed = pref ? pref.subscribed : true
     return {
       type: 'user',
@@ -130,10 +140,144 @@ export async function getManageableRecipients(
     name: fullName(e.first_name, e.last_name) || e.email,
     email: e.email,
     phone: e.phone,
-    category: isRecipientCategory(e.category) ? e.category : DEFAULT_CATEGORY,
+    category: e.category ? String(e.category) : DEFAULT_CATEGORY,
   }))
 
   return { users, externals }
+}
+
+// The global project-type label list (lookups, category='project_types'),
+// shared by every location. Used by the unified section's per-type assignment
+// UI. Falls back to [] if the lookups read fails — the basic notify list stays
+// fully functional without it.
+export async function getNotificationProjectTypes(): Promise<string[]> {
+  try {
+    const res = await supabaseService
+      .from('lookups')
+      .select('label, sort_order')
+      .eq('category', 'project_types')
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true })
+    return (res.data || []).map((r: any) => r.label).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+// Forward-safe read of the per-location notify split toggle. Returns false if
+// the column doesn't exist yet (migration not run) or the read errors, so the
+// section degrades to basic (notify-everyone) behavior with no error. Uses
+// array access (not .single()) to stay defensive.
+export async function isSplitNotificationsEnabled(locationId: string): Promise<boolean> {
+  try {
+    const res = await supabaseService
+      .from('locations')
+      .select('split_notifications_enabled')
+      .eq('id', locationId)
+    if ((res as any)?.error) return false
+    const row = (res.data || [])[0] as any
+    return row?.split_notifications_enabled === true
+  } catch {
+    return false
+  }
+}
+
+// Mirror of resolveDripCategory (lib/stage-emails.ts) — inlined here to keep the
+// notification send path off the heavy stage-emails/drip-send import chain and
+// fully mockable via supabaseService. project_type label → 'move' | 'general';
+// defaults to 'general' when the label isn't found. Only consulted to resolve
+// LEGACY 'moving'/'organizing' recipients against a lead.
+async function resolveLeadDripCategory(
+  projectType: string | null,
+): Promise<'move' | 'general'> {
+  if (!projectType) return 'general'
+  try {
+    const res = await supabaseService
+      .from('lookups')
+      .select('attrs')
+      .eq('category', 'project_types')
+      .eq('label', projectType)
+      .eq('is_active', true)
+    const row = (res.data || [])[0] as any
+    return row?.attrs?.drip_category === 'move' ? 'move' : 'general'
+  } catch {
+    return 'general'
+  }
+}
+
+// Full config payload for the unified section's PART 1 (notifications): the
+// manageable recipients, the global project-type list, and the current split
+// toggle state.
+export type NotificationConfig = ManageableRecipients & {
+  project_types: string[]
+  split_enabled: boolean
+}
+
+export async function getNotificationConfig(
+  locationId: string,
+): Promise<NotificationConfig> {
+  const [recipients, project_types, split_enabled] = await Promise.all([
+    getManageableRecipients(locationId),
+    getNotificationProjectTypes(),
+    isSplitNotificationsEnabled(locationId),
+  ])
+  return { ...recipients, project_types, split_enabled }
+}
+
+// Persist the per-location notify split toggle.
+export async function setSplitNotificationsEnabled(
+  locationId: string,
+  enabled: boolean,
+): Promise<void> {
+  const { error } = await supabaseService
+    .from('locations')
+    .update({ split_notifications_enabled: enabled })
+    .eq('id', locationId)
+  if (error) throw new Error(`set_split_notifications: ${error.message}`)
+}
+
+// PART 1 send-time routing. Given the base send list (already subscribed-
+// filtered) and the lead, return who should actually be notified when the
+// split toggle is ON:
+//
+//   • A recipient matches if their project-type set includes the lead's type,
+//     OR they are 'all' (legacy 'moving'/'organizing' match on drip category).
+//   • "Everything else → whole team": if NO recipient SPECIFICALLY claims this
+//     lead's type, the type is unassigned and the WHOLE team (all subscribed
+//     interface users) is notified — plus any cross-cutting 'all' recipients.
+//   • NEVER-DROP: if the filter would notify nobody, fall back to the whole
+//     team; if there are no interface users at all, fall back to the full base
+//     list. A lead notification must never silently reach no one.
+export function filterRecipientsByProjectType(
+  base: EffectiveRecipient[],
+  leadProjectType: string | null,
+  leadDripCategory: 'move' | 'general',
+): EffectiveRecipient[] {
+  const matched = base.filter((r) =>
+    categoryMatchesLead(r.category, leadProjectType, leadDripCategory),
+  )
+  // The type is "claimed" iff a SPECIFIC (type-set) recipient matched it.
+  const claimed = matched.some((r) => isSpecificSelection(r.category))
+  const team = base.filter((r) => r.source === 'user')
+
+  let result: EffectiveRecipient[]
+  if (claimed) {
+    result = matched
+  } else {
+    // Unassigned type → everything-else bucket → whole team ∪ cross-cutting.
+    const seen = new Set(matched.map((r) => r.email))
+    result = [...matched]
+    for (const u of team) {
+      if (!seen.has(u.email)) {
+        seen.add(u.email)
+        result.push(u)
+      }
+    }
+  }
+
+  // NEVER-DROP backstop.
+  if (result.length === 0) result = team.length ? team : base
+  return result
 }
 
 // Effective SEND list (B2 calls this). PRECEDENCE:
@@ -150,6 +294,28 @@ export async function getManageableRecipients(
 // recipients, is logged with the location id — a location must never SILENTLY
 // receive no notification.
 export async function resolveLeadRecipients(
+  locationId: string,
+  lead?: { project_type?: string | null } | null,
+): Promise<EffectiveRecipient[]> {
+  const base = await resolveBaseLeadRecipients(locationId)
+
+  // PART 1 project-type routing is applied ONLY when the split toggle is ON and
+  // we were given a lead to route on. Otherwise behavior is unchanged: every
+  // subscribed recipient is returned (B1/B2 semantics). The toggle read is
+  // forward-safe — a missing column reads false → basic behavior.
+  if (!lead) return base
+  const splitOn = await isSplitNotificationsEnabled(locationId)
+  if (!splitOn) return base
+
+  const projectType = lead.project_type?.trim() || null
+  const dripCategory = await resolveLeadDripCategory(projectType)
+  return filterRecipientsByProjectType(base, projectType, dripCategory)
+}
+
+// The unfiltered send list: subscribed interface users + all externals, or the
+// Zoho fallback for non-interface locations. This is the B1/B2 resolver, split
+// out so resolveLeadRecipients can optionally layer PART 1 routing on top.
+async function resolveBaseLeadRecipients(
   locationId: string,
 ): Promise<EffectiveRecipient[]> {
   const { users, externals } = await getManageableRecipients(locationId)

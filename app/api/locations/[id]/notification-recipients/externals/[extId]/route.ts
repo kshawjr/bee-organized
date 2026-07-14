@@ -15,11 +15,27 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { notificationRecipientsManageableServer } from '@/lib/notification-access'
-import { isRecipientCategory } from '@/lib/notification-recipients'
 
 export const runtime = 'nodejs'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+// Same routing-string contract as the parent route: 'all' | JSON array of
+// project-type labels | legacy 'moving'/'organizing'.
+function isValidCategoryField(v: unknown): v is string {
+  if (typeof v !== 'string') return false
+  const s = v.trim()
+  if (s === 'all' || s === 'moving' || s === 'organizing') return true
+  if (s.startsWith('[')) {
+    try {
+      const arr = JSON.parse(s)
+      return Array.isArray(arr) && arr.every((x) => typeof x === 'string')
+    } catch {
+      return false
+    }
+  }
+  return false
+}
 
 async function authForLocation(locId: string) {
   const supabase = await createServerSupabaseClient()
@@ -78,7 +94,7 @@ export async function PATCH(
     patch.email = email
   }
   if (body.category !== undefined) {
-    if (!isRecipientCategory(body.category)) {
+    if (!isValidCategoryField(body.category)) {
       return NextResponse.json({ error: 'invalid category' }, { status: 400 })
     }
     patch.category = body.category

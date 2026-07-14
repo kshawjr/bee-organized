@@ -17430,9 +17430,9 @@ function ProjectTypeSenders({ realLocId, readOnly=false }) {
       {/* Toggle */}
       <div style={{ padding:'14px 16px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', borderBottom: enabled ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
         <div style={{ flex:1, minWidth:0 }}>
-          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Split senders by project type</p>
+          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Send certain project types from someone else</p>
           <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>
-            {enabled ? 'Assigned types send from their sender; the rest use your base Outreach Email.' : 'Off — every project type sends from your base Outreach Email.'}
+            {enabled ? 'Assigned types send from their sender; the rest use your default sender.' : 'Off — every project type sends from your default sender.'}
           </p>
         </div>
         <button
@@ -17549,51 +17549,117 @@ function ProjectTypeSenders({ realLocId, readOnly=false }) {
   )
 }
 
-// ─── Lead Notification Recipients ──────────────────────────────────────────────
-// Owner/super_admin-only manager for WHO gets emailed when a new client comes
-// in. Two kinds of recipient, both with an All/Moving/Organizing category:
-//   • INTERFACE USERS (hub_users: owner/managers) — auto-listed, default All +
-//     subscribed. Owner sets each user's category or unsubscribes/removes them
-//     (this is how a terminated manager is instantly cut from lead emails).
-//     Name/email are read live from hub_users server-side — never copied.
-//   • EXTERNAL RECIPIENTS (non-users) — added by hand (name/email/phone/cat).
-// Persistence is server-side via /api/locations/:id/notification-recipients
-// (owner+elevated gated; a manager is rejected even on a direct hit). The
-// section itself only renders in the owner+super_admin-only "My Location"
-// Settings module, so managers never see it. readOnly hides all controls.
-const LEAD_NOTIF_CATEGORIES = [
-  { key:'all',        label:'All' },
-  { key:'moving',     label:'Moving' },
-  { key:'organizing', label:'Organizing' },
-]
+// ─── New-lead Notifications (PART 1 of the unified "New lead emails") ───────────
+// Owner/super_admin-only manager for WHO gets emailed when a new lead comes in.
+//   • BASIC (always visible): a real list of recipients — team members
+//     (hub_users owner/managers, auto-included, shown by name + role) and
+//     external emails (shown by their actual address). Each is removable /
+//     unsubscribable; "Add outside email" works here with the toggle OFF.
+//   • ADVANCED (behind the per-part toggle "Notify different people by project
+//     type"): each recipient carries a SET of project types — "All leads" or
+//     specific types. Unassigned types fall to "Everything else → whole team".
+// A recipient's project-type set lives in the free-text category field
+// ('all' | JSON array of labels); see lib/notification-project-types.ts. The
+// send filter (lib/notification-recipients.filterRecipientsByProjectType) and
+// this UI share the same rules. Persistence is server-side via
+// /api/locations/:id/notification-recipients (owner+elevated gated; a manager
+// is rejected even on a direct hit). readOnly hides all controls.
 const LEAD_NOTIF_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-function LeadNotifCategorySelect({ value, disabled, onChange }) {
+// JS mirror of parseCategory/serializeCategory/selectedTypes (kept inline so
+// the component is self-contained; the TS lib is the send-side source of truth).
+function parseCatJS(raw) {
+  if (raw == null) return { all:true, types:[] }
+  const s = String(raw).trim()
+  if (s === '' || s === 'all') return { all:true, types:[] }
+  if (s === 'moving') return { all:false, types:[], legacy:'moving' }
+  if (s === 'organizing') return { all:false, types:[], legacy:'organizing' }
+  if (s.startsWith('[')) {
+    try { const a = JSON.parse(s); if (Array.isArray(a)) return { all:false, types:a.filter(x=>typeof x==='string') } } catch {}
+  }
+  const t = s.split(',').map(x=>x.trim()).filter(Boolean)
+  return t.length ? { all:false, types:t } : { all:true, types:[] }
+}
+function serializeCatJS(all, types) {
+  if (all) return 'all'
+  const t = Array.from(new Set((types||[]).map(x=>x.trim()).filter(Boolean))).sort()
+  return t.length ? JSON.stringify(t) : 'all'
+}
+function catSummaryJS(raw) {
+  const p = parseCatJS(raw)
+  if (p.all) return 'All leads'
+  if (p.legacy) return p.legacy === 'moving' ? 'Moving leads' : 'Organizing leads'
+  return p.types.length ? `${p.types.length} project type${p.types.length!==1?'s':''}` : 'All leads'
+}
+
+// A single tappable project-type pill (assigned = filled teal, unassigned =
+// greyed). Shared by team + external rows. Tight: 11px / 3px 9px / radius 20.
+function TypePill({ label, on, disabled, muted, onClick }) {
   return (
-    <select
-      value={value}
-      disabled={disabled}
-      onClick={e=>e.stopPropagation()}
-      onChange={e=>onChange(e.target.value)}
-      style={{ padding:'6px 26px 6px 10px', borderRadius:'8px', border:'1.5px solid rgba(0,0,0,0.1)', background:'#f7f5f0', color:'#1a2e2b', fontFamily:'inherit', fontSize:'12px', fontWeight:600, cursor:disabled?'default':'pointer', appearance:'none', backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%231a2e2b' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat:'no-repeat', backgroundPosition:'right 8px center' }}>
-      {LEAD_NOTIF_CATEGORIES.map(c=>(
-        <option key={c.key} value={c.key}>{c.label}</option>
-      ))}
-    </select>
+    <span
+      onClick={disabled ? undefined : onClick}
+      title={label}
+      style={{
+        fontSize:'11px', padding:'3px 9px', borderRadius:'20px', fontWeight:600,
+        cursor: disabled ? 'default' : 'pointer',
+        border:'1px solid',
+        borderColor: on ? 'rgba(168,201,196,0.9)' : 'rgba(0,0,0,0.10)',
+        background: on ? 'rgba(168,201,196,0.20)' : (muted ? 'rgba(0,0,0,0.04)' : 'transparent'),
+        color: on ? '#3a5e58' : '#a2b0ad',
+        whiteSpace:'nowrap',
+      }}>
+      {on ? '✓ ' : ''}{label}
+    </span>
   )
 }
 
-function LeadNotificationRecipients({ realLocId, readOnly=false }) {
+// The per-recipient project-type picker shown when Advanced is ON: an "All
+// leads" pill + one pill per master project type. "All leads" and specific
+// types are mutually exclusive (one-per-recipient bucket). Tapping a type while
+// in All mode switches to specific-with-just-that-type.
+function RecipientTypePicker({ category, projectTypes, readOnly, onChange }) {
+  const p = parseCatJS(category)
+  const legacyNote = p.legacy ? (p.legacy === 'moving' ? 'Moving leads (legacy)' : 'Organizing leads (legacy)') : null
+  function toggleType(t) {
+    if (readOnly) return
+    const cur = p.all ? [] : p.types.slice()
+    const next = cur.includes(t) ? cur.filter(x=>x!==t) : [...cur, t]
+    onChange(serializeCatJS(next.length===0, next))
+  }
+  return (
+    <div style={{ marginTop:'8px', paddingTop:'8px', borderTop:'1px dashed rgba(0,0,0,0.07)' }}>
+      <div style={{ display:'flex', flexWrap:'wrap', gap:'6px', alignItems:'center' }}>
+        <span
+          onClick={readOnly ? undefined : ()=>onChange('all')}
+          style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', fontWeight:600, cursor: readOnly?'default':'pointer', border:'1px solid', borderColor: p.all ? '#a8c9c4' : 'rgba(0,0,0,0.10)', background: p.all ? 'rgba(168,201,196,0.28)' : 'transparent', color: p.all ? '#2f5049' : '#8a9e9a', whiteSpace:'nowrap' }}>
+          {p.all ? '✓ ' : ''}All leads
+        </span>
+        <span style={{ width:'1px', height:'16px', background:'rgba(0,0,0,0.08)', margin:'0 2px' }} />
+        {projectTypes.length === 0 ? (
+          <span style={{ fontSize:'11px', color:'#b0c0bc' }}>No project types configured.</span>
+        ) : projectTypes.map(t => (
+          <TypePill key={t} label={t} on={!p.all && p.types.includes(t)} disabled={readOnly} onClick={()=>toggleType(t)} />
+        ))}
+      </div>
+      {legacyNote && <p style={{ fontSize:'10px', color:'#b07d3a', marginTop:'5px' }}>Currently: {legacyNote} — pick specific types or All leads to update.</p>}
+    </div>
+  )
+}
+
+function NewLeadNotifications({ realLocId, readOnly=false }) {
   const [users, setUsers] = useState([])
   const [externals, setExternals] = useState([])
+  const [projectTypes, setProjectTypes] = useState([])
+  const [splitEnabled, setSplitEnabled] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [adding, setAdding] = useState(false)
-  const [form, setForm] = useState({ first_name:'', last_name:'', email:'', phone:'', category:'all' })
+  const [form, setForm] = useState({ first_name:'', last_name:'', email:'', phone:'' })
   const [formErr, setFormErr] = useState('')
   const [busy, setBusy] = useState(false)
 
   const base = realLocId ? `/api/locations/${realLocId}/notification-recipients` : null
+  const advanced = splitEnabled
 
   async function load() {
     if (!base) { setLoading(false); return }
@@ -17604,6 +17670,8 @@ function LeadNotificationRecipients({ realLocId, readOnly=false }) {
       const data = await r.json()
       setUsers(data.users || [])
       setExternals(data.externals || [])
+      setProjectTypes(data.project_types || [])
+      setSplitEnabled(!!data.split_enabled)
     } catch {
       setError('Could not load recipients.')
     } finally {
@@ -17613,16 +17681,25 @@ function LeadNotificationRecipients({ realLocId, readOnly=false }) {
 
   useEffect(() => { load() /* eslint-disable-next-line */ }, [realLocId])
 
+  async function setAdvanced(on) {
+    if (!base) return
+    setSplitEnabled(on) // optimistic
+    const r = await fetch(base, {
+      method:'PATCH', credentials:'include', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ split_enabled: on }),
+    })
+    if (!r.ok) load()
+  }
+
   async function patchUser(hubUserId, patch) {
     if (!base) return
-    // Optimistic
     setUsers(prev => prev.map(u => u.hub_user_id===hubUserId ? { ...u, ...patch } : u))
     const r = await fetch(base, {
       method:'PATCH', credentials:'include',
       headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({ hub_user_id: hubUserId, ...patch }),
     })
-    if (!r.ok) load() // revert to server truth on failure
+    if (!r.ok) load()
   }
 
   async function addExternal() {
@@ -17639,7 +17716,7 @@ function LeadNotificationRecipients({ realLocId, readOnly=false }) {
           last_name: form.last_name.trim() || null,
           email,
           phone: form.phone.trim() || null,
-          category: form.category,
+          category: 'all',
         }),
       })
       if (!r.ok) { setFormErr('Could not add recipient.'); return }
@@ -17650,7 +17727,7 @@ function LeadNotificationRecipients({ realLocId, readOnly=false }) {
         name: [external.first_name, external.last_name].filter(Boolean).join(' ') || external.email,
         email: external.email, phone: external.phone, category: external.category,
       }])
-      setForm({ first_name:'', last_name:'', email:'', phone:'', category:'all' })
+      setForm({ first_name:'', last_name:'', email:'', phone:'' })
       setAdding(false)
     } finally { setBusy(false) }
   }
@@ -17682,11 +17759,35 @@ function LeadNotificationRecipients({ realLocId, readOnly=false }) {
   }
 
   const subCount = users.filter(u => u.subscribed).length + externals.length
+  // Types no recipient SPECIFICALLY claims → "Everything else → whole team".
+  const claimed = new Set()
+  for (const u of users) { if (u.subscribed) { const p = parseCatJS(u.category); if (!p.all) p.types.forEach(t=>claimed.add(t)) } }
+  for (const e of externals) { const p = parseCatJS(e.category); if (!p.all) p.types.forEach(t=>claimed.add(t)) }
+  const leftoverTypes = projectTypes.filter(t => !claimed.has(t))
+  const subscribedUsers = users.filter(u => u.subscribed)
 
   return (
     <div style={{ margin:'0 12px', borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
 
-      {/* Interface users */}
+      {/* Advanced toggle (project-type routing) */}
+      <div style={{ background:'white', padding:'12px 16px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
+        <div style={{ flex:1, minWidth:0 }}>
+          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Notify different people by project type</p>
+          <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>
+            {advanced ? 'Assign project types to specific people; unassigned types go to the whole team.' : 'Off — everyone below is notified for every new lead.'}
+          </p>
+        </div>
+        <button
+          disabled={readOnly || loading || projectTypes.length===0}
+          onClick={()=>setAdvanced(!advanced)}
+          role="switch" aria-checked={advanced}
+          title={projectTypes.length===0 ? 'No project types configured yet' : undefined}
+          style={{ flexShrink:0, width:'44px', height:'26px', borderRadius:'20px', border:'none', cursor:(readOnly||projectTypes.length===0)?'default':'pointer', background: advanced ? '#a8c9c4' : 'rgba(0,0,0,0.15)', position:'relative', transition:'background 0.15s', opacity:(readOnly||projectTypes.length===0)?0.5:1 }}>
+          <span style={{ position:'absolute', top:'3px', left: advanced ? '21px' : '3px', width:'20px', height:'20px', borderRadius:'50%', background:'white', transition:'left 0.15s', boxShadow:'0 1px 3px rgba(0,0,0,0.2)' }} />
+        </button>
+      </div>
+
+      {/* Team members */}
       <div style={{ background:'white' }}>
         <div style={{ padding:'8px 16px 4px', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
           <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px' }}>Team Members</p>
@@ -17700,24 +17801,27 @@ function LeadNotificationRecipients({ realLocId, readOnly=false }) {
         ) : users.map((u, i) => {
           const rc = FRANCHISE_ROLES.find(r => r.key === u.role)
           return (
-            <div key={u.hub_user_id} style={{ padding:'11px 16px', display:'flex', alignItems:'center', gap:'12px', borderBottom: i < users.length - 1 ? '1px solid rgba(0,0,0,0.04)' : 'none', opacity: u.subscribed ? 1 : 0.55 }}>
-              <div style={{ flex:1, minWidth:0 }}>
-                <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{u.name}</p>
-                <p title={u.email} style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.email}</p>
-              </div>
-              {rc && <span style={{ fontSize:'10px', padding:'2px 7px', borderRadius:'20px', background:rc.bg, color:rc.color, fontWeight:600, flexShrink:0 }}>{rc.icon} {rc.label}</span>}
-              {readOnly ? (
-                <span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{u.subscribed ? (LEAD_NOTIF_CATEGORIES.find(c=>c.key===u.category)?.label || u.category) : 'Off'}</span>
-              ) : (
-                <>
-                  <LeadNotifCategorySelect value={u.category} disabled={!u.subscribed} onChange={v=>patchUser(u.hub_user_id, { category:v })} />
+            <div key={u.hub_user_id} style={{ padding:'11px 16px', borderBottom: i < users.length - 1 ? '1px solid rgba(0,0,0,0.04)' : 'none', opacity: u.subscribed ? 1 : 0.55 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'12px' }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{u.name}</p>
+                  <p title={u.email} style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.email}</p>
+                </div>
+                {rc && <span style={{ fontSize:'10px', padding:'2px 7px', borderRadius:'20px', background:rc.bg, color:rc.color, fontWeight:600, flexShrink:0 }}>{rc.icon} {rc.label}</span>}
+                {readOnly ? (
+                  <span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{u.subscribed ? (advanced ? catSummaryJS(u.category) : 'On') : 'Off'}</span>
+                ) : (
                   <button
                     onClick={()=>patchUser(u.hub_user_id, { subscribed: !u.subscribed })}
                     title={u.subscribed ? 'Unsubscribe from lead emails' : 'Re-subscribe to lead emails'}
                     style={{ flexShrink:0, padding:'6px 10px', borderRadius:'8px', border:'1px solid', borderColor: u.subscribed ? 'rgba(229,160,160,0.5)' : 'rgba(168,201,196,0.5)', background:'transparent', color: u.subscribed ? '#c96a6a' : '#4a5e5a', fontFamily:'inherit', fontSize:'12px', fontWeight:600, cursor:'pointer' }}>
                     {u.subscribed ? 'Remove' : 'Add back'}
                   </button>
-                </>
+                )}
+              </div>
+              {advanced && u.subscribed && (
+                <RecipientTypePicker category={u.category} projectTypes={projectTypes} readOnly={readOnly}
+                  onChange={v=>patchUser(u.hub_user_id, { category:v })} />
               )}
             </div>
           )
@@ -17728,30 +17832,58 @@ function LeadNotificationRecipients({ realLocId, readOnly=false }) {
       {externals.length > 0 && (
         <div style={{ background:'white', borderTop:'1px solid rgba(0,0,0,0.05)' }}>
           <div style={{ padding:'8px 16px 4px' }}>
-            <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px' }}>Additional Recipients</p>
+            <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px' }}>Outside Emails</p>
           </div>
-          {externals.map((e, i) => (
-            <div key={e.id} style={{ padding:'10px 16px', display:'flex', alignItems:'center', gap:'10px', borderTop:'1px solid rgba(0,0,0,0.04)' }}>
-              <span style={{ fontSize:'14px', flexShrink:0 }}>✉️</span>
-              <div style={{ flex:1, minWidth:0 }}>
-                {e.name && e.name !== e.email && <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{e.name}</p>}
-                <p title={e.email} style={{ fontSize:'12px', color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{e.email}</p>
-                {e.phone && <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{e.phone}</p>}
-              </div>
-              {readOnly ? (
-                <span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{LEAD_NOTIF_CATEGORIES.find(c=>c.key===e.category)?.label || e.category}</span>
-              ) : (
-                <>
-                  <LeadNotifCategorySelect value={e.category} onChange={v=>patchExternal(e.id, { category:v })} />
+          {externals.map((e) => (
+            <div key={e.id} style={{ padding:'10px 16px', borderTop:'1px solid rgba(0,0,0,0.04)' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+                <span style={{ fontSize:'14px', flexShrink:0 }}>✉️</span>
+                <div style={{ flex:1, minWidth:0 }}>
+                  {e.name && e.name !== e.email && <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{e.name}</p>}
+                  <p title={e.email} style={{ fontSize:'12px', color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{e.email}</p>
+                  {e.phone && <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{e.phone}</p>}
+                </div>
+                {readOnly ? (
+                  advanced && <span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{catSummaryJS(e.category)}</span>
+                ) : (
                   <button onClick={()=>removeExternal(e.id)} title="Remove recipient" style={{ background:'none', border:'none', color:'#e5a0a0', cursor:'pointer', fontSize:'18px', flexShrink:0, lineHeight:1 }}>×</button>
-                </>
+                )}
+              </div>
+              {advanced && (
+                <RecipientTypePicker category={e.category} projectTypes={projectTypes} readOnly={readOnly}
+                  onChange={v=>patchExternal(e.id, { category:v })} />
               )}
             </div>
           ))}
         </div>
       )}
 
-      {/* Add external recipient */}
+      {/* Everything else → whole team (advanced only) */}
+      {advanced && projectTypes.length > 0 && (
+        <div style={{ background:'#faf9f6', borderTop:'1px solid rgba(0,0,0,0.05)', padding:'11px 16px' }}>
+          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Everything else → whole team</p>
+          {leftoverTypes.length === 0 ? (
+            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Every project type is assigned to someone specific.</p>
+          ) : (
+            <>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:'6px', marginBottom:'8px' }}>
+                {leftoverTypes.map(t => (
+                  <span key={t} style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:'rgba(0,0,0,0.05)', color:'#8a9e9a', fontWeight:600 }}>{t}</span>
+                ))}
+              </div>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
+                {subscribedUsers.length === 0 ? (
+                  <span style={{ fontSize:'11px', color:'#c96a6a' }}>No subscribed team members — these leads fall back to the full list.</span>
+                ) : subscribedUsers.map(u => (
+                  <span key={u.hub_user_id} style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:'rgba(168,201,196,0.18)', color:'#3a5e58', fontWeight:600 }}>{u.name}</span>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Add outside email — available in BASIC state (no toggle needed) */}
       {!readOnly && (adding ? (
         <div style={{ background:'#f7f5f0', padding:'12px 14px', borderTop:'1px solid rgba(0,0,0,0.05)', display:'grid', gap:'8px' }}>
           <div style={{ display:'flex', gap:'8px' }}>
@@ -17759,20 +17891,18 @@ function LeadNotificationRecipients({ realLocId, readOnly=false }) {
             <input value={form.last_name} onChange={e=>setForm(f=>({...f,last_name:e.target.value}))} placeholder="Last name" style={{ flex:1, padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
           </div>
           <input value={form.email} onChange={e=>{ setForm(f=>({...f,email:e.target.value})); setFormErr('') }} placeholder="email@example.com *" type="email" style={{ padding:'9px 12px', border:`1.5px solid ${formErr?'#e5a0a0':'rgba(0,0,0,0.1)'}`, borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
-          <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
-            <input value={form.phone} onChange={e=>setForm(f=>({...f,phone:e.target.value}))} placeholder="Phone (optional)" type="tel" style={{ flex:1, padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
-            <LeadNotifCategorySelect value={form.category} onChange={v=>setForm(f=>({...f,category:v}))} />
-          </div>
+          <input value={form.phone} onChange={e=>setForm(f=>({...f,phone:e.target.value}))} placeholder="Phone (optional)" type="tel" style={{ padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
           {formErr && <p style={{ fontSize:'11px', color:'#c96a6a' }}>{formErr}</p>}
+          <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>Outside emails are notify-only — they never send follow-up emails.{advanced ? ' Set which project types they get after adding.' : ''}</p>
           <div style={{ display:'flex', gap:'8px', justifyContent:'flex-end' }}>
             <button onClick={()=>{ setAdding(false); setFormErr('') }} style={{ padding:'9px 14px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', color:'#8a9e9a', cursor:'pointer', fontFamily:'inherit' }}>Cancel</button>
-            <button onClick={addExternal} disabled={busy} style={{ padding:'9px 16px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor: busy?'default':'pointer', opacity: busy?0.6:1 }}>{busy ? 'Adding…' : 'Add recipient'}</button>
+            <button onClick={addExternal} disabled={busy} style={{ padding:'9px 16px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor: busy?'default':'pointer', opacity: busy?0.6:1 }}>{busy ? 'Adding…' : 'Add email'}</button>
           </div>
         </div>
       ) : (
         <div style={{ background:'white', borderTop:'1px solid rgba(0,0,0,0.05)', padding:'10px 16px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
           <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{subCount} active recipient{subCount !== 1 ? 's' : ''}</span>
-          <button onClick={()=>setAdding(true)} style={{ padding:'6px 12px', background:'transparent', border:'1px solid rgba(168,201,196,0.4)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>+ Add external recipient</button>
+          <button onClick={()=>setAdding(true)} style={{ padding:'6px 12px', background:'transparent', border:'1px solid rgba(168,201,196,0.4)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>+ Add outside email</button>
         </div>
       ))}
     </div>
@@ -20027,17 +20157,39 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
               </div>
             </div>
 
-            <SectionHeader title="Outreach Email" desc="Used as the From address for all New Client Drip emails" />
+            {/* ── New lead emails (unified) ──────────────────────────────
+                ONE section governing NEW-LEAD emails only: the internal
+                notification (who's told a lead arrived) + the new-lead
+                follow-up drip sender. Two independently-toggled parts. Other
+                email types (assessments, reminders) are configured elsewhere. */}
+            <div style={{ padding:'20px 16px 8px' }}>
+              <p style={{ fontSize:'12px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'2px' }}>📧 New lead emails</p>
+              <p style={{ fontSize:'12px', color:'#b0c0bc', lineHeight:1.45 }}>Who gets told about a new lead, and who your follow-up emails come from. Other emails (assessments, reminders) are set up elsewhere.</p>
+            </div>
+
+            {/* PART 1 — Notifications */}
+            <div style={{ padding:'6px 16px 6px' }}>
+              <p style={{ fontSize:'11px', fontWeight:700, color:'#4a5e5a' }}>1 · Who gets notified</p>
+              <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>Emailed the moment a new lead comes in through your website.</p>
+            </div>
+            <NewLeadNotifications realLocId={realLocId} readOnly={false} />
+
+            {/* PART 2 — Sending identity */}
+            <div style={{ padding:'16px 16px 6px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px' }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <p style={{ fontSize:'11px', fontWeight:700, color:'#4a5e5a' }}>2 · Who follow-up emails come from</p>
+                <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>The From name &amp; address on your new-lead follow-up drip.</p>
+              </div>
+              {settings.location.sendFromEmail
+                ? <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'20px', background:'rgba(168,201,196,0.2)', color:'#3a5e58', fontWeight:600, flexShrink:0 }}>✓ Verified sender</span>
+                : <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'20px', background:'rgba(212,160,70,0.14)', color:'#b07d3a', fontWeight:600, flexShrink:0 }}>Not set</span>}
+            </div>
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
               <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>updateLocation('sendFromName',v)}  hint="e.g. Bee Organized Kansas City" />
               <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>updateLocation('sendFromEmail',v)} hint="Must be a verified sender in your email provider" type="email" />
               <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>updateLocation('replyToEmail',v)}  hint="Where client replies land (defaults to Send From)" type="email" />
             </div>
-
-            <SectionHeader title="Lead Notification Recipients" desc="Who gets emailed when a new client comes in" />
-            <LeadNotificationRecipients realLocId={realLocId} readOnly={false} />
-
-            <SectionHeader title="Drip Sender Routing" desc="Send drips from a different person based on the lead's project type" />
+            <div style={{ height:'8px' }} />
             <ProjectTypeSenders realLocId={realLocId} readOnly={false} />
 
             <SectionHeader title="Integrations" />

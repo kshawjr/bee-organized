@@ -27,14 +27,33 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { notificationRecipientsManageableServer } from '@/lib/notification-access'
 import {
-  getManageableRecipients,
-  isRecipientCategory,
+  getNotificationConfig,
+  setSplitNotificationsEnabled,
   DEFAULT_CATEGORY,
 } from '@/lib/notification-recipients'
 
 export const runtime = 'nodejs'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+// The category field is now a project-type ROUTING string: 'all' (all leads),
+// a JSON array of project-type labels, or a legacy 'moving'/'organizing' value
+// (kept working). Accept those shapes; reject anything else so a malformed
+// write can't land. The UI serializes selections via serializeCategory().
+function isValidCategoryField(v: unknown): v is string {
+  if (typeof v !== 'string') return false
+  const s = v.trim()
+  if (s === 'all' || s === 'moving' || s === 'organizing') return true
+  if (s.startsWith('[')) {
+    try {
+      const arr = JSON.parse(s)
+      return Array.isArray(arr) && arr.every((x) => typeof x === 'string')
+    } catch {
+      return false
+    }
+  }
+  return false
+}
 
 async function authForLocation(locId: string) {
   const supabase = await createServerSupabaseClient()
@@ -66,7 +85,9 @@ export async function GET(
     return NextResponse.json({ error: auth.error }, { status: auth.status })
   }
   try {
-    const data = await getManageableRecipients(params.id)
+    // Returns { users, externals, project_types, split_enabled } — the full
+    // PART 1 config the unified section renders.
+    const data = await getNotificationConfig(params.id)
     return NextResponse.json(data)
   } catch (e: any) {
     console.error('[notification-recipients GET]', e?.message || e)
@@ -84,11 +105,24 @@ export async function PATCH(
   }
 
   const body = await req.json().catch(() => null)
+
+  // Split-toggle flip: { split_enabled: boolean }, no hub_user_id. This is the
+  // PART 1 Advanced toggle ("Notify different people by project type").
+  if (body && typeof body.split_enabled === 'boolean') {
+    try {
+      await setSplitNotificationsEnabled(params.id, body.split_enabled)
+      return NextResponse.json({ ok: true, split_enabled: body.split_enabled })
+    } catch (e: any) {
+      console.error('[notification-recipients PATCH split]', e?.message || e)
+      return NextResponse.json({ error: 'save_failed' }, { status: 500 })
+    }
+  }
+
   const hubUserId = body?.hub_user_id
   if (!hubUserId || typeof hubUserId !== 'string') {
     return NextResponse.json({ error: 'hub_user_id required' }, { status: 400 })
   }
-  if (body.category !== undefined && !isRecipientCategory(body.category)) {
+  if (body.category !== undefined && !isValidCategoryField(body.category)) {
     return NextResponse.json({ error: 'invalid category' }, { status: 400 })
   }
   if (body.subscribed !== undefined && typeof body.subscribed !== 'boolean') {
@@ -153,7 +187,7 @@ export async function POST(
   if (!EMAIL_RE.test(email)) {
     return NextResponse.json({ error: 'valid email required' }, { status: 400 })
   }
-  if (body.category !== undefined && !isRecipientCategory(body.category)) {
+  if (body.category !== undefined && !isValidCategoryField(body.category)) {
     return NextResponse.json({ error: 'invalid category' }, { status: 400 })
   }
 

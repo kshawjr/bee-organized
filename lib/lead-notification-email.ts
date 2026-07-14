@@ -9,10 +9,10 @@
 // no-pref users defaulting to subscribed/'all'.
 //
 // ONE email addressed to ALL recipients — a single Resend message with every
-// recipient email on the `to` line, never a per-recipient loop. Category
-// ('all' | 'moving' | 'organizing') is NOT used to filter here: this send
-// goes to everyone subscribed. Category-based routing/filtering is a later
-// build.
+// recipient email on the `to` line, never a per-recipient loop. Project-type
+// routing (when the location's split-notifications toggle is ON) is applied
+// inside resolveLeadRecipients, which is handed the lead below; this module
+// just fans one message out to whoever it returns.
 //
 // Sends via the SYSTEM sender (sendEmailDirect), mirroring team-invite /
 // magic-link emails — a pre-launch location may not have its per-location
@@ -171,7 +171,13 @@ export async function notifyNewLead(args: {
 
   let recipients
   try {
-    recipients = await resolveLeadRecipients(location.id)
+    // Pass the lead so resolveLeadRecipients can route by project type when the
+    // location's split-notifications toggle is ON (unassigned types → whole
+    // team; never-drop to the whole team if the filter empties). When the
+    // toggle is OFF, this is a no-op and every subscribed recipient is returned.
+    recipients = await resolveLeadRecipients(location.id, {
+      project_type: lead.project_type,
+    })
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
     console.error('[lead-notify] resolveLeadRecipients failed', err)

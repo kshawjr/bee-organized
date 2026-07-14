@@ -284,10 +284,14 @@ const slice = (src: string, from: string, to: string) => {
 }
 
 describe('UI — placement in the owner+super_admin-only My Location module', () => {
-  const comp = slice(beehub, 'function LeadNotificationRecipients(', '// ─── SMS Add-on Card')
+  const comp = slice(beehub, 'function NewLeadNotifications(', '// ─── SMS Add-on Card')
 
   it('renders in the location section, wired to the real location UUID', () => {
-    expect(beehub).toContain('<LeadNotificationRecipients realLocId={realLocId}')
+    expect(beehub).toContain('<NewLeadNotifications realLocId={realLocId}')
+  })
+  it('lives under the unified "New lead emails" section (part 1)', () => {
+    expect(beehub).toContain('📧 New lead emails')
+    expect(beehub).toContain('1 · Who gets notified')
   })
   it('the location module is HIDDEN from managers (isManager excluded)', () => {
     // Section only exists for non-managers → owner + super_admin/corporate.
@@ -296,20 +300,29 @@ describe('UI — placement in the owner+super_admin-only My Location module', ()
   })
   it('the placeholder card is gone (no competing notifications UI)', () => {
     expect(beehub).not.toContain('function LeadNotificationsCard(')
+    // the old single-category component + select are fully replaced
+    expect(beehub).not.toContain('function LeadNotificationRecipients(')
+    expect(beehub).not.toContain('function LeadNotifCategorySelect(')
   })
   it('readOnly hides every editable control', () => {
-    expect(comp).toContain('function LeadNotificationRecipients({ realLocId, readOnly')
-    // category select + subscribe/remove + add form are all behind !readOnly / readOnly ?
+    expect(comp).toContain('function NewLeadNotifications({ realLocId, readOnly')
+    // subscribe/remove + add form are all behind !readOnly / readOnly ?
     expect(comp).toContain('readOnly ?')
     expect(comp).toContain('{!readOnly && (adding')
   })
-  it('interface users get a category dropdown + unsubscribe/remove control', () => {
-    expect(comp).toContain('patchUser(u.hub_user_id, { category:v })')
+  it('the basic recipient list + subscribe/remove works with the toggle OFF', () => {
+    // Team subscribe/remove and the outside-email add are NOT gated on advanced.
     expect(comp).toContain('patchUser(u.hub_user_id, { subscribed: !u.subscribed })')
-  })
-  it('has an add-external-recipient form with required email validation', () => {
-    expect(comp).toContain('+ Add external recipient')
+    expect(comp).toContain('+ Add outside email')
     expect(comp).toContain('LEAD_NOTIF_EMAIL_RE.test(email)')
+  })
+  it('the per-part advanced toggle persists split_enabled', () => {
+    expect(comp).toContain('Notify different people by project type')
+    expect(comp).toContain("JSON.stringify({ split_enabled: on })")
+  })
+  it('advanced shows per-recipient project-type pills + the everything-else row', () => {
+    expect(comp).toContain('RecipientTypePicker')
+    expect(comp).toContain('Everything else → whole team')
   })
 })
 
