@@ -16471,6 +16471,9 @@ const DEFAULT_SETTINGS = {
     jobberStatus:   'disconnected',
     jobberAccountId:'',
     jobberInitialImportCompletedAt: null,
+    slackConnected:  false,
+    slackTeamName:   '',
+    slackChannelName:'',
     crmStatus:      'active',
     sendFromName:   '',
     sendFromEmail:  '',
@@ -19288,6 +19291,166 @@ function CommsLabel({ children }) {
   )
 }
 
+// ─── Slack notifications card (Communications tab) ─────────────────────────────
+// Per-location "Add to Slack" install: when connected, a new lead ALSO posts to
+// the location's Slack channel (in addition to the email). 2-state only —
+// connected / disconnected. Unlike JobberCard there is NO reconnect_required /
+// expiry state: bot tokens don't rotate, so there's nothing to expire. Mirrors
+// JobberCard's status-strip + one-primary-action + Manage-connection expander,
+// minus the import machinery, styled to the Comms tab (0.5px borders, small
+// radii, flat fills, outline icon, no shadows on controls).
+function SlackCard({ settings, updateLocation }) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy]       = useState(false)
+  const [error, setError]     = useState(null)
+  const [toast, setToast]     = useState(null)
+  const [managing, setManaging] = useState(false)
+
+  const locationId  = settings.location.locId || null
+  const connected   = !!settings.location.slackConnected
+  const teamName    = settings.location.slackTeamName || ''
+  const channelName = settings.location.slackChannelName || ''
+
+  // OAuth entry point — full-page redirect into the "Add to Slack" flow.
+  function goConnect() {
+    if (!locationId) { setError('No location id — reload and try again.'); return }
+    window.location.href = '/api/slack/connect?location_id=' + encodeURIComponent(locationId)
+  }
+
+  async function doDisconnect() {
+    if (!locationId) { setError('No location id — reload and try again.'); return }
+    setBusy(true); setError(null)
+    try {
+      const r = await fetch('/api/locations/' + encodeURIComponent(locationId) + '/slack-disconnect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (!r.ok) {
+        let detail = `disconnect_failed_${r.status}`
+        try { const j = await r.json(); detail = j.error || detail } catch {}
+        setError(detail); setBusy(false); return
+      }
+      setConfirming(false)
+      // Optimistic local flip so the card matches the DB without a reload.
+      updateLocation('slackConnected', false)
+      updateLocation('slackTeamName', '')
+      updateLocation('slackChannelName', '')
+      setToast({ kind:'success', msg:'Disconnected from Slack' })
+      setTimeout(() => setToast(null), 3000)
+    } catch (e) {
+      setError(String(e?.message || e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const accent    = connected ? '#16a34a' : '#5a6e6a'
+  const softBg     = connected ? 'rgba(22,163,74,0.09)' : 'rgba(0,0,0,0.025)'
+  const softBorder = connected ? 'rgba(22,163,74,0.22)' : 'rgba(26,46,43,0.10)'
+  const channelLabel = channelName
+    ? (channelName.startsWith('#') ? channelName : `#${channelName}`)
+    : ''
+
+  return (
+    <div style={{ margin:'0 12px', borderRadius:'14px', overflow:'hidden', border:`0.5px solid ${softBorder}`, background:'white', boxShadow:'0 1px 5px rgba(26,46,43,0.05)' }}>
+      {toast && <InlineToast kind={toast.kind} msg={toast.msg} />}
+
+      {/* Status strip — only when connected (calm, unmissable). */}
+      {connected && (
+        <div style={{ display:'flex', alignItems:'center', gap:'9px', padding:'9px 14px', background:softBg, borderBottom:`0.5px solid ${softBorder}` }}>
+          <span style={{ width:'18px', height:'18px', borderRadius:'50%', background:accent, color:'white', fontSize:'11px', fontWeight:800, display:'inline-flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>✓</span>
+          <span style={{ fontSize:'12px', fontWeight:700, color:accent, letterSpacing:'0.2px' }}>Connected</span>
+        </div>
+      )}
+
+      <div style={{ padding:'14px' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'11px', marginBottom:'8px' }}>
+          <div style={{ width:'34px', height:'34px', borderRadius:'9px', background:'rgba(74,21,75,0.08)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+            <CommsIcon name="message" size={18} color="#4a154b" />
+          </div>
+          <div style={{ minWidth:0 }}>
+            <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', lineHeight:1.2 }}>
+              {connected ? 'Slack is connected' : 'Connect Slack'}
+            </p>
+            {connected && (channelLabel || teamName) && (
+              <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                Posting to {channelLabel && <span style={{ fontWeight:600, color:'#5a6e6a' }}>{channelLabel}</span>}
+                {channelLabel && teamName ? ' in ' : ''}
+                {teamName && <span style={{ fontWeight:600, color:'#5a6e6a' }}>{teamName}</span>}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <p style={{ fontSize:'12px', color:'#5a6e6a', lineHeight:1.5, marginBottom: connected ? '2px' : '12px' }}>
+          {connected
+            ? 'New leads are posted to your Slack channel in addition to the email notification.'
+            : 'Post a message to your team’s Slack channel every time a new lead comes in — on top of the email.'}
+        </p>
+
+        {!connected && (
+          <button onClick={goConnect} disabled={busy}
+            style={{ width:'100%', padding:'11px', background:'#4a154b', border:'none', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
+            Add to Slack
+          </button>
+        )}
+
+        {connected && (
+          <div style={{ marginTop:'8px' }}>
+            <button onClick={()=>setManaging(m=>!m)}
+              style={{ background:'none', border:'none', padding:'6px 0', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer', display:'inline-flex', alignItems:'center', gap:'5px' }}>
+              Manage connection <span style={{ fontSize:'9px' }}>{managing ? '▲' : '▼'}</span>
+            </button>
+            {managing && (
+              <div style={{ marginTop:'6px', padding:'11px', borderRadius:'8px', background:'rgba(0,0,0,0.02)', border:'0.5px solid rgba(26,46,43,0.08)' }}>
+                <p style={{ fontSize:'11px', color:'#5a6e6a', lineHeight:1.5, marginBottom:'9px' }}>
+                  Posting to a different channel or workspace? Reconnect. Stopping Slack posts? Disconnect — your email notifications are unaffected.
+                </p>
+                <div style={{ display:'flex', flexWrap:'wrap', gap:'8px' }}>
+                  <button onClick={goConnect} disabled={busy}
+                    style={{ padding:'8px 12px', background:'white', border:'0.5px solid rgba(26,46,43,0.15)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
+                    Reconnect
+                  </button>
+                  <button onClick={()=>setConfirming(true)} disabled={busy}
+                    style={{ padding:'8px 12px', background:'white', border:'0.5px solid rgba(239,68,68,0.35)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#ef4444', cursor:busy?'default':'pointer', opacity:busy?0.6:1 }}>
+                    Disconnect
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {error && <p style={{ fontSize:'11px', color:'#ef4444', marginTop:'9px' }}>Something went wrong: {error}</p>}
+      </div>
+
+      {confirming && (
+        <div onClick={()=>{ if(!busy) setConfirming(false) }}
+          style={{ position:'fixed', inset:0, zIndex:10100, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}>
+          <div onClick={e=>e.stopPropagation()}
+            style={{ background:'white', borderRadius:'14px', padding:'18px', maxWidth:'340px', width:'100%', boxShadow:'0 16px 48px rgba(0,0,0,0.28)' }}>
+            <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', marginBottom:'8px' }}>Disconnect from Slack?</p>
+            <p style={{ fontSize:'12.5px', color:'#5a6e6a', lineHeight:1.5, marginBottom:'16px' }}>
+              New leads will stop posting to Slack. Your email notifications are unaffected. You can reconnect any time.
+            </p>
+            {error && <p style={{ fontSize:'11px', color:'#ef4444', marginBottom:'10px' }}>Couldn't disconnect: {error}</p>}
+            <div style={{ display:'flex', gap:'8px', justifyContent:'flex-end' }}>
+              <button onClick={()=>setConfirming(false)} disabled={busy}
+                style={{ padding:'8px 14px', background:'white', border:'0.5px solid rgba(26,46,43,0.15)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#5a6e6a', cursor:busy?'default':'pointer' }}>
+                Cancel
+              </button>
+              <button onClick={doDisconnect} disabled={busy}
+                style={{ padding:'8px 14px', background:'#ef4444', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
+                {busy ? 'Disconnecting…' : 'Disconnect'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Static composition data for the Communication tab's Templates tier. These
 // tiles open a center modal (CommsTemplatesModal) that previews the location's
 // templates of the tapped type — no navigation off the Communications tab.
@@ -19617,6 +19780,10 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
       // is verifiable at a glance, not just a green pill).
       jobberTokenExpiry:    currentLocationCtx.token_expiry || null,
       jobberLastSyncStatus: currentLocationCtx.last_sync_status || null,
+      // Slack display fields (bot token stays server-side). Drive the SlackCard.
+      slackConnected:   !!currentLocationCtx.slack_connected,
+      slackTeamName:    currentLocationCtx.slack_team_name || '',
+      slackChannelName: currentLocationCtx.slack_channel_name || '',
       sendFromName:    currentLocationCtx.sender_name || '',
       sendFromEmail:   currentLocationCtx.send_from_email || '',
       replyToEmail:    currentLocationCtx.reply_to_email || '',
@@ -19654,6 +19821,10 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     jobberLastSyncStatus: selectedLoc.last_sync_status || null,
     jobberTeamRoster: selectedLoc.jobberTeamRoster || [],
     jobberTeamRosterSyncedAt: selectedLoc.jobberTeamRosterSyncedAt || null,
+    // Slack display fields (bot token stays server-side). Drive the SlackCard.
+    slackConnected:   !!selectedLoc.slackConnected,
+    slackTeamName:    selectedLoc.slackTeamName || '',
+    slackChannelName: selectedLoc.slackChannelName || '',
     crmStatus:      selectedLoc.crmStatus,
     // Prefer the location's configured sender fields (sender_name /
     // send_from_email / reply_to_email in the DB) so super_admin sees the
@@ -20613,6 +20784,11 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             {/* ── TIER 2 · MEDIUM — who's notified about new leads ─────────── */}
             <CommsLabel>Who hears about new leads</CommsLabel>
             <NewLeadNotifications realLocId={realLocId} readOnly={false} />
+
+            {/* Slack notifications — additive to the email above. New leads ALSO
+                post to the location's Slack channel once the app is installed. */}
+            <CommsLabel>Slack notifications</CommsLabel>
+            <SlackCard settings={settings} updateLocation={updateLocation} />
 
             {/* ── TIER 3 · PAIRED — automatic follow-up sequences (2-col) ──── */}
             <CommsLabel>Automatic follow-up</CommsLabel>

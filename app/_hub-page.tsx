@@ -253,7 +253,10 @@ export default async function HubPage({
     const { data: locRow, error: subErr } = await supabase
       .from('locations')
       .select(
-        'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, token_expiry, onboarding_state, default_drip_path, default_move_drip_path, address, city, state, zip, phone, email, timezone, sender_name, send_from_email, reply_to_email, reviews_link, calendar_link, activated_at, lifecycle_status'
+        // NOTE: slack_bot_token is intentionally NOT selected — display fields
+        // only (slack_connected / slack_team_name / slack_channel_name). The
+        // token is server-read-only (lib/slack-bot + intake route).
+        'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, token_expiry, onboarding_state, default_drip_path, default_move_drip_path, address, city, state, zip, phone, email, timezone, sender_name, send_from_email, reply_to_email, reviews_link, calendar_link, activated_at, lifecycle_status, slack_connected, slack_team_name, slack_channel_name'
       )
       .eq('id', hubUser.location_id)
       .single()
@@ -280,6 +283,10 @@ export default async function HubPage({
         jobber_team_roster_synced_at: locRow.jobber_team_roster_synced_at || null,
         last_sync_status: locRow.last_sync_status || null,
         token_expiry: locRow.token_expiry || null,
+        // Slack display fields (token never leaves the server).
+        slack_connected: !!locRow.slack_connected,
+        slack_team_name: locRow.slack_team_name || null,
+        slack_channel_name: locRow.slack_channel_name || null,
         payment_source: locRow.payment_source || 'none',
         subscription_status: locRow.subscription_status || 'deferred',
         subscription_plan: locRow.subscription_plan || null,
@@ -337,7 +344,8 @@ export default async function HubPage({
     const { data: locs, error: locsErr } = await supabaseService
       .from('locations')
       .select(
-        'id, name, address, city, state, zip, phone, email, timezone, reviews_link, calendar_link, sender_name, send_from_email, reply_to_email, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, token_expiry, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at, corporate_sponsorship_started_at, corporate_sponsorship_ends_at'
+        // slack_bot_token intentionally omitted — display fields only.
+        'id, name, address, city, state, zip, phone, email, timezone, reviews_link, calendar_link, sender_name, send_from_email, reply_to_email, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, token_expiry, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at, corporate_sponsorship_started_at, corporate_sponsorship_ends_at, slack_connected, slack_team_name, slack_channel_name'
       )
       .order('name', { ascending: true })
 
@@ -461,6 +469,10 @@ export default async function HubPage({
         jobberInitialImportCompletedAt: row.jobber_initial_import_completed_at || null,
         jobberTeamRoster: Array.isArray(row.jobber_team_roster) ? row.jobber_team_roster : [],
         jobberTeamRosterSyncedAt: row.jobber_team_roster_synced_at || null,
+        // Slack display fields (token never leaves the server).
+        slackConnected: !!row.slack_connected,
+        slackTeamName: row.slack_team_name || null,
+        slackChannelName: row.slack_channel_name || null,
         last_sync_status: row.last_sync_status || null,
         // Token expiry (epoch-ms) feeds deriveJobberStatus so the settings badge
         // reads reconnect_required for a dead-token location, not a false green.

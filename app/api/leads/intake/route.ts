@@ -39,6 +39,7 @@ import { writeSyncLog } from '@/lib/sync-log'
 import { applyDripSideEffects, startDripForLead } from '@/lib/drip-lifecycle'
 import { sendDripStep } from '@/lib/drip-send'
 import { notifyNewLead } from '@/lib/lead-notification-email'
+import { notifyNewLeadSlack } from '@/lib/slack-bot'
 import {
   queryLeadMatches,
   classifyLeadMatches,
@@ -459,6 +460,52 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     console.error('[intake] notifyNewLead threw', err)
     warnings.push(`lead_notification_failed: ${err?.message || String(err)}`)
+  }
+
+  // ─── New-lead Slack post (ADDITIVE, CREATE path only) ─────────
+  // In ADDITION to the email above, post to the location's Slack channel when
+  // it has installed the Bee Hub Slack app. Strictly additive + non-blocking:
+  // notifyNewLeadSlack never throws, and this block is double-wrapped in
+  // try/catch — a Slack failure can NEVER affect the email (already sent), the
+  // lead row (already inserted), or the success response (returned regardless).
+  // Only on the CREATE path — like the email, a returning client's resubmission
+  // (mergeResubmission) must never re-notify.
+  //
+  // The Slack connection state is NOT read via this route's `location` select
+  // (which stays exactly as it was — no new columns) so a not-yet-applied
+  // migration can never 500 lead intake. Instead notifyNewLeadSlack does its own
+  // fail-soft read of slack_connected/slack_bot_token/slack_channel_id: any read
+  // error (incl. missing columns before the migration runs) or a not-connected
+  // location returns a quiet skip — exactly like an email location with zero
+  // recipients.
+  try {
+    const baseUrl =
+      process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ||
+      process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
+      req.nextUrl?.origin ||
+      null
+    const slackRes = await notifyNewLeadSlack({
+      locationId: location.id,
+      locationName: location.name,
+      baseUrl,
+      lead: {
+        id: lead.id,
+        name: full_name.trim(),
+        email: validEmail,
+        phone: phone || null,
+        project_type: project_type || null,
+        request_details: requestDetails,
+        preferred_contact: preferredContact,
+      },
+    })
+    // Only a real send failure warns; a quiet skip (not connected / not yet
+    // migrated) carries no error and is silent.
+    if (slackRes.error) {
+      warnings.push(`slack_notification_failed: ${slackRes.error}`)
+    }
+  } catch (err: any) {
+    console.error('[intake] notifyNewLeadSlack threw', err)
+    warnings.push(`slack_notification_failed: ${err?.message || String(err)}`)
   }
 
   // Success row. Warnings never flip status — the lead row landed and
