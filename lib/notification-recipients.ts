@@ -19,6 +19,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { supabaseService } from './supabase-service'
+import { getZohoLocationNotificationContacts } from './zoho'
 
 export const RECIPIENT_CATEGORIES = ['all', 'moving', 'organizing'] as const
 export type RecipientCategory = (typeof RECIPIENT_CATEGORIES)[number]
@@ -60,9 +61,11 @@ export type ManageableRecipients = {
   externals: ExternalRecipient[]
 }
 
-// A flat, send-ready recipient (what B2 fans out over).
+// A flat, send-ready recipient (what B2 fans out over). 'zoho' recipients come
+// from a location's Zoho Contacts related list — the fallback for locations
+// with no in-interface recipients (see resolveLeadRecipients).
 export type EffectiveRecipient = {
-  source: 'user' | 'external'
+  source: 'user' | 'external' | 'zoho'
   hub_user_id: string | null
   name: string
   email: string
@@ -133,32 +136,104 @@ export async function getManageableRecipients(
   return { users, externals }
 }
 
-// Effective SEND list (B2 calls this): subscribed interface users + all
-// externals, flattened. Unsubscribed users are excluded. Users with no pref
-// row default to subscribed / 'all'.
+// Effective SEND list (B2 calls this). PRECEDENCE:
+//   1. If the location has ANY in-interface recipients (owner/manager hub_users
+//      or externals — B1 tables), use those: subscribed users + all externals,
+//      flattened. Zoho is NOT consulted. An all-unsubscribed interface location
+//      returns [] deliberately (the owner turned everyone off) — we do NOT
+//      resurrect Zoho contacts behind their back.
+//   2. ELSE (a non-interface location — no hub_users at all) fall back to the
+//      location's Zoho Contacts related list, so B2's send transparently
+//      reaches the ~non-interface locations too.
+//
+// FAIL LOUD: a Zoho fetch failure, or a location that resolves to zero
+// recipients, is logged with the location id — a location must never SILENTLY
+// receive no notification.
 export async function resolveLeadRecipients(
   locationId: string,
 ): Promise<EffectiveRecipient[]> {
   const { users, externals } = await getManageableRecipients(locationId)
+
+  // A location is "interface-managed" if it has any owner/manager user or any
+  // external configured — regardless of their subscribe state.
+  const isInterfaceLocation = users.length > 0 || externals.length > 0
+
+  if (isInterfaceLocation) {
+    const out: EffectiveRecipient[] = []
+    for (const u of users) {
+      if (!u.subscribed) continue
+      out.push({
+        source: 'user',
+        hub_user_id: u.hub_user_id,
+        name: u.name,
+        email: u.email,
+        category: u.category,
+      })
+    }
+    for (const e of externals) {
+      out.push({
+        source: 'external',
+        hub_user_id: null,
+        name: e.name,
+        email: e.email,
+        category: e.category,
+      })
+    }
+    return out
+  }
+
+  // No in-interface recipients — resolve from Zoho.
+  return resolveZohoRecipients(locationId)
+}
+
+// Fallback resolver: a non-interface location's notification contacts live in
+// Zoho as the Location's related Contacts. Maps the Supabase location UUID to
+// its Zoho Location_ID slug, fetches the contacts, and returns them as
+// send-ready recipients (category defaults to 'all' — Zoho carries no per-
+// contact category). Opted-out contacts are excluded.
+async function resolveZohoRecipients(
+  locationId: string,
+): Promise<EffectiveRecipient[]> {
+  const locRes = await supabaseService
+    .from('locations')
+    .select('location_id')
+    .eq('id', locationId)
+  const slug = (locRes.data || [])[0]?.location_id as string | undefined
+
+  if (!slug) {
+    console.error(
+      `[notification-recipients] location ${locationId} has no in-interface recipients and no Zoho Location_ID mapping — resolved to ZERO recipients`,
+    )
+    return []
+  }
+
+  let contacts
+  try {
+    contacts = await getZohoLocationNotificationContacts(slug)
+  } catch (err: any) {
+    // Loud, visible signal — do NOT silently drop the location's notifications.
+    console.error(
+      `[notification-recipients] Zoho notification-contacts fetch FAILED for location ${locationId} (${slug}): ${err?.message} — resolved to ZERO recipients`,
+    )
+    return []
+  }
+
   const out: EffectiveRecipient[] = []
-  for (const u of users) {
-    if (!u.subscribed) continue
+  for (const c of contacts) {
+    if (c.opted_out || !c.email) continue
     out.push({
-      source: 'user',
-      hub_user_id: u.hub_user_id,
-      name: u.name,
-      email: u.email,
-      category: u.category,
+      source: 'zoho',
+      hub_user_id: null,
+      name: c.name,
+      email: c.email,
+      category: DEFAULT_CATEGORY,
     })
   }
-  for (const e of externals) {
-    out.push({
-      source: 'external',
-      hub_user_id: null,
-      name: e.name,
-      email: e.email,
-      category: e.category,
-    })
+
+  if (out.length === 0) {
+    console.error(
+      `[notification-recipients] location ${locationId} (${slug}) resolved to ZERO notification recipients from Zoho (no contacts, or all opted out)`,
+    )
   }
   return out
 }

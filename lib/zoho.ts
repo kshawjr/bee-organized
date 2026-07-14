@@ -71,3 +71,92 @@ export async function getZohoLocation(locationId: string) {
   )
   return data.data?.[0] || null
 }
+
+// ─── Location notification contacts ───────────────────────────────
+// The individual people a location's lead notifications fan out to today
+// live in Zoho as the Location's related CONTACTS (each an internal
+// @beeorganized.com staff record, Contact_Type "Zee Bee"/"Team Member").
+// This is the Zoho-side equivalent of B1's in-interface recipients, used
+// for the ~non-interface locations that have no hub_users. `locationSlug`
+// is the Zoho Location_ID (e.g. 'loc_seattle').
+//
+// Throws on any API failure so callers can FAIL LOUD — a location must
+// never silently resolve to zero recipients because of a swallowed error.
+// A genuinely empty related list (HTTP 204) resolves to [] (not an error).
+// Successful reads are cached briefly (correctness over caching: a short
+// TTL, and on a transient failure we serve the last good list rather than
+// drop a real recipient).
+
+export type ZohoNotificationContact = {
+  name: string
+  email: string
+  opted_out: boolean
+}
+
+const NOTIF_CONTACT_FIELDS = 'Full_Name,First_Name,Last_Name,Email,Email_Opt_Out'
+const notifContactsCache = new Map<
+  string,
+  { at: number; contacts: ZohoNotificationContact[] }
+>()
+const NOTIF_CONTACTS_TTL_MS = 5 * 60 * 1000 // 5 min
+
+export async function getZohoLocationNotificationContacts(
+  locationSlug: string,
+): Promise<ZohoNotificationContact[]> {
+  const cached = notifContactsCache.get(locationSlug)
+  if (cached && Date.now() - cached.at < NOTIF_CONTACTS_TTL_MS) return cached.contacts
+
+  try {
+    const loc = await getZohoLocation(locationSlug)
+    if (!loc?.id) {
+      throw new Error(`no Zoho Location for Location_ID=${locationSlug}`)
+    }
+
+    const token = await getZohoToken()
+    const res = await fetch(
+      `${ZOHO_API_BASE}/Locations/${loc.id}/Contacts?fields=${NOTIF_CONTACT_FIELDS}`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` }, cache: 'no-store' },
+    )
+
+    // 204 (or any empty body) = the location genuinely has no related contacts.
+    if (res.status === 204) {
+      notifContactsCache.set(locationSlug, { at: Date.now(), contacts: [] })
+      return []
+    }
+
+    const text = await res.text()
+    const data = text ? JSON.parse(text) : {}
+    if (data.status === 'error') {
+      throw new Error(`Zoho Contacts read failed: ${data.code || data.message}`)
+    }
+
+    const seen = new Set<string>()
+    const contacts: ZohoNotificationContact[] = []
+    for (const c of data.data || []) {
+      const email = typeof c.Email === 'string' ? c.Email.trim() : ''
+      if (!email) continue
+      const key = email.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      const name =
+        (c.Full_Name && c.Full_Name !== email && String(c.Full_Name).trim()) ||
+        [c.First_Name, c.Last_Name].filter(Boolean).join(' ').trim() ||
+        email
+      contacts.push({ name, email, opted_out: c.Email_Opt_Out === true })
+    }
+
+    notifContactsCache.set(locationSlug, { at: Date.now(), contacts })
+    return contacts
+  } catch (err: any) {
+    // Serve the last good list rather than drop real recipients on a
+    // transient failure — but make it visible.
+    const stale = notifContactsCache.get(locationSlug)
+    if (stale) {
+      console.error(
+        `[zoho] notification-contacts fetch failed for ${locationSlug}; serving cached list (${stale.contacts.length}): ${err?.message}`,
+      )
+      return stale.contacts
+    }
+    throw err
+  }
+}

@@ -35,6 +35,20 @@ vi.mock('@/lib/supabase-service', () => {
   return { supabaseService: { from: (t: string) => makeBuilder(t) } }
 })
 
+// ── Mock the Zoho client so the non-interface fallback is deterministic and
+//    the network is never touched. ──────────────────────────────────────────
+const zohoContacts = vi.hoisted(() => ({
+  bySlug: {} as Record<string, any[]>,
+  fail: null as string | null,
+}))
+vi.mock('@/lib/zoho', () => ({
+  getZohoLocationNotificationContacts: vi.fn(async (slug: string) => {
+    if (zohoContacts.fail) throw new Error(zohoContacts.fail)
+    return zohoContacts.bySlug[slug] || []
+  }),
+}))
+import { getZohoLocationNotificationContacts } from '@/lib/zoho'
+
 import {
   notificationRecipientsManageable,
   notificationRecipientsManageableServer,
@@ -104,9 +118,29 @@ function seed() {
       { id: 'e1', location_id: 'loc1', first_name: 'Ext', last_name: 'One', email: 'ext1@x.com', phone: '555-1', category: 'organizing', created_at: '2026-01-01' },
       { id: 'e2', location_id: 'loc2', first_name: 'Ext', last_name: 'Two', email: 'ext2@x.com', phone: null, category: 'all', created_at: '2026-01-01' },
     ],
+    // Supabase UUID → Zoho Location_ID slug, for the Zoho fallback path.
+    // loc-zoho is a NON-interface location (no hub_users seeded for it).
+    // Slug + contacts below are SYNTHETIC fixtures, not live CRM data.
+    locations: [
+      { id: 'loc-zoho', location_id: 'loc_zslug' },
+      { id: 'loc-nomap', location_id: null },
+    ],
   }
+  // SYNTHETIC fixtures — not live CRM data. The deliverable recipient uses the
+  // controlled admin@beeorganized.com address; the opted-out row uses a
+  // reserved example.com address (RFC 2606) so the exclusion is observable.
+  zohoContacts.bySlug = {
+    loc_zslug: [
+      { name: 'Admin Recipient', email: 'admin@beeorganized.com', opted_out: false },
+      { name: 'Opted Out', email: 'optout@example.com', opted_out: true },
+    ],
+  }
+  zohoContacts.fail = null
 }
-beforeEach(seed)
+beforeEach(() => {
+  seed()
+  vi.clearAllMocks()
+})
 
 describe('getManageableRecipients — merged list for the owner UI', () => {
   it('auto-lists interface users (owner+manager); owner with no row defaults to All/subscribed', async () => {
@@ -166,6 +200,67 @@ describe('resolveLeadRecipients — effective SEND list (B2)', () => {
     // owner + 2 managers, all default subscribed/all
     expect(eff.map(r => r.email).sort()).toEqual(['fred@x.com', 'manny@x.com', 'olivia@x.com'])
     expect(eff.every(r => r.category === 'all')).toBe(true)
+  })
+})
+
+// ── B3: Zoho fallback for non-interface locations ───────────────────────────
+describe('resolveLeadRecipients — Zoho fallback (B3)', () => {
+  it('a location WITH interface recipients uses those; Zoho is NOT called', async () => {
+    const eff = await resolveLeadRecipients('loc1')
+    expect(eff.map(r => r.email).sort()).toEqual(['ext1@x.com', 'manny@x.com', 'olivia@x.com'])
+    expect(getZohoLocationNotificationContacts).not.toHaveBeenCalled()
+    expect(eff.every(r => r.source !== 'zoho')).toBe(true)
+  })
+
+  it('an interface location with EVERYONE unsubscribed and no externals stays interface (empty), does NOT fall back to Zoho', async () => {
+    // loc1: unsubscribe every user, drop externals → still interface-managed.
+    tableData.current.lead_notification_prefs = [
+      { location_id: 'loc1', hub_user_id: 'u-owner', category: 'all', subscribed: false },
+      { location_id: 'loc1', hub_user_id: 'u-mgr', category: 'all', subscribed: false },
+      { location_id: 'loc1', hub_user_id: 'u-fired', category: 'all', subscribed: false },
+    ]
+    tableData.current.lead_notification_externals = []
+    const eff = await resolveLeadRecipients('loc1')
+    expect(eff).toEqual([])
+    expect(getZohoLocationNotificationContacts).not.toHaveBeenCalled()
+  })
+
+  it('a location WITHOUT interface recipients resolves from Zoho (excluding opted-out)', async () => {
+    const eff = await resolveLeadRecipients('loc-zoho')
+    expect(getZohoLocationNotificationContacts).toHaveBeenCalledWith('loc_zslug')
+    expect(eff.map(r => r.email).sort()).toEqual(['admin@beeorganized.com'])
+    expect(eff.some(r => r.email === 'optout@example.com')).toBe(false) // opted out
+    expect(eff.every(r => r.source === 'zoho' && r.category === 'all' && r.hub_user_id === null)).toBe(true)
+  })
+
+  it('a Zoho FAILURE logs loudly with the location id and does not throw or silently drop', async () => {
+    zohoContacts.fail = 'zoho 500'
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const eff = await resolveLeadRecipients('loc-zoho')
+    expect(eff).toEqual([])
+    expect(err).toHaveBeenCalled()
+    const msg = err.mock.calls.map(c => String(c[0])).join('\n')
+    expect(msg).toContain('loc-zoho')
+    expect(msg).toContain('FAILED')
+    err.mockRestore()
+  })
+
+  it('a non-interface location that resolves to ZERO recipients logs loudly (never silent)', async () => {
+    zohoContacts.bySlug = { loc_zslug: [] } // no contacts in Zoho
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const eff = await resolveLeadRecipients('loc-zoho')
+    expect(eff).toEqual([])
+    expect(err.mock.calls.map(c => String(c[0])).join('\n')).toContain('ZERO')
+    err.mockRestore()
+  })
+
+  it('a non-interface location with no Zoho Location_ID mapping logs loudly and returns []', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const eff = await resolveLeadRecipients('loc-nomap')
+    expect(eff).toEqual([])
+    expect(getZohoLocationNotificationContacts).not.toHaveBeenCalled()
+    expect(err.mock.calls.map(c => String(c[0])).join('\n')).toContain('loc-nomap')
+    err.mockRestore()
   })
 })
 
