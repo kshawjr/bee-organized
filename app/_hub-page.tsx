@@ -93,7 +93,11 @@ function buildLocationUser(row: any) {
       row.location_id ? 'franchise' :
       row.role === 'super_admin' ? 'development' :
       'corporate',
-    status: 'active',
+    status: row.disabled_at ? 'removed' : 'active',
+    // Reversible "Remove access" flag (hub_users.disabled_at). When set, the
+    // Team UI shows a "Removed" state + "Restore login" instead of the normal
+    // controls, and middleware.ts (Layer 1) locks the user out.
+    disabled: !!row.disabled_at,
     joined: fmtJoined(row.created_at),
     // jobber_user_id gates assignment to Jobber jobs/assessments. Null
     // means the user is hidden from the assignment multi-select; the
@@ -332,7 +336,7 @@ export default async function HubPage({
 
     const { data: allUsers, error: usersErr } = await supabaseService
       .from('hub_users')
-      .select('id, full_name, email, location_id, role, created_at, jobber_user_id')
+      .select('id, full_name, email, location_id, role, created_at, jobber_user_id, disabled_at')
       .order('full_name', { ascending: true })
       .limit(500)
 
@@ -464,7 +468,7 @@ export default async function HubPage({
   } else if (hubUser.location_id) {
     const { data: locUsers, error: locUsersErr } = await supabase
       .from('hub_users')
-      .select('id, full_name, email, location_id, role, created_at, jobber_user_id')
+      .select('id, full_name, email, location_id, role, created_at, jobber_user_id, disabled_at')
       .eq('location_id', hubUser.location_id)
       .order('full_name', { ascending: true })
 

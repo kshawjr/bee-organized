@@ -18280,6 +18280,14 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
   const jobberConnected = !!currentLocationCtx?.jobber_connected
     || settings?.location?.jobberStatus === 'connected'
 
+  // Team writes (invite / remove access / restore) are blocked on a paused or
+  // inactive location — mirrors lib/read-only-access.isLocationReadOnly.
+  // past_due is NOT read-only (grace period keeps full access). super_admin
+  // has no currentLocationCtx, so they're never gated here.
+  const teamReadOnly =
+    currentLocationCtx?.lifecycle_status === 'paused' ||
+    currentLocationCtx?.subscription_status === 'inactive'
+
   async function refreshJobberRoster() {
     if (!dbLocationId || refreshingRoster) return
     setRefreshingRoster(true)
@@ -18347,37 +18355,49 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
   function updateRole(uid,role) { setUsers(prev=>prev.map(u=>u.id===uid?{...u,role}:u)) }
   function updateSub(uid,patch) { setSubData(prev=>({...prev,[uid]:{...prev[uid],...patch}})) }
 
-  // Remove a team member: free their seat (PATCH user_id=null), delete
-  // their hub_users row, drop them from local state. Owners can remove
-  // anyone except themselves; super_admin/admin always allowed.
-  async function removeMember(member) {
+  // Remove ACCESS (reversible full offboard) in one call: the endpoint sets
+  // the disabled flag (locks them out via middleware), bans their auth, frees
+  // their seat back to the pool, and unsubscribes them from lead emails. We
+  // keep the row in the list but flip it to a "Removed" state (NOT delete),
+  // so an owner can restore their login later.
+  async function offboardMember(member) {
     if (!member?.id) return
     setRemoving(member.id)
     try {
-      // Find the seat assigned to this user (if any) and free it. We don't
-      // require a seat to exist — seats may have been removed manually.
-      const assignedSeat = (seatsCtx?.seats || []).find(s => s.user_id === member.id && s.status === 'active')
-      if (assignedSeat) {
-        const r = await fetch('/api/seats', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: assignedSeat.id, user_id: null }),
-        })
-        if (!r.ok) {
-          const j = await r.json().catch(()=>({}))
-          throw new Error(j.error || 'Could not free seat')
-        }
-        // Mirror in context so the billing card refreshes immediately.
-        seatsCtx?.setSeats?.(prev => prev.map(s => s.id === assignedSeat.id ? { ...s, user_id: null } : s))
+      const r = await fetch(`/api/hub_users/${encodeURIComponent(member.id)}/access`, {
+        method: 'POST',
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(()=>({}))
+        throw new Error(j.error || 'Could not remove access')
       }
-      const r2 = await fetch(`/api/hub_users/${encodeURIComponent(member.id)}`, { method: 'DELETE' })
-      if (!r2.ok) {
-        const j = await r2.json().catch(()=>({}))
-        throw new Error(j.error || 'Could not remove member')
-      }
-      removeUser(member.id)
+      // Mark disabled locally; the server already freed the seat, so mirror
+      // that in seats context to refresh the billing card immediately.
+      setUsers(prev => prev.map(u => u.id === member.id ? { ...u, disabled: true, status: 'removed' } : u))
+      seatsCtx?.setSeats?.(prev => prev.map(s => s.user_id === member.id && s.status === 'active' ? { ...s, user_id: null } : s))
     } catch (err) {
-      alert(err?.message || 'Could not remove member')
+      alert(err?.message || 'Could not remove access')
+    } finally {
+      setRemoving(null)
+    }
+  }
+
+  // Reactivate: restore LOGIN only. Does NOT re-add a paid seat (deliberate —
+  // re-seating is a separate step so reactivation can't silently bill).
+  async function reactivateMember(member) {
+    if (!member?.id) return
+    setRemoving(member.id)
+    try {
+      const r = await fetch(`/api/hub_users/${encodeURIComponent(member.id)}/access`, {
+        method: 'PATCH',
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(()=>({}))
+        throw new Error(j.error || 'Could not restore login')
+      }
+      setUsers(prev => prev.map(u => u.id === member.id ? { ...u, disabled: false, status: 'active' } : u))
+    } catch (err) {
+      alert(err?.message || 'Could not restore login')
     } finally {
       setRemoving(null)
     }
@@ -18444,8 +18464,10 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
                 <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'3px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.name}</p>
                 <div style={{ display:'flex', alignItems:'center', gap:'4px', flexWrap:'wrap' }}>
                   <span style={{ fontSize:'10px', color:rc2.color, background:rc2.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>{rc2.icon} {rc2.label}</span>
-                  <span style={{ fontSize:'10px', color:sc.color, background:sc.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>{sc.icon} {sc.label}</span>
-                  {showJobberBadge && (
+                  {u.disabled
+                    ? <span title="Access removed — login is off and their seat has been freed" style={{ fontSize:'10px', color:'#ef4444', background:'rgba(239,68,68,0.08)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>🔒 Removed</span>
+                    : <span style={{ fontSize:'10px', color:sc.color, background:sc.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>{sc.icon} {sc.label}</span>}
+                  {!u.disabled && showJobberBadge && (
                     jLinked
                       ? <span title="Linked to Jobber — can be assigned to Jobber jobs" style={{ fontSize:'10px', color:'#22c55e', background:'rgba(34,197,94,0.08)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>✓ Jobber</span>
                       : <span title="No Jobber identity yet — hidden from assignment pickers" style={{ fontSize:'10px', color:'#d4a046', background:'rgba(212,160,70,0.1)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>⚠ No Jobber</span>
@@ -18478,6 +18500,8 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
           subConf={subConf}
           canRemove={!!dbLocationId && currentUserCtx?.id !== selectedMember.id}
           removing={removing === selectedMember.id}
+          disabledMember={!!selectedMember.disabled}
+          teamReadOnly={teamReadOnly}
           jobberConnected={jobberConnected}
           jobberRoster={jobberRoster}
           canEditJobberLink={!!dbLocationId && jobberConnected}
@@ -18493,10 +18517,18 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
           }}
           onRemove={async ()=>{
             if (dbLocationId) {
-              await removeMember(selectedMember)
-              setSelectedMember(null)
+              await offboardMember(selectedMember)
+              // Keep the sheet open, flipped to the Removed state so the
+              // owner sees the "Restore login" affordance immediately.
+              setSelectedMember(prev => prev ? { ...prev, disabled: true } : prev)
             } else {
               removeUser(selectedMember.id); setSelectedMember(null)
+            }
+          }}
+          onReactivate={async ()=>{
+            if (dbLocationId) {
+              await reactivateMember(selectedMember)
+              setSelectedMember(prev => prev ? { ...prev, disabled: false } : prev)
             }
           }}
         />
@@ -18506,7 +18538,7 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
 }
 
 
-function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdateSub, onRemove, onUpdateJobberLink, canRemove=true, removing=false, jobberConnected=false, jobberRoster=[], canEditJobberLink=false }) {
+function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdateSub, onRemove, onReactivate=()=>{}, onUpdateJobberLink, canRemove=true, removing=false, disabledMember=false, teamReadOnly=false, jobberConnected=false, jobberRoster=[], canEditJobberLink=false }) {
   const [note, setNote]       = useState(sub.note||'')
   const [editingNote, setEditingNote] = useState(false)
   const rc = FRANCHISE_ROLES.find(r=>r.key===user.role)||FRANCHISE_ROLES[0]
@@ -18654,14 +18686,32 @@ function MemberDetailPopup({ user, sub, subConf, onClose, onUpdateRole, onUpdate
             )}
           </div>
 
-          {/* Danger zone */}
-          {user.role!=='owner' && canRemove && (
+          {/* Access control — reversible "Remove access" / "Restore login". */}
+          {canRemove && (
             <div style={{ padding:'14px 20px' }}>
-              <button onClick={()=>{ if(removing) return; if(window.confirm(`Remove ${user.name} from this location? Their seat will return to the pool.`)) onRemove() }}
-                disabled={removing}
-                style={{ width:'100%', padding:'10px', background:'rgba(239,68,68,0.04)', border:'1.5px solid rgba(239,68,68,0.15)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#ef4444', cursor:removing?'wait':'pointer', fontWeight:500, opacity:removing?0.6:1 }}>
-                {removing ? 'Removing…' : 'Remove from Location'}
-              </button>
+              {teamReadOnly ? (
+                <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center' }}>
+                  This location is paused (read-only) — reactivate the subscription to manage access.
+                </p>
+              ) : disabledMember ? (
+                <>
+                  <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, marginBottom:'8px' }}>
+                    Access removed — their login is off and their seat has been freed. Restoring
+                    login does <strong>not</strong> re-add a paid seat; re-seating is a separate step.
+                  </p>
+                  <button onClick={()=>{ if(removing) return; onReactivate() }}
+                    disabled={removing}
+                    style={{ width:'100%', padding:'10px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'white', cursor:removing?'wait':'pointer', fontWeight:600, opacity:removing?0.6:1 }}>
+                    {removing ? 'Restoring…' : 'Restore login'}
+                  </button>
+                </>
+              ) : (
+                <button onClick={()=>{ if(removing) return; if(window.confirm(`Remove access for ${user.name}? This removes their login and frees their seat. You can restore their login later; re-adding a seat is a separate step.`)) onRemove() }}
+                  disabled={removing}
+                  style={{ width:'100%', padding:'10px', background:'rgba(239,68,68,0.04)', border:'1.5px solid rgba(239,68,68,0.15)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#ef4444', cursor:removing?'wait':'pointer', fontWeight:500, opacity:removing?0.6:1 }}>
+                  {removing ? 'Removing…' : 'Remove access'}
+                </button>
+              )}
             </div>
           )}
         </div>
