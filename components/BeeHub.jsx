@@ -19249,6 +19249,70 @@ function SectionHeader({ title, desc }) {
   )
 }
 
+// ─── Communications tab — crisp outline icon set ──────────────────────────────
+// One family, OUTLINE only, a single stroke weight, whole-pixel sizes (11–20).
+// Paths are 24×24-viewBox line art; never filled. Used across the composed
+// Communication tab so every icon reads as one system.
+const COMMS_ICON_PATHS = {
+  send:    '<path d="m22 2-7 20-4-9-9-4 20-7Z"/><path d="M22 2 11 13"/>',
+  mail:    '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+  users:   '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  box:     '<path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3 8 9 5 9-5"/><path d="M12 13v8"/>',
+  home:    '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>',
+  message: '<path d="M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2Z"/>',
+  phone:   '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z"/>',
+  file:    '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h7"/>',
+  bell:    '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
+  check:   '<path d="M20 6 9 17l-5-5"/>',
+}
+function CommsIcon({ name, size=18, color='#1a2e2b', stroke=1.75, style }) {
+  const d = COMMS_ICON_PATHS[name]
+  if (!d) return null
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color}
+      strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round"
+      style={{ display:'block', flexShrink:0, ...style }}
+      dangerouslySetInnerHTML={{ __html: d }} />
+  )
+}
+
+// Section rhythm label between composed groups (11px uppercase, tracked, muted).
+function CommsLabel({ children }) {
+  return (
+    <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.09em', margin:'22px 16px 9px' }}>{children}</p>
+  )
+}
+
+// Channel badge — exact tint background + same-family text, small precise radius,
+// tight padding, flat (never a shadow on a badge).
+function CommsChannelBadge({ channel }) {
+  if (channel === 'sms') return (
+    <span style={{ display:'inline-flex', alignItems:'center', gap:'4px', fontSize:'10px', fontWeight:600, color:'#0a7d5f', background:'rgba(16,185,129,0.12)', padding:'2px 7px', borderRadius:'6px' }}>
+      <CommsIcon name="message" size={11} color="#0a7d5f" stroke={2} />SMS soon
+    </span>
+  )
+  return (
+    <span style={{ display:'inline-flex', alignItems:'center', gap:'4px', fontSize:'10px', fontWeight:600, color:'#4f46e5', background:'rgba(99,102,241,0.10)', padding:'2px 7px', borderRadius:'6px' }}>
+      <CommsIcon name="mail" size={11} color="#4f46e5" stroke={2} />Email
+    </span>
+  )
+}
+
+// Static composition data for the Communication tab's lighter tiers. The Client
+// Alerts + Templates tiers here are PRESENTATIONAL previews that deep-link to
+// their own owner tabs ('notifs' / 'templates') — the live wiring stays there.
+const COMMS_ALERT_PREVIEW = [
+  { icon:'users',   label:'New client enters the pipeline',   channels:['email','sms'] },
+  { icon:'bell',    label:'Assessment reminder',              channels:['email','sms'] },
+  { icon:'check',   label:'Invoice paid',                     channels:['email'] },
+  { icon:'phone',   label:'Client goes quiet',                channels:['email'] },
+]
+const COMMS_TEMPLATE_TILES = [
+  { type:'email', icon:'mail',    label:'Email',        sub:'Subjects & bodies', accent:'#4f46e5', tint:'rgba(99,102,241,0.10)' },
+  { type:'sms',   icon:'message', label:'SMS',          sub:'Text templates',    accent:'#0a7d5f', tint:'rgba(16,185,129,0.12)' },
+  { type:'call',  icon:'phone',   label:'Call scripts', sub:'Talking points',    accent:'#b45309', tint:'rgba(245,158,11,0.14)' },
+]
+
 // ─── Template Preview Modal ───────────────────────────────────────────────────
 function TemplatePreviewModal({ template, settings, onClose }) {
   React.useEffect(()=>{
@@ -19652,8 +19716,8 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
   const [peekTemplate, setPeekTemplate] = useState(null)
   const [editingStep, setEditingStep]         = useState(null) // { pathId, step }
   const [expandedPath, setExpandedPath]       = useState(null)
-  const [newLeadsExpanded, setNewLeadsExpanded] = useState(false)
-  const [newLeadsHover, setNewLeadsHover]     = useState(false)
+  // Communication tab — which follow-up sequence's step editor is open (null = none).
+  const [openSequence, setOpenSequence]       = useState(null)
   // Templates tab: one collapse state per type section (email/sms/call), all closed by default.
   const [tplTypeExpanded, setTplTypeExpanded] = useState({ email:false, sms:false, call:false })
   const [tplTypeHover, setTplTypeHover]       = useState(null)
@@ -20209,41 +20273,9 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
               </div>
             </div>
 
-            {/* ── New lead emails (unified) ──────────────────────────────
-                ONE section governing NEW-LEAD emails only: the internal
-                notification (who's told a lead arrived) + the new-lead
-                follow-up drip sender. Two independently-toggled parts. Other
-                email types (assessments, reminders) are configured elsewhere. */}
-            <div style={{ padding:'20px 16px 8px' }}>
-              <p style={{ fontSize:'12px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'2px' }}>📧 New lead emails</p>
-              <p style={{ fontSize:'12px', color:'#b0c0bc', lineHeight:1.45 }}>Who gets told about a new lead, and who your follow-up emails come from. Other emails (assessments, reminders) are set up elsewhere.</p>
-            </div>
-
-            {/* PART 1 — Notifications */}
-            <div style={{ padding:'10px 16px 6px' }}>
-              <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', marginBottom:'1px' }}>1 · Who gets notified</p>
-              <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.4 }}>Emailed the moment a new lead comes in through your website.</p>
-            </div>
-            <NewLeadNotifications realLocId={realLocId} readOnly={false} />
-
-            {/* PART 2 — Sending identity */}
-            <div style={{ padding:'18px 16px 6px' }}>
-              <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', marginBottom:'1px' }}>2 · Who follow-up emails come from</p>
-              <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.4 }}>The From name &amp; address on your new-lead follow-up drip.</p>
-            </div>
-            {/* (a) Default identity — ONE bordered container, hairline-divided rows;
-                the Verified pill rides the From-name row (right-aligned). */}
-            <div style={{ borderRadius:'10px', overflow:'hidden', margin:'0 12px', border:'1px solid rgba(0,0,0,0.09)', background:'white' }}>
-              <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>updateLocation('sendFromName',v)}  hint="e.g. Bee Organized Kansas City"
-                trailing={settings.location.sendFromEmail
-                  ? <span style={{ fontSize:'10px', padding:'3px 9px', borderRadius:'8px', background:'#e7f2ee', color:'#2f7d6f', fontWeight:600 }}>✓ Verified sender</span>
-                  : <span style={{ fontSize:'10px', padding:'3px 9px', borderRadius:'8px', background:'#fbf1de', color:'#c98a2b', fontWeight:600 }}>Not set</span>} />
-              <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>updateLocation('sendFromEmail',v)} hint="Must be a verified sender in your email provider" type="email" />
-              <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>updateLocation('replyToEmail',v)}  hint="Where client replies land (defaults to Send From)" type="email" />
-            </div>
-            <div style={{ height:'8px' }} />
-            {/* (b) Per-type sender split — ONE bordered container (see component) */}
-            <ProjectTypeSenders realLocId={realLocId} readOnly={false} />
+            {/* New-lead emails (notifications + sending identity) moved to the
+                Communication tab (activeSection==='paths'). See the composed
+                layout there. */}
 
             <SectionHeader title="Integrations" />
             {/* One unified Jobber card: connection status + import next-step in a
@@ -20436,45 +20468,118 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
         })()}
 
         {/* ── New Client Drip ── */}
-        {activeSection==='paths'&&(
-          <>
-            {/* Top-level drip category — collapsible (defaults closed) so future
-                categories (e.g. Won Lead Reactivation, Lost Lead Follow-up) can
-                be added as sibling sections without overwhelming the page. */}
-            <div
-              onClick={()=>setNewLeadsExpanded(v=>!v)}
-              onMouseEnter={()=>setNewLeadsHover(true)}
-              onMouseLeave={()=>setNewLeadsHover(false)}
-              style={{ padding:'16px 16px 8px', margin:'0 4px', borderRadius:'10px', cursor:'pointer', background:newLeadsHover?'rgba(168,201,196,0.08)':'transparent', transition:'background 0.12s' }}
-            >
-              <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'4px' }}>
-                <span style={{ fontSize:'12px', color:'#6b7c79', flexShrink:0 }}>{newLeadsExpanded?'▼':'▶'}</span>
-                <p style={{ fontSize:'15px', fontWeight:700, color:'#6b7c79', textTransform:'uppercase', letterSpacing:'0.8px', margin:0 }}>📧 New Lead Emails</p>
-                {(()=>{ const n = ['moveDefault','generalDefault'].filter(k=>settings.paths[k]).length; return n>0 ? <span style={{ fontSize:'11px', fontWeight:600, color:'#4a7a74', background:'rgba(168,201,196,0.18)', padding:'1px 8px', borderRadius:'20px' }}>{n} active</span> : null })()}
-              </div>
-              <p style={{ fontSize:'12px', color:'#b0c0bc', lineHeight:1.5, paddingLeft:'20px' }}>
-                Drip sequences sent to new leads. Project type determines which path group is used; the marked Default plays unless overridden per client.
-              </p>
+        {activeSection==='paths'&&(()=>{
+          // Communication tab — a COMPOSITION in distinct tiers (hero → medium
+          // → paired → dense list → tiles), each visually sized to its weight.
+          // Element-level sharpness rules: outline icons at whole-pixel sizes,
+          // hairline 0.5px borders, exact small radii (6/8) on controls / 20px
+          // only on true pills, tight padding, flat fills, and soft shadow
+          // reserved for CARD elevation only (never on a button/pill/badge).
+          const SEQUENCES = [
+            { key:'moveDefault',    label:'Moving',     sub:'Move-in & move-out',           filter:'moving',     projectType:'move',    icon:'box',  accent:'#4f46e5', tint:'rgba(99,102,241,0.10)' },
+            { key:'generalDefault', label:'Organizing', sub:'Closets, kitchens, whole home', filter:'organizing', projectType:'general', icon:'home', accent:'#0f8f6f', tint:'rgba(16,185,129,0.12)' },
+          ]
+          const verified = !!settings.location.sendFromEmail
+          const openSeq = SEQUENCES.find(s=>s.key===openSequence) || null
+          return (
+          <div style={{ paddingBottom:'12px' }}>
+
+            {/* Page title (Georgia serif per house H1) */}
+            <div style={{ padding:'18px 16px 2px' }}>
+              <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Communications</h1>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Your sending identity, who's told about new leads, and the follow-up that goes out automatically.</p>
             </div>
 
-            {newLeadsExpanded && (<>
-            {[
-              { key:'moveDefault',    label:'📦 Moving Projects',     desc:'Move-In and Move-Out',                 filter:'moving',     projectType:'move' },
-              { key:'generalDefault', label:'🏠 Organizing Projects', desc:'Closet, Kitchen, Full Home, etc.',     filter:'organizing', projectType:'general' },
-            ].map(section=>(
-              <div key={section.key}>
-                <SectionHeader title={section.label} desc={section.desc} />
-                <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
+            {/* ── TIER 1 · HERO — email sending identity (the anchor) ──────── */}
+            <div style={{ margin:'14px 12px 0', borderRadius:'16px', background:'white', boxShadow:'0 2px 12px rgba(26,46,43,0.07)', overflow:'hidden' }}>
+              <div style={{ padding:'17px 17px 14px', display:'flex', alignItems:'flex-start', gap:'13px' }}>
+                <div style={{ width:'42px', height:'42px', borderRadius:'12px', background:'rgba(99,102,241,0.10)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                  <CommsIcon name="send" size={20} color="#4f46e5" />
+                </div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:'8px', flexWrap:'wrap' }}>
+                    <h2 style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Sending identity</h2>
+                    {verified ? (
+                      <span style={{ display:'inline-flex', alignItems:'center', gap:'4px', fontSize:'10px', fontWeight:600, color:'#0a7d5f', background:'rgba(16,185,129,0.12)', padding:'3px 8px', borderRadius:'6px' }}>
+                        <CommsIcon name="check" size={12} color="#0a7d5f" stroke={2.25} />Verified sender
+                      </span>
+                    ) : (
+                      <span style={{ fontSize:'10px', fontWeight:600, color:'#b45309', background:'rgba(245,158,11,0.14)', padding:'3px 8px', borderRadius:'6px' }}>Not set</span>
+                    )}
+                  </div>
+                  <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'3px' }}>The name and address your new-lead follow-up emails come from.</p>
+                </div>
+              </div>
+              <div style={{ borderTop:'0.5px solid rgba(26,46,43,0.08)' }}>
+                <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>updateLocation('sendFromName',v)}  hint="e.g. Bee Organized Kansas City" />
+                <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>updateLocation('sendFromEmail',v)} hint="Must be a verified sender in your email provider" type="email" />
+                <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>updateLocation('replyToEmail',v)}  hint="Where client replies land (defaults to Send From)" type="email" />
+              </div>
+            </div>
+
+            {/* Per-project-type sender split — attached to the identity hero. */}
+            <p style={{ fontSize:'11px', fontWeight:600, color:'#8a9e9a', margin:'12px 16px 7px' }}>Send some project types from someone else</p>
+            <ProjectTypeSenders realLocId={realLocId} readOnly={false} />
+
+            {/* ── TIER 2 · MEDIUM — who's notified about new leads ─────────── */}
+            <CommsLabel>Who hears about new leads</CommsLabel>
+            <NewLeadNotifications realLocId={realLocId} readOnly={false} />
+
+            {/* ── TIER 3 · PAIRED — automatic follow-up sequences (2-col) ──── */}
+            <CommsLabel>Automatic follow-up</CommsLabel>
+            <div style={{ margin:'0 12px', display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
+              {SEQUENCES.map(seq=>{
+                const defId = settings.paths[seq.key]
+                const defStyle = PATH_STYLES.find(s => (s.id==='custom' ? 'custom' : `${seq.filter}-${s.id.replace('path-','')}`) === defId)
+                const stepCount = (pathSteps[defId]||[]).length
+                const active = openSequence===seq.key
+                return (
+                  <button key={seq.key} onClick={()=>setOpenSequence(active?null:seq.key)}
+                    style={{ textAlign:'left', padding:'13px', borderRadius:'14px', background:'white', border:`0.5px solid ${active?seq.accent:'rgba(26,46,43,0.10)'}`, boxShadow: active ? `0 0 0 1px ${seq.accent}` : '0 1px 5px rgba(26,46,43,0.05)', cursor:'pointer', fontFamily:'inherit', display:'flex', flexDirection:'column', gap:'11px' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:'9px', minWidth:0 }}>
+                      <div style={{ width:'32px', height:'32px', borderRadius:'9px', background:seq.tint, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                        <CommsIcon name={seq.icon} size={18} color={seq.accent} />
+                      </div>
+                      <div style={{ minWidth:0 }}>
+                        <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{seq.label}</p>
+                        <p style={{ fontSize:'10px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{seq.sub}</p>
+                      </div>
+                    </div>
+                    <div>
+                      <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', marginBottom:'6px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        {defStyle ? defStyle.label : 'No default set'} · {stepCount} step{stepCount===1?'':'s'}
+                      </p>
+                      {/* Progress-bar rhythm — one graduated segment per step. */}
+                      <div style={{ display:'flex', gap:'3px' }}>
+                        {Array.from({ length: Math.max(stepCount,1) }).map((_,i)=>(
+                          <div key={i} style={{ flex:1, height:'4px', borderRadius:'2px', background: stepCount>0 ? seq.accent : 'rgba(26,46,43,0.08)', opacity: stepCount>0 ? (0.32 + 0.68*((i+1)/stepCount)) : 1 }} />
+                        ))}
+                      </div>
+                    </div>
+                    <span style={{ fontSize:'10px', fontWeight:600, color:seq.accent }}>{active?'Hide steps ▲':'Edit steps ▼'}</span>
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Full-width step editor for the open sequence (behavior preserved). */}
+            {openSeq && (
+              <div style={{ margin:'12px 12px 0', borderRadius:'14px', overflow:'hidden', border:`0.5px solid ${openSeq.accent}`, background:'white', boxShadow:'0 1px 5px rgba(26,46,43,0.05)' }}>
+                <div style={{ padding:'11px 14px', display:'flex', alignItems:'center', gap:'8px', background:openSeq.tint, borderBottom:'0.5px solid rgba(26,46,43,0.07)' }}>
+                  <CommsIcon name={openSeq.icon} size={16} color={openSeq.accent} />
+                  <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>{openSeq.label} follow-up — pick the default sequence</p>
+                </div>
+                <div>
                   {PATH_STYLES.map((style,i)=>{
-                    const pathId = style.id==='custom' ? 'custom' : `${section.filter}-${style.id.replace('path-','')}`
-                    const isDefault = settings.paths[section.key]===pathId
+                    const pathId = style.id==='custom' ? 'custom' : `${openSeq.filter}-${style.id.replace('path-','')}`
+                    const isDefault = settings.paths[openSeq.key]===pathId
                     const steps = pathSteps[pathId]||[]
                     return (
-                      <div key={style.id} style={{ background:isDefault?'rgba(168,201,196,0.15)':'white', boxShadow:isDefault?'inset 4px 0 0 #4a7a74':'none', borderBottom:i<PATH_STYLES.length-1?'1px solid rgba(0,0,0,0.05)':'none' }}>
+                      <div key={style.id} style={{ background:isDefault?'rgba(168,201,196,0.15)':'white', boxShadow:isDefault?'inset 3px 0 0 '+openSeq.accent:'none', borderBottom:i<PATH_STYLES.length-1?'0.5px solid rgba(26,46,43,0.06)':'none' }}>
                         <div style={{ padding:'12px 16px', display:'flex', alignItems:'center', gap:'12px', cursor:'pointer' }}
                           onClick={()=>setExpandedPath(expandedPath===pathId?null:pathId)}>
                           {/* Radio */}
-                          <div onClick={e=>{e.stopPropagation();setSettings(s=>({...s,paths:{...s.paths,[section.key]:pathId}})); if(section.key==='generalDefault') setDefaultPathId(pathId); if(section.key==='moveDefault') setDefaultMovePathId(pathId); persistDefault(section.key, pathId)}}
+                          <div onClick={e=>{e.stopPropagation();setSettings(s=>({...s,paths:{...s.paths,[openSeq.key]:pathId}})); if(openSeq.key==='generalDefault') setDefaultPathId(pathId); if(openSeq.key==='moveDefault') setDefaultMovePathId(pathId); persistDefault(openSeq.key, pathId)}}
                             style={{ width:'22px', height:'22px', borderRadius:'50%', border:`2px solid ${isDefault?'#1a2e2b':'rgba(0,0,0,0.15)'}`, background:isDefault?'#1a2e2b':'white', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, cursor:'pointer' }}>
                             {isDefault&&<div style={{ width:'8px', height:'8px', borderRadius:'50%', background:'white' }} />}
                           </div>
@@ -20482,32 +20587,32 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                           <div style={{ flex:1, minWidth:0 }}>
                             <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'2px', flexWrap:'wrap' }}>
                               <p style={{ fontSize:'13px', fontWeight:isDefault?700:600, color:'#1a2e2b' }}>{style.label}</p>
-                              {isDefault&&<span style={{ fontSize:'10px', color:'#a8c9c4', background:'rgba(168,201,196,0.15)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>Default</span>}
+                              {isDefault&&<span style={{ fontSize:'10px', color:'#3a5e58', background:'rgba(168,201,196,0.22)', padding:'2px 8px', borderRadius:'6px', fontWeight:600 }}>Default</span>}
                               {style.id!=='custom' && (dbPaths[pathId]
-                                ? <span style={{ fontSize:'10px', color:'#d4a046', background:'rgba(212,160,70,0.12)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>Customized</span>
-                                : dbMasters[pathId] && <span style={{ fontSize:'10px', color:'#6b7c79', background:'rgba(0,0,0,0.04)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>Master template</span>
+                                ? <span style={{ fontSize:'10px', color:'#b45309', background:'rgba(245,158,11,0.14)', padding:'2px 8px', borderRadius:'6px', fontWeight:600 }}>Customized</span>
+                                : dbMasters[pathId] && <span style={{ fontSize:'10px', color:'#6b7c79', background:'rgba(26,46,43,0.05)', padding:'2px 8px', borderRadius:'6px', fontWeight:600 }}>Master template</span>
                               )}
                             </div>
                             <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{style.cta}</p>
                           </div>
-                          {(()=>{ const count = people ? people.filter(p=>p.path===pathId&&!p.isJunk).length : 0; return count>0 ? <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'20px', background:'rgba(168,201,196,0.12)', color:'#4a5e5a', fontWeight:600, flexShrink:0 }}>{count} client</span> : null })()}
+                          {(()=>{ const count = people ? people.filter(p=>p.path===pathId&&!p.isJunk).length : 0; return count>0 ? <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'6px', background:'rgba(168,201,196,0.14)', color:'#4a5e5a', fontWeight:600, flexShrink:0 }}>{count} client</span> : null })()}
                           <span style={{ fontSize:'12px', color:'#c8d8d4' }}>{expandedPath===pathId?'▲':'▼'}</span>
                         </div>
                         {/* Steps preview */}
                         {expandedPath===pathId&&(
-                          <div style={{ background:'rgba(0,0,0,0.02)', borderTop:'1px solid rgba(0,0,0,0.05)', padding:'8px 12px' }}>
+                          <div style={{ background:'rgba(0,0,0,0.02)', borderTop:'0.5px solid rgba(26,46,43,0.06)', padding:'8px 12px' }}>
                             {/* Customize / Reset banner — only for master-backed paths (i.e. not 'custom') when a real location is loaded */}
                             {realLocId && style.id!=='custom' && dbMasters[pathId] && (
                               dbPaths[pathId] ? (
-                                <div style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 10px', background:'rgba(212,160,70,0.08)', border:'1px solid rgba(212,160,70,0.22)', borderRadius:'8px', marginBottom:'8px' }}>
+                                <div style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 10px', background:'rgba(245,158,11,0.08)', border:'0.5px solid rgba(245,158,11,0.30)', borderRadius:'8px', marginBottom:'8px' }}>
                                   <span style={{ fontSize:'12px', color:'#7a5d24', flex:1 }}>This path is <strong>customized</strong> for your location. Resetting will restore the corp master content.</span>
                                   <button onClick={()=>resetPathToMaster(pathId)} disabled={pathsSaving===pathId}
-                                    style={{ padding:'5px 10px', background:'transparent', border:'1px solid rgba(212,160,70,0.5)', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#7a5d24', cursor: pathsSaving===pathId ? 'wait' : 'pointer', flexShrink:0 }}>
+                                    style={{ padding:'5px 10px', background:'transparent', border:'0.5px solid rgba(180,83,9,0.5)', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#7a5d24', cursor: pathsSaving===pathId ? 'wait' : 'pointer', flexShrink:0 }}>
                                     {pathsSaving===pathId ? 'Resetting…' : 'Reset to master'}
                                   </button>
                                 </div>
                               ) : (
-                                <div style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 10px', background:'rgba(168,201,196,0.12)', border:'1px solid rgba(168,201,196,0.28)', borderRadius:'8px', marginBottom:'8px' }}>
+                                <div style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 10px', background:'rgba(168,201,196,0.12)', border:'0.5px solid rgba(168,201,196,0.35)', borderRadius:'8px', marginBottom:'8px' }}>
                                   <span style={{ fontSize:'12px', color:'#4a5e5a', flex:1 }}>Using the corp <strong>master template</strong>. Click Customize to fork a copy you can edit for this location only.</span>
                                   <button onClick={()=>customizeFromMaster(pathId)} disabled={pathsSaving===pathId}
                                     style={{ padding:'5px 10px', background:'#1a2e2b', border:'none', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor: pathsSaving===pathId ? 'wait' : 'pointer', flexShrink:0 }}>
@@ -20525,28 +20630,28 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                               <div style={{ display:'grid', gap:'5px' }}>
                                 {steps.map(step=>{
                                   const tmpl = templates.find(t=>t.id===step.templateId)
-                                  const tc = {email:{icon:'📧',color:'#6366f1'},sms:{icon:'💬',color:'#10b981'},call:{icon:'📞',color:'#f59e0b'}}[step.type]
+                                  const stepIcon = {email:'mail',sms:'message',call:'phone'}[step.type] || 'mail'
+                                  const stepColor = {email:'#4f46e5',sms:'#0a7d5f',call:'#b45309'}[step.type] || '#4f46e5'
                                   if (step.type==='sms'&&!settings.location.smsEnabled) return null
                                   return (
-                                    <div key={step.id} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 10px', background:'white', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.07)' }}>
-                                      <span style={{ fontSize:'12px', flexShrink:0 }}>{tc.icon}</span>
+                                    <div key={step.id} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 10px', background:'white', borderRadius:'8px', border:'0.5px solid rgba(26,46,43,0.09)' }}>
+                                      <CommsIcon name={stepIcon} size={14} color={stepColor} />
                                       <div style={{ flex:1, minWidth:0 }}>
                                         <p style={{ fontSize:'11px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>Step {step.order} · {step.name}</p>
                                         <EditableDelay step={step} pathId={pathId} setPathSteps={setPathSteps} />
                                         {tmpl&&(
-                                          <button onClick={()=>setEditingTemplate(tmpl)} style={{ display:'flex', alignItems:'center', gap:'4px', padding:'3px 8px', background:'rgba(99,102,241,0.07)', border:'1px solid rgba(99,102,241,0.15)', borderRadius:'5px', cursor:'pointer', fontFamily:'inherit', overflow:'hidden' }}>
-                                            <span style={{ fontSize:'10px', fontWeight:600, color:'#6366f1', whiteSpace:'nowrap' }}>{tmpl.name}</span>
+                                          <button onClick={()=>setEditingTemplate(tmpl)} style={{ display:'flex', alignItems:'center', gap:'4px', padding:'3px 8px', background:'rgba(99,102,241,0.07)', border:'0.5px solid rgba(99,102,241,0.25)', borderRadius:'6px', cursor:'pointer', fontFamily:'inherit', overflow:'hidden' }}>
+                                            <span style={{ fontSize:'10px', fontWeight:600, color:'#4f46e5', whiteSpace:'nowrap' }}>{tmpl.name}</span>
                                             {tmpl.type==='email'&&tmpl.subject&&<span style={{ fontSize:'10px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>— {tmpl.subject}</span>}
                                             {tmpl.type!=='email'&&<span style={{ fontSize:'10px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{tmpl.body.slice(0,40)}…</span>}
-                                            <span style={{ fontSize:'10px', color:'#a8c9c4', flexShrink:0 }}>✏️</span>
                                           </button>
                                         )}
                                         {!tmpl&&<span style={{ fontSize:'10px', color:'#e5a0a0' }}>No template assigned</span>}
                                       </div>
                                       {tmpl&&(
-                                        <button onClick={()=>setPeekTemplate(tmpl)} title="Preview this email" style={{ display:'flex', alignItems:'center', gap:'4px', fontSize:'10px', fontWeight:600, color:'#6366f1', background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'5px', padding:'2px 7px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>👁 Preview</button>
+                                        <button onClick={()=>setPeekTemplate(tmpl)} title="Preview this email" style={{ fontSize:'10px', fontWeight:600, color:'#4f46e5', background:'rgba(99,102,241,0.08)', border:'0.5px solid rgba(99,102,241,0.30)', borderRadius:'6px', padding:'3px 8px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>Preview</button>
                                       )}
-                                      <button onClick={()=>setEditingStep({pathId,step})} style={{ fontSize:'10px', color:'#a8c9c4', background:'none', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'5px', padding:'2px 7px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>Change</button>
+                                      <button onClick={()=>setEditingStep({pathId,step})} style={{ fontSize:'10px', color:'#3a5e58', background:'rgba(168,201,196,0.14)', border:'0.5px solid rgba(168,201,196,0.4)', borderRadius:'6px', padding:'3px 8px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>Change</button>
                                     </div>
                                   )
                                 })}
@@ -20571,9 +20676,9 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                             ) : (
                               <button
                                 onClick={()=>setAddingStepToPath(pathId)}
-                                style={{ width:'100%', padding:'8px', background:'transparent', border:'1px dashed rgba(168,201,196,0.4)', borderRadius:'8px', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', color:'#a8c9c4', fontWeight:500, marginTop:'4px' }}
+                                style={{ width:'100%', padding:'8px', background:'transparent', border:'0.5px dashed rgba(168,201,196,0.6)', borderRadius:'8px', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', color:'#4a7a74', fontWeight:600, marginTop:'4px' }}
                               >
-                                + Add Step
+                                + Add step
                               </button>
                             )}
                             {realLocId && style.id !== 'custom' && (
@@ -20582,7 +20687,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                                 disabled={pathsSaving===pathId}
                                 style={{ width:'100%', padding:'9px', background: pathsSaving===pathId ? '#9ca3af' : '#1a2e2b', border:'none', borderRadius:'8px', cursor: pathsSaving===pathId ? 'wait' : 'pointer', fontFamily:'inherit', fontSize:'12px', color:'white', fontWeight:600, marginTop:'6px' }}
                               >
-                                {pathsSaving===pathId ? 'Saving…' : dbPaths[pathId] ? '💾 Save Changes' : '💾 Save Path to DB'}
+                                {pathsSaving===pathId ? 'Saving…' : dbPaths[pathId] ? 'Save changes' : 'Save path to DB'}
                               </button>
                             )}
                           </div>
@@ -20592,13 +20697,46 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                   })}
                 </div>
               </div>
-            ))}
-            <div style={{ padding:'12px 16px 0' }}>
-              <p style={{ fontSize:'12px', color:'#b0c0bc' }}>Tap any path to preview its steps. Tap 🕐 on any step to set the delay (1 day, 3 days, 7 days…). Tap the radio to set as default.</p>
+            )}
+            <p style={{ fontSize:'11px', color:'#b0c0bc', margin:'9px 16px 0', lineHeight:1.5 }}>Pick a sequence above to review its steps. Tap a step's delay to change timing; tap the radio to set the default.</p>
+
+            {/* ── TIER 4 · DENSE — client alerts (compact rows; preview) ───── */}
+            <CommsLabel>Client alerts</CommsLabel>
+            <div style={{ margin:'0 12px', borderRadius:'12px', overflow:'hidden', border:'0.5px solid rgba(26,46,43,0.10)', background:'white' }}>
+              {COMMS_ALERT_PREVIEW.map((a,i)=>(
+                <div key={a.label} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'9px 13px', borderBottom: i<COMMS_ALERT_PREVIEW.length-1 ? '0.5px solid rgba(26,46,43,0.06)' : 'none' }}>
+                  <CommsIcon name={a.icon} size={16} color="#5a6e6a" />
+                  <p style={{ flex:1, minWidth:0, fontSize:'12px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{a.label}</p>
+                  <div style={{ display:'flex', gap:'5px', flexShrink:0 }}>
+                    {a.channels.map(ch => <CommsChannelBadge key={ch} channel={ch} />)}
+                  </div>
+                </div>
+              ))}
+              <button onClick={()=>{ setActiveSection('notifs'); window.scrollTo(0,0) }}
+                style={{ width:'100%', textAlign:'left', padding:'9px 13px', border:'none', borderTop:'0.5px solid rgba(26,46,43,0.06)', background:'#fafbfa', color:'#2f7d6f', fontFamily:'inherit', fontSize:'11px', fontWeight:600, cursor:'pointer' }}>Manage alerts →</button>
             </div>
-            </>)}
-          </>
-        )}
+
+            {/* ── TIER 5 · TILES — template library (lightest; preview) ────── */}
+            <CommsLabel>Templates</CommsLabel>
+            <div style={{ margin:'0 12px', display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'8px' }}>
+              {COMMS_TEMPLATE_TILES.map(t=>{
+                const n = templates ? templates.filter(x=>x.type===t.type).length : 0
+                return (
+                  <button key={t.type} onClick={()=>{ setActiveSection('templates'); window.scrollTo(0,0) }}
+                    style={{ padding:'13px 9px', borderRadius:'10px', border:'0.5px solid rgba(26,46,43,0.10)', background:'white', cursor:'pointer', fontFamily:'inherit', display:'flex', flexDirection:'column', alignItems:'center', gap:'7px', textAlign:'center' }}>
+                    <div style={{ width:'30px', height:'30px', borderRadius:'8px', background:t.tint, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                      <CommsIcon name={t.icon} size={17} color={t.accent} />
+                    </div>
+                    <p style={{ fontSize:'11px', fontWeight:600, color:'#1a2e2b' }}>{t.label}</p>
+                    <p style={{ fontSize:'10px', color:'#8a9e9a' }}>{n>0 ? `${n} template${n===1?'':'s'}` : t.sub}</p>
+                  </button>
+                )
+              })}
+            </div>
+
+          </div>
+          )
+        })()}
 
         {/* ── Templates ── */}
         {activeSection==='templates'&&(()=>{

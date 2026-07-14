@@ -283,19 +283,22 @@ const slice = (src: string, from: string, to: string) => {
   return a >= 0 && b >= 0 ? src.slice(a, b) : ''
 }
 
-describe('UI — placement in the owner+super_admin-only My Location module', () => {
+describe('UI — placement in the owner+super_admin-only Communication tab', () => {
   const comp = slice(beehub, 'function NewLeadNotifications(', '// ─── SMS Add-on Card')
 
-  it('renders in the location section, wired to the real location UUID', () => {
+  it('renders in the Communication tab, wired to the real location UUID', () => {
     expect(beehub).toContain('<NewLeadNotifications realLocId={realLocId}')
   })
-  it('lives under the unified "New lead emails" section (part 1)', () => {
-    expect(beehub).toContain('📧 New lead emails')
-    expect(beehub).toContain('1 · Who gets notified')
+  it('lives under the composed "Who hears about new leads" tier alongside the sending-identity hero', () => {
+    // The unified new-lead emails block moved out of My Location into the
+    // Communication tab (activeSection==='paths'), composed in tiers.
+    expect(beehub).toContain('Who hears about new leads')
+    expect(beehub).toContain('Sending identity')
   })
-  it('the location module is HIDDEN from managers (isManager excluded)', () => {
-    // Section only exists for non-managers → owner + super_admin/corporate.
-    expect(beehub).toContain("...(isManager ? [] : [{ key:'location'")
+  it('the Communication tab is HIDDEN from managers (isManager excluded)', () => {
+    // Both the tab list and the notifications live behind the same non-manager
+    // gate → owner + super_admin/corporate only.
+    expect(beehub).toContain("label:'Communication'")
     expect(beehub).toContain("const isManager = franchiseRole === 'manager'")
   })
   it('the placeholder card is gone (no competing notifications UI)', () => {
