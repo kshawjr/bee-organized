@@ -109,19 +109,22 @@ function buildLocationUser(row: any) {
 export default async function HubPage({
   initialRoute,
   initialSelectedLeadId,
+  initialSelectedEngagementId,
   notFoundToast = false,
 }: {
   initialRoute?: string
   initialSelectedLeadId?: string
+  initialSelectedEngagementId?: string
   notFoundToast?: boolean
 } = {}) {
   // Where a logged-OUT visitor was actually headed, so login can send them
   // back (e.g. a /clients/<leadId> deep-link from a lead notification email
   // → login → land on the lead, not home). A /clients/[id] route carries the
-  // lead id; other Hub routes fall back to the tab. requireAuth sanitizes it
-  // (same-origin relative only) before it becomes ?next=…
+  // lead id (+ optional ?e=<engagementId>); other Hub routes fall back to the
+  // tab. requireAuth sanitizes it (same-origin relative only) before it
+  // becomes ?next=… (safeNextPath permits the query string).
   const returnTo = initialSelectedLeadId
-    ? `/clients/${initialSelectedLeadId}`
+    ? `/clients/${initialSelectedLeadId}${initialSelectedEngagementId ? `?e=${initialSelectedEngagementId}` : ''}`
     : initialRoute && initialRoute !== 'home'
       ? `/${initialRoute}`
       : null
@@ -834,6 +837,28 @@ export default async function HubPage({
     }
   }
 
+  // /clients/<id>?e=<engagementId> — validate the engagement belongs to THIS
+  // client before opening its panel. The client id is already location-scoped
+  // (validated ∈ initialPeople above), so an `id = e AND client_id = <client>`
+  // match transitively scopes the engagement — no separate location filter, no
+  // way to deep-link another location's deal. A malformed uuid, an unknown id,
+  // or an engagement under a different client is silently dropped (the client
+  // opens, the engagement doesn't) — never an error/redirect that would leak
+  // whether the id exists.
+  let selectedEngagementId: string | undefined = undefined
+  if (initialSelectedLeadId && initialSelectedEngagementId) {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (UUID_RE.test(initialSelectedEngagementId)) {
+      const { data: engRow } = await supabaseService
+        .from('engagements')
+        .select('id')
+        .eq('id', initialSelectedEngagementId)
+        .eq('client_id', initialSelectedLeadId)
+        .maybeSingle()
+      if (engRow) selectedEngagementId = initialSelectedEngagementId
+    }
+  }
+
   // Partners + Contacts (one table, `type` discriminator) and Companies — the
   // CRM module behind the "Contacts" tab. Location-scoped like leads; elevated
   // users get every location's rows. Soft-deleted rows are excluded (the recycle
@@ -905,6 +930,7 @@ export default async function HubPage({
     <BeeHub
       initialRoute={initialRoute}
       initialSelectedLeadId={initialSelectedLeadId}
+      initialSelectedEngagementId={selectedEngagementId}
       notFoundToast={notFoundToast}
       initialRole={role}
       initialFranchiseRole={franchiseRole}

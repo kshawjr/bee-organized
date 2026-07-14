@@ -157,7 +157,9 @@ describe('threading: logged-out cold arrival returns to the deep-link', () => {
   })
   it('_hub-page computes returnTo from a /clients/[id] deep-link', () => {
     const src = readFileSync('app/_hub-page.tsx', 'utf8')
-    expect(src).toMatch(/initialSelectedLeadId\s*\n?\s*\?\s*`\/clients\/\$\{initialSelectedLeadId\}`/)
+    // returnTo now also carries the optional ?e=<engagementId> so a logged-out
+    // engagement deep-link returns to the engagement, not just the client.
+    expect(src).toMatch(/initialSelectedLeadId\s*\n?\s*\?\s*`\/clients\/\$\{initialSelectedLeadId\}\$\{initialSelectedEngagementId \? `\?e=\$\{initialSelectedEngagementId\}` : ''\}`/)
     expect(src).toContain('await requireAuth(returnTo)')
   })
   it('login page forwards a sanitized next into the OAuth callback', () => {

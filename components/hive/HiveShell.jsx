@@ -27,7 +27,7 @@ import { isTerminal, CLOSED_WON } from './shared/stageConfig'
 import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount } from './shared/engagementStatus'
 import { reconcileServerRows, mergeEngagements } from './shared/engagementRevalidate'
 import { useStoredState } from './shared/useStoredControls'
-import { nextClientOverlay } from './shared/hubUrl'
+import { nextRecordOverlay } from './shared/hubUrl'
 import useIsMobile from './shared/useIsMobile'
 import { IconInbox, IconLayoutKanban, IconList, IconUsers, IconPlus } from '@/components/ui/icons'
 import { TEXT_TOKENS, BORDER_TOKENS, WARNING_TOKENS } from '@/components/ui/tokens'
@@ -121,7 +121,15 @@ export default function HiveShell({
   // onCloseRecord() so opening/closing/chevron-walking a client here drives
   // the URL. §8.5 direction rule: props only, BeeHub never reaches in here.
   urlClientId = null,
+  // Record-in-URL (engagement): the engagement id the URL currently names
+  // (?e=<id> on /clients/<clientId>). Feeds the SAME overlay slot the client
+  // uses — nextRecordOverlay keeps the engagement on top when it's set, so a
+  // deep-link / browser back-forward opens the standalone EngagementPanel a
+  // click produces. onOpenEngagementUrl drives it OUT (clientId+engagementId,
+  // so the URL inherits the client route's location scoping).
+  urlEngagementId = null,
   onOpenClient = () => {},
+  onOpenEngagementUrl = () => {},
   onCloseRecord = () => {},
   onSendToJobber = () => {},
   // The people-merge seam (§8.5 direction rule): BeeHub passes this
@@ -219,11 +227,17 @@ export default function HiveShell({
   // one-shot seed the List consumes on mount, then hands back null.
   const [listInitialView, setListInitialView] = useState(null)
   const viewClosedInList = () => { setListInitialView('closed'); pickLens('list') }
-  // Opening an engagement or a pre-engagement person swaps the overlay
-  // AWAY from any open client — clear the client from the URL so it never
-  // claims /clients/<id> while a non-client panel is showing (onCloseRecord
-  // is a no-op when no client URL is active, so board-direct opens are safe).
-  const openEngagement = (e) => { setOverlay({ type: 'engagement', engagement: e }); onCloseRecord() }
+  // Opening an engagement swaps the single overlay slot to the panel AND
+  // drives the URL to /clients/<clientId>?e=<engagementId> — shareable,
+  // refresh-survivable, back/forward-aware, and location-scoped through the
+  // parent client. Every engagement row carries client_id (board/list/
+  // profile); the defensive onCloseRecord fallback only fires if a row
+  // somehow lacks one (it never should) so we never strand a URL-less panel.
+  const openEngagement = (e) => {
+    setOverlay({ type: 'engagement', engagement: e })
+    if (e?.id && e?.client_id) onOpenEngagementUrl(e.client_id, e.id)
+    else onCloseRecord()
+  }
   // siblings: the opener's visible ordering (directory rows) — powers
   // the profile's prev/next chevrons; openers without a natural order
   // pass nothing and the chevrons hide. Also drive the URL (→ /clients/<id>)
@@ -240,14 +254,14 @@ export default function HiveShell({
   // the old PersonCard (junk/buzz/source/referrer/request-details/touchpoints).
   const openPerson = (person) => { if (person?.id) openClient(person.id) }
 
-  // URL → overlay sync: when the URL-named client id changes (deep-link on
-  // mount, browser back/forward), open/close the ClientProfile overlay to
-  // match. nextClientOverlay returns the SAME overlay ref when nothing
-  // should change (a click already opened it), so this never fights the
-  // openers and preserves an open client's siblings. Client-only by design.
+  // URL → overlay sync: when the URL-named client id OR engagement id changes
+  // (deep-link on mount, browser back/forward), open/close/swap the overlay to
+  // match. nextRecordOverlay returns the SAME overlay ref when nothing should
+  // change (a click already opened it), so this never fights the openers and
+  // preserves an open client's siblings / an open engagement's seed.
   useEffect(() => {
-    setOverlay(o => nextClientOverlay(urlClientId, o))
-  }, [urlClientId])
+    setOverlay(o => nextRecordOverlay(urlClientId, urlEngagementId, o))
+  }, [urlClientId, urlEngagementId])
 
   // Cards emit lead-COLUMN patches after a confirmed PATCH; translate to
   // Person-shape fields and hand UP (onPersonPatched merges into BeeHub's
@@ -547,7 +561,7 @@ export default function HiveShell({
           people={people}
           locationUsers={locationUsers}
           readOnly={readOnly}
-          onClose={() => setOverlay(null)}
+          onClose={() => { setOverlay(null); onCloseRecord() }}
           onOpenClient={openClient}
           onChanged={applyEngagementPatch}
           onReopened={(row) => {

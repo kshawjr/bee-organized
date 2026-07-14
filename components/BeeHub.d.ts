@@ -184,6 +184,9 @@ interface BeeHubProps {
   // fires the "Lead not found" toast after /clients/[bad-id] redirect.
   initialRoute?: string
   initialSelectedLeadId?: string
+  // Optional deep-linked engagement id from /clients/[id]?e=<id>; opens the
+  // EngagementPanel on mount (server-validated: belongs to the scoped client).
+  initialSelectedEngagementId?: string
   notFoundToast?: boolean
 }
 

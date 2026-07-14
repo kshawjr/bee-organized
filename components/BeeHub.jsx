@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { useLeadsRealtime } from "@/lib/use-leads-realtime"
 import dynamic from "next/dynamic"
 import { canSeeBetaBoard, defaultHiveView, hydrateHiveView, resolveBetaReadOnly } from "@/components/hive/shared/betaGate"
-import { ROUTE_TO_NAV, NAV_TO_URL, parseHubUrl, clientPath } from "@/components/hive/shared/hubUrl"
+import { ROUTE_TO_NAV, NAV_TO_URL, parseHubUrl, clientPath, engagementPath } from "@/components/hive/shared/hubUrl"
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { financialsVisible } from "@/lib/financial-access"
 import { splitNameForPrefill } from "@/lib/name-prefill"
@@ -9925,7 +9925,7 @@ async function patchLeadAPI(leadId, patch) {
   }
 }
 
-function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false }) {
+function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, initialSelectedEngagementId=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onEngagementChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false }) {
   if (!people) return null
   const allPeople = locFilter==='all' ? people : people.filter(p=>p.locationId===locFilter)
   // Real hub_users roster (LocationUsersContext) drives the "Assigned To"
@@ -9962,6 +9962,13 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
   // decoupled-founding next step), null for plain people-world sends.
   const [betaSendPerson, setBetaSendPerson] = useState(null)
   const [selected, setSelected] = useState(initialSelected)
+  // Record-in-URL (engagement): the engagement id the URL currently names
+  // (?e=<id>). Rides ALONGSIDE `selected` (its parent client) — the engagement
+  // URL is /clients/<selected.id>?e=<selectedEngagementId>. Seeded from the
+  // deep-link on mount, kept in sync with browser back/forward via the App's
+  // globalSelectedEngagementId (initialSelectedEngagementId), and driven OUT by
+  // the selected→URL effect below.
+  const [selectedEngagementId, setSelectedEngagementId] = useState(initialSelectedEngagementId)
   const [viewingCard, setViewingCard] = useState(null)
   // Prev/next sibling navigation (beta profile chevrons) sets this so the
   // next URL write REPLACES the current entry instead of pushing — chevron
@@ -9979,15 +9986,21 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
   React.useEffect(()=>{
     setSelected(initialSelected || null)
   }, [initialSelected])
-  // Push URL + notify App-level globalSelectedPerson when the user opens
-  // or closes a lead via the list / panel close / prev-next. Guarded to
-  // skip the popstate / dashboard-click flows that already set the URL
-  // before this effect runs (no double-push, no history bloat).
+  // Same one-way sync for the URL-named engagement (browser back/forward +
+  // deep-link on mount flow through the App's globalSelectedEngagementId).
+  React.useEffect(()=>{
+    setSelectedEngagementId(initialSelectedEngagementId || null)
+  }, [initialSelectedEngagementId])
+  // Push URL + notify App-level globalSelectedPerson / engagement when the
+  // user opens or closes a record via the list / panel close / prev-next. The
+  // engagement (if any) rides its parent client's path as ?e=<id>. Guarded to
+  // skip the popstate / dashboard-click flows that already set the URL before
+  // this effect runs (no double-push, no history bloat).
   React.useEffect(()=>{
     if (typeof window === 'undefined') return
-    const current = window.location.pathname
+    const current = window.location.pathname + window.location.search
     const want = selected
-      ? clientPath(selected.id)
+      ? (selectedEngagementId ? engagementPath(selected.id, selectedEngagementId) : clientPath(selected.id))
       : (current.startsWith('/clients/') ? '/clients' : null)
     if (want && current !== want) {
       // replaceState for chevron/sibling walks (no history bloat),
@@ -9995,9 +10008,10 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
       const method = urlReplaceRef.current ? 'replaceState' : 'pushState'
       window.history[method]({}, '', want)
       onSelectedChange(selected)
+      onEngagementChange(selectedEngagementId)
     }
     urlReplaceRef.current = false
-  }, [selected])
+  }, [selected, selectedEngagementId])
   const [search, setSearch] = useState('')
   const [stageFilters, setStageFilters] = useState([])   // multi-select array
   const [sourceFilters, setSourceFilters] = useState([]) // multi-select array
@@ -10207,20 +10221,37 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
           // seeds/clears its ClientProfile overlay from this (deep-link on
           // load + browser back/forward) via nextClientOverlay.
           urlClientId={selected?.id || null}
+          // URL id the beta board's open ENGAGEMENT should reflect (?e=<id>).
+          // HiveShell seeds/clears its EngagementPanel overlay from this via
+          // nextRecordOverlay (deep-link on load + browser back/forward).
+          urlEngagementId={selectedEngagementId || null}
           // Beta board opened a client → drive the URL. setSelected feeds
           // the selected→URL effect above (pushes /clients/<id>); the
           // ClientProfile overlay is what actually renders the detail, so
           // a minimal {id} is enough when the person isn't in local state
           // (the overlay loads it server-side, RLS/location-scoped). opts.replace
           // marks a prev/next chevron walk so the URL write replaces, not pushes.
+          // Opening a bare client clears any engagement param (client ⊃ engagement
+          // in the URL, and a "View profile" from a panel drops the ?e=).
           onOpenClient={(clientId, opts)=>{
             if (opts?.replace) urlReplaceRef.current = true
             const p = people.find(x=>x.id===clientId)
             setSelected(p || { id: clientId })
+            setSelectedEngagementId(null)
           }}
-          // Beta board closed the client (or swapped to a non-client
-          // overlay) → clear the record from the URL (back to /clients).
-          onCloseRecord={()=>setSelected(null)}
+          // Beta board opened an engagement → drive /clients/<clientId>?e=<id>.
+          // The clientId rides `selected` (so the base path + close-to-profile
+          // behavior come for free) and the engagement id rides ?e=. The URL is
+          // location-scoped through the parent client — no new engagement query.
+          onOpenEngagementUrl={(clientId, engagementId, opts)=>{
+            if (opts?.replace) urlReplaceRef.current = true
+            const p = people.find(x=>x.id===clientId)
+            setSelected(p || { id: clientId })
+            setSelectedEngagementId(engagementId || null)
+          }}
+          // Beta board closed the record (client or engagement) → clear both
+          // from the URL (back to /clients).
+          onCloseRecord={()=>{ setSelected(null); setSelectedEngagementId(null) }}
           onSendToJobber={(p, opts)=>setBetaSendPerson({ person: p, engagementId: opts?.engagementId || null })}
         />
         {/* The EXISTING send-to-jobber confirm flow, mounted for the beta
@@ -32243,13 +32274,14 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated }) {
 
 // ROUTE_TO_NAV, NAV_TO_URL, parseHubUrl, clientPath now live in
 // @/components/hive/shared/hubUrl (imported above) so the pure URL↔state
-// mapping is unit-testable. nextClientOverlay there drives the beta
+// mapping is unit-testable. nextRecordOverlay there drives the beta
 // board's URL→overlay sync.
 
 export default function App({
   currentUser,
   initialRoute,              // URL-derived route slug ('clients', 'reports', etc.) — maps to activeNav via ROUTE_TO_NAV
-  initialSelectedLeadId,     // /clients/[id] deep link — opens PersonPanel on mount
+  initialSelectedLeadId,     // /clients/[id] deep link — opens the client overlay on mount
+  initialSelectedEngagementId, // /clients/[id]?e=<engagementId> deep link — opens EngagementPanel on mount (server-validated: belongs to the scoped client)
   notFoundToast,             // /clients?notfound=1 — fired by HubPage when /clients/[bad-id] redirects here
   initialRole,
   initialFranchiseRole,
@@ -32538,6 +32570,11 @@ export default function App({
     if (!initialSelectedLeadId || !Array.isArray(initialPeople)) return null
     return initialPeople.find(p => p.id === initialSelectedLeadId) || null
   })
+  // /clients/<id>?e=<engagementId> deep-link: the engagement to open on mount.
+  // Already validated SERVER-side (HubPage: belongs to the location-scoped
+  // client) so it's a bare id here. Flows down to HiveScreen alongside the
+  // selected person and stays in sync with browser back/forward via popstate.
+  const [globalSelectedEngagementId, setGlobalSelectedEngagementId] = useState(initialSelectedEngagementId || null)
   const [globalSelectedPartner, setGlobalSelectedPartner] = useState(null)
 const [people, setPeople]                 = useState(Array.isArray(initialPeople) ? initialPeople : ALL_PEOPLE)
  // Extend with randomized mock data post-mount. Module-level Math.random
@@ -32754,9 +32791,9 @@ if (Array.isArray(initialPeople)) return
   function nav(key) {
     setActiveNav(key)
     window.scrollTo(0,0)
-    // Leaving the Clients tab — drop the open lead so a later nav('hive')
-    // opens to the list, not back into a stale detail panel.
-    if (key !== 'hive') setGlobalSelectedPerson(null)
+    // Leaving the Clients tab — drop the open lead (and any open engagement)
+    // so a later nav('hive') opens to the list, not back into a stale panel.
+    if (key !== 'hive') { setGlobalSelectedPerson(null); setGlobalSelectedEngagementId(null) }
     // Sync URL with the tab the user picked. Use window.history.pushState
     // (not Next.js router.push) so BeeHub stays mounted — a real route
     // navigation would unmount and reset all in-app state (filters,
@@ -32779,20 +32816,25 @@ if (Array.isArray(initialPeople)) return
   // Click-driven URL updates go through pushState (above) and lead-panel
   // open/close (HiveScreen below); popstate handles the user-driven case.
   // globalSelectedPerson flows down as HiveScreen's `selected` → its
-  // urlClientId → HiveShell's ClientProfile overlay (nextClientOverlay),
+  // urlClientId/urlEngagementId → HiveShell's overlay (nextRecordOverlay),
   // so back/forward now OPENS and CLOSES the beta overlay too — not just
   // the classic PersonPanel. Fall back to a minimal {id} when the client
   // isn't in local `people` (forward-nav to a not-yet-loaded record): the
   // overlay loads it server-side, so the URL still opens the right panel.
   useEffect(() => {
     function onPop() {
-      const { nav: navKey, leadId } = parseHubUrl(window.location.pathname)
+      const { nav: navKey, leadId, engagementId } = parseHubUrl(window.location.pathname, window.location.search)
       setActiveNav(navKey)
       if (leadId) {
         const lead = people.find(p => p.id === leadId)
         setGlobalSelectedPerson(lead || { id: leadId })
+        // ?e= only resolves under a /clients/<id> path (parseHubUrl drops it
+        // otherwise). No server round-trip on back/forward: a stale/foreign id
+        // is 403'd by the panel's own location-scoped fetch, never leaking.
+        setGlobalSelectedEngagementId(engagementId || null)
       } else if (navKey === 'hive') {
         setGlobalSelectedPerson(null)
+        setGlobalSelectedEngagementId(null)
       }
     }
     window.addEventListener('popstate', onPop)
@@ -33190,7 +33232,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     )
     if (activeNav==='hive') return (
       <div style={pageStyle}>
-        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} />
+        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} initialSelectedEngagementId={globalSelectedEngagementId} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onEngagementChange={(id)=>setGlobalSelectedEngagementId(id)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} />
         {toast && <InlineToast {...toast} />}
       </div>
     )

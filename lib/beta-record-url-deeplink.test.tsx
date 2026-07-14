@@ -27,7 +27,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { parseHubUrl, clientPath, nextClientOverlay } from '@/components/hive/shared/hubUrl'
+import { parseHubUrl, clientPath, nextRecordOverlay } from '@/components/hive/shared/hubUrl'
 import HiveShell from '@/components/hive/HiveShell'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
@@ -35,26 +35,26 @@ import HiveShell from '@/components/hive/HiveShell'
 // ── A) pathname ↔ state ────────────────────────────────────────
 describe('parseHubUrl', () => {
   it('maps the bare tabs to nav keys with no open client', () => {
-    expect(parseHubUrl('/')).toEqual({ nav: 'home', leadId: null })
-    expect(parseHubUrl('/clients')).toEqual({ nav: 'hive', leadId: null })
-    expect(parseHubUrl('/contacts')).toEqual({ nav: 'partners', leadId: null })
-    expect(parseHubUrl('/reports')).toEqual({ nav: 'reports', leadId: null })
-    expect(parseHubUrl('/settings')).toEqual({ nav: 'settings', leadId: null })
-    expect(parseHubUrl('/admin')).toEqual({ nav: 'admin', leadId: null })
+    expect(parseHubUrl('/')).toEqual({ nav: 'home', leadId: null, engagementId: null })
+    expect(parseHubUrl('/clients')).toEqual({ nav: 'hive', leadId: null, engagementId: null })
+    expect(parseHubUrl('/contacts')).toEqual({ nav: 'partners', leadId: null, engagementId: null })
+    expect(parseHubUrl('/reports')).toEqual({ nav: 'reports', leadId: null, engagementId: null })
+    expect(parseHubUrl('/settings')).toEqual({ nav: 'settings', leadId: null, engagementId: null })
+    expect(parseHubUrl('/admin')).toEqual({ nav: 'admin', leadId: null, engagementId: null })
   })
   it('extracts the open client id from /clients/<id>', () => {
-    expect(parseHubUrl('/clients/abc-123')).toEqual({ nav: 'hive', leadId: 'abc-123' })
+    expect(parseHubUrl('/clients/abc-123')).toEqual({ nav: 'hive', leadId: 'abc-123', engagementId: null })
     // uuids survive intact (the deep-link id is resolved server-side, RLS-scoped)
     expect(parseHubUrl('/clients/9d62fc00-0000-4000-8000-000000000001'))
-      .toEqual({ nav: 'hive', leadId: '9d62fc00-0000-4000-8000-000000000001' })
+      .toEqual({ nav: 'hive', leadId: '9d62fc00-0000-4000-8000-000000000001', engagementId: null })
   })
   it('falls back to home for empty / unknown routes', () => {
-    expect(parseHubUrl('')).toEqual({ nav: 'home', leadId: null })
-    expect(parseHubUrl(null as any)).toEqual({ nav: 'home', leadId: null })
-    expect(parseHubUrl('/nope')).toEqual({ nav: 'home', leadId: null })
+    expect(parseHubUrl('')).toEqual({ nav: 'home', leadId: null, engagementId: null })
+    expect(parseHubUrl(null as any)).toEqual({ nav: 'home', leadId: null, engagementId: null })
+    expect(parseHubUrl('/nope')).toEqual({ nav: 'home', leadId: null, engagementId: null })
     // a deeper /clients path (trailing segment) isn't a record id — it stays
     // on the Clients tab but opens NOTHING (leadId null), never a bad record.
-    expect(parseHubUrl('/clients/x/y')).toEqual({ nav: 'hive', leadId: null })
+    expect(parseHubUrl('/clients/x/y')).toEqual({ nav: 'hive', leadId: null, engagementId: null })
   })
 })
 
@@ -64,31 +64,36 @@ describe('clientPath', () => {
   })
 })
 
-// ── B) URL → overlay reducer ───────────────────────────────────
-describe('nextClientOverlay', () => {
+// ── B) URL → overlay reducer (client half; engagement half in the
+//        dedicated engagement deep-link suite) ────────────────────
+describe('nextRecordOverlay (client cases: no ?e)', () => {
   it('opens a client overlay when the URL names one and none is open', () => {
-    expect(nextClientOverlay('a', null)).toEqual({ type: 'client', clientId: 'a', siblings: null })
+    expect(nextRecordOverlay('a', null, null)).toEqual({ type: 'client', clientId: 'a', siblings: null })
   })
   it('is a same-ref no-op when the URL re-confirms the open client (preserves siblings)', () => {
     const open = { type: 'client', clientId: 'a', siblings: ['a', 'b', 'c'] }
-    expect(nextClientOverlay('a', open)).toBe(open)
+    expect(nextRecordOverlay('a', null, open)).toBe(open)
   })
   it('swaps to the new client when the URL id changes', () => {
     const open = { type: 'client', clientId: 'a', siblings: ['a', 'b'] }
-    expect(nextClientOverlay('b', open)).toEqual({ type: 'client', clientId: 'b', siblings: null })
+    expect(nextRecordOverlay('b', null, open)).toEqual({ type: 'client', clientId: 'b', siblings: null })
   })
   it('closes the client overlay when the URL id clears', () => {
-    expect(nextClientOverlay(null, { type: 'client', clientId: 'a', siblings: null })).toBe(null)
+    expect(nextRecordOverlay(null, null, { type: 'client', clientId: 'a', siblings: null })).toBe(null)
   })
-  it('leaves engagement / person overlays alone (client-only scope)', () => {
+  it('closes a URL-backed engagement overlay when nothing is named (both cleared)', () => {
+    // Engagements now OWN a URL — so with neither client nor engagement in the
+    // URL, a lingering engagement overlay must close (back to bare /clients).
     const eng = { type: 'engagement', engagement: { id: 'e1' } }
+    expect(nextRecordOverlay(null, null, eng)).toBe(null)
+  })
+  it('leaves a legacy person overlay alone (no URL scope)', () => {
     const per = { type: 'person', person: { id: 'p1' } }
-    expect(nextClientOverlay(null, eng)).toBe(eng)
-    expect(nextClientOverlay(null, per)).toBe(per)
+    expect(nextRecordOverlay(null, null, per)).toBe(per)
   })
-  it('a URL id wins over a non-client overlay (deep-link into a client)', () => {
+  it('a client URL id wins over a stale engagement overlay (View-profile / back to client)', () => {
     const eng = { type: 'engagement', engagement: { id: 'e1' } }
-    expect(nextClientOverlay('a', eng)).toEqual({ type: 'client', clientId: 'a', siblings: null })
+    expect(nextRecordOverlay('a', null, eng)).toEqual({ type: 'client', clientId: 'a', siblings: null })
   })
 })
 
@@ -172,9 +177,9 @@ describe('wiring: HiveShell drives the URL out', () => {
   it('prev/next chevron walk uses replace (no history bloat)', () => {
     expect(src).toMatch(/onOpenClient\(id, \{ replace: true \}\)/)
   })
-  it('the URL id feeds the overlay via nextClientOverlay', () => {
-    expect(src).toContain('import { nextClientOverlay }')
-    expect(src).toMatch(/setOverlay\(o => nextClientOverlay\(urlClientId, o\)\)/)
+  it('the URL id feeds the overlay via nextRecordOverlay (client + engagement)', () => {
+    expect(src).toContain('import { nextRecordOverlay }')
+    expect(src).toMatch(/setOverlay\(o => nextRecordOverlay\(urlClientId, urlEngagementId, o\)\)/)
   })
   it('exposes urlClientId + onCloseRecord props', () => {
     expect(src).toMatch(/urlClientId = null/)
@@ -186,7 +191,8 @@ describe('wiring: BeeHub feeds the URL in + unifies the detail UIs', () => {
   const src = readFileSync('components/BeeHub.jsx', 'utf8')
   it('passes urlClientId / onOpenClient / onCloseRecord to the beta HiveShell', () => {
     expect(src).toMatch(/urlClientId=\{selected\?\.id \|\| null\}/)
-    expect(src).toMatch(/onCloseRecord=\{\(\)=>setSelected\(null\)\}/)
+    // onCloseRecord now clears BOTH the client and the engagement param.
+    expect(src).toMatch(/onCloseRecord=\{\(\)=>\{ setSelected\(null\); setSelectedEngagementId\(null\) \}\}/)
     expect(src).toMatch(/onOpenClient=\{\(clientId, opts\)=>\{/)
   })
   it('the beta block no longer renders PersonPanel-on-selected (two detail UIs unified)', () => {
