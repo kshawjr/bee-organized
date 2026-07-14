@@ -21,6 +21,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
+import { insertTouchpoint } from '@/lib/touchpoints'
 
 const VALID_KINDS = ['reach_out', 'drip', 'system', 'stage_change', 'note'] as const
 const VALID_METHODS = ['call', 'sms', 'email', 'system', 'call_prompt', 'in_person'] as const
@@ -118,54 +119,36 @@ export async function POST(req: Request) {
   const roBlock = await readOnlyWriteBlock(hubUser, lead.location_uuid)
   if (roBlock) return roBlock
 
-  // Build insert row
-  const insertRow: Record<string, unknown> = {
+  // Insert via the shared writer (lib/touchpoints.ts) so the Slack "Log call"
+  // interactivity handler and this in-record path produce identical rows. The
+  // reach_out updated_at bump lives inside insertTouchpoint. system/drip events
+  // have no human author; everything else is attributed to the session user.
+  const result = await insertTouchpoint({
     lead_id,
     location_uuid: lead.location_uuid,
     kind,
     // Phase 1: touchpoints can carry engagement context (column exists
     // since the step-1 migration). Optional — client-level touchpoints
     // pass nothing and behave exactly as before.
-    ...(typeof body.engagement_id === 'string' && body.engagement_id
-      ? { engagement_id: body.engagement_id }
-      : {}),
-    label: label.trim(),
+    engagement_id:
+      typeof body.engagement_id === 'string' && body.engagement_id
+        ? body.engagement_id
+        : null,
+    label,
     method: method ?? null,
     status: status ?? null,
     drip_id: drip_id ?? null,
     notes: notes ?? null,
-    // system events have no human author
     user_id: kind === 'system' || kind === 'drip' ? null : hubUser.id,
-  }
+    occurred_at: occurred_at ?? null,
+  })
 
-  if (occurred_at) {
-    insertRow.occurred_at = occurred_at
-  }
-
-  // Insert
-  const { data: inserted, error: insertError } = await supabaseService
-    .from('touchpoints')
-    .insert(insertRow)
-    .select('*')
-    .single()
-
-  if (insertError) {
+  if (!result.ok) {
     return NextResponse.json(
-      { error: 'insert_failed', detail: insertError.message },
+      { error: 'insert_failed', detail: result.error },
       { status: 500 }
     )
   }
 
-  // Reach-out side effect: bump lead's updated_at + record last reach-out
-  // method for fast access (avoids a query on every PersonPanel load).
-  if (kind === 'reach_out') {
-    await supabaseService
-      .from('leads')
-      .update({
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', lead_id)
-  }
-
-  return NextResponse.json({ touchpoint: inserted }, { status: 201 })
+  return NextResponse.json({ touchpoint: result.touchpoint }, { status: 201 })
 }

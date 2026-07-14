@@ -75,22 +75,48 @@ function escapeMrkdwn(s: string): string {
 const dash = (v: string | null | undefined): string =>
   v && v.trim() ? escapeMrkdwn(v.trim()) : '—'
 
+// Phone → tappable tel: mrkdwn link `<tel:+1XXXXXXXXXX|(formatted)>`. Digits
+// only for the tel: target (E.164-ish: 10 digits → +1, 11 starting with 1 →
+// +, anything else → +digits); the display keeps the human-formatted value.
+// Blank → em-dash, matching dash().
+const telLink = (phone: string | null | undefined): string => {
+  if (!phone || !phone.trim()) return '—'
+  const digits = phone.replace(/\D/g, '')
+  if (!digits) return dash(phone)
+  const e164 =
+    digits.length === 10 ? `+1${digits}`
+    : digits.length === 11 && digits.startsWith('1') ? `+${digits}`
+    : `+${digits}`
+  return `<tel:${e164}|${escapeMrkdwn(phone.trim())}>`
+}
+
+// Email → tappable mailto: mrkdwn link `<mailto:addr|addr>`. Blank → em-dash.
+const mailtoLink = (email: string | null | undefined): string => {
+  if (!email || !email.trim()) return '—'
+  const e = escapeMrkdwn(email.trim())
+  return `<mailto:${e}|${e}>`
+}
+
 // ── Pure message builder ──────────────────────────────────────
-// Formats the new-lead Slack message in mrkdwn, INCLUDING the deep-link to the
-// lead in Bee Hub (/clients/<id>) — the same link the email carries. Pure +
-// testable (no Slack, no Supabase), mirroring buildLeadNotificationEmail and
-// lib/webhook-digest.ts. Returns the chat.postMessage body sans `channel`
-// (postToSlack fills that from the location row).
+// Formats the new-lead Slack notification as Block Kit blocks so each lead
+// reads as a distinct card (header + section + divider), with tap-to-call /
+// tap-to-email hyperlinks and an interactive "Log call" button. Returns BOTH:
+//   • blocks — the rendered card (what Slack shows when present)
+//   • text   — a plain mrkdwn fallback (notification preview + accessibility;
+//              unchanged from the pre-card format, so it stays backward-safe)
+// Pure + testable (no Slack, no Supabase). Returns the chat.postMessage body
+// sans `channel` (postToSlack fills that from the location row).
 export function buildLeadSlackMessage(args: {
   lead: SlackLead
   locationName: string
   // Absolute Hub origin (no trailing slash) → `${baseUrl}/clients/${lead.id}`.
-  // Null when no base URL is available — the link line is simply omitted.
+  // Null when no base URL is available — the Open button/link is omitted.
   leadUrl: string | null
-}): { text: string } {
+}): { text: string; blocks: any[] } {
   const { lead, locationName, leadUrl } = args
   const name = dash(lead.name)
 
+  // ── Plain-text fallback (unchanged shape) ──────────────────
   const lines: string[] = [
     `:bee: *New lead for ${escapeMrkdwn(locationName)}*`,
     '',
@@ -100,18 +126,64 @@ export function buildLeadSlackMessage(args: {
     `*Project type:* ${dash(lead.project_type)}`,
     `*Preferred contact:* ${dash(lead.preferred_contact)}`,
   ]
-
   if (lead.request_details?.trim()) {
     lines.push('', `*What they told us:*`, `>${escapeMrkdwn(lead.request_details.trim())}`)
   }
-
   if (leadUrl) {
-    // mrkdwn link: <url|label>. escapeMrkdwn the URL too so a stray delimiter
-    // can't break out of the link.
     lines.push('', `<${escapeMrkdwn(leadUrl)}|Open this lead in Bee Hub>`)
   }
+  const text = lines.join('\n')
 
-  return { text: lines.join('\n') }
+  // ── Block Kit card ─────────────────────────────────────────
+  const blocks: any[] = [
+    {
+      type: 'header',
+      text: { type: 'plain_text', text: `🐝 New lead — ${locationName}`, emoji: true },
+    },
+    {
+      type: 'section',
+      fields: [
+        { type: 'mrkdwn', text: `*Name:*\n${name}` },
+        { type: 'mrkdwn', text: `*Project type:*\n${dash(lead.project_type)}` },
+        { type: 'mrkdwn', text: `*Email:*\n${mailtoLink(lead.email)}` },
+        { type: 'mrkdwn', text: `*Phone:*\n${telLink(lead.phone)}` },
+        { type: 'mrkdwn', text: `*Preferred contact:*\n${dash(lead.preferred_contact)}` },
+      ],
+    },
+  ]
+
+  // Request details — only when present (no empty label).
+  if (lead.request_details?.trim()) {
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: `*What they told us:*\n>${escapeMrkdwn(lead.request_details.trim())}` },
+    })
+  }
+
+  // Actions: "Log call" button (carries the lead id for the interactivity
+  // handler) + an optional "Open in Bee Hub" link button.
+  const elements: any[] = [
+    {
+      type: 'button',
+      text: { type: 'plain_text', text: '📞 Log call', emoji: true },
+      action_id: 'log_call',
+      value: lead.id,
+    },
+  ]
+  if (leadUrl) {
+    elements.push({
+      type: 'button',
+      text: { type: 'plain_text', text: 'Open in Bee Hub', emoji: true },
+      url: leadUrl,
+    })
+  }
+  blocks.push({ type: 'actions', elements })
+
+  // Trailing divider gives the card a visible bottom edge, separating adjacent
+  // lead posts (Slack has no literal border).
+  blocks.push({ type: 'divider' })
+
+  return { text, blocks }
 }
 
 // ── Transport: chat.postMessage ───────────────────────────────
@@ -121,7 +193,7 @@ export function buildLeadSlackMessage(args: {
 // email location with zero recipients.
 export async function postToSlack(
   locationId: string,
-  message: { text: string },
+  message: { text: string; blocks?: any[] },
 ): Promise<SlackPostResult> {
   const loc = await getSlackLocation(locationId)
   if (!loc) {
@@ -180,4 +252,32 @@ export async function notifyNewLeadSlack(args: {
   const leadUrl = baseUrl ? `${baseUrl.replace(/\/$/, '')}/clients/${lead.id}` : null
   const message = buildLeadSlackMessage({ lead, locationName, leadUrl })
   return postToSlack(locationId, message)
+}
+
+// ── users.info: Slack user id → email ─────────────────────────
+// Resolves a clicking Slack user to their email so the interactivity handler
+// can match a hub_user (we store no slack_user_id). Uses the location's bot
+// token; needs the app's `users:read.email` scope. Never throws — returns null
+// on any miss (no scope, no email set, API error) so the caller degrades to an
+// unattributed touchpoint rather than failing the click.
+export async function getSlackUserEmail(
+  botToken: string,
+  slackUserId: string,
+): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://slack.com/api/users.info?user=${encodeURIComponent(slackUserId)}`,
+      { headers: { Authorization: `Bearer ${botToken}` }, cache: 'no-store' },
+    )
+    const json = await res.json().catch(() => null as any)
+    if (!json || json.ok !== true) {
+      console.error('[slack-bot] users.info not ok for', slackUserId, '—', json?.error || 'unknown')
+      return null
+    }
+    const email = json.user?.profile?.email
+    return typeof email === 'string' && email.trim() ? email.trim() : null
+  } catch (err: any) {
+    console.error('[slack-bot] users.info threw for', slackUserId, '—', err?.message || err)
+    return null
+  }
 }

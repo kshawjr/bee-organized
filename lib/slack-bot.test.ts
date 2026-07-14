@@ -82,6 +82,56 @@ describe('buildLeadSlackMessage (pure builder)', () => {
   })
 })
 
+describe('buildLeadSlackMessage — Block Kit card', () => {
+  const flat = (blocks: any[]) => JSON.stringify(blocks)
+
+  it('renders a header + section card with tel:/mailto: hyperlinks and a Log call button', () => {
+    const { blocks } = buildLeadSlackMessage({
+      lead: LEAD,
+      locationName: 'Boulder',
+      leadUrl: 'https://app.example.com/clients/lead-1',
+    })
+    // Header block gives each lead its own card heading.
+    expect(blocks[0]).toMatchObject({ type: 'header' })
+    expect(blocks[0].text.text).toContain('New lead — Boulder')
+    // Trailing divider = the card's bottom edge (separates adjacent posts).
+    expect(blocks[blocks.length - 1]).toEqual({ type: 'divider' })
+
+    const s = flat(blocks)
+    // Phone → tel: link (digits only, +1 for a 10-digit US number); display kept.
+    expect(s).toContain('<tel:+15551112222|(555) 111-2222>')
+    // Email → mailto: link.
+    expect(s).toContain('<mailto:jane@example.com|jane@example.com>')
+
+    // The interactive Log call button carries the lead id in its value.
+    const actions = blocks.find((b: any) => b.type === 'actions')
+    const logBtn = actions.elements.find((e: any) => e.action_id === 'log_call')
+    expect(logBtn).toBeTruthy()
+    expect(logBtn.value).toBe('lead-1')
+    // Open button links to the deep-link when a URL is present.
+    expect(actions.elements.some((e: any) => e.url === 'https://app.example.com/clients/lead-1')).toBe(true)
+  })
+
+  it('includes the request-details section only when present; drops Open button + tel/mailto blanks', () => {
+    const withDetails = buildLeadSlackMessage({ lead: LEAD, locationName: 'Boulder', leadUrl: null }).blocks
+    expect(flat(withDetails)).toContain('What they told us')
+    // No leadUrl → no Open button (only the Log call button remains).
+    const actions = withDetails.find((b: any) => b.type === 'actions')
+    expect(actions.elements).toHaveLength(1)
+    expect(actions.elements[0].action_id).toBe('log_call')
+
+    const noDetails = buildLeadSlackMessage({
+      lead: { ...LEAD, request_details: null, phone: null, email: null },
+      locationName: 'Boulder',
+      leadUrl: null,
+    }).blocks
+    expect(flat(noDetails)).not.toContain('What they told us')
+    // Blank phone/email fall back to em-dash, not a broken tel:/mailto: link.
+    expect(flat(noDetails)).not.toContain('tel:')
+    expect(flat(noDetails)).not.toContain('mailto:')
+  })
+})
+
 describe('postToSlack', () => {
   it('is a quiet no-op (skipped, not error) when Slack is not connected', async () => {
     LOC_ROW = { slack_connected: false, slack_bot_token: null, slack_channel_id: null }
