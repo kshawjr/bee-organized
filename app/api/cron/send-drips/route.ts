@@ -84,10 +84,14 @@ export async function GET(req: NextRequest) {
     } else if (
       result.error === 'no_email' ||
       result.error === 'non_email_channel' ||
-      result.error === 'opted_out'
+      result.error === 'opted_out' ||
+      result.error === 'location_not_active'
     ) {
-      // Expected skips: drip auto-stopped (no_email / opted_out) or
-      // auto-advanced past a non-email step. Bookkeeping already happened.
+      // Expected skips: drip auto-stopped (no_email / opted_out),
+      // auto-advanced past a non-email step, or HELD because the location
+      // isn't active on the interface (location_not_active — row untouched,
+      // retried automatically once the location reactivates). Bookkeeping
+      // already happened / is intentionally deferred.
       skipped++
     } else if (result.error) {
       failed++

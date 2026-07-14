@@ -78,7 +78,10 @@ function seedHappyPath(opts: {
 }) {
   const { leadRow, location, dripCategory } = opts
   h.enqueue('leads', leadRow)                       // paused / opt-out / project_type
-  h.enqueue('locations', { id: LOC_UUID, timezone: 'UTC', ...location })
+  // lifecycle_status:'active' — the interface-active safety gate now lives
+  // in startDripForLead; a non-active location enrolls nothing (pinned in
+  // the dedicated interface-active-gate suite).
+  h.enqueue('locations', { id: LOC_UUID, timezone: 'UTC', lifecycle_status: 'active', ...location })
   // resolveDripCategory → lookups (only queried when project_type is set)
   if (leadRow.project_type) {
     h.enqueue('lookups', dripCategory ? { attrs: { drip_category: dripCategory } } : null)
@@ -192,7 +195,7 @@ describe('suppression intact', () => {
 
   it('no default paths configured at all → enrolls NOTHING (owner has not set up)', async () => {
     h.enqueue('leads', { paused: false, marketing_opt_out: false, project_type: 'Kitchen' })
-    h.enqueue('locations', { id: LOC_UUID, timezone: 'UTC', default_drip_path: null, default_move_drip_path: null })
+    h.enqueue('locations', { id: LOC_UUID, timezone: 'UTC', lifecycle_status: 'active', default_drip_path: null, default_move_drip_path: null })
     h.enqueue('lookups', { attrs: { drip_category: 'general' } })
 
     await startDripForLead(LEAD_ID, LOC_UUID)

@@ -70,12 +70,30 @@ export async function startDripForLead(leadId: string, locationUuid: string): Pr
 
     const { data: loc, error: locErr } = await supabaseService
       .from('locations')
-      .select('id, timezone, default_drip_path, default_move_drip_path')
+      .select('id, timezone, default_drip_path, default_move_drip_path, lifecycle_status')
       .eq('id', locationUuid)
       .maybeSingle()
 
     if (locErr || !loc) {
       console.error('[drip] startDrip: location lookup failed', { leadId, locationUuid, locErr })
+      return
+    }
+
+    // SAFETY GATE (interface-active): client drips fire ONLY for locations
+    // ACTIVE on the interface — the interface is the only place a drip can
+    // be stopped, so a non-active location must NEVER enroll an
+    // uncontrollable client drip. This is the SAME lifecycle_status ===
+    // 'active' condition the intake caller has always used (9d5811f's
+    // non-active-location gate), lifted here to the shared enrollment
+    // chokepoint so every caller inherits it — intake, POST/PATCH
+    // /api/leads, the Jobber webhook stage-promotion path, drip-restart,
+    // and the imported-lead resume seed. The internal lead notification
+    // (B2/B3) is a separate path and is unaffected.
+    if (loc.lifecycle_status !== 'active') {
+      console.log(
+        `[drip] startDrip: location ${locationUuid} not active ` +
+          `(lifecycle_status=${loc.lifecycle_status ?? 'null'}) — lead ${leadId} not enrolled`,
+      )
       return
     }
 

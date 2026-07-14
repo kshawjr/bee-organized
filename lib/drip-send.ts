@@ -139,12 +139,26 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // 8 master path templates + opp-stage emails.
   const { data: loc, error: locErr } = await supabaseService
     .from('locations')
-    .select('id, name, sender_name, phone, calendar_link, reviews_link, rate_per_hour, city, state, timezone')
+    .select('id, name, sender_name, phone, calendar_link, reviews_link, rate_per_hour, city, state, timezone, lifecycle_status')
     .eq('id', lead.location_uuid)
     .maybeSingle()
 
   if (locErr || !loc) {
     return { sent: false, error: `loc_lookup: ${locErr?.message ?? 'missing'}` }
+  }
+
+  // SAFETY GATE (interface-active): never SEND a client drip for a location
+  // that isn't ACTIVE on the interface — the interface is the only place a
+  // drip can be stopped, so an uncontrollable drip must never leave the
+  // building. This is the authoritative send-time backstop: it catches a
+  // lead enrolled while active whose location later deactivated, AND any
+  // enrollment that slipped past the startDripForLead gate. SKIP — leave
+  // the progress row untouched (no stop, no advance) so the drip simply
+  // resumes on the next cron tick if the location reactivates. Reuses the
+  // same lifecycle_status === 'active' condition as enrollment; the cron
+  // treats 'location_not_active' as an expected skip. B2 is unaffected.
+  if (loc.lifecycle_status !== 'active') {
+    return { sent: false, error: 'location_not_active' }
   }
 
   // Location owner (two uses: phone fallback + location_owner_name). Resolves
