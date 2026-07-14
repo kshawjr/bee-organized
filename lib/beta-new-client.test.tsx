@@ -260,6 +260,8 @@ describe('NewClientSheet frames', () => {
       notifyEmail: false,
       notifySlack: false,
       startDrip: false,
+      // Request-details textarea left empty → null (omitted from email/Slack).
+      request_details: null,
     })
     expect(onCreated).toHaveBeenCalledTimes(1)
     expect(onCreated.mock.calls[0][0].id).toBe('lead-new-1') // the REAL returned row
@@ -287,6 +289,28 @@ describe('NewClientSheet frames', () => {
       notifySlack: false, // independent — not selected, not sent
       startDrip: true,
     })
+    await unmount()
+  })
+
+  it('frame C: request-details textarea rides the POST as request_details (→ email + Slack)', async () => {
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[person()]} locFilter="loc-uuid-1" currentUserId="user-1" onClose={() => {}} onCreated={() => {}} />
+    )
+    await type(host.querySelector('input[aria-label="Search clients"]')!, 'Fresh Person')
+
+    const ta = host.querySelector('textarea[aria-label="Request details"]') as HTMLTextAreaElement
+    expect(ta, 'request-details textarea missing').toBeTruthy()
+    await act(async () => {
+      // Textarea uses the HTMLTextAreaElement value setter (not the input one).
+      const setter = Object.getOwnPropertyDescriptor((globalThis as any).window.HTMLTextAreaElement.prototype, 'value')!.set!
+      setter.call(ta, 'Whole-house declutter, garage + pantry')
+      ta.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+
+    await click(buttonByText(host, 'Create — opens card')!)
+    expect(createdBodies).toHaveLength(1)
+    // Persisted to the SAME leads.request_details column the intake path fills.
+    expect(createdBodies[0].request_details).toBe('Whole-house declutter, garage + pantry')
     await unmount()
   })
 

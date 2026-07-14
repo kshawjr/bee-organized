@@ -178,7 +178,7 @@ export default function NewClientSheet({
   // notifyEmail / notifySlack / startDrip: the on-create multi-select, all
   // default OFF (a manual lead with nothing selected is silent). startDrip
   // replaces the old `drip` toggle default-ON.
-  const [form, setForm] = useState({ name: null, email: null, phone: null, source: 'Manual', projectType: 'Client', notifyEmail: false, notifySlack: false, startDrip: false })
+  const [form, setForm] = useState({ name: null, email: null, phone: null, source: 'Manual', projectType: 'Client', requestDetails: '', notifyEmail: false, notifySlack: false, startDrip: false })
   // Referral-source referrer link (frame C) — { id, kind, name } | null.
   // kind is 'lead' or 'partner' (contacts store as 'partner' too); maps
   // straight onto leads.referred_by_kind / referred_by_id at POST.
@@ -307,6 +307,10 @@ export default function NewClientSheet({
         phone: (effPhone || '').trim() || null,
         source: form.source || null,
         project_type: form.projectType || null,
+        // Free-text request/description → leads.request_details (the same
+        // column the intake path fills from `message`). Empty stays null so
+        // the notification builders omit it, same as a details-less webform.
+        request_details: (form.requestDetails || '').trim() || null,
         // Referrer link rides only on a Referral source WITH a picked
         // referrer — source='Referral' with none saves nulls (the picker
         // is skippable, matching Classic; never block founding on it).
@@ -550,6 +554,22 @@ export default function NewClientSheet({
               )}
             </div>
           )}
+
+          {/* Request details — the free-text "what they want" field. Same
+              leads.request_details column the intake path fills from the
+              webform `message`; flows to the notification email + Slack post
+              (both render it only when present). Ordinary optional field —
+              NOT gated by the notify pills. */}
+          <div>
+            <label style={lbl}>Request details · optional</label>
+            <textarea
+              style={{ ...inp, minHeight: '72px', resize: 'vertical', lineHeight: 1.4 }}
+              value={form.requestDetails}
+              onChange={e => set('requestDetails', e.target.value)}
+              placeholder="What does the client want? (shows in the new-lead email + Slack)"
+              aria-label="Request details"
+            />
+          </div>
 
           <NotifyPills value={form} onToggle={(k) => set(k, !form[k])} />
 
