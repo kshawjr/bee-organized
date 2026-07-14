@@ -17870,7 +17870,7 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
                   <button
                     onClick={()=>patchUser(u.hub_user_id, { subscribed: !u.subscribed })}
                     title={u.subscribed ? 'Unsubscribe from lead emails' : 'Re-subscribe to lead emails'}
-                    style={{ flexShrink:0, padding:'2px 8px', borderRadius:'6px', border:'1px solid', borderColor: u.subscribed ? 'rgba(192,57,43,0.35)' : 'rgba(47,125,111,0.4)', background:'transparent', color: u.subscribed ? '#c0392b' : '#2f7d6f', fontFamily:'inherit', fontSize:'11px', fontWeight:600, cursor:'pointer' }}>
+                    style={{ flexShrink:0, padding:0, border:'none', background:'none', color: u.subscribed ? '#c0554e' : '#2f7d6f', fontFamily:'inherit', fontSize:'13px', fontWeight:600, cursor:'pointer' }}>
                     {u.subscribed ? 'Remove' : 'Add back'}
                   </button>
                 )}
@@ -17902,7 +17902,7 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
                 {readOnly ? (
                   advanced && <span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{catSummaryJS(e.category)}</span>
                 ) : (
-                  <button onClick={()=>removeExternal(e.id)} title="Remove recipient" style={{ flexShrink:0, padding:'2px 8px', borderRadius:'6px', border:'1px solid rgba(192,57,43,0.35)', background:'transparent', color:'#c0392b', fontFamily:'inherit', fontSize:'11px', fontWeight:600, cursor:'pointer' }}>Remove</button>
+                  <button onClick={()=>removeExternal(e.id)} title="Remove recipient" style={{ flexShrink:0, padding:0, border:'none', background:'none', color:'#c0554e', fontFamily:'inherit', fontSize:'13px', fontWeight:600, cursor:'pointer' }}>Remove</button>
                 )}
               </div>
               {advanced && (
@@ -17958,7 +17958,7 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
       ) : (
         <div style={{ background:'#fafbfa', borderTop:'1px solid rgba(0,0,0,0.06)', padding:'8px 14px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
           <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{subCount} active recipient{subCount !== 1 ? 's' : ''}</span>
-          <button onClick={()=>setAdding(true)} style={{ padding:'3px 9px', background:'transparent', border:'1px solid rgba(47,125,111,0.35)', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#2f7d6f', cursor:'pointer' }}>+ Add outside email</button>
+          <button onClick={()=>setAdding(true)} style={{ padding:0, background:'none', border:'none', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#2f7d6f', cursor:'pointer' }}>+ Add outside email</button>
         </div>
       ))}
     </div>
@@ -20599,15 +20599,15 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
                   <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'3px' }}>The name and address your new-lead follow-up emails come from.</p>
                 </div>
               </div>
+              {/* Per-project-type sender split — grouped INSIDE the identity card
+                  and LEADING it (toggle first), so the sending card matches the
+                  "Who hears about new leads" card, which also leads with its toggle. */}
+              <ProjectTypeSenders realLocId={realLocId} readOnly={false} embedded />
               <div style={{ borderTop:'0.5px solid rgba(26,46,43,0.08)' }}>
                 <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>updateLocation('sendFromName',v)}  hint="e.g. Bee Organized Kansas City" />
                 <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>updateLocation('sendFromEmail',v)} hint="Must be a verified sender in your email provider" type="email" />
                 <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>updateLocation('replyToEmail',v)}  hint="Where client replies land (defaults to Send From)" type="email" />
               </div>
-              {/* Per-project-type sender split — grouped INSIDE the identity card
-                  (one unified container, hairline-divided, toggle inside), so the
-                  sending section matches the "Who hears about new leads" card. */}
-              <ProjectTypeSenders realLocId={realLocId} readOnly={false} embedded />
             </div>
 
             {/* ── TIER 2 · MEDIUM — who's notified about new leads ─────────── */}
