@@ -28,6 +28,7 @@ import { isTerminal, CLOSED_WON } from './shared/stageConfig'
 import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount } from './shared/engagementStatus'
 import { reconcileServerRows, mergeEngagements } from './shared/engagementRevalidate'
 import { useStoredState } from './shared/useStoredControls'
+import { nextClientOverlay } from './shared/hubUrl'
 import useIsMobile from './shared/useIsMobile'
 import { IconInbox, IconLayoutKanban, IconList, IconUsers, IconPlus } from '@/components/ui/icons'
 import { TEXT_TOKENS, BORDER_TOKENS, WARNING_TOKENS } from '@/components/ui/tokens'
@@ -114,7 +115,15 @@ export default function HiveShell({
   locFilter = 'all',
   currentLocationUuid = null,
   currentUserId = null,
+  // Record-in-URL (client): BeeHub owns the URL (single-page shell). It
+  // passes DOWN the client id the URL currently names (urlClientId) so the
+  // ClientProfile overlay seeds/clears from the URL (deep-link on load +
+  // browser back/forward), and receives UP onOpenClient(id, {replace}) /
+  // onCloseRecord() so opening/closing/chevron-walking a client here drives
+  // the URL. §8.5 direction rule: props only, BeeHub never reaches in here.
+  urlClientId = null,
   onOpenClient = () => {},
+  onCloseRecord = () => {},
   onSendToJobber = () => {},
   // The people-merge seam (§8.5 direction rule): BeeHub passes this
   // callback DOWN; after a confirmed create the shell hands the mapped
@@ -211,13 +220,29 @@ export default function HiveShell({
   // one-shot seed the List consumes on mount, then hands back null.
   const [listInitialView, setListInitialView] = useState(null)
   const viewClosedInList = () => { setListInitialView('closed'); pickLens('list') }
-  const openEngagement = (e) => setOverlay({ type: 'engagement', engagement: e })
+  // Opening an engagement or a pre-engagement person swaps the overlay
+  // AWAY from any open client — clear the client from the URL so it never
+  // claims /clients/<id> while a non-client panel is showing (onCloseRecord
+  // is a no-op when no client URL is active, so board-direct opens are safe).
+  const openEngagement = (e) => { setOverlay({ type: 'engagement', engagement: e }); onCloseRecord() }
   // siblings: the opener's visible ordering (directory rows) — powers
   // the profile's prev/next chevrons; openers without a natural order
-  // pass nothing and the chevrons hide.
-  const openClient = (clientId, siblings = null) =>
+  // pass nothing and the chevrons hide. Also drive the URL (→ /clients/<id>)
+  // so a beta-board open is shareable / refresh-survivable.
+  const openClient = (clientId, siblings = null) => {
     setOverlay({ type: 'client', clientId, siblings: Array.isArray(siblings) && siblings.length > 1 ? siblings : null })
-  const openPerson = (person) => setOverlay({ type: 'person', person })
+    onOpenClient(clientId)
+  }
+  const openPerson = (person) => { setOverlay({ type: 'person', person }); onCloseRecord() }
+
+  // URL → overlay sync: when the URL-named client id changes (deep-link on
+  // mount, browser back/forward), open/close the ClientProfile overlay to
+  // match. nextClientOverlay returns the SAME overlay ref when nothing
+  // should change (a click already opened it), so this never fights the
+  // openers and preserves an open client's siblings. Client-only by design.
+  useEffect(() => {
+    setOverlay(o => nextClientOverlay(urlClientId, o))
+  }, [urlClientId])
 
   // Cards emit lead-COLUMN patches after a confirmed PATCH; translate to
   // Person-shape fields and hand UP (onPersonPatched merges into BeeHub's
@@ -562,10 +587,16 @@ export default function HiveShell({
           clientId={overlay.clientId}
           readOnly={readOnly}
           siblings={overlay.siblings ?? null}
-          onNavigate={(id) => setOverlay(o => (o && o.type === 'client' ? { ...o, clientId: id } : o))}
+          onNavigate={(id) => {
+            // Prev/next chevron walk: swap the shown client AND move the URL
+            // with it, but REPLACE (opts.replace) so walking the directory
+            // doesn't stack a back-history entry per neighbour.
+            setOverlay(o => (o && o.type === 'client' ? { ...o, clientId: id } : o))
+            onOpenClient(id, { replace: true })
+          }}
           people={people}
           locationUsers={locationUsers}
-          onClose={() => setOverlay(null)}
+          onClose={() => { setOverlay(null); onCloseRecord() }}
           onOpenEngagement={openEngagement}
           onLeadPatched={handleLeadPatched}
           onPartnerCreated={onPartnerCreated}

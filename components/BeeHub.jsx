@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useLeadsRealtime } from "@/lib/use-leads-realtime"
 import dynamic from "next/dynamic"
 import { canSeeBetaBoard, defaultHiveView, hydrateHiveView, resolveBetaReadOnly } from "@/components/hive/shared/betaGate"
+import { ROUTE_TO_NAV, NAV_TO_URL, parseHubUrl, clientPath } from "@/components/hive/shared/hubUrl"
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { financialsVisible } from "@/lib/financial-access"
 import { splitNameForPrefill } from "@/lib/name-prefill"
@@ -9962,6 +9963,11 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
   const [betaSendPerson, setBetaSendPerson] = useState(null)
   const [selected, setSelected] = useState(initialSelected)
   const [viewingCard, setViewingCard] = useState(null)
+  // Prev/next sibling navigation (beta profile chevrons) sets this so the
+  // next URL write REPLACES the current entry instead of pushing — chevron
+  // walking through a directory shouldn't bloat back-history with a stop
+  // at every neighbour. Consumed + reset by the selected→URL effect below.
+  const urlReplaceRef = useRef(false)
 
   // One-way sync from URL/dashboard-driven globalSelectedPerson (via
   // initialSelected) into local state. Always sync — including when
@@ -9981,12 +9987,16 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
     if (typeof window === 'undefined') return
     const current = window.location.pathname
     const want = selected
-      ? `/clients/${selected.id}`
+      ? clientPath(selected.id)
       : (current.startsWith('/clients/') ? '/clients' : null)
     if (want && current !== want) {
-      window.history.pushState({}, '', want)
+      // replaceState for chevron/sibling walks (no history bloat),
+      // pushState for a fresh open/close (back/forward returns to it).
+      const method = urlReplaceRef.current ? 'replaceState' : 'pushState'
+      window.history[method]({}, '', want)
       onSelectedChange(selected)
     }
+    urlReplaceRef.current = false
   }, [selected])
   const [search, setSearch] = useState('')
   const [stageFilters, setStageFilters] = useState([])   // multi-select array
@@ -10193,11 +10203,24 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
           onPartnerCreated={(row)=>{ hivePartnersCtx?.mergePartner?.(row) }}
           setToast={setToast}
           onExitBeta={()=>{ setView('kanban'); try{localStorage.setItem('bee_hive_view','kanban')}catch(e){} }}
-          onOpenClient={(clientId)=>{
+          // URL id the beta board's open client should reflect. HiveShell
+          // seeds/clears its ClientProfile overlay from this (deep-link on
+          // load + browser back/forward) via nextClientOverlay.
+          urlClientId={selected?.id || null}
+          // Beta board opened a client → drive the URL. setSelected feeds
+          // the selected→URL effect above (pushes /clients/<id>); the
+          // ClientProfile overlay is what actually renders the detail, so
+          // a minimal {id} is enough when the person isn't in local state
+          // (the overlay loads it server-side, RLS/location-scoped). opts.replace
+          // marks a prev/next chevron walk so the URL write replaces, not pushes.
+          onOpenClient={(clientId, opts)=>{
+            if (opts?.replace) urlReplaceRef.current = true
             const p = people.find(x=>x.id===clientId)
-            if (p) setSelected(p)
-            else setToast({ kind:'error', msg:'Client record not loaded — try the classic board' })
+            setSelected(p || { id: clientId })
           }}
+          // Beta board closed the client (or swapped to a non-client
+          // overlay) → clear the record from the URL (back to /clients).
+          onCloseRecord={()=>setSelected(null)}
           onSendToJobber={(p, opts)=>setBetaSendPerson({ person: p, engagementId: opts?.engagementId || null })}
         />
         {/* The EXISTING send-to-jobber confirm flow, mounted for the beta
@@ -10220,14 +10243,13 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
             onClose={()=>setBetaSendPerson(null)}
           />
         )}
-        {selected&&(()=>{
-          const idx = sorted.findIndex(p=>p.id===selected.id)
-          return <PersonPanel person={selected} onClose={()=>setSelected(null)} onUpdate={updatePerson} onMarkJunk={markJunk} onResurrect={()=>{ resurrectPerson(selected.id); setSelected(null) }} onAddFollowUp={onAddFollowUp} onViewCard={(p)=>setViewingCard(p)} allPeople={allPeople}
-            onPrev={idx>0?()=>setSelected(sorted[idx-1]):null}
-            onNext={idx<sorted.length-1?()=>setSelected(sorted[idx+1]):null}
-            navLabel={`${idx+1} / ${sorted.length}`}
-          />
-        })()}
+        {/* UNIFIED DETAIL UI: the beta board's client detail is HiveShell's
+            ClientProfile overlay (opened from a click OR a /clients/<id>
+            deep-link via urlClientId). The legacy PersonPanel is NOT
+            rendered here anymore — `selected` is now URL-tracking-only in
+            beta, so a deep-link and a click open the SAME panel and the URL
+            never disagrees with what's on screen. (Classic board still
+            renders PersonPanel below its own return.) */}
         {viewingCard&&<CardViewerModal cardImage={viewingCard.cardImage||null} onClose={()=>setViewingCard(null)} />}
       </div>
     )
@@ -32219,37 +32241,10 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated }) {
   )
 }
 
-// URL slug → internal activeNav key. The Clients tab is internally 'hive'
-// but exposed as /clients in the URL; /contacts maps to the 'partners'
-// screen (label "Contacts", internal key "partners").
-const ROUTE_TO_NAV = {
-  clients: 'hive',
-  hive:    'hive',
-  contacts:'partners',
-  partners:'partners',
-  reports: 'reports',
-  settings:'settings',
-  admin:   'admin',
-  home:    'home',
-}
-const NAV_TO_URL = {
-  home:    '/',
-  hive:    '/clients',
-  partners:'/contacts',
-  reports: '/reports',
-  settings:'/settings',
-  admin:   '/admin',
-}
-// Parse the current pathname into the activeNav key + (optional) selected
-// lead id. Drives initial state on mount and the popstate handler so
-// browser back/forward stay in sync with internal nav state.
-function parseHubUrl(pathname) {
-  if (!pathname || pathname === '/') return { nav: 'home', leadId: null }
-  const m = pathname.match(/^\/clients(?:\/([^/]+))?$/)
-  if (m) return { nav: 'hive', leadId: m[1] || null }
-  const seg = pathname.split('/').filter(Boolean)[0]
-  return { nav: ROUTE_TO_NAV[seg] || 'home', leadId: null }
-}
+// ROUTE_TO_NAV, NAV_TO_URL, parseHubUrl, clientPath now live in
+// @/components/hive/shared/hubUrl (imported above) so the pure URL↔state
+// mapping is unit-testable. nextClientOverlay there drives the beta
+// board's URL→overlay sync.
 
 export default function App({
   currentUser,
@@ -32780,16 +32775,22 @@ if (Array.isArray(initialPeople)) return
     if (notFoundToast) setToast({ kind: 'error', msg: 'Client not found' })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  // Browser back/forward — re-derive activeNav + selected lead from the URL.
+  // Browser back/forward — re-derive activeNav + open client from the URL.
   // Click-driven URL updates go through pushState (above) and lead-panel
   // open/close (HiveScreen below); popstate handles the user-driven case.
+  // globalSelectedPerson flows down as HiveScreen's `selected` → its
+  // urlClientId → HiveShell's ClientProfile overlay (nextClientOverlay),
+  // so back/forward now OPENS and CLOSES the beta overlay too — not just
+  // the classic PersonPanel. Fall back to a minimal {id} when the client
+  // isn't in local `people` (forward-nav to a not-yet-loaded record): the
+  // overlay loads it server-side, so the URL still opens the right panel.
   useEffect(() => {
     function onPop() {
       const { nav: navKey, leadId } = parseHubUrl(window.location.pathname)
       setActiveNav(navKey)
       if (leadId) {
         const lead = people.find(p => p.id === leadId)
-        if (lead) setGlobalSelectedPerson(lead)
+        setGlobalSelectedPerson(lead || { id: leadId })
       } else if (navKey === 'hive') {
         setGlobalSelectedPerson(null)
       }
