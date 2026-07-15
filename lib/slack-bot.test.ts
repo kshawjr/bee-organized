@@ -211,7 +211,12 @@ describe('postToSlack', () => {
     const [url, opts] = fetchSpy.mock.calls[0] as any[]
     expect(url).toBe(SLACK_POST_MESSAGE_URL)
     expect(opts.headers.Authorization).toBe('Bearer xoxb-secret')
-    expect(JSON.parse(opts.body)).toEqual({ channel: 'C123', text: 'hello' })
+    expect(JSON.parse(opts.body)).toEqual({
+      channel: 'C123',
+      unfurl_links: false,
+      unfurl_media: false,
+      text: 'hello',
+    })
   })
 
   it('never throws — a fetch rejection returns { ok:false }', async () => {

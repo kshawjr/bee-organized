@@ -280,7 +280,16 @@ export async function postToSlack(
         Authorization: `Bearer ${loc.slack_bot_token}`,
         'Content-Type': 'application/json; charset=utf-8',
       },
-      body: JSON.stringify({ channel: loc.slack_channel_id, ...message }),
+      // unfurl_links/unfurl_media:false suppress Slack's auto-preview of the
+      // "Open in Bee Hub" deep-link (the beehive.beeorganized.com site-preview
+      // block that pushed the card past "Show more"). The button stays intact —
+      // only the auto-generated preview is suppressed.
+      body: JSON.stringify({
+        channel: loc.slack_channel_id,
+        unfurl_links: false,
+        unfurl_media: false,
+        ...message,
+      }),
       cache: 'no-store',
     })
 
