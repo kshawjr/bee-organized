@@ -154,23 +154,19 @@ export function buildLeadSlackMessage(args: {
   const { lead, locationName, leadUrl } = args
   const name = dash(lead.name)
 
-  // ── Plain-text fallback (unchanged shape) ──────────────────
-  const lines: string[] = [
-    `:bee: *New lead for ${escapeMrkdwn(locationName)}*`,
-    '',
-    `*Name:* ${name}`,
-    `*Email:* ${dash(lead.email)}`,
-    `*Phone:* ${dash(lead.phone)}`,
-    `*Project type:* ${dash(lead.project_type)}`,
-    `*Preferred contact:* ${dash(lead.preferred_contact)}`,
-  ]
-  if (lead.request_details?.trim()) {
-    lines.push('', `*What they told us:*`, `>${escapeMrkdwn(lead.request_details.trim())}`)
-  }
-  if (leadUrl) {
-    lines.push('', `<${escapeMrkdwn(leadUrl)}|Open this lead in Bee Hub>`)
-  }
-  const text = lines.join('\n')
+  // ── Top-level text = single-line summary (NOT the full detail) ─────────
+  // The card lives in `attachments` (for the color stripe), and Slack renders a
+  // non-empty top-level `text` as a VISIBLE body ABOVE the attachment. A rich
+  // multi-line `text` therefore double-posted every field as a plain block over
+  // the card. Keep the top-level `text` to a one-line summary so ONLY the card
+  // renders; the card blocks below carry every detail. The same string is set as
+  // the attachment `fallback` for non-block clients / notification previews.
+  // Graceful: a missing lead name omits cleanly (no dangling ": ").
+  const leadName = lead.name?.trim() ? escapeMrkdwn(lead.name.trim()) : ''
+  const summary = leadName
+    ? `🐝 New lead: ${leadName} (${escapeMrkdwn(locationName)})`
+    : `🐝 New lead (${escapeMrkdwn(locationName)})`
+  const text = summary
 
   // ── Resolved, display-ready soft fields (null = omit) ──────
   const projectLabel = lead.project_type?.trim() ? escapeMrkdwn(lead.project_type.trim()) : null
@@ -253,7 +249,7 @@ export function buildLeadSlackMessage(args: {
   // 9. Trailing divider so consecutive lead cards visually separate.
   blocks.push({ type: 'divider' })
 
-  return { text, attachments: [{ color: projectTypeColor(lead.project_type), blocks }] }
+  return { text, attachments: [{ color: projectTypeColor(lead.project_type), fallback: summary, blocks }] }
 }
 
 // ── Transport: chat.postMessage ───────────────────────────────

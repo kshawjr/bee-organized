@@ -52,33 +52,33 @@ beforeEach(() => {
   maybeSingleMock.mockImplementation(async () => ({ data: LOC_ROW, error: null }))
 })
 
-describe('buildLeadSlackMessage (pure builder)', () => {
-  it('renders lead fields, the deep-link, and escapes mrkdwn delimiters', () => {
-    const { text } = buildLeadSlackMessage({
+describe('buildLeadSlackMessage — top-level text (single-line summary)', () => {
+  // The top-level `text` renders ABOVE the attachment card, so it is a one-line
+  // summary only — every detail lives in attachments[0].blocks (see next block).
+  // The same summary is mirrored onto attachments[0].fallback.
+  it('is a single-line "New lead: <name> (<location>)" summary, mrkdwn-escaped, mirrored to fallback', () => {
+    const msg = buildLeadSlackMessage({
       lead: { ...LEAD, name: 'A & B <Co>' },
       locationName: 'Boulder',
       leadUrl: 'https://app.example.com/clients/lead-1',
     })
-    expect(text).toContain('New lead for Boulder')
-    expect(text).toContain('*Email:* jane@example.com')
-    expect(text).toContain('*Project type:* Moving')
-    expect(text).toContain('*Preferred contact:* Text')
-    // Deep-link as a mrkdwn <url|label> link.
-    expect(text).toContain('<https://app.example.com/clients/lead-1|Open this lead in Bee Hub>')
-    // & < > escaped in the interpolated name.
-    expect(text).toContain('A &amp; B &lt;Co&gt;')
+    expect(msg.text).toBe('🐝 New lead: A &amp; B &lt;Co&gt; (Boulder)')
+    // The old rich detail is NOT in the top-level text — it only lives in the card.
+    expect(msg.text).not.toContain('*Email:*')
+    expect(msg.text).not.toContain('*Project type:*')
+    expect(msg.text).not.toContain('Open this lead in Bee Hub')
+    // Attachment carries the same summary as its non-block fallback.
+    expect(msg.attachments[0].fallback).toBe(msg.text)
   })
 
-  it('falls back to em-dash for blank fields and omits the link when no URL', () => {
-    const { text } = buildLeadSlackMessage({
-      lead: { ...LEAD, phone: null, preferred_contact: null, request_details: null },
+  it('omits the name cleanly when the lead name is blank (no dangling ": ")', () => {
+    const msg = buildLeadSlackMessage({
+      lead: { ...LEAD, name: '   ' },
       locationName: 'Boulder',
       leadUrl: null,
     })
-    expect(text).toContain('*Phone:* —')
-    expect(text).toContain('*Preferred contact:* —')
-    expect(text).not.toContain('Open this lead in Bee Hub')
-    expect(text).not.toContain('What they told us')
+    expect(msg.text).toBe('🐝 New lead (Boulder)')
+    expect(msg.attachments[0].fallback).toBe('🐝 New lead (Boulder)')
   })
 })
 
@@ -243,6 +243,12 @@ describe('notifyNewLeadSlack', () => {
     expect(res).toEqual({ ok: true })
     const body = JSON.parse((fetchSpy.mock.calls[0] as any[])[1].body)
     expect(body.channel).toBe('C1')
-    expect(body.text).toContain('<https://app.example.com/clients/lead-1|Open this lead in Bee Hub>')
+    // Top-level text is the one-line summary; the deep-link now lives on the
+    // card's "Open in Bee Hub" button (attachments[0].blocks), not the text.
+    expect(body.text).toBe('🐝 New lead: Jane Prospect (Boulder)')
+    const openBtn = body.attachments[0].blocks
+      .find((b: any) => b.type === 'actions')
+      .elements.find((e: any) => e.url)
+    expect(openBtn.url).toBe('https://app.example.com/clients/lead-1')
   })
 })
