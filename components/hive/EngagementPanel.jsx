@@ -32,9 +32,9 @@
 //     RIGHT description (EditableDesc) + engagement-scoped activity +
 //           composer
 //   action bar — PINNED (sticky): Call · Log touchpoint · (Send to
-//     Jobber, founded-not-sent only) · Open in Jobber · Close… (the
-//     same shared CloseEngagementConfirm inline on Overview — moved out
-//     of the ··· menu in build 2)
+//     Jobber, founded-not-sent only) · Open in Jobber. There is NO
+//     Close… button here — the close-out triggers live in the masthead
+//     ··· menu and open the engagement-scoped wizards.
 // Fetches GET /api/engagements/:id on open (board rows stay
 // lightweight; `seed` renders the shell synchronously).
 //
@@ -627,10 +627,12 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
 
   // Action bar — PINNED (sticky) to the card bottom, every tab. NO
   // manual stage mover (7/10 decision): Send to Jobber is the forward
-  // door for local engagements; Close… (build 2: moved out of the ···
-  // menu) opens the SAME shared CloseEngagementConfirm inline on
-  // Overview — there is no Jobber auto-Lost, so the manual close path
-  // must always exist.
+  // door for local engagements. The manual close path must always exist
+  // (there is no Jobber auto-Lost), but it does NOT live here — the
+  // masthead ··· menu opens the engagement-scoped CloseWon/CloseLost
+  // wizards. CloseEngagementConfirm is the BOARD's drag-to-close popup
+  // and never renders in this panel; all three share one write path
+  // (shared/closeEngagement).
   const actionBar = (
     <div style={{
       position: 'sticky', bottom: 0, zIndex: 5, background: T.surface.raised,
