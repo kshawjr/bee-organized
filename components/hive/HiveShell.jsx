@@ -26,6 +26,7 @@ import { deriveClientStatus } from './shared/clientStatus'
 import { isTerminal, CLOSED_WON } from './shared/stageConfig'
 import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount } from './shared/engagementStatus'
 import { reconcileServerRows, mergeEngagements } from './shared/engagementRevalidate'
+import { useEngagementsRealtime } from '@/lib/use-engagements-realtime'
 import { useStoredState } from './shared/useStoredControls'
 import { nextRecordOverlay } from './shared/hubUrl'
 import useIsMobile from './shared/useIsMobile'
@@ -47,6 +48,12 @@ const LENS_LS_KEY = 'bee_hive_beta_lens'
 // Focus/visibility revalidation guard — collapse a burst of focus events
 // (alt-tab flurries, OS focus echoes) into at most one refetch per window.
 const REVALIDATE_DEBOUNCE_MS = 4000
+
+// Realtime coalesce window — a single server action often writes an
+// engagement more than once (stage + totals + closed_at), and each write is
+// its own postgres_changes event. Collect ids for a beat and refetch once.
+// Short on purpose: this is the live-move path, and the delay is felt.
+const REALTIME_COALESCE_MS = 250
 
 function TabPill({ tab, active, onSelect, badgeCount = null }) {
   if (!tab.live) {
@@ -338,6 +345,70 @@ export default function HiveShell({
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [revalidateOpenEngagements])
+
+  // ── revalidation TRIGGER 2: Supabase realtime stage moves ───────────
+  // Cards move columns the moment engagements.stage changes from ANY source
+  // (another user, a webhook, MAKE) — no reload, no poll. The focus trigger
+  // above STAYS: it is the belt to this braces, and it still covers the
+  // window where the socket is down or an event was missed.
+  //
+  // The subscription hands us an id only (the payload has no enrichment), so
+  // this refetches the named rows in board shape and feeds them to the SAME
+  // reconcileEngagements the focus sweep uses. Everything the merge
+  // guarantees therefore holds unchanged here — in particular rowPatches win
+  // last, so a pending drag-close or a just-reopened row is never clobbered
+  // by a refetch this path kicks off.
+  const rtPendingIds = useRef(new Set())
+  const rtTimer = useRef(null)
+  const rtInFlight = useRef(false)
+  const rtFlushRef = useRef(null)
+
+  const flushRealtimeIds = useCallback(async () => {
+    rtTimer.current = null
+    // Stacking guard, mirroring the focus trigger's: never run two refetches
+    // at once. Re-arm rather than drop — the ids stay pending, so a burst
+    // that lands mid-fetch still surfaces (it isn't a stale focus event we
+    // can safely discard; it's a move nothing else will tell us about).
+    if (rtInFlight.current) {
+      rtTimer.current = setTimeout(() => rtFlushRef.current?.(), REALTIME_COALESCE_MS)
+      return
+    }
+    const ids = Array.from(rtPendingIds.current)
+    rtPendingIds.current.clear()
+    if (ids.length === 0) return
+    rtInFlight.current = true
+    try {
+      const params = new URLSearchParams({ ids: ids.join(',') })
+      if (locFilter && locFilter !== 'all') params.set('location_uuid', locFilter)
+      const res = await fetch(`/api/engagements?${params}`)
+      if (!res.ok) return
+      const j = await res.json().catch(() => null)
+      if (j && Array.isArray(j.rows)) reconcileEngagements(j.rows)
+    } catch {
+      // best-effort — the focus trigger is the backstop if this fails
+    } finally {
+      rtInFlight.current = false
+    }
+  }, [locFilter, reconcileEngagements])
+  rtFlushRef.current = flushRealtimeIds
+
+  const handleEngagementRealtime = useCallback(({ engagementId }) => {
+    if (!engagementId) return
+    rtPendingIds.current.add(engagementId)
+    if (rtTimer.current) return
+    rtTimer.current = setTimeout(() => rtFlushRef.current?.(), REALTIME_COALESCE_MS)
+  }, [])
+
+  // Drop a timer armed at unmount — the channel is already gone by then and
+  // the fetch would resolve into a dead tree.
+  useEffect(() => () => {
+    if (rtTimer.current) clearTimeout(rtTimer.current)
+  }, [])
+
+  // Subscribes on mount; tears the channel down and reopens on locFilter
+  // change (the hook keys its effect on it), so a location switch can't leave
+  // the old location's channel behind delivering into the new board.
+  useEngagementsRealtime(locFilter, handleEngagementRealtime)
 
   const allEngagements = sessionEngagements.length === 0
     ? engagements

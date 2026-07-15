@@ -8,9 +8,16 @@
 // Returns { rows, total, offset, limit } ordered closed_at desc; rows
 // carry client_name (joined) in the same shape the list renders.
 //
-// Only closed=1 is supported — open engagements ship server-rendered via
-// _hub-page. Auth: logged-in hub_user; elevated may scope with
-// location_uuid; everyone else is forced to their own location.
+// GET /api/engagements?ids=<uuid>[,<uuid>…][&location_uuid=]
+//
+// Board-shape read of specific engagements, by id — the refetch behind the
+// board's realtime subscription (a realtime payload carries no enrichment,
+// so it is a signal and this is the read). Unlike open=1 it is not narrowed
+// to open stages.
+//
+// closed=1, open=1 and ids= are the supported reads. Auth: logged-in
+// hub_user; elevated may scope with location_uuid; everyone else is forced
+// to their own location.
 //
 // POST /api/engagements — { client_id, title? }
 //
@@ -32,6 +39,99 @@ import { foundManualEngagement } from '@/lib/engagements'
 // source for the terminal stage strings ('Closed Won' / 'Closed Lost').
 import { CLOSED_STAGE_FILTERS } from '@/components/hive/shared/stageConfig'
 
+// Ceiling on ?ids= — the realtime coalescer only ever names cards already on
+// one board, so this is a guard against a hand-crafted URL, not a real limit.
+const IDS_MAX = 200
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+// Board-shape enrichment: bolts client_name/phone/email + repeat_count + the
+// minimal child arrays onto raw engagement rows. This is the projection
+// HiveShell's boardSignature reads, so ?open=1 (the focus sweep) and ?ids=
+// (the realtime refetch) BOTH go through here — two copies would drift, and
+// a drifted shape reads as a phantom board change. The shape MUST mirror
+// _hub-page.tsx initialEngagements — keep them in lockstep.
+async function enrichBoardRows(baseRows: any[]): Promise<any[]> {
+  const clientIds = Array.from(new Set(baseRows.map(r => r.client_id).filter(Boolean)))
+  const engIds = baseRows.map(r => r.id)
+
+  // client name/contact for the joined card headline.
+  const infoById: Record<string, { name: string; phone: string | null; email: string | null }> = {}
+  if (clientIds.length > 0) {
+    const { data: leads } = await supabaseService
+      .from('leads').select('id, name, phone, email').in('id', clientIds)
+    for (const l of leads ?? []) infoById[l.id] = { name: l.name || 'Unknown', phone: l.phone || null, email: l.email || null }
+  }
+
+  // repeat_count: ALL engagements per client (closed included), the same
+  // count _hub-page's all-engagements sweep produces.
+  const repeatCounts: Record<string, number> = {}
+  if (clientIds.length > 0) {
+    for (let i = 0; i < clientIds.length; i += 200) {
+      const chunk = clientIds.slice(i, i + 200)
+      const { data } = await supabaseService
+        .from('engagements').select('id, client_id').in('client_id', chunk)
+      for (const r of data ?? []) repeatCounts[r.client_id] = (repeatCounts[r.client_id] || 0) + 1
+    }
+  }
+
+  // Child rows by engagement_id — same projection _hub-page ships for the
+  // board chips (value/status derivation + linked-vs-local gate).
+  const byEng = <T extends { engagement_id?: string | null }>(rows: T[] | null) => {
+    const out: Record<string, T[]> = {}
+    ;(rows || []).forEach(r => {
+      if (!r.engagement_id) return
+      ;(out[r.engagement_id] ||= []).push(r)
+    })
+    return out
+  }
+  const fetchByEng = async (table: string, cols: string): Promise<any[]> => {
+    const acc: any[] = []
+    for (let i = 0; i < engIds.length; i += 200) {
+      const chunk = engIds.slice(i, i + 200)
+      const { data, error } = await supabaseService.from(table).select(cols).in('engagement_id', chunk)
+      if (error) {
+        console.error(`[engagements] ${table} child fetch failed: ${error.message}`)
+        continue
+      }
+      acc.push(...(data || []))
+    }
+    return acc
+  }
+  const [quotesRaw, jobsRaw, invoicesRaw, assessmentsRaw, serviceReqsRaw] = await Promise.all([
+    fetchByEng('quotes', 'id, engagement_id, status, total, sent_at, approved_at'),
+    fetchByEng('jobs', 'id, engagement_id, status, title, scheduled_start, completed_at'),
+    fetchByEng('invoices', 'id, engagement_id, status, total, balance_owing'),
+    fetchByEng('assessments', 'id, engagement_id, scheduled_at, status, completed_at'),
+    fetchByEng('service_requests', 'id, engagement_id'),
+  ])
+  const quotesByEng = byEng(quotesRaw)
+  const jobsByEng = byEng(jobsRaw)
+  const invoicesByEng = byEng(invoicesRaw)
+  const assessmentsByEng = byEng(assessmentsRaw)
+  const serviceReqsByEng = byEng(serviceReqsRaw)
+
+  return baseRows.map((e: any) => ({
+    ...e,
+    client_name: infoById[e.client_id]?.name || 'Unknown',
+    client_phone: infoById[e.client_id]?.phone ?? null,
+    client_email: infoById[e.client_id]?.email ?? null,
+    repeat_count: repeatCounts[e.client_id] || 1,
+    quotes: (quotesByEng[e.id] || []).map((q: any) => ({
+      id: q.id, status: q.status, total: q.total, sent_at: q.sent_at, approved_at: q.approved_at,
+    })),
+    jobs: (jobsByEng[e.id] || []).map((j: any) => ({
+      id: j.id, status: j.status, title: j.title, scheduled_start: j.scheduled_start, completed_at: j.completed_at,
+    })),
+    invoices: (invoicesByEng[e.id] || []).map((i: any) => ({
+      id: i.id, status: i.status, total: i.total, balance_owing: i.balance_owing,
+    })),
+    assessments: (assessmentsByEng[e.id] || []).map((a: any) => ({
+      id: a.id, scheduled_at: a.scheduled_at, status: a.status, completed_at: a.completed_at,
+    })),
+    service_requests: (serviceReqsByEng[e.id] || []).map((sr: any) => ({ id: sr.id })),
+  }))
+}
+
 export async function GET(req: Request) {
   const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -47,6 +147,41 @@ export async function GET(req: Request) {
   }
 
   const url = new URL(req.url)
+
+  // ── IDS mode: the board's REALTIME refetch ──────────────────────
+  // GET /api/engagements?ids=<uuid>[,<uuid>…][&location_uuid=]
+  //
+  // A Supabase realtime payload is ONE flat engagements row carrying none of
+  // the board enrichment, so the subscription treats it as a SIGNAL only and
+  // refetches the named rows here, in board shape, via the same
+  // enrichBoardRows the ?open=1 sweep uses. Feeding a raw payload straight
+  // into reconcileServerRows would churn boardSignature and blank the card's
+  // chips and value.
+  //
+  // Deliberately NOT narrowed to open stages the way ?open=1 is: a remote
+  // close is a stage move like any other, and omitting the row would leave a
+  // closed card sitting in an open column until reload. Naming an id the
+  // caller can't see is inert — reconcileServerRows only reconciles rows
+  // already in baseById, and scopeLoc still fences non-admins to their own
+  // location here exactly as it does below.
+  const idsParam = url.searchParams.get('ids')
+  if (idsParam) {
+    const requestedLoc = url.searchParams.get('location_uuid')
+    const scopeLoc = isAdmin(hubUser.role) ? (requestedLoc || null) : hubUser.location_id
+    // Drop non-uuids rather than handing them to PostgREST, which would 500
+    // the whole batch on 22P02 for one malformed id.
+    const ids = idsParam.split(',').map(s => s.trim()).filter(s => UUID_RE.test(s)).slice(0, IDS_MAX)
+    if (ids.length === 0) return NextResponse.json({ rows: [], total: 0 })
+
+    let q = supabaseService.from('engagements').select('*').in('id', ids)
+    if (scopeLoc) q = q.eq('location_uuid', scopeLoc)
+    const { data, error } = await q
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (!data || data.length === 0) return NextResponse.json({ rows: [], total: 0 })
+
+    const rows = await enrichBoardRows(data)
+    return NextResponse.json({ rows, total: rows.length })
+  }
 
   // ── OPEN mode: the board's focus-revalidation read ──────────────
   // GET /api/engagements?open=1[&location_uuid=]
@@ -83,91 +218,12 @@ export async function GET(req: Request) {
 
     if (openRows.length === 0) return NextResponse.json({ rows: [], total: 0 })
 
-    const clientIds = Array.from(new Set(openRows.map(r => r.client_id).filter(Boolean)))
-    const engIds = openRows.map(r => r.id)
-
-    // client name/contact for the joined card headline.
-    const infoById: Record<string, { name: string; phone: string | null; email: string | null }> = {}
-    if (clientIds.length > 0) {
-      const { data: leads } = await supabaseService
-        .from('leads').select('id, name, phone, email').in('id', clientIds)
-      for (const l of leads ?? []) infoById[l.id] = { name: l.name || 'Unknown', phone: l.phone || null, email: l.email || null }
-    }
-
-    // repeat_count: ALL engagements per client (closed included), the same
-    // count _hub-page's all-engagements sweep produces.
-    const repeatCounts: Record<string, number> = {}
-    if (clientIds.length > 0) {
-      for (let i = 0; i < clientIds.length; i += 200) {
-        const chunk = clientIds.slice(i, i + 200)
-        const { data } = await supabaseService
-          .from('engagements').select('id, client_id').in('client_id', chunk)
-        for (const r of data ?? []) repeatCounts[r.client_id] = (repeatCounts[r.client_id] || 0) + 1
-      }
-    }
-
-    // Child rows by engagement_id — same projection _hub-page ships for the
-    // board chips (value/status derivation + linked-vs-local gate).
-    const byEng = <T extends { engagement_id?: string | null }>(rows: T[] | null) => {
-      const out: Record<string, T[]> = {}
-      ;(rows || []).forEach(r => {
-        if (!r.engagement_id) return
-        ;(out[r.engagement_id] ||= []).push(r)
-      })
-      return out
-    }
-    const fetchByEng = async (table: string, cols: string): Promise<any[]> => {
-      const acc: any[] = []
-      for (let i = 0; i < engIds.length; i += 200) {
-        const chunk = engIds.slice(i, i + 200)
-        const { data, error } = await supabaseService.from(table).select(cols).in('engagement_id', chunk)
-        if (error) {
-          console.error(`[engagements?open] ${table} child fetch failed: ${error.message}`)
-          continue
-        }
-        acc.push(...(data || []))
-      }
-      return acc
-    }
-    const [quotesRaw, jobsRaw, invoicesRaw, assessmentsRaw, serviceReqsRaw] = await Promise.all([
-      fetchByEng('quotes', 'id, engagement_id, status, total, sent_at, approved_at'),
-      fetchByEng('jobs', 'id, engagement_id, status, title, scheduled_start, completed_at'),
-      fetchByEng('invoices', 'id, engagement_id, status, total, balance_owing'),
-      fetchByEng('assessments', 'id, engagement_id, scheduled_at, status, completed_at'),
-      fetchByEng('service_requests', 'id, engagement_id'),
-    ])
-    const quotesByEng = byEng(quotesRaw)
-    const jobsByEng = byEng(jobsRaw)
-    const invoicesByEng = byEng(invoicesRaw)
-    const assessmentsByEng = byEng(assessmentsRaw)
-    const serviceReqsByEng = byEng(serviceReqsRaw)
-
-    const rows = openRows.map((e: any) => ({
-      ...e,
-      client_name: infoById[e.client_id]?.name || 'Unknown',
-      client_phone: infoById[e.client_id]?.phone ?? null,
-      client_email: infoById[e.client_id]?.email ?? null,
-      repeat_count: repeatCounts[e.client_id] || 1,
-      quotes: (quotesByEng[e.id] || []).map((q: any) => ({
-        id: q.id, status: q.status, total: q.total, sent_at: q.sent_at, approved_at: q.approved_at,
-      })),
-      jobs: (jobsByEng[e.id] || []).map((j: any) => ({
-        id: j.id, status: j.status, title: j.title, scheduled_start: j.scheduled_start, completed_at: j.completed_at,
-      })),
-      invoices: (invoicesByEng[e.id] || []).map((i: any) => ({
-        id: i.id, status: i.status, total: i.total, balance_owing: i.balance_owing,
-      })),
-      assessments: (assessmentsByEng[e.id] || []).map((a: any) => ({
-        id: a.id, scheduled_at: a.scheduled_at, status: a.status, completed_at: a.completed_at,
-      })),
-      service_requests: (serviceReqsByEng[e.id] || []).map((sr: any) => ({ id: sr.id })),
-    }))
-
+    const rows = await enrichBoardRows(openRows)
     return NextResponse.json({ rows, total: rows.length })
   }
 
   if (url.searchParams.get('closed') !== '1') {
-    return NextResponse.json({ error: 'unsupported_query', hint: 'only closed=1 or open=1 is served here' }, { status: 400 })
+    return NextResponse.json({ error: 'unsupported_query', hint: 'only closed=1, open=1 or ids= is served here' }, { status: 400 })
   }
   const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0)
   const limit = Math.min(500, Math.max(1, parseInt(url.searchParams.get('limit') || '200', 10) || 200))
