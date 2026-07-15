@@ -669,6 +669,7 @@ export default function HiveShell({
           onClose={() => { setOverlay(null); onCloseRecord() }}
           onOpenClient={openClient}
           onChanged={applyEngagementPatch}
+          onCallLogged={applyTouchpoint}
           onReopened={(row) => {
             // Inject the freshly-open row into the session set (the founding
             // "show-without-reload" seam) so it lands in the OPEN columns

@@ -180,7 +180,7 @@ function MilestoneRow({ kind, primary, secondary = null, state = null, href = nu
   )
 }
 
-export default function EngagementPanel({ engagementId, seed = null, people = [], locationUsers = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onReopened = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [], closeLostReasons: [] }, readOnly = false }) {
+export default function EngagementPanel({ engagementId, seed = null, people = [], locationUsers = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onReopened = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [], closeLostReasons: [] }, readOnly = false }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -291,6 +291,10 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
       setTouchNote(''); setTouchOpen(false)
       if (j.touchpoint) {
         setData(d => d ? { ...d, children: { ...d.children, touchpoints: [{ ...j.touchpoint, user_label: 'You' }, ...(d.children.touchpoints || [])] } } : d)
+        // Hand the CONFIRMED row up so the person re-derives across every
+        // lens, same seam the Inbox's Log call uses. Raw row, real id —
+        // the shell dedupes on it against the next server echo.
+        onCallLogged(client.id, j.touchpoint)
       }
       setToast({ kind: 'success', msg: 'Touchpoint logged' })
     } catch (e) {
