@@ -20,8 +20,9 @@ import ClientDirectory from './ClientDirectory'
 import InboxScreen from './InboxScreen'
 import ClientProfile from './ClientProfile'
 import NewClientSheet from './NewClientSheet'
-import { mapLeadToPerson } from '@/lib/people-mapper'
+import { mapLeadToPerson, touchpointToTimelineEntry } from '@/lib/people-mapper'
 import { leadColsToPersonFields } from './shared/leadPatchMap'
+import { mergePeopleTouches } from './shared/peopleTouchPatch'
 import { deriveClientStatus } from './shared/clientStatus'
 import { isTerminal, CLOSED_WON } from './shared/stageConfig'
 import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount } from './shared/engagementStatus'
@@ -179,6 +180,15 @@ export default function HiveShell({
   //        | { type:'person', person }  ← pre-engagement card (Inbox rows)
   const [overlay, setOverlay] = useState(null)
   const [rowPatches, setRowPatches] = useState({})
+  // The log-call override — rowPatches' opposite number for PEOPLE: personId →
+  // CONFIRMED reach_out timeline entries logged this session. It lives HERE,
+  // not in the Inbox, because client status is DERIVED from
+  // person.outreachTimeline (clientStatus.js) by every lens: the Inbox's old
+  // Inbox-local Set moved its own row and left the directory and the badge
+  // still reading New until a reload. Merged in mergePeopleTouches, which is
+  // additive-BY-ID rather than last-wins — appends can't use rowPatches'
+  // precedence without double-counting the call once a refetch echoes it.
+  const [touchPatches, setTouchPatches] = useState({})
   // Server truth re-fetched on focus/visibility (below rowPatches in the
   // merge). Keyed by id; each refetch overwrites — never holds local intent.
   const [serverRevalidated, setServerRevalidated] = useState({})
@@ -288,6 +298,22 @@ export default function HiveShell({
     if (!id || !patch) return
     setRowPatches(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))
     if (patch.stage && isTerminal(patch.stage)) setReopenedIds(prev => prev.filter(x => x !== id))
+  }, [])
+
+  // THE single touchpoint hand-up seam — applyEngagementPatch's counterpart.
+  // The Inbox's Log call hands the CONFIRMED inserted row up here (never an
+  // optimistic stub, so the id is the real one); projecting it through the
+  // same people-mapper function hydration uses makes the local entry identical
+  // to what the next reload brings back, which is what lets the merge dedupe
+  // on id instead of stacking a second reach_out.
+  const applyTouchpoint = useCallback((personId, row) => {
+    if (!personId || !row || !row.id) return
+    const entry = touchpointToTimelineEntry(row)
+    setTouchPatches(prev => {
+      const cur = prev[personId] || []
+      if (cur.some(t => t.id === entry.id)) return prev
+      return { ...prev, [personId]: [...cur, entry] }
+    })
   }, [])
 
   // ── revalidation: reconcile a fresh open set into serverRevalidated ──
@@ -426,12 +452,19 @@ export default function HiveShell({
   const nowMs = Date.now()
   const openCount = openFiltered.filter(e => passesEngagementFilters(e, workFilters, nowMs)).length
 
+  // Layer: page-load snapshot → local log-call override. ONE merge, here, so
+  // every lens below derives client status through it — that is the whole
+  // point of lifting the override out of the Inbox. Additive by id: a refetch
+  // that carries the touchpoint retires the override instead of stacking on it
+  // (mergePeopleTouches returns `people` itself, so no re-render).
+  const patchedPeople = useMemo(() => mergePeopleTouches(people, touchPatches), [people, touchPatches])
+
   // Inbox badge: New + Attempting in the current location scope. The
   // won set (session-closed Won + hydrated person.wonEngagements inside
   // the derivation) keeps won clients out of the count — same inputs as
   // the Inbox worklist itself.
   const inboxCount = useMemo(() => {
-    const scopedPeople = locFilter === 'all' ? people : people.filter(p => p.locationId === locFilter)
+    const scopedPeople = locFilter === 'all' ? patchedPeople : patchedPeople.filter(p => p.locationId === locFilter)
     const openIds = new Set(openFiltered.map(e => e.client_id))
     const wonIds = new Set(filtered.filter(e => e.stage === CLOSED_WON).map(e => e.client_id))
     let n = 0
@@ -440,7 +473,7 @@ export default function HiveShell({
       if (s === 'New' || s === 'Attempting') n++
     }
     return n
-  }, [people, locFilter, openFiltered, filtered])
+  }, [patchedPeople, locFilter, openFiltered, filtered])
 
   const tabPills = TABS.map(t => <TabPill key={t.key} tab={t} active={t.key === lens} onSelect={() => pickLens(t.key)} badgeCount={t.badge ? inboxCount : null} />)
   // Desktop "New" pill — the ONE solid chrome element, visible from all
@@ -517,17 +550,18 @@ export default function HiveShell({
 
       {lens === 'inbox' ? (
         <InboxScreen
-          people={people}
+          people={patchedPeople}
           engagements={patched}
           locFilter={locFilter}
           onOpenPerson={openPerson}
           onSendToJobber={onSendToJobber}
+          onCallLogged={applyTouchpoint}
           setToast={setToast}
           readOnly={readOnly}
         />
       ) : lens === 'clients' ? (
         <ClientDirectory
-          people={people}
+          people={patchedPeople}
           engagements={patched}
           locFilter={locFilter}
           onOpenClient={openClient}
@@ -590,7 +624,7 @@ export default function HiveShell({
 
       {newClientOpen && (
         <NewClientSheet
-          people={people}
+          people={patchedPeople}
           readOnly={readOnly}
           onPartnerCreated={onPartnerCreated}
           engagements={filtered}
@@ -629,7 +663,7 @@ export default function HiveShell({
           key={overlay.engagement.id}
           engagementId={overlay.engagement.id}
           seed={overlay.engagement}
-          people={people}
+          people={patchedPeople}
           locationUsers={locationUsers}
           readOnly={readOnly}
           onClose={() => { setOverlay(null); onCloseRecord() }}
@@ -650,7 +684,7 @@ export default function HiveShell({
           onSendToJobber={(clientId, opts) => {
             // Founded-not-sent send (engagement-scoped): resolve the person
             // the popup needs — same lookup as ClientProfile below.
-            const p = people.find(x => x.id === clientId)
+            const p = patchedPeople.find(x => x.id === clientId)
             if (p) onSendToJobber(p, opts)
             else setToast({ kind: 'error', msg: 'Client record not loaded — try the classic view' })
           }}
@@ -676,14 +710,14 @@ export default function HiveShell({
             setOverlay(o => (o && o.type === 'client' ? { ...o, clientId: id } : o))
             onOpenClient(id, { replace: true })
           }}
-          people={people}
+          people={patchedPeople}
           locationUsers={locationUsers}
           onClose={() => { setOverlay(null); onCloseRecord() }}
           onOpenEngagement={openEngagement}
           onLeadPatched={handleLeadPatched}
           onPartnerCreated={onPartnerCreated}
           onSendToJobber={(clientId) => {
-            const p = people.find(x => x.id === clientId)
+            const p = patchedPeople.find(x => x.id === clientId)
             if (p) onSendToJobber(p)
             else setToast({ kind: 'error', msg: 'Client record not loaded — try the classic view' })
           }}

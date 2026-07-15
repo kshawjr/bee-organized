@@ -84,6 +84,29 @@ function fmtCreatedShort(iso: string | null | undefined): string {
   }
 }
 
+// The touchpoints-row → outreachTimeline-entry projection.
+//
+// Exported because the hydration path is no longer the only producer: the
+// Inbox's Log call hands its CONFIRMED insert up to HiveShell, which layers
+// the entry onto the page-load snapshot so every lens re-derives without a
+// reload (components/hive/shared/peopleTouchPatch.js). Routing BOTH producers
+// through THIS function is what makes the local entry byte-identical to the
+// one the next reload hydrates — so the merge can dedupe on `id` and the two
+// layers can never disagree about the same row.
+export function touchpointToTimelineEntry(t: any) {
+  return {
+    id: t.id,
+    type: t.kind,
+    method: t.method,
+    label: t.label,
+    ts: fmtDateTime(t.occurred_at),
+    // Raw ISO for accurate sorting alongside drip items (which come from
+    // the API as ISO). `ts` is the human-readable display string.
+    occurred_at: t.occurred_at,
+    status: t.status || 'done',
+  }
+}
+
 function fmtDateTime(iso: string | null | undefined): string {
   if (!iso) return ''
   try {
@@ -155,17 +178,7 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
   const allTouchpoints = (joined.touchpoints || []).slice().sort(
     (a, b) => new Date(a.occurred_at).getTime() - new Date(b.occurred_at).getTime()
   )
-  const outreachTimeline = allTouchpoints.map(t => ({
-    id: t.id,
-    type: t.kind,
-    method: t.method,
-    label: t.label,
-    ts: fmtDateTime(t.occurred_at),
-    // Raw ISO for accurate sorting alongside drip items (which come from
-    // the API as ISO). `ts` is the human-readable display string.
-    occurred_at: t.occurred_at,
-    status: t.status || 'done',
-  }))
+  const outreachTimeline = allTouchpoints.map(t => touchpointToTimelineEntry(t))
   const activity = allTouchpoints
     .filter(t => t.kind === 'system' || t.kind === 'stage_change')
     .map(t => ({

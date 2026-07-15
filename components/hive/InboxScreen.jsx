@@ -218,16 +218,15 @@ function RowMenu({ anchorId, isMobile, onClose, children }) {
   )
 }
 
-export default function InboxScreen({ people = [], engagements = [], locFilter = 'all', onOpenPerson = () => {}, onSendToJobber = () => {}, setToast = () => {}, readOnly = false }) {
+export default function InboxScreen({ people = [], engagements = [], locFilter = 'all', onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, setToast = () => {}, readOnly = false }) {
   const [busyId, setBusyId] = useState(null)
-  // Local session overrides: a logged call moves the row to Attempting
-  // immediately (the real touchpoint is written; derivation catches up
-  // on next load).
-  const [loggedIds, setLoggedIds] = useState(() => new Set())
-  // Soft-removal Sets, one per action (all mirror loggedIds): the row
-  // leaves the worklist instantly, and a Realtime re-insert of the same
-  // person can't bring it back this session even if the refetched row
-  // races ahead of the PATCH landing.
+  // Soft-removal Sets, one per action: the row leaves the worklist
+  // instantly, and a Realtime re-insert of the same person can't bring it
+  // back this session even if the refetched row races ahead of the PATCH
+  // landing. These stay Inbox-LOCAL on purpose — they suppress a row in
+  // THIS worklist and mean nothing to the other lenses. A logged call is
+  // the opposite: it changes what the person IS, so it lives in HiveShell
+  // (touchPatches) and re-derives everywhere. See logCall below.
   const [junkedIds, setJunkedIds] = useState(() => new Set())
   const [snoozedIds, setSnoozedIds] = useState(() => new Set())
   const [dismissedIds, setDismissedIds] = useState(() => new Set())
@@ -283,8 +282,11 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     engagements.filter(e => e.stage === CLOSED_WON).map(e => e.client_id)
   ), [engagements])
 
-  const reachCount = (p) => (p.outreachTimeline || []).filter(t => t.type === 'reach_out').length + (loggedIds.has(p.id) ? 1 : 0)
-  const lastReach = (p) => Math.max(0, ...(p.outreachTimeline || []).filter(t => t.type === 'reach_out').map(t => new Date(t.occurred_at || 0).getTime() || 0), loggedIds.has(p.id) ? nowMs : 0)
+  // A call logged this session is already IN outreachTimeline (HiveShell
+  // layers it on before people reaches us), so these read the timeline
+  // alone — no local splice to keep in sync with the derivation.
+  const reachCount = (p) => (p.outreachTimeline || []).filter(t => t.type === 'reach_out').length
+  const lastReach = (p) => Math.max(0, ...(p.outreachTimeline || []).filter(t => t.type === 'reach_out').map(t => new Date(t.occurred_at || 0).getTime() || 0))
 
   const passesInboxFilters = (p) => {
     if (filters.sources.length && !filters.sources.includes((p.source || '').toLowerCase() || 'unknown')) return false
@@ -317,8 +319,11 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       if (snoozedIds.has(p.id) || (p.snoozeUntil && new Date(p.snoozeUntil).getTime() > nowMs)) continue
       if (p.inboxDismissedAt || dismissedIds.has(p.id)) continue
       if (!passesInboxFilters(p)) continue
+      // The section IS the derivation now: a call logged this session is in
+      // the timeline, so the person derives Attempting here and everywhere
+      // else — no Inbox-local reassignment papering over a stale snapshot.
       const status = deriveClientStatus(p, openClientIds, nowMs, wonClientIds)
-      if (status === 'New') (loggedIds.has(p.id) ? working : fresh).push(p)
+      if (status === 'New') fresh.push(p)
       else if (status === 'Attempting') working.push(p)
     }
     const created = (p) => new Date(p.created || 0).getTime() || 0
@@ -329,7 +334,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     fresh.sort(cmp)
     working.sort(cmp)
     return { fresh, working }
-  }, [scoped, openClientIds, wonClientIds, loggedIds, junkedIds, snoozedIds, dismissedIds, filters, inboxSort]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scoped, openClientIds, wonClientIds, junkedIds, snoozedIds, dismissedIds, filters, inboxSort]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Selection universe ─────────────────────────────────────
   // The VISIBLE rows (filters + section derivation already applied),
@@ -553,8 +558,14 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lead_id: p.id, kind: 'reach_out', label: 'Reach-out', method: 'call' }),
       })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
-      setLoggedIds(prev => new Set(prev).add(p.id))
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      // Hand the CONFIRMED touchpoint UP (§8.5 direction rule — the same
+      // real-row discipline as onFounded/onCreated, never a stub). HiveShell
+      // layers it onto the people snapshot, so this row moves New →
+      // Attempting instantly AND the directory chip and the badge re-derive
+      // with it. The Inbox no longer keeps its own private truth.
+      onCallLogged(p.id, j.touchpoint)
       setToast({ kind: 'success', msg: `Call logged for ${p.name}` })
     } catch (e) {
       setToast({ kind: 'error', msg: `Log failed: ${e.message}` })
