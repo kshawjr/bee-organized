@@ -13,10 +13,15 @@ import crypto from 'crypto'
 
 const SLACK_AUTH_URL = 'https://slack.com/oauth/v2/authorize'
 
-// Bot scopes: chat:write to post the notification, channels:read for channel
-// metadata, incoming-webhook so the install picks the target channel inside
-// Slack and hands back its id/name.
-const SLACK_SCOPES = 'chat:write,channels:read,incoming-webhook'
+// Bot scopes: chat:write to post the notification, chat:write.public so the bot
+// can post to a public channel it hasn't been manually invited to (kills the
+// not_in_channel step at scale), channels:read for channel metadata,
+// incoming-webhook so the install picks the target channel inside Slack and
+// hands back its id/name, and users:read + users:read.email so users.info can
+// resolve a clicking Slack user → email for touchpoint attribution (the email
+// field requires users:read.email AND users.info itself requires users:read).
+const SLACK_SCOPES =
+  'chat:write,chat:write.public,channels:read,incoming-webhook,users:read,users:read.email'
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
