@@ -183,12 +183,21 @@ describe('log call re-derives across lenses (HiveShell)', () => {
 
   const rowText = () => container.textContent || ''
 
+  // The row's phone icon OPENS the shared TouchpointModal now (prefilled to
+  // 'call') instead of firing a hardcoded one-click write — so the log is two
+  // gestures: the row affordance, then the modal's commit.
   const clickLogCall = async () => {
     const btn = Array.from(container.querySelectorAll('button'))
       .find(b => (b.getAttribute('aria-label') || '') === 'Log call')
     expect(btn, 'Log call button should be on the New row').toBeTruthy()
     await act(async () => { btn!.click() })
+
+    const commit = Array.from(container.querySelectorAll('button'))
+      .find(b => (b.textContent || '').trim() === 'Log call')
+    expect(commit, 'the row action should open the modal, whose footer restates the method').toBeTruthy()
+    await act(async () => { commit!.click() })
     // let the POST promise + the hand-up settle
+    await act(async () => { await Promise.resolve() })
     await act(async () => { await Promise.resolve() })
   }
 

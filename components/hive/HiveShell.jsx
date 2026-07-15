@@ -301,11 +301,12 @@ export default function HiveShell({
   }, [])
 
   // THE single touchpoint hand-up seam — applyEngagementPatch's counterpart.
-  // The Inbox's Log call hands the CONFIRMED inserted row up here (never an
-  // optimistic stub, so the id is the real one); projecting it through the
-  // same people-mapper function hydration uses makes the local entry identical
-  // to what the next reload brings back, which is what lets the merge dedupe
-  // on id instead of stacking a second reach_out.
+  // All THREE logging surfaces (Inbox row, engagement card, client profile —
+  // one shared TouchpointModal behind each) hand the CONFIRMED inserted row up
+  // here (never an optimistic stub, so the id is the real one); projecting it
+  // through the same people-mapper function hydration uses makes the local
+  // entry identical to what the next reload brings back, which is what lets
+  // the merge dedupe on id instead of stacking a second reach_out.
   const applyTouchpoint = useCallback((personId, row) => {
     if (!personId || !row || !row.id) return
     const entry = touchpointToTimelineEntry(row)
@@ -717,6 +718,7 @@ export default function HiveShell({
           onOpenEngagement={openEngagement}
           onLeadPatched={handleLeadPatched}
           onPartnerCreated={onPartnerCreated}
+          onCallLogged={applyTouchpoint}
           onSendToJobber={(clientId) => {
             const p = patchedPeople.find(x => x.id === clientId)
             if (p) onSendToJobber(p)

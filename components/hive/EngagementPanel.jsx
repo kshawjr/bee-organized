@@ -62,12 +62,13 @@ import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX,
 import NotesStream from './NotesStream'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
+import TouchpointModal from './TouchpointModal'
 import MetaSelect from './MetaSelect'
 import Timeline from './shared/Timeline'
 import CardTabs from './shared/CardTabs'
 import InitialsAvatar from './shared/InitialsAvatar'
 import EngagementAssignees from './shared/EngagementAssignees'
-import { MicroLabel, quietBtn, ActionRow, actionBtn, metaValueBtn } from './shared/cardKit'
+import { MicroLabel, ActionRow, actionBtn, metaValueBtn } from './shared/cardKit'
 import { EditPencil } from './shared/inlineEdit'
 import RecordMenu from './shared/RecordMenu'
 import CloseLostWizard from './shared/CloseLostWizard'
@@ -184,9 +185,10 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
+  // The touchpoint composer is the shared center modal (TouchpointModal)
+  // — the old inline select+input+Log wedge that lived on this row is
+  // gone, and its method/note state went with it into the modal.
   const [touchOpen, setTouchOpen] = useState(false)
-  const [touchMethod, setTouchMethod] = useState('call')
-  const [touchNote, setTouchNote] = useState('')
   const [busy, setBusy] = useState(false)
   // The ··· masthead menu drives the close-out wizards (Won/Lost) and
   // Reopen — the standalone action-bar Close… button was retired here.
@@ -270,7 +272,12 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     }
   }
 
-  async function logTouchpoint() {
+  // Called by TouchpointModal with the composed payload — the write and
+  // the hand-up stay here (this surface is the only one that anchors the
+  // touchpoint to an engagement). `status` is the optional outcome and
+  // rides ONLY when picked, so a plain log posts the byte-identical body
+  // it always has.
+  async function logTouchpoint({ method, status, notes }) {
     if (!client) return
     setBusy(true)
     try {
@@ -281,14 +288,15 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           lead_id: client.id,
           kind: 'reach_out',
           label: 'Reach-out',
-          method: touchMethod,
-          notes: touchNote.trim() || null,
+          method,
+          ...(status ? { status } : {}),
+          notes: notes || null,
           engagement_id: engagementId,
         }),
       })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      setTouchNote(''); setTouchOpen(false)
+      setTouchOpen(false)
       if (j.touchpoint) {
         setData(d => d ? { ...d, children: { ...d.children, touchpoints: [{ ...j.touchpoint, user_label: 'You' }, ...(d.children.touchpoints || [])] } } : d)
         // Hand the CONFIRMED row up so the person re-derives across every
@@ -637,7 +645,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
           </a>
         )}
         {!readOnly && (
-          <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
+          <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(true)}>
             Log touchpoint
           </button>
         )}
@@ -654,20 +662,13 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
         {/* Close… moved to the masthead ··· menu (Part 1) — the close-out
             wizards live there now, not as a standalone action-bar button. */}
       </ActionRow>
-      {!readOnly && touchOpen && (
-        <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <select value={touchMethod} onChange={e => setTouchMethod(e.target.value)}
-            style={{ padding: '8px 10px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', background: T.surface.raised }}>
-            <option value="call">Call</option>
-            <option value="sms">Text</option>
-            <option value="email">Email</option>
-            <option value="in_person">In person</option>
-          </select>
-          <input value={touchNote} onChange={e => setTouchNote(e.target.value)} placeholder="Notes (optional)…"
-            onKeyDown={e => { if (e.key === 'Enter') logTouchpoint() }}
-            style={{ flex: 1, minWidth: '140px', padding: '8px 12px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
-          <button style={{ ...quietBtn(), minHeight: 0 }} disabled={busy} onClick={logTouchpoint}>Log</button>
-        </div>
+      {!readOnly && touchOpen && client && (
+        <TouchpointModal
+          personName={client.name}
+          subline={eng?.title || null}
+          onClose={() => setTouchOpen(false)}
+          onSubmit={logTouchpoint}
+        />
       )}
     </div>
   )

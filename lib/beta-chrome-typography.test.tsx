@@ -261,11 +261,15 @@ describe('shared structural components — one markup, affordances intact', () =
     expect([...dir.querySelectorAll('button')].find(b => (b.textContent || '').startsWith('Load '))).toBeFalsy()
   })
 
-  it('Inbox Log call button still posts the touchpoint', async () => {
+  it('Inbox Log call button still reaches the touchpoint write (via the shared composer)', async () => {
     const container = mount(<InboxScreen people={[newPerson()] as any} engagements={[]} />)
     const logBtn = container.querySelector('button[aria-label="Log call"]')!
     expect(logBtn).toBeTruthy()
     await fire(logBtn)
+    // The row action opens TouchpointModal now; the footer commits the write.
+    const commit = [...container.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'Log call')!
+    expect(commit).toBeTruthy()
+    await fire(commit)
     expect(fetchMock).toHaveBeenCalled()
     expect(String(fetchMock.mock.calls[0][0])).toContain('/api/touchpoints')
   })

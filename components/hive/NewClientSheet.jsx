@@ -54,6 +54,7 @@ import { lastActivityTs } from './shared/engagementStatus'
 import { matchPeople, normalizeEmail, normalizePhone, queryLeadMatches, maskEmail, maskPhone } from './shared/clientMatch'
 import { createClient } from '@/lib/supabase'
 import { IconSearch, IconPlus, IconUserCheck, IconSparkles, IconAlertTriangle, IconCheck, IconSend } from '@/components/ui/icons'
+import { inp, lbl } from './shared/formKit'
 import { T } from './shared/tokens'
 
 const ACCENT = T.accent.fg // THE action accent
@@ -70,15 +71,6 @@ const fmtDate = (d) => {
 const initialsOf = (name) =>
   (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?'
 
-const inp = {
-  width: '100%', padding: '9px 11px', border: T.border.strong,
-  borderRadius: T.radius.control, fontSize: '16px', fontFamily: 'inherit', color: T.ink.primary,
-  background: T.surface.raised, outline: 'none', boxSizing: 'border-box',
-}
-const lbl = {
-  fontSize: '11px', fontWeight: 500, color: T.ink.muted, letterSpacing: '0.6px',
-  textTransform: 'uppercase', marginBottom: '4px', display: 'block',
-}
 const primaryBtn = {
   width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
   padding: '10px 14px', borderRadius: T.radius.control, border: 'none',

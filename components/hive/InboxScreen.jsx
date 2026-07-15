@@ -60,6 +60,7 @@ import { TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY } from '@/components/ui/tokens
 import { T } from './shared/tokens'
 import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock, IconDots } from '@/components/ui/icons'
 import InitialsAvatar from './shared/InitialsAvatar'
+import TouchpointModal, { METHODS } from './TouchpointModal'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
@@ -220,6 +221,11 @@ function RowMenu({ anchorId, isMobile, onClose, children }) {
 
 export default function InboxScreen({ people = [], engagements = [], locFilter = 'all', onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, setToast = () => {}, readOnly = false }) {
   const [busyId, setBusyId] = useState(null)
+  // The person whose touchpoint composer is open — the row's phone icon
+  // sets it, TouchpointModal at the bottom of the tree renders it. Held
+  // as the person (not just an id) so the modal's subline survives the
+  // row re-deriving out of its section the moment the log lands.
+  const [touchFor, setTouchFor] = useState(null)
   // Soft-removal Sets, one per action: the row leaves the worklist
   // instantly, and a Realtime re-insert of the same person can't bring it
   // back this session even if the refetched row races ahead of the PATCH
@@ -550,13 +556,18 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     }
   }
 
-  async function logCall(p) {
+  // The row's phone icon OPENS the shared composer now (touchFor) rather
+  // than writing a hardcoded call on one click — same modal the card and
+  // the profile use, prefilled to 'call' since that's what the row's
+  // affordance means. This is the submit half; `p` is the row's person
+  // and the payload is the modal's.
+  async function logCall(p, { method, status, notes }) {
     setBusyId(p.id)
     try {
       const res = await fetch('/api/touchpoints', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lead_id: p.id, kind: 'reach_out', label: 'Reach-out', method: 'call' }),
+        body: JSON.stringify({ lead_id: p.id, kind: 'reach_out', label: 'Reach-out', method, ...(status ? { status } : {}), ...(notes ? { notes } : {}) }),
       })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
@@ -566,7 +577,9 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       // Attempting instantly AND the directory chip and the badge re-derive
       // with it. The Inbox no longer keeps its own private truth.
       onCallLogged(p.id, j.touchpoint)
-      setToast({ kind: 'success', msg: `Call logged for ${p.name}` })
+      setTouchFor(null)
+      const what = METHODS.find(m => m.value === method)?.label || 'Touchpoint'
+      setToast({ kind: 'success', msg: `${what} logged for ${p.name}` })
     } catch (e) {
       setToast({ kind: 'error', msg: `Log failed: ${e.message}` })
     } finally {
@@ -597,7 +610,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
             in the secondary line is the one that dials). */}
         {pill === 'New' && (
           <GhostIconButton label="Log call" icon={IconPhone} disabled={busyId === p.id}
-            onClick={(ev) => { ev.stopPropagation(); logCall(p) }} />
+            onClick={(ev) => { ev.stopPropagation(); setTouchFor(p) }} />
         )}
         {canSend && (
           <GhostIconButton label="Send to Jobber" icon={IconSend} disabled={busyId === p.id}
@@ -879,6 +892,15 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
             )}
           </div>
         </div>
+      )}
+
+      {touchFor && !readOnly && (
+        <TouchpointModal
+          personName={touchFor.name}
+          initialMethod="call"
+          onClose={() => setTouchFor(null)}
+          onSubmit={(payload) => logCall(touchFor, payload)}
+        />
       )}
     </div>
   )

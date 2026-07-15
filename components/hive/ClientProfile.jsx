@@ -53,6 +53,7 @@ import {
 } from '@/components/ui/icons'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
+import TouchpointModal from './TouchpointModal'
 import ContactField from './shared/ContactField'
 import AddressField from './shared/AddressField'
 import SourceField from './shared/SourceField'
@@ -66,7 +67,7 @@ import CardTabs from './shared/CardTabs'
 import PinnedBuzz from './shared/PinnedBuzz'
 import InitialsAvatar from './shared/InitialsAvatar'
 import NotesStream from './NotesStream'
-import { MicroLabel, quietBtn, CardMenu, undoToast, ActionRow, actionBtn } from './shared/cardKit'
+import { MicroLabel, CardMenu, undoToast, ActionRow, actionBtn } from './shared/cardKit'
 import useIsMobile from './shared/useIsMobile'
 
 const QUIET = T.surface.sunken
@@ -86,15 +87,16 @@ const STAGE_ICON = {
 // siblings/onNavigate: the opener's natural ordering (e.g. the client
 // directory's visible rows). When absent the prev/next chevrons hide —
 // a panel→profile swap or a fresh create has no "next client".
-export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, lookupOptions = { sources: [], projectTypes: [], clientTags: [] }, locationUsers = [], siblings = null, onNavigate = () => {}, readOnly = false }) {
+export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, lookupOptions = { sources: [], projectTypes: [], clientTags: [] }, locationUsers = [], siblings = null, onNavigate = () => {}, readOnly = false }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
   const [showClosed, setShowClosed] = useState(false)
   const [showAllReferred, setShowAllReferred] = useState(false)
+  // The touchpoint composer is the shared center modal (TouchpointModal)
+  // — the old inline select+input+Log wedge is gone and its method/note
+  // state went with it into the modal.
   const [touchOpen, setTouchOpen] = useState(false)
-  const [touchMethod, setTouchMethod] = useState('call')
-  const [touchNote, setTouchNote] = useState('')
   const [busy, setBusy] = useState(false)
   const nowMs = Date.now()
 
@@ -225,17 +227,31 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
     }
   }
 
-  async function logTouchpoint() {
+  // Called by TouchpointModal with the composed payload. This used to
+  // fabricate an `id: tmp-<now>` row and throw the server's away — a
+  // landmine, because that id can never match the echo the next refetch
+  // brings back, so the moment it was handed up to the shell the person
+  // would carry the touchpoint TWICE, forever. It reads the real row
+  // now, exactly like EngagementPanel, which is what makes the hand-up
+  // below safe (applyTouchpoint dedupes on the server id).
+  // `status` is the optional outcome and rides ONLY when picked.
+  async function logTouchpoint({ method, status, notes }) {
     if (!c) return
     setBusy(true)
     try {
       const res = await fetch('/api/touchpoints', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lead_id: c.id, kind: 'reach_out', label: 'Reach-out', method: touchMethod, notes: touchNote.trim() || null }),
+        body: JSON.stringify({ lead_id: c.id, kind: 'reach_out', label: 'Reach-out', method, ...(status ? { status } : {}), notes: notes || null }),
       })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`)
-      setTouchNote(''); setTouchOpen(false)
-      setData(d => d ? { ...d, touchpoints: [{ id: `tmp-${Date.now()}`, kind: 'reach_out', method: touchMethod, label: 'Reach-out', occurred_at: new Date().toISOString() }, ...d.touchpoints] } : d)
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      setTouchOpen(false)
+      if (j.touchpoint) {
+        setData(d => d ? { ...d, touchpoints: [{ ...j.touchpoint, user_label: 'You' }, ...d.touchpoints] } : d)
+        // Same seam the Inbox and the engagement card use: the CONFIRMED
+        // row goes up so the person re-derives in every lens this session.
+        onCallLogged(c.id, j.touchpoint)
+      }
       setToast({ kind: 'success', msg: 'Touchpoint logged' })
     } catch (e) { setToast({ kind: 'error', msg: `Touchpoint failed: ${e.message}` }) }
     finally { setBusy(false) }
@@ -556,7 +572,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
           </a>
         )}
         {!readOnly && (
-          <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(v => !v)}>
+          <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(true)}>
             Log touchpoint
           </button>
         )}
@@ -583,20 +599,12 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
           </button>
         )}
       </ActionRow>
-      {touchOpen && !readOnly && (
-        <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <select value={touchMethod} onChange={e => setTouchMethod(e.target.value)}
-            style={{ padding: '8px 10px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', background: T.surface.raised }}>
-            <option value="call">Call</option>
-            <option value="sms">Text</option>
-            <option value="email">Email</option>
-            <option value="in_person">In person</option>
-          </select>
-          <input value={touchNote} onChange={e => setTouchNote(e.target.value)} placeholder="Notes (optional)…"
-            onKeyDown={e => { if (e.key === 'Enter') logTouchpoint() }}
-            style={{ flex: 1, minWidth: '140px', padding: '8px 12px', border: T.border.control, borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', outline: 'none' }} />
-          <button style={{ ...quietBtn(), minHeight: 0 }} disabled={busy} onClick={logTouchpoint}>Log</button>
-        </div>
+      {touchOpen && !readOnly && c && (
+        <TouchpointModal
+          personName={c.name}
+          onClose={() => setTouchOpen(false)}
+          onSubmit={logTouchpoint}
+        />
       )}
     </div>
   )

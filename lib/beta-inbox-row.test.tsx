@@ -99,11 +99,22 @@ describe('ghost icon actions', () => {
     expect(html).not.toContain('···')
   })
 
-  it('Log call still POSTs the reach_out touchpoint and never opens the PersonCard', async () => {
+  it('Log call opens the shared composer (prefilled call) and never opens the PersonCard', async () => {
+    // The row action used to fire a hardcoded one-click write. It opens the
+    // unified TouchpointModal now — same reach_out on commit, but the notes
+    // and the outcome are reachable, and the method is a choice.
     const p = person()
     const onOpenPerson = vi.fn()
     const m = await mount(inbox([p], { onOpenPerson }))
     await click(byLabel(m.host, 'Log call')!)
+    expect(touchpointPosts, 'opening the composer must not write').toHaveLength(0)
+
+    const commit = Array.from(m.host.querySelectorAll('button'))
+      .find(b => (b.textContent || '').trim() === 'Log call')
+    expect(commit, 'the modal footer restates the prefilled method').toBeTruthy()
+    await click(commit!)
+    await act(async () => { await Promise.resolve() })
+
     expect(touchpointPosts).toHaveLength(1)
     expect(touchpointPosts[0]).toMatchObject({ lead_id: p.id, kind: 'reach_out', method: 'call' })
     expect(onOpenPerson).not.toHaveBeenCalled()

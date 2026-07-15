@@ -143,21 +143,29 @@ describe('log call from the engagement card re-derives across lenses (HiveShell)
   const byText = (label: string) =>
     Array.from(container.querySelectorAll('button')).find(b => (b.textContent || '').trim() === label)
 
-  const logFromPanel = async (note?: string) => {
+  // The composer is the shared TouchpointModal now — the inline wedge
+  // (select + one-line input + "Log") is gone, so the notes field is a real
+  // textarea and the commit button restates the method.
+  const logFromPanel = async (note?: string, outcome?: string) => {
     const open = byText('Log touchpoint')
     expect(open, 'the panel action row should offer Log touchpoint').toBeTruthy()
     await act(async () => { open!.click() })
     if (note) {
-      const input = container.querySelector('input[placeholder="Notes (optional)…"]') as HTMLInputElement
-      expect(input, 'the composer should expose a notes input').toBeTruthy()
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+      const box = container.querySelector('textarea[aria-label="Notes"]') as HTMLTextAreaElement
+      expect(box, 'the modal should expose a notes textarea').toBeTruthy()
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!
       await act(async () => {
-        setter.call(input, note)
-        input.dispatchEvent(new Event('input', { bubbles: true }))
+        setter.call(box, note)
+        box.dispatchEvent(new Event('input', { bubbles: true }))
       })
     }
-    const log = byText('Log')
-    expect(log, 'the composer should expose a Log button').toBeTruthy()
+    if (outcome) {
+      const chip = byText(outcome)
+      expect(chip, `the modal should expose the ${outcome} outcome chip`).toBeTruthy()
+      await act(async () => { chip!.click() })
+    }
+    const log = byText('Log call')
+    expect(log, 'the modal footer should restate the method').toBeTruthy()
     await act(async () => { log!.click() })
     // let the POST promise + the hand-up settle
     await act(async () => { await Promise.resolve() })
@@ -168,9 +176,22 @@ describe('log call from the engagement card re-derives across lenses (HiveShell)
     await mountWithPanel()
     await logFromPanel('Left a voicemail')
 
+    // No outcome picked → the body is byte-identical to the pre-modal write.
     expect(posts).toEqual([{
       lead_id: 'p1', kind: 'reach_out', label: 'Reach-out',
       method: 'call', notes: 'Left a voicemail', engagement_id: 'eng-7',
+    }])
+  })
+
+  it('an outcome rides as touchpoints.status — and ONLY when one is picked', async () => {
+    // status is free text in the schema and the route whitelists it through,
+    // so this needs no backend; Timeline already renders it.
+    await mountWithPanel()
+    await logFromPanel('No pickup', 'Left voicemail')
+
+    expect(posts).toEqual([{
+      lead_id: 'p1', kind: 'reach_out', label: 'Reach-out',
+      method: 'call', status: 'voicemail', notes: 'No pickup', engagement_id: 'eng-7',
     }])
   })
 
@@ -239,20 +260,38 @@ describe('log call from the engagement card re-derives across lenses (HiveShell)
 })
 
 // ── wiring, source-pinned ──────────────────────────────────────
-describe('wiring: the panel is handed the shell’s touchpoint seam', () => {
+describe('wiring: every logging surface is handed the shell’s touchpoint seam', () => {
   const shell = readFileSync('components/hive/HiveShell.jsx', 'utf8')
   const panel = readFileSync('components/hive/EngagementPanel.jsx', 'utf8')
+  const profile = readFileSync('components/hive/ClientProfile.jsx', 'utf8')
 
-  it('HiveShell passes applyTouchpoint to EngagementPanel — the SAME seam the Inbox gets', () => {
-    // One seam, both surfaces: if these ever diverge the lenses go stale again.
-    expect(shell).toMatch(/onCallLogged=\{applyTouchpoint\}/)
-    expect(shell.match(/onCallLogged=\{applyTouchpoint\}/g)!.length).toBe(2)
+  it('HiveShell passes applyTouchpoint to ALL THREE logging surfaces — one seam, no divergence', () => {
+    // Inbox + EngagementPanel + ClientProfile. The count was 2 until the
+    // unified-modal build wired the profile (which wrote a touchpoint and told
+    // nobody). If a fourth surface learns to log, it gets this seam too or its
+    // writes go stale in every other lens — so this number moves deliberately.
+    const sites = shell.match(/onCallLogged=\{applyTouchpoint\}/g) || []
+    expect(sites.length).toBe(3)
+    // ...and named, so a miscount can't pass by wiring the same surface twice.
+    for (const surface of ['<InboxScreen', '<EngagementPanel', '<ClientProfile']) {
+      const from = shell.indexOf(surface)
+      expect(from, `${surface} should be rendered by the shell`).toBeGreaterThan(-1)
+      const block = shell.slice(from, shell.indexOf('/>', from))
+      expect(block, `${surface} must be handed applyTouchpoint`).toContain('onCallLogged={applyTouchpoint}')
+    }
   })
 
   it('the panel hands up the confirmed row, not an optimistic stub', () => {
     expect(panel).toMatch(/onCallLogged\(client\.id, j\.touchpoint\)/)
-    // A fabricated id is the ClientProfile bug (tmp-${Date.now()}) — it would
-    // permanently double-count here, since no echo can ever match it.
     expect(panel).not.toMatch(/tmp-\$\{Date\.now\(\)\}/)
+  })
+
+  it('the profile hands up the confirmed row — the fabricated tmp id is GONE', () => {
+    // The landmine this build defused: ClientProfile used to prepend
+    // `id: tmp-${Date.now()}` and discard the server's row. Harmless while it
+    // stayed local; a permanent double-count the moment it was handed up,
+    // because no server echo can ever match a fabricated id.
+    expect(profile).toMatch(/onCallLogged\(c\.id, j\.touchpoint\)/)
+    expect(profile).not.toMatch(/tmp-\$\{Date\.now\(\)\}/)
   })
 })
