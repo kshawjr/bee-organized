@@ -136,10 +136,13 @@ const humanizeSource = (s: string | null | undefined): string | null => {
 // ── Pure message builder ──────────────────────────────────────
 // Formats the new-lead notification as a polished card: an `attachments`
 // wrapper gives a color stripe (by project type) down the left edge, and the
-// Block Kit body inside reads top-to-bottom — eyebrow, name, a "Prefers … from
-// …" line, a 2-column field grid, an optional request-details quote, action
-// buttons, and a footer. Every soft field omits cleanly when absent (no empty
-// labels, no dangling separators): a name+phone-only lead still renders clean.
+// Block Kit body inside reads top-to-bottom — name, a "from <source>" meta
+// line, a 2-column field grid (Phone / Email / Project / Preferred contact), an
+// optional request-details quote, action buttons, and a footer. Each VALUE
+// appears exactly ONCE: source lives only in the meta line, project only in the
+// grid — no eyebrow badge, no Source grid cell (both were duplicates). Soft
+// fields omit cleanly when absent, except Preferred contact which ALWAYS renders
+// (— when empty): a name+phone-only lead still renders clean.
 // Returns:
 //   • text        — plain mrkdwn fallback (notification preview; UNCHANGED)
 //   • attachments — [{ color, blocks }] — what Slack renders as the card
@@ -172,46 +175,34 @@ export function buildLeadSlackMessage(args: {
   const projectLabel = lead.project_type?.trim() ? escapeMrkdwn(lead.project_type.trim()) : null
   const sourceRaw = humanizeSource(lead.source)
   const sourceLabel = sourceRaw ? escapeMrkdwn(sourceRaw) : null
-  const prefLabel = lead.preferred_contact?.trim()
-    ? escapeMrkdwn(lead.preferred_contact.trim().toLowerCase())
-    : null
+  // Preferred contact ALWAYS renders in the grid — dash() gives the em-dash
+  // fallback when empty (never omitted, unlike the other soft fields).
+  const prefValue = dash(lead.preferred_contact)
   const hasPhone = !!lead.phone?.trim()
   const hasEmail = !!lead.email?.trim()
 
   const blocks: any[] = []
 
-  // 2. Eyebrow — "🐝 New lead" + project type as a short inline badge.
-  blocks.push({
-    type: 'context',
-    elements: [
-      {
-        type: 'mrkdwn',
-        text: projectLabel ? `🐝 *New lead*   ·   \`${projectLabel}\`` : '🐝 *New lead*',
-      },
-    ],
-  })
-
-  // 3. Name — the prominent bold line.
+  // 2. Name — the prominent bold line, the card's first row (no eyebrow).
   blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${name}*` } })
 
-  // 4. Preferred contact line — "Prefers <label> · from <source>". Each half
-  //    omits independently; both missing → the whole line is skipped.
-  const metaBits: string[] = []
-  if (prefLabel) metaBits.push(`Prefers ${prefLabel}`)
-  if (sourceLabel) metaBits.push(`from ${sourceLabel}`)
-  if (metaBits.length) {
-    blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: metaBits.join('   ·   ') }] })
+  // 3. Source meta line — "from <source>" directly under the name; the ONLY
+  //    place source appears. Omitted when source is absent.
+  if (sourceLabel) {
+    blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `from ${sourceLabel}` }] })
   }
 
-  // 5. Fields — 2-column grid; each field omitted when its value is absent.
+  // 4. Fields — 2-column grid: Phone / Email / Project / Preferred contact.
+  //    Phone/Email/Project omit when absent; Preferred contact ALWAYS shows
+  //    (— when empty). Source is NOT here — it lives only in the meta line above.
   const fields: any[] = []
   if (hasPhone) fields.push({ type: 'mrkdwn', text: `*Phone:*\n${telLink(lead.phone)}` })
   if (hasEmail) fields.push({ type: 'mrkdwn', text: `*Email:*\n${mailtoLink(lead.email)}` })
   if (projectLabel) fields.push({ type: 'mrkdwn', text: `*Project:*\n${projectLabel}` })
-  if (sourceLabel) fields.push({ type: 'mrkdwn', text: `*Source:*\n${sourceLabel}` })
-  if (fields.length) blocks.push({ type: 'section', fields })
+  fields.push({ type: 'mrkdwn', text: `*Preferred contact:*\n${prefValue}` })
+  blocks.push({ type: 'section', fields })
 
-  // 6. What they told us — labeled quote, only when present.
+  // 5. What they told us — labeled quote, only when present.
   if (lead.request_details?.trim()) {
     blocks.push({
       type: 'section',
@@ -219,7 +210,7 @@ export function buildLeadSlackMessage(args: {
     })
   }
 
-  // 7. Actions — Log call (primary/green) + optional Open in Bee Hub. The
+  // 6. Actions — Log call (primary/green) + optional Open in Bee Hub. The
   //    log_call action_id + value (lead id) are the interactivity contract —
   //    DO NOT change them.
   const elements: any[] = [
@@ -240,13 +231,13 @@ export function buildLeadSlackMessage(args: {
   }
   blocks.push({ type: 'actions', elements })
 
-  // 8. Footer — location provenance (time omitted; the builder is pure).
+  // 7. Footer — location provenance (time omitted; the builder is pure).
   blocks.push({
     type: 'context',
     elements: [{ type: 'mrkdwn', text: `${escapeMrkdwn(locationName)} · via Bee Hub` }],
   })
 
-  // 9. Trailing divider so consecutive lead cards visually separate.
+  // 8. Trailing divider so consecutive lead cards visually separate.
   blocks.push({ type: 'divider' })
 
   return { text, attachments: [{ color: projectTypeColor(lead.project_type), fallback: summary, blocks }] }

@@ -97,9 +97,9 @@ describe('buildLeadSlackMessage — card (attachments + blocks)', () => {
     expect(typeof msg.attachments[0].color).toBe('string')
     const blocks = blocksOf(msg)
     expect(blocks[blocks.length - 1]).toEqual({ type: 'divider' })
-    // Eyebrow + prominent name.
-    expect(flat(blocks)).toContain('New lead')
-    expect(flat(blocks)).toContain('*Jane Prospect*')
+    // Card starts with the prominent name — no eyebrow "New lead" badge.
+    expect(flat(blocks)).not.toContain('New lead')
+    expect(blocks[0]).toEqual({ type: 'section', text: { type: 'mrkdwn', text: '*Jane Prospect*' } })
   })
 
   it('renders tel:/mailto: hyperlinks and the primary Log call button with the exact contract', () => {
@@ -127,31 +127,37 @@ describe('buildLeadSlackMessage — card (attachments + blocks)', () => {
     })
   })
 
-  describe('graceful omission', () => {
-    it('shows "Prefers <label> · from <source>" and both field cells when present', () => {
-      const s = flat(blocksOf(card({ preferred_contact: 'Phone', source: 'Referral' })))
-      expect(s).toContain('Prefers phone   ·   from Referral')
-      expect(s).toContain('*Source:*\\nReferral') // JSON-escaped newline
+  describe('de-dupe: each value appears exactly once', () => {
+    it('source lives ONLY in the meta line, project ONLY in the grid — no duplicate cells', () => {
+      const s = flat(blocksOf(card({ preferred_contact: 'Phone', source: 'Referral', project_type: 'Moving' })))
+      // Source: meta line only, no Source grid cell.
+      expect(s).toContain('from Referral')
+      expect(s).not.toContain('*Source:*')
+      // Project: grid cell only, no eyebrow badge.
+      expect(s).toContain('*Project:*\\nMoving')
+      expect(s.match(/Moving/g)!.length).toBe(1)
+      // Preferred contact: the grid field replacing Source.
+      expect(s).toContain('*Preferred contact:*\\nPhone')
     })
 
-    it('humanizes the webform source slug to Website', () => {
+    it('humanizes the webform source slug to Website (meta line)', () => {
       expect(flat(blocksOf(card({ source: 'web_form' })))).toContain('from Website')
     })
 
-    it('omits the source half when source is absent (no dangling separator)', () => {
+    it('omits the source meta line when source is absent', () => {
       const s = flat(blocksOf(card({ preferred_contact: 'Text', source: null })))
-      expect(s).toContain('Prefers text')
       expect(s).not.toContain('from ')
-      expect(s).not.toContain('·   from')
+      // Preferred contact still renders in the grid.
+      expect(s).toContain('*Preferred contact:*\\nText')
     })
 
-    it('drops the whole meta line when BOTH preferred-contact and source are absent', () => {
+    it('ALWAYS renders Preferred contact — em-dash when empty', () => {
       const s = flat(blocksOf(card({ preferred_contact: null, source: null })))
-      expect(s).not.toContain('Prefers')
+      expect(s).toContain('*Preferred contact:*\\n—')
       expect(s).not.toContain('from ')
     })
 
-    it('a name+phone-only lead still renders a clean card (no empty labels, no details)', () => {
+    it('a name+phone-only lead still renders a clean card (no empty labels, Preferred contact = —)', () => {
       const s = flat(blocksOf(card(
         { email: null, project_type: null, preferred_contact: null, source: null, request_details: null },
         null,
@@ -162,6 +168,8 @@ describe('buildLeadSlackMessage — card (attachments + blocks)', () => {
       expect(s).not.toContain('*Source:*')
       expect(s).not.toContain('*Project:*')
       expect(s).not.toContain('What they told us')
+      // Preferred contact always shows, em-dash when empty.
+      expect(s).toContain('*Preferred contact:*\\n—')
       // No leadUrl → only the Log call button.
       const actions = actionsOf(blocksOf(card(
         { email: null, project_type: null, preferred_contact: null, source: null, request_details: null },
