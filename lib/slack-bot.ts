@@ -136,13 +136,14 @@ const humanizeSource = (s: string | null | undefined): string | null => {
 // ── Pure message builder ──────────────────────────────────────
 // Formats the new-lead notification as a polished card: an `attachments`
 // wrapper gives a color stripe (by project type) down the left edge, and the
-// Block Kit body inside reads top-to-bottom — name, a "from <source>" meta
-// line, a 2-column field grid (Phone / Email / Project / Preferred contact), an
-// optional request-details quote, action buttons, and a footer. Each VALUE
-// appears exactly ONCE: source lives only in the meta line, project only in the
-// grid — no eyebrow badge, no Source grid cell (both were duplicates). Soft
-// fields omit cleanly when absent, except Preferred contact which ALWAYS renders
-// (— when empty): a name+phone-only lead still renders clean.
+// Block Kit body inside reads top-to-bottom — a headline section (bold name +
+// "from <source>" on two lines), a divider, a 2-column field grid (Phone /
+// Email / Project / Preferred contact), an optional (length-capped) request-
+// details quote, action buttons, and a footer. Each VALUE appears exactly ONCE:
+// source lives only in the headline, project only in the grid — no eyebrow
+// badge, no Source grid cell (both were duplicates). Soft fields omit cleanly
+// when absent, except Preferred contact which ALWAYS renders (— when empty): a
+// name+phone-only lead still renders clean.
 // Returns:
 //   • text        — plain mrkdwn fallback (notification preview; UNCHANGED)
 //   • attachments — [{ color, blocks }] — what Slack renders as the card
@@ -164,11 +165,10 @@ export function buildLeadSlackMessage(args: {
   // the card. Keep the top-level `text` to a one-line summary so ONLY the card
   // renders; the card blocks below carry every detail. The same string is set as
   // the attachment `fallback` for non-block clients / notification previews.
-  // Graceful: a missing lead name omits cleanly (no dangling ": ").
-  const leadName = lead.name?.trim() ? escapeMrkdwn(lead.name.trim()) : ''
-  const summary = leadName
-    ? `🐝 New lead: ${leadName} (${escapeMrkdwn(locationName)})`
-    : `🐝 New lead (${escapeMrkdwn(locationName)})`
+  // The lead NAME is intentionally NOT in the summary/notification line — it is
+  // the card's headline. Graceful: a missing location omits its parens cleanly.
+  const locPart = locationName?.trim() ? ` (${escapeMrkdwn(locationName.trim())})` : ''
+  const summary = `🐝 New lead${locPart}`
   const text = summary
 
   // ── Resolved, display-ready soft fields (null = omit) ──────
@@ -183,14 +183,14 @@ export function buildLeadSlackMessage(args: {
 
   const blocks: any[] = []
 
-  // 2. Name — the prominent bold line, the card's first row (no eyebrow).
-  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${name}*` } })
+  // 2. Headline — the bold name and the "from <source>" meta on TWO LINES of a
+  //    SINGLE section block, so Slack renders them tight together (not spaced as
+  //    two blocks). Source lives ONLY here; its line drops when source is absent.
+  const headline = sourceLabel ? `*${name}*\nfrom ${sourceLabel}` : `*${name}*`
+  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: headline } })
 
-  // 3. Source meta line — "from <source>" directly under the name; the ONLY
-  //    place source appears. Omitted when source is absent.
-  if (sourceLabel) {
-    blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `from ${sourceLabel}` }] })
-  }
+  // 3. Divider between the headline and the field grid.
+  blocks.push({ type: 'divider' })
 
   // 4. Fields — 2-column grid: Phone / Email / Project / Preferred contact.
   //    Phone/Email/Project omit when absent; Preferred contact ALWAYS shows
@@ -202,11 +202,17 @@ export function buildLeadSlackMessage(args: {
   fields.push({ type: 'mrkdwn', text: `*Preferred contact:*\n${prefValue}` })
   blocks.push({ type: 'section', fields })
 
-  // 5. What they told us — labeled quote, only when present.
+  // 5. What they told us — labeled quote, only when present. This is the card's
+  //    tallest variable-height element, so the shown text is capped at 140 chars
+  //    (+ "…") to keep the whole card under Slack's "Show more" fold — the full
+  //    details always live in Bee Hub via the Open button. Card-display only:
+  //    the stored lead + the email carry the untruncated text.
   if (lead.request_details?.trim()) {
+    const details = lead.request_details.trim()
+    const shown = details.length > 140 ? `${details.slice(0, 140)}…` : details
     blocks.push({
       type: 'section',
-      text: { type: 'mrkdwn', text: `*What they told us:*\n>${escapeMrkdwn(lead.request_details.trim())}` },
+      text: { type: 'mrkdwn', text: `*What they told us:*\n>${escapeMrkdwn(shown)}` },
     })
   }
 

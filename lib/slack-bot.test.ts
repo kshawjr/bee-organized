@@ -55,14 +55,17 @@ beforeEach(() => {
 describe('buildLeadSlackMessage — top-level text (single-line summary)', () => {
   // The top-level `text` renders ABOVE the attachment card, so it is a one-line
   // summary only — every detail lives in attachments[0].blocks (see next block).
-  // The same summary is mirrored onto attachments[0].fallback.
-  it('is a single-line "New lead: <name> (<location>)" summary, mrkdwn-escaped, mirrored to fallback', () => {
+  // The same summary is mirrored onto attachments[0].fallback. The lead NAME is
+  // intentionally NOT in the summary — it is the card's headline.
+  it('is a single-line "New lead (<location>)" summary with NO lead name, mirrored to fallback', () => {
     const msg = buildLeadSlackMessage({
       lead: { ...LEAD, name: 'A & B <Co>' },
       locationName: 'Boulder',
       leadUrl: 'https://app.example.com/clients/lead-1',
     })
-    expect(msg.text).toBe('🐝 New lead: A &amp; B &lt;Co&gt; (Boulder)')
+    expect(msg.text).toBe('🐝 New lead (Boulder)')
+    // The lead name is NOT in the summary/notification line.
+    expect(msg.text).not.toContain('A &amp; B')
     // The old rich detail is NOT in the top-level text — it only lives in the card.
     expect(msg.text).not.toContain('*Email:*')
     expect(msg.text).not.toContain('*Project type:*')
@@ -71,14 +74,20 @@ describe('buildLeadSlackMessage — top-level text (single-line summary)', () =>
     expect(msg.attachments[0].fallback).toBe(msg.text)
   })
 
-  it('omits the name cleanly when the lead name is blank (no dangling ": ")', () => {
+  it('the summary omits the name regardless of the lead name', () => {
     const msg = buildLeadSlackMessage({
-      lead: { ...LEAD, name: '   ' },
+      lead: { ...LEAD, name: 'Jane Prospect' },
       locationName: 'Boulder',
       leadUrl: null,
     })
     expect(msg.text).toBe('🐝 New lead (Boulder)')
     expect(msg.attachments[0].fallback).toBe('🐝 New lead (Boulder)')
+  })
+
+  it('drops the location parens cleanly when the location is blank', () => {
+    const msg = buildLeadSlackMessage({ lead: LEAD, locationName: '   ', leadUrl: null })
+    expect(msg.text).toBe('🐝 New lead')
+    expect(msg.attachments[0].fallback).toBe('🐝 New lead')
   })
 })
 
@@ -97,9 +106,36 @@ describe('buildLeadSlackMessage — card (attachments + blocks)', () => {
     expect(typeof msg.attachments[0].color).toBe('string')
     const blocks = blocksOf(msg)
     expect(blocks[blocks.length - 1]).toEqual({ type: 'divider' })
-    // Card starts with the prominent name — no eyebrow "New lead" badge.
+    // Card starts with the prominent name headline — no eyebrow "New lead" badge.
     expect(flat(blocks)).not.toContain('New lead')
     expect(blocks[0]).toEqual({ type: 'section', text: { type: 'mrkdwn', text: '*Jane Prospect*' } })
+  })
+
+  it('puts the name and "from <source>" on two lines of ONE headline section, then a divider before the grid', () => {
+    const blocks = blocksOf(card({ source: 'Instagram' }))
+    // Headline: single section, name line 1 + "from <source>" line 2.
+    expect(blocks[0]).toEqual({
+      type: 'section',
+      text: { type: 'mrkdwn', text: '*Jane Prospect*\nfrom Instagram' },
+    })
+    // Divider sits between the headline and the field grid.
+    expect(blocks[1]).toEqual({ type: 'divider' })
+    const fieldsIdx = blocks.findIndex((b: any) => Array.isArray(b.fields))
+    expect(blocks[fieldsIdx - 1]).toEqual({ type: 'divider' })
+    // "from <source>" is NOT its own separate context block.
+    expect(blocks.filter((b: any) => b.type === 'context' && flat([b]).includes('from Instagram'))).toHaveLength(0)
+  })
+
+  it('caps the "What they told us" quote at ~140 chars (+ …); full text stays in Bee Hub', () => {
+    const long = 'x'.repeat(300)
+    const s = flat(blocksOf(card({ request_details: long })))
+    // 140 shown chars + a single ellipsis, never the full 300.
+    expect(s).toContain(`${'x'.repeat(140)}…`)
+    expect(s).not.toContain('x'.repeat(141))
+    // A short one is shown whole, no ellipsis.
+    const shortS = flat(blocksOf(card({ request_details: 'Need packing help' })))
+    expect(shortS).toContain('Need packing help')
+    expect(shortS).not.toContain('…')
   })
 
   it('renders tel:/mailto: hyperlinks and the primary Log call button with the exact contract', () => {
@@ -251,9 +287,9 @@ describe('notifyNewLeadSlack', () => {
     expect(res).toEqual({ ok: true })
     const body = JSON.parse((fetchSpy.mock.calls[0] as any[])[1].body)
     expect(body.channel).toBe('C1')
-    // Top-level text is the one-line summary; the deep-link now lives on the
-    // card's "Open in Bee Hub" button (attachments[0].blocks), not the text.
-    expect(body.text).toBe('🐝 New lead: Jane Prospect (Boulder)')
+    // Top-level text is the one-line summary (no lead name); the deep-link now
+    // lives on the card's "Open in Bee Hub" button (attachments[0].blocks).
+    expect(body.text).toBe('🐝 New lead (Boulder)')
     const openBtn = body.attachments[0].blocks
       .find((b: any) => b.type === 'actions')
       .elements.find((e: any) => e.url)
