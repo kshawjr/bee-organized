@@ -601,29 +601,33 @@ export async function upsertServiceRequest(
     jobber_synced_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   }
-  const { data: existing } = await supabaseService
+  // Pre-select is a stats hint only — correctness lives in the DB-level
+  // upsert below. The arbiter is service_requests_location_jobber_request_id_idx
+  // (non-partial since jobber_subrecord_onconflict_targetable.sql — PostgREST
+  // can't arbitrate partial indexes); concurrent webhook deliveries for the
+  // same request merge into one row instead of racing check-then-insert.
+  const { data: existing, error: selectError } = await supabaseService
     .from('service_requests')
     .select('id')
     .eq('jobber_request_id', jobberRequestId)
     .eq('location_id', location_id)
     .maybeSingle()
-
-  let srId: string
-  let created: boolean
-  if (existing) {
-    await supabaseService.from('service_requests').update(payload).eq('id', existing.id)
-    srId = existing.id
-    created = false
-  } else {
-    const { data, error } = await supabaseService
-      .from('service_requests')
-      .insert({ ...payload, created_at: request.createdAt || new Date().toISOString() })
-      .select('id')
-      .single()
-    if (error) throw new Error(error.message)
-    srId = data.id
-    created = true
-  }
+  if (selectError) throw new Error(`Service request lookup: ${selectError.message}`)
+  const { data, error } = await supabaseService
+    .from('service_requests')
+    .upsert(
+      {
+        ...payload,
+        // Same-value on update: readers key off Jobber's timestamp either way.
+        created_at: request.createdAt || new Date().toISOString(),
+      },
+      { onConflict: 'location_id,jobber_request_id' },
+    )
+    .select('id')
+    .single()
+  if (error) throw new Error(`Service request: ${error.message}`)
+  const srId = data.id
+  const created = !existing
 
   // Forward-only promotion: leads.stage mirrors the SR's classification
   // only when it represents forward progress. Skipped entirely when
