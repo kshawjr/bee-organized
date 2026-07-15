@@ -16474,6 +16474,7 @@ const DEFAULT_SETTINGS = {
     slackConnected:  false,
     slackTeamName:   '',
     slackChannelName:'',
+    slackInviteUrl:  '',
     crmStatus:      'active',
     sendFromName:   '',
     sendFromEmail:  '',
@@ -19299,7 +19300,7 @@ function CommsLabel({ children }) {
 // JobberCard's status-strip + one-primary-action + Manage-connection expander,
 // minus the import machinery, styled to the Comms tab (0.5px borders, small
 // radii, flat fills, outline icon, no shadows on controls).
-function SlackCard({ settings, updateLocation }) {
+function SlackCard({ settings, updateLocation, readOnly = false }) {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy]       = useState(false)
   const [error, setError]     = useState(null)
@@ -19310,6 +19311,59 @@ function SlackCard({ settings, updateLocation }) {
   const connected   = !!settings.location.slackConnected
   const teamName    = settings.location.slackTeamName || ''
   const channelName = settings.location.slackChannelName || ''
+
+  // Team invite link — a shareable Slack invite URL the owner pastes + saves,
+  // then copies to hand to teammates. LOCATION invite only (no corporate link).
+  // Gracefully empty when the slack_invite_url column isn't migrated yet.
+  const savedInvite = settings.location.slackInviteUrl || ''
+  const [inviteDraft, setInviteDraft] = useState(savedInvite)
+  const [savingInvite, setSavingInvite] = useState(false)
+  const [inviteError, setInviteError]   = useState(null)
+  const [copied, setCopied]             = useState(false)
+  // Resync the draft when the saved value changes (e.g. switching locations).
+  useEffect(() => { setInviteDraft(savedInvite) }, [savedInvite])
+  const hasSavedInvite = !!savedInvite
+  const inviteDirty    = inviteDraft.trim() !== savedInvite
+
+  async function saveInvite() {
+    if (readOnly) return
+    if (!locationId) { setInviteError('No location id — reload and try again.'); return }
+    setSavingInvite(true); setInviteError(null)
+    try {
+      const r = await fetch('/api/locations/' + encodeURIComponent(locationId) + '/slack-invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slack_invite_url: inviteDraft.trim() }),
+      })
+      if (!r.ok) {
+        let detail = `save_failed_${r.status}`
+        try { const j = await r.json(); detail = j.error || detail } catch {}
+        setInviteError(detail); setSavingInvite(false); return
+      }
+      let saved = inviteDraft.trim()
+      try { const j = await r.json(); if (typeof j.slack_invite_url !== 'undefined') saved = j.slack_invite_url || '' } catch {}
+      updateLocation('slackInviteUrl', saved)
+      setInviteDraft(saved)
+      setToast({ kind:'success', msg:'Team invite link saved' })
+      setTimeout(() => setToast(null), 3000)
+    } catch (e) {
+      setInviteError(String(e?.message || e))
+    } finally {
+      setSavingInvite(false)
+    }
+  }
+
+  async function copyInvite() {
+    const val = savedInvite || inviteDraft.trim()
+    if (!val) return
+    try {
+      await navigator.clipboard.writeText(val)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setInviteError('Copy failed — select the link and copy it manually.')
+    }
+  }
 
   // OAuth entry point — full-page redirect into the "Add to Slack" flow.
   function goConnect() {
@@ -19344,40 +19398,39 @@ function SlackCard({ settings, updateLocation }) {
     }
   }
 
-  const accent    = connected ? '#16a34a' : '#5a6e6a'
-  const softBg     = connected ? 'rgba(22,163,74,0.09)' : 'rgba(0,0,0,0.025)'
   const softBorder = connected ? 'rgba(22,163,74,0.22)' : 'rgba(26,46,43,0.10)'
   const channelLabel = channelName
     ? (channelName.startsWith('#') ? channelName : `#${channelName}`)
     : ''
 
   return (
-    <div style={{ margin:'0 12px', borderRadius:'14px', overflow:'hidden', border:`0.5px solid ${softBorder}`, background:'white', boxShadow:'0 1px 5px rgba(26,46,43,0.05)' }}>
+    <div style={{ position:'relative', borderRadius:'16px', overflow:'hidden', border:`0.5px solid ${softBorder}`, background:'white', boxShadow:'0 1px 6px rgba(26,46,43,0.06)' }}>
+      {/* Soft, pale Slack-purple accent bleeding off the top-right corner —
+          the card's one warm flourish. Non-interactive, clipped by overflow. */}
+      <span aria-hidden style={{ position:'absolute', top:'-42px', right:'-42px', width:'120px', height:'120px', borderRadius:'50%', background:'rgba(74,21,75,0.06)', pointerEvents:'none' }} />
+
       {toast && <InlineToast kind={toast.kind} msg={toast.msg} />}
 
-      {/* Status strip — only when connected (calm, unmissable). */}
-      {connected && (
-        <div style={{ display:'flex', alignItems:'center', gap:'9px', padding:'9px 14px', background:softBg, borderBottom:`0.5px solid ${softBorder}` }}>
-          <span style={{ width:'18px', height:'18px', borderRadius:'50%', background:accent, color:'white', fontSize:'11px', fontWeight:800, display:'inline-flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>✓</span>
-          <span style={{ fontSize:'12px', fontWeight:700, color:accent, letterSpacing:'0.2px' }}>Connected</span>
-        </div>
-      )}
-
-      <div style={{ padding:'14px' }}>
-        <div style={{ display:'flex', alignItems:'center', gap:'11px', marginBottom:'8px' }}>
-          <div style={{ width:'34px', height:'34px', borderRadius:'9px', background:'rgba(74,21,75,0.08)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-            <CommsIcon name="message" size={18} color="#4a154b" />
+      <div style={{ position:'relative', padding:'15px' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'11px', marginBottom:'9px' }}>
+          {/* Circular Slack-purple avatar with '#'. */}
+          <div style={{ width:'40px', height:'40px', borderRadius:'50%', background:'#4a154b', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 2px 6px rgba(74,21,75,0.28)' }}>
+            <span aria-hidden style={{ color:'white', fontSize:'20px', fontWeight:800, lineHeight:1 }}>#</span>
           </div>
           <div style={{ minWidth:0 }}>
             <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', lineHeight:1.2 }}>
-              {connected ? 'Slack is connected' : 'Connect Slack'}
+              {connected ? 'Slack' : 'Connect Slack'}
             </p>
-            {connected && (channelLabel || teamName) && (
-              <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                Posting to {channelLabel && <span style={{ fontWeight:600, color:'#5a6e6a' }}>{channelLabel}</span>}
-                {channelLabel && teamName ? ' in ' : ''}
-                {teamName && <span style={{ fontWeight:600, color:'#5a6e6a' }}>{teamName}</span>}
+            {connected ? (
+              <p style={{ display:'flex', alignItems:'center', gap:'6px', fontSize:'11px', color:'#5a6e6a', marginTop:'3px', overflow:'hidden' }}>
+                {/* Small green status dot. */}
+                <span aria-hidden style={{ width:'7px', height:'7px', borderRadius:'50%', background:'#16a34a', flexShrink:0, boxShadow:'0 0 0 2px rgba(22,163,74,0.18)' }} />
+                <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  Connected{channelLabel ? ` · ${channelLabel}` : ''}{teamName ? ` · ${teamName}` : ''}
+                </span>
               </p>
+            ) : (
+              <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px' }}>Post new leads to your team’s channel</p>
             )}
           </div>
         </div>
@@ -19390,13 +19443,45 @@ function SlackCard({ settings, updateLocation }) {
 
         {!connected && (
           <button onClick={goConnect} disabled={busy}
-            style={{ width:'100%', padding:'11px', background:'#4a154b', border:'none', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
+            style={{ width:'100%', padding:'11px', background:'#4a154b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:busy?'default':'pointer', opacity:busy?0.7:1 }}>
             Add to Slack
           </button>
         )}
 
+        {/* Team invite link — only meaningful once Slack is connected. LOCATION
+            invite only; there is intentionally no corporate/community link. */}
         {connected && (
-          <div style={{ marginTop:'8px' }}>
+          <div style={{ marginTop:'12px', paddingTop:'12px', borderTop:`0.5px solid ${softBorder}` }}>
+            <p style={{ fontSize:'11px', fontWeight:700, color:'#4a5e5a', letterSpacing:'0.2px', marginBottom:'6px' }}>Team invite link</p>
+            <div style={{ display:'flex', gap:'7px', alignItems:'stretch' }}>
+              <input
+                value={inviteDraft}
+                onChange={e=>setInviteDraft(e.target.value)}
+                readOnly={readOnly}
+                placeholder="Paste your Slack invite link"
+                style={{ flex:1, minWidth:0, padding:'9px 10px', borderRadius:'10px', border:'0.5px solid rgba(26,46,43,0.15)', fontSize:'12px', fontFamily:'inherit', color:'#1a2e2b', background: readOnly?'rgba(0,0,0,0.03)':'white', outline:'none' }}
+              />
+              {!readOnly && (
+                <button onClick={saveInvite} disabled={savingInvite || !inviteDirty}
+                  style={{ padding:'9px 14px', background:'white', border:'0.5px solid rgba(74,21,75,0.30)', borderRadius:'10px', fontSize:'12px', fontFamily:'inherit', fontWeight:700, color:'#4a154b', cursor:(savingInvite||!inviteDirty)?'default':'pointer', opacity:(savingInvite||!inviteDirty)?0.5:1, flexShrink:0 }}>
+                  {savingInvite ? 'Saving…' : 'Save'}
+                </button>
+              )}
+            </div>
+            {/* The card's one confident splash of colour — filled Slack-purple. */}
+            <button onClick={copyInvite} disabled={!hasSavedInvite}
+              style={{ marginTop:'8px', width:'100%', padding:'10px', background:'#4a154b', border:'none', borderRadius:'10px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:hasSavedInvite?'pointer':'default', opacity:hasSavedInvite?1:0.4, display:'inline-flex', alignItems:'center', justifyContent:'center', gap:'6px' }}>
+              {copied ? 'Copied ✓' : 'Copy team invite'}
+            </button>
+            <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, marginTop:'7px' }}>
+              Copy it and send to anyone you’d like on your team’s Slack.
+            </p>
+            {inviteError && <p style={{ fontSize:'11px', color:'#ef4444', marginTop:'7px' }}>Couldn’t save: {inviteError}</p>}
+          </div>
+        )}
+
+        {connected && (
+          <div style={{ marginTop:'10px' }}>
             <button onClick={()=>setManaging(m=>!m)}
               style={{ background:'none', border:'none', padding:'6px 0', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer', display:'inline-flex', alignItems:'center', gap:'5px' }}>
               Manage connection <span style={{ fontSize:'9px' }}>{managing ? '▲' : '▼'}</span>
@@ -19784,6 +19869,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
       slackConnected:   !!currentLocationCtx.slack_connected,
       slackTeamName:    currentLocationCtx.slack_team_name || '',
       slackChannelName: currentLocationCtx.slack_channel_name || '',
+      slackInviteUrl:   currentLocationCtx.slack_invite_url || '',
       sendFromName:    currentLocationCtx.sender_name || '',
       sendFromEmail:   currentLocationCtx.send_from_email || '',
       replyToEmail:    currentLocationCtx.reply_to_email || '',
@@ -19825,6 +19911,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     slackConnected:   !!selectedLoc.slackConnected,
     slackTeamName:    selectedLoc.slackTeamName || '',
     slackChannelName: selectedLoc.slackChannelName || '',
+    slackInviteUrl:   selectedLoc.slackInviteUrl || '',
     crmStatus:      selectedLoc.crmStatus,
     // Prefer the location's configured sender fields (sender_name /
     // send_from_email / reply_to_email in the DB) so super_admin sees the
@@ -20788,7 +20875,12 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             {/* Slack notifications — additive to the email above. New leads ALSO
                 post to the location's Slack channel once the app is installed. */}
             <CommsLabel>Slack notifications</CommsLabel>
-            <SlackCard settings={settings} updateLocation={updateLocation} />
+            {/* Half-width: sits at ~half on the wider settings column (auto-fill
+                keeps the empty companion track) and reflows to full-width on
+                narrow screens. */}
+            <div style={{ margin:'0 12px', display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(260px, 1fr))', gap:'10px' }}>
+              <SlackCard settings={settings} updateLocation={updateLocation} />
+            </div>
 
             {/* ── TIER 3 · PAIRED — automatic follow-up sequences (2-col) ──── */}
             <CommsLabel>Automatic follow-up</CommsLabel>

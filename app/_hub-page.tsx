@@ -263,6 +263,22 @@ export default async function HubPage({
 
     if (subErr) console.error('[hub-page] currentSubscription error:', subErr.message)
 
+    // slack_invite_url is added by a STOP-gated migration that may not have run
+    // yet. Fetch it separately + error-tolerantly so a missing column can NEVER
+    // break the location context — a failed select simply yields null and the
+    // SlackCard renders an empty invite field.
+    let currentSlackInviteUrl: string | null = null
+    {
+      const { data: inviteRow, error: inviteErr } = await supabase
+        .from('locations')
+        .select('slack_invite_url')
+        .eq('id', hubUser.location_id)
+        .maybeSingle()
+      if (!inviteErr && inviteRow) {
+        currentSlackInviteUrl = (inviteRow as any).slack_invite_url || null
+      }
+    }
+
     if (locRow) {
       currentSubscription = {
         subscription_status: locRow.subscription_status || 'deferred',
@@ -287,6 +303,7 @@ export default async function HubPage({
         slack_connected: !!locRow.slack_connected,
         slack_team_name: locRow.slack_team_name || null,
         slack_channel_name: locRow.slack_channel_name || null,
+        slack_invite_url: currentSlackInviteUrl,
         payment_source: locRow.payment_source || 'none',
         subscription_status: locRow.subscription_status || 'deferred',
         subscription_plan: locRow.subscription_plan || null,
@@ -353,6 +370,21 @@ export default async function HubPage({
       console.error('[hub-page] locations fetch error:', locsErr.message)
     } else {
       console.log(`[hub-page] Fetched ${locs?.length ?? 0} locations for ${hubUser.email}`)
+    }
+
+    // slack_invite_url is STOP-gated (may not be migrated yet), so it is fetched
+    // in a separate error-tolerant query and merged by id. A failed select just
+    // leaves the map empty — the SlackCard renders an empty invite field.
+    const slackInviteById: Record<string, string> = {}
+    {
+      const { data: inviteRows, error: inviteErr } = await supabaseService
+        .from('locations')
+        .select('id, slack_invite_url')
+      if (!inviteErr && Array.isArray(inviteRows)) {
+        for (const r of inviteRows as any[]) {
+          if (r?.slack_invite_url) slackInviteById[r.id] = r.slack_invite_url
+        }
+      }
     }
 
     const { data: allUsers, error: usersErr } = await supabaseService
@@ -473,6 +505,7 @@ export default async function HubPage({
         slackConnected: !!row.slack_connected,
         slackTeamName: row.slack_team_name || null,
         slackChannelName: row.slack_channel_name || null,
+        slackInviteUrl: slackInviteById[row.id] || null,
         last_sync_status: row.last_sync_status || null,
         // Token expiry (epoch-ms) feeds deriveJobberStatus so the settings badge
         // reads reconnect_required for a dead-token location, not a false green.
