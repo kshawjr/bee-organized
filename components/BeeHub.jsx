@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from "react"
 import { useRouter } from "next/navigation"
 import { useLeadsRealtime } from "@/lib/use-leads-realtime"
+import { upsertRealtimePerson, removeRealtimePerson } from "@/components/hive/shared/leadsRealtime"
 import dynamic from "next/dynamic"
 import { canSeeBetaBoard, defaultHiveView, hydrateHiveView, resolveBetaReadOnly } from "@/components/hive/shared/betaGate"
 import { ROUTE_TO_NAV, NAV_TO_URL, parseHubUrl, clientPath, engagementPath } from "@/components/hive/shared/hubUrl"
@@ -33082,13 +33083,20 @@ if (Array.isArray(initialPeople)) return
     if (Array.isArray(initialPeople)) setPeople(initialPeople)
   }, [initialPeople])
 
-  // Supabase Realtime: push lead changes from Jobber webhooks into the Hive
-  // without requiring a page refresh. Scoped to the current owner's location.
-  // For INSERT/UPDATE we refetch the full person (with all relations) via GET
-  // /api/leads/:id since the Realtime payload only carries the leads row.
+  // Supabase Realtime: push lead changes that land with no client event — a
+  // Jobber webhook, MAKE, website intake, another user — into the Hive without
+  // a refresh. This `people` state is the single seam every lens derives from
+  // (HiveScreen, the Inbox via HiveShell's patchedPeople, Reports), so an
+  // INSERT landing here surfaces as a new Inbox row that buckets through the
+  // same deriveClientStatus as every other row — no special-casing.
+  //
+  // The event is a SIGNAL: its payload is the flat leads row, so INSERT/UPDATE
+  // refetch the full person (with all relations) via GET /api/leads/:id.
+  // Dedupe is by id — a lead already present (created locally this session, or
+  // a duplicate event) is REPLACED, never appended twice.
   const handleLeadsRealtime = React.useCallback(async ({ type, leadId }) => {
     if (type === 'DELETE') {
-      setPeople(prev => prev.filter(p => p.id !== leadId))
+      setPeople(prev => removeRealtimePerson(prev, leadId))
       return
     }
     try {
@@ -33096,21 +33104,20 @@ if (Array.isArray(initialPeople)) return
       if (!res.ok) return
       const { person } = await res.json()
       if (!person) return
-      // Briefly highlight the card so the user sees the realtime update land
-      setPeople(prev => {
-        const exists = prev.some(p => p.id === leadId)
-        const updated = { ...person, _realtimePulse: Date.now() }
-        if (exists) return prev.map(p => p.id === leadId ? updated : p)
-        return [updated, ...prev]
-      })
+      const pulseMs = Date.now()
+      setPeople(prev => upsertRealtimePerson(prev, person, pulseMs))
     } catch (e) {
       console.error('[realtime] lead refetch failed:', e)
     }
   }, [])
 
-  // Only subscribe when viewing a real owner location (not super_admin all-view)
-  const realtimeLocationUuid = currentLocation?.id || currentUser?.locationId || null
-  useLeadsRealtime(realtimeLocationUuid, handleLeadsRealtime)
+  // Subscribe on the board's own location vocabulary, NOT a resolved
+  // currentLocation: the hook filters for a real locFilter and subscribes
+  // unfiltered for 'all' (RLS scopes delivery). The old
+  // currentLocation?.id || currentUser?.locationId resolution pinned an 'all'
+  // view to one arbitrary location — or, for an admin with no location at all,
+  // to nothing — which is why new leads never landed live for admins.
+  useLeadsRealtime(locFilter, handleLeadsRealtime)
 
   // Recycle Bin — is_junk=true leads loaded server-side. Kept in its own
   // state so the main `people` array stays bin-free for HiveScreen / Reports.
