@@ -87,7 +87,7 @@ const STAGE_ICON = {
 // siblings/onNavigate: the opener's natural ordering (e.g. the client
 // directory's visible rows). When absent the prev/next chevrons hide —
 // a panel→profile swap or a fresh create has no "next client".
-export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, lookupOptions = { sources: [], projectTypes: [], clientTags: [] }, locationUsers = [], siblings = null, onNavigate = () => {}, readOnly = false }) {
+export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, lookupOptions = { sources: [], projectTypes: [], clientTags: [] }, locationUsers = [], siblings = null, onNavigate = () => {}, jobberLinks = {}, readOnly = false }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -146,12 +146,18 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   const statusMeta = status ? CLIENT_STATUS_META[status] : null
   const fam = statusMeta ? (CHIP_STYLES[statusMeta.styleKey] || CHIP_STYLES.gray) : CHIP_STYLES.gray
 
-  const jobberLinked = !!c?.jobber_client_id
+  // Live send-flip (the stale-button fix): a fresh send-to-jobber this
+  // session lands { jobber_client_id } in jobberLinks[clientId] BEFORE the
+  // next profile refetch, so the gate reads the server column OR the live
+  // patch — the Send button flips to "Open in Jobber" in place, no reload.
+  const linkPatch = jobberLinks[clientId] || null
+  const effJobberClientId = c?.jobber_client_id || linkPatch?.jobber_client_id || null
+  const jobberLinked = !!effJobberClientId
   // CLIENT-level deep link — /clients/{jobber_client_id} (classic's
   // pattern). Never derived from a child record's URL: the profile
   // route doesn't ship child *_url columns, and even if it did, a
   // client link that lands on one arbitrary job would be wrong.
-  const jobberHref = jobberClientUrl(c?.jobber_client_id)
+  const jobberHref = jobberClientUrl(effJobberClientId)
 
   const tags = data?.tags ?? []
   const lastTouchTs = touches.reduce((m, t) => Math.max(m, new Date(t.occurred_at).getTime() || 0), 0) || null

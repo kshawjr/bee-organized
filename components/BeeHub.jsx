@@ -12,6 +12,13 @@ import { financialsVisible } from "@/lib/financial-access"
 import { splitNameForPrefill } from "@/lib/name-prefill"
 import { captureViewAsSnapshot, revertViewAsCancel } from "@/lib/view-as-identity"
 import AddressAutofill from "@/components/hive/shared/AddressAutofill"
+// The Send-to-Jobber wizard — extracted from this file onto the hive modal
+// system (OverlayShell + tokens). Used by BOTH the classic PersonPanel and
+// the beta Inbox/panel/profile, so it's a SHARED presentational leaf in the
+// main bundle (its deps — OverlayShell/tokens/formKit/useIsMobile/icons —
+// are pure leaves, no beta-board surface), imported statically like the
+// icons above. §8.5's dynamic rule guards the heavy board tree, not this.
+import SendToJobberModal from "@/components/hive/SendToJobberModal"
 // Pure presentational icon set (inline SVG, zero deps) — safe to import
 // statically like betaGate; it pulls no beta-chunk surface code with it.
 import { IconBug, IconBulb, IconPlus, IconPaperclip } from "@/components/ui/icons"
@@ -2086,287 +2093,10 @@ function InvoicePopup({ person, onFinalProcess, onClose, onUpdate }) {
   )
 }
 
-// ─── Send to Jobber Popup ─────────────────────────────────────────────────────
-// engagementId (optional): a send on an already-FOUNDED engagement (the
-// beta shell's decoupled manual founding). Rides the POST body as
-// engagement_id so the server links the new Jobber request to that
-// engagement instead of letting the webhook found a second one.
-function SendToJobberPopup({ person, engagementId = null, onDone, onClose }) {
-  const [step, setStep] = useState(person.jobberClient?'history':'action')
-  const [action, setAction] = useState(null)
-  const [includeAssessment, setIncludeAssessment] = useState(!!person.assessment)
-  const [assessmentType, setAssessmentType] = useState(person.assessmentType||'in-person')
-  // Pre-fill from existing assessment on record
-  const [date, setDate] = useState(()=>{
-    if (person.assessment) {
-      const parts = person.assessment.split(' at ')
-      return parts[0]||''
-    }
-    return ''
-  })
-  const [time, setTime] = useState(()=>{
-    if (person.assessment) {
-      const parts = person.assessment.split(' at ')
-      return parts[1]||'10:00 AM'
-    }
-    return '10:00 AM'
-  })
-  // Loading + error state for the real Jobber send.
-  const [submitting, setSubmitting] = useState(false)
-  const [errorMsg, setErrorMsg]     = useState(null)
-
-  // Address is required server-side for job_direct and in-person assessments
-  // (matches the validation in /api/leads/:id/send-to-jobber). For request_only
-  // and virtual assessments, no address is fine — property creation is skipped.
-  function leadHasUsableAddress(p) {
-    const arr = Array.isArray(p?.addresses) ? p.addresses : []
-    for (const a of arr) {
-      if (a && (a.street || a.value)) return true
-    }
-    if (p?.address && String(p.address).trim()) return true
-    return false
-  }
-  const hasAddress = leadHasUsableAddress(person)
-  const wantsAssessment = action === 'request' && includeAssessment && !!date
-  const addressRequired =
-    (wantsAssessment && assessmentType === 'in-person')
-  const blockSendForAddress = addressRequired && !hasAddress
-
-  // 15-min increments 7am–7pm
-  const times = []
-  for (let h = 7; h <= 19; h++) {
-    for (let m = 0; m < 60; m += 15) {
-      const ampm = h < 12 ? 'AM' : 'PM'
-      const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h
-      times.push(`${h12}:${m.toString().padStart(2,'0')} ${ampm}`)
-    }
-  }
-
-  // Combine the popup's YYYY-MM-DD `date` + "h:mm AM/PM" `time` into an ISO
-  // string. Interpreted in the browser's local timezone, then converted to
-  // UTC for Jobber (which stores in UTC and renders per-account TZ).
-  function buildScheduledIso() {
-    if (!date) return null
-    const [hm, ampm] = (time || '10:00 AM').split(' ')
-    const [hh, mm] = hm.split(':').map(Number)
-    let h24 = hh % 12
-    if (ampm === 'PM') h24 += 12
-    const d = new Date(`${date}T00:00:00`)
-    d.setHours(h24, mm, 0, 0)
-    return d.toISOString()
-  }
-
-  async function confirm() {
-    if (submitting) return
-    setErrorMsg(null)
-
-    const isReq = action === 'request'
-    const hasAssessment = isReq && includeAssessment && date
-    // job_direct retired (build 3) — the chooser only offers Request now,
-    // matching the server's validation gate.
-    const creationType = hasAssessment ? 'request_with_assessment' : 'request_only'
-
-    const body = { creation_type: creationType }
-    if (engagementId) body.engagement_id = engagementId
-    if (hasAssessment) {
-      const iso = buildScheduledIso()
-      if (!iso) { setErrorMsg('Pick a date for the assessment'); return }
-      body.scheduled_assessment_at = iso
-      body.assessment_type = assessmentType
-    }
-
-    setSubmitting(true)
-    let json
-    try {
-      const res = await fetch(`/api/leads/${person.id}/send-to-jobber`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      json = await res.json().catch(() => ({}))
-      if (!res.ok || !json || json.success !== true) {
-        const msg = json && json.error
-          ? `${json.error}${json.stage ? ` (${json.stage})` : ''}`
-          : `Send failed (HTTP ${res.status})`
-        setErrorMsg(msg)
-        setSubmitting(false)
-        return
-      }
-    } catch (e) {
-      setErrorMsg('Network error — please try again')
-      setSubmitting(false)
-      return
-    }
-
-    // Success — build human-readable timeline entries from the returned IDs.
-    const newStage = isReq ? 'Request' : 'Job in Progress'
-    const matchLabel = json.match_status === 'matched_existing'
-      ? `Matched existing client — JC-${json.jobber_client_id}`
-      : `New client created in Jobber — JC-${json.jobber_client_id}`
-    const entries = [
-      { id:`o${Date.now()}`, type:'system', method:'system', label: matchLabel, ts:'Just now', status:'done' },
-    ]
-    if (json.jobber_request_id) {
-      entries.push({ id:`o${Date.now()+1}`, type:'system', method:'system', label:`Request created in Jobber — REQ-${json.jobber_request_id}`, ts:'Just now', status:'done' })
-    }
-    if (json.jobber_job_id) {
-      entries.push({ id:`o${Date.now()+1}`, type:'system', method:'system', label:`Job created in Jobber — JOB-${json.jobber_job_id}`, ts:'Just now', status:'done' })
-    }
-    if (json.jobber_assessment_id && hasAssessment) {
-      entries.push({ id:`o${Date.now()+2}`, type:'system', method:'system', label:`${assessmentType==='virtual'?'Virtual':'In-person'} assessment — ${date} at ${time}`, ts:'Just now', status:'done' })
-    }
-
-    const ref = json.jobber_request_id
-      ? `REQ-${json.jobber_request_id}`
-      : json.jobber_job_id
-        ? `JOB-${json.jobber_job_id}`
-        : null
-
-    setSubmitting(false)
-    onDone({
-      stage: newStage,
-      jobberRef: ref,
-      assessment: hasAssessment ? `${date} at ${time}` : person.assessment,
-      assessmentType: isReq ? assessmentType : person.assessmentType,
-      outreachTimeline: [...person.outreachTimeline, ...entries]
-    })
-  }
-
-  const AC = ({aKey,icon,title,desc,color}) => (
-    <button onClick={()=>setAction(aKey)} style={{ width:'100%', padding:'14px', background:action===aKey?`${color}10`:'white', border:`2px solid ${action===aKey?color:'rgba(0,0,0,0.08)'}`, borderRadius:'12px', cursor:'pointer', textAlign:'left', fontFamily:'inherit', marginBottom:'8px' }}>
-      <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'3px' }}>
-        <span style={{ fontSize:'18px' }}>{icon}</span><span style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b' }}>{title}</span>
-        {action===aKey&&<span style={{ marginLeft:'auto', color }}>✓</span>}
-      </div>
-      <p style={{ fontSize:'12px', color:'#8a9e9a', marginLeft:'26px', lineHeight:1.4 }}>{desc}</p>
-    </button>
-  )
-
-  return (
-    <Popup title="Send to Jobber" onClose={onClose}>
-      {step==='history'&&person.jobberClient&&(
-        <>
-          <div style={{ padding:'10px 14px', background:'rgba(16,185,129,0.06)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:'10px', marginBottom:'10px' }}>
-            <p style={{ fontSize:'13px', fontWeight:500, color:'#10b981', marginBottom:'4px' }}>✅ Existing Client · {person.jobberClient.clientId}</p>
-            {person.jobberClient.jobs?.map(j=>(
-              <div key={j.id} style={{ display:'flex', justifyContent:'space-between', padding:'7px 10px', background:'white', borderRadius:'8px', marginBottom:'4px' }}>
-                <div><p style={{ fontSize:'12px', fontWeight:500, color:'#1a2e2b' }}>{j.title}</p><p style={{ fontSize:'11px', color:'#8a9e9a' }}>{j.id} · {fmtDate(j.date)}</p></div>
-                <span style={{ fontSize:'10px', color:'#22c55e', background:'rgba(34,197,94,0.1)', padding:'2px 7px', borderRadius:'20px', alignSelf:'center', fontWeight:600 }}>{j.status}</span>
-              </div>
-            ))}
-          </div>
-          <button onClick={()=>setStep('action')} style={{ width:'100%', padding:'12px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:'pointer' }}>Continue →</button>
-        </>
-      )}
-      {step==='action'&&(
-        <>
-          <p style={{ fontSize:'13px', color:'#8a9e9a', marginBottom:'1rem' }}>{person.jobberClient?`For ${person.jobberClient.clientId}`:'New client will be created.'}</p>
-          <AC aKey="request" icon="📋" title="Create a Request" color="#0ea5e9" desc="Add a request in Jobber. Optionally attach an assessment." />
-          {/* The direct-job option was REMOVED (card-restore build 3): the
-              server has 400-gated job_direct since JobCreateAttributes
-              grew required fields we don't collect (invoicing:
-              JobInvoicingAttributes! = billing strategy + frequency,
-              introspected 2026-07-11). Honest UI > a button that always
-              errors. Restore only WITH a billing-strategy picker. */}
-          <button onClick={()=>action&&setStep(action==='request'?'request-details':'confirm')} disabled={!action} style={{ width:'100%', padding:'12px', background:action?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:action?'white':'#9ca3af', cursor:action?'pointer':'not-allowed', marginTop:'4px' }}>Continue →</button>
-        </>
-      )}
-      {step==='request-details'&&(
-        <>
-          {/* Include Assessment toggle */}
-          <div onClick={()=>setIncludeAssessment(!includeAssessment)} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 14px', background:includeAssessment?'rgba(14,165,233,0.06)':'#f7f5f0', border:`1.5px solid ${includeAssessment?'rgba(14,165,233,0.25)':'rgba(0,0,0,0.08)'}`, borderRadius:'10px', marginBottom:'1rem', cursor:'pointer' }}>
-            <div><p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Include Assessment</p><p style={{ fontSize:'12px', color:'#8a9e9a' }}>Attach a scheduled assessment to this request</p></div>
-            <div style={{ width:'40px', height:'22px', borderRadius:'11px', background:includeAssessment?'#0ea5e9':'rgba(0,0,0,0.15)', position:'relative', flexShrink:0, transition:'background 0.2s' }}>
-              <div style={{ position:'absolute', top:'3px', left:includeAssessment?'21px':'3px', width:'16px', height:'16px', borderRadius:'50%', background:'white', transition:'left 0.2s' }} />
-            </div>
-          </div>
-
-          {includeAssessment&&(
-            <>
-              {/* In-person / Virtual */}
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'1rem' }}>
-                {[['in-person','🏠','In-Person'],['virtual','💻','Virtual']].map(([v,icon,label])=>(
-                  <button key={v} onClick={()=>setAssessmentType(v)} style={{ padding:'10px', borderRadius:'10px', cursor:'pointer', border:'2px solid', borderColor:assessmentType===v?'#a8c9c4':'rgba(0,0,0,0.08)', background:assessmentType===v?'rgba(168,201,196,0.12)':'white', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'8px' }}>
-                    <span style={{ fontSize:'18px' }}>{icon}</span>
-                    <span style={{ fontSize:'13px', fontWeight:assessmentType===v?600:400, color:'#1a2e2b' }}>{label}</span>
-                    {assessmentType===v&&<span style={{ marginLeft:'auto', color:'#a8c9c4' }}>✓</span>}
-                  </button>
-                ))}
-              </div>
-
-              {/* Date */}
-              <div style={{ marginBottom:'1rem' }}>
-                <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Date</p>
-                <input type="date" value={date} onChange={e=>setDate(e.target.value)} min={new Date().toISOString().split('T')[0]} style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-              </div>
-
-              {/* Time - scroll picker 15 min increments */}
-              <div>
-                <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Time</p>
-                <div style={{ height:'180px', overflowY:'scroll', border:'1.5px solid rgba(0,0,0,0.08)', borderRadius:'10px', background:'white', WebkitOverflowScrolling:'touch' }}>
-                  {times.map(t=>(
-                    <button
-                      key={t}
-                      onClick={()=>setTime(t)}
-                      style={{ width:'100%', padding:'11px 16px', background:time===t?'rgba(168,201,196,0.15)':'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.04)', cursor:'pointer', textAlign:'left', fontSize:'14px', fontFamily:'inherit', fontWeight:time===t?600:400, color:time===t?'#1a2e2b':'#4a5e5a', display:'flex', justifyContent:'space-between', alignItems:'center' }}
-                    >
-                      {t}
-                      {time===t&&<span style={{ color:'#a8c9c4', fontSize:'14px' }}>✓</span>}
-                    </button>
-                  ))}
-                </div>
-                {date&&<p style={{ fontSize:'12px', color:'#a8c9c4', marginTop:'6px', textAlign:'center' }}>📅 {date} at {time}</p>}
-              </div>
-            </>
-          )}
-
-          <div style={{ display:'flex', gap:'10px', marginTop:'1rem' }}>
-            <button onClick={()=>setStep('action')} style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Back</button>
-            <button onClick={()=>setStep('confirm')} style={{ flex:2, padding:'12px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:'pointer' }}>Review →</button>
-          </div>
-        </>
-      )}
-      {step==='confirm'&&(
-        <>
-          <div style={{ background:'#f7f5f0', borderRadius:'12px', padding:'14px', marginBottom:'1.25rem', display:'grid', gap:'8px' }}>
-            {[
-              ['Client',     person.jobberClient?`${person.jobberClient.clientId} (existing)`:`${person.name} (new)`],
-              ['Creating',   'Request'],
-              ['Assessment', includeAssessment&&date?`${assessmentType==='virtual'?'Virtual':'In-person'} · ${date} at ${time}`:'None'],
-              ['Stage after', 'Request'],
-            ].map(([l,v])=>(
-              <div key={l} style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{l}</span>
-                <span style={{ fontSize:'13px', fontWeight:500, color:'#1a2e2b', textAlign:'right', maxWidth:'60%' }}>{v}</span>
-              </div>
-            ))}
-          </div>
-          {blockSendForAddress&&(
-            <div style={{ padding:'10px 14px', background:'rgba(245,158,11,0.08)', border:'1px solid rgba(245,158,11,0.3)', borderRadius:'10px', marginBottom:'10px' }}>
-              <p style={{ fontSize:'12px', fontWeight:600, color:'#b45309', marginBottom:'2px' }}>Address required</p>
-              <p style={{ fontSize:'12px', color:'#78350f', wordBreak:'break-word' }}>This action requires a client address. Add one before sending.</p>
-            </div>
-          )}
-          {errorMsg&&(
-            <div style={{ padding:'10px 14px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'10px', marginBottom:'10px' }}>
-              <p style={{ fontSize:'12px', fontWeight:600, color:'#dc2626', marginBottom:'2px' }}>Couldn't send to Jobber</p>
-              <p style={{ fontSize:'12px', color:'#7f1d1d', wordBreak:'break-word' }}>{errorMsg}</p>
-            </div>
-          )}
-          <div style={{ display:'flex', gap:'10px' }}>
-            <button onClick={()=>{ if(!submitting){ setErrorMsg(null); setStep(action==='request'?'request-details':'action') } }} disabled={submitting} style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', color:submitting?'#9ca3af':'#4a5e5a', cursor:submitting?'not-allowed':'pointer' }}>Back</button>
-            <button onClick={confirm} disabled={submitting||blockSendForAddress} style={{ flex:2, padding:'12px', background:blockSendForAddress?'#e5e7eb':(submitting?'#6ee7b7':'#10b981'), border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:500, color:blockSendForAddress?'#9ca3af':'white', cursor:blockSendForAddress?'not-allowed':(submitting?'wait':'pointer'), display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
-              {submitting
-                ? <>⏳ Sending…</>
-                : <><JobberIcon size={20} style={{marginRight:'7px'}} />{errorMsg ? 'Retry' : 'Send to Jobber'}</>
-              }
-            </button>
-          </div>
-        </>
-      )}
-    </Popup>
-  )
-}
+// ─── Send to Jobber Modal ─────────────────────────────────────────────────────
+// The Send-to-Jobber wizard now lives in components/hive/SendToJobberModal.jsx
+// (rebuilt on OverlayShell + hive tokens). Imported at the top of this file and
+// mounted by both the classic PersonPanel and the beta Inbox/panel/profile.
 
 // ─── Add Address Popup ─────────────────────────────────────────────────────────
 // ─── Address Autofill Input ───────────────────────────────────────────────────
@@ -8955,7 +8685,7 @@ function PersonPanel({
         onClose: () => setPopup(null),
       }),
     popup === "send-jobber" &&
-      React.createElement(SendToJobberPopup, {
+      React.createElement(SendToJobberModal, {
         person: person,
         onDone: handleSendToJobber,
         onClose: () => setPopup(null),
@@ -9955,13 +9685,22 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
   useEffect(() => {
     try { const v = hydrateHiveView(newBoardAllowed, localStorage.getItem('bee_hive_view')); if (v) setView(v) } catch {}
   }, [])
-  // Beta Inbox → Send to Jobber: reuses the EXISTING SendToJobberPopup
-  // confirm flow (module scope in this file — the beta chunk can't and
-  // shouldn't import it). Hook lives here, unconditionally, above the
-  // beta early return (rules of hooks). Holds { person, engagementId } —
-  // engagementId non-null when the send rides a founded engagement (the
-  // decoupled-founding next step), null for plain people-world sends.
+  // Beta Inbox → Send to Jobber: reuses the shared SendToJobberModal confirm
+  // flow (now a hive leaf, imported at the top). Hook lives here,
+  // unconditionally, above the beta early return (rules of hooks). Holds
+  // { person, engagementId } — engagementId non-null when the send rides a
+  // founded engagement (the decoupled-founding next step), null for plain
+  // people-world sends.
   const [betaSendPerson, setBetaSendPerson] = useState(null)
+  // Live Jobber-link patch, keyed by client id — the stale-button fix. The
+  // panel/profile overlays derive their "Send vs Open in Jobber" gate from
+  // their OWN server-loaded record (jobber_client_id), NOT people-state, so
+  // a fresh send wouldn't flip them without a refetch. On a confirmed send we
+  // stash { jobber_client_id, jobber_request_id } here and thread it DOWN to
+  // HiveShell → the overlays, which merge it into that derivation so the
+  // button flips live. A later refetch carries the real columns and this
+  // becomes a harmless echo.
+  const [jobberLinks, setJobberLinks] = useState({})
   const [selected, setSelected] = useState(initialSelected)
   // Record-in-URL (engagement): the engagement id the URL currently names
   // (?e=<id>). Rides ALONGSIDE `selected` (its parent client) — the engagement
@@ -10254,21 +9993,34 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
           // from the URL (back to /clients).
           onCloseRecord={()=>{ setSelected(null); setSelectedEngagementId(null) }}
           onSendToJobber={(p, opts)=>setBetaSendPerson({ person: p, engagementId: opts?.engagementId || null })}
+          jobberLinks={jobberLinks}
         />
-        {/* The EXISTING send-to-jobber confirm flow, mounted for the beta
-            Inbox. onDone mirrors PersonPanel's handleSendToJobber: merge
-            the patch and persist via updatePerson; the popup's own steps
-            are the confirmation (what will be created, for whom).
-            engagementId rides through when the send is the founded-
-            engagement next step (frames B/D founding → frame F, or the
-            panel's founded-not-sent action). */}
+        {/* The shared send-to-jobber confirm flow, mounted for the beta
+            Inbox/panel/profile. onDone mirrors PersonPanel's handleSendToJobber
+            for people-state (merge the patch, persist via updatePerson) AND
+            keeps the record OPEN, flipping the panel/profile Send button to
+            "Open in Jobber" live via jobberLinks (the stale-button fix). The
+            second arg carries the raw Jobber ids the overlay gate needs.
+            engagementId rides through when the send is the founded-engagement
+            next step (frames B/D founding → frame F, or the panel's
+            founded-not-sent action). */}
         {betaSendPerson&&(
-          <SendToJobberPopup
+          <SendToJobberModal
             person={betaSendPerson.person}
             engagementId={betaSendPerson.engagementId}
-            onDone={(patch)=>{
+            onDone={(patch, result)=>{
               updatePerson({ ...betaSendPerson.person, ...patch }, patch)
-              setSelected(null)
+              if (result?.jobber_client_id) {
+                setJobberLinks(prev => ({
+                  ...prev,
+                  [betaSendPerson.person.id]: {
+                    jobber_client_id: result.jobber_client_id,
+                    jobber_request_id: result.jobber_request_id || null,
+                  },
+                }))
+              }
+              // Keep the record OPEN (no setSelected(null)) — the overlay flips
+              // in place via jobberLinks instead of being force-closed.
               setBetaSendPerson(null)
               setToast({ kind:'success', msg:`${betaSendPerson.person.name} sent to Jobber` })
             }}

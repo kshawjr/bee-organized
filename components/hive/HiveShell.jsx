@@ -140,6 +140,12 @@ export default function HiveShell({
   onOpenEngagementUrl = () => {},
   onCloseRecord = () => {},
   onSendToJobber = () => {},
+  // Live Jobber-link patch, keyed by client id (BeeHub owns it; passed DOWN
+  // per §8.5). After a confirmed send-to-jobber the record stays open, and
+  // the panel/profile overlays merge { jobber_client_id, jobber_request_id }
+  // from here into their server-loaded gate so the Send button flips to
+  // "Open in Jobber" WITHOUT a refetch. Empty until the first send.
+  jobberLinks = {},
   // The people-merge seam (§8.5 direction rule): BeeHub passes this
   // callback DOWN; after a confirmed create the shell hands the mapped
   // person UP through it. The shell never reaches into BeeHub state.
@@ -690,6 +696,7 @@ export default function HiveShell({
             if (p) onSendToJobber(p, opts)
             else setToast({ kind: 'error', msg: 'Client record not loaded — try the classic view' })
           }}
+          jobberLinks={jobberLinks}
           setToast={setToast}
           lookupOptions={lookupOptions}
         />
@@ -724,6 +731,7 @@ export default function HiveShell({
             if (p) onSendToJobber(p)
             else setToast({ kind: 'error', msg: 'Client record not loaded — try the classic view' })
           }}
+          jobberLinks={jobberLinks}
           setToast={setToast}
           lookupOptions={lookupOptions}
         />

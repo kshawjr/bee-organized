@@ -76,7 +76,7 @@ import CloseWonWizard from './shared/CloseWonWizard'
 import ClosedSummary from './shared/ClosedSummary'
 import { Celebration, useReducedMotion, useMotionKeyframes, chipMoveStyle } from './shared/motion'
 import { fmtTime, fmtShort, engagementValue, displayTitle, formatFullDate, invoiceNumber, daysInStage, invoicesFullyPaid } from './shared/engagementStatus'
-import { recordJobberUrl } from './shared/jobberLinks'
+import { recordJobberUrl, jobberClientUrl } from './shared/jobberLinks'
 import { T } from './shared/tokens'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
@@ -181,7 +181,7 @@ function MilestoneRow({ kind, primary, secondary = null, state = null, href = nu
   )
 }
 
-export default function EngagementPanel({ engagementId, seed = null, people = [], locationUsers = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onReopened = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, onSendToJobber = null, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [], closeLostReasons: [] }, readOnly = false }) {
+export default function EngagementPanel({ engagementId, seed = null, people = [], locationUsers = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onReopened = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, onSendToJobber = null, jobberLinks = {}, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [], closeLostReasons: [] }, readOnly = false }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -316,16 +316,31 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     ...(children.touchpoints || []).map(tp => ({ t: 'touch', ts: tp.occurred_at, ...tp })),
   ].sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 8)
 
-  // Deep link: latest job → quote → request (whatever Jobber has).
+  // Live send-flip (the stale-button fix): a fresh send-to-jobber this
+  // session lands { jobber_client_id, jobber_request_id } in
+  // jobberLinks[client.id] BEFORE the panel's next refetch. The request it
+  // created isn't in `children` yet, so without this the panel would keep
+  // offering Send and show no link. Treat the patch as the just-created
+  // request: hide Send, and point "Open in Jobber" at it (client link as a
+  // last resort).
+  const linkPatch = (client && jobberLinks[client.id]) || null
+
+  // Deep link: latest job → quote → request (whatever Jobber has), then the
+  // just-sent request / client from the live patch.
   const jobberHref = (() => {
     const jobs = children.jobs, quotes = children.quotes, srs = children.service_requests
-    return jobs[jobs.length - 1]?.job_url || quotes[quotes.length - 1]?.quote_url || srs[srs.length - 1]?.request_url || null
+    const childHref = jobs[jobs.length - 1]?.job_url || quotes[quotes.length - 1]?.quote_url || srs[srs.length - 1]?.request_url || null
+    if (childHref) return childHref
+    if (linkPatch) return recordJobberUrl('request', { jobber_request_id: linkPatch.jobber_request_id }) || jobberClientUrl(linkPatch.jobber_client_id)
+    return null
   })()
 
   // Founded-but-not-sent (the decoupled-founding case): NO work records
   // at all → Send to Jobber, carrying engagementId so the request
-  // attaches HERE (never a second engagement / second lead).
-  const canSendToJobber = !!onSendToJobber && !!data && eng && !isTerminal(eng.stage) &&
+  // attaches HERE (never a second engagement / second lead). A live send
+  // this session (linkPatch) counts as a work record too — the request
+  // exists in Jobber even before the panel refetches it.
+  const canSendToJobber = !!onSendToJobber && !!data && eng && !isTerminal(eng.stage) && !linkPatch &&
     children.service_requests.length === 0 && children.quotes.length === 0 &&
     children.jobs.length === 0 && children.invoices.length === 0 &&
     (children.assessments || []).length === 0
