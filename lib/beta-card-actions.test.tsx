@@ -456,6 +456,86 @@ describe('ClientProfile wires the live blocks', () => {
   })
 })
 
+// ═══ action bar — loc_other leads are route-only ═══════════════
+// A loc_other lead isn't ours to work, only to route: Transfer is the bar's
+// ONLY action. Same rationale as the Inbox's Needs-transfer row pill. Normal
+// profiles keep the full bar — pinned here so the gate can't over-reach.
+describe('action bar — loc_other (transfer) lead', () => {
+  const mountProfile = (over: any = {}) => mount(
+    <ClientProfile clientId="lead-9" people={[]} onClose={() => {}} setToast={() => {}}
+      onSendToJobber={() => {}}
+      lookupOptions={{ sources: [], projectTypes: [], clientTags: [] } as any}
+      locationUsers={[] as any} {...over} />
+  )
+  const bar = (host: Element) => host.querySelector('[aria-label="Card actions"]')!
+
+  it('renders ONLY Transfer — no Call / Log touchpoint / Send to Jobber / New engagement', async () => {
+    profileBody = profilePayload({ client: { location_id: 'loc_other' } })
+    const { host, unmount } = await mountProfile()
+    const text = bar(host).textContent || ''
+    expect(btnContaining(bar(host), 'Transfer')).toBeTruthy()
+    expect(text).not.toContain('Call')
+    expect(text).not.toContain('Log touchpoint')
+    expect(text).not.toContain('Send to Jobber')
+    expect(text).not.toContain('New engagement')
+    // Transfer is the bar's sole control — nothing else survived the gate.
+    expect(bar(host).querySelectorAll('button, a')).toHaveLength(1)
+    await unmount()
+  })
+
+  it('the surviving Transfer still opens the transfer modal', async () => {
+    profileBody = profilePayload({ client: { location_id: 'loc_other' } })
+    const { host, unmount } = await mountProfile()
+    await click(btnContaining(bar(host), 'Transfer')!)
+    expect(document.querySelector('[role="dialog"][aria-label="Transfer lead"]')).toBeTruthy()
+    await unmount()
+  })
+
+  it('readOnly + loc_other drops the bar entirely rather than pinning an empty strip', async () => {
+    profileBody = profilePayload({ client: { location_id: 'loc_other' } })
+    const { host, unmount } = await mountProfile({ readOnly: true })
+    expect(host.querySelector('[aria-label="Card actions"]')).toBeNull()
+    await unmount()
+  })
+})
+
+describe('action bar — normal (non-loc_other) profile is unchanged', () => {
+  const mountProfile = (over: any = {}) => mount(
+    <ClientProfile clientId="lead-9" people={[]} onClose={() => {}} setToast={() => {}}
+      onSendToJobber={() => {}}
+      lookupOptions={{ sources: [], projectTypes: [], clientTags: [] } as any}
+      locationUsers={[] as any} {...over} />
+  )
+  const bar = (host: Element) => host.querySelector('[aria-label="Card actions"]')!
+
+  it('keeps the full bar — Call, Log touchpoint, Send to Jobber, New engagement; no Transfer', async () => {
+    const { host, unmount } = await mountProfile()
+    const text = bar(host).textContent || ''
+    expect(text).toContain('Call')
+    expect(text).toContain('Log touchpoint')
+    expect(text).toContain('Send to Jobber')
+    expect(text).toContain('New engagement')
+    expect(text).not.toContain('Transfer')
+    await unmount()
+  })
+
+  it('a jobber-linked normal lead still shows Open in Jobber (the gate never touches this branch)', async () => {
+    profileBody = profilePayload({ client: { jobber_client_id: 'jc-1' } })
+    const { host, unmount } = await mountProfile()
+    expect((bar(host).textContent || '')).toContain('Open in Jobber')
+    expect((bar(host).textContent || '')).not.toContain('Transfer')
+    await unmount()
+  })
+
+  it('ActionRow still sizes its grid per-action (each action is a separate child, not one wrapped block)', async () => {
+    const { host, unmount } = await mountProfile()
+    const grid = bar(host).firstElementChild as HTMLElement
+    // Call + Log touchpoint + Send to Jobber + New engagement = 4 columns.
+    expect(grid.style.gridTemplateColumns).toBe('repeat(4, 1fr)')
+    await unmount()
+  })
+})
+
 // ═══ introspection verdicts — source pins ══════════════════════
 describe('introspection-gated verdicts (live schema 2026-07-11)', () => {
   it('H: send-to-jobber assigns salespersonId at request creation, NON-FATAL (retry-without on rejection)', () => {

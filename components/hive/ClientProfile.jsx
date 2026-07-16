@@ -580,25 +580,35 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   // Action bar — PINNED (sticky) to the card bottom, visible from every
   // tab: Call (primary) · Log touchpoint · Open in Jobber (Send to
   // Jobber pre-link) · + New engagement.
-  const actionBar = c && (
-    <div style={{
+  //
+  // A loc_other lead is the exception: it isn't ours to work, only to
+  // route, so Transfer is its ONLY action and every other door is a dead
+  // end (same rationale as the Inbox's Needs-transfer row pill). Each
+  // action gates on !atLocOther individually rather than as one wrapped
+  // block — ActionRow sizes its grid from the CHILD COUNT, so a fragment
+  // would collapse the normal bar to a single column.
+  //
+  // readOnly + loc_other leaves nothing at all, so the bar drops out
+  // rather than pinning an empty bordered strip.
+  const actionBar = c && !(atLocOther && readOnly) && (
+    <div aria-label="Card actions" style={{
       position: 'sticky', bottom: 0, zIndex: 5, background: T.surface.raised,
       borderTop: T.border.divider,
       margin: isMobile ? '0 -16px' : '0 -24px',
       padding: isMobile ? '10px 16px calc(10px + env(safe-area-inset-bottom, 0px))' : '12px 24px',
     }}>
       <ActionRow>
-        {c.phone && (
+        {!atLocOther && c.phone && (
           <a href={`tel:${c.phone}`} style={actionBtn('accent')}>
             <IconPhone size={14} /> Call
           </a>
         )}
-        {!readOnly && (
+        {!readOnly && !atLocOther && (
           <button style={actionBtn('gray')} disabled={busy} onClick={() => setTouchOpen(true)}>
             Log touchpoint
           </button>
         )}
-        {jobberLinked ? (
+        {!atLocOther && (jobberLinked ? (
           jobberHref ? (
             <a href={jobberHref} target="_blank" rel="noreferrer" style={actionBtn('gray')}>
               <IconExternalLink size={14} /> Open in Jobber
@@ -614,7 +624,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
               <IconSend size={14} /> Send to Jobber
             </button>
           )
-        )}
+        ))}
         {/* Transfer — corp/admin routes a loc_other global-form lead to a
             real location. Same modal the Inbox's Needs-transfer rows open. */}
         {!readOnly && atLocOther && (
@@ -622,7 +632,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             <IconMapPin size={14} /> Transfer
           </button>
         )}
-        {!readOnly && (
+        {!readOnly && !atLocOther && (
           <button style={actionBtn('gray')} disabled={busy} onClick={newEngagement}>
             <IconPlus size={14} /> New engagement
           </button>
