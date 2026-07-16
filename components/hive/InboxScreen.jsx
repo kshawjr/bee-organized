@@ -58,9 +58,10 @@ import { formatInboxAgeParts } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import { TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY } from '@/components/ui/tokens'
 import { T } from './shared/tokens'
-import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock, IconDots } from '@/components/ui/icons'
+import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock, IconDots, IconMapPin } from '@/components/ui/icons'
 import InitialsAvatar from './shared/InitialsAvatar'
 import TouchpointModal, { METHODS } from './TouchpointModal'
+import TransferLeadModal from './TransferLeadModal'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
@@ -77,9 +78,18 @@ const inboxFilterCount = (f) =>
 
 // Section color families ride the CHIP_STYLES pairs (teal = New, blue =
 // Attempting) — the same one pair the chips and unread badge resolve to.
-const TEAL = CHIP_STYLES.teal, BLUE = CHIP_STYLES.blue
+const TEAL = CHIP_STYLES.teal, BLUE = CHIP_STYLES.blue, AMBER = CHIP_STYLES.amber
 
 const freshlySent = (p) => /^(REQ|JOB)-/.test(p.jobberRef || '')
+
+// Origin line for a Needs-transfer row: "city, ST zip · project · from
+// global form". Each part drops out when absent (a lead may carry a zip but
+// no street, or no project_type yet).
+const transferOriginLine = (p) => {
+  const cityState = [p.originCity, p.originState].filter(Boolean).join(', ')
+  const place = [cityState, p.originZip].filter(Boolean).join(' ')
+  return [place, p.project, 'from global form'].filter(Boolean).join(' · ')
+}
 
 function SectionLabel({ glyph, color, label, count, hint }) {
   return (
@@ -226,6 +236,15 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
   // as the person (not just an id) so the modal's subline survives the
   // row re-deriving out of its section the moment the log lands.
   const [touchFor, setTouchFor] = useState(null)
+  // The loc_other lead whose Transfer modal is open (row button OR ··· menu).
+  // Held as the person so the modal's origin subline survives the row
+  // re-deriving out of the section the instant the move lands.
+  const [transferFor, setTransferFor] = useState(null)
+  // Session-local optimistic removal for a just-transferred lead: the moved
+  // lead still reads atLocOther in this snapshot until the Realtime refetch
+  // re-maps it, so suppress it here so it leaves the Needs-transfer section
+  // immediately (mirrors junkedIds / dismissedIds).
+  const [transferredIds, setTransferredIds] = useState(() => new Set())
   // Soft-removal Sets, one per action: the row leaves the worklist
   // instantly, and a Realtime re-insert of the same person can't bring it
   // back this session even if the refetched row races ahead of the PATCH
@@ -314,8 +333,8 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     return [...present].sort()
   }, [scoped])
 
-  const { fresh, working } = useMemo(() => {
-    const fresh = [], working = []
+  const { transfer, fresh, working } = useMemo(() => {
+    const transfer = [], fresh = [], working = []
     for (const p of scoped) {
       // Soft removals — session Set OR the DB-backed field (rows arriving
       // already junked/snoozed/dismissed, incl. Realtime refetches). These
@@ -324,7 +343,14 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       if (p.isJunk || junkedIds.has(p.id)) continue
       if (snoozedIds.has(p.id) || (p.snoozeUntil && new Date(p.snoozeUntil).getTime() > nowMs)) continue
       if (p.inboxDismissedAt || dismissedIds.has(p.id)) continue
+      if (transferredIds.has(p.id)) continue // just-transferred — optimistic removal from every section
       if (!passesInboxFilters(p)) continue
+      // Needs transfer sits ABOVE New/Attempting: loc_other global-form leads
+      // corp/admin routes to a real location. They're pulled out here and
+      // EXCLUDED from New/Attempting (a loc_other New lead shows ONLY in this
+      // section). The section self-gates — franchise scopes never receive
+      // loc_other rows, so `transfer` is empty and the section doesn't render.
+      if (p.atLocOther) { transfer.push(p); continue }
       // The section IS the derivation now: a call logged this session is in
       // the timeline, so the person derives Attempting here and everywhere
       // else — no Inbox-local reassignment papering over a stale snapshot.
@@ -337,10 +363,11 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       : inboxSort === 'name' ? (a, b) => (a.name || '').localeCompare(b.name || '')
       : inboxSort === 'last_touch' ? (a, b) => lastReach(b) - lastReach(a)
       : (a, b) => created(b) - created(a)
+    transfer.sort(cmp)
     fresh.sort(cmp)
     working.sort(cmp)
-    return { fresh, working }
-  }, [scoped, openClientIds, wonClientIds, junkedIds, snoozedIds, dismissedIds, filters, inboxSort]) // eslint-disable-line react-hooks/exhaustive-deps
+    return { transfer, fresh, working }
+  }, [scoped, openClientIds, wonClientIds, junkedIds, snoozedIds, dismissedIds, transferredIds, filters, inboxSort]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Selection universe ─────────────────────────────────────
   // The VISIBLE rows (filters + section derivation already applied),
@@ -587,7 +614,17 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     }
   }
 
+  // The transfer landed (endpoint already moved the lead + notified +
+  // re-enrolled). Suppress the row this session and confirm; the Realtime
+  // refetch will re-map it under its new location.
+  function onTransferred(p, dest) {
+    addTo(setTransferredIds, p.id)
+    setTransferFor(null)
+    setToast({ kind: 'success', msg: `${p.name} transferred to ${dest?.name || 'location'}` })
+  }
+
   function Row({ p, family, pill }) {
+    const isTransfer = pill === 'Transfer'
     const sent = freshlySent(p)
     const canSend = !p.jobberRef
     // Jobber-owns-deletion rule: ANY jobberRef (imported/linked client,
@@ -604,7 +641,28 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       <span style={{ fontSize: '12px', color: T.accent.fg, fontWeight: 500, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
         <IconCheck size={13} /> Sent — engagement will appear on the board
       </span>
-    ) : readOnly ? null : (
+    ) : readOnly ? null : isTransfer ? (
+      <>
+        {/* Needs-transfer row: a small Transfer button PLUS the ··· menu,
+            both opening the same TransferLeadModal (row button, menu item,
+            and the card all reach one modal). */}
+        <GhostIconButton label="Transfer" icon={IconMapPin} disabled={busyId === p.id}
+          onClick={(ev) => { ev.stopPropagation(); setTransferFor(p) }} />
+        <GhostIconButton label="More" icon={IconDots} disabled={busyId === p.id}
+          data-bee-menu-trigger={p.id}
+          onClick={(ev) => { ev.stopPropagation(); setMenuFor(menuFor === p.id ? null : p.id) }} />
+        {menuFor === p.id && (
+          <RowMenu anchorId={p.id} isMobile={isMobile} onClose={() => setMenuFor(null)}>
+            <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); setTransferFor(p) }}
+              label={<><IconMapPin size={13} />Transfer to a location</>} />
+            <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); snoozeLead(p, 1) }}
+              label={<><IconClock size={13} />Snooze until tomorrow</>} />
+            <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); dismissLead(p) }}
+              label={<><IconCheck size={13} />Dismiss</>} />
+          </RowMenu>
+        )}
+      </>
+    ) : (
       <>
         {/* Ghost cluster — Log call RECORDS a touchpoint (the tel: link
             in the secondary line is the one that dials). */}
@@ -695,8 +753,18 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
                 center line with the icons); mobile keeps it far right
                 here, where the hint tail truncates before the date. */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px', minWidth: 0 }}>
-              <StatusChip label={pill} styleKey={pill === 'New' ? 'New' : 'Attempting'} />
-              {phoneLabel && phoneDigits && (
+              <StatusChip label={isTransfer ? 'Needs transfer' : pill} styleKey={isTransfer ? 'amber' : (pill === 'New' ? 'New' : 'Attempting')} />
+              {/* Needs-transfer rows show the lead's ORIGIN (where the global
+                  form said it was) instead of a tappable number. */}
+              {isTransfer && (
+                <span style={{
+                  fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
+                }}>
+                  {transferOriginLine(p)}
+                </span>
+              )}
+              {!isTransfer && phoneLabel && phoneDigits && (
                 <a className="bee-inbox-tel" href={`tel:${phoneDigits}`}
                   onClick={(ev) => ev.stopPropagation()}
                   style={{
@@ -742,6 +810,9 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
   }
 
   const cardStyle = { background: T.surface.raised, border: T.border.card, boxShadow: T.shadow.card, borderRadius: T.radius.card, overflow: 'hidden' }
+  // Needs-transfer card carries a left amber accent (the section's "attention"
+  // cue) on top of the neutral card — the banner accent convention.
+  const transferCardStyle = { ...cardStyle, borderLeft: `3px solid ${T.state.warning.fg}` }
 
   return (
     <div>
@@ -856,7 +927,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
         </div>
       )}
 
-      {fresh.length === 0 && working.length === 0 ? (
+      {transfer.length === 0 && fresh.length === 0 && working.length === 0 ? (
         inboxFilterCount(filters) > 0 ? (
           <FilteredEmpty count={inboxFilterCount(filters)} onClear={clearFilters} noun="inbox leads" />
         ) : (
@@ -866,6 +937,16 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
         )
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          {/* Needs transfer — ABOVE New/Attempting, ONLY when loc_other leads
+              are in scope (self-gating to corp/admin). */}
+          {transfer.length > 0 && (
+            <div>
+              <SectionLabel glyph={<IconMapPin size={13} />} color={AMBER.text} label="Needs transfer" count={transfer.length} hint="Route to a Location" />
+              <div style={transferCardStyle}>
+                {transfer.map(p => <Row key={p.id} p={p} family={AMBER} pill="Transfer" />)}
+              </div>
+            </div>
+          )}
           <div>
             <SectionLabel glyph={<IconSparkles size={13} />} color={TEAL.text} label="New" count={fresh.length} hint="No Contact Yet" />
             {fresh.length > 0 ? (
@@ -900,6 +981,15 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
           initialMethod="call"
           onClose={() => setTouchFor(null)}
           onSubmit={(payload) => logCall(touchFor, payload)}
+        />
+      )}
+
+      {transferFor && !readOnly && (
+        <TransferLeadModal
+          person={{ id: transferFor.id, name: transferFor.name }}
+          subline={transferOriginLine(transferFor)}
+          onClose={() => setTransferFor(null)}
+          onDone={(dest) => onTransferred(transferFor, dest)}
         />
       )}
     </div>

@@ -267,6 +267,19 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     id: row.id,
     assignedTo: row.assigned_to,
     locationId: row.location_uuid || row.location_id, // UUID matches BeeHub's locFilter
+    // Global-form leads that landed outside any service area sit at the
+    // 'loc_other' holding pen (a real location, slug 'loc_other'). The Inbox
+    // "Needs transfer" section keys on this flag; franchise scopes never
+    // receive loc_other rows, so its presence self-gates to corp/admin.
+    // location_id is the slug string, always present alongside location_uuid.
+    atLocOther: row.location_id === 'loc_other',
+    // Origin the transfer row shows ("city, ST zip · project · from global
+    // form"). Kept as discrete fields (not the flattened `addresses` array)
+    // so a city/state/zip with no street still renders — legacyAddr only
+    // synthesizes an address entry when row.address is set.
+    originCity: row.city || null,
+    originState: row.state || null,
+    originZip: row.zip || null,
     name: row.name || [row.first_name, row.last_name].filter(Boolean).join(' ').trim() || '(unnamed)',
     phone: row.phone || '',
     // Digits-only tel: key (generated column). Display keeps `phone`.

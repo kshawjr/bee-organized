@@ -49,11 +49,12 @@ import { vitalsAge } from './shared/VitalsStrip'
 import MetricBand from './shared/MetricBand'
 import {
   IconPhone, IconExternalLink, IconSend, IconChevronRight,
-  IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPlus, IconPaperclip,
+  IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconPlus, IconPaperclip, IconMapPin,
 } from '@/components/ui/icons'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
 import TouchpointModal from './TouchpointModal'
+import TransferLeadModal from './TransferLeadModal'
 import ContactField from './shared/ContactField'
 import AddressField from './shared/AddressField'
 import SourceField from './shared/SourceField'
@@ -97,6 +98,8 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   // — the old inline select+input+Log wedge is gone and its method/note
   // state went with it into the modal.
   const [touchOpen, setTouchOpen] = useState(false)
+  // Transfer modal — only reachable for a loc_other lead (see actionBar).
+  const [transferOpen, setTransferOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const nowMs = Date.now()
 
@@ -158,6 +161,19 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   // route doesn't ship child *_url columns, and even if it did, a
   // client link that lands on one arbitrary job would be wrong.
   const jobberHref = jobberClientUrl(effJobberClientId)
+
+  // Needs-transfer: a loc_other global-form lead corp/admin can route to a
+  // real location. location_id is the slug string; the profile route already
+  // 403s a franchise user viewing a loc_other lead, and the transfer endpoint
+  // is the load-bearing gate, so surfacing the action on the slug is enough.
+  const atLocOther = c?.location_id === 'loc_other'
+  const transferSubline = c
+    ? [
+        [[c.city, c.state].filter(Boolean).join(', '), c.zip].filter(Boolean).join(' '),
+        c.project_type,
+        'from global form',
+      ].filter(Boolean).join(' · ')
+    : ''
 
   const tags = data?.tags ?? []
   const lastTouchTs = touches.reduce((m, t) => Math.max(m, new Date(t.occurred_at).getTime() || 0), 0) || null
@@ -599,6 +615,13 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             </button>
           )
         )}
+        {/* Transfer — corp/admin routes a loc_other global-form lead to a
+            real location. Same modal the Inbox's Needs-transfer rows open. */}
+        {!readOnly && atLocOther && (
+          <button style={actionBtn('accent')} disabled={busy} onClick={() => setTransferOpen(true)}>
+            <IconMapPin size={14} /> Transfer
+          </button>
+        )}
         {!readOnly && (
           <button style={actionBtn('gray')} disabled={busy} onClick={newEngagement}>
             <IconPlus size={14} /> New engagement
@@ -610,6 +633,20 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
           personName={c.name}
           onClose={() => setTouchOpen(false)}
           onSubmit={logTouchpoint}
+        />
+      )}
+      {transferOpen && !readOnly && c && atLocOther && (
+        <TransferLeadModal
+          person={{ id: c.id, name: c.name }}
+          subline={transferSubline}
+          onClose={() => setTransferOpen(false)}
+          onDone={(dest) => {
+            setTransferOpen(false)
+            setToast({ kind: 'success', msg: `${c.name} transferred to ${dest?.name || 'location'}` })
+            // The lead left loc_other — close the card; the inbox refetch
+            // drops it from Needs transfer and re-maps it under its new home.
+            onClose()
+          }}
         />
       )}
     </div>
