@@ -58,7 +58,7 @@ import { formatInboxAgeParts } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import { TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY } from '@/components/ui/tokens'
 import { T } from './shared/tokens'
-import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock, IconDots, IconMapPin } from '@/components/ui/icons'
+import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock, IconDots, IconMapPin, IconArrowRight } from '@/components/ui/icons'
 import InitialsAvatar from './shared/InitialsAvatar'
 import TouchpointModal, { METHODS } from './TouchpointModal'
 import TransferLeadModal from './TransferLeadModal'
@@ -118,6 +118,28 @@ function GhostIconButton({ label, icon: Icon, disabled, onClick, ...rest }) {
     <button className="bee-ghost-btn" aria-label={label} title={label}
       disabled={disabled} style={ghostBtn} onClick={onClick} {...rest}>
       <Icon size={17} />
+    </button>
+  )
+}
+
+// The Needs-transfer row's sole action — a filled accent pill rather than
+// a ghost icon, because routing the lead away is the ONLY thing to do with
+// it and the row shouldn't make you hunt for that. Compact by the standing
+// preference: it reads as a row control, not a call-to-action bar.
+function TransferPill({ disabled, onClick }) {
+  return (
+    <button className="bee-transfer-pill" aria-label="Transfer" title="Transfer"
+      disabled={disabled} onClick={onClick}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: '5px',
+        padding: '7px 13px', borderRadius: T.radius.pill, border: 'none',
+        background: T.accent.fg, color: T.accent.onFill,
+        fontSize: '13px', fontWeight: 600, lineHeight: 1, whiteSpace: 'nowrap',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+      }}>
+      <IconArrowRight size={13} />
+      Transfer
     </button>
   )
 }
@@ -642,26 +664,13 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
         <IconCheck size={13} /> Sent — engagement will appear on the board
       </span>
     ) : readOnly ? null : isTransfer ? (
-      <>
-        {/* Needs-transfer row: a small Transfer button PLUS the ··· menu,
-            both opening the same TransferLeadModal (row button, menu item,
-            and the card all reach one modal). */}
-        <GhostIconButton label="Transfer" icon={IconMapPin} disabled={busyId === p.id}
-          onClick={(ev) => { ev.stopPropagation(); setTransferFor(p) }} />
-        <GhostIconButton label="More" icon={IconDots} disabled={busyId === p.id}
-          data-bee-menu-trigger={p.id}
-          onClick={(ev) => { ev.stopPropagation(); setMenuFor(menuFor === p.id ? null : p.id) }} />
-        {menuFor === p.id && (
-          <RowMenu anchorId={p.id} isMobile={isMobile} onClose={() => setMenuFor(null)}>
-            <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); setTransferFor(p) }}
-              label={<><IconMapPin size={13} />Transfer to a location</>} />
-            <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); snoozeLead(p, 1) }}
-              label={<><IconClock size={13} />Snooze until tomorrow</>} />
-            <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); dismissLead(p) }}
-              label={<><IconCheck size={13} />Dismiss</>} />
-          </RowMenu>
-        )}
-      </>
+      /* Needs-transfer row: ONE action — the filled Transfer pill. The
+         normal cluster (log call, Send to Jobber, ···) is deliberately
+         absent: a lead being routed away isn't ours to call or push to
+         Jobber, so those doors would be dead ends. The card keeps the
+         fuller action set; the row is a single decision. */
+      <TransferPill disabled={busyId === p.id}
+        onClick={(ev) => { ev.stopPropagation(); setTransferFor(p) }} />
     ) : (
       <>
         {/* Ghost cluster — Log call RECORDS a touchpoint (the tel: link

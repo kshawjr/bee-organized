@@ -8,12 +8,23 @@
 //     receive loc_other rows, so the section is simply absent for them)
 //   · a loc_other lead shows its ORIGIN (city, ST zip · project · from global
 //     form) and is EXCLUDED from New (it appears once, in Needs transfer)
-//   · the Transfer opens the same modal from the row button AND the ··· menu
+//   · the row's ONLY action is the Transfer pill — no log-call / Send-to-Jobber
+//     / ··· cluster, since none of those apply to a lead being routed away —
+//     and it opens the same TransferLeadModal the card does
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import InboxScreen from '@/components/hive/InboxScreen'
+import { T } from '@/components/hive/shared/tokens'
+
+// The DOM normalizes colors (hex in → rgb() out), so compare a token to a
+// rendered value by pushing the token through the same normalizer.
+const asRendered = (prop: 'background' | 'color', value: string) => {
+  const probe = document.createElement('div')
+  probe.style[prop] = value
+  return probe.style[prop]
+}
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 ;(globalThis as any).__BEE_TEST_WIDTH__ = 1200
@@ -116,7 +127,7 @@ describe('Inbox — Needs transfer section', () => {
     await unmount()
   })
 
-  it('opens the transfer modal from the row Transfer button', async () => {
+  it('opens the transfer modal from the row Transfer pill', async () => {
     const { host, unmount } = await mount(
       <InboxScreen people={[locOtherLead()]} engagements={[]} locFilter="all" />,
     )
@@ -129,20 +140,71 @@ describe('Inbox — Needs transfer section', () => {
     await unmount()
   })
 
-  it('opens the same modal from the ··· menu Transfer item', async () => {
+  it('opens the pill modal for the CORRECT lead when several await transfer', async () => {
+    const target = locOtherLead({ name: 'Second Lead', originCity: 'Reno', originState: 'NV', originZip: '89501' })
+    const { host, unmount } = await mount(
+      <InboxScreen people={[locOtherLead({ name: 'First Lead' }), target]} engagements={[]} locFilter="all" />,
+    )
+    const rows = Array.from(host.querySelectorAll('.bee-inbox-row'))
+      .filter(r => (r.textContent || '').includes('Lead'))
+    const targetRow = rows.find(r => (r.textContent || '').includes('Second Lead'))
+    expect(targetRow).toBeTruthy()
+    const pill = Array.from(targetRow!.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Transfer')
+    await act(async () => { pill!.click() })
+    await flush()
+    const dlg = document.querySelector('[role="dialog"][aria-label="Transfer lead"]')
+    expect(dlg).toBeTruthy()
+    // The modal is bound to the row that was clicked, not the first in the list.
+    expect(dlg!.textContent).toContain('Second Lead')
+    expect(dlg!.textContent).not.toContain('First Lead')
+    await unmount()
+  })
+
+  it('renders the pill as the ONLY action — no log-call / Send-to-Jobber / ··· on a transfer row', async () => {
     const { host, unmount } = await mount(
       <InboxScreen people={[locOtherLead()]} engagements={[]} locFilter="all" />,
     )
-    const more = Array.from(host.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'More')
-    expect(more).toBeTruthy()
-    await act(async () => { more!.click() })
-    await flush()
-    // RowMenu portals to <body>; find the Transfer item there.
-    const item = Array.from(document.querySelectorAll('button')).find(b => (b.textContent || '').includes('Transfer to a location'))
-    expect(item).toBeTruthy()
-    await act(async () => { item!.click() })
-    await flush()
-    expect(document.querySelector('[role="dialog"][aria-label="Transfer lead"]')).toBeTruthy()
+    const row = Array.from(host.querySelectorAll('.bee-inbox-row'))
+      .find(r => (r.textContent || '').includes('Global Lead'))
+    expect(row).toBeTruthy()
+    const labels = Array.from(row!.querySelectorAll('button')).map(b => b.getAttribute('aria-label'))
+    expect(labels).toEqual(['Transfer'])
+    expect(labels).not.toContain('Log call')
+    expect(labels).not.toContain('Send to Jobber')
+    expect(labels).not.toContain('More')
+    await unmount()
+  })
+
+  it('leaves the normal row cluster intact (the pill is transfer-only)', async () => {
+    const { host, unmount } = await mount(
+      <InboxScreen people={[locOtherLead(), person({ name: 'Normal New' })]} engagements={[]} locFilter="all" />,
+    )
+    const row = Array.from(host.querySelectorAll('.bee-inbox-row'))
+      .find(r => (r.textContent || '').includes('Normal New'))
+    const labels = Array.from(row!.querySelectorAll('button')).map(b => b.getAttribute('aria-label'))
+    expect(labels).toContain('Log call')
+    expect(labels).toContain('Send to Jobber')
+    expect(labels).toContain('More')
+    expect(labels).not.toContain('Transfer')
+    await unmount()
+  })
+
+  it('styles the pill from tokens — accent fill, pill radius, compact', async () => {
+    const { host, unmount } = await mount(
+      <InboxScreen people={[locOtherLead()]} engagements={[]} locFilter="all" />,
+    )
+    const pill = Array.from(host.querySelectorAll('button'))
+      .find(b => b.getAttribute('aria-label') === 'Transfer') as HTMLButtonElement
+    expect(pill.style.borderRadius).toBe(T.radius.pill)
+    // Filled accent, not a ghost: accent fill + the accent's onFill ink.
+    expect(pill.style.background).toBe(asRendered('background', T.accent.fg))
+    expect(pill.style.color).toBe(asRendered('color', T.accent.onFill))
+    // Compact — a row control, not a call-to-action bar.
+    expect(pill.style.fontSize).toBe('13px')
+    expect(pill.style.padding).toBe('7px 13px')
+    // Arrow + label.
+    expect(pill.textContent).toContain('Transfer')
+    expect(pill.querySelector('svg')).toBeTruthy()
     await unmount()
   })
 })
