@@ -655,15 +655,13 @@ async function handleInvoiceCore(
   let leadId: string | null = null
   let jobDbId: string | null = null
 
-  if (firstJob?.request?.id) {
-    sr = await findServiceRequestByJobberId(firstJob.request.id, ctx.location.location_id)
-    if (!sr) {
-      const parent = await fetchAndUpsertRequest(firstJob.request.id, ctx)
-      if ('error' in parent) return { processed: false, error: parent.error }
-      sr = { id: parent.service_request_id, lead_id: parent.lead_id }
-    }
-    leadId = sr.lead_id
-
+  // The job lookup is deliberately NOT gated on the job having a parent
+  // request. Jobber allows a job with no request (booked straight off a
+  // quote, or created by hand), and that job still identifies the invoice's
+  // engagement via rule 3. While this lived inside the request branch, every
+  // requestless job's invoice came through with job_id null — so
+  // resolveEngagementForChild had no rule-3 key, and the invoice orphaned.
+  if (firstJob?.id) {
     const jobNumeric = extractJobberId(firstJob.id)
     if (jobNumeric) {
       const { data: jobRow } = await supabaseService
@@ -673,6 +671,16 @@ async function handleInvoiceCore(
         .maybeSingle()
       jobDbId = jobRow?.id || null
     }
+  }
+
+  if (firstJob?.request?.id) {
+    sr = await findServiceRequestByJobberId(firstJob.request.id, ctx.location.location_id)
+    if (!sr) {
+      const parent = await fetchAndUpsertRequest(firstJob.request.id, ctx)
+      if ('error' in parent) return { processed: false, error: parent.error }
+      sr = { id: parent.service_request_id, lead_id: parent.lead_id }
+    }
+    leadId = sr.lead_id
   } else if (invRec.client?.id) {
     const existing = await findLeadByJobberClientId(invRec.client.id, ctx.location.location_id)
     if (existing) leadId = existing.id
@@ -686,6 +694,7 @@ async function handleInvoiceCore(
 
   // Dual-write (step 3): invoice attaches via its job (then SR / rule-5
   // fallbacks). Additive.
+  let attachNote: string | undefined
   try {
     const engId = await resolveEngagementForChild({
       childTable: 'invoices',
@@ -698,8 +707,18 @@ async function handleInvoiceCore(
     if (engId) {
       await attachToEngagement('invoices', iRes.id, engId)
       await maybeAdvanceEngagementStage(engId)
+    } else {
+      // Unattachable: the row is written but belongs to no engagement, so it
+      // contributes to no rollup and shows on no board. checkLanded already
+      // records not_landed for this; the note carries the WHY into the
+      // sync_log message so the digest doesn't just say "didn't land".
+      attachNote = `engagement unresolved (job_id=${jobDbId ?? 'null'} sr=${sr?.id ?? 'null'}) — invoice written but unattached`
+      console.error('[engagements] invoice unattachable', {
+        invoiceDbId: iRes.id, leadId, jobDbId, srId: sr?.id ?? null,
+      })
     }
   } catch (err: any) {
+    attachNote = `engagement dual-write failed: ${err?.message || err}`
     console.error('[engagements] invoice dual-write failed', err?.message || err)
   }
 
@@ -729,10 +748,17 @@ async function handleInvoiceCore(
       lead_id: leadId,
       lead_stage: promo.lead_stage,
       prev_stage: promo.prev_stage,
+      ...(attachNote ? { note: attachNote } : {}),
     }
   }
   const stage = await readLeadStage(leadId)
-  return { processed: true, lead_id: leadId, lead_stage: stage, prev_stage: stage }
+  return {
+    processed: true,
+    lead_id: leadId,
+    lead_stage: stage,
+    prev_stage: stage,
+    ...(attachNote ? { note: attachNote } : {}),
+  }
 }
 
 // INVOICE_CREATE → no stage change + invoice_created_at + balance_owing
