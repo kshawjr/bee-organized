@@ -91,6 +91,13 @@ export type ZohoNotificationContact = {
   name: string
   email: string
   opted_out: boolean
+  // First/Last are ALREADY inside NOTIF_CONTACT_FIELDS below — the mapping just
+  // used to collapse them into `name` and drop them. Surfaced verbatim (no
+  // extra API cost, no widened selection) so the seed can write
+  // lead_notification_externals.first_name/last_name without splitting a full
+  // name on whitespace. Null when Zoho carries only a Full_Name.
+  first_name: string | null
+  last_name: string | null
 }
 
 const NOTIF_CONTACT_FIELDS = 'Full_Name,First_Name,Last_Name,Email,Email_Opt_Out'
@@ -142,7 +149,15 @@ export async function getZohoLocationNotificationContacts(
         (c.Full_Name && c.Full_Name !== email && String(c.Full_Name).trim()) ||
         [c.First_Name, c.Last_Name].filter(Boolean).join(' ').trim() ||
         email
-      contacts.push({ name, email, opted_out: c.Email_Opt_Out === true })
+      const trimmed = (v: unknown) =>
+        typeof v === 'string' && v.trim() ? v.trim() : null
+      contacts.push({
+        name,
+        email,
+        opted_out: c.Email_Opt_Out === true,
+        first_name: trimmed(c.First_Name),
+        last_name: trimmed(c.Last_Name),
+      })
     }
 
     notifContactsCache.set(locationSlug, { at: Date.now(), contacts })
