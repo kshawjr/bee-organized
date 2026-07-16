@@ -190,13 +190,19 @@ export const SINGLE_JOB_QUERY = `
   }
 `
 
+// paymentRecords + paymentsTotal/tipsTotal/invoiceBalance are selected ONLY
+// here (the webhook single-invoice path — the one a live payment travels).
+// The bulk-import invoice queries above deliberately still omit them: adding
+// them there is part of the not-yet-taken backfill decision, and upsertInvoice
+// falls back to createdAt when they're absent, exactly as before.
 export const SINGLE_INVOICE_QUERY = `
   query GetInvoice($id: EncodedId!) {
     invoice(id: $id) {
       id createdAt jobberWebUri invoiceStatus
-      amounts { subtotal taxAmount discountAmount total }
+      amounts { subtotal taxAmount discountAmount total paymentsTotal tipsTotal invoiceBalance }
       client { id }
       jobs(first: 5) { nodes { id request { id } } }
+      paymentRecords(first: 50) { nodes { amount entryDate tipAmount adjustmentType } }
     }
   }
 `
@@ -906,6 +912,18 @@ export async function upsertInvoice(
   const status = (invoice.invoiceStatus || '').toUpperCase()
   const isPaid = status === 'PAID'
   const totalNum = invoice.amounts?.total ? parseFloat(invoice.amounts.total) : null
+  // Latest real money-in date, when the caller's query selected paymentRecords
+  // (SINGLE_INVOICE_QUERY does; the bulk-import queries don't). Only PAYMENT
+  // and DEPOSIT are money in — REFUND / FAILED_ACH_PAYMENT / VOIDED /
+  // BAD_DEBT / CORRECTION are also PaymentRecords and must never be read as
+  // "when this was paid". ISO-8601 sorts lexicographically = chronologically.
+  const MONEY_IN = new Set(['PAYMENT', 'DEPOSIT'])
+  const paidAtFromPayments =
+    (invoice.paymentRecords?.nodes || [])
+      .filter((p: any) => p?.entryDate && MONEY_IN.has(String(p.adjustmentType || '').toUpperCase()))
+      .map((p: any) => p.entryDate as string)
+      .sort()
+      .pop() || null
   const payload: Record<string, any> = {
     job_id, service_request_id, lead_id, location_id,
     jobber_invoice_id: jobberInvoiceId,
@@ -918,14 +936,19 @@ export async function upsertInvoice(
     tax_amount:      invoice.amounts?.taxAmount      ? parseFloat(invoice.amounts.taxAmount)      : null,
     discount_amount: invoice.amounts?.discountAmount ? parseFloat(invoice.amounts.discountAmount) : null,
     total:           totalNum,
-    // Payment fields (read by people-mapper's invoice mapping). Jobber's
-    // invoice shape here carries no per-payment data or paid timestamp, so
-    // PAID is all-or-nothing: paid = full total, balance 0, and issued date
-    // stands in for paid_at. PARTIAL can't be split without payments data —
-    // leave amounts null rather than guess.
+    // Payment fields (read by people-mapper's invoice mapping). PAID stays
+    // all-or-nothing: paid = full total, balance 0.
+    //
+    // paid_at prefers the real money-in date from paymentRecords. It falls
+    // back to createdAt (the ISSUE date) only when the caller's query didn't
+    // select paymentRecords — i.e. the bulk-import paths. That fallback is
+    // why existing rows carry issue dates as payment dates: Jobber does
+    // expose paymentRecords { entryDate } and amounts { paymentsTotal
+    // tipsTotal invoiceBalance }; SINGLE_INVOICE_QUERY simply never asked
+    // until now. Repairing the already-stamped rows is a separate decision.
     paid_amount:   isPaid ? totalNum : null,
     balance_owing: isPaid ? 0 : totalNum,
-    paid_at:       isPaid ? (invoice.createdAt || null) : null,
+    paid_at:       isPaid ? (paidAtFromPayments || invoice.createdAt || null) : null,
     issued_at: invoice.createdAt || null,
     jobber_synced_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
