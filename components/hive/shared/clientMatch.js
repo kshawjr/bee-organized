@@ -111,12 +111,17 @@ export function buildLeadMatchOr({ email, phone } = {}) {
 // Resolves to matching rows ([] when there is nothing to match on).
 // Errors propagate — the caller decides how a failed re-check degrades
 // (the people-prop gate has already run by then).
+//
+// jobber_client_id rides in the select for the Jobber import's adoption
+// pass (lib/jobber-import.ts): it needs to restrict candidates to rows
+// NOT yet linked to a Jobber client. It is inert for the other two
+// callers (intake, NewClientSheet) — they never read it.
 export async function queryLeadMatches(supabase, { email, phone, locationUuid } = {}) {
   const orFilter = buildLeadMatchOr({ email, phone })
   if (!orFilter) return []
   let q = supabase
     .from('leads')
-    .select('id, name, email, phone, phone_normalized, address, city, state, zip, project_type, request_details, preferred_contact, stage, is_junk, location_uuid, created_at')
+    .select('id, name, email, phone, phone_normalized, address, city, state, zip, project_type, request_details, preferred_contact, stage, is_junk, location_uuid, created_at, jobber_client_id')
     .or(orFilter)
     .not('is_junk', 'is', true)
     .range(0, 999)
