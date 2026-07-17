@@ -22,6 +22,10 @@
 import { supabaseService } from './supabase-service'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
 import { writeSyncLog } from './sync-log'
+import {
+  queryLeadMatches,
+  classifyLeadMatches,
+} from '@/components/hive/shared/clientMatch'
 
 // ── GraphQL: bulk pagination queries (used by the import route) ────
 
@@ -484,6 +488,262 @@ export function determineLeadStage(
 
 // ── upserts ───────────────────────────────────────────────────────
 
+// ── adoption pass: website lead ↔ Jobber client reconciliation ─────
+// A person can arrive through BOTH doors: a website lead (MAKE →
+// /api/leads/intake) and, later, a Jobber client the owner imports.
+// Intake rows carry jobber_client_id = NULL, so upsertLead's
+// jobber_client_id SELECT can never match one — before this pass the
+// import blind-inserted a SECOND row for the same human. The owner then
+// saw the person twice: the web-form context (request_details, source,
+// touchpoint history) on one row, the Jobber stage + money
+// (service_request/quote/job/invoice children) on the other. This is the
+// NORMAL onboarding path — a territory collects leads pre-launch, then
+// imports Jobber on day one.
+//
+// So on a jobber_client_id MISS, re-check with the SAME vocabulary the
+// webform door uses (queryLeadMatches / classifyLeadMatches — see
+// components/hive/shared/clientMatch.js), scoped to this location:
+//
+//   SOLID       — a strong key (exact email or phone_normalized) reaches
+//                 exactly ONE lead, and that lead is not yet linked to a
+//                 Jobber client. ADOPT it: stamp jobber_client_id and
+//                 fill-empty the payload onto that row instead of
+//                 inserting. One row survives, carrying both histories.
+//   IN QUESTION — ambiguous: a strong key reached >1 lead, the keys
+//                 conflict, it is only a name match, or the one solid
+//                 match already belongs to another Jobber client. NEVER
+//                 merge — fusing two different people is worse than a
+//                 duplicate, and unmergeable. Insert as before, but
+//                 record possible_duplicate_of.
+//   NO MATCH    — insert exactly as before. No behavior change.
+//
+// Only UNLINKED rows are adoptable, but the ambiguity check runs over
+// linked rows too — see the worked example in findAdoptionCandidate for
+// why filtering them out first is a false-merge bug.
+//
+// A failed match read degrades to the plain insert: a duplicate is
+// recoverable, a dropped Jobber client is not (same trade intake makes).
+//
+// NOTE: possible_duplicate_of is written here but is currently READ BY NO
+// UI, so the flag is invisible to owners today. A reader (surfacing
+// flagged rows for human merge) is a deliberate separate follow-up — the
+// column is populated now so the data exists when that lands.
+
+const isBlank = (v: unknown): boolean =>
+  v === null || v === undefined || (typeof v === 'string' && v.trim() === '')
+
+// The name upsertLead falls back to when a Jobber client has no personal
+// and no company name. Never name-match on it — it is a placeholder, not
+// an identity, and would flag every nameless client against every other.
+const UNKNOWN_NAME = 'Unknown'
+
+// Columns the import fills on an adopted row only when the row has none.
+//
+// SCOPE — this is an AT-ADOPTION rule, not a permanent one. Once adopted,
+// the row carries a jobber_client_id, so the next sync (webhook, or a
+// re-run of the idempotent bulk import) takes the `existing` branch in
+// upsertLead, which applies the full payload — Jobber becomes the source
+// of truth for these contact columns, exactly as it already is for every
+// other Jobber-linked lead. That is the intended contract; fill-empty
+// here just avoids a pointless clobber on the adopting write itself.
+//
+// The web-form context that must survive PERMANENTLY — request_details,
+// source, project_type, preferred_contact, metadata, stage, and the
+// touchpoint history — is preserved by construction: none of it appears
+// in the import payload at all, on either branch.
+const ADOPT_FILL_EMPTY_COLS = [
+  'name', 'first_name', 'last_name', 'company',
+  'email', 'phone', 'address', 'city', 'state', 'zip',
+] as const
+
+// The insert–insert race recovery below and the adopt race guard both key
+// off the partial unique index leads_jobber_client_id_location_idx
+// (WHERE jobber_client_id IS NOT NULL).
+function isClientIdDup(error: any): boolean {
+  return (
+    error?.code === '23505' &&
+    (error.message?.includes('leads_jobber_client_id_location_idx') ||
+      error?.details?.includes('jobber_client_id'))
+  )
+}
+
+type AdoptionVerdict =
+  | { kind: 'adopt'; leadId: string; matchedOn: string }
+  | { kind: 'flag'; candidateIds: string[] }
+  | { kind: 'none' }
+
+// Resolve what (if anything) this Jobber client should reconcile with.
+// Throws only on a genuine query failure — the caller degrades to insert.
+async function findAdoptionCandidate(args: {
+  email: string | null
+  phone: string | null
+  name: string | null
+  location_uuid: string
+}): Promise<AdoptionVerdict> {
+  const { email, phone, name, location_uuid } = args
+
+  // Cross-tenant guard. queryLeadMatches DROPS its location scope when
+  // locationUuid is falsy or the literal 'all' — an unscoped match here
+  // could adopt another territory's lead, so refuse to match at all
+  // rather than match globally.
+  if (!location_uuid || location_uuid === 'all') return { kind: 'none' }
+
+  // Strong keys first. queryLeadMatches carries the standing patterns:
+  // .or() built only from present keys, .not('is_junk','is',true),
+  // .range(0,999), and phone matched via the generated phone_normalized
+  // column (raw leads.phone is free-text and never matched DB-side).
+  const rows = (await queryLeadMatches(supabaseService, {
+    email,
+    phone,
+    locationUuid: location_uuid,
+  })) as Array<{ id: string; jobber_client_id?: string | null }>
+
+  // Classify over the FULL result set — linked rows included.
+  //
+  // It is tempting to drop already-linked rows first ("they aren't
+  // adoptable anyway"), but that is a FALSE-MERGE BUG: classifyLeadMatches
+  // arbitrates ambiguity by counting how many leads each strong key
+  // reaches (emailIds.size > 1 || phoneIds.size > 1 → in_question).
+  // Filtering the input shrinks those counts and silently promotes
+  // in_question → solid. Worked example — a shared household landline:
+  //   erin — website lead, landline L, already linked to her Jobber client
+  //   fay  — website lead, same landline L, unlinked
+  //   import Dave, same landline L, no email on his Jobber record
+  // Filter-first sees only [fay] → "exactly one" → SOLID → Dave's jobs and
+  // money get stamped onto Fay's row. Unrecoverable. Classifying the full
+  // set sees the landline reaching TWO leads → in_question → insert+flag.
+  // erin being linked is positive PROOF the landline is shared; it is
+  // evidence, not noise. (It also made adoption import-order dependent.)
+  // The intake door classifies unfiltered for the same reason.
+  const verdict = classifyLeadMatches(rows, { email, phone }) as {
+    tier: 'solid' | 'in_question' | 'none'
+    match?: { id: string; jobber_client_id?: string | null }
+    matchedOn?: string
+    matchIds?: string[]
+  }
+
+  if (verdict.tier === 'solid' && verdict.match?.id) {
+    // Unambiguous — but only ADOPTABLE if the row isn't already spoken
+    // for. A row carrying a jobber_client_id belongs to a different
+    // Jobber client (ours missed the SELECT above); adopting it would
+    // steal it. Flag instead: the same person reachable under two Jobber
+    // clients is a real duplicate, just not one we may resolve here.
+    if (isBlank(verdict.match.jobber_client_id)) {
+      return { kind: 'adopt', leadId: verdict.match.id, matchedOn: verdict.matchedOn ?? 'email' }
+    }
+    return { kind: 'flag', candidateIds: [verdict.match.id] }
+  }
+  if (verdict.tier === 'in_question') {
+    return { kind: 'flag', candidateIds: verdict.matchIds ?? [] }
+  }
+
+  // No strong-key hit — name-only check, mirroring the intake door
+  // (app/api/leads/intake/route.ts). Name matches can NEVER adopt; they
+  // can only ever flag. ilike with escaped wildcards = case-insensitive
+  // exact match on the stored name.
+  const trimmed = (name || '').trim()
+  if (!trimmed || trimmed === UNKNOWN_NAME) return { kind: 'none' }
+  const nameEsc = trimmed.replace(/[\\%_]/g, (m) => `\\${m}`)
+  const { data: nameRows, error: nameErr } = await supabaseService
+    .from('leads')
+    .select('id')
+    .eq('location_uuid', location_uuid)
+    .is('jobber_client_id', null)
+    .ilike('name', nameEsc)
+    .not('is_junk', 'is', true)
+    .range(0, 999)
+  if (nameErr) throw new Error(nameErr.message)
+  if (nameRows && nameRows.length > 0) {
+    return { kind: 'flag', candidateIds: nameRows.map((r: { id: string }) => r.id) }
+  }
+  return { kind: 'none' }
+}
+
+// Execute the adoption. Returns null when the candidate turned out to be
+// unusable (vanished, or linked by a racing writer) — the caller then
+// falls through to the normal insert.
+async function adoptLead(args: {
+  candidateId: string
+  jobberClientId: string
+  payload: Record<string, any>
+  location_uuid: string
+}): Promise<{ id: string; created: false; stage: string | null } | null> {
+  const { candidateId, jobberClientId, payload, location_uuid } = args
+
+  // Fresh targeted read: the fill-empty decision must be made against the
+  // row as it is NOW, and this doubles as the race guard below.
+  const { data: row, error: readErr } = await supabaseService
+    .from('leads')
+    .select(
+      'id, name, first_name, last_name, company, email, phone, address, city, state, zip, assigned_to, jobber_client_id, stage',
+    )
+    .eq('id', candidateId)
+    .maybeSingle()
+  if (readErr) throw new Error(readErr.message)
+  if (!row) return null
+
+  // Linked between the match and now. If it was linked to US, the work is
+  // already done; to anyone else, it is no longer ours to adopt.
+  if (!isBlank(row.jobber_client_id)) {
+    return row.jobber_client_id === jobberClientId
+      ? { id: row.id, created: false, stage: (row.stage as string | null) ?? null }
+      : null
+  }
+
+  const patch: Record<string, any> = {
+    // The adoption itself, plus bookkeeping — these always win.
+    jobber_client_id: jobberClientId,
+    location_id: payload.location_id,
+    location_uuid: payload.location_uuid,
+    jobber_synced_at: payload.jobber_synced_at,
+    updated_at: payload.updated_at,
+  }
+  for (const col of ADOPT_FILL_EMPTY_COLS) {
+    if (!isBlank(payload[col]) && isBlank((row as any)[col])) patch[col] = payload[col]
+  }
+  // Same "never orphaned" guarantee the insert path gives — but only when
+  // the row has no owner yet; an existing assignment is the owner's.
+  if (isBlank(row.assigned_to)) {
+    const primaryOwner = await getPrimaryOwnerForLocation(location_uuid)
+    if (primaryOwner?.id) patch.assigned_to = primaryOwner.id
+  }
+  // Deliberately NOT set: import_source, source, request_details, and
+  // `paused`. The first three keep the row's web-form provenance intact.
+  // `paused` is left exactly as-is because upsertLead also serves the
+  // realtime webhook path, where a location IS active and the adopted
+  // lead may have a LIVE drip sequence — stamping the import's
+  // paused:true there would silently halt it. Mirrors the existing rule
+  // that updates never reclassify source or flip the paused flag.
+
+  const { error: updErr } = await supabaseService
+    .from('leads')
+    .update(patch)
+    .eq('id', row.id)
+
+  if (updErr) {
+    // A racing writer claimed this jobber_client_id for a different row
+    // between our read and this write, tripping the partial unique index.
+    // The winner's row is the target — update it as the `existing` branch
+    // would have, and leave our candidate unlinked (it stays a duplicate,
+    // which is exactly the pre-adoption behavior — never worse).
+    if (isClientIdDup(updErr)) {
+      const { data: winner } = await supabaseService
+        .from('leads')
+        .select('id, stage')
+        .eq('jobber_client_id', jobberClientId)
+        .eq('location_id', payload.location_id)
+        .maybeSingle()
+      if (winner) {
+        await supabaseService.from('leads').update(payload).eq('id', winner.id)
+        return { id: winner.id, created: false, stage: (winner.stage as string | null) ?? null }
+      }
+    }
+    throw new Error(updErr.message)
+  }
+
+  return { id: row.id, created: false, stage: (row.stage as string | null) ?? null }
+}
+
 // importSource tags the origin of records this function creates. It's
 // only written on insert — updates to an already-existing lead never
 // reclassify its source or flip the paused flag, so an owner-paused
@@ -539,6 +799,42 @@ export async function upsertLead(
     await supabaseService.from('leads').update(payload).eq('id', existing.id)
     return { id: existing.id, created: false, stage: existing.stage as string | null }
   }
+
+  // ── Adoption pass ───────────────────────────────────────────────
+  // The jobber_client_id SELECT missed, so this client is new TO JOBBER —
+  // but the person may already exist as a website lead. See the block
+  // comment above findAdoptionCandidate. Never fatal: any failure here
+  // degrades to the plain insert below.
+  let possibleDuplicateIds: string[] = []
+  try {
+    const verdict = await findAdoptionCandidate({
+      email,
+      phone,
+      name: payload.name,
+      location_uuid,
+    })
+    // Adoption needs an id to stamp: an unextractable Jobber client id
+    // (extractJobberId → null) has nothing to link the row to, so it can
+    // only ever take the insert path.
+    if (verdict.kind === 'adopt' && jobberClientId) {
+      const adopted = await adoptLead({
+        candidateId: verdict.leadId,
+        jobberClientId,
+        payload,
+        location_uuid,
+      })
+      // null = the candidate became unusable mid-flight; fall through.
+      if (adopted) return adopted
+    } else if (verdict.kind === 'flag') {
+      possibleDuplicateIds = verdict.candidateIds
+    }
+  } catch (err: any) {
+    console.error(
+      '[jobber-import] adoption match failed — falling back to plain insert',
+      err,
+    )
+  }
+
   // Default new leads to the location's primary owner so they're never
   // orphaned (assigned_to=null). Fetched per-insert rather than once
   // up-front so the webhook path (single-record creates) also benefits.
@@ -552,6 +848,12 @@ export async function upsertLead(
       created_at: client.createdAt || new Date().toISOString(),
       import_source: importSource,
       paused: true,
+      // IN QUESTION only — an ambiguous match creates the row (never
+      // merge two possible people) but records what it might collide
+      // with. No UI reads this yet; see the adoption block comment.
+      ...(possibleDuplicateIds.length
+        ? { possible_duplicate_of: possibleDuplicateIds }
+        : {}),
     })
     .select('id, stage')
     .single()
@@ -562,11 +864,7 @@ export async function upsertLead(
     // index leads_jobber_client_id_location_idx. Recover idempotently by
     // treating the winner's row as the target: re-select and update it,
     // exactly as the `existing` branch would have.
-    const isClientIdDup =
-      (error as any).code === '23505' &&
-      ((error.message?.includes('leads_jobber_client_id_location_idx')) ||
-       (error as any).details?.includes('jobber_client_id'))
-    if (isClientIdDup) {
+    if (isClientIdDup(error)) {
       const { data: winner } = await supabaseService
         .from('leads')
         .select('id, stage')

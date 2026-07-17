@@ -18,6 +18,24 @@ function leadsBuilder() {
   const b: any = {
     select: () => b,
     eq: () => b,
+    // The adoption pass (upsertLead → findAdoptionCandidate) runs between
+    // the existence SELECT and the INSERT, so this builder must speak the
+    // lead-match vocabulary too: queryLeadMatches chains .or/.not/.range
+    // and awaits the builder directly, and the name probe adds .is/.ilike.
+    // Without these the chain throws a TypeError that upsertLead's
+    // fall-back-to-insert catch swallows — these tests would still pass,
+    // but via the degrade path, silently covering nothing.
+    or: () => b,
+    not: () => b,
+    range: () => b,
+    is: () => b,
+    ilike: () => b,
+    // Awaiting the builder = a non-terminal list read (the match queries).
+    // Resolves to "no matches" WITHOUT touching `reads`, which belongs to
+    // the .maybeSingle()/.single() FIFO above. So the adoption pass runs
+    // for real, finds nothing, and hands off to the insert path under test.
+    then: (res: any, rej: any) =>
+      Promise.resolve({ data: [], error: null }).then(res, rej),
     maybeSingle: async () => reads.shift() ?? { data: null, error: null },
     single: async () => reads.shift() ?? { data: null, error: null },
     insert: (payload: any) => { lastInsert = payload; inserts.push(payload); return b },
