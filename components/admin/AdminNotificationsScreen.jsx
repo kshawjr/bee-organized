@@ -30,15 +30,24 @@ import StatusChip from '@/components/ui/StatusChip'
 // NOT the won-green — green would read as "delivered", which Half A cannot
 // know. zero_recipients is amber: nothing failed, but a location with nobody
 // subscribed is a loose end worth chasing.
+//
+// 'muted' is GRAY, and that is the point: gray is the one family that reads as
+// "working as intended, nothing to do". A muted row means the location's
+// notifications_live flag is off during the Zoho-parallel migration — expected
+// for 45 of 51 locations, and the opposite of the amber loose-end that
+// zero_recipients marks. Amber here would put a permanent chase-me badge on
+// every lead at every not-yet-cut-over location.
 const STATUS_STYLE = {
   accepted: 'teal',
   failed: 'red',
   zero_recipients: 'amber',
+  muted: 'gray',
 }
 const STATUS_LABEL = {
   accepted: 'Accepted',
   failed: 'Failed',
   zero_recipients: 'No recipients',
+  muted: 'Muted',
 }
 
 // delivery_status → chip family (Half B fills these; every row reads '—' today).
@@ -130,7 +139,7 @@ export default function AdminNotificationsScreen({ locations = [] }) {
   // so they're shown only on the unfiltered view.
   const counts = useMemo(() => {
     if (status !== 'all') return null
-    const c = { all: rows.length, accepted: 0, failed: 0, zero_recipients: 0 }
+    const c = { all: rows.length, accepted: 0, failed: 0, zero_recipients: 0, muted: 0 }
     for (const r of rows) if (c[r.send_status] !== undefined) c[r.send_status] += 1
     return c
   }, [rows, status])
@@ -148,6 +157,10 @@ export default function AdminNotificationsScreen({ locations = [] }) {
     { key: 'accepted', label: 'Accepted', count: counts?.accepted },
     { key: 'failed', label: 'Failed', count: counts?.failed },
     { key: 'zero_recipients', label: 'No recipients', count: counts?.zero_recipients, muted: true },
+    // Two senses of "muted" collide on this line and they are unrelated: key
+    // 'muted' is the send_status being filtered for; `muted: true` is
+    // FilterChips' de-emphasis prop, the same one 'No recipients' carries.
+    { key: 'muted', label: 'Muted', count: counts?.muted, muted: true },
   ]
 
   return (

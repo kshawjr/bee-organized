@@ -12,7 +12,7 @@
 //   - ?window=24h|7d|30d|all   (default 7d; bounds the read)
 //   - ?location_id=<uuid>      (note: the UUID, not the slug — the column is a
 //                               real FK. location_slug is a display copy.)
-//   - ?status=accepted|failed|zero_recipients
+//   - ?status=accepted|failed|zero_recipients|muted
 //   - ?channel=email|slack
 //   - ?email_kind=<label>      (free text — the column carries no CHECK)
 //   - ?q=<search>              (recipient / subject / lead name, case-insensitive)
@@ -44,7 +44,7 @@ const WINDOW_MS: Record<Exclude<FetchWindow, 'all'>, number> = {
   '30d': 30 * 24 * 60 * 60 * 1000,
 }
 
-const VALID_STATUSES = new Set(['accepted', 'failed', 'zero_recipients'])
+const VALID_STATUSES = new Set(['accepted', 'failed', 'zero_recipients', 'muted'])
 const VALID_CHANNELS = new Set(['email', 'slack'])
 
 // Hard cap on rows returned. The screen is a triage surface, not an export:
