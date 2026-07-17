@@ -19,9 +19,21 @@ const sendEmailDirectMock = vi.hoisted(() =>
   vi.fn(async () => ({ success: true, id: 'email-abc' })),
 )
 const resolveMock = vi.hoisted(() => vi.fn(async () => [] as any[]))
+const logNotificationMock = vi.hoisted(() => vi.fn(async () => {}))
 
 vi.mock('@/lib/resend', () => ({
   sendEmailDirect: sendEmailDirectMock,
+}))
+// notifyNewLead logs the two paths that never reach the resend layer (zero
+// recipients / recipient-resolution failure) to the outbound-mail notebook.
+// Mocked here for a hard reason, not just for isolation: lib/notification-log
+// imports lib/supabase-service, which calls createClient() at MODULE SCOPE and
+// THROWS "supabaseUrl is required" without env — which this node-env suite has
+// none of. Unmocked, that throw happens at import time and takes down the whole
+// file before a single test runs. Real write behavior is covered against a
+// mocked client in lib/notification-log-fire-safety.test.ts.
+vi.mock('@/lib/notification-log', () => ({
+  logNotification: logNotificationMock,
 }))
 vi.mock('@/lib/notification-recipients', () => ({
   resolveLeadRecipients: resolveMock,
@@ -53,6 +65,7 @@ beforeEach(() => {
   sendEmailDirectMock.mockClear()
   sendEmailDirectMock.mockResolvedValue({ success: true, id: 'email-abc' })
   resolveMock.mockReset()
+  logNotificationMock.mockClear()
 })
 
 describe('notifyNewLead', () => {
@@ -129,6 +142,58 @@ describe('notifyNewLead', () => {
     expect(res.sent).toBe(false)
     expect(res.recipientCount).toBe(0)
     expect(res.error).toBeUndefined()
+  })
+
+  // ── outbound-mail notebook (migrations/notification_log.sql) ────────
+  // sendEmailDirect logs every send at the resend layer, so notifyNewLead
+  // logs ONLY the paths that return before reaching it. These two are
+  // therefore the only rows this module is responsible for.
+  it('zero recipients logs a zero_recipients row — the silent no-send stays visible', async () => {
+    resolveMock.mockResolvedValue([])
+
+    await notifyNewLead({ location: LOCATION, lead: LEAD, locationSlug: 'boulder-01' })
+
+    expect(logNotificationMock).toHaveBeenCalledTimes(1)
+    expect(logNotificationMock.mock.calls[0][0]).toMatchObject({
+      channel: 'email',
+      send_status: 'zero_recipients',
+      email_kind: 'lead_notification',
+      lead_id: 'lead-1',
+      lead_name: 'Jane Prospect',
+      location_id: 'loc-uuid-1',
+      location_slug: 'boulder-01',
+    })
+  })
+
+  it('a recipient-resolution failure logs a failed row (it never reaches the resend hook)', async () => {
+    resolveMock.mockRejectedValue(new Error('recipients table exploded'))
+
+    const res = await notifyNewLead({ location: LOCATION, lead: LEAD })
+
+    expect(res.sent).toBe(false)
+    expect(logNotificationMock).toHaveBeenCalledTimes(1)
+    expect(logNotificationMock.mock.calls[0][0]).toMatchObject({
+      channel: 'email',
+      send_status: 'failed',
+      error: 'recipients table exploded',
+    })
+  })
+
+  it('a real send does NOT double-log here — it threads context to the resend hook instead', async () => {
+    resolveMock.mockResolvedValue([recip('a@biz.com')])
+
+    await notifyNewLead({ location: LOCATION, lead: LEAD, locationSlug: 'boulder-01' })
+
+    // The row is written inside sendEmailDirect (one per recipient), so this
+    // module must stay silent or every send would be logged twice.
+    expect(logNotificationMock).not.toHaveBeenCalled()
+    expect(sendEmailDirectMock.mock.calls[0][0]).toMatchObject({
+      email_kind: 'lead_notification',
+      lead_id: 'lead-1',
+      lead_name: 'Jane Prospect',
+      location_id: 'loc-uuid-1',
+      location_slug: 'boulder-01',
+    })
   })
 
   it('collapses a duplicate email (user + external same address) to one To entry', async () => {

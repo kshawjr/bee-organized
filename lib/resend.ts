@@ -12,6 +12,7 @@
 
 import { Resend } from 'resend'
 import { supabaseService } from './supabase-service'
+import { logNotificationFanout, type NotificationContext } from './notification-log'
 
 let _resend: import('resend').Resend | null = null
 function getResend() {
@@ -23,7 +24,7 @@ type SendSuccess = { success: true; id: string }
 type SendFailure = { success: false; error: string }
 export type SendResult = SendSuccess | SendFailure
 
-interface SendEmailArgs {
+interface SendEmailArgs extends NotificationContext {
   locationId: string
   to: string | string[]
   subject: string
@@ -38,7 +39,11 @@ interface SendEmailArgs {
   senderProjectType?: string | null
 }
 
-interface SendEmailDirectArgs {
+// Context is OPTIONAL and purely descriptive — it colors the notification_log
+// row and changes nothing about the send. Callers that have lead/location on
+// hand (the notification rails) pass it; system mail omits it and those columns
+// land null. Every pre-existing call site keeps compiling untouched.
+interface SendEmailDirectArgs extends NotificationContext {
   from: string
   fromName: string
   replyTo: string
@@ -112,6 +117,16 @@ export function renderTemplate(
 
 export async function sendEmail(args: SendEmailArgs): Promise<SendResult> {
   const { locationId, to, subject, html, text, senderProjectType } = args
+  // Every sendEmail() send is by definition scoped to a location, so the log
+  // row gets location_id for free even when the caller passed no context.
+  // An explicit args.location_id still wins.
+  const context: NotificationContext = {
+    lead_id: args.lead_id,
+    lead_name: args.lead_name,
+    location_id: args.location_id ?? locationId,
+    location_slug: args.location_slug,
+    email_kind: args.email_kind,
+  }
 
   if (!locationId || !to || !subject || !html) {
     const error = 'sendEmail: missing required field (locationId, to, subject, html)'
@@ -164,6 +179,7 @@ export async function sendEmail(args: SendEmailArgs): Promise<SendResult> {
     subject,
     html,
     text,
+    ...context,
   })
 }
 
@@ -208,6 +224,35 @@ async function resolveProjectTypeSenderOverride(
 export async function sendEmailDirect(args: SendEmailDirectArgs): Promise<SendResult> {
   const { from, fromName, replyTo, to, subject, html, text } = args
 
+  // THE hook point for the outbound-mail notebook (migrations/
+  // notification_log.sql). Logging lives here rather than in any one feature so
+  // that invites, magic-links, drips AND lead notifications are all recorded by
+  // construction — a future send rail gets logging for free by calling this.
+  //
+  // Half A records ACCEPTANCE only: 'accepted' means Resend took the message
+  // and gave us an id, NOT that it landed in an inbox. Delivery is Half B (the
+  // Resend webhook), which fills delivery_status by resend_message_id.
+  const context: NotificationContext = {
+    lead_id: args.lead_id,
+    lead_name: args.lead_name,
+    location_id: args.location_id,
+    location_slug: args.location_slug,
+    email_kind: args.email_kind,
+  }
+  const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean)
+
+  // BELT AND BRACES. logNotification already swallows everything, so this
+  // .catch() should be dead code — but the success-path log call below sits
+  // INSIDE the try/catch that converts a throw into { success: false }. Without
+  // this guard, a writer that somehow rejected would silently downgrade a
+  // genuinely sent email to a failure, and the caller would report a send that
+  // actually happened as broken. The notebook must never be able to do that.
+  // Pinned by lib/notification-log-fire-safety.test.ts.
+  const safeLog = (base: Parameters<typeof logNotificationFanout>[1], addrs: (string | null)[] = recipients) =>
+    logNotificationFanout(addrs as string[], base).catch(err =>
+      console.warn('[notification-log] fanout rejected — send result unaffected:', err),
+    )
+
   if (!from || !fromName || !replyTo || !to || !subject || !html) {
     const error = 'sendEmailDirect: missing required field (from, fromName, replyTo, to, subject, html)'
     console.error(error, {
@@ -218,6 +263,20 @@ export async function sendEmailDirect(args: SendEmailDirectArgs): Promise<SendRe
       hasSubject: !!subject,
       hasHtml: !!html,
     })
+    // A malformed send never reached Resend. Log it as failed against whatever
+    // recipients we did get; if `to` itself was the missing field there is no
+    // address to key on, so one recipient-less row still records the attempt
+    // rather than letting it vanish.
+    await safeLog(
+      {
+        ...context,
+        channel: 'email',
+        subject: subject || null,
+        send_status: 'failed',
+        error,
+      },
+      recipients.length ? recipients : [null],
+    )
     return { success: false, error }
   }
 
@@ -233,19 +292,53 @@ export async function sendEmailDirect(args: SendEmailDirectArgs): Promise<SendRe
 
     if (error) {
       console.error('sendEmailDirect: Resend API error', error)
-      return { success: false, error: error.message || 'Resend API error' }
+      const message = error.message || 'Resend API error'
+      await safeLog({
+        ...context,
+        channel: 'email',
+        subject,
+        send_status: 'failed',
+        error: message,
+      })
+      return { success: false, error: message }
     }
 
     if (!data?.id) {
       const msg = 'sendEmailDirect: Resend returned no id'
       console.error(msg, data)
+      // No id means nothing for Half B to reconcile against — the row is
+      // 'failed' even though Resend didn't report an error.
+      await safeLog({
+        ...context,
+        channel: 'email',
+        subject,
+        send_status: 'failed',
+        error: msg,
+      })
       return { success: false, error: msg }
     }
 
+    // ONE row per recipient, all sharing this message id (the notebook's grain
+    // — see the migration). resend_message_id is indexed, not unique, precisely
+    // so this fan-out is legal.
+    await safeLog({
+      ...context,
+      channel: 'email',
+      subject,
+      send_status: 'accepted',
+      resend_message_id: data.id,
+    })
     return { success: true, id: data.id }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('sendEmailDirect: unexpected error', err)
+    await safeLog({
+      ...context,
+      channel: 'email',
+      subject,
+      send_status: 'failed',
+      error: message,
+    })
     return { success: false, error: message }
   }
 }

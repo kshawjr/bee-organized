@@ -40,6 +40,7 @@ import { applyDripSideEffects, startDripForLead } from '@/lib/drip-lifecycle'
 import { sendDripStep } from '@/lib/drip-send'
 import { notifyNewLead } from '@/lib/lead-notification-email'
 import { notifyNewLeadSlack } from '@/lib/slack-bot'
+import { logSlackNotification } from '@/lib/notification-log'
 import {
   queryLeadMatches,
   classifyLeadMatches,
@@ -442,6 +443,9 @@ export async function POST(req: NextRequest) {
       null
     const notify = await notifyNewLead({
       location: { id: location.id, name: location.name },
+      // locations.location_id is the SLUG, not the uuid — recorded on the
+      // notification_log row so the admin screen reads 'boulder-01', not a uuid.
+      locationSlug: location.location_id,
       baseUrl,
       lead: {
         id: lead.id,
@@ -504,9 +508,24 @@ export async function POST(req: NextRequest) {
     if (slackRes.error) {
       warnings.push(`slack_notification_failed: ${slackRes.error}`)
     }
+    await logSlackNotification(slackRes, {
+      lead_id: lead.id,
+      lead_name: full_name.trim(),
+      location_id: location.id,
+      location_slug: location.location_id,
+    })
   } catch (err: any) {
     console.error('[intake] notifyNewLeadSlack threw', err)
     warnings.push(`slack_notification_failed: ${err?.message || String(err)}`)
+    await logSlackNotification(
+      { ok: false, error: err?.message || String(err) },
+      {
+        lead_id: lead.id,
+        lead_name: full_name.trim(),
+        location_id: location.id,
+        location_slug: location.location_id,
+      },
+    )
   }
 
   // Success row. Warnings never flip status — the lead row landed and

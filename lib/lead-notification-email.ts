@@ -27,6 +27,13 @@
 
 import { sendEmailDirect } from './resend'
 import { resolveLeadRecipients } from './notification-recipients'
+import { logNotification } from './notification-log'
+
+// The email_kind stamped on every row this module produces. Hardcoded rather
+// than passed by callers: this function IS the lead notification, so deriving
+// the label here means all three call sites (intake / leads / transfer) are
+// correct by construction and a new caller can't mislabel its rows.
+const LEAD_NOTIFICATION_KIND = 'lead_notification'
 
 // System sender for lead notifications. notifications@beeorganized.com sends
 // on the same verified domain (beeorganized.com) that admin@ already uses for
@@ -192,8 +199,22 @@ export async function notifyNewLead(args: {
   // (intake route) derives it as NEXT_PUBLIC_SITE_URL || request origin. When
   // absent the email still sends, just without the button.
   baseUrl?: string | null
+  // The location's human-readable slug (locations.location_id — a slug, NOT the
+  // uuid). Purely for the notification_log row, so the admin screen can show
+  // "boulder-01" without joining. Sits beside `location` rather than inside it
+  // so the caller-side shape of `location` stays exactly as it was.
+  locationSlug?: string | null
 }): Promise<NotifyResult> {
-  const { location, lead, baseUrl } = args
+  const { location, lead, baseUrl, locationSlug } = args
+  // Context for the outbound-mail notebook. Derived here from what this
+  // function already knows, so callers can't get it wrong.
+  const logContext = {
+    lead_id: lead.id,
+    lead_name: lead.name,
+    location_id: location.id,
+    location_slug: locationSlug ?? null,
+    email_kind: LEAD_NOTIFICATION_KIND,
+  }
   const locationName = location.name?.trim() || 'your location'
   const leadUrl = baseUrl
     ? `${baseUrl.replace(/\/$/, '')}/clients/${lead.id}`
@@ -211,6 +232,15 @@ export async function notifyNewLead(args: {
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
     console.error('[lead-notify] resolveLeadRecipients failed', err)
+    // Never reached sendEmailDirect, so the resend-layer hook can't see this —
+    // log it here or a lead whose recipients failed to resolve leaves NO trace
+    // in the notebook, which reads identically to "no email was ever due".
+    await logNotification({
+      ...logContext,
+      channel: 'email',
+      send_status: 'failed',
+      error,
+    })
     return { sent: false, recipientCount: 0, error }
   }
 
@@ -230,6 +260,17 @@ export async function notifyNewLead(args: {
     console.log(
       `[lead-notify] location ${location.id} (${locationName}) has zero lead-notification recipients — no email sent for lead ${lead.id}`,
     )
+    // THE reason 'zero_recipients' exists as a distinct send_status. This path
+    // returns before sendEmailDirect, so it is the only place that can record
+    // it. Without this row, "nobody is subscribed at this location" would be
+    // indistinguishable in the notebook from "no lead came in" — and that is
+    // exactly the silent failure the log is meant to expose. recipient stays
+    // null: there was nobody to address.
+    await logNotification({
+      ...logContext,
+      channel: 'email',
+      send_status: 'zero_recipients',
+    })
     return { sent: false, recipientCount: 0 }
   }
 
@@ -238,6 +279,10 @@ export async function notifyNewLead(args: {
   // ONE message to all recipients — the whole list on `to`, not a loop.
   // Reply-To is the prospect's email when captured so a recipient can reply
   // straight to them; otherwise the system inbox.
+  // The context rides along so the resend-layer hook writes one RICH row per
+  // recipient (lead + location resolved) instead of the bare rows system mail
+  // produces. sendEmailDirect does the actual logging — this module logs only
+  // the paths that never reach it.
   const result = await sendEmailDirect({
     from: NOTIFY_FROM_EMAIL,
     fromName: NOTIFY_FROM_NAME,
@@ -246,6 +291,7 @@ export async function notifyNewLead(args: {
     subject,
     html,
     text,
+    ...logContext,
   })
 
   if (!result.success) {

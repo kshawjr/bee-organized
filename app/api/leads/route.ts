@@ -26,6 +26,7 @@ import { applyDripSideEffects } from '@/lib/drip-lifecycle'
 import { sendDripStep } from '@/lib/drip-send'
 import { notifyNewLead } from '@/lib/lead-notification-email'
 import { notifyNewLeadSlack } from '@/lib/slack-bot'
+import { logSlackNotification } from '@/lib/notification-log'
 
 export const runtime = 'nodejs'
 
@@ -243,6 +244,8 @@ export async function POST(req: NextRequest) {
     try {
       const notify = await notifyNewLead({
         location: { id: location.id, name: location.name },
+        // locations.location_id is the SLUG, not the uuid (notification_log).
+        locationSlug: location.location_id,
         baseUrl,
         lead: {
           id: lead.id,
@@ -266,6 +269,15 @@ export async function POST(req: NextRequest) {
   //    not-yet-migrated location returns a quiet skip), so the slack_connected
   //    gate is enforced inside, exactly as on intake.
   if (body.notifySlack === true) {
+    // Shared by the success + throw branches below so both record the same
+    // lead/location against the slack row.
+    const slackLogContext = {
+      lead_id: lead.id,
+      lead_name: lead.name,
+      location_id: location.id,
+      // locations.location_id is the SLUG, not the uuid.
+      location_slug: location.location_id,
+    }
     try {
       const slackRes = await notifyNewLeadSlack({
         locationId: location.id,
@@ -283,9 +295,14 @@ export async function POST(req: NextRequest) {
         },
       })
       if (slackRes.error) warnings.push(`slack_notification_failed: ${slackRes.error}`)
+      await logSlackNotification(slackRes, slackLogContext)
     } catch (err: any) {
       console.error('[leads] notifyNewLeadSlack threw', err)
       warnings.push(`slack_notification_failed: ${err?.message || String(err)}`)
+      await logSlackNotification(
+        { ok: false, error: err?.message || String(err) },
+        slackLogContext,
+      )
     }
   }
 

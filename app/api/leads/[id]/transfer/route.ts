@@ -183,6 +183,8 @@ export async function POST(
       null
     const notify = await notifyNewLead({
       location: { id: dest.id, name: dest.name },
+      // locations.location_id is the SLUG, not the uuid (notification_log).
+      locationSlug: dest.location_id,
       baseUrl,
       lead: {
         id:                existing.id,
