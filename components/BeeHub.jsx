@@ -22,6 +22,7 @@ import SendToJobberModal from "@/components/hive/SendToJobberModal"
 // Pure presentational icon set (inline SVG, zero deps) — safe to import
 // statically like betaGate; it pulls no beta-chunk surface code with it.
 import { IconBug, IconBulb, IconPlus, IconPaperclip } from "@/components/ui/icons"
+import AdminNotificationsScreen from "@/components/admin/AdminNotificationsScreen"
 // Phase 1 beta surfaces are DYNAMIC imports only (ssr:false) — separate
 // chunk, loaded when the toggle flips. A crash in beta code must never
 // reach the main bundle (two all-user incident scares on 2026-07-03).
@@ -30487,6 +30488,12 @@ function SuperAdminLayout({
   const [feedbackPending, setFeedbackPending] = useState(0)
   const handleFeedbackPending = React.useCallback(n => setFeedbackPending(n), [])
   const showFeedback = role === 'super_admin' || role === 'corporate' || role === 'admin'
+  // Outbound-mail notebook. ONE gate for this screen across BOTH admin shells
+  // and the API route it reads (app/api/admin/notification-log): elevated =
+  // super_admin + admin. Deliberately NOT copying Webhooks, which is
+  // super_admin-only in this shell but super_admin||admin in the legacy
+  // AdminScreen + its own API route — a discrepancy this screen doesn't inherit.
+  const showNotifications = role === 'super_admin' || role === 'admin'
   useEffect(() => {
     if (!showFeedback) return
     let cancelled = false
@@ -30576,6 +30583,11 @@ function SuperAdminLayout({
         { key:'locations', label:'Locations', icon:'🏢' },
         ...(showFeedback ? [{ key:'feedback', label:'Feedback', icon:'🐛', badge:feedbackPending }] : []),
         { key:'users', label:'Users', icon:'👥' },
+        // Operations, not Advanced: this cluster is where the elevated-but-not-
+        // super_admin screens live (Feedback, Content), and Advanced is gated
+        // super_admin-only as a whole — putting it there would silently narrow
+        // the gate to super_admin and re-create the discrepancy above.
+        ...(showNotifications ? [{ key:'notifications', label:'Notifications', icon:'✉️' }] : []),
         // Content (Hive Hub Guide / manual editor) matches the legacy
         // AdminScreen gate — corporate edits it too, so it can't live in the
         // super_admin-only Advanced cluster.
@@ -30615,6 +30627,7 @@ function SuperAdminLayout({
     locations:   { label:'Locations',      cluster:'Operations'   },
     users:       { label:'Users',          cluster:'Operations'   },
     feedback:    { label:'Feedback',       cluster:'Operations'   },
+    notifications: { label:'Notifications', cluster:'Operations'  },
     conversions: { label:'Conversions Due',cluster:'Billing'      },
     renewals:    { label:'Renewals',       cluster:'Billing'      },
     pricing:     { label:'Pricing',        cluster:'Billing'      },
@@ -30848,6 +30861,15 @@ function SuperAdminLayout({
           </div>
         )
 
+      case 'notifications':
+        return (
+          // Same wrapper as Webhooks/Feedback — the screen brings its own
+          // header, so no serif h1 here.
+          <div style={{ padding:'14px 8px 48px' }}>
+            <AdminNotificationsScreen locations={locations} />
+          </div>
+        )
+
       case 'jobber':
         return (
           <div style={{ padding:'28px 28px 48px' }}>
@@ -30990,12 +31012,16 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
   // Webhook observability is operational/sensitive — admin + super_admin
   // only (corporate stays out, unlike Feedback).
   const showWebhooksTab = role === 'super_admin' || role === 'admin'
+  // Outbound-mail notebook — same elevated gate as the SuperAdminLayout mount
+  // (showNotifications) and the API route. One gate, all three places.
+  const showNotificationsTab = role === 'super_admin' || role === 'admin'
   // Deep link: /admin?adminTab=webhooks (the Slack failure digest links
   // land here). Applied once on mount, only for tabs this role can see.
   useEffect(() => {
     try {
       const t = new URLSearchParams(window.location.search).get('adminTab')
       if (t === 'webhooks' && showWebhooksTab) setAdminTab('webhooks')
+      else if (t === 'notifications' && showNotificationsTab) setAdminTab('notifications')
       else if (t === 'feedback' && showFeedbackTab) setAdminTab('feedback')
     } catch {}
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -31119,7 +31145,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
 
           {/* Sub-tabs — native <select> on mobile (<768px), pill row at ≥768px. */}
           {(()=>{
-            const adminTabs = [{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'content',label:'✏️ Content'}]:[]),...(showFeedbackTab?[{key:'feedback',label:'🐛 Feedback'}]:[]),...(showWebhooksTab?[{key:'webhooks',label:'🔌 Webhooks'}]:[]),...(role==='super_admin'?[{key:'conversions',label:'Conversions Due'},{key:'renewals',label:'🕐 Renewals'},{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])]
+            const adminTabs = [{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'content',label:'✏️ Content'}]:[]),...(showFeedbackTab?[{key:'feedback',label:'🐛 Feedback'}]:[]),...(showWebhooksTab?[{key:'webhooks',label:'🔌 Webhooks'}]:[]),...(showNotificationsTab?[{key:'notifications',label:'✉️ Notifications'}]:[]),...(role==='super_admin'?[{key:'conversions',label:'Conversions Due'},{key:'renewals',label:'🕐 Renewals'},{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])]
             return (
               <>
                 <select
@@ -31228,6 +31254,8 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
           <AdminFeedbackScreen onPendingCountChange={handleFeedbackPending} />
         ) : adminTab==='webhooks' ? (
           <AdminWebhookLogScreen />
+        ) : adminTab==='notifications' ? (
+          <AdminNotificationsScreen locations={locations} />
         ) : adminTab==='conversions' ? (
           <ConversionsDueTab onOpenLocation={loc=>setSelectedLoc(loc)} />
         ) : adminTab==='renewals' ? (
