@@ -28,12 +28,27 @@ export async function getZohoToken(): Promise<string> {
   return cachedToken!
 }
 
+// Zoho signals failure two ways: an HTTP status, and a status:'error' body.
+// Only the second was ever checked, so a 401/429/500 whose body carries no
+// status:'error' read as an empty-but-successful response. Check the status
+// first. 204 is NOT a failure — it is Zoho's genuine "no records".
+async function assertZohoOk(res: Response, what: string) {
+  if (res.ok) return
+  const body = await res.text().catch(() => '')
+  throw new Error(
+    `${what} failed: HTTP ${res.status}${body ? ` — ${body.slice(0, 200)}` : ''}`,
+  )
+}
+
 export async function zohoGet(path: string) {
   const token = await getZohoToken()
   const res = await fetch(`${ZOHO_API_BASE}/${path}`, {
     headers: { Authorization: `Zoho-oauthtoken ${token}` },
     cache: 'no-store',
   })
+  await assertZohoOk(res, `Zoho GET ${path.split('?')[0]}`)
+  // 204 = no records matched; body is empty and JSON.parse would throw.
+  if (res.status === 204) return {}
   return res.json()
 }
 
@@ -130,6 +145,8 @@ export async function getZohoLocationNotificationContacts(
       notifContactsCache.set(locationSlug, { at: Date.now(), contacts: [] })
       return []
     }
+
+    await assertZohoOk(res, `Zoho Contacts read for ${locationSlug}`)
 
     const text = await res.text()
     const data = text ? JSON.parse(text) : {}
