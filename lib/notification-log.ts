@@ -24,7 +24,16 @@
 import { supabaseService } from './supabase-service'
 
 export type NotificationChannel = 'email' | 'slack'
-export type NotificationSendStatus = 'accepted' | 'failed' | 'zero_recipients'
+// 'muted' — the location's notifications_live flag is false (or unreadable, which
+// fails closed), so nothing was sent. Recorded rather than skipped: an
+// intentionally silent location must not read like a broken one. Its CHECK value
+// is added by migrations/notifications_live.sql — until that runs, 'muted' rows
+// are rejected and swallowed, exactly like every other pre-migration row here.
+export type NotificationSendStatus =
+  | 'accepted'
+  | 'failed'
+  | 'zero_recipients'
+  | 'muted'
 
 // The context a caller threads through sendEmailDirect. Lead notifications
 // carry all of it; invites/magic-links/drips carry some or none. Every field
@@ -89,13 +98,32 @@ export async function logNotification(args: LogNotificationArgs): Promise<void> 
 // otherwise every lead at every non-Slack location would mint a permanently
 // unresolvable row and the Slack rail would read as broken rather than absent.
 //
+// …WITH EXACTLY ONE EXCEPTION: 'notifications_off'. Every other skip reports an
+// ABSENCE (no Slack app, no columns) — there is nothing to resolve and nothing
+// to decide, so a row would be noise forever. A mute is the opposite: a
+// DECISION, made by Kevin, that will be reversed the day that location cuts
+// over off Zoho. Recording it is the entire point of the flag — a muted
+// location has to be visibly, deliberately silent instead of looking broken.
+// So this one skip falls through to a row; the rest still return early.
+//
 // delivery_status stays NULL on these rows FOREVER: there is no Slack delivery
 // webhook, so unlike an email row it will never be filled in by Half B. Null
 // here means "not applicable", not "pending".
 export async function logSlackNotification(
-  result: { ok: boolean; skipped?: string; error?: string },
+  result: { ok: boolean; skipped?: string; error?: string; mutedReason?: string },
   context: NotificationContext,
 ): Promise<void> {
+  if (result.skipped === 'notifications_off') {
+    await logNotification({
+      ...context,
+      channel: 'slack',
+      send_status: 'muted',
+      // Why the gate said no — 'muted' (expected) vs 'read_failed' (the column
+      // is missing and live locations are dark).
+      error: result.mutedReason ?? null,
+    })
+    return
+  }
   if (result.skipped) return
   await logNotification({
     ...context,

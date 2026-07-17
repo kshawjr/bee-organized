@@ -19,6 +19,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 let LOC_ROW: any = null
 const maybeSingleMock = vi.hoisted(() => vi.fn())
 
+// notifyNewLeadSlack is gated on notifications_live. Mocked live:true here so
+// these tests keep pinning the TRANSPORT — and mocked rather than left real
+// because resolveNotificationsLive reads through the same mocked
+// supabaseService builder below, so an unmocked gate would consume this file's
+// single queued location row and every post would read as muted. The gate's own
+// behavior is pinned in beta-notifications-live-gate.test.ts.
+const notificationsLiveMock = vi.hoisted(() =>
+  vi.fn(async () => ({ live: true }) as any),
+)
+vi.mock('@/lib/notifications-live', () => ({
+  resolveNotificationsLive: notificationsLiveMock,
+}))
+
 vi.mock('@/lib/supabase-service', () => {
   const builder: any = {
     select: () => builder,

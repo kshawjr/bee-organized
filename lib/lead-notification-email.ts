@@ -23,11 +23,18 @@
 //
 // Zero recipients → send nothing, no error, but log quietly so silent
 // no-sends are visible.
+//
+// GATED on the location's notifications_live flag (lib/notifications-live.ts).
+// The gate lives HERE rather than at the call sites so all three — intake,
+// /api/leads POST, and transfer — are covered by construction and a fourth
+// caller can't be added without it. Muted is a logged outcome, never a silent
+// return; see the gate block below.
 // ─────────────────────────────────────────────────────────────
 
 import { sendEmailDirect } from './resend'
 import { resolveLeadRecipients } from './notification-recipients'
 import { logNotification } from './notification-log'
+import { resolveNotificationsLive } from './notifications-live'
 
 // The email_kind stamped on every row this module produces. Hardcoded rather
 // than passed by callers: this function IS the lead notification, so deriving
@@ -67,6 +74,10 @@ export type NotifyResult = {
   recipientCount: number
   emailId?: string
   error?: string
+  // The location's notifications_live gate said no. Distinct from sent:false
+  // with an error — nothing failed, nothing was attempted. Carries no `error`,
+  // so existing callers (which warn only on `error`) stay quiet without change.
+  muted?: boolean
 }
 
 function escapeHtml(s: string): string {
@@ -219,6 +230,39 @@ export async function notifyNewLead(args: {
   const leadUrl = baseUrl
     ? `${baseUrl.replace(/\/$/, '')}/clients/${lead.id}`
     : null
+
+  // ── The notifications_live gate ─────────────────────────────────────────
+  // FIRST, before resolveLeadRecipients — deliberately. Two reasons:
+  //  1) A muted location must not have its recipients resolved at all. For the
+  //     44 onboarding locations resolveLeadRecipients falls through to Zoho
+  //     (none of them have hub_users owners), so gating after would fire a Zoho
+  //     API call per lead purely to compute a list we've already decided not to
+  //     use.
+  //  2) 'muted' is a statement about the LOCATION, not about its recipients.
+  //     The 44 all have seeded recipients — that is precisely why the flag,
+  //     and not the recipient list, is what silences them. Checking recipients
+  //     first would let a recipient-resolution failure mask the mute in the log.
+  const gate = await resolveNotificationsLive(location.id)
+  if (!gate.live) {
+    console.log(
+      `[lead-notify] location ${location.id} (${locationName}) is not notifications_live ` +
+        `(${gate.reason}) — no email sent for lead ${lead.id}`,
+    )
+    // Recorded, not skipped. An intentionally-muted location and a broken one
+    // look identical from the outside — silence — and the ONLY thing that tells
+    // them apart is this row. gate.reason rides in `error` so the notebook
+    // distinguishes 'muted' (Kevin hasn't flipped it: expected) from
+    // 'read_failed' (the column is missing: the 6 live locations are dark and
+    // someone needs to run the migration).
+    await logNotification({
+      ...logContext,
+      channel: 'email',
+      send_status: 'muted',
+      error: gate.error ? `${gate.reason}: ${gate.error}` : gate.reason,
+    })
+    // No `error` on the result: nothing failed, so no caller should warn.
+    return { sent: false, recipientCount: 0, muted: true }
+  }
 
   let recipients
   try {

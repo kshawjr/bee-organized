@@ -20,6 +20,14 @@ const sendEmailDirectMock = vi.hoisted(() =>
 )
 const resolveMock = vi.hoisted(() => vi.fn(async () => [] as any[]))
 const logNotificationMock = vi.hoisted(() => vi.fn(async () => {}))
+// Every test in THIS file is about a location that is cleared to send, so the
+// gate defaults to live and stays out of the way. Mocked for the same hard
+// reason as notification-log below — lib/notifications-live imports
+// lib/supabase-service, whose module-scope createClient() throws without env.
+// The gate's own behavior is pinned in beta-notifications-live-gate.test.ts.
+const notificationsLiveMock = vi.hoisted(() =>
+  vi.fn(async () => ({ live: true }) as any),
+)
 
 vi.mock('@/lib/resend', () => ({
   sendEmailDirect: sendEmailDirectMock,
@@ -37,6 +45,9 @@ vi.mock('@/lib/notification-log', () => ({
 }))
 vi.mock('@/lib/notification-recipients', () => ({
   resolveLeadRecipients: resolveMock,
+}))
+vi.mock('@/lib/notifications-live', () => ({
+  resolveNotificationsLive: notificationsLiveMock,
 }))
 
 import { notifyNewLead } from '@/lib/lead-notification-email'
@@ -66,6 +77,8 @@ beforeEach(() => {
   sendEmailDirectMock.mockResolvedValue({ success: true, id: 'email-abc' })
   resolveMock.mockReset()
   logNotificationMock.mockClear()
+  notificationsLiveMock.mockClear()
+  notificationsLiveMock.mockResolvedValue({ live: true })
 })
 
 describe('notifyNewLead', () => {

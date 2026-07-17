@@ -431,7 +431,17 @@ export async function POST(req: NextRequest) {
   // client's resubmission must never re-notify. Non-fatal: a send failure
   // logs + warns but never flips the lead capture, which already succeeded.
   // Zero recipients is a normal quiet no-send.
+  //
+  // GATED on the location's notifications_live flag, but NOT here and NOT via
+  // this route's `location` select — which stays exactly as it was, no new
+  // columns, for the same reason the Slack block below gives: a not-yet-applied
+  // migration must never be able to 500 lead intake. notifyNewLead does its own
+  // fail-soft (fail-CLOSED) read. A muted location returns sent:false with no
+  // error — the lead still lands, still enrolls in drip, still shows in the
+  // Inbox; only the email is suppressed, and the suppression is recorded in
+  // notification_log rather than being silent.
   let notifiedCount = 0
+  let notificationsMuted = false
   try {
     // Base URL for the "open this lead" deep-link — same pattern the invite
     // emails use: the NEXT_PUBLIC_SITE_URL override (for proxy-fronted deploys)
@@ -458,6 +468,7 @@ export async function POST(req: NextRequest) {
       },
     })
     notifiedCount = notify.sent ? notify.recipientCount : 0
+    notificationsMuted = notify.muted === true
     if (notify.error) {
       warnings.push(`lead_notification_failed: ${notify.error}`)
     }
@@ -539,6 +550,10 @@ export async function POST(req: NextRequest) {
     detail:
       `lead=${lead.id} source=${source || 'web_form'} dedup=${dedupTier}` +
       ` drip_enrolled=${dripEnrolled} notified=${notifiedCount}` +
+      // Only when muted, so the token's presence is the signal. Without it a
+      // muted location reads as `notified=0`, which is indistinguishable from
+      // "nobody was subscribed" — the ambiguity this flag has to avoid.
+      (notificationsMuted ? ' notifications_muted=true' : '') +
       (dripSkippedReason ? ` drip_skipped_reason=${dripSkippedReason}` : '') +
       (warnings.length ? ` — warnings: ${warnings.join('; ')}` : ''),
   })

@@ -130,6 +130,35 @@ describe('logSlackNotification', () => {
     expect(h.state.inserts).toHaveLength(0)
   })
 
+  // The ONE skip that is NOT silent. Every other skip reports an absence (no
+  // Slack app installed) — nothing to resolve, so a row would be noise forever.
+  // A mute is a DECISION that gets reversed at cutover, and a muted location
+  // that logged nothing would be indistinguishable from a broken one.
+  it('a MUTED location (notifications_off) DOES write a row — a mute is not an absence', async () => {
+    await logSlackNotification(
+      { ok: false, skipped: 'notifications_off', mutedReason: 'muted' },
+      { lead_id: 'l1', location_slug: 'loc_omaha' },
+    )
+    expect(h.state.inserts).toHaveLength(1)
+    expect(h.state.inserts[0].row).toMatchObject({
+      channel: 'slack',
+      send_status: 'muted',
+      error: 'muted',
+      location_slug: 'loc_omaha',
+    })
+  })
+
+  it('a fail-closed read carries its reason onto the muted row', async () => {
+    await logSlackNotification(
+      { ok: false, skipped: 'notifications_off', mutedReason: 'read_failed: column does not exist' },
+      { lead_id: 'l1' },
+    )
+    expect(h.state.inserts[0].row).toMatchObject({
+      send_status: 'muted',
+      error: 'read_failed: column does not exist',
+    })
+  })
+
   it('ok → accepted; error → failed, both on the slack channel', async () => {
     await logSlackNotification({ ok: true }, { lead_id: 'l1' })
     await logSlackNotification({ ok: false, error: 'channel_not_found' }, { lead_id: 'l1' })

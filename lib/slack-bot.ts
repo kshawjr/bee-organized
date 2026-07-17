@@ -23,6 +23,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { supabaseService } from './supabase-service'
+import { resolveNotificationsLive } from './notifications-live'
 
 const supabase = supabaseService
 
@@ -45,7 +46,16 @@ export type SlackLead = {
   source?: string | null
 }
 
-export type SlackPostResult = { ok: boolean; skipped?: string; error?: string }
+export type SlackPostResult = {
+  ok: boolean
+  skipped?: string
+  error?: string
+  // Set only alongside skipped:'notifications_off' — why the gate said no
+  // ('muted' | 'read_failed' | 'location_not_found'). Threaded so the
+  // notification_log row can tell an expected mute from a missing column.
+  // NOT `error`: nothing failed, and the routes warn on `error`.
+  mutedReason?: string
+}
 
 // ── Location read (service-role) ──────────────────────────────
 // Mirrors lib/jobber.ts getLocation: reads the location row so postToSlack can
@@ -313,6 +323,12 @@ export async function postToSlack(
 // ── Convenience: build + post in one call ─────────────────────
 // What the intake route calls. Non-throwing end to end. baseUrl builds the
 // /clients/<id> deep-link (same source the email uses); null just omits it.
+//
+// GATED on notifications_live, mirroring the email rail. The gate lives here
+// rather than at the two call sites so both are covered by construction — and
+// here rather than in postToSlack because postToSlack is the generic transport
+// (interactivity replies go through it too); this flag gates NEW-LEAD
+// notifications, not every message Bee Hub ever posts to a channel.
 export async function notifyNewLeadSlack(args: {
   locationId: string
   locationName: string | null
@@ -320,6 +336,23 @@ export async function notifyNewLeadSlack(args: {
   baseUrl?: string | null
 }): Promise<SlackPostResult> {
   const { locationId, lead, baseUrl } = args
+
+  // Before building the message or touching the location's Slack columns: a
+  // muted location must not post, even if it has the app installed.
+  const gate = await resolveNotificationsLive(locationId)
+  if (!gate.live) {
+    console.log(
+      `[slack-bot] location ${locationId} is not notifications_live (${gate.reason}) — ` +
+        `no Slack post for lead ${lead.id}`,
+    )
+    // A skip, but the ONE skip that gets logged — see logSlackNotification.
+    return {
+      ok: false,
+      skipped: 'notifications_off',
+      mutedReason: gate.error ? `${gate.reason}: ${gate.error}` : gate.reason,
+    }
+  }
+
   const locationName = args.locationName?.trim() || 'your location'
   const leadUrl = baseUrl ? `${baseUrl.replace(/\/$/, '')}/clients/${lead.id}` : null
   const message = buildLeadSlackMessage({ lead, locationName, leadUrl })
