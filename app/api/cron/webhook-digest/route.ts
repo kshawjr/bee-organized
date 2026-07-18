@@ -1,28 +1,34 @@
 // app/api/cron/webhook-digest/route.ts
 //
-// GET /api/cron/webhook-digest — Vercel cron entrypoint, fires twice
-// daily (vercel.json: "0 0,12 * * *" UTC ≈ 8am/8pm ET in summer).
+// GET /api/cron/webhook-digest — Vercel cron entrypoint, fires every 3
+// hours around the clock (vercel.json: "0 */3 * * *" UTC).
 //
-// Queries the last 12h of webhook sync_log activity (same enrichment
-// as the admin Webhooks tab) and posts a Slack digest of FAILURES
-// (processing errored) + DIDN'T-LAND rows (processed but the record
-// never reached its expected state). A quiet window still posts a
-// short "all clear" so a dead digest is distinguishable from a quiet
-// one.
+// Queries the last 3h of webhook sync_log activity (same enrichment as
+// the admin Webhooks tab) and posts a Slack digest that LEADS with
+// lead-intake health (website→Bee Hub, running in parallel with Zoho)
+// and re-presents Jobber webhook sync underneath. See lib/webhook-digest
+// for the classification: only leads/events that DIDN'T LAND drive the
+// headline; token-race self-heals are calm background noise.
+//
+// SUPPRESS WHEN QUIET: if nothing landed and nothing failed in the
+// window (a truly quiet window, or one whose only activity was token
+// self-heals), the digest is suppressed and NOTHING is posted — a digest
+// arriving should mean there was activity. Returns 200 { posted:false,
+// suppressed:true } so the cron doesn't page.
 //
 // Auth: same convention as send-drips — Vercel cron sends
 // `Authorization: Bearer <CRON_SECRET>`; manual testing also accepts
 // `?secret=<value>`. Missing CRON_SECRET is fail-closed (500).
 //
-// Slack transport: lib/slack.ts posts to SLACK_WEBHOOK_URL. If that
-// env var is missing, the run is a logged no-op returning
-// { posted:false, skipped:'no_webhook_url' } — 200, not 5xx, so the
-// cron doesn't page as a function failure while Slack wiring is
+// Slack transport: lib/slack.ts posts to SLACK_WEBHOOK_URL (unchanged
+// destination). If that env var is missing, the run is a logged no-op
+// returning { posted:false, skipped:'no_webhook_url' } — 200, not 5xx,
+// so the cron doesn't page as a function failure while Slack wiring is
 // pending.
 //
 // CRON REGISTRATION CAVEAT: Vercel crons pin to the deployment that
-// registered them — after this lands, check the Vercel dashboard's
-// Cron tab and Redeploy if the new cron didn't register.
+// registered them — after this schedule change lands, check the Vercel
+// dashboard's Cron tab and Redeploy if the new 3h cadence didn't take.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { fetchWebhookLogEvents } from '@/lib/webhook-observability'
@@ -49,16 +55,26 @@ export async function GET(req: NextRequest) {
   // ─── Query + format ────────────────────────────────────────────
   let digest
   try {
-    const { events } = await fetchWebhookLogEvents({ window: '12h' })
+    const { events } = await fetchWebhookLogEvents({ window: '3h' })
     const appUrl = (
       process.env.NEXT_PUBLIC_APP_URL ||
       process.env.NEXT_PUBLIC_SITE_URL ||
       ''
     ).replace(/\/$/, '')
-    digest = buildWebhookDigest({ events, appUrl, windowLabel: 'last 12h' })
+    digest = buildWebhookDigest({ events, appUrl, windowLabel: 'last 3h' })
   } catch (err: any) {
     console.error('[cron webhook-digest] query failed', err?.message || err)
     return NextResponse.json({ error: 'digest_query_failed' }, { status: 500 })
+  }
+
+  // ─── Suppress a quiet / self-heal-only window ──────────────────
+  // A digest arriving should mean there was activity. Nothing to say →
+  // post nothing (200, not a failure).
+  if (digest.suppressed) {
+    console.log(
+      `[cron webhook-digest] window=3h suppressed (quiet window) self_heals=${digest.selfHeals}`,
+    )
+    return NextResponse.json({ ok: true, posted: false, suppressed: true })
   }
 
   // ─── Post ──────────────────────────────────────────────────────
@@ -73,15 +89,21 @@ export async function GET(req: NextRequest) {
   }
 
   console.log(
-    `[cron webhook-digest] window=12h events=${digest.totalEvents} failures=${digest.failures} stuck=${digest.stuck} posted=${post.ok}${post.skipped ? ` skipped=${post.skipped}` : ''}`,
+    `[cron webhook-digest] window=3h posted=${post.ok} allClear=${digest.allClear} ` +
+      `leadsIn=${digest.leadsLanded} leadsFailed=${digest.leadsFailed} ` +
+      `jobberLanded=${digest.jobberLanded} jobberDidntLand=${digest.jobberDidntLand} ` +
+      `selfHeals=${digest.selfHeals}${post.skipped ? ` skipped=${post.skipped}` : ''}`,
   )
   return NextResponse.json({
     ok: true,
     posted: post.ok,
     ...(post.skipped ? { skipped: post.skipped } : {}),
+    suppressed: false,
     allClear: digest.allClear,
-    failures: digest.failures,
-    stuck: digest.stuck,
-    events: digest.totalEvents,
+    leadsLanded: digest.leadsLanded,
+    leadsFailed: digest.leadsFailed,
+    jobberLanded: digest.jobberLanded,
+    jobberDidntLand: digest.jobberDidntLand,
+    selfHeals: digest.selfHeals,
   })
 }
