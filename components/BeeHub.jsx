@@ -9948,6 +9948,10 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
           currentLocationUuid={locFilter!=='all' ? locFilter : (hiveCurrentLocationCtx?.id || hiveCurrentUserCtx?.locationId || null)}
           currentUserId={hiveCurrentUserCtx?.id || null}
           locationUsers={hiveLocationUsersCtx || []}
+          // Location roster ({ id, name }) already in scope for the switcher —
+          // the Client List resolves a client's location name from it (no new
+          // query), same source the classic StageGroup location tag reads.
+          locations={locations}
           // People-merge seam (BeeHub → HiveShell onPersonCreated, passed
           // DOWN): the shell hands the mapped person up after a confirmed
           // /api/leads insert; we merge it into people-state here so the

@@ -14,9 +14,15 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import EngagementBoard from './EngagementBoard'
-import EngagementList from './EngagementList'
+// Nav restructure 2026-07-18: the List lens is now the grouped color-band
+// EngagementGroupedList; the Client List lens is the grouped ClientGroupedList.
+// The prior flat EngagementList / ClientDirectory are RETAINED on disk
+// (still unit-tested in isolation) but no longer mounted here — reversible
+// by restoring the import + render branch, same pattern as the Classic
+// retirement.
+import EngagementGroupedList from './EngagementGroupedList'
 import EngagementPanel from './EngagementPanel'
-import ClientDirectory from './ClientDirectory'
+import ClientGroupedList from './ClientGroupedList'
 import InboxScreen from './InboxScreen'
 import ClientProfile from './ClientProfile'
 import NewClientSheet from './NewClientSheet'
@@ -36,15 +42,23 @@ import { TEXT_TOKENS, BORDER_TOKENS, WARNING_TOKENS } from '@/components/ui/toke
 import { CHIP_STYLES } from './shared/stageConfig'
 import { T } from './shared/tokens'
 
+// Nav restructure 2026-07-18: three top-level tabs. Board + List are no
+// longer separate tabs — they became a sub-toggle INSIDE Engagements (see
+// engView below). "Inbox (New)" keeps the count badge; "Client List" is the
+// people lens; "Engagements" holds the board/list toggle.
 const TABS = [
-  { key: 'inbox',   label: 'Inbox',   live: true, badge: true, Icon: IconInbox },
-  { key: 'board',   label: 'Board',   live: true, Icon: IconLayoutKanban },
-  { key: 'list',    label: 'List',    live: true, Icon: IconList },
-  { key: 'clients', label: 'Clients', live: true, Icon: IconUsers },
+  { key: 'inbox',       label: 'Inbox (New)', live: true, badge: true, Icon: IconInbox },
+  { key: 'engagements', label: 'Engagements', live: true, Icon: IconLayoutKanban },
+  { key: 'clients',     label: 'Client List', live: true, Icon: IconUsers },
 ]
 
-// The preferred lens (Board/List) sticks across sessions.
+// The preferred top-level tab sticks across sessions. (Key name unchanged
+// for continuity; older stored 'board'/'list' values migrate to
+// 'engagements' on hydration below.)
 const LENS_LS_KEY = 'bee_hive_beta_lens'
+// The Board-vs-List sub-toggle within Engagements — its own preference,
+// separate from the retired classic view pref. Default Board.
+const ENG_VIEW_LS_KEY = 'bee_hive_eng_view'
 
 // Focus/visibility revalidation guard — collapse a burst of focus events
 // (alt-tab flurries, OS focus echoes) into at most one refetch per window.
@@ -119,6 +133,10 @@ export default function HiveShell({
   // LocationUsersContext here so the profile's assigned-to picker can
   // stay §8.5-clean (props only, no context in the hive chunk).
   locationUsers = [],
+  // Location roster ({ id, name }) already loaded for the app switcher —
+  // threaded down so the Client List can resolve a client's location NAME
+  // without a new query (§8.5 props-only).
+  locations = [],
   locFilter = 'all',
   currentLocationUuid = null,
   currentUserId = null,
@@ -169,14 +187,27 @@ export default function HiveShell({
   // in betaGate.js resolveBetaReadOnly; BeeHub threads the boolean down.
   readOnly = false,
 }) {
-  // Board/List/Clients lens — default 'board', hydrated from localStorage
-  // after mount (SSR-safe, same pattern as the legacy view toggle).
-  const [lens, setLens] = useState('board')
+  // Top-level tab — default 'engagements' (opens on the board), hydrated
+  // from localStorage after mount (SSR-safe). A stored legacy 'board'/'list'
+  // value migrates to 'engagements' (they're now the sub-toggle, not tabs).
+  const [lens, setLens] = useState('engagements')
   const isMobile = useIsMobile()
   useEffect(() => {
-    try { const v = localStorage.getItem(LENS_LS_KEY); if (['board', 'list', 'clients', 'inbox'].includes(v)) setLens(v) } catch {}
+    try {
+      const v = localStorage.getItem(LENS_LS_KEY)
+      if (v === 'board' || v === 'list') setLens('engagements')
+      else if (['inbox', 'engagements', 'clients'].includes(v)) setLens(v)
+    } catch {}
   }, [])
   const pickLens = (v) => { setLens(v); try { localStorage.setItem(LENS_LS_KEY, v) } catch {} }
+
+  // Board-vs-List sub-toggle within Engagements — default 'board', its
+  // choice remembered. Hydrated after mount, same SSR-safe pattern.
+  const [engView, setEngView] = useState('board')
+  useEffect(() => {
+    try { const v = localStorage.getItem(ENG_VIEW_LS_KEY); if (v === 'board' || v === 'list') setEngView(v) } catch {}
+  }, [])
+  const pickEngView = (v) => { setEngView(v); try { localStorage.setItem(ENG_VIEW_LS_KEY, v) } catch {} }
 
   // ONE overlay slot: EngagementPanel or ClientProfile — they REPLACE
   // each other (no stacking): 'View profile' swaps panel→profile;
@@ -249,7 +280,7 @@ export default function HiveShell({
   // Board→List deep link ("view all in List" on the closed rail): a
   // one-shot seed the List consumes on mount, then hands back null.
   const [listInitialView, setListInitialView] = useState(null)
-  const viewClosedInList = () => { setListInitialView('closed'); pickLens('list') }
+  const viewClosedInList = () => { setListInitialView('closed'); pickLens('engagements'); pickEngView('list') }
   // Opening an engagement swaps the single overlay slot to the panel AND
   // drives the URL to /clients/<clientId>?e=<engagementId> — shareable,
   // refresh-survivable, back/forward-aware, and location-scoped through the
@@ -506,6 +537,40 @@ export default function HiveShell({
       Open engagements · {openCount}{engagementFilterCount(workFilters) > 0 ? ` of ${openFiltered.length}` : ''}
     </span>
   )
+  // Engagements Board|List sub-toggle — sits in the chrome next to the open
+  // count, only while the Engagements tab is active. Board reuses the board-
+  // grid icon, List the list icon (same icons the old tabs carried). The
+  // active side is a solid ink pill; the choice persists (pickEngView).
+  const ENG_VIEWS = [
+    { k: 'board', label: 'Board', Icon: IconLayoutKanban },
+    { k: 'list',  label: 'List',  Icon: IconList },
+  ]
+  const engToggleEl = lens !== 'engagements' ? null : (
+    <div role="group" aria-label="Engagements view" style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', padding: '2px', borderRadius: T.radius.pill, border: `0.5px solid ${T.hairline.line}`, background: T.surface.raised, flexShrink: 0 }}>
+      {ENG_VIEWS.map(o => {
+        const active = engView === o.k
+        return (
+          <button
+            key={o.k}
+            onClick={() => pickEngView(o.k)}
+            aria-pressed={active}
+            aria-label={`${o.label} view`}
+            title={`${o.label} view`}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: '5px',
+              padding: '5px 11px', borderRadius: T.radius.pill, border: 'none',
+              background: active ? T.ink.primary : 'transparent',
+              color: active ? T.ink.inverse : T.ink.muted,
+              fontSize: '12px', fontWeight: 500, cursor: active ? 'default' : 'pointer',
+              fontFamily: 'inherit', whiteSpace: 'nowrap',
+            }}
+          >
+            <o.Icon size={13} />{!isMobile && ` ${o.label}`}
+          </button>
+        )
+      })}
+    </div>
+  )
   // Classic retired 2026-07-18 — the "Back to classic" escape hatch is no
   // longer rendered (see the two removed {exitEl} render sites below). This
   // element + the onExitBeta prop are RETAINED (unrendered) so restoring
@@ -542,7 +607,8 @@ export default function HiveShell({
             {tabPills}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginTop: '6px', padding: '0 4px' }}>
-            {counterEl}
+            {lens === 'engagements' ? counterEl : <span />}
+            {engToggleEl}
             {/* Classic retired 2026-07-18 — {exitEl} "Back to classic" removed (mobile) */}
           </div>
         </div>
@@ -554,7 +620,8 @@ export default function HiveShell({
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
             {newPillEl}
-            {counterEl}
+            {engToggleEl}
+            {lens === 'engagements' ? counterEl : null}
             {/* Classic retired 2026-07-18 — {exitEl} "Back to classic" removed (desktop) */}
           </div>
         </div>
@@ -572,14 +639,15 @@ export default function HiveShell({
           readOnly={readOnly}
         />
       ) : lens === 'clients' ? (
-        <ClientDirectory
+        <ClientGroupedList
           people={patchedPeople}
           engagements={patched}
           locFilter={locFilter}
+          locations={locations}
           onOpenClient={openClient}
         />
-      ) : lens === 'list' ? (
-        <EngagementList
+      ) : engView === 'list' ? (
+        <EngagementGroupedList
           engagements={filtered}
           closedCount={closedCount}
           closedWonCount={closedWonCount}

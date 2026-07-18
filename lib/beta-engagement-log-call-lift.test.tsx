@@ -215,12 +215,13 @@ describe('log call from the engagement card re-derives across lenses (HiveShell)
 
     // Close the overlay, then switch lens on the SAME mounted shell.
     const clientsTab = Array.from(container.querySelectorAll('button'))
-      .find(b => (b.textContent || '').trim().startsWith('Clients'))
+      .find(b => (b.textContent || '').trim().includes('Client List'))
     expect(clientsTab).toBeTruthy()
     await act(async () => { clientsTab!.click() })
 
+    // The Client List groups by status: the re-derived person now heads the
+    // Attempting band (nav restructure 2026-07-18 — grouped color-band view).
     expect(text()).toContain('Attempting')
-    expect(text()).not.toContain('Not Yet Contacted')
   })
 
   it('still updates the panel’s OWN activity slice instantly (kept behavior)', async () => {

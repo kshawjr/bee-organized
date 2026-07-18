@@ -27,6 +27,14 @@ import { touchpointToTimelineEntry } from '@/lib/people-mapper'
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 ;(globalThis as any).__BEE_TEST_WIDTH__ = 1200
 
+// The grouped Client List renders one tinted band per status: band div >
+// header div > [dot, label span, count]. Resolve a band by its header label
+// so we can assert which status bucket a person landed in.
+const bandFor = (root: Element, label: string): HTMLElement | null => {
+  const s = Array.from(root.querySelectorAll('span')).find(x => (x.textContent || '').trim() === label)
+  return s ? ((s.parentElement?.parentElement as HTMLElement) || null) : null
+}
+
 // HiveShell subscribes to engagements realtime on mount; the hook already
 // degrades when createClient throws, but stub it so the suite isn't asserting
 // through a console.error path unrelated to this build.
@@ -227,15 +235,17 @@ describe('log call re-derives across lenses (HiveShell)', () => {
 
     // Switch lens on the SAME mounted shell — same session, no new props.
     const clientsTab = Array.from(container.querySelectorAll('button'))
-      .find(b => (b.textContent || '').trim().startsWith('Clients'))
+      .find(b => (b.textContent || '').trim().includes('Client List'))
     expect(clientsTab).toBeTruthy()
     await act(async () => { clientsTab!.click() })
 
+    // The Client List groups by STATUS (grouped color-band view). The
+    // re-derived person now sits inside the Attempting band, not New — the
+    // cross-lens override took without a reload.
     expect(rowText()).toContain('Sarah Mitchell')
-    // The directory renders the derived chip + its Attempting subtitle.
-    expect(rowText()).toContain('Attempting')
-    expect(rowText()).toContain('Last Reach-Out')
-    expect(rowText()).not.toContain('Not Yet Contacted')
+    const attemptingBand = bandFor(container, 'Attempting')
+    expect(attemptingBand, 'Attempting band should render').toBeTruthy()
+    expect(attemptingBand!.textContent).toContain('Sarah Mitchell')
   })
 
   it('does not touch a person who had no call logged', async () => {
@@ -243,11 +253,13 @@ describe('log call re-derives across lenses (HiveShell)', () => {
     await clickLogCall() // fires on the first New row (Sarah)
 
     const clientsTab = Array.from(container.querySelectorAll('button'))
-      .find(b => (b.textContent || '').trim().startsWith('Clients'))
+      .find(b => (b.textContent || '').trim().includes('Client List'))
     await act(async () => { clientsTab!.click() })
 
-    // Dana still derives New — the override is scoped to the person it names.
-    expect(rowText()).toContain('Dana Reed')
-    expect(rowText()).toContain('Not Yet Contacted')
+    // Dana still derives New — the override is scoped to the person it names,
+    // so she stays inside the New band of the grouped Client List.
+    const newBand = bandFor(container, 'New')
+    expect(newBand, 'New band should render').toBeTruthy()
+    expect(newBand!.textContent).toContain('Dana Reed')
   })
 })

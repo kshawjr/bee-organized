@@ -66,10 +66,11 @@ describe('beta mobile layout', () => {
     setWidth(390)
     const html = renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)
 
-    // Row 1: a nowrap horizontal scroller holding the four tab pills.
+    // Row 1: a nowrap horizontal scroller holding the three tab pills
+    // (nav restructure 2026-07-18 — Board+List merged into Engagements).
     const strip = html.match(/<div style="([^"]*overflow-x:auto[^"]*)">(.*?)<\/div>/)
     expect(strip, 'tab strip scroll container missing').toBeTruthy()
-    for (const label of ['Inbox', 'Board', 'List', 'Clients']) expect(strip![2]).toContain(label)
+    for (const label of ['Inbox (New)', 'Engagements', 'Client List']) expect(strip![2]).toContain(label)
 
     // Row 2: the open-engagements counter on a compact space-between line,
     // 11px quiet — and NOT inside the pill strip. (Classic retired 2026-07-18 —
