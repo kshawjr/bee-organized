@@ -12,19 +12,20 @@
 //      is NOT cleared/migrated, so rollback restores old behavior as-is.
 //
 // Must survive the flip:
-//   - "Back to classic" escape hatch renders (desktop + mobile) and fires
-//     onExitBeta — Classic stays reachable in-session (recycle bin,
-//     mass-update, saved views, quick captures, drip activation).
 //   - Reversibility self-heal: with the gate CLOSED, a stored
 //     'engagements' is ignored and the default is 'list' — a beta-stranded
 //     browser bounces back to Classic on next load; stored Classic views
 //     still restore under a closed gate.
-import { describe, it, expect, vi, afterEach } from 'vitest'
+//
+// SUPERSEDED 2026-07-18 (Classic retired): the "Back to classic" escape hatch
+// was REMOVED and BeeHub now renders the new Hive view unconditionally (guard
+// no longer requires view==='engagements'). The landing/gate/reversibility
+// helpers below are unchanged; the escape-hatch assertions are inverted here
+// and the full retirement guarantees live in beta-classic-retired.test.tsx.
+import { describe, it, expect, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import React from 'react'
 import { renderToString } from 'react-dom/server'
-import { createRoot } from 'react-dom/client'
-import { act } from 'react-dom/test-utils'
 import HiveShell from '@/components/hive/HiveShell'
 import { canSeeBetaBoard, defaultHiveView, hydrateHiveView } from '@/components/hive/shared/betaGate'
 
@@ -71,8 +72,10 @@ describe('landing view: beta by default, stored Classic no longer wins', () => {
     const src = readFileSync('components/BeeHub.jsx', 'utf8')
     expect(src).toContain("useState(defaultHiveView(newBoardAllowed))")
     expect(src).toContain("hydrateHiveView(newBoardAllowed, localStorage.getItem('bee_hive_view'))")
-    // In-session escape hatch still writes the Classic preference.
-    expect(src).toContain("onExitBeta={()=>{ setView('kanban')")
+    // Classic retired 2026-07-18 — the new Hive view renders whenever the gate
+    // is open (guard no longer requires view==='engagements'), so no view value
+    // can route to the Classic board. Full pins in beta-classic-retired.test.tsx.
+    expect(src).toContain('if (newBoardAllowed) {')
   })
 })
 
@@ -88,28 +91,11 @@ describe('reversibility self-heal (gate closed = rollback posture)', () => {
   })
 })
 
-describe('"Back to classic" escape hatch survives the flip', () => {
-  it('renders on desktop and mobile shell chrome', () => {
+describe('Classic retired (2026-07-18) — escape hatch removed', () => {
+  it('does NOT render "Back to classic" on desktop or mobile', () => {
     setWidth(1280)
-    expect(renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)).toContain('Back to classic')
+    expect(renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)).not.toContain('Back to classic')
     setWidth(390)
-    expect(renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)).toContain('Back to classic')
-  })
-
-  it('clicking it fires onExitBeta (in-session switch to Classic)', async () => {
-    ;(globalThis as any).fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ lookups: [] }) }))
-    const onExitBeta = vi.fn()
-    const host = document.createElement('div')
-    document.body.appendChild(host)
-    const root = createRoot(host)
-    await act(async () => {
-      root.render(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} onExitBeta={onExitBeta} />)
-    })
-    const btn = Array.from(host.querySelectorAll('button')).find(b => b.textContent === 'Back to classic')
-    expect(btn).toBeTruthy()
-    await act(async () => { btn!.click() })
-    expect(onExitBeta).toHaveBeenCalledTimes(1)
-    await act(async () => { root.unmount() })
-    host.remove()
+    expect(renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)).not.toContain('Back to classic')
   })
 })

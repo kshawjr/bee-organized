@@ -198,8 +198,11 @@ describe('wiring: BeeHub feeds the URL in + unifies the detail UIs', () => {
   it('the beta block no longer renders PersonPanel-on-selected (two detail UIs unified)', () => {
     // The beta early-return block ends at the classic `return (` — within it
     // there must be no <PersonPanel …> tied to `selected`.
+    // Classic retired 2026-07-18 — the guard is now `if (newBoardAllowed)`
+    // (renders the new Hive view unconditionally); the Classic block below
+    // still starts at its `return (` and is unreachable.
     const betaBlock = src.slice(
-      src.indexOf("if (view==='engagements' && newBoardAllowed) {"),
+      src.indexOf('if (newBoardAllowed) {'),
       src.indexOf('  return (\n    <div style={{ fontFamily'),
     )
     expect(betaBlock.length).toBeGreaterThan(500)

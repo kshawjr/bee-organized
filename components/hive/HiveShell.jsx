@@ -506,6 +506,11 @@ export default function HiveShell({
       Open engagements · {openCount}{engagementFilterCount(workFilters) > 0 ? ` of ${openFiltered.length}` : ''}
     </span>
   )
+  // Classic retired 2026-07-18 — the "Back to classic" escape hatch is no
+  // longer rendered (see the two removed {exitEl} render sites below). This
+  // element + the onExitBeta prop are RETAINED (unrendered) so restoring
+  // Classic access is a one-line revert. BeeHub also renders the new Hive view
+  // unconditionally now, so even firing onExitBeta would not reach Classic.
   const exitEl = (
     <button
       onClick={onExitBeta}
@@ -538,7 +543,7 @@ export default function HiveShell({
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginTop: '6px', padding: '0 4px' }}>
             {counterEl}
-            {exitEl}
+            {/* Classic retired 2026-07-18 — {exitEl} "Back to classic" removed (mobile) */}
           </div>
         </div>
       ) : (
@@ -550,7 +555,7 @@ export default function HiveShell({
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
             {newPillEl}
             {counterEl}
-            {exitEl}
+            {/* Classic retired 2026-07-18 — {exitEl} "Back to classic" removed (desktop) */}
           </div>
         </div>
       )}
@@ -694,7 +699,7 @@ export default function HiveShell({
             // the popup needs — same lookup as ClientProfile below.
             const p = patchedPeople.find(x => x.id === clientId)
             if (p) onSendToJobber(p, opts)
-            else setToast({ kind: 'error', msg: 'Client record not loaded — try the classic view' })
+            else setToast({ kind: 'error', msg: 'Client record not loaded — refresh and try again' })
           }}
           jobberLinks={jobberLinks}
           setToast={setToast}
@@ -729,7 +734,7 @@ export default function HiveShell({
           onSendToJobber={(clientId) => {
             const p = patchedPeople.find(x => x.id === clientId)
             if (p) onSendToJobber(p)
-            else setToast({ kind: 'error', msg: 'Client record not loaded — try the classic view' })
+            else setToast({ kind: 'error', msg: 'Client record not loaded — refresh and try again' })
           }}
           jobberLinks={jobberLinks}
           setToast={setToast}

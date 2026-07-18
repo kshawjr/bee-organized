@@ -3,8 +3,10 @@
 // useIsMobile, since renderToString never runs effects) and asserts the
 // 2026-07-04 mobile rules hold:
 //   - shell chrome STACKS: tab pills on one nowrap scroll line, the
-//     open-engagements counter + 'Back to classic' on a second compact
-//     11px line (nothing shares a line with the pills → nothing overlaps)
+//     open-engagements counter on a second compact 11px line (nothing
+//     shares a line with the pills → nothing overlaps). (Classic retired
+//     2026-07-18 — the "Back to classic" hatch that used to share row 2
+//     with the counter is gone; the compact-row layout is otherwise intact.)
 //   - chip strips stay single-line horizontal scrollers (nowrap)
 //   - overlays are bottom sheets with contained overscroll
 // Born from Kevin's 2026-07-04 mobile screenshots (overlapping shell row).
@@ -60,7 +62,7 @@ const setWidth = (w: number | undefined) => { (globalThis as any).__BEE_TEST_WID
 afterEach(() => setWidth(undefined))
 
 describe('beta mobile layout', () => {
-  it('mobile shell stacks: pills scroll on row 1, counter + escape hatch on a compact row 2', () => {
+  it('mobile shell stacks: pills scroll on row 1, counter on a compact row 2', () => {
     setWidth(390)
     const html = renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)
 
@@ -69,24 +71,24 @@ describe('beta mobile layout', () => {
     expect(strip, 'tab strip scroll container missing').toBeTruthy()
     for (const label of ['Inbox', 'Board', 'List', 'Clients']) expect(strip![2]).toContain(label)
 
-    // Row 2: counter left + Back to classic right in a space-between line,
-    // 11px quiet — and NOT inside the pill strip.
+    // Row 2: the open-engagements counter on a compact space-between line,
+    // 11px quiet — and NOT inside the pill strip. (Classic retired 2026-07-18 —
+    // the "Back to classic" hatch that used to sit on this row is removed.)
     const metaLine = html.match(/<div style="[^"]*justify-content:space-between[^"]*">(.*?)<\/div>/)
     expect(metaLine, 'compact meta line missing').toBeTruthy()
     expect(metaLine![1]).toContain('Open engagements')
-    expect(metaLine![1]).toContain('Back to classic')
     expect(metaLine![1]).toContain('font-size:11px')
     expect(strip![2]).not.toContain('Open engagements')
-    expect(strip![2]).not.toContain('Back to classic')
+    expect(html).not.toContain('Back to classic')
 
     // Nothing in the shell header may wrap (wrap = the old collision).
-    expect(html.slice(0, html.indexOf('Back to classic'))).not.toContain('flex-wrap:wrap')
+    expect(html.slice(0, html.indexOf('Open engagements'))).not.toContain('flex-wrap:wrap')
   })
 
   it('desktop shell keeps the single top row (counter inline, 12px)', () => {
     const html = renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)
     expect(html).toContain('Open engagements')
-    expect(html).toContain('Back to classic')
+    expect(html).not.toContain('Back to classic') // Classic retired 2026-07-18
     expect(html).toMatch(/font-size:12px[^"]*"[^>]*>Open engagements/)
   })
 

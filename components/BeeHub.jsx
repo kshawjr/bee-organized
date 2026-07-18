@@ -9928,7 +9928,14 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
   // hook declaration (rules of hooks); the legacy return below is
   // untouched for everyone else. PersonPanel + card viewer stay mounted
   // here so board card clicks keep working during dual-read.
-  if (view==='engagements' && newBoardAllowed) {
+  // Classic retired 2026-07-18 — access removed, Classic code retained below
+  // (unreachable, NOT deleted; fully reversible). `newBoardAllowed` is the open
+  // beta gate (canSeeBetaBoard → always true), so the new Hive view now renders
+  // UNCONDITIONALLY: `view` can no longer route anyone to the Classic list/kanban
+  // board — not via saved pref, deep link, fallback, or a stale state value.
+  // To restore Classic access: put back `view==='engagements' &&` on this guard
+  // and restore the "Back to classic" control (exitEl) in HiveShell.jsx.
+  if (newBoardAllowed) {
     return (
       <div>
         <HiveShell
