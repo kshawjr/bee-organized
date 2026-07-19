@@ -50,9 +50,11 @@ describe('submit-tab default (Feedback-screen button only)', () => {
     )
   })
 
-  it('the Help "?" menu path still sets plain true → the My Items default', () => {
-    const helpPaths = beehub.match(/onOpenFeedback=\{\(\)=>\{ dismissGuideHint\(\); setShowFeedback\(true\) \}\}/g) || []
-    expect(helpPaths.length).toBe(2) // compact + full HelpIconButton mounts
+  it('the Ask Bee Hub help path still sets plain true → the My Items default', () => {
+    // The old "? Help" dropdown is gone; the bug-report entry now lives in the
+    // Ask Bee Hub chat panel footer. It still opens the modal on plain `true`
+    // (My Items default), never 'submit'.
+    expect(beehub).toContain("onOpenFeedback={() => { setShowHelpChat(false); setShowFeedback(true) }}")
   })
 })
 

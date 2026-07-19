@@ -29,9 +29,10 @@ import AddressAutofill from "@/components/hive/shared/AddressAutofill"
 // are pure leaves, no beta-board surface), imported statically like the
 // icons above. §8.5's dynamic rule guards the heavy board tree, not this.
 import SendToJobberModal from "@/components/hive/SendToJobberModal"
+import AskBeeHubPanel from "@/components/hive/AskBeeHubPanel"
 // Pure presentational icon set (inline SVG, zero deps) — safe to import
 // statically like betaGate; it pulls no beta-chunk surface code with it.
-import { IconBug, IconBulb, IconPlus, IconPaperclip } from "@/components/ui/icons"
+import { IconBug, IconBulb, IconPlus, IconPaperclip, IconMessage } from "@/components/ui/icons"
 import AdminNotificationsScreen from "@/components/admin/AdminNotificationsScreen"
 // Phase 1 beta surfaces are DYNAMIC imports only (ssr:false) — separate
 // chunk, loaded when the toggle flips. A crash in beta code must never
@@ -27480,63 +27481,29 @@ function SlideEditForm({ slide, isNew, onSave, onCancel, allChapters = [] }) {
   )
 }
 
-// Top-bar help affordance — a subtle "? Help" pill that opens a small dropdown
-// offering both the Quick Start Guide (HowToGuideModal) and the Manual
-// (ManualModal). Lives in the desktop sidebar header and the mobile top bar.
-// Self-contained: owns its hover + open state, closes on outside click (a
-// document listener, so it's immune to the surrounding stacking contexts).
+// Top-bar help affordance — the "Ask Bee Hub" pill that opens the screen-aware
+// AI help chat (AskBeeHubPanel). Replaces the old "? Help" dropdown; the Quick
+// Start Guide, Manual, and Bug report now live inside the chat panel's footer
+// so nothing is stranded. Lives in the desktop sidebar header and the mobile
+// top bar, on the dark surface (sage-on-dark, like the old pill).
 // `compact` trims the label a touch on mobile so it doesn't crowd the top bar.
-function HelpIconButton({ onOpenGuide, onOpenManual, onOpenFeedback, onOpen, title = 'Help', compact = false }) {
+function AskBeeHubButton({ onOpen, compact = false }) {
   const [hover, setHover] = useState(false)
-  const [open, setOpen] = useState(false)
-  const [hoverItem, setHoverItem] = useState(null)
-  const wrapRef = useRef(null)
-  useEffect(() => {
-    if (!open) return
-    function onDoc(e) { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
-  }, [open])
-  const items = [
-    { key:'guide',  icon:'🚀', label:'Quick Start Guide', run:onOpenGuide },
-    { key:'manual', icon:'📖', label:'Manual',            run:onOpenManual },
-    { key:'feedback', icon:'🐛', label:'Report a Bug / Suggest a Feature', run:onOpenFeedback },
-  ]
   return (
-    <div ref={wrapRef} style={{ position:'relative', display:'inline-flex', flexShrink:0 }}>
-      <button
-        type="button"
-        onClick={() => { if (!open && onOpen) onOpen(); setOpen(o => !o) }}
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
-        aria-label={title}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title={title}
-        style={{ minHeight:'44px', display:'inline-flex', alignItems:'center', justifyContent:'center', background:'none', border:'none', cursor:'pointer', padding:0, flexShrink:0 }}>
-        <span style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding: compact ? '5px 10px' : '6px 12px', borderRadius:'18px', background: (hover || open) ? 'rgba(168,201,196,0.22)' : 'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', color:'rgba(168,201,196,0.95)', fontWeight:600, fontSize: compact ? '12px' : '13px', lineHeight:1, fontFamily:'inherit', whiteSpace:'nowrap', transition:'background 0.15s' }}>
-          <span style={{ fontWeight:700 }}>?</span>
-          <span>Help</span>
-        </span>
-      </button>
-      {open && (
-        <div role="menu" style={{ position:'absolute', top:'calc(100% + 6px)', right:0, zIndex:10012, background:'white', borderRadius:'10px', boxShadow:'0 12px 40px rgba(26,46,43,0.22)', border:'1px solid rgba(0,0,0,0.06)', padding:'6px', minWidth:'196px' }}>
-          {items.map(it => (
-            <button
-              key={it.key}
-              type="button"
-              role="menuitem"
-              onClick={() => { setOpen(false); it.run && it.run() }}
-              onMouseEnter={() => setHoverItem(it.key)}
-              onMouseLeave={() => setHoverItem(null)}
-              style={{ width:'100%', display:'flex', alignItems:'center', gap:'10px', padding:'10px 14px', minHeight:'44px', background: hoverItem === it.key ? 'rgba(168,201,196,0.14)' : 'transparent', border:'none', borderRadius:'8px', cursor:'pointer', fontFamily:'inherit', fontSize:'13px', fontWeight:500, color:'#1a2e2b', textAlign:'left', transition:'background 0.12s' }}>
-              <span style={{ fontSize:'16px', flexShrink:0 }}>{it.icon}</span>
-              <span>{it.label}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+    <button
+      type="button"
+      onClick={() => onOpen && onOpen()}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      aria-label="Ask Bee Hub"
+      title="Ask Bee Hub — get help"
+      style={{ minHeight:'44px', display:'inline-flex', alignItems:'center', justifyContent:'center', background:'none', border:'none', cursor:'pointer', padding:0, flexShrink:0 }}>
+      <span style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding: compact ? '5px 10px' : '6px 12px', borderRadius:'18px', background: hover ? 'rgba(168,201,196,0.22)' : 'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', color:'rgba(168,201,196,0.95)', fontWeight:600, fontSize: compact ? '12px' : '13px', lineHeight:1, fontFamily:'inherit', whiteSpace:'nowrap', transition:'background 0.15s' }}>
+        <IconMessage size={14} />
+        {!compact && <span>Ask Bee Hub</span>}
+        {compact && <span>Ask</span>}
+      </span>
+    </button>
   )
 }
 
@@ -32632,6 +32599,7 @@ export default function App({
   // No client-side defaults — empty array stays empty, modal stays hidden.
   const [guideSlides, setGuideSlides]       = useState(Array.isArray(initialGuideSlides) ? initialGuideSlides : [])
   const [showGuide, setShowGuide]           = useState(false) // SSR-safe: open only after client-side localStorage check
+  const [showHelpChat, setShowHelpChat]     = useState(false) // "Ask Bee Hub" screen-aware help chat panel
   // First-time discovery hint pointing at the top-bar "?" icon. Replaces the
   // old auto-open-the-Guide-on-first-visit behavior — instead of shoving the
   // full modal in a new owner's face, we nudge them toward the help icon.
@@ -33270,7 +33238,7 @@ if (Array.isArray(initialPeople)) return
           style={{ width:'44px', height:'44px', display:'flex', alignItems:'center', justifyContent:'center', background:'none', border:'none', cursor:'pointer', flexShrink:0, color:'rgba(168,201,196,0.85)', fontSize:'18px' }}>
           🔍
         </button>
-        <HelpIconButton onOpenGuide={openGuide} onOpenManual={()=>{ dismissGuideHint(); setShowManual(true) }} onOpenFeedback={()=>{ dismissGuideHint(); setShowFeedback(true) }} onOpen={dismissGuideHint} compact title="Help" />
+        <AskBeeHubButton onOpen={()=>{ dismissGuideHint(); setShowHelpChat(true) }} compact />
         <button
           onClick={()=>setShowMobileProfile(v=>!v)}
           aria-label="Profile menu"
@@ -33702,7 +33670,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           {/* Arrow offsets account for the wider "? Help" pill (vs the old circle). */}
           <div style={{ position:'absolute', top:'-7px', ...(isMobile ? { right:'56px' } : { right:'30px' }), width:'14px', height:'14px', background:'white', transform:'rotate(45deg)', boxShadow:'-2px -2px 5px rgba(26,46,43,0.05)' }} />
           <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.5, marginBottom:'12px', fontWeight:500 }}>
-            👋 New here? The Quick Start Guide and Manual live in this menu.
+            👋 New here? Tap Ask Bee Hub for instant help — plus the Quick Start Guide and Manual.
           </p>
           <div style={{ display:'flex', gap:'8px', justifyContent:'flex-end' }}>
             <button onClick={dismissGuideHint} style={{ padding:'7px 12px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Got it</button>
@@ -33738,6 +33706,23 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         onClose={() => setShowManual(false)}
       />
       {showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} viewAsUserId={viewAsUser?.id || null} onClose={() => setShowFeedback(false)} />}
+      {showHelpChat && (
+        <AskBeeHubPanel
+          isMobile={isMobile}
+          screenName={
+            activeNav === 'hive' ? 'Clients'
+            : activeNav === 'partners' ? 'Contacts'
+            : activeNav === 'reports' ? 'Reports'
+            : activeNav === 'settings' ? 'Settings'
+            : activeNav === 'admin' ? (role === 'super_admin' ? 'Admin' : 'Corp')
+            : 'Home'
+          }
+          onClose={() => setShowHelpChat(false)}
+          onOpenGuide={() => { setShowHelpChat(false); openGuide() }}
+          onOpenManual={() => { setShowHelpChat(false); setShowManual(true) }}
+          onOpenFeedback={() => { setShowHelpChat(false); setShowFeedback(true) }}
+        />
+      )}
       <LocPickerDropdown />
 
       {/* Sidebar nav - desktop only. The column itself no longer scrolls —
@@ -33754,7 +33739,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
               <p style={{ fontSize:'14px', fontWeight:700, color:'white', fontFamily:'Georgia,serif', lineHeight:1 }}>Bee Hub</p>
               <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.5)', marginTop:'2px' }}>Bee Organized</p>
             </div>
-            <HelpIconButton onOpenGuide={openGuide} onOpenManual={()=>{ dismissGuideHint(); setShowManual(true) }} onOpenFeedback={()=>{ dismissGuideHint(); setShowFeedback(true) }} onOpen={dismissGuideHint} title="Help" />
+            <AskBeeHubButton onOpen={()=>{ dismissGuideHint(); setShowHelpChat(true) }} />
           </div>
         </div>
         {/* Nav items — THE scroll region; footer below stays pinned */}
