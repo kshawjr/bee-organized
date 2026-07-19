@@ -106,10 +106,10 @@ function EngagementRow({ e, nowMs, muted = false, onOpen, isMobile }) {
 // chevron) and its rows on white cards. The chevron points down when
 // expanded, right when collapsed; its color matches the band (fam.text).
 // Collapsed → children are not rendered at all.
-function StageBand({ stageKey, label, count, expanded, onToggle, children }) {
+function StageBand({ stageKey, gid, label, count, expanded, onToggle, children }) {
   const fam = CHIP_STYLES[stageKey] || CHIP_STYLES.gray
   return (
-    <div style={{ background: fam.bg, borderRadius: T.radius.card, padding: '10px 10px 12px', marginBottom: '12px' }}>
+    <div id={gid ? `bee-eng-band-${gid}` : undefined} style={{ background: fam.bg, borderRadius: T.radius.card, padding: '10px 10px 12px', marginBottom: '12px', scrollMarginTop: '12px' }}>
       <div
         role="button"
         tabIndex={0}
@@ -185,14 +185,28 @@ export default function EngagementGroupedList({
   // for the new scope if the group is still expanded.
   useEffect(() => { setClosedData(null) }, [locFilter])
 
-  // Board→List hand-off ("view all in List" on the board's closed rail):
-  // a one-shot 'closed' seed force-expands the Closed group (runs after the
-  // store's own hydration effect, so it wins).
+  // One-shot deep-link seed → force-expand a target band and scroll it into
+  // view (runs after the store's own hydration effect, so it wins). Two
+  // callers share this seam:
+  //   · the board's closed rail ("view all in List") passes 'closed'
+  //   · a Home "Needs attention" deep-link passes a STAGE KEY (e.g. 'Estimate',
+  //     'Final Processing') to land pre-expanded on that group — the bands
+  //     start collapsed, so without this a deep-link would land on a closed
+  //     band showing nothing.
+  // The gid an open band keys on IS its stage.key; the Closed band keys on
+  // CLOSED_GID. scrollIntoView on the next frame, after the expand has laid
+  // the band out.
   useEffect(() => {
-    if (initialView === 'closed') {
-      setExpandedMap(prev => ({ ...prev, [CLOSED_GID]: true }))
-      onInitialViewConsumed()
+    if (!initialView) return
+    const gid = initialView === 'closed' ? CLOSED_GID : initialView
+    setExpandedMap(prev => ({ ...prev, [gid]: true }))
+    if (typeof window !== 'undefined' && typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`bee-eng-band-${gid}`)
+        if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      })
     }
+    onInitialViewConsumed()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -221,7 +235,7 @@ export default function EngagementGroupedList({
           const rows = byStage(s.key)
           const expanded = isExp(s.key)
           return (
-            <StageBand key={s.key} stageKey={s.key} label={s.displayLabel} count={rows.length}
+            <StageBand key={s.key} stageKey={s.key} gid={s.key} label={s.displayLabel} count={rows.length}
               expanded={expanded} onToggle={() => toggle(s.key)}>
               {rows.length === 0
                 ? <div style={{ padding: '8px 4px', fontSize: '12px', color: T.ink.quiet }}>None in this stage</div>
@@ -233,7 +247,7 @@ export default function EngagementGroupedList({
 
       {/* Closed group — always at the bottom, lazy-loaded on first expand */}
       <StageBand
-        stageKey={CLOSED_WON} label="Closed" count={scopedClosedTotal ?? '…'}
+        stageKey={CLOSED_WON} gid={CLOSED_GID} label="Closed" count={scopedClosedTotal ?? '…'}
         expanded={closedExpanded} onToggle={() => toggle(CLOSED_GID)}
       >
         {(closedData?.rows || []).map(e => (

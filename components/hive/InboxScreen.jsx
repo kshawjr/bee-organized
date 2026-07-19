@@ -251,7 +251,24 @@ function RowMenu({ anchorId, isMobile, onClose, children }) {
   )
 }
 
-export default function InboxScreen({ people = [], engagements = [], locFilter = 'all', onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, setToast = () => {}, readOnly = false }) {
+export default function InboxScreen({ people = [], engagements = [], locFilter = 'all', onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
+  // One-shot deep-link → scroll a target section into view on mount (Home
+  // "Needs attention" cards land here: 'transfer' = Needs-transfer section,
+  // 'new' = New section). Sections aren't collapsible (they always render
+  // when non-empty), so this is scroll-only — no expand needed. Consumed
+  // once so a re-render doesn't re-scroll.
+  useEffect(() => {
+    if (!initialSection) return
+    const id = initialSection === 'transfer' ? 'bee-inbox-sec-transfer' : initialSection === 'new' ? 'bee-inbox-sec-new' : null
+    if (id && typeof window !== 'undefined' && typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        const el = document.getElementById(id)
+        if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      })
+    }
+    onInitialSectionConsumed()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [busyId, setBusyId] = useState(null)
   // The person whose touchpoint composer is open — the row's phone icon
   // sets it, TouchpointModal at the bottom of the tree renders it. Held
@@ -949,14 +966,14 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
           {/* Needs transfer — ABOVE New/Attempting, ONLY when loc_other leads
               are in scope (self-gating to corp/admin). */}
           {transfer.length > 0 && (
-            <div>
+            <div id="bee-inbox-sec-transfer" style={{ scrollMarginTop: '12px' }}>
               <SectionLabel glyph={<IconMapPin size={13} />} color={AMBER.text} label="Needs transfer" count={transfer.length} hint="Route to a Location" />
               <div style={transferCardStyle}>
                 {transfer.map(p => <Row key={p.id} p={p} family={AMBER} pill="Transfer" />)}
               </div>
             </div>
           )}
-          <div>
+          <div id="bee-inbox-sec-new" style={{ scrollMarginTop: '12px' }}>
             <SectionLabel glyph={<IconSparkles size={13} />} color={TEAL.text} label="New" count={fresh.length} hint="No Contact Yet" />
             {fresh.length > 0 ? (
               <div style={cardStyle}>

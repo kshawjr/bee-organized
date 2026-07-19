@@ -53,10 +53,18 @@ describe('BeeHub wiring — one shared predicate, no drift', () => {
     expect(beehub).not.toContain('const canSeeFinancials = !isLiteUser')
   })
 
-  it('operational "Assessments today" stat is decoupled from the money gate', () => {
-    // must not regress for managers — gated on !isLiteUser, not canSeeFinancials
-    expect(beehub).toContain('{!isLiteUser&&!isElevated')
-    expect(beehub).toContain('label="Assessments today"')
+  it('operational assessments signal is decoupled from the money gate (Home redesign)', () => {
+    // Post-redesign the "Assessments today/tomorrow" signal is a Needs-attention
+    // card + the Upcoming info list, shown to EVERY role — it must NOT be behind
+    // canSeeFinancials (managers keep operational visibility). Money surfaces
+    // (unpaid-invoices card + Outstanding metric) ARE gated.
+    const idx = beehub.indexOf("key:'assessments-soon'")
+    expect(idx).toBeGreaterThan(-1)
+    const assessPush = beehub.slice(Math.max(0, idx - 120), idx)
+    expect(assessPush).not.toContain('canSeeFinancials')
+    // money cards remain money-gated
+    expect(beehub).toContain('(canSeeFinancials && agingInvoices.length > 0)')
+    expect(beehub).toContain('canSeeFinancials && <HomeMetricTile label="Outstanding"')
   })
 })
 

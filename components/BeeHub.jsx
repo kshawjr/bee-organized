@@ -7,6 +7,16 @@ import { upsertRealtimePerson, removeRealtimePerson } from "@/components/hive/sh
 import dynamic from "next/dynamic"
 import { canSeeBetaBoard, defaultHiveView, hydrateHiveView, resolveBetaReadOnly } from "@/components/hive/shared/betaGate"
 import { ROUTE_TO_NAV, NAV_TO_URL, parseHubUrl, clientPath, engagementPath } from "@/components/hive/shared/hubUrl"
+// Home redesign — read the SAME derivation/tokens the Clients surface uses so
+// Home can't drift from the views. Pure leaves (§8.5), imported statically.
+// Aliased where a local name already exists in this file (T, isTerminal,
+// daysSince, fmtMoney).
+import { T as HT } from "@/components/hive/shared/tokens"
+import { deriveClientStatus } from "@/components/hive/shared/clientStatus"
+import { daysSince as sharedDaysSince } from "@/components/hive/shared/engagementStatus"
+import { isTerminal as engIsTerminal, CHIP_STYLES as HIVE_CHIP_STYLES } from "@/components/hive/shared/stageConfig"
+import { useStoredState } from "@/components/hive/shared/useStoredControls"
+import { ESTIMATE_FOLLOWUP_DAYS, INVOICE_AGING_DAYS, ASSESSMENT_HORIZON_DAYS } from "@/components/hive/shared/attentionThresholds"
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { financialsVisible } from "@/lib/financial-access"
 import { splitNameForPrefill } from "@/lib/name-prefill"
@@ -9657,7 +9667,7 @@ async function patchLeadAPI(leadId, patch) {
   }
 }
 
-function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, initialSelectedEngagementId=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onEngagementChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false }) {
+function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, initialSelectedEngagementId=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onEngagementChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, initialHiveIntent=null, onHiveIntentConsumed=()=>{} }) {
   if (!people) return null
   const allPeople = locFilter==='all' ? people : people.filter(p=>p.locationId===locFilter)
   // Real hub_users roster (LocationUsersContext) drives the "Assigned To"
@@ -9944,6 +9954,11 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
           closedWonCount={engagementsClosedWonCount}
           people={people}
           readOnly={readOnly}
+          // Deep-link intent (Home "Needs attention" cards): land on the
+          // right tab + view + expanded/scrolled target. One-shot; consumed
+          // back up to the App so it can't re-fire.
+          initialIntent={initialHiveIntent}
+          onIntentConsumed={onHiveIntentConsumed}
           locFilter={locFilter}
           currentLocationUuid={locFilter!=='all' ? locFilter : (hiveCurrentLocationCtx?.id || hiveCurrentUserCtx?.locationId || null)}
           currentUserId={hiveCurrentUserCtx?.id || null}
@@ -10657,6 +10672,78 @@ function AttentionCard({ icon, title, desc, urgency='medium', action, onAction }
         </button>
       )}
     </div>
+  )
+}
+
+// ─── Home redesign — Needs-attention + calm-metric primitives ─────────────────
+// Colored tint cards for the "Needs attention" hero + quiet tiles for the
+// metrics strip. Colors come from the shared CHIP_STYLES families (via HT
+// tokens) — the SAME red/amber/blue/green pairs the Clients chips read, so
+// Home and the views can never disagree on a tone. tone: red|amber|blue|green.
+function HomeAlertCard({ tone='red', icon, title, detail, onOpen }) {
+  const fam = HIVE_CHIP_STYLES[tone] || HIVE_CHIP_STYLES.gray
+  return (
+    <button
+      onClick={onOpen}
+      style={{
+        display:'flex', alignItems:'center', gap:'12px', width:'100%', textAlign:'left',
+        background:fam.bg, border:'none', borderRadius:HT.radius.card, padding:'13px 14px',
+        cursor:onOpen?'pointer':'default', fontFamily:'inherit',
+      }}
+    >
+      <span aria-hidden style={{
+        flexShrink:0, width:'34px', height:'34px', borderRadius:HT.radius.control,
+        background:HT.surface.raised, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'17px',
+      }}>{icon}</span>
+      <span style={{ flex:1, minWidth:0 }}>
+        <span style={{ display:'block', fontSize:'14px', fontWeight:600, color:fam.text, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{title}</span>
+        {detail && <span style={{ display:'block', fontSize:'12px', color:fam.text, opacity:0.75, marginTop:'2px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{detail}</span>}
+      </span>
+      {onOpen && <span aria-hidden style={{ flexShrink:0, color:fam.text, opacity:0.6, fontSize:'16px', lineHeight:1 }}>›</span>}
+    </button>
+  )
+}
+
+// The "all caught up" empty state — one calm green card, never an empty hero.
+function HomeAllClearCard() {
+  const fam = HIVE_CHIP_STYLES.green
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:'12px', background:fam.bg, borderRadius:HT.radius.card, padding:'14px' }}>
+      <span aria-hidden style={{ flexShrink:0, width:'34px', height:'34px', borderRadius:HT.radius.control, background:HT.surface.raised, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'17px' }}>✓</span>
+      <span>
+        <span style={{ display:'block', fontSize:'14px', fontWeight:600, color:fam.text }}>You&rsquo;re all caught up</span>
+        <span style={{ display:'block', fontSize:'12px', color:fam.text, opacity:0.75, marginTop:'2px' }}>Nothing needs you right now</span>
+      </span>
+    </div>
+  )
+}
+
+// A quiet metric tile (surface-1, no heavy border) — context, not hero.
+function HomeMetricTile({ label, value, sub }) {
+  return (
+    <div style={{ flex:'1 1 130px', minWidth:0, background:HT.surface.sunken, borderRadius:HT.radius.inset, padding:'12px 13px' }}>
+      <p style={{ fontSize:'20px', fontWeight:600, color:HT.ink.primary, fontVariantNumeric:HT.type.tabular, letterSpacing:HT.type.trackNum, marginBottom:'3px' }}>{value}</p>
+      <p style={{ fontSize:'11px', fontWeight:500, color:HT.ink.muted, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{label}</p>
+      {sub && <p style={{ fontSize:'10px', color:HT.ink.quiet, marginTop:'1px' }}>{sub}</p>}
+    </div>
+  )
+}
+
+// A collapsible info-list section header (muted label + count + chevron). The
+// collapse STATE is owned by DashboardScreen (useStoredState, HOME-scoped key)
+// so it remembers per-section and renders no rows when collapsed — the same
+// mechanism the grouped color-band views use.
+function HomeCollapseHeader({ label, count=null, expanded, onToggle }) {
+  return (
+    <button
+      onClick={onToggle}
+      aria-expanded={expanded}
+      style={{ display:'flex', alignItems:'center', gap:'8px', width:'100%', background:'none', border:'none', padding:'2px 0 8px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}
+    >
+      <span style={{ fontSize:'11px', fontWeight:700, color:HT.ink.muted, textTransform:'uppercase', letterSpacing:'0.6px' }}>{label}</span>
+      {count != null && <span style={{ fontSize:'11px', fontWeight:500, color:HT.ink.quiet, fontVariantNumeric:HT.type.tabular }}>· {count}</span>}
+      <span aria-hidden style={{ marginLeft:'auto', color:HT.ink.muted, fontSize:'13px', display:'inline-block', transform:expanded?'rotate(90deg)':'none', transition:'transform 0.15s' }}>›</span>
+    </button>
   )
 }
 
@@ -21565,7 +21652,7 @@ function SlimCoOwnerOnboarding({ locationId, locationName, profile, topOffset=0,
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false }) {
+function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
@@ -21641,6 +21728,163 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
 
   // Effective location ID - uses selectedLoc when super admin has a location selected but locFilter is still 'all'
   const effectiveLocId = locFilter!=='all' ? locFilter : selectedLoc?.id || null
+
+  // ═══ HOME REDESIGN — "Needs attention" + calm metrics, ALL from real data ═══
+  // Sources: `people` (mapped leads) + `engagements` (OPEN only) — both already
+  // loaded, server-scoped by location; elevated sees all + loc_other. No new
+  // fetch. Home reads the SAME derivations the Clients views use so the two
+  // can't drift (deriveClientStatus, deriveStatusChip, the CHIP_STYLES families,
+  // and one shared threshold module).
+  const nowHome = Date.now()
+  // Client-side location scope (mirrors HiveShell.filtered): effectiveLocId null
+  // = the all-locations view (elevated on 'all').
+  const scopedPeopleH = effectiveLocId ? (people||[]).filter(p=>p.locationId===effectiveLocId) : (people||[])
+  const scopedEngsH   = effectiveLocId ? (engagements||[]).filter(e=>e.location_uuid===effectiveLocId) : (engagements||[])
+  const openEngsH     = scopedEngsH.filter(e=>!engIsTerminal(e.stage))
+  // Same client-status inputs the Inbox/directory build (open engagements →
+  // openClientIds; the payload is open-only so wonClientIds is empty here and
+  // person.wonEngagements carries the 'Client' read at hydration).
+  const openClientIdsH = new Set(openEngsH.map(e=>e.client_id))
+  const wonClientIdsH  = new Set(scopedEngsH.filter(e=>e.stage==='Closed Won').map(e=>e.client_id))
+  const isLivePersonH = (p) => !p.isJunk
+    && !(p.snoozeUntil && new Date(p.snoozeUntil).getTime() > nowHome)
+    && !p.inboxDismissedAt
+
+  // RED · New leads not contacted — deriveClientStatus 'New' (has contact info,
+  // no open engagement, no won/paid, NO reach-out in 30d, created <30d). This IS
+  // the Inbox "New / No Contact Yet" section, so Home and Inbox agree by
+  // construction. loc_other leads are the transfer card, not this.
+  const newUncontacted = scopedPeopleH.filter(p =>
+    isLivePersonH(p) && !p.atLocOther &&
+    deriveClientStatus(p, openClientIdsH, nowHome, wonClientIdsH) === 'New')
+  const newUncontactedOldest = newUncontacted.reduce((m,p)=>{
+    const d = p.created ? sharedDaysSince(p.created, nowHome) : 0; return d>m?d:m }, 0)
+
+  // RED · Estimates awaiting follow-up — open Estimate-stage engagements whose
+  // latest quote was SENT more than ESTIMATE_FOLLOWUP_DAYS ago (Jobber tracks no
+  // reply, so sent-age is the honest "no reply yet" proxy).
+  const latestSentH = (e) => (e.quotes||[]).map(q=>q.sent_at).filter(Boolean).sort().pop() || null
+  const estimateFollowUps = openEngsH.filter(e => {
+    if (e.stage !== 'Estimate') return false
+    const sent = latestSentH(e)
+    return sent && sharedDaysSince(sent, nowHome) > ESTIMATE_FOLLOWUP_DAYS
+  })
+  const estimateOldest = estimateFollowUps.reduce((m,e)=>{
+    const sent = latestSentH(e); const d = sent ? sharedDaysSince(sent, nowHome) : 0; return d>m?d:m }, 0)
+
+  // AMBER · Assessments today/tomorrow — engagement child assessments scheduled
+  // between start of today and end of (today + ASSESSMENT_HORIZON_DAYS). Raw ISO
+  // scheduled_at (the people-side assessment is a lossy formatted string with no
+  // raw ISO, so this reads engagements).
+  const startTodayH = (()=>{ const d=new Date(nowHome); d.setHours(0,0,0,0); return d.getTime() })()
+  const endHorizonH = (()=>{ const d=new Date(nowHome); d.setHours(23,59,59,999); d.setDate(d.getDate()+ASSESSMENT_HORIZON_DAYS); return d.getTime() })()
+  const upcomingAssessments = []
+  for (const e of scopedEngsH) {
+    for (const a of (e.assessments||[])) {
+      if (!a.scheduled_at) continue
+      const t = new Date(a.scheduled_at).getTime()
+      if (isNaN(t) || t < startTodayH || t > endHorizonH) continue
+      upcomingAssessments.push({ id:a.id, when:t, scheduled_at:a.scheduled_at, client:e.client_name })
+    }
+  }
+  upcomingAssessments.sort((a,b)=>a.when-b.when)
+  const assessNext = upcomingAssessments[0]
+  const assessDetail = assessNext
+    ? `Next: ${assessNext.client || 'Client'} · ${new Date(assessNext.scheduled_at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}`
+    : ''
+
+  // AMBER · Invoices unpaid & aging — unpaid balance, issued more than
+  // INVOICE_AGING_DAYS ago. Jobber imports NO invoice due-date, so this reads
+  // issue-AGE only — it never asserts a past-due window. Balance (balance_owing)
+  // + issue date (raw ISO inv.date) are real. Money → owner/corp only (gated).
+  const agingInvoices = []
+  for (const p of scopedPeopleH) {
+    for (const inv of (p.invoices||[])) {
+      const bal = Number(inv.balance)
+      if (!(bal > 0) || !inv.date) continue
+      const age = sharedDaysSince(inv.date, nowHome)
+      if (age > INVOICE_AGING_DAYS) agingInvoices.push({ bal, age })
+    }
+  }
+  const agingTotal  = agingInvoices.reduce((s,x)=>s+x.bal, 0)
+  const agingOldest = agingInvoices.reduce((m,x)=>x.age>m?x.age:m, 0)
+
+  // BLUE · Leads needing transfer (super_admin/corp ONLY) — loc_other unrouted
+  // global-form leads. Self-gates: franchise scopes never receive loc_other rows.
+  const transferLeads = isElevated ? scopedPeopleH.filter(p => isLivePersonH(p) && p.atLocOther) : []
+
+  // ── Calm metrics (context, not hero) ──
+  // Open engagements — open engagement RECORD count in scope (SAME source as the
+  // Engagements tab badge). Distinct from Active clients (people count).
+  const openEngagementsCount = openEngsH.length
+  // Active clients — distinct PEOPLE with ≥1 open engagement (deriveClientStatus
+  // 'Active'). A repeat client with two open deals = ONE active client but TWO
+  // open engagements: the numbers are honestly different, hence two labels.
+  const activeClientsCount = scopedPeopleH.filter(p => openClientIdsH.has(p.id)).length
+  // New this week — leads created within 7 days (real: people.created).
+  const newThisWeekCount = scopedPeopleH.filter(p => {
+    if (!p.created) return false
+    const t = new Date(p.created).getTime(); return !isNaN(t) && (nowHome - t) < 7*86400000 }).length
+  // Outstanding ($) — sum of unpaid invoice balances in scope. Money → gated on
+  // canSeeFinancials, same as the Reports/Revenue tiles.
+  const outstandingTotal = scopedPeopleH
+    .flatMap(p => p.invoices||[])
+    .reduce((s,inv)=> s + (Number(inv.balance)>0 ? Number(inv.balance) : 0), 0)
+
+  // Home-scoped collapse memory for the info lists (Tier 2d) — REUSES the
+  // grouped views' useStoredState; absent = collapsed, so first visit is
+  // all-collapsed. The Needs-attention hero is NEVER in here (always open).
+  const [homeCollapsed, setHomeCollapsed] = useStoredState('bee_hive_home_collapsed', {})
+  const homeExpanded = (k) => homeCollapsed[k] === true
+  const toggleHomeSection = (k) => setHomeCollapsed(prev => ({ ...prev, [k]: !prev[k] }))
+  const revealHomeSection = (k) => {
+    setHomeCollapsed(prev => ({ ...prev, [k]: true }))
+    if (typeof window !== 'undefined' && typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => { const el = document.getElementById(`bee-home-sec-${k}`); if (el?.scrollIntoView) el.scrollIntoView({ behavior:'smooth', block:'start' }) })
+    }
+  }
+
+  // The five alert cards, urgency order (RED → AMBER → BLUE). Each reads a real
+  // signal above and taps through to the correct filtered destination via the
+  // HiveShell deep-link intent (onOpenHive) — except assessments, which have no
+  // dedicated Clients view, so that card reveals Home's own Upcoming list.
+  const alertCards = [
+    newUncontacted.length > 0 && {
+      key:'new-uncontacted', tone:'red', icon:'✨',
+      title:`${newUncontacted.length} new lead${newUncontacted.length>1?'s':''} not contacted`,
+      detail:`No outreach yet · oldest ${newUncontactedOldest}d`,
+      onOpen:()=> onOpenHive && onOpenHive({ tab:'inbox', section:'new' }),
+    },
+    estimateFollowUps.length > 0 && {
+      key:'estimate-followup', tone:'red', icon:'📋',
+      title:`${estimateFollowUps.length} estimate${estimateFollowUps.length>1?'s':''} awaiting follow-up`,
+      detail:`Sent >${ESTIMATE_FOLLOWUP_DAYS}d ago · oldest ${estimateOldest}d`,
+      onOpen:()=> onOpenHive && onOpenHive({ tab:'engagements', view:'list', group:'Estimate' }),
+    },
+    upcomingAssessments.length > 0 && {
+      key:'assessments-soon', tone:'amber', icon:'📅',
+      title:`${upcomingAssessments.length} assessment${upcomingAssessments.length>1?'s':''} today & tomorrow`,
+      detail:assessDetail,
+      onOpen:()=> revealHomeSection('upcoming'),
+    },
+    (canSeeFinancials && agingInvoices.length > 0) && {
+      key:'invoices-aging', tone:'amber', icon:'💳',
+      title:`${fmt(agingTotal)} unpaid`,
+      detail:`${agingInvoices.length} invoice${agingInvoices.length>1?'s':''} · oldest issued ${agingOldest}d ago`,
+      onOpen:()=> onOpenHive && onOpenHive({ tab:'engagements', view:'list', group:'Final Processing' }),
+    },
+    transferLeads.length > 0 && {
+      key:'needs-transfer', tone:'blue', icon:'📍',
+      title:`${transferLeads.length} lead${transferLeads.length>1?'s':''} need${transferLeads.length===1?'s':''} transfer`,
+      detail:'Unrouted global-form leads · route to a location',
+      onOpen:()=> onOpenHive && onOpenHive({ tab:'inbox', section:'transfer' }),
+    },
+  ].filter(Boolean)
+  const attentionCount = newUncontacted.length + estimateFollowUps.length + upcomingAssessments.length
+    + (canSeeFinancials ? agingInvoices.length : 0) + transferLeads.length
+  const homeScope = (isElevated && locFilter==='all')
+    ? 'All locations'
+    : (selectedLoc?.name || currentLocation?.name || locationName || 'Your location')
 
   // Filter leads by location
   const visibleLeads = (people||[]).filter(l=> !l.isJunk && (effectiveLocId ? l.locationId===effectiveLocId : true))
@@ -21896,24 +22140,13 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         >
           📍 {locFilter==='all' ? 'All Locations' : (selectedLoc?.name || currentLocation?.name || locationName || '—')}
         </button>
-        <p style={{ fontSize:'13px', color:'rgba(168,201,196,0.7)', marginBottom:'0' }}>
-          {isElevated && locFilter==='all'
-  ? `${locations.length} locations`
-  : `${newClients.length} new · ${inProgressClients.length} in progress`}
+        {/* Day summary — what needs you today + the scope this Home is showing.
+            Scope = "All locations" for elevated on 'all', else the location. */}
+        <p style={{ fontSize:'13px', color:'rgba(168,201,196,0.85)', marginBottom:'0' }}>
+          {attentionCount>0
+            ? `${attentionCount} thing${attentionCount>1?'s':''} need${attentionCount===1?'s':''} you today · ${homeScope}`
+            : `You're all caught up · ${homeScope}`}
         </p>
-
-        {/* Today banner */}
-        {!isElevated||locFilter!=='all' ? assessmentsToday.length>0&&(
-          <div style={{ marginTop:'1rem', padding:'10px 14px', background:'rgba(168,201,196,0.12)', border:'1px solid rgba(168,201,196,0.2)', borderRadius:'10px' }}>
-            <p style={{ fontSize:'12px', color:BRAND.teal, fontWeight:600, marginBottom:'4px' }}>📅 Today's Schedule</p>
-            {assessmentsToday.map(a=>(
-              <div key={a.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <p style={{ fontSize:'13px', color:'white' }}>{a.client} - {a.type}</p>
-                <span style={{ fontSize:'12px', color:BRAND.teal }}>{a.time}</span>
-              </div>
-            ))}
-          </div>
-        ) : null}
 
         {/* Quick Capture FAB */}
         {!isReadOnly&&(
@@ -21924,276 +22157,74 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         )}
       </div>
 
-      <div style={{ padding:'1.25rem', display:'grid', gap:'1.25rem' }}>
+      <div style={{ padding:'1.25rem', display:'grid', gap:'1.5rem' }}>
 
-        {/* Needs Attention - merged with follow-up reminders */}
-        {(()=>{
-          const locFollowUps = effectiveLocId ? followUps.filter(f=>!f.locationId||f.locationId===effectiveLocId) : followUps
-          const hasItems = noReachOut.length>0||stuckLeads.length>0||unpaidInvoices.length>0||locFollowUps.length>0||nearExpiryNurture.length>0||snoozedToday.length>0
-          return (
-            <div>
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'4px' }}>
-                <p style={{ fontSize:'11px', fontWeight:700, color:BRAND.muted, textTransform:'uppercase', letterSpacing:'0.6px' }}>
-                  Needs Attention {hasItems&&<span style={{ fontWeight:400 }}>· {noReachOut.length+stuckLeads.length+(unpaidInvoices.length>0?1:0)+locFollowUps.length+(nearExpiryNurture.length>0?1:0)+(snoozedToday.length>0?1:0)}</span>}
-                </p>
-                <button onClick={()=>setShowAddFollowUp(s=>!s)} style={{ fontSize:'11px', color:'#a8c9c4', background:'none', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'6px', padding:'2px 8px', cursor:'pointer', fontFamily:'inherit', fontWeight:600 }}>+ Reminder</button>
-              </div>
-              <p style={{ fontSize:'11px', color:BRAND.muted, marginBottom:'10px' }}>Stuck clients, unpaid invoices, and your scheduled follow-ups</p>
-
-              {showAddFollowUp&&(
-                <div style={{ background:'white', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'12px', padding:'12px 14px', marginBottom:'8px', display:'grid', gap:'8px' }}>
-                  <input value={newFollowUpName} onChange={e=>setNewFollowUpName(e.target.value)} placeholder="Client name" style={{ width:'100%', padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-                  <input type="date" value={newFollowUpDate} onChange={e=>setNewFollowUpDate(e.target.value)} min={new Date().toISOString().split('T')[0]} style={{ width:'100%', padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-                  <input value={newFollowUpNote} onChange={e=>setNewFollowUpNote(e.target.value)} placeholder="Reason (optional)" style={{ width:'100%', padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-                  <div style={{ display:'flex', gap:'6px' }}>
-                    <button onClick={()=>setShowAddFollowUp(false)} style={{ flex:1, padding:'8px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
-                    <button onClick={()=>{ if(!newFollowUpDate||!newFollowUpName.trim()) return; setFollowUps(prev=>[...prev,{ id:`fu${Date.now()}`, personId:null, personName:newFollowUpName.trim(), date:newFollowUpDate, note:newFollowUpNote.trim(), locationId:effectiveLocId||'loc1', createdAt:'Just now' }]); setNewFollowUpDate(''); setNewFollowUpName(''); setNewFollowUpNote(''); setShowAddFollowUp(false) }}
-                      disabled={!newFollowUpDate||!newFollowUpName.trim()}
-                      style={{ flex:2, padding:'8px', background:newFollowUpDate&&newFollowUpName.trim()?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:newFollowUpDate&&newFollowUpName.trim()?'white':'#9ca3af', cursor:newFollowUpDate&&newFollowUpName.trim()?'pointer':'not-allowed' }}>Save Reminder</button>
-                  </div>
-                </div>
-              )}
-
-              {!hasItems&&!showAddFollowUp&&(
-                <div style={{ padding:'14px', background:'rgba(34,197,94,0.05)', border:'1px solid rgba(34,197,94,0.15)', borderRadius:'12px', display:'flex', alignItems:'center', gap:'10px' }}>
-                  <span style={{ fontSize:'18px' }}>🎉</span>
-                  <p style={{ fontSize:'13px', color:'#4a5e5a' }}>All clear - nothing needs attention right now.</p>
-                </div>
-              )}
-
-              <div style={{ display:'grid', gap:'6px' }}>
-                {nearExpiryNurture.length>0&&<ExpandableAttentionCard icon="⏳" urgency="high" title={`${nearExpiryNurture.length} nurture client${nearExpiryNurture.length>1?'s':''} near auto-close - review now`} records={nearExpiryNurture} onOpenRecord={onOpenRecord} nav={nav} />}
-                {snoozedToday.length>0&&<ExpandableAttentionCard icon="⏰" urgency="high" title={`${snoozedToday.length} snoozed client${snoozedToday.length>1?'s':''} waking up today`} records={snoozedToday} onOpenRecord={onOpenRecord} nav={nav} />}
-                {noReachOut.length>0&&<ExpandableAttentionCard icon="📲" urgency="high" title={`${noReachOut.length} new client${noReachOut.length>1?'s':''} with no reach-out`} records={noReachOut} onOpenRecord={onOpenRecord} nav={nav} />}
-                {stuckLeads.length>0&&<ExpandableAttentionCard icon="⏸" urgency="medium" title={`${stuckLeads.length} client stuck 7+ days`} records={stuckLeads} onOpenRecord={onOpenRecord} nav={nav} />}
-                {unpaidInvoices.length>0&&(()=>{ const ip=activePeople.filter(p=>p.invoices?.some(i=>i.status==='Awaiting Payment')); return ip.length?<ExpandableAttentionCard icon="💳" urgency="medium" title={`${ip.length} unpaid invoice${ip.length>1?'s':''} · ${fmt(unpaidInvoices.reduce((s,i)=>s+i.amount,0))}`} records={ip} onOpenRecord={onOpenRecord} nav={nav} />:null })()}
-                {(()=>{
-                  const sorted = [...locFollowUps].sort((a,b)=>a.date.localeCompare(b.date))
-                  const visible = sorted.filter(f=>Math.ceil((new Date(f.date)-new Date())/(1000*60*60*24)) <= 7)
-                  const older   = sorted.filter(f=>Math.ceil((new Date(f.date)-new Date())/(1000*60*60*24)) > 7)
-                  const FollowUpRow = ({f})=>{
-                    const daysUntil = Math.ceil((new Date(f.date)-new Date())/(1000*60*60*24))
-                    const isOverdue = daysUntil < 0
-                    const isSoon    = daysUntil <= 3 && daysUntil >= 0
-                    return (
-                      <div style={{ display:'flex', alignItems:'center', gap:'12px', padding:'10px 14px', background:'white', border:`1px solid ${isOverdue?'rgba(239,68,68,0.2)':isSoon?'rgba(245,158,11,0.2)':'rgba(0,0,0,0.07)'}`, borderRadius:'12px' }}>
-                        <div style={{ width:'42px', height:'42px', borderRadius:'10px', background:isOverdue?'rgba(239,68,68,0.08)':isSoon?'rgba(245,158,11,0.08)':'rgba(168,201,196,0.1)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                          <span style={{ fontSize:'10px', fontWeight:700, color:isOverdue?'#ef4444':isSoon?'#f59e0b':'#8a9e9a', textTransform:'uppercase' }}>{isOverdue?'LATE':isSoon?`${daysUntil}d`:'📅'}</span>
-                          <span style={{ fontSize:'9px', color:isOverdue?'#ef4444':isSoon?'#f59e0b':'#8a9e9a' }}>{new Date(f.date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>
-                        </div>
-                        <div style={{ flex:1, minWidth:0 }}>
-                          <button
-                            onClick={()=>{ const p = activePeople.find(x=>x.id===f.personId||x.name===f.personName); if(p&&onOpenRecord){ onOpenRecord(p); nav?.('hive') } }}
-                            style={{ background:'none', border:'none', padding:0, cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
-                            <p style={{ fontSize:'13px', fontWeight:600, color:'#0ea5e9', marginBottom:'1px', textDecoration:'underline', textUnderlineOffset:'2px' }}>{f.personName}</p>
-                          </button>
-                          {f.note&&<p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{f.note}</p>}
-                        </div>
-                        <div style={{ display:'flex', gap:'4px', flexShrink:0 }}>
-                          <button
-                            onClick={()=>{
-                              const newDate = prompt('Reschedule to (YYYY-MM-DD):', f.date)
-                              if(newDate) {
-                                setFollowUps(prev=>prev.map(x=>x.id===f.id?{...x,date:newDate}:x))
-                                // Log in client's outreach timeline
-                                const fmtDate = new Date(newDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})
-                                setPeople(prev=>prev.map(p=>p.id===f.personId||p.name===f.personName?{
-                                  ...p,
-                                  outreachTimeline:[...(p.outreachTimeline||[]),{
-                                    id:`o${Date.now()}`,type:'system',method:'system',
-                                    label:`Follow-up rescheduled to ${fmtDate}${f.note?' · '+f.note:''}`,
-                                    ts:'Just now',status:'done',user:'You'
-                                  }]
-                                }:p))
-                              }
-                            }}
-                            style={{ padding:'4px 8px', background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.15)', borderRadius:'7px', fontSize:'10px', fontFamily:'inherit', fontWeight:600, color:'#6366f1', cursor:'pointer', flexShrink:0 }}>
-                            Reschedule
-                          </button>
-                          <button
-                            onClick={()=>{
-                              setFollowUps(prev=>prev.filter(x=>x.id!==f.id))
-                              // Log completion in client's outreach timeline
-                              setPeople(prev=>prev.map(p=>p.id===f.personId||p.name===f.personName?{
-                                ...p,
-                                outreachTimeline:[...(p.outreachTimeline||[]),{
-                                  id:`o${Date.now()}`,type:'manual',method:'system',
-                                  label:`✓ Follow-up completed${f.note?' · '+f.note:''}`,
-                                  ts:'Just now',status:'done',user:'You'
-                                }]
-                              }:p))
-                            }}
-                            style={{ padding:'4px 8px', background:'rgba(34,197,94,0.08)', border:'1px solid rgba(34,197,94,0.15)', borderRadius:'7px', fontSize:'10px', fontFamily:'inherit', fontWeight:600, color:'#22c55e', cursor:'pointer', flexShrink:0 }}>
-                            ✓
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  }
-                  return (<>
-                    {visible.map(f=><FollowUpRow key={f.id} f={f} />)}
-                    {older.length>0&&(
-                      <>
-                        <button onClick={()=>setShowOlderFollowUps(s=>!s)}
-                          style={{ width:'100%', padding:'9px 14px', background:'rgba(0,0,0,0.02)', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', color:'#8a9e9a', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                          <span>{showOlderFollowUps?'▲ Hide':'▼ Show'} {older.length} follow-up{older.length>1?'s':''} further out</span>
-                          <span style={{ fontSize:'11px', background:'rgba(0,0,0,0.06)', padding:'1px 8px', borderRadius:'10px' }}>{older.length}</span>
-                        </button>
-                        {showOlderFollowUps&&older.map(f=><FollowUpRow key={f.id} f={f} />)}
-                      </>
-                    )}
-                  </>)
-                })()}
-              </div>
-            </div>
-          )
-        })()}
-
-
-        {/* Stats row */}
-        <div style={{ display:'flex', gap:'8px' }}>
-          <StatCard icon="✨"
-            label={isElevated&&locFilter==='all'?'Active Clients':'New clients'}
-            value={isElevated&&locFilter==='all'?activeLeads.length:newThisWeek.length}
-            sub={isElevated&&locFilter==='all'?'Across all locations':'Added this week'}
-            bg="white" />
-          {isElevated&&locFilter==='all'
-            ? <StatCard icon="🏢" label="Active Locations" value={locations.filter(l=>l.crmStatus==='active').length} sub="Franchise locations" bg="white" color='#6366f1' />
-            : <StatCard icon="🔨" label="Jobs in progress" value={inProgress.length} sub="Active Jobber jobs" bg="white" color='#10b981' />
-          }
-          {/* Assessments today is OPERATIONAL (not money) — managers keep it.
-              Gate on !isLiteUser (the pre-financials-split behavior) so the
-              canSeeFinancials tightening doesn't hide an operational stat. */}
-          {!isLiteUser&&!isElevated
-            ? <StatCard icon="📅" label="Assessments today" value={assessmentsToday.length} sub="Scheduled in Jobber" bg="white" color='#0ea5e9' />
-            : null}
-        </div>
-        {canSeeFinancials&&isElevated&&(
-          <div style={{ display:'flex', gap:'8px', padding:'10px 14px', background:'rgba(212,160,70,0.08)', border:'1px solid rgba(212,160,70,0.2)', borderRadius:'12px', alignItems:'center' }}>
-            <span style={{ fontSize:'20px' }}>🍯</span>
-            <div style={{ flex:1 }}>
-              <p style={{ fontSize:'11px', color:'#8a9e9a', fontWeight:500, marginBottom:'2px' }}>6% Royalty on Services</p>
-              <p style={{ fontSize:'20px', fontWeight:700, color:'#d4a046', fontFamily:'Georgia,serif' }}>{fmt(royalties)}</p>
-            </div>
-            <div style={{ textAlign:'right' }}>
-              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>From {fmt(collected)} collected</p>
-            </div>
-          </div>
-        )}
-        {/* Revenue */}
-        {canSeeFinancials&&(
-        <div style={{ background:'white', borderRadius:'14px', padding:'16px', border:'1px solid rgba(0,0,0,0.06)' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'12px' }}>
-            <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>Revenue</p>
-            <span style={{ fontSize:'11px', color:BRAND.muted }}>This month</span>
-          </div>
-          <div style={{ display:'flex', gap:'1rem', marginBottom:'12px' }}>
-            <div>
-              <p style={{ fontSize:'24px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{fmt(collected)}</p>
-              <p style={{ fontSize:'11px', color:'#22c55e', fontWeight:600 }}>✅ Collected</p>
-            </div>
-            {outstanding>0&&(
-              <div style={{ borderLeft:'1px solid rgba(0,0,0,0.07)', paddingLeft:'1rem' }}>
-                <p style={{ fontSize:'24px', fontWeight:700, color:'#f59e0b', fontFamily:'Georgia,serif' }}>{fmt(outstanding)}</p>
-                <p style={{ fontSize:'11px', color:'#f59e0b', fontWeight:600 }}>⏳ Outstanding</p>
-              </div>
-            )}
-          </div>
-          <div style={{ height:'6px', background:'rgba(0,0,0,0.06)', borderRadius:'3px', overflow:'hidden' }}>
-            <div style={{ height:'100%', width:`${Math.round((collected/Math.max(totalRevenue,1))*100)}%`, background:'linear-gradient(90deg,#a8c9c4,#22c55e)', borderRadius:'3px', transition:'width 0.5s' }} />
-          </div>
-          <p style={{ fontSize:'11px', color:BRAND.muted, marginTop:'5px' }}>{Math.round((collected/Math.max(totalRevenue,1))*100)}% of {fmt(totalRevenue)} collected</p>
-          {isElevated&&(
-            <div style={{ marginTop:'12px', paddingTop:'12px', borderTop:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:'10px' }}>
-              <span style={{ fontSize:'16px' }}>🍯</span>
-              <div style={{ flex:1 }}>
-                <p style={{ fontSize:'11px', color:'#8a9e9a', fontWeight:500 }}>6% Royalty on Services</p>
-                <p style={{ fontSize:'18px', fontWeight:700, color:'#d4a046', fontFamily:'Georgia,serif' }}>{fmt(royalties)}</p>
-              </div>
-              <p style={{ fontSize:'11px', color:'#8a9e9a', textAlign:'right' }}>From {fmt(collected)}<br/>collected</p>
-            </div>
-          )}
-        </div>
-        )}
-
-        {/* Pipeline - modern funnel bars */}
-        <div style={{ background:'white', borderRadius:'14px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.06)' }}>
-          <div style={{ padding:'14px 16px 12px', display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
-            <div>
-              <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', marginBottom:'2px' }}>Client Pipeline</p>
-              <p style={{ fontSize:'11px', color:BRAND.muted }}>Client = your records in the CRM</p>
-            </div>
-            <div style={{ textAlign:'right' }}>
-              <p style={{ fontSize:'22px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', lineHeight:1 }}>{activePeople.length}</p>
-              <p style={{ fontSize:'10px', color:BRAND.muted, marginTop:'2px' }}>Active clients</p>
-            </div>
-          </div>
-          <div style={{ borderTop:'1px solid rgba(0,0,0,0.04)' }}>
-            {stageCounts.map((s,i)=>{
-              const pct = Math.round((s.count/Math.max(activePeople.length,1))*100)
-              return (
-                <button key={s.key} onClick={()=>nav('hive')} style={{ width:'100%', padding:'9px 16px', background:'white', border:'none', borderBottom:i<stageCounts.length-1?'1px solid rgba(0,0,0,0.04)':'none', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
-                  <span style={{ fontSize:'14px', width:'20px', flexShrink:0 }}>{s.icon}</span>
-                  <span style={{ fontSize:'12px', color:'#4a5e5a', width:'120px', flexShrink:0, fontWeight:500 }}>{s.label}</span>
-                  <div style={{ flex:1, height:'6px', background:'rgba(0,0,0,0.05)', borderRadius:'3px', overflow:'hidden' }}>
-                    <div style={{ height:'100%', width:`${pct}%`, background:s.color, borderRadius:'3px', transition:'width 0.5s', opacity:0.75 }} />
-                  </div>
-                  <span style={{ fontSize:'13px', fontWeight:700, color:s.color, width:'24px', textAlign:'right', flexShrink:0 }}>{s.count}</span>
-                </button>
-              )
-            })}
-          </div>
-          <div style={{ padding:'10px 16px', background:'rgba(0,0,0,0.01)', borderTop:'1px solid rgba(0,0,0,0.04)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-            <p style={{ fontSize:'11px', color:BRAND.muted }}>Excludes Closed Won & Closed Lost</p>
-            <button onClick={()=>nav('hive')} style={{ fontSize:'11px', color:'#a8c9c4', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', fontWeight:600 }}>Open Hive →</button>
-          </div>
-        </div>
-
-
-        {/* Upcoming assessments - always shown for location views */}
-        {visibleUpcoming.length>0 ? (
-          <div>
-            <p style={{ fontSize:'11px', fontWeight:700, color:BRAND.muted, textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>Upcoming Assessments</p>
-            <div style={{ display:'grid', gap:'6px' }}>
-              {visibleUpcoming.map(a=>(
-                <div key={a.id} style={{ display:'flex', alignItems:'center', gap:'12px', padding:'12px 14px', background:'white', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'12px' }}>
-                  <div style={{ width:'44px', height:'44px', borderRadius:'10px', background:a.date==='Today'?'rgba(14,165,233,0.1)':'rgba(0,0,0,0.04)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center' }}>
-                    <span style={{ fontSize:'10px', fontWeight:700, color:a.date==='Today'?'#0ea5e9':'#8a9e9a', textTransform:'uppercase' }}>{a.date==='Today'?'TODAY':'TMW'}</span>
-                    <span style={{ fontSize:'13px', fontWeight:700, color:a.date==='Today'?'#0ea5e9':'#4a5e5a' }}>{a.time.split(' ')[0]}</span>
-                  </div>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{a.client}</p>
-                    <p style={{ fontSize:'11px', color:BRAND.muted }}>{a.type} · {a.ref}</p>
-                  </div>
-                  <span style={{ fontSize:'11px', color:a.date==='Today'?'#0ea5e9':'#8a9e9a', background:a.date==='Today'?'rgba(14,165,233,0.08)':'rgba(0,0,0,0.04)', padding:'3px 8px', borderRadius:'20px', flexShrink:0 }}>{a.time}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div>
-            <p style={{ fontSize:'11px', fontWeight:700, color:BRAND.muted, textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>Upcoming Assessments</p>
-            <p style={{ fontSize:'13px', color:BRAND.muted, fontStyle:'italic', padding:'12px 0' }}>No upcoming assessments scheduled.</p>
-          </div>
-        )}
-
-        {/* Recent activity - always shown */}
+        {/* ═══ Needs attention (hero) — ALWAYS open, never collapsed ═══ */}
         <div>
-          <p style={{ fontSize:'11px', fontWeight:700, color:BRAND.muted, textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>Recent Activity</p>
-            {recentActivityItems.length>0 ? (
-              <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.06)', overflow:'hidden' }}>
-                {recentActivityItems.map((item,i)=>(
-                  <div key={i} style={{ display:'flex', alignItems:'center', gap:'12px', padding:'11px 14px', borderBottom:i<recentActivityItems.length-1?'1px solid rgba(0,0,0,0.04)':'none' }}>
-                    <div style={{ width:'32px', height:'32px', borderRadius:'8px', background:`${item.color}15`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'15px', flexShrink:0 }}>{item.icon}</div>
-                    <p style={{ fontSize:'12px', color:'#1a2e2b', flex:1, lineHeight:1.4 }}>{item.text}</p>
-                    <span style={{ fontSize:'11px', color:BRAND.muted, flexShrink:0, whiteSpace:'nowrap' }}>{expandTs(item.ts)}</span>
+          <p style={{ fontSize:'11px', fontWeight:700, color:BRAND.muted, textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>Needs attention</p>
+          <div style={{ display:'grid', gap:'8px' }}>
+            {alertCards.length===0
+              ? <HomeAllClearCard />
+              : alertCards.map(c => <HomeAlertCard key={c.key} tone={c.tone} icon={c.icon} title={c.title} detail={c.detail} onOpen={c.onOpen} />)}
+          </div>
+        </div>
+
+        {/* ═══ Calm metrics strip — context, not hero. Real source each:
+            Open engagements = open engagement records (tab-badge source);
+            Active clients   = distinct people with an open engagement;
+            New this week     = leads created <7d; Outstanding = unpaid balances
+            (money → canSeeFinancials only). ═══ */}
+        <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
+          <HomeMetricTile label="Open engagements" value={openEngagementsCount} />
+          <HomeMetricTile label="Active clients" value={activeClientsCount} />
+          <HomeMetricTile label="New this week" value={newThisWeekCount} />
+          {canSeeFinancials && <HomeMetricTile label="Outstanding" value={fmt(outstandingTotal)} />}
+        </div>
+
+        {/* ═══ Collapsible info lists — start COLLAPSED, remembered per-section
+            (bee_hive_home_collapsed), render no rows when collapsed. The hero
+            above is never collapsed. ═══ */}
+        <div id="bee-home-sec-upcoming">
+          <HomeCollapseHeader label="Upcoming this week" count={upcomingAssessments.length}
+            expanded={homeExpanded('upcoming')} onToggle={()=>toggleHomeSection('upcoming')} />
+          {homeExpanded('upcoming') && (
+            upcomingAssessments.length>0 ? (
+              <div style={{ display:'grid', gap:'6px' }}>
+                {upcomingAssessments.map(a=>(
+                  <div key={a.id} style={{ display:'flex', alignItems:'center', gap:'12px', padding:'11px 13px', background:HT.surface.raised, border:HT.border.card, borderRadius:HT.radius.inset }}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <p style={{ fontSize:'13px', fontWeight:600, color:HT.ink.primary, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{a.client||'Client'}</p>
+                      <p style={{ fontSize:'11px', color:HT.ink.muted }}>Assessment</p>
+                    </div>
+                    <span style={{ flexShrink:0, fontSize:'11px', color:HT.ink.secondary, fontVariantNumeric:HT.type.tabular }}>{new Date(a.scheduled_at).toLocaleString('en-US',{weekday:'short', hour:'numeric', minute:'2-digit'})}</span>
                   </div>
                 ))}
               </div>
             ) : (
-              <p style={{ fontSize:'13px', color:BRAND.muted, fontStyle:'italic', padding:'12px 0' }}>No recent activity yet. Add clients to get started.</p>
-            )}
-          </div>
+              <p style={{ fontSize:'13px', color:HT.ink.muted, fontStyle:'italic', padding:'6px 0' }}>No assessments scheduled today or tomorrow.</p>
+            )
+          )}
+        </div>
+
+        <div id="bee-home-sec-recent">
+          <HomeCollapseHeader label="Recent activity" count={recentActivityItems.length}
+            expanded={homeExpanded('recent')} onToggle={()=>toggleHomeSection('recent')} />
+          {homeExpanded('recent') && (
+            recentActivityItems.length>0 ? (
+              <div style={{ background:HT.surface.raised, border:HT.border.card, borderRadius:HT.radius.card, overflow:'hidden' }}>
+                {recentActivityItems.map((item,i)=>(
+                  <div key={i} style={{ display:'flex', alignItems:'center', gap:'12px', padding:'11px 14px', borderBottom:i<recentActivityItems.length-1?HT.border.thin:'none' }}>
+                    <span aria-hidden style={{ fontSize:'15px', flexShrink:0 }}>{item.icon}</span>
+                    <p style={{ fontSize:'12px', color:HT.ink.primary, flex:1, lineHeight:1.4 }}>{item.text}</p>
+                    <span style={{ fontSize:'11px', color:HT.ink.muted, flexShrink:0, whiteSpace:'nowrap' }}>{expandTs(item.ts)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p style={{ fontSize:'13px', color:HT.ink.muted, fontStyle:'italic', padding:'6px 0' }}>No recent activity yet.</p>
+            )
+          )}
+        </div>
 
       </div>
 
@@ -32861,6 +32892,13 @@ export default function App({
   // selected person and stays in sync with browser back/forward via popstate.
   const [globalSelectedEngagementId, setGlobalSelectedEngagementId] = useState(initialSelectedEngagementId || null)
   const [globalSelectedPartner, setGlobalSelectedPartner] = useState(null)
+  // Home "Needs attention" deep-link intent — a one-shot { tab, view?, group?,
+  // section? } the Dashboard hands up (onOpenHive) to land the Clients shell on
+  // the right tab + filtered/expanded target. Cleared when HiveShell consumes
+  // it (onHiveIntentConsumed). Ephemeral triage jump — deliberately NOT
+  // URL-persisted (same as the board's listInitialView one-shot); a refresh
+  // returns to the remembered lens, which is the right default.
+  const [hiveIntent, setHiveIntent] = useState(null)
 const [people, setPeople]                 = useState(Array.isArray(initialPeople) ? initialPeople : ALL_PEOPLE)
  // Extend with randomized mock data post-mount. Module-level Math.random
   // would diverge between SSR and client → hydration mismatch.
@@ -33523,7 +33561,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     )
     if (activeNav==='hive') return (
       <div style={pageStyle}>
-        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} initialSelectedEngagementId={globalSelectedEngagementId} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onEngagementChange={(id)=>setGlobalSelectedEngagementId(id)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} />
+        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} initialSelectedEngagementId={globalSelectedEngagementId} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onEngagementChange={(id)=>setGlobalSelectedEngagementId(id)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} initialHiveIntent={hiveIntent} onHiveIntentConsumed={()=>setHiveIntent(null)} />
         {toast && <InlineToast {...toast} />}
       </div>
     )
@@ -33586,6 +33624,17 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             setActiveNav('hive')
             if (typeof window !== 'undefined') {
               window.history.pushState({}, '', '/clients/' + person.id)
+              window.scrollTo(0, 0)
+            }
+          }}
+          onOpenHive={(intent)=>{
+            // Home "Needs attention" deep-link: stash the intent, switch to the
+            // Clients tab, and drive the URL to /clients (bare tab). HiveShell
+            // consumes the intent on mount to land on the right tab + target.
+            setHiveIntent(intent || null)
+            setActiveNav('hive')
+            if (typeof window !== 'undefined') {
+              if (window.location.pathname !== '/clients') window.history.pushState({}, '', '/clients')
               window.scrollTo(0, 0)
             }
           }}

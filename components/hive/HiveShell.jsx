@@ -190,6 +190,18 @@ export default function HiveShell({
   // keeps full access, so it never reaches here as readOnly. Policy lives
   // in betaGate.js resolveBetaReadOnly; BeeHub threads the boolean down.
   readOnly = false,
+  // Deep-link intent (general infra, reusable beyond Home) — a one-shot
+  // { tab, view?, group?, section? } a caller passes to land the shell on a
+  // specific tab + view + filtered/expanded target:
+  //   · tab:    'inbox' | 'engagements' | 'clients'  → the lens
+  //   · view:   'board' | 'list'  (engagements only) → the sub-toggle
+  //   · group:  a stage key (engagements List) → force-expand + scroll that band
+  //   · section:'transfer' | 'new' (inbox) → scroll to that section
+  // Applied on mount (winning over the localStorage-hydrated pref for this
+  // entry), then consumed via onIntentConsumed. NON-deep-linked entry is
+  // untouched — no intent means the remembered lens/view/collapse win as before.
+  initialIntent = null,
+  onIntentConsumed = () => {},
 }) {
   // Top-level tab — default 'engagements' (opens on the board), hydrated
   // from localStorage after mount (SSR-safe). A stored legacy 'board'/'list'
@@ -285,6 +297,26 @@ export default function HiveShell({
   // one-shot seed the List consumes on mount, then hands back null.
   const [listInitialView, setListInitialView] = useState(null)
   const viewClosedInList = () => { setListInitialView('closed'); pickLens('engagements'); pickEngView('list') }
+  // Inbox deep-link section seed (one-shot) — the Inbox-lens counterpart to
+  // listInitialView; consumed by InboxScreen's initialSection.
+  const [inboxInitialSection, setInboxInitialSection] = useState(null)
+  // Apply a deep-link intent ONCE on mount. Placed AFTER the lens/engView
+  // hydration effects above (effects run in definition order), so a real
+  // intent wins the initial entry over the remembered pref. A stage `group`
+  // implies List view (the band only exists there — item 4 of the contract).
+  // onIntentConsumed hands it back so a later render can't re-fire it.
+  useEffect(() => {
+    if (!initialIntent) return
+    const { tab, view, group, section } = initialIntent
+    if (tab && ['inbox', 'engagements', 'clients'].includes(tab)) pickLens(tab)
+    if (tab === 'engagements') {
+      if (group) { pickEngView('list'); setListInitialView(group) }
+      else if (view === 'board' || view === 'list') pickEngView(view)
+    }
+    if (tab === 'inbox' && section) setInboxInitialSection(section)
+    onIntentConsumed()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   // Opening an engagement swaps the single overlay slot to the panel AND
   // drives the URL to /clients/<clientId>?e=<engagementId> — shareable,
   // refresh-survivable, back/forward-aware, and location-scoped through the
@@ -652,6 +684,8 @@ export default function HiveShell({
           onCallLogged={applyTouchpoint}
           setToast={setToast}
           readOnly={readOnly}
+          initialSection={inboxInitialSection}
+          onInitialSectionConsumed={() => setInboxInitialSection(null)}
         />
       ) : lens === 'clients' ? (
         <ClientGroupedList
