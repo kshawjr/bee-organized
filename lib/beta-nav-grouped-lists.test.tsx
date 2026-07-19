@@ -1,16 +1,19 @@
 // @vitest-environment happy-dom
 // ─────────────────────────────────────────────────────────────
-// Clients nav restructure + grouped color-band list views (2026-07-18).
+// Clients nav restructure + grouped color-band list views (2026-07-18),
+// plus the collapsible-bands + tab-badge refinement (2026-07-19).
 //
-//   1) Nav shows exactly THREE tabs: Inbox (New) · Engagements · Client List
-//      (Board + List are no longer separate tabs).
-//   2) Engagements opens on Board; the Board|List sub-toggle persists the
-//      choice to localStorage (bee_hive_eng_view) and List rehydrates.
-//   3) The List lens is the grouped-by-stage color-band view, in board order,
-//      with a collapsed Closed group at the bottom that lazy-loads.
-//   4) The Client List lens is the grouped-by-status color-band view.
-//   5) Both band views drive their colors from the SAME source the board
-//      uses (CHIP_STYLES), and a row click opens the same detail seam.
+//   1) Nav shows exactly THREE tabs, each with a count badge:
+//      Inbox (New) · Engagements · Client List. Engagements badge = open
+//      engagements (the value the removed corner text showed).
+//   2) Engagements opens on Board; the Board|List sub-toggle persists
+//      (bee_hive_eng_view) and List rehydrates. The corner "Open
+//      engagements · N" text is gone.
+//   3) The List lens groups by stage in board order; the Client List groups
+//      by status. Colors come from CHIP_STYLES (same source the board uses).
+//   4) COLLAPSIBLE bands: start collapsed, remember each group's choice per
+//      view (bee_hive_eng_collapsed / bee_hive_clients_collapsed, separate
+//      memory). Collapsed renders NO rows. Row click opens the same detail.
 // ─────────────────────────────────────────────────────────────
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -60,13 +63,24 @@ const mount = async (ui: React.ReactElement) => {
   document.body.appendChild(host)
   const root = createRoot(host)
   await act(async () => { root.render(ui) })
-  return { host, unmount: async () => { await act(async () => root.unmount()); host.remove() } }
+  return {
+    host,
+    rerender: async (next: React.ReactElement) => { await act(async () => { root.render(next) }) },
+    unmount: async () => { await act(async () => root.unmount()); host.remove() },
+  }
 }
 
 const okJson = (body: any) => ({ ok: true, status: 200, json: async () => body })
 
-// happy-dom v20 ships no localStorage — stub one so the lens/engView
-// hydration in HiveShell runs for real instead of being try/catch-swallowed.
+// A band header is a role=button labelled "<Label> group"; its parent div is
+// the band container (holding the rows). Helpers to drive/inspect collapse.
+const bandHeader = (host: Element, label: string) => host.querySelector(`[aria-label="${label} group"]`) as HTMLElement | null
+const bandOf = (host: Element, label: string) => bandHeader(host, label)?.parentElement as HTMLElement | null
+const rowsInBand = (host: Element, label: string) => bandOf(host, label)?.querySelectorAll('.bee-grp-row') ?? []
+const clickEl = async (el: Element) => { await act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })) }) }
+
+// happy-dom v20 ships no localStorage — stub one so the persisted lens /
+// engView / collapse state hydrates for real instead of being swallowed.
 const lsStore = new Map<string, string>()
 const lsMock = {
   getItem: (k: string) => (lsStore.has(k) ? lsStore.get(k)! : null),
@@ -78,15 +92,27 @@ const lsMock = {
 beforeEach(() => { vi.stubGlobal('localStorage', lsMock); lsStore.clear() })
 afterEach(() => { vi.unstubAllGlobals(); lsStore.clear() })
 
-// ── 1) nav labels ───────────────────────────────────────────────
-describe('nav — exactly three tabs', () => {
+// ── 1) nav labels + badges ──────────────────────────────────────
+describe('nav — exactly three tabs with count badges', () => {
   it('renders Inbox (New) · Engagements · Client List, and no standalone Board/List/Clients tab', () => {
     const html = renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)
     expect(html).toContain('Inbox (New)')
     expect(html).toContain('Engagements')
     expect(html).toContain('Client List')
-    // Old flat-tab label is gone (the people tab is "Client List" now).
     expect(html).not.toContain('>Clients<')
+  })
+
+  it('each tab shows a count badge; Engagements badge = open engagements, Client List = total clients', () => {
+    // 4 open engagements, 2 clients (Nora=New, Pete=Past → inbox counts New+Attempting = 1).
+    const html = renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)
+    expect(html).toMatch(/Engagements<span[^>]*>4<\/span>/)
+    expect(html).toMatch(/Client List<span[^>]*>2<\/span>/)
+    expect(html).toMatch(/Inbox \(New\)<span[^>]*>1<\/span>/)
+  })
+
+  it('the "Open engagements · N" corner text is gone', () => {
+    const html = renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)
+    expect(html).not.toContain('Open engagements')
   })
 })
 
@@ -94,10 +120,8 @@ describe('nav — exactly three tabs', () => {
 describe('Engagements Board|List sub-toggle', () => {
   it('defaults to Board active (SSR initial state)', () => {
     const html = renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)
-    // the toggle renders (Engagements is the default tab)
     expect(html).toContain('aria-label="Board view"')
     expect(html).toContain('aria-label="List view"')
-    // Board is the pressed side by default
     expect(html).toMatch(/aria-pressed="true" aria-label="Board view"/)
     expect(html).toMatch(/aria-pressed="false" aria-label="List view"/)
   })
@@ -110,13 +134,12 @@ describe('Engagements Board|List sub-toggle', () => {
     const { host, unmount } = await mount(
       <HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} locations={LOCATIONS as any} />
     )
-    // board first (no grouped rows yet)
     const listBtn = Array.from(host.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'List view')!
     expect(listBtn).toBeTruthy()
-    await act(async () => { listBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    await clickEl(listBtn)
     expect(localStorage.getItem('bee_hive_eng_view')).toBe('list')
-    // grouped rows now present (board renders ui/Card, never .bee-grp-row)
-    expect(host.querySelector('.bee-grp-row')).toBeTruthy()
+    // grouped list present via its band headers (the board has none)
+    expect(bandHeader(host, 'Request')).toBeTruthy()
     await unmount()
   })
 
@@ -129,12 +152,12 @@ describe('Engagements Board|List sub-toggle', () => {
     const { host, unmount } = await mount(
       <HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} locations={LOCATIONS as any} />
     )
-    expect(host.querySelector('.bee-grp-row')).toBeTruthy()
+    expect(bandHeader(host, 'Request')).toBeTruthy()
     await unmount()
   })
 })
 
-// ── 3) grouped list: stage order + collapsed Closed + row click ──
+// ── 3) grouped list: order, colors, detail seam ─────────────────
 describe('EngagementGroupedList — grouped by stage in board order', () => {
   it('bands appear in board order and the Closed group is last', async () => {
     const { host, unmount } = await mount(
@@ -147,34 +170,17 @@ describe('EngagementGroupedList — grouped by stage in board order', () => {
     await unmount()
   })
 
-  it('the Closed group is collapsed by default and lazy-loads on expand', async () => {
-    const fetchSpy = vi.fn(async (url: any) => okJson({ rows: [eng({ id: 'closed-1', stage: 'Closed Won', client_name: 'Won One' })], total: 1 }))
-    vi.stubGlobal('fetch', fetchSpy)
-    const { host, unmount } = await mount(
-      <EngagementGroupedList engagements={ENGAGEMENTS as any} closedCount={2787} />
-    )
-    // collapsed: the closed count shows, but no fetch fired and no closed row
-    expect(host.textContent).toContain('2787')
-    expect(fetchSpy).not.toHaveBeenCalled()
-    // expand: click the Closed band header (the div wrapping the label span)
-    const closedLabel = Array.from(host.querySelectorAll('span')).find(s => (s.textContent || '').trim() === 'Closed')!
-    expect(closedLabel).toBeTruthy()
-    const closedHeader = closedLabel.parentElement as HTMLElement
-    await act(async () => { closedHeader.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
-    expect(fetchSpy).toHaveBeenCalled()
-    const calledUrl = String((fetchSpy.mock.calls[0] as any)[0])
-    expect(calledUrl).toContain('closed=1')
-    expect(host.textContent).toContain('Won One')
-    await unmount()
-  })
-
-  it('a row click opens the same detail seam (onOpenEngagement)', async () => {
+  it('a row click opens the same detail seam (onOpenEngagement) — after expanding its band', async () => {
     const onOpen = vi.fn()
     const { host, unmount } = await mount(
       <EngagementGroupedList engagements={ENGAGEMENTS as any} onOpenEngagement={onOpen} />
     )
-    const row = host.querySelector('.bee-grp-row') as HTMLElement
-    await act(async () => { row.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    // collapsed by default → no rows yet
+    expect(host.querySelector('.bee-grp-row')).toBeFalsy()
+    await clickEl(bandHeader(host, 'Request')!)
+    const row = bandOf(host, 'Request')!.querySelector('.bee-grp-row') as HTMLElement
+    expect(row).toBeTruthy()
+    await clickEl(row)
     expect(onOpen).toHaveBeenCalledTimes(1)
     expect(onOpen.mock.calls[0][0]).toHaveProperty('id')
     await unmount()
@@ -183,25 +189,76 @@ describe('EngagementGroupedList — grouped by stage in board order', () => {
   it('band tint is driven from CHIP_STYLES (same source as the board)', () => {
     const src = readFileSync('components/hive/EngagementGroupedList.jsx', 'utf8')
     expect(src).toContain('CHIP_STYLES[stageKey]')
-    // the tint is the family bg (the light 50-stop), the header the dark stop
     expect(src).toContain('fam.bg')
     expect(src).toContain('fam.text')
-    // sanity: Request resolves to the teal family the board's chip uses
     expect(CHIP_STYLES['Request']).toEqual(CHIP_STYLES.teal)
   })
 })
 
-// ── 4) client list: grouped by status + row click ───────────────
-describe('ClientGroupedList — grouped by status', () => {
-  it('renders a band per present status with the client rows inside', async () => {
+// ── 4) collapsible bands (Engagements) ──────────────────────────
+describe('EngagementGroupedList — collapsible bands', () => {
+  it('first load: every band collapsed (chevron-right, counts shown, NO rows)', async () => {
+    const { host, unmount } = await mount(
+      <EngagementGroupedList engagements={ENGAGEMENTS as any} closedCount={2787} />
+    )
+    // headers + counts render…
+    expect(bandHeader(host, 'Request')!.getAttribute('aria-expanded')).toBe('false')
+    expect(host.textContent).toContain('2787')
+    // …but no rows, and the chevron is not rotated to the open (down) state
+    expect(host.querySelectorAll('.bee-grp-row').length).toBe(0)
+    expect(host.innerHTML).not.toContain('rotate(90deg)')
+    await unmount()
+  })
+
+  it('toggling expands a band; reload remembers it expanded, others collapsed', async () => {
+    const first = await mount(<EngagementGroupedList engagements={ENGAGEMENTS as any} />)
+    await clickEl(bandHeader(first.host, 'Estimate')!)
+    expect(bandHeader(first.host, 'Estimate')!.getAttribute('aria-expanded')).toBe('true')
+    expect(rowsInBand(first.host, 'Estimate').length).toBe(1) // Ben Estimate
+    // persisted to the Engagements-specific store
+    expect(JSON.parse(lsStore.get('bee_hive_eng_collapsed') || '{}')).toMatchObject({ Estimate: true })
+    await first.unmount()
+
+    // remount (same storage) → Estimate expanded, Request still collapsed
+    const second = await mount(<EngagementGroupedList engagements={ENGAGEMENTS as any} />)
+    expect(bandHeader(second.host, 'Estimate')!.getAttribute('aria-expanded')).toBe('true')
+    expect(rowsInBand(second.host, 'Estimate').length).toBe(1)
+    expect(bandHeader(second.host, 'Request')!.getAttribute('aria-expanded')).toBe('false')
+    expect(rowsInBand(second.host, 'Request').length).toBe(0)
+    await second.unmount()
+  })
+
+  it('the Closed group folds into the same collapse mechanism and lazy-loads on expand', async () => {
+    const fetchSpy = vi.fn(async () => okJson({ rows: [eng({ id: 'closed-1', stage: 'Closed Won', client_name: 'Won One' })], total: 1 }))
+    vi.stubGlobal('fetch', fetchSpy)
+    const { host, unmount } = await mount(
+      <EngagementGroupedList engagements={ENGAGEMENTS as any} closedCount={2787} />
+    )
+    // collapsed: count shows, nothing fetched
+    expect(fetchSpy).not.toHaveBeenCalled()
+    await clickEl(bandHeader(host, 'Closed')!)
+    await act(async () => { await Promise.resolve() })
+    const url = String((fetchSpy.mock.calls[0] as any)[0])
+    expect(url).toContain('closed=1')
+    expect(host.textContent).toContain('Won One')
+    await unmount()
+  })
+})
+
+// ── 5) client list: grouping, detail seam, collapse ─────────────
+describe('ClientGroupedList — grouped by status, collapsible', () => {
+  it('renders a band header per present status; rows appear only when expanded', async () => {
     const { host, unmount } = await mount(
       <ClientGroupedList people={PEOPLE as any} engagements={[]} locations={LOCATIONS as any} />
     )
-    // Nora is New, Pete is Past client — both status labels head a band
-    expect(host.textContent).toContain('New')
-    expect(host.textContent).toContain('Past client')
-    // location name resolves from the roster
-    expect(host.textContent).toContain('Portland')
+    // headers render collapsed (Nora=New, Pete=Past client)
+    expect(bandHeader(host, 'New')).toBeTruthy()
+    expect(bandHeader(host, 'Past client')).toBeTruthy()
+    expect(host.querySelectorAll('.bee-grp-row').length).toBe(0)
+    // expand New → Nora + her location surface
+    await clickEl(bandHeader(host, 'New')!)
+    expect(bandOf(host, 'New')!.textContent).toContain('Nora New')
+    expect(bandOf(host, 'New')!.textContent).toContain('Portland')
     await unmount()
   })
 
@@ -210,10 +267,22 @@ describe('ClientGroupedList — grouped by status', () => {
     const { host, unmount } = await mount(
       <ClientGroupedList people={PEOPLE as any} engagements={[]} locations={LOCATIONS as any} onOpenClient={onOpen} />
     )
-    const row = host.querySelector('.bee-grp-row') as HTMLElement
-    await act(async () => { row.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    await clickEl(bandHeader(host, 'New')!)
+    const row = bandOf(host, 'New')!.querySelector('.bee-grp-row') as HTMLElement
+    await clickEl(row)
     expect(onOpen).toHaveBeenCalledTimes(1)
-    expect(typeof onOpen.mock.calls[0][0]).toBe('string') // a client id
+    expect(typeof onOpen.mock.calls[0][0]).toBe('string')
+    await unmount()
+  })
+
+  it('Client List collapse memory is INDEPENDENT of Engagements (separate stores)', async () => {
+    const { host, unmount } = await mount(
+      <ClientGroupedList people={PEOPLE as any} engagements={[]} locations={LOCATIONS as any} />
+    )
+    await clickEl(bandHeader(host, 'New')!)
+    // writes the clients store, never the engagements store
+    expect(JSON.parse(lsStore.get('bee_hive_clients_collapsed') || '{}')).toMatchObject({ New: true })
+    expect(lsStore.get('bee_hive_eng_collapsed')).toBeUndefined()
     await unmount()
   })
 

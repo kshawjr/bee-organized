@@ -7,6 +7,13 @@
 // a status dot + stage name + count, with the engagement rows sitting on
 // white cards inside the band.
 //
+// COLLAPSIBLE (2026-07-19): every band header toggles its rows. Groups start
+// COLLAPSED, and each group remembers its own last choice — persisted per
+// group id under one keyed store (bee_hive_eng_collapsed, SSR-safe via
+// useStoredState, separate from Client List's memory). A COLLAPSED group
+// renders only its header (no hidden rows) — the whole list stays light, and
+// the Closed group's thousands never mount until it's opened.
+//
 // SAME data, SAME source as the board — NOT a divergent lens:
 //   · band tint + dot come from CHIP_STYLES[stage] (shared/stageConfig —
 //     the ONE per-stage color source the board's chips already read), so
@@ -16,10 +23,9 @@
 //     mapper.
 //   · a row click opens the SAME EngagementPanel the board opens
 //     (onOpenEngagement), threaded up through HiveShell.
-//   · the Closed group sits collapsed at the bottom and lazy-loads its
-//     rows from the SAME path the board's closed rail uses
-//     (GET /api/engagements?closed=1&limit=…) — there are thousands of
-//     terminal rows, so nothing closed renders until it's expanded.
+//   · the Closed group lazy-loads its rows from the SAME path the board's
+//     closed rail uses (GET /api/engagements?closed=1&limit=…) — fetched on
+//     first expand, so nothing closed renders until it's opened.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
@@ -28,8 +34,7 @@ import { ENGAGEMENT_STAGES, CHIP_STYLES, isTerminal, stageDisplayLabel, CLOSED_W
 import { T } from './shared/tokens'
 import { TEXT_MUTED } from '@/components/ui/tokens'
 import StatusChip from '@/components/ui/StatusChip'
-import { statusIconFor } from '@/components/ui/icons'
-import { IconChevronRight } from '@/components/ui/icons'
+import { statusIconFor, IconChevronRight } from '@/components/ui/icons'
 import LoadMore from './shared/LoadMore'
 import EngagementFilters from './EngagementFilters'
 import {
@@ -37,10 +42,14 @@ import {
   ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount,
 } from './shared/engagementStatus'
 import { FilteredEmpty } from './shared/FilterPopover'
+import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
 
 const OPEN_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 const CLOSED_WINDOW = 50
+// The Closed group's stable id in the collapse store (the open bands key on
+// their stage.key).
+const CLOSED_GID = 'closed'
 
 // A small filled dot in the stage's dark stop — the same colored marker
 // the board reads for the stage, sourced from CHIP_STYLES (never a literal).
@@ -93,34 +102,33 @@ function EngagementRow({ e, nowMs, muted = false, onOpen, isMobile }) {
   )
 }
 
-// A tinted color band with a colored header (dot + name + count) and its
-// rows on white cards. `collapsible` drives the Closed group's chevron.
-function StageBand({ stageKey, label, count, rows, nowMs, onOpen, isMobile, muted = false, collapsible = false, expanded = true, onToggle = () => {}, children }) {
+// A tinted color band with a colored, clickable header (dot + name + count +
+// chevron) and its rows on white cards. The chevron points down when
+// expanded, right when collapsed; its color matches the band (fam.text).
+// Collapsed → children are not rendered at all.
+function StageBand({ stageKey, label, count, expanded, onToggle, children }) {
   const fam = CHIP_STYLES[stageKey] || CHIP_STYLES.gray
   return (
     <div style={{ background: fam.bg, borderRadius: T.radius.card, padding: '10px 10px 12px', marginBottom: '12px' }}>
       <div
-        onClick={collapsible ? onToggle : undefined}
-        style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 4px 8px', cursor: collapsible ? 'pointer' : 'default' }}
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-label={`${label} group`}
+        onClick={onToggle}
+        onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onToggle() } }}
+        style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 4px 8px', cursor: 'pointer' }}
       >
         <StageDot color={fam.text} />
         <span style={{ fontSize: '13px', fontWeight: 600, color: fam.text, whiteSpace: 'nowrap' }}>{label}</span>
         <span style={{ fontSize: '12px', fontWeight: 500, color: fam.text, opacity: 0.7, fontVariantNumeric: T.type.tabular }}>· {count}</span>
-        {collapsible && (
-          <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', color: fam.text }}>
-            <IconChevronRight size={14} style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
-          </span>
-        )}
+        <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', color: fam.text }}>
+          <IconChevronRight size={14} style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
+        </span>
       </div>
-      {(!collapsible || expanded) && (
+      {expanded && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {rows && rows.map(e => (
-            <EngagementRow key={e.id} e={e} nowMs={nowMs} muted={muted} onOpen={onOpen} isMobile={isMobile} />
-          ))}
           {children}
-          {rows && rows.length === 0 && !children && (
-            <div style={{ padding: '8px 4px', fontSize: '12px', color: T.ink.quiet }}>None in this stage</div>
-          )}
         </div>
       )}
     </div>
@@ -135,9 +143,14 @@ export default function EngagementGroupedList({
   const isMobile = useIsMobile()
   const nowMs = Date.now()
 
-  // Closed group: collapsed by default (perf — thousands of terminal rows),
-  // its window fetched on first expand and cached until the location moves.
-  const [closedOpen, setClosedOpen] = useState(false)
+  // Per-group collapse memory — one keyed store, gid → true when EXPANDED.
+  // Absent = collapsed, so the first visit (empty store) is all-collapsed.
+  const [expandedMap, setExpandedMap] = useStoredState('bee_hive_eng_collapsed', {})
+  const isExp = (gid) => expandedMap[gid] === true
+  const toggle = (gid) => setExpandedMap(prev => ({ ...prev, [gid]: !prev[gid] }))
+  const closedExpanded = isExp(CLOSED_GID)
+
+  // Closed rows lazy-load on first expand; cached until the location moves.
   const [closedData, setClosedData] = useState(null) // { rows, total }
   const [closedLoading, setClosedLoading] = useState(false)
 
@@ -160,24 +173,28 @@ export default function EngagementGroupedList({
     }
   }
 
-  const expandClosed = () => {
-    const next = !closedOpen
-    setClosedOpen(next)
-    if (next && !closedData && !closedLoading) fetchClosed(0)
-  }
+  // Fetch whenever the Closed group is (or becomes) expanded with no window
+  // loaded — covers both the toggle click AND a persisted expanded state
+  // rehydrating on mount.
+  useEffect(() => {
+    if (closedExpanded && !closedData && !closedLoading) fetchClosed(0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closedExpanded])
 
-  // Location scope moved → drop the cached window and recollapse.
-  useEffect(() => { setClosedData(null); setClosedOpen(false) }, [locFilter])
+  // Location scope moved → drop the cached window; the effect above refetches
+  // for the new scope if the group is still expanded.
+  useEffect(() => { setClosedData(null) }, [locFilter])
 
   // Board→List hand-off ("view all in List" on the board's closed rail):
-  // a one-shot 'closed' seed auto-expands + loads the Closed group.
+  // a one-shot 'closed' seed force-expands the Closed group (runs after the
+  // store's own hydration effect, so it wins).
   useEffect(() => {
     if (initialView === 'closed') {
-      setClosedOpen(true)
-      if (!closedData && !closedLoading) fetchClosed(0)
+      setExpandedMap(prev => ({ ...prev, [CLOSED_GID]: true }))
       onInitialViewConsumed()
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Open rows: shared filters applied (so switching board↔list keeps the
   // subset), ordered newest-activity-first within each stage — the board's
@@ -202,27 +219,33 @@ export default function EngagementGroupedList({
       ) : (
         OPEN_STAGES.map(s => {
           const rows = byStage(s.key)
+          const expanded = isExp(s.key)
           return (
             <StageBand key={s.key} stageKey={s.key} label={s.displayLabel} count={rows.length}
-              rows={rows} nowMs={nowMs} onOpen={onOpenEngagement} isMobile={isMobile} />
+              expanded={expanded} onToggle={() => toggle(s.key)}>
+              {rows.length === 0
+                ? <div style={{ padding: '8px 4px', fontSize: '12px', color: T.ink.quiet }}>None in this stage</div>
+                : rows.map(e => <EngagementRow key={e.id} e={e} nowMs={nowMs} onOpen={onOpenEngagement} isMobile={isMobile} />)}
+            </StageBand>
           )
         })
       )}
 
-      {/* Closed group — always at the bottom, collapsed until expanded */}
+      {/* Closed group — always at the bottom, lazy-loaded on first expand */}
       <StageBand
         stageKey={CLOSED_WON} label="Closed" count={scopedClosedTotal ?? '…'}
-        rows={closedOpen ? (closedData?.rows || []) : null}
-        nowMs={nowMs} onOpen={onOpenEngagement} isMobile={isMobile} muted
-        collapsible expanded={closedOpen} onToggle={expandClosed}
+        expanded={closedExpanded} onToggle={() => toggle(CLOSED_GID)}
       >
-        {closedOpen && closedLoading && (!closedData || (closedData.rows || []).length === 0) && (
+        {(closedData?.rows || []).map(e => (
+          <EngagementRow key={e.id} e={e} nowMs={nowMs} muted onOpen={onOpenEngagement} isMobile={isMobile} />
+        ))}
+        {closedLoading && (!closedData || (closedData.rows || []).length === 0) && (
           <div style={{ padding: '8px 4px', fontSize: '12px', color: T.ink.quiet }}>Loading closed engagements…</div>
         )}
-        {closedOpen && !closedLoading && closedData && (closedData.rows || []).length === 0 && (
+        {!closedLoading && closedData && (closedData.rows || []).length === 0 && (
           <div style={{ padding: '8px 4px', fontSize: '12px', color: T.ink.quiet }}>No closed engagements in this view</div>
         )}
-        {closedOpen && closedData && closedData.total != null && (closedData.rows || []).length < closedData.total && !closedLoading && (
+        {closedData && closedData.total != null && (closedData.rows || []).length < closedData.total && !closedLoading && (
           <LoadMore pageSize={CLOSED_WINDOW} remaining={closedData.total - closedData.rows.length}
             onClick={() => fetchClosed(closedData.rows.length)} />
         )}

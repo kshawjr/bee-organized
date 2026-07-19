@@ -62,7 +62,7 @@ const setWidth = (w: number | undefined) => { (globalThis as any).__BEE_TEST_WID
 afterEach(() => setWidth(undefined))
 
 describe('beta mobile layout', () => {
-  it('mobile shell stacks: pills scroll on row 1, counter on a compact row 2', () => {
+  it('mobile shell stacks: pills scroll on row 1, Board/List toggle on row 2', () => {
     setWidth(390)
     const html = renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)
 
@@ -72,25 +72,27 @@ describe('beta mobile layout', () => {
     expect(strip, 'tab strip scroll container missing').toBeTruthy()
     for (const label of ['Inbox (New)', 'Engagements', 'Client List']) expect(strip![2]).toContain(label)
 
-    // Row 2: the open-engagements counter on a compact space-between line,
-    // 11px quiet — and NOT inside the pill strip. (Classic retired 2026-07-18 —
-    // the "Back to classic" hatch that used to sit on this row is removed.)
-    const metaLine = html.match(/<div style="[^"]*justify-content:space-between[^"]*">(.*?)<\/div>/)
-    expect(metaLine, 'compact meta line missing').toBeTruthy()
-    expect(metaLine![1]).toContain('Open engagements')
-    expect(metaLine![1]).toContain('font-size:11px')
-    expect(strip![2]).not.toContain('Open engagements')
+    // Row 2: the Board/List sub-toggle, right-aligned (Engagements is the
+    // default tab). The "Open engagements" corner text was REMOVED 2026-07-19
+    // (its count is now the Engagements tab badge). Classic hatch already gone.
+    expect(html).not.toContain('Open engagements')
+    expect(html).toContain('aria-label="Board view"')
+    const toggleRow = html.match(/<div style="[^"]*justify-content:flex-end[^"]*">(.*?)<\/div>/)
+    expect(toggleRow, 'toggle row missing').toBeTruthy()
+    expect(toggleRow![1]).toContain('aria-label="Engagements view"')
     expect(html).not.toContain('Back to classic')
 
-    // Nothing in the shell header may wrap (wrap = the old collision).
-    expect(html.slice(0, html.indexOf('Open engagements'))).not.toContain('flex-wrap:wrap')
+    // The pill strip itself never wraps (wrap = the old collision).
+    expect(strip![1]).not.toContain('flex-wrap:wrap')
   })
 
-  it('desktop shell keeps the single top row (counter inline, 12px)', () => {
+  it('desktop shell keeps the single top row, no corner counter', () => {
     const html = renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />)
-    expect(html).toContain('Open engagements')
+    // Corner "Open engagements · N" text removed 2026-07-19.
+    expect(html).not.toContain('Open engagements')
     expect(html).not.toContain('Back to classic') // Classic retired 2026-07-18
-    expect(html).toMatch(/font-size:12px[^"]*"[^>]*>Open engagements/)
+    // The Board/List toggle rides the right cluster instead.
+    expect(html).toContain('aria-label="Engagements view"')
   })
 
   it('directory chip row is a single-line nowrap scroller with the filter pill beside it', () => {

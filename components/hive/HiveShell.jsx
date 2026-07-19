@@ -31,7 +31,7 @@ import { leadColsToPersonFields } from './shared/leadPatchMap'
 import { mergePeopleTouches } from './shared/peopleTouchPatch'
 import { deriveClientStatus } from './shared/clientStatus'
 import { isTerminal, CLOSED_WON } from './shared/stageConfig'
-import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount } from './shared/engagementStatus'
+import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters } from './shared/engagementStatus'
 import { reconcileServerRows, mergeEngagements } from './shared/engagementRevalidate'
 import { useEngagementsRealtime } from '@/lib/use-engagements-realtime'
 import { useStoredState } from './shared/useStoredControls'
@@ -46,10 +46,14 @@ import { T } from './shared/tokens'
 // longer separate tabs — they became a sub-toggle INSIDE Engagements (see
 // engView below). "Inbox (New)" keeps the count badge; "Client List" is the
 // people lens; "Engagements" holds the board/list toggle.
+// Every tab carries a count badge (2026-07-19): Inbox = New+Attempting,
+// Engagements = total open engagements (the count the corner text used to
+// show, now removed), Client List = total clients in scope. Per-tab counts
+// are wired in `tabBadges` below; the badge pill itself is one shared anatomy.
 const TABS = [
   { key: 'inbox',       label: 'Inbox (New)', live: true, badge: true, Icon: IconInbox },
-  { key: 'engagements', label: 'Engagements', live: true, Icon: IconLayoutKanban },
-  { key: 'clients',     label: 'Client List', live: true, Icon: IconUsers },
+  { key: 'engagements', label: 'Engagements', live: true, badge: true, Icon: IconLayoutKanban },
+  { key: 'clients',     label: 'Client List', live: true, badge: true, Icon: IconUsers },
 ]
 
 // The preferred top-level tab sticks across sessions. (Key name unchanged
@@ -513,7 +517,17 @@ export default function HiveShell({
     return n
   }, [patchedPeople, locFilter, openFiltered, filtered])
 
-  const tabPills = TABS.map(t => <TabPill key={t.key} tab={t} active={t.key === lens} onSelect={() => pickLens(t.key)} badgeCount={t.badge ? inboxCount : null} />)
+  // Client List badge: total clients in the current location scope — the
+  // exact set ClientGroupedList renders (grouped by status).
+  const clientCount = useMemo(() => (
+    locFilter === 'all' ? patchedPeople.length : patchedPeople.filter(p => p.locationId === locFilter).length
+  ), [patchedPeople, locFilter])
+
+  // Per-tab badge counts, all from real sources (never hardcoded): Inbox =
+  // New+Attempting (inboxCount), Engagements = open engagements (openCount —
+  // the value the removed corner text showed), Client List = clientCount.
+  const tabBadges = { inbox: inboxCount, engagements: openCount, clients: clientCount }
+  const tabPills = TABS.map(t => <TabPill key={t.key} tab={t} active={t.key === lens} onSelect={() => pickLens(t.key)} badgeCount={t.badge ? tabBadges[t.key] : null} />)
   // Desktop "New" pill — the ONE solid chrome element, visible from all
   // four tabs, left of the counter. Mobile gets the FAB instead. Hidden
   // for read-only users (creating a client is a write).
@@ -532,13 +546,12 @@ export default function HiveShell({
       <IconPlus size={14} /> New
     </button>
   )
-  const counterEl = (
-    <span style={{ fontSize: isMobile ? '11px' : '12px', color: T.ink.muted, whiteSpace: 'nowrap', fontVariantNumeric: T.type.tabular }}>
-      Open engagements · {openCount}{engagementFilterCount(workFilters) > 0 ? ` of ${openFiltered.length}` : ''}
-    </span>
-  )
-  // Engagements Board|List sub-toggle — sits in the chrome next to the open
-  // count, only while the Engagements tab is active. Board reuses the board-
+  // The "Open engagements · N" corner text was REMOVED 2026-07-19 — it
+  // collided with the Board/List toggle and its value now lives in the
+  // Engagements tab badge (tabBadges.engagements = openCount). openCount /
+  // openFiltered are retained above: they still feed that badge.
+  // Engagements Board|List sub-toggle — sits in the chrome next to the tabs,
+  // only while the Engagements tab is active. Board reuses the board-
   // grid icon, List the list icon (same icons the old tabs carried). The
   // active side is a solid ink pill; the choice persists (pickEngView).
   const ENG_VIEWS = [
@@ -599,21 +612,24 @@ export default function HiveShell({
       <style>{`.bee-hive-root { min-height: 100vh; min-height: 100dvh; }`}</style>
       {isMobile ? (
         /* Mobile chrome STACKS (nothing may overlap at 320–430px):
-           row 1 = the four tab pills on ONE nowrap line, scrolling
-           horizontally if tight; row 2 = compact meta line, counter
-           left + escape hatch right, both 11px quiet. */
+           row 1 = the tab pills (with count badges) on ONE nowrap line,
+           scrolling horizontally if tight; row 2 = the Board/List toggle,
+           right-aligned, ONLY on the Engagements tab (the "Open engagements"
+           corner text was removed 2026-07-19 — its count is now a tab badge). */
         <div style={{ marginBottom: '14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '2px', overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', paddingBottom: '2px' }}>
             {tabPills}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginTop: '6px', padding: '0 4px' }}>
-            {lens === 'engagements' ? counterEl : <span />}
-            {engToggleEl}
-            {/* Classic retired 2026-07-18 — {exitEl} "Back to classic" removed (mobile) */}
-          </div>
+          {engToggleEl && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '12px', marginTop: '6px', padding: '0 4px' }}>
+              {engToggleEl}
+            </div>
+          )}
         </div>
       ) : (
-        /* Desktop top row: tab pills left, quiet counter + escape hatch right */
+        /* Desktop top row: tab pills left, New + Board/List toggle right.
+           (The "Open engagements" corner text was removed 2026-07-19 — its
+           count now rides the Engagements tab badge.) */
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flex: 1, minWidth: 0, overflowX: 'auto', scrollbarWidth: 'none' }}>
             {tabPills}
@@ -621,7 +637,6 @@ export default function HiveShell({
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
             {newPillEl}
             {engToggleEl}
-            {lens === 'engagements' ? counterEl : null}
             {/* Classic retired 2026-07-18 — {exitEl} "Back to classic" removed (desktop) */}
           </div>
         </div>

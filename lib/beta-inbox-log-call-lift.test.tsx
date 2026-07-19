@@ -28,12 +28,15 @@ import { touchpointToTimelineEntry } from '@/lib/people-mapper'
 ;(globalThis as any).__BEE_TEST_WIDTH__ = 1200
 
 // The grouped Client List renders one tinted band per status: band div >
-// header div > [dot, label span, count]. Resolve a band by its header label
-// so we can assert which status bucket a person landed in.
+// header div (role=button) > [dot, label span, count, chevron]. Resolve a
+// band by its header label so we can assert which status bucket a person
+// landed in. Bands start COLLAPSED, so expandBand clicks the header first.
 const bandFor = (root: Element, label: string): HTMLElement | null => {
   const s = Array.from(root.querySelectorAll('span')).find(x => (x.textContent || '').trim() === label)
   return s ? ((s.parentElement?.parentElement as HTMLElement) || null) : null
 }
+const bandHeaderFor = (root: Element, label: string): HTMLElement | null =>
+  (root.querySelector(`[aria-label="${label} group"]`) as HTMLElement | null)
 
 // HiveShell subscribes to engagements realtime on mount; the hook already
 // degrades when createClient throws, but stub it so the suite isn't asserting
@@ -241,10 +244,12 @@ describe('log call re-derives across lenses (HiveShell)', () => {
 
     // The Client List groups by STATUS (grouped color-band view). The
     // re-derived person now sits inside the Attempting band, not New — the
-    // cross-lens override took without a reload.
-    expect(rowText()).toContain('Sarah Mitchell')
+    // cross-lens override took without a reload. Bands start collapsed, so
+    // expand Attempting before reading its rows.
+    const attemptingHeader = bandHeaderFor(container, 'Attempting')
+    expect(attemptingHeader, 'Attempting band should render').toBeTruthy()
+    await act(async () => { attemptingHeader!.click() })
     const attemptingBand = bandFor(container, 'Attempting')
-    expect(attemptingBand, 'Attempting band should render').toBeTruthy()
     expect(attemptingBand!.textContent).toContain('Sarah Mitchell')
   })
 
@@ -257,9 +262,12 @@ describe('log call re-derives across lenses (HiveShell)', () => {
     await act(async () => { clientsTab!.click() })
 
     // Dana still derives New — the override is scoped to the person it names,
-    // so she stays inside the New band of the grouped Client List.
+    // so she stays inside the New band of the grouped Client List. Expand New
+    // (collapsed by default) before reading its rows.
+    const newHeader = bandHeaderFor(container, 'New')
+    expect(newHeader, 'New band should render').toBeTruthy()
+    await act(async () => { newHeader!.click() })
     const newBand = bandFor(container, 'New')
-    expect(newBand, 'New band should render').toBeTruthy()
     expect(newBand!.textContent).toContain('Dana Reed')
   })
 })

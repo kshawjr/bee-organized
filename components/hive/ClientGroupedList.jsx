@@ -6,6 +6,13 @@
 // contact), each group a tinted band whose colored header carries a status
 // dot + label + count, with the client rows on white cards inside.
 //
+// COLLAPSIBLE (2026-07-19): every status band toggles its rows. Groups start
+// COLLAPSED and each remembers its own last choice — persisted per status id
+// under one keyed store (bee_hive_clients_collapsed, SSR-safe via
+// useStoredState, SEPARATE from Engagements' memory). A collapsed group
+// renders only its header. An active search force-expands every band so
+// matches are never hidden behind a collapsed header.
+//
 // SAME data, SAME source as the directory — NOT a divergent lens:
 //   · status + its color come from shared/clientStatus (deriveClientStatus
 //     + CLIENT_STATUS_META) mapped through CHIP_STYLES — the one status
@@ -24,7 +31,9 @@ import { CHIP_STYLES, CLOSED_WON, isTerminal } from './shared/stageConfig'
 import { T } from './shared/tokens'
 import { deriveClientStatus, CLIENT_STATUS_ORDER, CLIENT_STATUS_META } from './shared/clientStatus'
 import { HAIRLINE_BORDER } from '@/components/ui/tokens'
+import { IconChevronRight } from '@/components/ui/icons'
 import InitialsAvatar from './shared/InitialsAvatar'
+import { useStoredState } from './shared/useStoredControls'
 
 // A small filled dot in the status's dark stop — sourced from CHIP_STYLES
 // (the same status color source the directory chip reads), never a literal.
@@ -35,6 +44,12 @@ function StatusDot({ color }) {
 export default function ClientGroupedList({ people = [], engagements = [], locFilter = 'all', onOpenClient = () => {}, locations = [] }) {
   const [search, setSearch] = useState('')
   const nowMs = Date.now()
+
+  // Per-group collapse memory — one keyed store, statusKey → true when
+  // EXPANDED. Absent = collapsed, so first visit is all-collapsed. Its own
+  // key, independent of the Engagements list's collapse memory.
+  const [expandedMap, setExpandedMap] = useStoredState('bee_hive_clients_collapsed', {})
+  const toggle = (gid) => setExpandedMap(prev => ({ ...prev, [gid]: !prev[gid] }))
 
   const scoped = useMemo(() => (
     locFilter === 'all' ? people : people.filter(p => p.locationId === locFilter)
@@ -82,6 +97,8 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
     return by
   }, [visible])
 
+  // A search reveals its matches regardless of the saved collapse state.
+  const isExpanded = (gid) => (q ? true : expandedMap[gid] === true)
   const totalShown = visible.length
 
   return (
@@ -111,28 +128,42 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
         if (!rows || rows.length === 0) return null
         const meta = CLIENT_STATUS_META[statusKey]
         const fam = CHIP_STYLES[meta.styleKey] || CHIP_STYLES.gray
+        const expanded = isExpanded(statusKey)
         return (
           <div key={statusKey} style={{ background: fam.bg, borderRadius: T.radius.card, padding: '10px 10px 12px', marginBottom: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 4px 8px' }}>
+            <div
+              role="button"
+              tabIndex={0}
+              aria-expanded={expanded}
+              aria-label={`${meta.label} group`}
+              onClick={() => toggle(statusKey)}
+              onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(statusKey) } }}
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 4px 8px', cursor: 'pointer' }}
+            >
               <StatusDot color={fam.text} />
               <span style={{ fontSize: '13px', fontWeight: 600, color: fam.text, whiteSpace: 'nowrap' }}>{meta.label}</span>
               <span style={{ fontSize: '12px', fontWeight: 500, color: fam.text, opacity: 0.7, fontVariantNumeric: T.type.tabular }}>· {rows.length}</span>
+              <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', color: fam.text }}>
+                <IconChevronRight size={14} style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
+              </span>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {rows.map(p => {
-                const loc = locName(p.locationId)
-                return (
-                  <div key={p.id} className="bee-grp-row" onClick={() => onOpenClient(p.id, orderedIds)}
-                    style={{ display: 'flex', alignItems: 'center', gap: '12px', background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset, padding: '11px 14px', cursor: 'pointer', transition: 'border-color 0.15s' }}>
-                    <InitialsAvatar name={p.name} bg={fam.bg} text={fam.text} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
-                      {loc && <p style={{ fontSize: '11px', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>{loc}</p>}
+            {expanded && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {rows.map(p => {
+                  const loc = locName(p.locationId)
+                  return (
+                    <div key={p.id} className="bee-grp-row" onClick={() => onOpenClient(p.id, orderedIds)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '12px', background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset, padding: '11px 14px', cursor: 'pointer', transition: 'border-color 0.15s' }}>
+                      <InitialsAvatar name={p.name} bg={fam.bg} text={fam.text} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
+                        {loc && <p style={{ fontSize: '11px', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>{loc}</p>}
+                      </div>
                     </div>
-                  </div>
-                )
-              })}
-            </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )
       })}
