@@ -22121,7 +22121,6 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
           </svg>
         </div>
 
-        <p style={{ fontSize:'11px', color:BRAND.teal, fontWeight:600, marginBottom:'2px', opacity:0.7, textTransform:'uppercase', letterSpacing:'1.5px' }}>The Hive Hub</p>
         <p style={{ fontSize:'12px', color:BRAND.teal, fontWeight:500, marginBottom:'4px', opacity:0.7 }}>{dateStr}{timeStr && ` · ${timeStr}`}</p>
         <h1 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'white', marginBottom:'4px' }}>
           {!now?'Hello':now.getHours()<12?'Good morning':now.getHours()<17?'Good afternoon':'Good evening'}{getFirstName(ownerName, ownerEmail)?`, ${getFirstName(ownerName, ownerEmail)}`:''} 👋
@@ -33718,8 +33717,6 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             : 'Home'
           }
           onClose={() => setShowHelpChat(false)}
-          onOpenGuide={() => { setShowHelpChat(false); openGuide() }}
-          onOpenManual={() => { setShowHelpChat(false); setShowManual(true) }}
           onOpenFeedback={() => { setShowHelpChat(false); setShowFeedback(true) }}
         />
       )}
@@ -33731,16 +33728,18 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           PINNED footer that stays visible however tall the board gets, and
           the identity popover isn't clipped by a scrolling ancestor. */}
       <div className="bee-sidebar" style={{ position:'fixed', top:0, left:0, bottom:0, width:'220px', background:'#1a2e2b', flexDirection:'column', zIndex:99, borderRight:'1px solid rgba(168,201,196,0.1)' }}>
-        {/* Logo */}
+        {/* Logo + Ask Bee Hub — stacked so the 220px sidebar gives the logo
+            lockup full width (title never wraps) and the Ask button sits on
+            its own clean row below, no crowding. */}
         <div style={{ padding:'20px 20px 16px', borderBottom:'1px solid rgba(168,201,196,0.08)', flexShrink:0 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-            <span style={{ fontSize:'22px' }}>🐝</span>
+          <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'12px' }}>
+            <span style={{ fontSize:'22px', flexShrink:0 }}>🐝</span>
             <div style={{ flex:1, minWidth:0 }}>
-              <p style={{ fontSize:'14px', fontWeight:700, color:'white', fontFamily:'Georgia,serif', lineHeight:1 }}>Bee Hub</p>
-              <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.5)', marginTop:'2px' }}>Bee Organized</p>
+              <p style={{ fontSize:'14px', fontWeight:700, color:'white', fontFamily:'Georgia,serif', lineHeight:1, whiteSpace:'nowrap' }}>Bee Hub</p>
+              <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.5)', marginTop:'2px', whiteSpace:'nowrap' }}>Bee Organized</p>
             </div>
-            <AskBeeHubButton onOpen={()=>{ dismissGuideHint(); setShowHelpChat(true) }} />
           </div>
+          <AskBeeHubButton onOpen={()=>{ dismissGuideHint(); setShowHelpChat(true) }} />
         </div>
         {/* Nav items — THE scroll region; footer below stays pinned */}
         <div style={{ flex:1, minHeight:0, overflowY:'auto', padding:'12px 10px', display:'flex', flexDirection:'column', gap:'2px' }}>

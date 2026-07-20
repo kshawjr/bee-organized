@@ -66,8 +66,6 @@ export default function AskBeeHubPanel({
   isMobile,
   onClose,
   screenName = 'Bee Hub',
-  onOpenGuide = null,
-  onOpenManual = null,
   onOpenFeedback = null,
 }) {
   const rootRef = useRef(null)
@@ -386,27 +384,13 @@ export default function AskBeeHubPanel({
             </button>
           </form>
 
-          {/* Preserve the classic help entry points so nothing is stranded. */}
-          {(onOpenGuide || onOpenManual || onOpenFeedback) && (
+          {/* Escalation link — report a bug or request a feature. */}
+          {onOpenFeedback && (
             <p style={{ fontSize: '11.5px', color: T.ink.muted, marginTop: '8px', lineHeight: 1.5 }}>
-              Prefer a walkthrough?{' '}
-              {onOpenGuide && (
-                <button onClick={onOpenGuide} style={linkBtn}>
-                  Quick Start Guide
-                </button>
-              )}
-              {onOpenGuide && (onOpenManual || onOpenFeedback) ? ' · ' : ''}
-              {onOpenManual && (
-                <button onClick={onOpenManual} style={linkBtn}>
-                  Manual
-                </button>
-              )}
-              {onOpenManual && onOpenFeedback ? ' · ' : ''}
-              {onOpenFeedback && (
-                <button onClick={onOpenFeedback} style={linkBtn}>
-                  Report a bug
-                </button>
-              )}
+              Something not working?{' '}
+              <button onClick={onOpenFeedback} style={linkBtn}>
+                Report Bug or Feature
+              </button>
             </p>
           )}
         </div>
