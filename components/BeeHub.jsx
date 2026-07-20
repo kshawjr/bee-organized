@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useRef, createContext, useContext } from "react"
+import React, { useState, useEffect, useRef, useMemo, createContext, useContext } from "react"
 import { useRouter } from "next/navigation"
 import { useLeadsRealtime } from "@/lib/use-leads-realtime"
 import { upsertRealtimePerson, removeRealtimePerson } from "@/components/hive/shared/leadsRealtime"
@@ -21653,6 +21653,35 @@ function SlimCoOwnerOnboarding({ locationId, locationName, profile, topOffset=0,
   )
 }
 
+// PERF: the header date/time + greeting own their OWN 60s clock here, isolated
+// from DashboardScreen. Previously the tick lived in DashboardScreen and
+// re-rendered the whole Home body (and its ~20 full-array derivations) every
+// minute; now only this ~two-element component re-renders on the tick. The
+// rendered text is byte-identical to before.
+function HomeGreeting({ ownerName, ownerEmail }) {
+  // Initialize to null so SSR doesn't pick a server-side time that
+  // mismatches client time on hydration (caused React errors #418,
+  // #423, #425). Effect sets it to client time after mount, then
+  // ticks every 60s so the header clock stays current without a
+  // reload — surfaces timezone bugs faster too.
+  const [now, setNow] = useState(null)
+  useEffect(() => {
+    setNow(new Date())
+    const id = setInterval(() => setNow(new Date()), 60_000)
+    return () => clearInterval(id)
+  }, [])
+  const dateStr = now ? now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}) : ''
+  const timeStr = now ? now.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZoneName:'short'}) : ''
+  return (
+    <>
+      <p style={{ fontSize:'12px', color:BRAND.teal, fontWeight:500, marginBottom:'4px', opacity:0.7 }}>{dateStr}{timeStr && ` · ${timeStr}`}</p>
+      <h1 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'white', marginBottom:'4px' }}>
+        {!now?'Hello':now.getHours()<12?'Good morning':now.getHours()<17?'Good afternoon':'Good evening'}{getFirstName(ownerName, ownerEmail)?`, ${getFirstName(ownerName, ownerEmail)}`:''} 👋
+      </h1>
+    </>
+  )
+}
+
 function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
@@ -21736,6 +21765,14 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   // fetch. Home reads the SAME derivations the Clients views use so the two
   // can't drift (deriveClientStatus, deriveStatusChip, the CHIP_STYLES families,
   // and one shared threshold module).
+  // PERF: this whole needs-attention + calm-metrics block is a large set of full
+  // passes over people/engagements. It is memoized on the REAL inputs so it
+  // recomputes only when the data changes — not on every re-render (the header
+  // clock tick is now isolated in HomeGreeting, and a realtime lead event
+  // re-renders this component but leaves the data identical). Same computation,
+  // far less often. `nowHome` is captured INSIDE so the day-granularity signals
+  // refresh together with the data rather than once per render.
+  const homeDerived = useMemo(() => {
   const nowHome = Date.now()
   // Client-side location scope (mirrors HiveShell.filtered): effectiveLocId null
   // = the all-locations view (elevated on 'all').
@@ -21832,6 +21869,28 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     .flatMap(p => p.invoices||[])
     .reduce((s,inv)=> s + (Number(inv.balance)>0 ? Number(inv.balance) : 0), 0)
 
+  return {
+    newUncontacted, newUncontactedOldest,
+    estimateFollowUps, estimateOldest,
+    upcomingAssessments, assessDetail,
+    agingInvoices, agingTotal, agingOldest,
+    transferLeads,
+    openEngagementsCount, activeClientsCount, newThisWeekCount, outstandingTotal,
+  }
+  // Deps = every value the block READS. `nowHome` (Date.now()) is deliberately
+  // NOT a dep: keeping it out is the whole point — the block must not recompute
+  // on the clock tick. `engagements` is the stable server prop; `people` is App
+  // state (new ref only on a real change); the rest are primitives/booleans.
+  }, [people, engagements, effectiveLocId, isElevated, canSeeFinancials])
+  const {
+    newUncontacted, newUncontactedOldest,
+    estimateFollowUps, estimateOldest,
+    upcomingAssessments, assessDetail,
+    agingInvoices, agingTotal, agingOldest,
+    transferLeads,
+    openEngagementsCount, activeClientsCount, newThisWeekCount, outstandingTotal,
+  } = homeDerived
+
   // Home-scoped collapse memory for the info lists (Tier 2d) — REUSES the
   // grouped views' useStoredState; absent = collapsed, so first visit is
   // all-collapsed. The Needs-attention hero is NEVER in here (always open).
@@ -21887,44 +21946,17 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     ? 'All locations'
     : (selectedLoc?.name || currentLocation?.name || locationName || 'Your location')
 
-  // Filter leads by location
-  const visibleLeads = (people||[]).filter(l=> !l.isJunk && (effectiveLocId ? l.locationId===effectiveLocId : true))
-  // Derive upcoming assessments from real lead data (mapLeadToPerson sets
-  // `assessment` to a formatted datetime string when a lead has a scheduled
-  // assessment, else null). Previously fell back to the D_UPCOMING mock when
-  // there was no effectiveLocId (e.g. super_admin viewing 'all'), which
-  // surfaced fake clients on an empty/cleared DB. visibleLeads is already
-  // location-scoped above.
-  const visibleUpcoming = visibleLeads
-    .filter(l => l.assessment)
-    .map(l => ({
-      id: l.id,
-      client: l.name,
-      type: l.assessmentType || 'Assessment',
-      time: l.assessment || '',
-      date: '',
-      ref: l.jobberRef || '',
-    }))
+  // PERF: removed a block of legacy stat derivations (visibleLeads/
+  // visibleUpcoming/totalRevenue/collected/outstanding/royalties/newClients/
+  // inProgressClients/activeLeads/newThisWeek/inProgress/assessmentsToday) — the
+  // redesigned Home (needs-attention hero + four metric tiles + upcoming/recent
+  // lists) reads none of them. They were pure dead full-array passes over
+  // `people` every render. Verified unused before deletion.
 
-  // Computed stats
-  const totalRevenue    = visibleLeads.flatMap(l=>l.invoices).reduce((s,i)=>s+i.amount, 0)
-  const collected       = visibleLeads.flatMap(l=>l.invoices).filter(i=>i.status==='Paid').reduce((s,i)=>s+i.amount, 0)
-  const outstanding     = totalRevenue - collected
-  const royalties       = Math.round(collected * 0.06)
-  const newClients      = visibleLeads.filter(l=>l.stage==='New')
-  const inProgressClients = visibleLeads.filter(l=>!['New','Nurturing','Closed Won','Closed Lost'].includes(l.stage) && !l.isJunk && !l.finalProcessed)
-  const activeLeads     = visibleLeads.filter(l=>!['Final Processing','Closed Won','Closed Lost'].includes(l.stage))
-  const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const newThisWeek     = visibleLeads.filter(l => {
-    if (!l.created) return false;
-    const d = new Date(l.created);
-    return !isNaN(d.getTime()) && d >= oneWeekAgo;
-  })
-  const inProgress      = visibleLeads.filter(l=>l.stage==='Job in Progress')
-  const assessmentsToday= visibleUpcoming.filter(u=>u.date==='Today')
-
-  // Recent activity - use people state, show for any specific location view
-  const recentActivityItems = (() => {
+  // Recent activity - use people state, show for any specific location view.
+  // PERF: memoized on [people, effectiveLocId] — recomputes only on a data/scope
+  // change, not on every render (was an inline IIFE recomputed every time).
+  const recentActivityItems = useMemo(() => {
     if (!effectiveLocId) return []
     const locPeople = people.filter(p=>p.locationId===effectiveLocId)
     const events = []
@@ -21943,36 +21975,15 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       if (s) events.push({ icon:s.icon, text:`${p.stage} - ${p.name}`, ts:p.activity?.[0]?.ts||p.created||'Recently', color:s.color })
     })
     return events.slice(0,5)
-  })()
+  }, [people, effectiveLocId])
 
-  // Pipeline stage counts - real people data
-  const visiblePeople = locFilter==='all' ? people : people.filter(p=>p.locationId===locFilter)
-  const activePeople  = visiblePeople.filter(p=>!p.isJunk&&p.stage!=='Closed Won'&&p.stage!=='Closed Lost')
-  const unpaidInvoices  = activePeople.flatMap(p=>p.invoices||[]).filter(i=>i.status==='Awaiting Payment')
-
-  // Attention items from real people state so records open correctly
-  const stuckLeads     = activePeople.filter(p=>p.daysInStage>=7&&['Attempting','Nurturing'].includes(p.stage))
-  const noReachOut     = activePeople.filter(p=>p.stage==='New'&&!p.reachOutMethod)
-  const nearExpiryNurture = activePeople.filter(p=>p.stage==='Nurturing'&&p.daysInStage>=85) // auto-close warning at 85 days
-  const today = new Date().toISOString().split('T')[0]
-  const snoozedToday    = activePeople.filter(p=>p.snoozeUntil&&p.snoozeUntil<=today)
-  const quickCaptures   = activePeople.filter(p=>p.quickCapture&&p.stage==='New')
-  const stageCounts   = STAGES.filter(s=>s.key!=='Closed Won'&&s.key!=='Closed Lost').map(s=>({...s,count:activePeople.filter(l=>l.stage===s.key).length})).filter(s=>s.count>0)
-  const maxCount      = Math.max(...stageCounts.map(s=>s.count), 1)
-
-  // Initialize to null so SSR doesn't pick a server-side time that
-  // mismatches client time on hydration (caused React errors #418,
-  // #423, #425). Effect sets it to client time after mount, then
-  // ticks every 60s so the header clock stays current without a
-  // reload — surfaces timezone bugs faster too.
-  const [now, setNow] = useState(null)
-  useEffect(() => {
-    setNow(new Date())
-    const id = setInterval(() => setNow(new Date()), 60_000)
-    return () => clearInterval(id)
-  }, [])
-  const dateStr = now ? now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}) : ''
-  const timeStr = now ? now.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZoneName:'short'}) : ''
+  // PERF: removed another dead block (visiblePeople/activePeople/unpaidInvoices/
+  // stuckLeads/noReachOut/nearExpiryNurture/snoozedToday/quickCaptures/
+  // stageCounts/maxCount) — the redesigned Home renders none of them. They were
+  // full-array passes over `people` (stageCounts re-filtered per stage) every
+  // render. Verified unused before deletion. The header clock that used to sit
+  // here now lives in its own <HomeGreeting> so its 60s tick no longer
+  // re-renders this component's derivations.
 
 
   const navItems = isOnboarding
@@ -22121,10 +22132,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
           </svg>
         </div>
 
-        <p style={{ fontSize:'12px', color:BRAND.teal, fontWeight:500, marginBottom:'4px', opacity:0.7 }}>{dateStr}{timeStr && ` · ${timeStr}`}</p>
-        <h1 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'white', marginBottom:'4px' }}>
-          {!now?'Hello':now.getHours()<12?'Good morning':now.getHours()<17?'Good afternoon':'Good evening'}{getFirstName(ownerName, ownerEmail)?`, ${getFirstName(ownerName, ownerEmail)}`:''} 👋
-        </h1>
+        <HomeGreeting ownerName={ownerName} ownerEmail={ownerEmail} />
         <button
           onClick={()=>{ if (onClickLocation) onClickLocation() }}
           onMouseEnter={()=>setLocIndicatorHover(true)}
