@@ -21,6 +21,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseService } from '@/lib/supabase-service'
+import { resolveInternalOrigin } from '@/lib/internal-origin'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,14 +50,13 @@ export async function GET(req: NextRequest) {
   }
 
   // ─── Resolve origin ───────────────────────────────────────────
-  // Fallback order: INTERNAL_BASE_URL (stable custom domain, set in Vercel
-  // dashboard) → VERCEL_PROJECT_PRODUCTION_URL (Vercel-injected, may be
-  // unset) → req.nextUrl.origin (deployment-specific, SSO-gated — last resort).
-  const origin =
-    process.env.INTERNAL_BASE_URL ||
-    (process.env.VERCEL_PROJECT_PRODUCTION_URL
-      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-      : req.nextUrl.origin)
+  // MUST be a non-SSO-gated origin or the re-poke is redirected to the Vercel
+  // login page before the import route runs (root cause of the stalled
+  // Scottsdale import: INTERNAL_BASE_URL + VERCEL_PROJECT_PRODUCTION_URL were
+  // both unset, so this fell through to the gated deployment origin and every
+  // re-poke bounced). resolveInternalOrigin now consults the public custom
+  // domain (NEXT_PUBLIC_APP_URL) too. See lib/internal-origin.ts.
+  const origin = resolveInternalOrigin(req.nextUrl.origin)
 
   console.log(
     '[sweeper] origin=', origin,
@@ -98,9 +98,16 @@ export async function GET(req: NextRequest) {
           redirect: 'manual',
         })
         const ok = r.status >= 200 && r.status < 300
-        if (!ok && r.status >= 300 && r.status < 400) {
+        // `redirect: 'manual'` makes undici surface a redirect as an
+        // opaqueredirect (type='opaqueredirect', status=0) rather than the
+        // real 3xx — so treat status 0 / opaqueredirect as a blocked SSO
+        // redirect too, not a silent "ok:false, status:0". This is the exact
+        // signature the SSO gate produces, and it must read as a failure.
+        const isRedirect =
+          (r as any).type === 'opaqueredirect' || r.status === 0 || (r.status >= 300 && r.status < 400)
+        if (!ok && isRedirect) {
           const loc = r.headers.get('location')
-          console.warn(`[import-sweeper] redirect blocked for ${j.location_id}: ${r.status} → ${loc}`)
+          console.warn(`[import-sweeper] redirect blocked for ${j.location_id}: status=${r.status} type=${(r as any).type} → ${loc} (origin=${origin} may be SSO-gated)`)
           results.push({ job_id: j.id, location_id: j.location_id, ok: false, status: r.status, redirected_to: loc ?? undefined })
         } else {
           results.push({ job_id: j.id, location_id: j.location_id, ok, status: r.status })
