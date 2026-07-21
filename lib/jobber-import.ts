@@ -338,6 +338,52 @@ export function extractJobberId(globalId: string | null | undefined): string | n
   }
 }
 
+// ── resumable write-loop helpers ──────────────────────────────
+//
+// Both back the segmented, self-continuing write phase of the bulk import.
+// Extracted as pure functions so the "resume doesn't double-write" and
+// "yield before the Vercel wall" invariants can be unit-tested without
+// standing up the whole 800s route.
+
+/**
+ * Filter a staged client set down to the ones NOT yet written for this
+ * location. Idempotent-resume backbone: a resumed segment re-loads the same
+ * staged clients but must skip whatever a prior segment already landed, so it
+ * never re-writes (and never double-counts) the already-done prefix. Clients
+ * whose Jobber id can't be extracted are treated as unwritten (processed every
+ * segment) — the downstream upsert still dedupes them on jobber_client_id.
+ */
+export function selectUnwrittenClients<T extends { id?: string | null }>(
+  clients: T[],
+  alreadyWritten: Set<string>,
+): T[] {
+  return clients.filter((c) => {
+    const id = extractJobberId(c.id)
+    return id === null || !alreadyWritten.has(id)
+  })
+}
+
+/**
+ * Decide whether the write loop should stop THIS invocation and hand off to
+ * the next segment (self-chain / sweeper). Two brakes, checked before each
+ * record so we never get hard-killed mid-write at the 800s Vercel wall:
+ *   - batch cap:   a fixed ceiling on records per invocation
+ *   - time budget: the same wall-clock guard the fetch phase already uses,
+ *                  so a heavy chunk (400 nested writes can outrun 800s) yields
+ *                  gracefully instead of dying with the mutex still held.
+ * The caller reacts to a truthy `stop` by persisting progress, releasing the
+ * mutex, and firing selfContinue() — mirroring the batch-cap path exactly.
+ */
+export function writeLoopShouldYield(
+  wroteThisRun: number,
+  batchCap: number,
+  timeLow: boolean,
+): { stop: boolean; reason: string } {
+  if (wroteThisRun >= batchCap) return { stop: true, reason: 'batch cap' }
+  if (timeLow) return { stop: true, reason: 'time budget' }
+  return { stop: false, reason: '' }
+}
+
 // The Jobber gid namespaces we round-trip through numeric storage. Every
 // jobber_*_id column persists the numeric tail (via extractJobberId), so
 // any outbound mutation typed EncodedId! must rebuild the base64 global id

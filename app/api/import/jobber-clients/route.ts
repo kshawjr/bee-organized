@@ -54,6 +54,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { canRunImport } from '@/lib/auth'
 import { writeSyncLog } from '@/lib/sync-log'
+import { resolveInternalOrigin } from '@/lib/internal-origin'
 import {
   CLIENTS_QUERY,
   INCREMENTAL_CLIENTS_QUERY,
@@ -69,6 +70,8 @@ import {
   upsertJob,
   upsertInvoice,
   extractJobberId,
+  selectUnwrittenClients,
+  writeLoopShouldYield,
   writeImportCompletionStamp,
 } from '@/lib/jobber-import'
 import {
@@ -174,13 +177,10 @@ export async function POST(req: NextRequest) {
   const queryMode  = url.searchParams.get('mode')
   // Use a stable, non-SSO-gated origin for self-chain POSTs. The deployment
   // URL (url.origin) is Vercel-SSO-gated and silently redirects internal
-  // fetches to a login page. Fallback order: INTERNAL_BASE_URL (stable custom
-  // domain) → VERCEL_PROJECT_PRODUCTION_URL → url.origin (last resort).
-  const selfOrigin =
-    process.env.INTERNAL_BASE_URL ||
-    (process.env.VERCEL_PROJECT_PRODUCTION_URL
-      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-      : url.origin)
+  // fetches to a login page — the same trap that stranded the sweeper. Route
+  // through the public custom domain (NEXT_PUBLIC_APP_URL) so the re-poke
+  // actually reaches this route. See lib/internal-origin.ts.
+  const selfOrigin = resolveInternalOrigin(url.origin)
 
   let body: any = {}
   try { body = await req.json() } catch { /* no body is fine */ }
@@ -561,7 +561,7 @@ export async function POST(req: NextRequest) {
             from += PAGE
           }
         }
-        const unwritten = clients.filter((c: any) => { const id = extractJobberId(c.id); return id === null || !alreadyWritten.has(id) })
+        const unwritten = selectUnwrittenClients(clients, alreadyWritten)
         console.log(`[jobber-import] ${alreadyWritten.size} already written, ${unwritten.length} unwritten this segment`)
         // TEMP DIAGNOSTIC — remove after Portland stuck-at-1400 investigation.
         console.log(`[import-debug] clients loaded: ${clients.length}, alreadyWritten: ${alreadyWritten.size}, unwritten: ${unwritten.length}`)
@@ -646,21 +646,30 @@ export async function POST(req: NextRequest) {
           errors: [] as string[],
         }
 
-        // Cap writes per invocation so we never hit the maxDuration wall
-        // mid-record. On a fresh 1616-client run this batches; on a resume
-        // with 216 unwritten it finishes in a single segment.
+        // Two brakes so a heavy chunk never gets hard-killed mid-record at the
+        // 800s Vercel wall (which skips the finally/releaseMutex and strands
+        // the job — the stalled-Scottsdale bug):
+        //   - WRITE_BATCH_CAP: fixed ceiling on records per invocation.
+        //   - timeLow(): the SAME wall-clock guard the fetch phase uses. 400
+        //     nested client-writes (each = lead + requests/quotes/jobs/invoices
+        //     + engagement founding) can outrun the budget on their own, so we
+        //     also yield on elapsed time, not just count. On a fresh 1616-client
+        //     run this batches; a resume with 216 unwritten finishes in one go.
         const WRITE_BATCH_CAP = 400
         let wroteThisRun = 0
         let hitCap = false
+        let yieldReason = ''
 
         // processed counts against clients.length (not unwritten.length) so
         // the UI's X-of-Y bee animation reflects overall progress including
         // prior segments' work.
         let processed = alreadyWritten.size
         for (const client of unwritten) {
-          // Stop this invocation once we've written a full batch — the sweeper
-          // + selfContinue will re-poke to continue. Prevents mid-record kill.
-          if (wroteThisRun >= WRITE_BATCH_CAP) { hitCap = true; break }
+          // Stop this invocation on batch-cap OR low wall-clock time — the
+          // sweeper + selfContinue re-poke to continue from the persisted
+          // cursor. Checked BEFORE each record so we never die mid-write.
+          const yieldNow = writeLoopShouldYield(wroteThisRun, WRITE_BATCH_CAP, timeLow())
+          if (yieldNow.stop) { hitCap = true; yieldReason = yieldNow.reason; break }
 
           try {
             const { id: leadId, created } = await upsertLead(client, locSlug, locUuid, {
@@ -876,15 +885,18 @@ export async function POST(req: NextRequest) {
         }
 
         if (hitCap) {
-          // More clients remain — mark job resumable and signal client to continue.
+          // More clients remain — persist progress, RELEASE THE MUTEX (nulls
+          // segment_started_at + location_claim_at so the next segment can
+          // claim immediately), then self-continue. Same graceful hand-off
+          // whether we stopped on the batch cap or the time budget.
           await updateProgress(jobId, {
             status: 'running',
-            phase: `batched — ${processed}/${clients.length}, continuing`,
+            phase: `batched — ${processed}/${clients.length}, continuing (${yieldReason})`,
             processed_records: processed,
             total_records: clients.length,
           })
           await releaseMutex()
-          emit({ continue: true, processed, total: clients.length, job_id: jobId })
+          emit({ continue: true, processed, total: clients.length, reason: yieldReason, job_id: jobId })
           selfContinue()
           return
         }
