@@ -156,6 +156,31 @@ describe('SendToJobberModal — the 4-step wizard, reskinned', () => {
     expect(t).toContain('2026-08-01')
   })
 
+  // ── the in-person-assessment address guard ───────────────────
+  // A client created via NewClientSheet's optional address block carries
+  // addresses:[{ street, … }] (+ a composed `address` string) — exactly
+  // what leadHasUsableAddress keys on. So an in-person assessment sends
+  // with no "Address required" wall.
+  it('in-person assessment WITH an address (addresses[].street) → no "Address required" block, Send enabled', async () => {
+    await mount() // person() carries addresses:[{ street: '123 Main St' }]
+    await toDetails()
+    await act(async () => { host.querySelector<HTMLButtonElement>('button[aria-label="Include assessment"]')!.click() })
+    await setInput(host.querySelector('input[aria-label="Assessment date"]') as HTMLInputElement, '2026-08-01')
+    await act(async () => { contains('Review')!.click() })
+    expect(host.textContent).not.toContain('Address required')
+    expect((contains('Send to Jobber') as HTMLButtonElement).disabled, 'Send is enabled').toBe(false)
+  })
+
+  it('in-person assessment WITHOUT an address → "Address required" block, Send disabled (the guard still bites)', async () => {
+    await mount({ person: person({ addresses: [] }) })
+    await toDetails()
+    await act(async () => { host.querySelector<HTMLButtonElement>('button[aria-label="Include assessment"]')!.click() })
+    await setInput(host.querySelector('input[aria-label="Assessment date"]') as HTMLInputElement, '2026-08-01')
+    await act(async () => { contains('Review')!.click() })
+    expect(host.textContent).toContain('Address required')
+    expect((contains('Send to Jobber') as HTMLButtonElement).disabled, 'Send is blocked').toBe(true)
+  })
+
   it('confirm (existing client) shows the existing-client row, never "New client"', async () => {
     await mount({ person: person({ jobberClient: { clientId: 'JC-42', jobs: [] } }) })
     // starts on history → Continue → action → pick Request → Continue → Review

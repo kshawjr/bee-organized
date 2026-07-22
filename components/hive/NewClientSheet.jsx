@@ -48,12 +48,14 @@
 import React, { useMemo, useState } from 'react'
 import OverlayShell from './OverlayShell'
 import ReferrerPicker from './ReferrerPicker'
+import AddressAutofill from './shared/AddressAutofill'
 import useIsMobile from './shared/useIsMobile'
 import { isTerminal } from './shared/stageConfig'
 import { lastActivityTs } from './shared/engagementStatus'
 import { matchPeople, normalizeEmail, normalizePhone, queryLeadMatches, maskEmail, maskPhone } from './shared/clientMatch'
 import { createClient } from '@/lib/supabase'
-import { IconSearch, IconPlus, IconUserCheck, IconSparkles, IconAlertTriangle, IconCheck, IconSend } from '@/components/ui/icons'
+import { composeLeadAddress } from '@/lib/lead-address'
+import { IconSearch, IconPlus, IconUserCheck, IconSparkles, IconAlertTriangle, IconCheck, IconSend, IconMapPin } from '@/components/ui/icons'
 import { inp, lbl } from './shared/formKit'
 import { T } from './shared/tokens'
 
@@ -170,7 +172,11 @@ export default function NewClientSheet({
   // notifyEmail / notifySlack / startDrip: the on-create multi-select, all
   // default OFF (a manual lead with nothing selected is silent). startDrip
   // replaces the old `drip` toggle default-ON.
-  const [form, setForm] = useState({ name: null, email: null, phone: null, source: 'Manual', projectType: 'Client', requestDetails: '', notifyEmail: false, notifySlack: false, startDrip: false })
+  const [form, setForm] = useState({ name: null, email: null, phone: null, source: 'Manual', projectType: 'Client', requestDetails: '', notifyEmail: false, notifySlack: false, startDrip: false, street: '', city: '', state: '', zip: '' })
+  // Address is OPTIONAL and collapsed by default — the sheet's stated
+  // intent is founding-viable fields only, so the block stays hidden until
+  // the user asks for it (mirrors Classic's default-off "📍 Add address").
+  const [showAddr, setShowAddr] = useState(false)
   // Referral-source referrer link (frame C) — { id, kind, name } | null.
   // kind is 'lead' or 'partner' (contacts store as 'partner' too); maps
   // straight onto leads.referred_by_kind / referred_by_id at POST.
@@ -233,6 +239,29 @@ export default function NewClientSheet({
 
   const locationUuid = locFilter !== 'all' ? locFilter : currentLocationUuid
   const withDefault = (opts, v) => (v && !opts.includes(v) ? [v, ...opts] : opts)
+
+  // Optional address → the POST shape the rest of the app already reads:
+  // the FULL composed `address` string + the part columns (people-mapper /
+  // client card), PLUS a discrete-`street` addresses[] entry (the
+  // Send-to-Jobber route reads addresses[].street for the Jobber property,
+  // preferring it over the flat string). Mirrors the import/Classic
+  // convention via composeLeadAddress. No street → NO address keys at all,
+  // so a create without an address is byte-identical to today.
+  function buildAddressFields() {
+    const street = (form.street || '').trim()
+    if (!street) return {}
+    const city = (form.city || '').trim()
+    const state = (form.state || '').trim()
+    const zip = (form.zip || '').trim()
+    const full = composeLeadAddress({ street, city, state, zip })
+    return {
+      address: full || null,
+      city: city || null,
+      state: state || null,
+      zip: zip || null,
+      addresses: [{ type: 'Service', value: full, street, city, state, zip }],
+    }
+  }
 
   async function postLead(body) {
     const res = await fetch('/api/leads', {
@@ -312,6 +341,8 @@ export default function NewClientSheet({
         notifyEmail: form.notifyEmail,
         notifySlack: form.notifySlack,
         startDrip:   form.startDrip,
+        // Optional address (empty when the block was never opened).
+        ...buildAddressFields(),
       })
       // Frame C stays person-world by design: a genuinely NEW inquiry
       // lands in the Inbox as a person (doctrine above). Manual founding
@@ -561,6 +592,54 @@ export default function NewClientSheet({
               placeholder="What does the client want? (shows in the new-lead email + Slack)"
               aria-label="Request details"
             />
+          </div>
+
+          {/* Address — OPTIONAL, collapsed by default (founding stays
+              short). Reuses AddressAutofill — the SAME shared Google Places
+              typeahead the client card's AddressField mounts — so there's
+              one autofill implementation, not a parallel one. Values ride
+              the create POST via buildAddressFields; nothing is required. */}
+          <div>
+            <button
+              type="button"
+              aria-label="Add address"
+              aria-expanded={showAddr}
+              aria-controls="new-client-address"
+              onClick={() => setShowAddr(v => !v)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '6px',
+                padding: '2px 0', border: 'none', background: 'transparent',
+                color: T.ink.muted, fontSize: '12px', fontWeight: 500,
+                fontFamily: 'inherit', cursor: 'pointer',
+              }}
+            >
+              <IconMapPin size={14} />
+              <span>Add address</span>
+              <span aria-hidden="true" style={{ color: T.ink.faint }}>{showAddr ? '–' : '+'}</span>
+            </button>
+            {showAddr && (
+              <div id="new-client-address" style={{ display: 'grid', gap: '8px', marginTop: '8px' }}>
+                <AddressAutofill
+                  value={form.street || ''}
+                  onChange={v => set('street', v)}
+                  onParsed={p => setForm(f => ({
+                    ...f,
+                    // Unit rides the street line (same as AddressField).
+                    street: [p.street, p.apt].filter(Boolean).join(' ') || p.full || '',
+                    city: p.city || '',
+                    state: p.state || '',
+                    zip: p.zip || '',
+                  }))}
+                  placeholder="Start typing a street address…"
+                  style={inp}
+                />
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '8px' }}>
+                  <input style={inp} value={form.city || ''} onChange={e => set('city', e.target.value)} placeholder="City" aria-label="City" />
+                  <input style={inp} value={form.state || ''} onChange={e => set('state', e.target.value)} placeholder="ST" maxLength={2} aria-label="State" />
+                  <input style={inp} value={form.zip || ''} onChange={e => set('zip', e.target.value)} placeholder="ZIP" aria-label="ZIP" />
+                </div>
+              </div>
+            )}
           </div>
 
           <NotifyPills value={form} onToggle={(k) => set(k, !form[k])} />

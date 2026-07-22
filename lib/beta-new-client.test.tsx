@@ -314,6 +314,76 @@ describe('NewClientSheet frames', () => {
     await unmount()
   })
 
+  // ── optional address (restored to the beta create form) ─────────
+  it('frame C: address is OPTIONAL and collapsed — the block appears only after "Add address"', async () => {
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[person()]} locFilter="loc-uuid-1" currentUserId="user-1" onClose={() => {}} onCreated={() => {}} />
+    )
+    await type(host.querySelector('input[aria-label="Search clients"]')!, 'Fresh Person')
+
+    // Default form stays short: no address inputs, just the toggle.
+    expect(host.querySelector('input[aria-label="City"]'), 'address hidden by default').toBeFalsy()
+    const toggle = host.querySelector('button[aria-label="Add address"]') as HTMLButtonElement
+    expect(toggle, 'Add-address toggle present').toBeTruthy()
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+
+    await click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    // The revealed block reuses the shared AddressAutofill street typeahead
+    // (placeholder) + the labeled part fields.
+    expect([...host.querySelectorAll('input')].some(i => (i.getAttribute('placeholder') || '').startsWith('Start typing a street')), 'street autofill revealed').toBe(true)
+    expect(host.querySelector('input[aria-label="City"]'), 'City revealed').toBeTruthy()
+    expect(host.querySelector('input[aria-label="State"]'), 'State revealed').toBeTruthy()
+    expect(host.querySelector('input[aria-label="ZIP"]'), 'ZIP revealed').toBeTruthy()
+    await unmount()
+  })
+
+  it('frame C: creating WITHOUT opening the address block posts NO address keys (byte-identical to today)', async () => {
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[person()]} locFilter="loc-uuid-1" currentUserId="user-1" onClose={() => {}} onCreated={() => {}} />
+    )
+    await type(host.querySelector('input[aria-label="Search clients"]')!, 'Fresh Person')
+    await click(buttonByText(host, 'Create — opens card')!)
+    expect(createdBodies).toHaveLength(1)
+    // The optional address contributes nothing when never opened.
+    expect(createdBodies[0]).not.toHaveProperty('address')
+    expect(createdBodies[0]).not.toHaveProperty('city')
+    expect(createdBodies[0]).not.toHaveProperty('addresses')
+    await unmount()
+  })
+
+  it('frame C: creating WITH an address posts the full shape — composed `address` string + parts + discrete-street addresses[]', async () => {
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[person()]} locFilter="loc-uuid-1" currentUserId="user-1" onClose={() => {}} onCreated={() => {}} />
+    )
+    await type(host.querySelector('input[aria-label="Search clients"]')!, 'Fresh Person')
+    await click(host.querySelector('button[aria-label="Add address"]')!)
+
+    const street = [...host.querySelectorAll('input')].find(i => (i.getAttribute('placeholder') || '').startsWith('Start typing a street'))!
+    await type(street, '123 Main St')
+    await type(host.querySelector('input[aria-label="City"]')!, 'Denver')
+    await type(host.querySelector('input[aria-label="State"]')!, 'CO')
+    await type(host.querySelector('input[aria-label="ZIP"]')!, '80202')
+
+    await click(buttonByText(host, 'Create — opens card')!)
+    expect(createdBodies).toHaveLength(1)
+    // Full composed string (the import storage convention) + the part columns…
+    expect(createdBodies[0]).toMatchObject({
+      name: 'Fresh Person',
+      address: '123 Main St, Denver, CO, 80202',
+      city: 'Denver', state: 'CO', zip: '80202',
+    })
+    // …plus a discrete-`street` addresses[] entry — what the Send-to-Jobber
+    // property step reads (addresses[].street) and what leadHasUsableAddress
+    // keys on. Clean street1, not the full joined string.
+    expect(createdBodies[0].addresses).toEqual([
+      { type: 'Service', value: '123 Main St, Denver, CO, 80202', street: '123 Main St', city: 'Denver', state: 'CO', zip: '80202' },
+    ])
+    // Let the AddressAutofill debounce settle while still mounted.
+    await act(async () => { await new Promise(r => setTimeout(r, 200)) })
+    await unmount()
+  })
+
   it('frame B: returning client with matched-on line and stat block', async () => {
     const p = person({ id: 'p1' })
     const { host, unmount } = await mount(
