@@ -351,3 +351,37 @@ describe('API — every verb gated server-side to owner + elevated', () => {
     expect(extRoute).toContain('loadExternalAtLocation')
   })
 })
+
+describe('API — duplicate-recipient prevention (the structural-hole fix)', () => {
+  // Scope to the POST handler only — the PATCH handler above it legitimately
+  // upserts lead_notification_prefs onConflict (location_id,hub_user_id), which
+  // is unrelated to the externals uniqueness this block asserts.
+  const postFn = mainRoute.slice(mainRoute.indexOf('export async function POST'))
+
+  it('POST normalizes email to lowercase before storing', () => {
+    // Stored value == the (location_id, email) uniqueness key, so a re-cased
+    // add can never create a second row.
+    expect(postFn).toContain('.trim().toLowerCase()')
+  })
+  it('POST dedups application-side (idempotent add), returning the existing row', () => {
+    // Existence check on (location_id, email) BEFORE the insert — the guard that
+    // works even BEFORE the unique-index migration runs.
+    expect(postFn).toContain(".eq('location_id', params.id)")
+    expect(postFn).toContain(".eq('email', email)")
+    expect(postFn).toContain('duplicate: true')
+  })
+  it('POST does NOT use ON CONFLICT / upsert — it ships ahead of the index', () => {
+    // An ON CONFLICT naming a not-yet-existing unique index is a 42P10 in the
+    // pre-migration window. Deliberately avoided; the DB index is a pure backstop.
+    expect(postFn).not.toContain('onConflict')
+    expect(postFn).not.toContain('.upsert(')
+  })
+  it('POST treats the unique backstop (23505) as benign, not a 500', () => {
+    expect(postFn).toContain("'23505'")
+  })
+  it('externals PATCH lowercases the edited email and 409s on a collision', () => {
+    expect(extRoute).toContain('.trim().toLowerCase()')
+    expect(extRoute).toContain("'23505'")
+    expect(extRoute).toContain('duplicate_recipient')
+  })
+})

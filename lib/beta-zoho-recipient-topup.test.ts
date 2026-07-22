@@ -384,6 +384,73 @@ describe('commitTopUpPlan — additive only', () => {
   })
 })
 
+// ── Lowercased storage — feeds the per-location (location_id, email) backstop ─
+describe('planLocationRows — stores email lowercased', () => {
+  it('lowercases the stored email (equals the dedup key + the uniqueness backstop)', () => {
+    const { rows } = planLocationRows(
+      'u1',
+      [contact({ email: 'Jamie@BeeOrganized.com', first_name: 'Jamie', last_name: 'Bee' })],
+      [],
+    )
+    expect(rows[0].email).toBe('jamie@beeorganized.com')
+    // Name is untouched by the lowercasing — only the email is normalized.
+    expect(rows[0].first_name).toBe('Jamie')
+    expect(rows[0].last_name).toBe('Bee')
+  })
+})
+
+// ── The unique backstop is benign — no ON CONFLICT (ships ahead of the index) ─
+describe('commitTopUpPlan — a 23505 from the backstop is benign', () => {
+  // A stub table that already holds one address (as if a concurrent add raced
+  // in between the plan read and this commit). A batch INSERT touching it fails
+  // 23505; single-row inserts of it fail 23505; everything else succeeds.
+  const stub = (taken: Set<string>, landed: any[]) => ({
+    from: () => ({
+      insert(rowsArg: any) {
+        const arr = Array.isArray(rowsArg) ? rowsArg : [rowsArg]
+        if (arr.some((r) => taken.has(r.email))) {
+          return Promise.resolve({ data: null, error: { code: '23505', message: 'duplicate key' } })
+        }
+        for (const r of arr) landed.push(r)
+        return Promise.resolve({ data: arr, error: null })
+      },
+    }),
+  })
+  const plan = (rows: any[]) => ({
+    locations: [{ location: { id: 'u1', name: 'X', slug: 'loc_x' }, rows, already: 0, unusable: 0, error: null }],
+    rows,
+  })
+
+  it('salvages the batch row-by-row so a raced dup cannot drop the new recipients', async () => {
+    const landed: any[] = []
+    const p = plan([
+      { location_id: 'u1', email: 'new@b.com', first_name: null, last_name: null, phone: null, category: 'all' },
+      { location_id: 'u1', email: 'dup@b.com', first_name: null, last_name: null, phone: null, category: 'all' },
+    ])
+    const { inserted, errors } = await commitTopUpPlan(
+      { supabase: stub(new Set(['dup@b.com']), landed) as any },
+      p as any,
+    )
+    expect(errors).toEqual([]) // 23505 is benign — never surfaced as an error
+    expect(inserted).toBe(1) // only the genuinely-new row landed
+    expect(landed.map((r) => r.email)).toEqual(['new@b.com']) // dup skipped, not thrown
+  })
+
+  it('a NON-23505 insert failure is still reported per-location', async () => {
+    const failing = {
+      from: () => ({
+        insert: () => Promise.resolve({ data: null, error: { code: '42501', message: 'nope' } }),
+      }),
+    }
+    const p = plan([
+      { location_id: 'u1', email: 'a@b.com', first_name: null, last_name: null, phone: null, category: 'all' },
+    ])
+    const { inserted, errors } = await commitTopUpPlan({ supabase: failing as any }, p as any)
+    expect(inserted).toBe(0)
+    expect(errors[0]).toMatchObject({ slug: 'loc_x', reason: 'nope' })
+  })
+})
+
 // ── Source sweeps: the review gate + cron registration ─────────────────────
 const read = (p: string) => readFileSync(join(process.cwd(), p), 'utf8')
 

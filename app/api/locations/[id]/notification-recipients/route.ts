@@ -183,12 +183,31 @@ export async function POST(
   }
 
   const body = await req.json().catch(() => null)
-  const email = typeof body?.email === 'string' ? body.email.trim() : ''
+  // Normalized (trimmed + lowercased) so one address can't land twice under
+  // different casing — the stored value equals the (location_id, email) uniqueness
+  // key and the case-insensitive dedup the resolver/send path use.
+  const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : ''
   if (!EMAIL_RE.test(email)) {
     return NextResponse.json({ error: 'valid email required' }, { status: 400 })
   }
   if (body.category !== undefined && !isValidCategoryField(body.category)) {
     return NextResponse.json({ error: 'invalid category' }, { status: 400 })
+  }
+
+  const SELECT_COLS = 'id, first_name, last_name, email, phone, category'
+
+  // Idempotent add — the PRIMARY dedup guard, and the one that works BEFORE the
+  // (location_id, email) unique index exists (this route ships ahead of the
+  // migration). If this location already has this address, return that row
+  // instead of inserting a duplicate.
+  const { data: existing } = await supabaseService
+    .from('lead_notification_externals')
+    .select(SELECT_COLS)
+    .eq('location_id', params.id)
+    .eq('email', email)
+    .maybeSingle()
+  if (existing) {
+    return NextResponse.json({ ok: true, external: existing, duplicate: true })
   }
 
   const row = {
@@ -203,9 +222,21 @@ export async function POST(
   const { data, error } = await supabaseService
     .from('lead_notification_externals')
     .insert(row)
-    .select('id, first_name, last_name, email, phone, category')
+    .select(SELECT_COLS)
     .single()
   if (error) {
+    // 23505 = the unique backstop caught a concurrent add of the same
+    // (location, email) between the check above and this insert. Not a failure —
+    // re-read and return the winning row so the add still reads as idempotent.
+    if ((error as any).code === '23505') {
+      const { data: raced } = await supabaseService
+        .from('lead_notification_externals')
+        .select(SELECT_COLS)
+        .eq('location_id', params.id)
+        .eq('email', email)
+        .maybeSingle()
+      return NextResponse.json({ ok: true, external: raced ?? null, duplicate: true })
+    }
     console.error('[notification-recipients POST]', error.message)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }

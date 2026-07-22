@@ -104,6 +104,25 @@ describe('notifyNewLead', () => {
     expect(res.recipientCount).toBe(3)
   })
 
+  it('dedupes recipients CASE-INSENSITIVELY, keeping the first-seen casing', async () => {
+    // A hub_user and an external row can share an address under different casing.
+    // The To line must carry it once — not twice — while preserving how it reads.
+    resolveMock.mockResolvedValue([
+      recip('Owner@Biz.com'),
+      recip('owner@biz.com', { source: 'external' }), // same address, lower-cased
+      recip('other@biz.com'),
+    ])
+
+    const res = await notifyNewLead({ location: LOCATION, lead: LEAD })
+
+    const arg = sendEmailDirectMock.mock.calls[0][0]
+    expect(arg.to).toHaveLength(2) // collapsed to 2 distinct addresses
+    expect(arg.to).toContain('Owner@Biz.com') // first-seen original casing preserved
+    expect(arg.to).toContain('other@biz.com')
+    expect(arg.to).not.toContain('owner@biz.com') // the case-variant duplicate dropped
+    expect(res.recipientCount).toBe(2)
+  })
+
   it('includes the captured lead fields in the email body', async () => {
     resolveMock.mockResolvedValue([recip('owner@biz.com')])
 

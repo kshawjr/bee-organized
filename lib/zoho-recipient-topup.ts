@@ -32,11 +32,19 @@
 // overwritten by Zoho. The only write is an INSERT of an email this location
 // does not already have.
 //
-// DEDUPE — read-then-diff, NOT ON CONFLICT. lead_notification_externals has no
-// unique constraint on (location_id, email) — only a non-unique index on
-// location_id — so an upsert would fail 42P10. We select the location's
-// existing emails, lowercase them into a Set, and insert only what's absent.
-// Case-insensitive because Zoho and hand-typed UI entries disagree on case.
+// DEDUPE — read-then-diff, application-side. We select the location's existing
+// emails, lowercase them into a Set, and insert only what's absent. This is the
+// PRIMARY guard and is case-insensitive (Zoho and hand-typed UI entries disagree
+// on case), so emails are also STORED lowercased (see planLocationRows) to keep
+// the stored value equal to the comparison key.
+//
+// A per-location UNIQUE (location_id, email) index is a DB BACKSTOP (see
+// migrations/lead_notification_externals_unique.sql). We deliberately do NOT use
+// ON CONFLICT: this code ships BEFORE that migration runs, and an ON CONFLICT
+// naming a target index that does not exist yet is a 42P10 — it would break both
+// the top-up and the POST route in the pre-migration window. Instead
+// commitTopUpPlan treats a 23505 from the backstop as benign (the row already
+// exists). Result: identical behavior before and after the index exists.
 // ─────────────────────────────────────────────────────────────
 
 // NO RUNTIME IMPORTS — deliberate, and load-bearing. This module is imported
@@ -175,7 +183,9 @@ export function planLocationRows(
       location_id: locationUuid,
       first_name: first,
       last_name: last,
-      email,
+      // Stored lowercased — matches the dedup key above and the per-location
+      // (location_id, email) backstop, so a case-variant can't slip past either.
+      email: key,
       phone: null,
       category: SEED_CATEGORY,
     })
@@ -273,14 +283,38 @@ export async function commitTopUpPlan(
     const { error } = await deps.supabase
       .from('lead_notification_externals')
       .insert(lp.rows)
-    if (error) {
+    if (!error) {
+      inserted += lp.rows.length
+      continue
+    }
+    // The read-then-diff above already excluded every email the location has, so
+    // a conflict here means the (location_id, email) BACKSTOP caught a row that
+    // appeared between the plan read and this write (a concurrent UI add, or an
+    // overlapping run). Anything else is a real failure — report and move on.
+    if ((error as any).code !== '23505') {
       console.error(
         `[zoho-recipient-topup] insert FAILED for ${lp.location.slug}: ${error.message}`,
       )
       errors.push({ slug: lp.location.slug, reason: error.message })
       continue
     }
-    inserted += lp.rows.length
+    // Salvage the batch row-by-row so one raced duplicate can't drop the
+    // location's genuinely-new recipients; a 23505 per row is benign (that
+    // recipient already exists — nothing to add).
+    for (const row of lp.rows) {
+      const { error: rowErr } = await deps.supabase
+        .from('lead_notification_externals')
+        .insert(row)
+      if (!rowErr) {
+        inserted += 1
+        continue
+      }
+      if ((rowErr as any).code === '23505') continue
+      console.error(
+        `[zoho-recipient-topup] insert FAILED for ${lp.location.slug}: ${rowErr.message}`,
+      )
+      errors.push({ slug: lp.location.slug, reason: rowErr.message })
+    }
   }
 
   return { inserted, errors }

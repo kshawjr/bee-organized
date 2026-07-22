@@ -289,14 +289,20 @@ export async function notifyNewLead(args: {
   }
 
   // De-dupe emails (a hub_user and an external row can share an address) so a
-  // single person never appears twice on the To line.
-  const emails = Array.from(
-    new Set(
-      recipients
-        .map((r) => r.email?.trim())
-        .filter((e): e is string => !!e),
-    ),
-  )
+  // single person never appears twice on the To line. Case-INSENSITIVE: the
+  // uniqueness key is the lowercased address, but the first-seen ORIGINAL casing
+  // is what we actually send — so 'A@x.com' and 'a@x.com' collapse to one
+  // recipient without mangling how the address is displayed.
+  const seenEmail = new Set<string>()
+  const emails: string[] = []
+  for (const r of recipients) {
+    const original = r.email?.trim()
+    if (!original) continue
+    const key = original.toLowerCase()
+    if (seenEmail.has(key)) continue
+    seenEmail.add(key)
+    emails.push(original)
+  }
 
   if (emails.length === 0) {
     // Quiet, visible no-send — a location with nobody subscribed is a real

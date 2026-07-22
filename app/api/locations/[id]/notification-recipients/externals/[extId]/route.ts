@@ -87,7 +87,10 @@ export async function PATCH(
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (body.email !== undefined) {
-    const email = typeof body.email === 'string' ? body.email.trim() : ''
+    // Lowercased on edit for the same reason POST does: keep the stored value
+    // equal to the (location_id, email) uniqueness key so a re-cased edit can't
+    // dodge dedup.
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
     if (!EMAIL_RE.test(email)) {
       return NextResponse.json({ error: 'valid email required' }, { status: 400 })
     }
@@ -116,6 +119,12 @@ export async function PATCH(
     .select('id, first_name, last_name, email, phone, category')
     .single()
   if (error) {
+    // 23505 = the edited email collides with another recipient already at this
+    // location (the per-location (location_id, email) backstop). Report it as a
+    // clean 409 the UI can surface, not a raw 500.
+    if ((error as any).code === '23505') {
+      return NextResponse.json({ error: 'duplicate_recipient' }, { status: 409 })
+    }
     console.error('[notification-recipients external PATCH]', error.message)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
