@@ -67,7 +67,101 @@ export type WebhookDigest = {
   selfHeals: number
   locOtherLeads: number
   locOtherSpike: boolean
+  // import health (added to the digest; 0 / false when healthy)
+  importFailed: number
+  importStalled: number
+  importOriginGated: boolean
   text: string
+}
+
+// ── import health section (item 2/3) ─────────────────────────────
+// The import pipeline reports into this SAME ops digest (never the per-lead
+// notification path). Only PROBLEMS produce output — a healthy import window
+// adds nothing (no lines, no un-suppress). Three problem classes:
+//   • failed  — jobs that ended failed in the window (cancel, token/throttle
+//               death, or the sweeper's max-lifetime fail-out)
+//   • stalled — jobs still running with a claim staler than the alert window
+//   • origin gated — the internal re-poke origin is SSO-gated, so EVERY
+//     self-resume bounces (the Scottsdale root cause). This escalates the
+//     origin health probe (lib/internal-origin.probeInternalOriginGated)
+//     instead of a silent console.warn.
+export type ImportHealthInput = {
+  failed: Array<{
+    location_id?: string | null
+    phase?: string | null
+    error_message?: string | null
+    processed_records?: number | null
+    total_records?: number | null
+  }>
+  stalled: Array<{
+    location_id?: string | null
+    phase?: string | null
+    processed_records?: number | null
+    total_records?: number | null
+    location_claim_at?: string | null
+    started_at?: string | null
+  }>
+  originGated: boolean | null   // true = SSO-gated (BAD); false = healthy; null = not probed
+  originTarget?: string
+  nowMs: number
+}
+
+const MAX_IMPORT_LINES = 10
+
+const progressOf = (j: { processed_records?: number | null; total_records?: number | null }) =>
+  j.total_records ? ` (${j.processed_records || 0}/${j.total_records})` : ''
+
+const staleMinutes = (j: { location_claim_at?: string | null; started_at?: string | null }, nowMs: number) => {
+  const ref = j.location_claim_at || j.started_at
+  const refMs = ref ? Date.parse(ref) : NaN
+  return Number.isFinite(refMs) ? Math.max(0, Math.round((nowMs - refMs) / 60000)) : null
+}
+
+export function buildImportHealthSection(
+  input: ImportHealthInput | undefined,
+  windowLabel: string,
+): { lines: string[]; failedCount: number; stalledCount: number; originGated: boolean; hasProblems: boolean } {
+  if (!input) return { lines: [], failedCount: 0, stalledCount: 0, originGated: false, hasProblems: false }
+
+  const failedCount = input.failed.length
+  const stalledCount = input.stalled.length
+  const originGated = input.originGated === true
+  const hasProblems = failedCount > 0 || stalledCount > 0 || originGated
+  if (!hasProblems) return { lines: [], failedCount, stalledCount, originGated, hasProblems: false }
+
+  const lines: string[] = [`*:package: Imports* (${windowLabel})`]
+
+  if (originGated) {
+    lines.push(
+      `• :rotating_light: Re-poke origin is SSO-GATED${input.originTarget ? ` (${input.originTarget})` : ''} — ` +
+        `imports cannot self-resume; every sweeper re-poke bounces. ` +
+        `Set NEXT_PUBLIC_APP_URL to the non-SSO custom domain.`,
+    )
+  }
+
+  if (failedCount > 0) {
+    lines.push(`• :x: ${failedCount} failed:`)
+    for (const j of input.failed.slice(0, MAX_IMPORT_LINES)) {
+      const loc = j.location_id || 'unknown'
+      const reason = (j.error_message || 'unknown error').replace(/\s+/g, ' ').trim().slice(0, 160)
+      lines.push(`    • ${loc} — ${j.phase || 'unknown'}${progressOf(j)}: ${reason}`)
+    }
+    const more = failedCount - MAX_IMPORT_LINES
+    if (more > 0) lines.push(`    _…plus ${more} more_`)
+  }
+
+  if (stalledCount > 0) {
+    lines.push(`• :warning: ${stalledCount} stalled (running, no progress):`)
+    for (const j of input.stalled.slice(0, MAX_IMPORT_LINES)) {
+      const loc = j.location_id || 'unknown'
+      const mins = staleMinutes(j, input.nowMs)
+      lines.push(`    • ${loc} — ${j.phase || 'unknown'}${progressOf(j)}${mins != null ? ` — stuck ${mins}m` : ''}`)
+    }
+    const more = stalledCount - MAX_IMPORT_LINES
+    if (more > 0) lines.push(`    _…plus ${more} more_`)
+  }
+
+  return { lines, failedCount, stalledCount, originGated, hasProblems: true }
 }
 
 // ── classification ────────────────────────────────────────────
@@ -207,6 +301,7 @@ export function buildWebhookDigest(opts: {
   events: WebhookLogEvent[]
   appUrl: string          // e.g. https://app.example.com (no trailing slash)
   windowLabel?: string    // human label for the query window
+  importHealth?: ImportHealthInput   // import pipeline health (item 2/3)
 }): WebhookDigest {
   const { appUrl } = opts
   const windowLabel = opts.windowLabel || 'last 3h'
@@ -214,17 +309,23 @@ export function buildWebhookDigest(opts: {
 
   const leadsFailed = c.leadFailures.length
   const jobberDidntLand = c.jobberProblems.length
-  const realProblems = leadsFailed + jobberDidntLand
+
+  const imp = buildImportHealthSection(opts.importHealth, windowLabel)
+
+  const realProblems = leadsFailed + jobberDidntLand + (imp.hasProblems ? 1 : 0)
   const allClear = realProblems === 0
 
   // Suppress a quiet window OR a self-heal-only window: nothing landed and
   // nothing failed. Self-heal rows are consumed above, so a window whose
-  // only activity was self-heals has zero landed + zero failed here.
+  // only activity was self-heals has zero landed + zero failed here. An import
+  // PROBLEM un-suppresses even when webhooks are quiet — but a healthy import
+  // window contributes nothing (imp.hasProblems is false), so success is silent.
   const suppressed =
     c.leadsLanded === 0 &&
     leadsFailed === 0 &&
     c.jobberLanded === 0 &&
-    jobberDidntLand === 0
+    jobberDidntLand === 0 &&
+    !imp.hasProblems
 
   // ── headline (real problems only) ──────────────────────────
   let headline: string
@@ -236,6 +337,9 @@ export function buildWebhookDigest(opts: {
     const parts: string[] = []
     if (leadsFailed > 0) parts.push(`${plural(leadsFailed, 'lead')} DIDN'T LAND`)
     if (jobberDidntLand > 0) parts.push(`${plural(jobberDidntLand, 'Jobber event')} DIDN'T LAND`)
+    if (imp.originGated) parts.push(`import origin SSO-GATED`)
+    if (imp.failedCount > 0) parts.push(`${plural(imp.failedCount, 'import')} FAILED`)
+    if (imp.stalledCount > 0) parts.push(`${plural(imp.stalledCount, 'import')} STALLED`)
     headline = `:warning: ${parts.join(' + ')} — check`
   }
 
@@ -296,10 +400,14 @@ export function buildWebhookDigest(opts: {
   const filter = jobberDidntLand > 0 ? 'failures' : 'stuck'
   const link = `${appUrl}/admin?adminTab=webhooks&whFilter=${filter}&whWindow=24h`
 
+  // Import section only appears when there's an import problem to act on.
+  const importBlock = imp.lines.length ? `${imp.lines.join('\n')}\n\n` : ''
+
   const text =
     `${headline}\n\n` +
     `${leadLines.join('\n')}\n\n` +
     `${jobberLines.join('\n')}\n\n` +
+    importBlock +
     `<${link}|Open the webhook dashboard>`
 
   return {
@@ -313,6 +421,9 @@ export function buildWebhookDigest(opts: {
     selfHeals: c.selfHeals.length,
     locOtherLeads: c.locOtherLeads,
     locOtherSpike: c.locOtherSpike,
+    importFailed: imp.failedCount,
+    importStalled: imp.stalledCount,
+    importOriginGated: imp.originGated,
     text,
   }
 }

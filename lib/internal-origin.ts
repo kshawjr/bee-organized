@@ -30,6 +30,47 @@
 /** Strip a trailing slash so callers can always append `/api/...`. */
 const trim = (u: string) => u.replace(/\/+$/, '')
 
+// Classify a fetch Response (from a no-secret probe of an internal route) as
+// SSO-gated or not. A gated origin makes Vercel Deployment Protection redirect
+// to a login page BEFORE the route runs; with redirect:'manual' undici surfaces
+// that as an opaqueredirect (type='opaqueredirect', status=0) or a raw 3xx. A
+// non-gated origin runs the route, which answers with its own status (e.g. 401
+// for a missing session) — anything that is NOT a redirect. Same signature the
+// import-sweeper keys off. Pure so it's unit-testable without a live fetch.
+export function isGatedResponse(res: { status: number; type?: string }): boolean {
+  return (
+    (res as any).type === 'opaqueredirect' ||
+    res.status === 0 ||
+    (res.status >= 300 && res.status < 400)
+  )
+}
+
+// Probe whether the resolved internal origin is SSO-gated by POSTing to the
+// import route WITHOUT the internal secret. A healthy (non-gated) origin runs
+// the route and returns its own 401 (no session) — NOT a redirect; a gated
+// origin redirects to login before the route runs. Returns:
+//   true  → gated (BAD — every self-chain / sweeper re-poke will bounce)
+//   false → reachable (healthy)
+//   null  → probe failed (network error) — inconclusive, don't alarm
+// The empty-body POST hits the route's auth check and returns 401 before any
+// location lookup or job creation, so it has no side effects.
+export async function probeInternalOriginGated(
+  origin: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<boolean | null> {
+  try {
+    const res = await fetchImpl(`${trim(origin)}/api/import/jobber-clients`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+      redirect: 'manual',
+    })
+    return isGatedResponse(res as any)
+  } catch {
+    return null
+  }
+}
+
 export function resolveInternalOrigin(
   fallbackOrigin: string,
   env: NodeJS.ProcessEnv = process.env,

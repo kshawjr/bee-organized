@@ -249,10 +249,99 @@ describe('buildWebhookDigest — loc_other spike detection', () => {
   })
 })
 
+describe('buildWebhookDigest — import health (item 2/3)', () => {
+  const NOW = Date.parse('2026-07-18T12:00:00Z')
+  const failedJob = (over: any = {}) => ({
+    location_id: 'loc_scottsdale', phase: 'writing', error_message: 'Token: jobber_reauth_required',
+    processed_records: 607, total_records: 709, ...over,
+  })
+  const stalledJob = (over: any = {}) => ({
+    location_id: 'loc_temecula', phase: 'writing', processed_records: 300, total_records: 709,
+    location_claim_at: new Date(NOW - 18 * 60 * 1000).toISOString(), started_at: new Date(NOW - 40 * 60 * 1000).toISOString(),
+    ...over,
+  })
+
+  it('a FAILED import un-suppresses an otherwise-quiet window and drives ⚠️', () => {
+    const d = buildWebhookDigest({
+      events: [], appUrl: APP,
+      importHealth: { failed: [failedJob()], stalled: [], originGated: false, nowMs: NOW },
+    })
+    expect(d.suppressed).toBe(false)          // quiet webhooks, but an import failed
+    expect(d.allClear).toBe(false)
+    expect(d.importFailed).toBe(1)
+    expect(d.headline).toContain(':warning:')
+    expect(d.headline).toContain('1 import FAILED')
+    expect(d.text).toContain('*:package: Imports*')
+    expect(d.text).toContain('loc_scottsdale — writing (607/709)')
+    expect(d.text).toContain('jobber_reauth_required')
+  })
+
+  it('a STALLED import is reported with how long it has been stuck', () => {
+    const d = buildWebhookDigest({
+      events: [], appUrl: APP,
+      importHealth: { failed: [], stalled: [stalledJob()], originGated: false, nowMs: NOW },
+    })
+    expect(d.suppressed).toBe(false)
+    expect(d.importStalled).toBe(1)
+    expect(d.headline).toContain('1 import STALLED')
+    expect(d.text).toContain('loc_temecula — writing (300/709) — stuck 18m')
+  })
+
+  it('an SSO-GATED re-poke origin escalates as a :rotating_light: alert', () => {
+    const d = buildWebhookDigest({
+      events: [], appUrl: APP,
+      importHealth: { failed: [], stalled: [], originGated: true, originTarget: 'https://dep123.vercel.app', nowMs: NOW },
+    })
+    expect(d.suppressed).toBe(false)
+    expect(d.importOriginGated).toBe(true)
+    expect(d.headline).toContain('import origin SSO-GATED')
+    expect(d.text).toContain(':rotating_light:')
+    expect(d.text).toContain('NEXT_PUBLIC_APP_URL')
+    expect(d.text).toContain('https://dep123.vercel.app')
+  })
+
+  it('HEALTHY imports are silent — no section, and a quiet window still suppresses', () => {
+    const d = buildWebhookDigest({
+      events: [], appUrl: APP,
+      importHealth: { failed: [], stalled: [], originGated: false, nowMs: NOW },
+    })
+    expect(d.suppressed).toBe(true)           // healthy imports add NO noise
+    expect(d.importFailed).toBe(0)
+    expect(d.importStalled).toBe(0)
+    expect(d.text).not.toContain(':package: Imports')
+  })
+
+  it('healthy imports do not disturb an otherwise-firing digest', () => {
+    const d = buildWebhookDigest({
+      events: [leadIn('boulder-01')], appUrl: APP,
+      importHealth: { failed: [], stalled: [], originGated: false, nowMs: NOW },
+    })
+    expect(d.suppressed).toBe(false)
+    expect(d.allClear).toBe(true)             // lead landed, no problems anywhere
+    expect(d.headline).toContain(':white_check_mark:')
+    expect(d.text).not.toContain(':package: Imports')
+  })
+
+  it('originGated null (probe failed) is NOT treated as a problem', () => {
+    const d = buildWebhookDigest({
+      events: [], appUrl: APP,
+      importHealth: { failed: [], stalled: [], originGated: null, nowMs: NOW },
+    })
+    expect(d.importOriginGated).toBe(false)
+    expect(d.suppressed).toBe(true)
+  })
+})
+
 describe('cron route + registration pins', () => {
   const route = readFileSync(join(process.cwd(), 'app/api/cron/webhook-digest/route.ts'), 'utf8')
   const vercel = readFileSync(join(process.cwd(), 'vercel.json'), 'utf8')
   const slack  = readFileSync(join(process.cwd(), 'lib/slack.ts'), 'utf8')
+
+  it('wires import health + the origin-gated probe into the digest', () => {
+    expect(route).toContain('fetchImportHealth(')
+    expect(route).toContain('probeInternalOriginGated(')
+    expect(route).toContain('importHealth:')
+  })
 
   it('is CRON_SECRET fail-closed with Bearer + ?secret= accepted', () => {
     expect(route).toContain("{ error: 'cron_secret_not_configured' }, { status: 500 }")

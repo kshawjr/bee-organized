@@ -33,6 +33,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { fetchWebhookLogEvents } from '@/lib/webhook-observability'
 import { buildWebhookDigest } from '@/lib/webhook-digest'
+import { fetchImportHealth } from '@/lib/import-health'
+import { resolveInternalOrigin, probeInternalOriginGated } from '@/lib/internal-origin'
 import { postSlackMessage } from '@/lib/slack'
 
 export const runtime = 'nodejs'
@@ -55,13 +57,46 @@ export async function GET(req: NextRequest) {
   // ─── Query + format ────────────────────────────────────────────
   let digest
   try {
+    const nowMs = Date.now()
     const { events } = await fetchWebhookLogEvents({ window: '3h' })
     const appUrl = (
       process.env.NEXT_PUBLIC_APP_URL ||
       process.env.NEXT_PUBLIC_SITE_URL ||
       ''
     ).replace(/\/$/, '')
-    digest = buildWebhookDigest({ events, appUrl, windowLabel: 'last 3h' })
+
+    // Import health (item 2): failed + stalled jobs in the window. Best-effort
+    // — a hiccup reading import_jobs must not take down the webhook digest, so
+    // degrade to empty rather than failing the whole run.
+    let importJobs: Awaited<ReturnType<typeof fetchImportHealth>> = { failed: [], stalled: [] }
+    try {
+      importJobs = await fetchImportHealth({ nowMs })
+    } catch (err: any) {
+      console.error('[cron webhook-digest] import health query failed (non-fatal)', err?.message || err)
+    }
+
+    // Origin health assertion (item 3): probe the SAME non-SSO origin the
+    // sweeper / self-chain use. If it's SSO-gated, every import self-resume
+    // bounces — escalate that into the digest instead of a silent warn.
+    // probeInternalOriginGated swallows its own errors (returns null).
+    const internalOrigin = resolveInternalOrigin(req.nextUrl.origin)
+    const originGated = await probeInternalOriginGated(internalOrigin)
+    if (originGated === true) {
+      console.error(`[cron webhook-digest] internal re-poke origin is SSO-GATED (${internalOrigin}) — imports cannot self-resume`)
+    }
+
+    digest = buildWebhookDigest({
+      events,
+      appUrl,
+      windowLabel: 'last 3h',
+      importHealth: {
+        failed: importJobs.failed,
+        stalled: importJobs.stalled,
+        originGated,
+        originTarget: internalOrigin,
+        nowMs,
+      },
+    })
   } catch (err: any) {
     console.error('[cron webhook-digest] query failed', err?.message || err)
     return NextResponse.json({ error: 'digest_query_failed' }, { status: 500 })
@@ -92,6 +127,7 @@ export async function GET(req: NextRequest) {
     `[cron webhook-digest] window=3h posted=${post.ok} allClear=${digest.allClear} ` +
       `leadsIn=${digest.leadsLanded} leadsFailed=${digest.leadsFailed} ` +
       `jobberLanded=${digest.jobberLanded} jobberDidntLand=${digest.jobberDidntLand} ` +
+      `importFailed=${digest.importFailed} importStalled=${digest.importStalled} importOriginGated=${digest.importOriginGated} ` +
       `selfHeals=${digest.selfHeals}${post.skipped ? ` skipped=${post.skipped}` : ''}`,
   )
   return NextResponse.json({
@@ -104,6 +140,9 @@ export async function GET(req: NextRequest) {
     leadsFailed: digest.leadsFailed,
     jobberLanded: digest.jobberLanded,
     jobberDidntLand: digest.jobberDidntLand,
+    importFailed: digest.importFailed,
+    importStalled: digest.importStalled,
+    importOriginGated: digest.importOriginGated,
     selfHeals: digest.selfHeals,
   })
 }

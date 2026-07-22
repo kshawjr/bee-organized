@@ -13,8 +13,8 @@
 // chain AHEAD of the gated deployment fallback. These tests pin the precedence
 // and, crucially, the regression: with only the public URL set (the real prod
 // shape), the gated fallback is NEVER returned.
-import { describe, it, expect } from 'vitest'
-import { resolveInternalOrigin } from '@/lib/internal-origin'
+import { describe, it, expect, vi } from 'vitest'
+import { resolveInternalOrigin, isGatedResponse, probeInternalOriginGated } from '@/lib/internal-origin'
 
 const GATED = 'https://bee-hub-abc123.vercel.app' // deployment origin — SSO-gated
 const PUBLIC = 'https://beehive.beeorganized.com'  // stable custom domain — open
@@ -60,5 +60,44 @@ describe('resolveInternalOrigin — precedence', () => {
   it('trims a trailing slash so callers can append /api/... cleanly', () => {
     const env = { NEXT_PUBLIC_APP_URL: PUBLIC + '/' } as any
     expect(resolveInternalOrigin(GATED, env)).toBe(PUBLIC)
+  })
+})
+
+// ── origin health assertion (item 3) ─────────────────────────────
+describe('isGatedResponse — classifies an SSO-gated probe response', () => {
+  it('opaqueredirect (redirect:manual on a gated origin) is gated', () => {
+    expect(isGatedResponse({ status: 0, type: 'opaqueredirect' })).toBe(true)
+  })
+  it('a raw 3xx is gated', () => {
+    expect(isGatedResponse({ status: 302 })).toBe(true)
+    expect(isGatedResponse({ status: 307 })).toBe(true)
+  })
+  it('the route’s own 401 (reachable, no session) is NOT gated', () => {
+    expect(isGatedResponse({ status: 401, type: 'basic' })).toBe(false)
+  })
+  it('a 400/200 (route ran) is NOT gated', () => {
+    expect(isGatedResponse({ status: 400 })).toBe(false)
+    expect(isGatedResponse({ status: 200 })).toBe(false)
+  })
+})
+
+describe('probeInternalOriginGated — probes the import route with no secret', () => {
+  it('POSTs to the import route with redirect:manual + empty body', async () => {
+    const fetchMock = vi.fn(async () => ({ status: 401, type: 'basic' }) as any)
+    const gated = await probeInternalOriginGated(PUBLIC, fetchMock as any)
+    expect(gated).toBe(false)
+    const [url, opts] = fetchMock.mock.calls[0]
+    expect(url).toBe(`${PUBLIC}/api/import/jobber-clients`)
+    expect(opts.method).toBe('POST')
+    expect(opts.redirect).toBe('manual')
+    expect(opts.body).toBe('{}')
+  })
+  it('returns true when the origin redirects to SSO login', async () => {
+    const fetchMock = vi.fn(async () => ({ status: 0, type: 'opaqueredirect' }) as any)
+    expect(await probeInternalOriginGated(GATED, fetchMock as any)).toBe(true)
+  })
+  it('returns null (inconclusive) when the probe throws', async () => {
+    const fetchMock = vi.fn(async () => { throw new Error('network') })
+    expect(await probeInternalOriginGated(PUBLIC, fetchMock as any)).toBe(null)
   })
 })

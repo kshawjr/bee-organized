@@ -1,0 +1,87 @@
+// @vitest-environment node
+//
+// fetchImportHealth — the import_jobs read behind the webhook digest's import
+// section (item 2). Pins that it queries TWO buckets with the right filters:
+//   • failed  — status='failed', completed_at within the window
+//   • stalled — status='running', started_at older than the stall threshold
+//               AND a null-or-stale location_claim_at
+// and that the stall threshold is above the sweeper's 2-min re-poke cutoff so
+// normal between-segment handoffs are never reported as stalls.
+import { describe, it, expect, vi } from 'vitest'
+
+// import-health imports supabaseService at module load (createClient needs env
+// we don't set here). Every test injects its own supabase, so stub the module.
+vi.mock('@/lib/supabase-service', () => ({
+  supabaseService: { from: () => { throw new Error('unused — tests inject supabase') } },
+}))
+
+import {
+  fetchImportHealth,
+  IMPORT_DIGEST_STALL_MS,
+  IMPORT_DIGEST_WINDOW_MS,
+} from '@/lib/import-health'
+
+// A chainable query mock: records every filter op, returns per-status data on
+// the terminal .limit(). Each .from() starts a fresh builder.
+function makeSupabase(byStatus: Record<string, any[]>) {
+  const calls: Array<{ ops: [string, any[]][]; status?: string }> = []
+  const supabase: any = {
+    from() {
+      const rec: { ops: [string, any[]][]; status?: string } = { ops: [] }
+      calls.push(rec)
+      const b: any = {}
+      for (const m of ['select', 'eq', 'gte', 'lt', 'or', 'order']) {
+        b[m] = (...args: any[]) => {
+          rec.ops.push([m, args])
+          if (m === 'eq' && args[0] === 'status') rec.status = args[1]
+          return b
+        }
+      }
+      b.limit = (...args: any[]) => {
+        rec.ops.push(['limit', args])
+        return Promise.resolve({ data: byStatus[rec.status || ''] ?? [], error: null })
+      }
+      return b
+    },
+  }
+  return { supabase, calls }
+}
+
+const NOW = Date.parse('2026-07-18T12:00:00Z')
+
+describe('fetchImportHealth', () => {
+  it('returns the failed + stalled buckets', async () => {
+    const { supabase } = makeSupabase({
+      failed: [{ location_id: 'loc_a', status: 'failed' }],
+      running: [{ location_id: 'loc_b', status: 'running' }, { location_id: 'loc_c', status: 'running' }],
+    })
+    const out = await fetchImportHealth({ nowMs: NOW, supabase })
+    expect(out.failed).toHaveLength(1)
+    expect(out.stalled).toHaveLength(2)
+  })
+
+  it('filters failed by status + completed_at within the window', async () => {
+    const { supabase, calls } = makeSupabase({ failed: [], running: [] })
+    await fetchImportHealth({ nowMs: NOW, supabase })
+    const failedCall = calls.find((c) => c.status === 'failed')!
+    const gte = failedCall.ops.find((o) => o[0] === 'gte')
+    expect(gte?.[1][0]).toBe('completed_at')
+    expect(gte?.[1][1]).toBe(new Date(NOW - IMPORT_DIGEST_WINDOW_MS).toISOString())
+  })
+
+  it('filters stalled by started_at older than the stall threshold + null-or-stale claim', async () => {
+    const { supabase, calls } = makeSupabase({ failed: [], running: [] })
+    await fetchImportHealth({ nowMs: NOW, supabase })
+    const runningCall = calls.find((c) => c.status === 'running')!
+    const lt = runningCall.ops.find((o) => o[0] === 'lt')
+    expect(lt?.[1][0]).toBe('started_at')
+    const orClause = runningCall.ops.find((o) => o[0] === 'or')?.[1]?.[0] ?? ''
+    expect(orClause).toContain('location_claim_at.is.null')
+    expect(orClause).toContain('location_claim_at.lt.')
+  })
+
+  it('the stall threshold is well above the sweeper 2-min re-poke cutoff', () => {
+    // Normal handoffs (~2min) must never read as a digest stall.
+    expect(IMPORT_DIGEST_STALL_MS).toBeGreaterThan(2 * 60 * 1000)
+  })
+})
