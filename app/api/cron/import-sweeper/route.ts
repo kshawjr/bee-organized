@@ -35,6 +35,21 @@ const RESUME_LIMIT = 10
 // how long a real segment can go without progress on Jobber throttle waits.
 const STALE_AFTER_MS = 2 * 60 * 1000
 
+// Max-lifetime fail-out. If a job's claim has been stale for THIS long, the
+// sweeper has been re-poking it (once a minute) for many minutes and NOTHING
+// has caught — every resume is dying instantly or bouncing (e.g. the SSO-gated
+// origin). It's hopeless: mark it failed so the UI shows an actionable error
+// instead of an eternal spinner, rather than re-poking forever.
+//
+// Safe against healthy imports: a live segment refreshes location_claim_at
+// every 50 records (write phase) or every page (fetch phase), so its claim is
+// never more than seconds stale while it's making progress. The write phase's
+// own wall-clock guard yields at 600s (10 min) but keeps refreshing the claim
+// throughout — so a healthy job's claim never approaches 15 min of staleness.
+// 15 min is comfortably past the 10-min write budget AND the ~150s max Jobber
+// throttle sleep, so this can only fire on a genuinely dead/bouncing job.
+const FAIL_AFTER_MS = 15 * 60 * 1000
+
 export async function GET(req: NextRequest) {
   // ─── Auth ──────────────────────────────────────────────────────
   const secret = process.env.CRON_SECRET
@@ -65,10 +80,11 @@ export async function GET(req: NextRequest) {
   )
 
   // ─── Find stalled jobs ─────────────────────────────────────────
-  const cutoffIso = new Date(Date.now() - STALE_AFTER_MS).toISOString()
+  const now = Date.now()
+  const cutoffIso = new Date(now - STALE_AFTER_MS).toISOString()
   const { data: stalled, error: findErr } = await supabaseService
     .from('import_jobs')
-    .select('id, location_id, location_claim_at')
+    .select('id, location_id, location_claim_at, started_at, phase, processed_records, total_records')
     .eq('status', 'running')
     .eq('type', 'jobber_clients')
     .or(`location_claim_at.is.null,location_claim_at.lt.${cutoffIso}`)
@@ -84,12 +100,55 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ resumed: 0, checked: 0 })
   }
 
+  // ─── Give up on hopeless jobs (max-lifetime fail-out) ──────────
+  // A job whose claim has been stale past FAIL_AFTER_MS has been re-poked for
+  // many minutes with nothing catching — mark it failed (guarded on
+  // status='running' so a natural transition isn't clobbered) + release both
+  // mutexes, and DON'T re-poke it. The rest fall through to the resume path.
+  // Age of the stall, measured from the last claim refresh (or, if the claim
+  // was released between segments, the job's start). Returns 0 when neither
+  // timestamp parses — a job we can't age is re-poked, never failed out, so a
+  // malformed row is never wrongly killed. started_at is always set at job
+  // creation, so this only defaults for genuinely broken rows.
+  const stallAgeMs = (j: any): number => {
+    const ref = j.location_claim_at || j.started_at
+    const refMs = ref ? Date.parse(ref) : NaN
+    return Number.isFinite(refMs) ? now - refMs : 0
+  }
+  const failOut = stallAgeMs
+  const hopeless = jobs.filter((j: any) => failOut(j) > FAIL_AFTER_MS)
+  const resumable = jobs.filter((j: any) => failOut(j) <= FAIL_AFTER_MS)
+
+  const failedOut: Array<{ job_id: string; location_id: string; failed_out: true; stalled_ms: number }> = []
+  await Promise.all(
+    hopeless.map(async (j: any) => {
+      const stalledMs = failOut(j)
+      const mins = Math.round(stalledMs / 60000)
+      await supabaseService
+        .from('import_jobs')
+        .update({
+          status: 'failed',
+          error_message:
+            `Import stalled — no progress for ${mins}m (max-lifetime fail-out at ${Math.round(FAIL_AFTER_MS / 60000)}m). ` +
+            `Last phase: ${j.phase || 'unknown'}${j.total_records ? ` (${j.processed_records || 0}/${j.total_records})` : ''}. ` +
+            `Re-sync to resume from where it stopped.`,
+          completed_at: new Date().toISOString(),
+          segment_started_at: null,
+          location_claim_at: null,
+        })
+        .eq('id', j.id)
+        .eq('status', 'running')
+      console.warn(`[import-sweeper] FAILED OUT hopeless job ${j.id} (${j.location_id}) — stalled ${mins}m`)
+      failedOut.push({ job_id: j.id, location_id: j.location_id, failed_out: true, stalled_ms: stalledMs })
+    }),
+  )
+
   // ─── Re-poke each with the internal-secret header ──────────────
   // redirect: 'manual' so a 302 to the SSO login page is caught as a
   // failure (status=302) rather than silently followed to a 200 HTML page.
   const results: Array<{ job_id: string; location_id: string; ok: boolean; status?: number; redirected_to?: string; error?: string }> = []
   await Promise.all(
-    jobs.map(async (j: any) => {
+    resumable.map(async (j: any) => {
       const url = `${origin}/api/import/jobber-clients?location_id=${encodeURIComponent(j.location_id)}&_continue=1`
       try {
         const r = await fetch(url, {
@@ -119,6 +178,11 @@ export async function GET(req: NextRequest) {
   )
 
   const resumed = results.filter(r => r.ok).length
-  console.log(`[import-sweeper] resumed ${resumed}/${jobs.length} stalled jobs`)
-  return NextResponse.json({ resumed, checked: jobs.length, results })
+  console.log(`[import-sweeper] resumed ${resumed}/${resumable.length} re-pokable, failed out ${failedOut.length}/${jobs.length} stalled jobs`)
+  return NextResponse.json({
+    resumed,
+    checked: jobs.length,
+    failed_out: failedOut.length,
+    results: [...results, ...failedOut],
+  })
 }

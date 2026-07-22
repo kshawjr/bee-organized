@@ -73,6 +73,8 @@ import {
   selectUnwrittenClients,
   writeLoopShouldYield,
   writeImportCompletionStamp,
+  withResumeOverlap,
+  RESUME_REWRITE_OVERLAP,
 } from '@/lib/jobber-import'
 import {
   ensureEngagementForServiceRequest,
@@ -561,6 +563,25 @@ export async function POST(req: NextRequest) {
             from += PAGE
           }
         }
+        // Mid-client partial-write guard: re-process the most-recently-written
+        // clients even though their lead already exists, so a client killed
+        // mid-record (lead written, some children not) gets its children
+        // completed on resume instead of being skipped forever. Bounded +
+        // idempotent — see withResumeOverlap. Ordered by jobber_synced_at so
+        // the boundary client (last one the dead segment touched) is included.
+        if (alreadyWritten.size > 0) {
+          const { data: recent } = await supabaseService
+            .from('leads')
+            .select('jobber_client_id')
+            .eq('location_uuid', locUuid)
+            .not('jobber_client_id', 'is', null)
+            .order('jobber_synced_at', { ascending: false })
+            .limit(RESUME_REWRITE_OVERLAP)
+          const recentIds = (recent ?? []).map((r: any) => r.jobber_client_id)
+          const kept = withResumeOverlap(alreadyWritten, recentIds, RESUME_REWRITE_OVERLAP)
+          alreadyWritten.clear()
+          kept.forEach((id) => alreadyWritten.add(id))
+        }
         const unwritten = selectUnwrittenClients(clients, alreadyWritten)
         console.log(`[jobber-import] ${alreadyWritten.size} already written, ${unwritten.length} unwritten this segment`)
         // TEMP DIAGNOSTIC — remove after Portland stuck-at-1400 investigation.
@@ -874,13 +895,26 @@ export async function POST(req: NextRequest) {
             // (a long segment that takes >2 min would otherwise get a rival
             // POST from the sweeper — the atomic claim rejects it, but this
             // avoids the wasted invocation entirely).
-            await supabaseService
+            //
+            // Guarded on status='running' so this DOUBLES as a cooperative
+            // cancellation check: /api/import/cancel flips status to 'failed',
+            // so the update matches zero rows once a user cancels. We stop the
+            // segment cleanly (release the mutex, don't mark completed) —
+            // already-written rows stay (idempotent), and the job is resumable.
+            const { data: stillRunning } = await supabaseService
               .from('import_jobs')
               .update({
                 processed_records: processed,
                 location_claim_at: new Date().toISOString(),
               })
               .eq('id', jobId)
+              .eq('status', 'running')
+              .select('id')
+            if (!stillRunning || stillRunning.length === 0) {
+              console.log(`[jobber-import] job ${jobId} no longer running (cancelled) — halting segment`)
+              await releaseMutex()
+              return
+            }
           }
         }
 
@@ -957,15 +991,30 @@ export async function POST(req: NextRequest) {
             `Errors: ${stats.errors.length}`,
         })
 
-        await updateProgress(jobId, {
-          status: 'completed',
-          phase: 'done',
-          processed_records: clients.length,
-          completed_at: new Date().toISOString(),
-          ...(stats.errors.length > 0
-            ? { error_message: stats.errors.slice(0, 5).join(' | ') }
-            : {}),
-        })
+        // Guarded on status='running' so a cancel that landed after the last
+        // checkpoint can't be resurrected to 'completed' (and can't trigger the
+        // staging cleanup below, which would strip a resumable job's data). If
+        // it matched zero rows the job was cancelled — release + bail, leaving
+        // it 'failed' with staging intact so a later resume can finish it.
+        const { data: completedRow } = await supabaseService
+          .from('import_jobs')
+          .update({
+            status: 'completed',
+            phase: 'done',
+            processed_records: clients.length,
+            completed_at: new Date().toISOString(),
+            ...(stats.errors.length > 0
+              ? { error_message: stats.errors.slice(0, 5).join(' | ') }
+              : {}),
+          })
+          .eq('id', jobId)
+          .eq('status', 'running')
+          .select('id')
+        if (!completedRow || completedRow.length === 0) {
+          console.log(`[jobber-import] job ${jobId} cancelled at completion — not marking done, staging preserved`)
+          await releaseMutex()
+          return
+        }
 
         // Staging + per-location fetch state are only useful while an import
         // is running — drop everything for this LOCATION once we finish so

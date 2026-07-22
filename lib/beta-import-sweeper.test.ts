@@ -28,7 +28,9 @@ const h = vi.hoisted(() => {
   const builder = () => {
     state.touched = true
     const b: any = {}
-    for (const m of ['select', 'eq', 'or', 'order']) {
+    // 'update' is chainable + records its patch so fail-out tests can assert
+    // the job was marked failed; its .eq() chain is awaited by the route.
+    for (const m of ['select', 'eq', 'or', 'order', 'update']) {
       b[m] = (...args: any[]) => { state.ops.push([m, args]); return b }
     }
     b.limit = (...args: any[]) => {
@@ -50,6 +52,13 @@ import { GET } from '@/app/api/cron/import-sweeper/route'
 const GATED = 'https://bee-hub-dep123.vercel.app'      // deployment origin GET is invoked on — SSO-gated
 const PUBLIC = 'https://beehive.beeorganized.com'       // non-SSO custom domain the re-poke must use
 const URL_BASE = `${GATED}/api/cron/import-sweeper`
+
+// Claim staleness fixtures. Stale enough to be found + re-poked (past the 2min
+// re-poke cutoff) but NOT past the 15min max-lifetime fail-out — so these
+// exercise the resume path, not the give-up path.
+const RESUMABLE_STALE = () => new Date(Date.now() - 4 * 60 * 1000).toISOString()
+// Well past the 15min fail-out threshold → the sweeper gives up (marks failed).
+const HOPELESS_STALE = () => new Date(Date.now() - 20 * 60 * 1000).toISOString()
 
 // Minimal fetch Response stand-in (undici-shaped for the fields the sweeper reads).
 const resp = (over: Partial<{ status: number; type: string; location: string | null }> = {}) => ({
@@ -100,7 +109,7 @@ describe('GET /api/cron/import-sweeper — recovery', () => {
   })
 
   it('IDENTIFY: filters on status=running + a stale location_claim_at', async () => {
-    h.state.jobs = [{ id: 'job-1', location_id: 'loc_scottsdale', location_claim_at: '2020-01-01T00:00:00Z' }]
+    h.state.jobs = [{ id: 'job-1', location_id: 'loc_scottsdale', location_claim_at: RESUMABLE_STALE() }]
     await GET(stalled())
     const eqCols = h.state.ops.filter((o) => o[0] === 'eq').map((o) => o[1][0])
     expect(eqCols).toContain('status')
@@ -111,7 +120,7 @@ describe('GET /api/cron/import-sweeper — recovery', () => {
   })
 
   it('RE-POKE + ORIGIN + AUTH: resumes the stalled job via the NON-gated domain with the internal secret', async () => {
-    h.state.jobs = [{ id: 'job-1', location_id: 'loc_scottsdale', location_claim_at: '2020-01-01T00:00:00Z' }]
+    h.state.jobs = [{ id: 'job-1', location_id: 'loc_scottsdale', location_claim_at: RESUMABLE_STALE() }]
     const res = await GET(stalled())
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -134,7 +143,7 @@ describe('GET /api/cron/import-sweeper — recovery', () => {
   it('re-pokes every stalled job in the batch', async () => {
     h.state.jobs = [
       { id: 'a', location_id: 'loc_a', location_claim_at: null },
-      { id: 'b', location_id: 'loc_b', location_claim_at: '2020-01-01T00:00:00Z' },
+      { id: 'b', location_id: 'loc_b', location_claim_at: RESUMABLE_STALE() },
     ]
     const res = await GET(stalled())
     expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -144,7 +153,7 @@ describe('GET /api/cron/import-sweeper — recovery', () => {
   it('REDIRECT: an opaqueredirect (status 0) reads as a blocked re-poke, not a success', async () => {
     // Exactly what redirect:'manual' yields when the origin IS still SSO-gated.
     fetchMock.mockResolvedValue(resp({ status: 0, type: 'opaqueredirect' }))
-    h.state.jobs = [{ id: 'job-1', location_id: 'loc_scottsdale', location_claim_at: '2020-01-01T00:00:00Z' }]
+    h.state.jobs = [{ id: 'job-1', location_id: 'loc_scottsdale', location_claim_at: RESUMABLE_STALE() }]
     const res = await GET(stalled())
     const body = await res.json()
     expect(body.resumed).toBe(0)
@@ -153,10 +162,63 @@ describe('GET /api/cron/import-sweeper — recovery', () => {
 
   it('REDIRECT: a raw 302 is also counted as blocked, not resumed', async () => {
     fetchMock.mockResolvedValue(resp({ status: 302, location: 'https://vercel.com/sso' }))
-    h.state.jobs = [{ id: 'job-1', location_id: 'loc_scottsdale', location_claim_at: '2020-01-01T00:00:00Z' }]
+    h.state.jobs = [{ id: 'job-1', location_id: 'loc_scottsdale', location_claim_at: RESUMABLE_STALE() }]
     const res = await GET(stalled())
     const body = await res.json()
     expect(body.resumed).toBe(0)
     expect(body.results[0]).toMatchObject({ ok: false, status: 302, redirected_to: 'https://vercel.com/sso' })
+  })
+
+  // ── Max-lifetime fail-out (item 1b) ──────────────────────────────
+  it('FAIL-OUT: a job stalled past the 15min ceiling is marked failed, NOT re-poked', async () => {
+    h.state.jobs = [{
+      id: 'job-dead', location_id: 'loc_scottsdale',
+      location_claim_at: HOPELESS_STALE(), started_at: HOPELESS_STALE(),
+      phase: 'writing', processed_records: 607, total_records: 709,
+    }]
+    const res = await GET(stalled())
+
+    // Never re-poked — we gave up on it.
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    // It was UPDATEd to status:'failed' with both mutexes released.
+    const updates = h.state.ops.filter((o) => o[0] === 'update').map((o) => o[1][0])
+    expect(updates.length).toBe(1)
+    expect(updates[0]).toMatchObject({
+      status: 'failed',
+      segment_started_at: null,
+      location_claim_at: null,
+    })
+    expect(updates[0].error_message).toMatch(/stalled/i)
+    expect(updates[0].error_message).toContain('607/709')
+
+    const body = await res.json()
+    expect(body).toMatchObject({ resumed: 0, failed_out: 1, checked: 1 })
+    expect(body.results.find((r: any) => r.job_id === 'job-dead')).toMatchObject({ failed_out: true })
+  })
+
+  it('FAIL-OUT is guarded on status=running (never clobbers a natural transition)', async () => {
+    h.state.jobs = [{
+      id: 'job-dead', location_id: 'loc_x',
+      location_claim_at: HOPELESS_STALE(), started_at: HOPELESS_STALE(),
+      phase: 'fetching jobs', processed_records: 0, total_records: 0,
+    }]
+    await GET(stalled())
+    // The fail-out update chains .eq('id',…).eq('status','running').
+    const eqCols = h.state.ops.filter((o) => o[0] === 'eq').map((o) => o[1])
+    expect(eqCols).toEqual(expect.arrayContaining([['id', 'job-dead'], ['status', 'running']]))
+  })
+
+  it('MIXED batch: recent-stale is re-poked, hopeless is failed out', async () => {
+    h.state.jobs = [
+      { id: 'young', location_id: 'loc_young', location_claim_at: RESUMABLE_STALE(), started_at: RESUMABLE_STALE() },
+      { id: 'old',   location_id: 'loc_old',   location_claim_at: HOPELESS_STALE(),  started_at: HOPELESS_STALE(), phase: 'writing' },
+    ]
+    const res = await GET(stalled())
+    // Only the young one is re-poked.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toContain('loc_young')
+    const body = await res.json()
+    expect(body).toMatchObject({ resumed: 1, failed_out: 1, checked: 2 })
   })
 })

@@ -27,6 +27,8 @@ import {
   writeLoopShouldYield,
   selectUnwrittenClients,
   encodeJobberId,
+  withResumeOverlap,
+  RESUME_REWRITE_OVERLAP,
 } from '@/lib/jobber-import'
 
 describe('writeLoopShouldYield — two brakes before every record', () => {
@@ -85,6 +87,42 @@ describe('selectUnwrittenClients — idempotent resume, no double-write', () => 
   })
 })
 
+describe('withResumeOverlap — mid-client partial-write guard (item 5)', () => {
+  it('removes the most-recently-written ids so they get re-processed', () => {
+    const already = new Set(['1', '2', '3', '4', '5'])
+    // recent (jobber_synced_at desc) = the last segment touched 5,4,3
+    const kept = withResumeOverlap(already, ['5', '4', '3'], 3)
+    expect([...kept].sort()).toEqual(['1', '2'])
+  })
+
+  it('the boundary client (lead written, children maybe not) falls back into unwritten', () => {
+    const client = (n: string) => ({ id: encodeJobberId('Client', n) })
+    const clients = [client('10'), client('20'), client('30')]
+    // 10 + 20 fully landed; 30 was the in-flight client when the segment died.
+    const already = new Set(['10', '20', '30'])
+    const kept = withResumeOverlap(already, ['30'], 1) // 30 is the freshest jobber_synced_at
+    const unwritten = selectUnwrittenClients(clients, kept)
+    expect(unwritten.map((c) => c.id)).toEqual([client('30').id]) // 30 re-processed
+  })
+
+  it('re-processing is bounded — never re-scans the whole done prefix', () => {
+    const already = new Set(Array.from({ length: 500 }, (_, i) => String(i)))
+    const recent = ['499', '498', '497', '496', '495']
+    const kept = withResumeOverlap(already, recent, RESUME_REWRITE_OVERLAP)
+    expect(kept.size).toBe(500 - RESUME_REWRITE_OVERLAP) // only the overlap re-runs
+  })
+
+  it('tolerates null/undefined ids in the recent list', () => {
+    const already = new Set(['1', '2'])
+    const kept = withResumeOverlap(already, [null, undefined, '2'] as any, 5)
+    expect([...kept]).toEqual(['1'])
+  })
+
+  it('a fresh import (nothing already written) is a no-op', () => {
+    expect(withResumeOverlap(new Set(), [], 5).size).toBe(0)
+  })
+})
+
 // ── Route wiring source-pin ────────────────────────────────────
 // The giant 800s handler can't be executed in a unit test, so pin the
 // load-bearing wiring textually: the write loop consults the guard with the
@@ -120,5 +158,70 @@ describe('jobber-clients route — write-guard wiring', () => {
 
   it('self-continue routes through the non-SSO origin helper, not the raw deployment URL', () => {
     expect(src).toMatch(/resolveInternalOrigin\(url\.origin\)/)
+  })
+
+  // ── item 5: resume overlap re-processes the boundary client ──
+  it('the resume re-processes a bounded overlap of recently-written clients', () => {
+    // Orders leads by jobber_synced_at desc, caps at the overlap, and feeds
+    // them to withResumeOverlap so the mid-client boundary is re-processed.
+    expect(src).toMatch(/order\(\s*['"]jobber_synced_at['"]\s*,\s*\{\s*ascending:\s*false\s*\}\s*\)/)
+    expect(src).toContain('withResumeOverlap(alreadyWritten, recentIds, RESUME_REWRITE_OVERLAP)')
+    expect(src).toContain('.limit(RESUME_REWRITE_OVERLAP)')
+  })
+
+  // ── item 1a: cooperative cancellation ──
+  it('the write-loop checkpoint is guarded on status=running and bails on cancel', () => {
+    // The periodic progress update only matches a still-running job; zero rows
+    // means /api/import/cancel flipped it to failed → stop without completing.
+    expect(src).toMatch(/\.eq\(\s*['"]status['"]\s*,\s*['"]running['"]\s*\)\s*\.select\(\s*['"]id['"]\s*\)/)
+    expect(src).toMatch(/if\s*\(!stillRunning\s*\|\|\s*stillRunning\.length\s*===\s*0\)/)
+  })
+
+  it('the completion write is guarded on status=running so a cancel is not resurrected', () => {
+    const block = src.slice(src.indexOf("status: 'completed'"))
+    expect(block).toMatch(/\.eq\(\s*['"]status['"]\s*,\s*['"]running['"]\s*\)/)
+    expect(src).toMatch(/if\s*\(!completedRow\s*\|\|\s*completedRow\.length\s*===\s*0\)/)
+  })
+})
+
+// ── Cancel route source-pin ────────────────────────────────────
+describe('import cancel route', () => {
+  const src = readFileSync(
+    join(process.cwd(), 'app/api/import/cancel/route.ts'),
+    'utf8',
+  )
+  it('marks the job failed and releases BOTH mutexes, guarded on status=running', () => {
+    expect(src).toMatch(/status:\s*'failed'/)
+    expect(src).toMatch(/segment_started_at:\s*null,\s*location_claim_at:\s*null/)
+    expect(src).toMatch(/\.eq\(\s*['"]status['"]\s*,\s*['"]running['"]\s*\)/)
+  })
+  it('enforces the owner ownership check (slug resolved from the owner location)', () => {
+    expect(src).toContain("hubUser.role === 'owner'")
+    expect(src).toMatch(/forbidden/)
+  })
+  it('is idempotent on an already-terminal job', () => {
+    expect(src).toContain('already_terminal')
+  })
+})
+
+// ── Sweeper max-lifetime fail-out source-pin (item 1b) ─────────
+describe('import-sweeper max-lifetime fail-out', () => {
+  const src = readFileSync(
+    join(process.cwd(), 'app/api/cron/import-sweeper/route.ts'),
+    'utf8',
+  )
+  it('has a fail-out threshold comfortably past the 600s write budget', () => {
+    expect(src).toContain('FAIL_AFTER_MS = 15 * 60 * 1000')
+  })
+  it('splits hopeless jobs from resumable ones and only re-pokes the resumable', () => {
+    expect(src).toMatch(/const hopeless = jobs\.filter/)
+    expect(src).toMatch(/const resumable = jobs\.filter/)
+    expect(src).toMatch(/resumable\.map\(async/)
+  })
+  it('marks a hopeless job failed with both mutexes released, guarded on running', () => {
+    const block = src.slice(src.indexOf('hopeless.map'))
+    expect(block).toMatch(/status:\s*'failed'/)
+    expect(block).toMatch(/segment_started_at:\s*null,\s*location_claim_at:\s*null/)
+    expect(block).toMatch(/\.eq\(\s*['"]status['"]\s*,\s*['"]running['"]\s*\)/)
   })
 })

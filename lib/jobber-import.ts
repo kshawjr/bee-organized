@@ -364,6 +364,47 @@ export function selectUnwrittenClients<T extends { id?: string | null }>(
 }
 
 /**
+ * How many of the most-recently-written clients a resume re-processes even
+ * though their lead row already exists. See withResumeOverlap.
+ */
+export const RESUME_REWRITE_OVERLAP = 5
+
+/**
+ * Idempotent-resume data-safety guard for the mid-client partial-write gap.
+ *
+ * The write loop writes a client's lead FIRST, then its
+ * requests/quotes/jobs/invoices/engagements, then the lead's final stage. If
+ * a segment is hard-killed mid-client (past the wall-clock guard, an OOM, a
+ * platform fault), the lead row exists but some children never landed — and
+ * because `alreadyWritten` is keyed purely on lead existence, every future
+ * resume AND full re-import would treat that client as "done" and skip it
+ * forever. Historical records emit no webhook, so the children never backfill.
+ *
+ * Fix: the caller loads the FULL already-written set, then hands the ids of
+ * the `overlap` most-recently-written leads (ordered by jobber_synced_at desc)
+ * to this helper, which removes them from the set. Those clients fall back
+ * into the `unwritten` list and get re-processed. At most ONE client can be
+ * partially written when a segment dies (writes are strictly sequential and a
+ * client fully completes before the next starts), so a small overlap always
+ * covers the boundary; the margin absorbs any tie in jobber_synced_at. Every
+ * child upsert dedupes on its per-location jobber_*_id composite, so
+ * re-processing a fully-complete client is a harmless no-op — never a
+ * duplicate row. Bounded by `overlap` so a resume never re-scans the whole
+ * done prefix (the Portland stuck-at-1400 churn this filter exists to avoid).
+ */
+export function withResumeOverlap(
+  alreadyWritten: Set<string>,
+  recentWrittenIds: Array<string | null | undefined>,
+  overlap: number = RESUME_REWRITE_OVERLAP,
+): Set<string> {
+  const out = new Set(alreadyWritten)
+  for (const id of recentWrittenIds.slice(0, overlap)) {
+    if (id != null) out.delete(String(id))
+  }
+  return out
+}
+
+/**
  * Decide whether the write loop should stop THIS invocation and hand off to
  * the next segment (self-chain / sweeper). Two brakes, checked before each
  * record so we never get hard-killed mid-write at the 800s Vercel wall:

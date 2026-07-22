@@ -12086,9 +12086,12 @@ export function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboardin
   // Polling loop — fires once per jobId; chains setTimeout instead of
   // setInterval so a slow status fetch doesn't pile up overlapping requests.
   // Auto-continue: when the server checkpoints mid-import (phase starts with
-  // 'fetching' or 'batched' while status='running'), re-POST to launch the
-  // next segment. The server is fire-and-forget via waitUntil, so the POST
-  // returns immediately with the same job_id.
+  // 'fetching', 'batched', or 'writing' while status='running'), re-POST to
+  // launch the next segment. 'writing' matters: it's set on write-phase entry
+  // and held for a full batch, so a segment that dies while phase='writing'
+  // (before it flips to 'batched') would otherwise only recover via the cron
+  // sweeper — this lets an open tab drive its own recovery. The server is
+  // fire-and-forget via waitUntil, so the POST returns immediately.
   useEffect(() => {
     if (!jobId) return
     let stopped  = false
@@ -12101,7 +12104,7 @@ export function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboardin
       if (continuingRef.current) return
       if (d?.status !== 'running') return
       const phase = d?.phase || ''
-      if (!/^fetching|^batched/.test(phase)) return
+      if (!/^fetching|^batched|^writing/.test(phase)) return
       if (!locationId) return
       continuingRef.current = true
       try {
@@ -12158,6 +12161,17 @@ export function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboardin
 
   function tryAgain() {
     setJobId(null); setStatus(null); setSummary(null); setError(null)
+  }
+
+  // Cancel a stuck/running import: marks the job failed + releases both
+  // mutexes server-side. We don't reset local state — the poller observes
+  // status='failed' and the existing "Import failed / Try Again" path renders.
+  // Already-written rows stay (idempotent); the job is resumable.
+  async function cancelImport() {
+    if (!jobId) return
+    try {
+      await fetch('/api/import/cancel?job_id=' + encodeURIComponent(jobId), { method: 'POST' })
+    } catch { /* best-effort — the poller will still see the status flip */ }
   }
 
   // ─── done ──
@@ -12310,6 +12324,10 @@ export function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboardin
         {hasTotal && (
           <p style={{ fontSize:'10px', color:'#8a9e9a', textAlign:'right' }}>{pct}%</p>
         )}
+        <button onClick={cancelImport}
+          style={{ width:'100%', padding:'8px', marginTop:'4px', background:'transparent', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:500, color:'#8a9e9a', cursor:'pointer' }}>
+          Cancel import
+        </button>
       </div>
     )
   }
@@ -16844,8 +16862,10 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
   }, [locationId])
 
   // Status polling + auto-continue: when the server checkpoints mid-import
-  // (phase startsWith 'fetching' or 'batched' while status='running'), re-POST
-  // to launch the next segment. Server is fire-and-forget via waitUntil.
+  // (phase startsWith 'fetching', 'batched', or 'writing' while
+  // status='running'), re-POST to launch the next segment. 'writing' is held
+  // for a full batch, so covering it lets an open tab drive its own recovery
+  // instead of waiting on the sweeper. Server is fire-and-forget via waitUntil.
   useEffect(() => {
     if (importState !== 'running' || !jobId) return
     let cancelled = false
@@ -16858,7 +16878,7 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
       if (continuingRef.current) return
       if (d?.status !== 'running') return
       const phase = d?.phase || ''
-      if (!/^fetching|^batched/.test(phase)) return
+      if (!/^fetching|^batched|^writing/.test(phase)) return
       if (!locationId) return
       continuingRef.current = true
       try {
@@ -17023,6 +17043,18 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
     }
   }
 
+  // Cancel a stuck/running import: marks the job failed + releases both
+  // mutexes server-side, then flips the card to the error/Try-again state.
+  // Already-written rows stay (idempotent); the job is resumable.
+  async function cancelImport() {
+    if (!jobId) return
+    try {
+      await fetch('/api/import/cancel?job_id=' + encodeURIComponent(jobId), { method: 'POST' })
+    } catch { /* best-effort — server-side flip still happens */ }
+    setError('Import cancelled')
+    setImportState('error')
+  }
+
   // ─── mount check in flight — don't flash a clickable Start over a
   // possibly-running job ──
   if (checkingActive && importState === 'idle') return null
@@ -17068,6 +17100,10 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
               </p>
             </div>
           )}
+          <button onClick={cancelImport}
+            style={{ width:'100%', padding:'7px', marginTop:'8px', background:'transparent', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'9px', fontSize:'11.5px', fontFamily:'inherit', fontWeight:500, color:'#8a9e9a', cursor:'pointer' }}>
+            Cancel import
+          </button>
         </div>
       )
     }
@@ -17199,6 +17235,17 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
             <div style={{ height:'100%', width:`${progressPct}%`, background:'linear-gradient(90deg,#1a2e2b,#a8c9c4)', borderRadius:'3px', transition:'width 0.2s ease' }} />
           </div>
           <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'5px', textAlign:'right' }}>{progressPct}%</p>
+        </div>
+      )}
+
+      {/* Cancel — the running-state exit so a stuck job is never a dead-end
+          spinner. Marks the job failed + releases mutexes; resumable after. */}
+      {importState === 'running' && (
+        <div style={{ padding:'0 14px 12px' }}>
+          <button onClick={cancelImport}
+            style={{ width:'100%', padding:'8px', background:'transparent', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:500, color:'#8a9e9a', cursor:'pointer' }}>
+            Cancel import
+          </button>
         </div>
       )}
 
