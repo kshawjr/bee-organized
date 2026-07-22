@@ -22,6 +22,7 @@
 import { supabaseService } from './supabase-service'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
 import { writeSyncLog } from './sync-log'
+import { mapQuoteStatus, quoteStatusStampsApproval } from './quote-status-map'
 import {
   queryLeadMatches,
   classifyLeadMatches,
@@ -1141,26 +1142,17 @@ export async function upsertQuote(
   location_id: string,
 ) {
   const jobberQuoteId = extractJobberId(quote.id)
-  // Map Jobber's quoteStatus enum to local string columns. Both paths feed
-  // this one mapper: the webhook via SINGLE_QUOTE_QUERY and the bulk import
-  // via QUOTES_QUERY (both now select quoteStatus). Jobber's enum is
-  // draft / awaiting_response / changes_requested / approved / converted /
-  // archived. DRAFT was never sent, so it gets its own 'draft' state rather
-  // than the 'sent' fallback; AWAITING_RESPONSE is a sent quote awaiting a
-  // reply, so it correctly rides the 'sent' default. When quoteStatus is
-  // absent entirely (legacy callers) the fallback is still 'sent'.
-  const status = (quote.quoteStatus || '').toUpperCase()
-  const approvedAt = status === 'APPROVED' ? new Date().toISOString() : null
+  // Map Jobber's quoteStatus enum to local string columns via the ONE shared
+  // mapper (lib/quote-status-map). Both paths feed it: the webhook via
+  // SINGLE_QUOTE_QUERY and the bulk import via QUOTES_QUERY (both now select
+  // quoteStatus). The backfill script imports the same mapper, so the three
+  // can never drift.
+  const approvedAt = quoteStatusStampsApproval(quote.quoteStatus) ? new Date().toISOString() : null
   const payload: Record<string, any> = {
     service_request_id, lead_id, location_id,
     jobber_quote_id: jobberQuoteId,
     quote_url: quote.jobberWebUri || null,
-    status: status === 'APPROVED' ? 'approved'
-          : status === 'CONVERTED' ? 'approved'
-          : status === 'ARCHIVED' ? 'archived'
-          : status === 'CHANGES_REQUESTED' ? 'changes_requested'
-          : status === 'DRAFT' ? 'draft'
-          : 'sent',
+    status: mapQuoteStatus(quote.quoteStatus),
     subtotal:        quote.amounts?.subtotal       ? parseFloat(quote.amounts.subtotal)       : null,
     tax_amount:      quote.amounts?.taxAmount      ? parseFloat(quote.amounts.taxAmount)      : null,
     discount_amount: quote.amounts?.discountAmount ? parseFloat(quote.amounts.discountAmount) : null,
