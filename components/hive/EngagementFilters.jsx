@@ -17,7 +17,7 @@ const OPEN_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 // actually present in the loaded rows — dead options never show).
 export const STATUS_LABELS = {
   'Request': 'Requested', amber: 'Requested (Stale)',
-  sent: 'Sent', approved: 'Approved', changes_requested: 'Changes Requested',
+  draft: 'Draft', sent: 'Sent', approved: 'Approved', changes_requested: 'Changes Requested',
   scheduled: 'Scheduled', in_progress: 'In Progress', upcoming: 'Upcoming',
   owing: 'Owes', never_invoiced: 'Never Invoiced', paid: 'Paid', nurturing: 'Nurturing',
 }

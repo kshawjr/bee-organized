@@ -13,7 +13,7 @@ import EngagementPanel from '@/components/hive/EngagementPanel'
 import ClientDirectory from '@/components/hive/ClientDirectory'
 import InboxScreen from '@/components/hive/InboxScreen'
 import PersonCard from '@/components/hive/PersonCard'
-import { fmtTime, fmtShortTime } from '@/components/hive/shared/engagementStatus'
+import { fmtTime, fmtShortTime, deriveStatusChip } from '@/components/hive/shared/engagementStatus'
 
 const now = Date.now()
 const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString()
@@ -45,6 +45,7 @@ const ENGAGEMENTS = [
   eng({ stage: 'Request', created_at: daysAgo(25) }), // amber pre-nurture
   eng({ stage: 'Estimate', quotes: [{ id: 'q1', status: 'sent', total: 500, sent_at: daysAgo(2) }] }),
   eng({ stage: 'Estimate', quotes: [{ id: 'q2', status: 'approved', total: 900 }], repeat_count: 3, description: 'Kitchen + garage reorganization after the move — donation runs included.' }),
+  eng({ stage: 'Estimate', quotes: [{ id: 'qd', status: 'draft', total: 700, sent_at: daysAgo(1) }] }), // drafted, never sent
   eng({ stage: 'Job in Progress', jobs: [{ id: 'j1', status: 'upcoming', scheduled_start: new Date(now + 5 * 86400000).toISOString() }] }),
   eng({ stage: 'Final Processing', total_invoiced: 600, balance_owing: 620, invoices: [{ id: 'i1', status: 'sent', total: 620 }] }),
   eng({ stage: 'Final Processing', jobs: [{ id: 'j2', status: 'completed', completed_at: daysAgo(1) }] }), // never invoiced
@@ -105,6 +106,20 @@ describe('beta chips', () => {
     // shifted hour here and fail).
     expect(html).toContain(`Assessment · ${fmtShortTime(daysAheadAt(2, 19, 0))}`)
     expect(html).toContain(', 7pm')
+  })
+
+  it('draft quote surfaces a distinct Draft chip, but a sent quote outranks a lingering draft', () => {
+    // A draft was never sent — even though the import stamps sent_at from
+    // createdAt, the Draft state must win over the "Sent <date>" fallback.
+    const draftOnly = eng({ stage: 'Estimate', quotes: [{ id: 'qd', status: 'draft', total: 700, sent_at: daysAgo(1) }] })
+    expect(deriveStatusChip(draftOnly, { nowMs: now })).toMatchObject({ label: 'Draft', styleKey: 'draft' })
+
+    // A sent quote alongside a draft — sent wins (real work is out the door).
+    const draftAndSent = eng({ stage: 'Estimate', quotes: [
+      { id: 'qd', status: 'draft', total: 700, sent_at: daysAgo(3) },
+      { id: 'qs', status: 'sent', total: 800, sent_at: daysAgo(1) },
+    ] })
+    expect(deriveStatusChip(draftAndSent, { nowMs: now }).styleKey).toBe('sent')
   })
 
   it('fmtTime: compact local time, minutes only when non-zero, lowercase am/pm', () => {

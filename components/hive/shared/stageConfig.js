@@ -149,6 +149,7 @@ export const CHIP_STYLES = {
   'No contact info': QUIET_GRAY,
 
   // within-stage states (card chips)
+  draft:             QUIET_GRAY, // quote drafted, not yet sent — calm, not a problem
   sent:              BLUE,    // quote out, no answer yet — neutral default
   approved:          GREEN,   // quote approved
   changes_requested: AMBER,   // quote needs attention

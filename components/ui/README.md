@@ -71,7 +71,7 @@ rules (sentence-case buttons, uppercase-by-transform section labels).
 ### StatusChip
 `{ label, styleKey?, icon? }` — colored pill per the locked chip anatomy.
 `styleKey` is any `CHIP_STYLES` key (families above, plus every engagement
-stage, client status, and within-stage state: `sent`, `approved`,
+stage, client status, and within-stage state: `draft`, `sent`, `approved`,
 `changes_requested`, `nurturing`, `upcoming`, `scheduled`, `in_progress`,
 `owing`, `paid`, `never_invoiced`, `repeat`). Unknown keys → gray.
 

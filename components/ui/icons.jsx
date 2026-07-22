@@ -214,6 +214,7 @@ export const IconBulb = make(<>
 // Within-stage status → leading icon (mockup chips/status text). One map
 // so board chips and list status text pick identical glyphs.
 const STATUS_ICON = {
+  draft: IconFileText,
   sent: IconSend,
   approved: IconCheck,
   paid: IconCheck,

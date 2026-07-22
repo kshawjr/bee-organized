@@ -81,7 +81,7 @@ export const QUOTES_QUERY = `
   query GetQuotes($after: String) {
     quotes(first: 50, after: $after) {
       nodes {
-        id createdAt jobberWebUri
+        id createdAt jobberWebUri quoteStatus
         request { id }
         client { id }
         amounts { subtotal taxAmount discountAmount total }
@@ -1141,9 +1141,14 @@ export async function upsertQuote(
   location_id: string,
 ) {
   const jobberQuoteId = extractJobberId(quote.id)
-  // Map Jobber's quoteStatus enum to local string columns. The bulk
-  // import doesn't fetch quoteStatus (would explode complexity score),
-  // so when absent default to 'sent' as before.
+  // Map Jobber's quoteStatus enum to local string columns. Both paths feed
+  // this one mapper: the webhook via SINGLE_QUOTE_QUERY and the bulk import
+  // via QUOTES_QUERY (both now select quoteStatus). Jobber's enum is
+  // draft / awaiting_response / changes_requested / approved / converted /
+  // archived. DRAFT was never sent, so it gets its own 'draft' state rather
+  // than the 'sent' fallback; AWAITING_RESPONSE is a sent quote awaiting a
+  // reply, so it correctly rides the 'sent' default. When quoteStatus is
+  // absent entirely (legacy callers) the fallback is still 'sent'.
   const status = (quote.quoteStatus || '').toUpperCase()
   const approvedAt = status === 'APPROVED' ? new Date().toISOString() : null
   const payload: Record<string, any> = {
@@ -1154,6 +1159,7 @@ export async function upsertQuote(
           : status === 'CONVERTED' ? 'approved'
           : status === 'ARCHIVED' ? 'archived'
           : status === 'CHANGES_REQUESTED' ? 'changes_requested'
+          : status === 'DRAFT' ? 'draft'
           : 'sent',
     subtotal:        quote.amounts?.subtotal       ? parseFloat(quote.amounts.subtotal)       : null,
     tax_amount:      quote.amounts?.taxAmount      ? parseFloat(quote.amounts.taxAmount)      : null,

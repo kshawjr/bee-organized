@@ -336,6 +336,12 @@ export function deriveStatusChip(e, opts = {}) {
     case 'Estimate': {
       if (quotes.some(q => q.status === 'approved')) return { label: 'Approved', styleKey: 'approved' }
       if (quotes.some(q => q.status === 'changes_requested')) return { label: 'Changes Requested', styleKey: 'changes_requested' }
+      // A draft was never sent — surface it as its own calm state, but only
+      // when no quote on the engagement has actually gone out (a sent quote
+      // always outranks a lingering draft).
+      if (!quotes.some(q => q.status === 'sent') && quotes.some(q => q.status === 'draft')) {
+        return { label: 'Draft', styleKey: 'draft' }
+      }
       const latest = quotes.reduce((a, q) => Math.max(a, ts(q.sent_at)), 0)
       const when = latest ? fmtShort(latest) : null
       return { label: when ? `Sent ${when}` : 'Sent', styleKey: 'sent' }

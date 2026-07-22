@@ -223,6 +223,34 @@ describe('upsertQuote approved_at semantics', () => {
   })
 })
 
+describe('upsertQuote quoteStatus → local status mapping (ONE shared mapper)', () => {
+  // Every Jobber QuoteStatusTypeEnum value the bulk QUOTES_QUERY and the
+  // webhook SINGLE_QUOTE_QUERY can now supply, pinned to its local column.
+  const MAP: Array<[string | undefined, string]> = [
+    ['DRAFT', 'draft'],               // never sent — its own calm state
+    ['AWAITING_RESPONSE', 'sent'],    // sent, awaiting a reply — rides 'sent'
+    ['CHANGES_REQUESTED', 'changes_requested'],
+    ['APPROVED', 'approved'],
+    ['CONVERTED', 'approved'],
+    ['ARCHIVED', 'archived'],
+    [undefined, 'sent'],              // legacy caller with no quoteStatus
+  ]
+  for (const [enumVal, local] of MAP) {
+    it(`${enumVal ?? '(absent)'} → '${local}'`, async () => {
+      await callQuote({ ...QUOTE, quoteStatus: enumVal })
+      expect(h.state.tables.quotes.rows[0].status).toBe(local)
+    })
+  }
+
+  it('only APPROVED stamps approved_at; draft/sent leave it null', async () => {
+    await callQuote({ ...QUOTE, quoteStatus: 'DRAFT' })
+    expect(h.state.tables.quotes.rows[0].approved_at ?? null).toBe(null)
+    h.reset()
+    await callQuote({ ...QUOTE, quoteStatus: 'APPROVED' })
+    expect(h.state.tables.quotes.rows[0].approved_at).toBeTruthy()
+  })
+})
+
 describe('upsertJob quote-link healing (preserved behavior)', () => {
   it('links quote_id when the quote row exists, and a missed lookup cannot erase it', async () => {
     const t = h.state.tables
