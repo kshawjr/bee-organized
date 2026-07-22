@@ -303,6 +303,165 @@ describe('SendToJobberModal — the 4-step wizard, reskinned', () => {
   })
 })
 
+// ═══ 1b) the Job path (Path 2, restored) ══════════════════════
+// A second action tile that SKIPS the request + estimate and books the work
+// directly (client + property + JOB). The Request path above is untouched.
+describe('SendToJobberModal — the Job path (Path 2)', () => {
+  let host: HTMLDivElement
+  let root: Root
+  let posts: any[] = []
+  let sendResponse: any = { success: true, match_status: 'new_client', jobber_client_id: '555', jobber_job_id: '900' }
+  let sendOk = true
+
+  const mount = async (props: any = {}) => {
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    root = createRoot(host)
+    await act(async () => {
+      root.render(<SendToJobberModal person={person()} onDone={() => {}} onClose={() => {}} {...props} />)
+    })
+  }
+
+  beforeEach(() => {
+    posts = []
+    sendOk = true
+    sendResponse = { success: true, match_status: 'new_client', jobber_client_id: '555', jobber_job_id: '900' }
+    global.fetch = vi.fn(async (url: any, opts: any = {}) => {
+      const u = String(url)
+      if (u.includes('/send-to-jobber') && opts.method === 'POST') {
+        posts.push(JSON.parse(opts.body))
+        return { ok: sendOk, status: sendOk ? 200 : 500, json: async () => sendResponse } as any
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as any
+    }) as any
+  })
+
+  afterEach(async () => {
+    if (root) await act(async () => root.unmount())
+    if (host) host.remove()
+    vi.restoreAllMocks()
+  })
+
+  const buttons = () => Array.from(host.querySelectorAll('button'))
+  const contains = (t: string) => buttons().find(b => (b.textContent || '').includes(t))
+  const aria = (l: string) => buttons().find(b => b.getAttribute('aria-label') === l)
+  const setInput = async (el: HTMLInputElement, v: string) => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+    await act(async () => { setter.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })) })
+  }
+  const flush = async () => { await act(async () => { await Promise.resolve() }); await act(async () => { await Promise.resolve() }) }
+
+  const toJobDetails = async (props: any = {}) => {
+    await mount(props)
+    await act(async () => { aria('Create a Job')!.click() })
+    await act(async () => { contains('Continue')!.click() })
+  }
+  const fillJob = async (work = 'Garage cleanout', price = '450') => {
+    await setInput(host.querySelector('input[aria-label="Job work description"]') as HTMLInputElement, work)
+    await setInput(host.querySelector('input[aria-label="Job price"]') as HTMLInputElement, price)
+  }
+
+  it('renders TWO action tiles — Create a Request AND Create a Job', async () => {
+    await mount()
+    expect(aria('Create a Request')).toBeTruthy()
+    expect(aria('Create a Job')).toBeTruthy()
+  })
+
+  it('choosing Job routes to job-details (work + price), NOT request-details', async () => {
+    await toJobDetails()
+    expect(host.querySelector('input[aria-label="Job work description"]'), 'work field').toBeTruthy()
+    expect(host.querySelector('input[aria-label="Job price"]'), 'price field').toBeTruthy()
+    expect(host.querySelector('button[aria-label="Include assessment"]'), 'must NOT be request-details').toBeFalsy()
+  })
+
+  it('Review is disabled until a real work + price — no zero/placeholder line item can advance', async () => {
+    await toJobDetails()
+    expect((contains('Review') as HTMLButtonElement).disabled).toBe(true)
+    await fillJob('Work', '0')       // zero price rejected
+    expect((contains('Review') as HTMLButtonElement).disabled).toBe(true)
+    await fillJob('Work', '100')
+    expect((contains('Review') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('job-only send posts job_direct + the real line item — no request/assessment fields, no placeholder', async () => {
+    await toJobDetails()
+    await fillJob('Garage cleanout', '450')
+    await act(async () => { contains('Review')!.click() })
+    await act(async () => { contains('Send to Jobber')!.click() })
+    await flush()
+    expect(posts).toEqual([{
+      creation_type: 'job_direct',
+      line_items: [{ name: 'Garage cleanout', unitPrice: 450, quantity: 1 }],
+    }])
+  })
+
+  it('optional scheduling — EMPTY omits scheduled_at', async () => {
+    await toJobDetails()
+    await fillJob()
+    await act(async () => { contains('Review')!.click() })
+    await act(async () => { contains('Send to Jobber')!.click() })
+    await flush()
+    expect(posts[0].scheduled_at).toBeUndefined()
+  })
+
+  it('optional scheduling — a DATE rides as scheduled_at (YYYY-MM-DD)', async () => {
+    await toJobDetails()
+    await fillJob()
+    await setInput(host.querySelector('input[aria-label="Job start date"]') as HTMLInputElement, '2026-09-01')
+    await act(async () => { contains('Review')!.click() })
+    await act(async () => { contains('Send to Jobber')!.click() })
+    await flush()
+    expect(posts[0].scheduled_at).toBe('2026-09-01')
+  })
+
+  it('engagement_id rides ONLY when provided (idempotent pre-link contract)', async () => {
+    await toJobDetails({ engagementId: 'eng-7' })
+    await fillJob()
+    await act(async () => { contains('Review')!.click() })
+    await act(async () => { contains('Send to Jobber')!.click() })
+    await flush()
+    expect(posts[0]).toEqual({
+      creation_type: 'job_direct',
+      line_items: [{ name: 'Garage cleanout', unitPrice: 450, quantity: 1 }],
+      engagement_id: 'eng-7',
+    })
+  })
+
+  it('no address → Send DISABLED with the explain-itself message', async () => {
+    await toJobDetails({ person: person({ addresses: [] }) })
+    await fillJob()
+    await act(async () => { contains('Review')!.click() })
+    const send = contains('Send to Jobber') as HTMLButtonElement
+    expect(send.disabled, 'send blocked with no property address').toBe(true)
+    expect(host.textContent).toContain('Address required')
+    expect(host.textContent).toContain('before sending')
+  })
+
+  it('confirm itemizes a JOB (never a Request/estimate) and states the Job in Progress stage', async () => {
+    await toJobDetails()
+    await fillJob('Closet build', '1200')
+    await act(async () => { contains('Review')!.click() })
+    const t = host.textContent || ''
+    expect(t).toContain('Job in Progress')
+    expect(t).toContain('Property')
+    expect(t).not.toContain('Moves this deal to the Request stage')
+  })
+
+  it('success hands up stage "Job in Progress" + a JOB- ref and the raw job id', async () => {
+    const onDone = vi.fn()
+    await toJobDetails({ onDone })
+    await fillJob()
+    await act(async () => { contains('Review')!.click() })
+    await act(async () => { contains('Send to Jobber')!.click() })
+    await flush()
+    expect(onDone).toHaveBeenCalledTimes(1)
+    const [patch, result] = onDone.mock.calls[0]
+    expect(patch.stage).toBe('Job in Progress')
+    expect(patch.jobberRef).toBe('JOB-900')
+    expect(result).toMatchObject({ jobber_client_id: '555', jobber_job_id: '900' })
+  })
+})
+
 // ═══ 2) the stale-button fix — overlays flip WITHOUT a refetch ══
 // The record's OWN loaded data still says jobber_client_id:null; the live
 // jobberLinks patch is what flips Send → "Open in Jobber" in place.

@@ -545,12 +545,24 @@ describe('introspection-gated verdicts (live schema 2026-07-11)', () => {
     expect(route).toContain('REQUEST_ASSIGN_RETRY') // sync_log breadcrumb
   })
 
-  it("I: job_direct is GONE from the send popup (JobCreateAttributes.invoicing! is uncollected); the server 400 gate stays", () => {
+  it("I (restored 2026-07-21): job_direct is a LIVE path — the 400 gate is gone and jobCreate ships with a defaulted invoicing", () => {
+    const route = readFileSync('app/api/leads/[id]/send-to-jobber/route.ts', 'utf8')
+    // the retirement 400-gate is removed — the path is no longer refused
+    expect(route).not.toContain("Direct job creation isn't supported yet")
+    // the mutation is restored on the CURRENT schema (arg is JobCreateAttributes!,
+    // NOT the retired JobCreateInput! — introspected 2026-07-21)
+    expect(route).toContain('const JOB_CREATE_MUTATION')
+    expect(route).toContain('mutation JobCreate($input: JobCreateAttributes!)')
+    expect(route).toContain("} else if (creation_type === 'job_direct') {")
+    // invoicing is the one required attribute we default; line items are the
+    // real values collected in the wizard (no placeholder)
+    expect(route).toMatch(/invoicingType:\s*'FIXED_PRICE'/)
+    expect(route).toMatch(/invoicingSchedule:\s*'ON_COMPLETION'/)
+    expect(route).toContain('lineItems:')
+    // the retired bespoke BeeHub "Create a Job Directly" popup copy stays gone
+    // (the shared SendToJobberModal replaced BeeHub's hand-rolled popup)
     const popup = readFileSync('components/BeeHub.jsx', 'utf8')
     expect(popup).not.toContain('Create a Job Directly')
-    expect(popup).not.toContain("'job_direct'\n        : 'request_only'")
-    const route = readFileSync('app/api/leads/[id]/send-to-jobber/route.ts', 'utf8')
-    expect(route).toContain("creation_type === 'job_direct'") // belt-and-suspenders gate
   })
 
   it('A2: no invoice mutation ships anywhere in the hive chunk — deep links only (no invoiceMarkAsSent/invoiceClose calls)', () => {

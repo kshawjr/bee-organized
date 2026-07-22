@@ -42,7 +42,7 @@ import { jobberGraphQL, jobberMutation } from '@/lib/jobber'
 import { writeSyncLog } from '@/lib/sync-log'
 import { requireIanaTimezone } from '@/lib/drip-time'
 import { isLocationReadOnly } from '@/lib/read-only-access'
-import { upsertServiceRequest } from '@/lib/jobber-import'
+import { upsertServiceRequest, upsertJob } from '@/lib/jobber-import'
 import { attachToEngagement } from '@/lib/engagements'
 import {
   buildContactEditFields,
@@ -66,6 +66,7 @@ type Stage =
   | 'property_create'
   | 'request_create'
   | 'assessment_create'
+  | 'job_create'
   | 'assignment'
   | 'writeback'
 
@@ -266,6 +267,31 @@ const APPOINTMENT_EDIT_ASSIGNMENT_MUTATION = /* GraphQL */ `
   }
 `
 
+// Path 2 (job-only): create a job directly, skipping request + estimate.
+// Live-schema introspection (2026-07-21, scripts/introspect-jobber-schema.mjs)
+// corrected the retired-era assumptions:
+//   · the mutation arg is `JobCreateAttributes!` (NOT the old `JobCreateInput!`
+//     — that type no longer exists);
+//   · the ONLY genuinely-required attributes are `propertyId: EncodedId!` and
+//     `invoicing: JobInvoicingAttributes!`. jobFormIds / notes / lineItems /
+//     customFields are all nullable — the "newly-required" list that retired
+//     this path in 232af24 was secondhand and is stale.
+// The response selects the same Job fields the import reads (JOBS_QUERY) so the
+// engagement pre-link's upsertJob writes a coherent row (real jobStatus → no
+// unmapped-status alarm) and the JOB_CREATE webhook heals the rest.
+const JOB_CREATE_MUTATION = /* GraphQL */ `
+  mutation JobCreate($input: JobCreateAttributes!) {
+    jobCreate(input: $input) {
+      job {
+        id createdAt jobberWebUri title jobStatus startAt completedAt total
+        client { id }
+        property { id }
+      }
+      userErrors { message path }
+    }
+  }
+`
+
 // ── handler ──────────────────────────────────────────────────────────────────
 
 export async function POST(
@@ -296,16 +322,6 @@ export async function POST(
       allowed: ALLOWED_CREATION_TYPES,
     })
   }
-  // job_direct is gated off until JobCreateAttributes' newly-required fields
-  // (jobFormIds, notes, invoicing, lineItems, customFields) have product-
-  // defined defaults. See JOB_CREATE_MUTATION below for the schema context.
-  if (creation_type === 'job_direct') {
-    return fail(
-      'validation',
-      "Direct job creation isn't supported yet. Use Request (with or without Assessment) instead.",
-      400,
-    )
-  }
   const scheduled_assessment_at: string | undefined = body.scheduled_assessment_at
   const assessment_type: 'in-person' | 'virtual' | undefined = body.assessment_type
   if (creation_type === 'request_with_assessment') {
@@ -328,6 +344,45 @@ export async function POST(
     }
   }
 
+  // ── job_direct fields (Path 2 — skip request + estimate) ─────────
+  // Path 2's premise is the work is ALREADY sold, so the price is known:
+  // we require at least one real line item (name + unitPrice) rather than
+  // shipping a zero/placeholder someone must fix in Jobber. scheduled_at
+  // (optional, YYYY-MM-DD) sets the job's target start date via
+  // TimeframeAttributes.startAt; empty leaves the job unscheduled.
+  type JobLineItem = { name: string; unitPrice: number; quantity: number }
+  let jobLineItems: JobLineItem[] = []
+  let jobScheduledDate: string | null = null
+  if (creation_type === 'job_direct') {
+    const raw = Array.isArray(body.line_items) ? body.line_items : []
+    if (raw.length === 0) {
+      return fail('validation', 'Cannot create a job: at least one line item (work + price) is required.', 400)
+    }
+    for (const li of raw) {
+      const name = typeof li?.name === 'string' ? li.name.trim() : ''
+      const unitPrice = Number(li?.unitPrice)
+      const quantity = li?.quantity == null ? 1 : Number(li.quantity)
+      if (!name) {
+        return fail('validation', 'Cannot create a job: every line item needs a work description.', 400)
+      }
+      if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+        return fail('validation', 'Cannot create a job: every line item needs a real price greater than zero.', 400)
+      }
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return fail('validation', 'Cannot create a job: line item quantity must be greater than zero.', 400)
+      }
+      jobLineItems.push({ name, unitPrice, quantity })
+    }
+    if (body.scheduled_at != null && String(body.scheduled_at).trim()) {
+      const d = String(body.scheduled_at).trim()
+      // TimeframeAttributes.startAt is an ISO8601Date (YYYY-MM-DD).
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || Number.isNaN(Date.parse(d))) {
+        return fail('validation', `Cannot create a job: scheduled date is not a valid date ("${d}").`, 400)
+      }
+      jobScheduledDate = d
+    }
+  }
+
   // Optional founded-engagement link (decoupled founding). Validated
   // against the lead below, before any Jobber mutation fires.
   const engagementId: string | null =
@@ -335,12 +390,14 @@ export async function POST(
       ? body.engagement_id.trim()
       : null
 
-  // Address is only mandatory for in-person assessments. request_only and
-  // virtual assessments proceed without a property — mirrors the Deluge
-  // reference, which skipped property creation when street1 was empty.
-  // (job_direct also needs an address but is gated above.)
+  // Address is mandatory for in-person assessments AND for job_direct
+  // (JobCreateAttributes.propertyId is REQUIRED — a job needs a property,
+  // a property needs an address). request_only and virtual assessments
+  // proceed without a property — mirrors the Deluge reference, which
+  // skipped property creation when street1 was empty.
   const addressRequired =
-    creation_type === 'request_with_assessment' && assessment_type === 'in-person'
+    (creation_type === 'request_with_assessment' && assessment_type === 'in-person') ||
+    creation_type === 'job_direct'
 
   // ── Load lead + location + assigned user ────────────────────────
   const { data: lead, error: leadErr } = await supabaseService
@@ -583,6 +640,7 @@ export async function POST(
   // ─────────────────────────────────────────────────────────────────
   let jobberRequestGlobalId:    string | null = null
   let jobberAssessmentGlobalId: string | null = null
+  let jobberJobGlobalId:        string | null = null
 
   const requestTitle =
     (lead.name || `${firstName} ${lastName}`.trim() || 'Service Request').slice(0, 200)
@@ -725,10 +783,105 @@ export async function POST(
         }
       }
     }
+  } else if (creation_type === 'job_direct') {
+    // ── Path 2: job-only (skip request + estimate) ────────────────
+    // propertyId is REQUIRED by JobCreateAttributes. It is guaranteed
+    // non-null here: address was mandated above (addressRequired) and a
+    // property was created/reused in step 3.
+    if (!jobberPropertyGlobalId) {
+      return fail('property_create', 'job_requires_property')
+    }
+    const jobInput: Record<string, any> = {
+      propertyId: jobberPropertyGlobalId,
+      title:      requestTitle,
+      // invoicing is the ONLY required attribute beyond propertyId (live
+      // schema 2026-07-21). Default = a one-off, fixed-price job invoiced
+      // on completion: matches Path 2's premise (work sold at a known
+      // price → one real line item) and Jobber's own default for a one-off
+      // job. FIXED_PRICE (price is known, not visit-metered); ON_COMPLETION
+      // (invoice when done — NEVER would block invoicing; PER_VISIT /
+      // PERIODIC are for visit-based / recurring contracts).
+      invoicing: {
+        invoicingType:     'FIXED_PRICE',
+        invoicingSchedule: 'ON_COMPLETION',
+      },
+      // Real line items collected in the wizard — never a placeholder.
+      // name = the work description, unitPrice = the sold price.
+      // saveToProductsAndServices false: don't add one-off work to the
+      // account's reusable Products & Services catalog.
+      lineItems: jobLineItems.map((li) => ({
+        name:                      li.name,
+        unitPrice:                 li.unitPrice,
+        quantity:                  li.quantity,
+        saveToProductsAndServices: false,
+      })),
+      // jobFormIds / notes / customFields omitted: all nullable, and each
+      // is account-specific (unknown form ids / custom-field definitions
+      // would error; a placeholder note is junk). The owner adds these in
+      // Jobber if wanted.
+    }
+    // Optional scheduling — target START DATE only (TimeframeAttributes.
+    // startAt, a typed ISO8601Date the import already reads into
+    // jobs.scheduled_start). Full visit-on-calendar scheduling needs
+    // Jobber's opaque ICalendarRule scalar, which we will not hand-forge;
+    // the owner slots the visit time in Jobber. Empty = unscheduled.
+    if (jobScheduledDate) {
+      jobInput.timeframe = { startAt: jobScheduledDate }
+    }
+    // Owner assignment at creation — mirror the request path's salespersonId
+    // (non-fatal: retry once WITHOUT it if Jobber rejects a stale roster id).
+    if (salesPersonJobberId) jobInput.salespersonId = salesPersonJobberId
+    let jobCreate = await jobberMutation(locationSlug, JOB_CREATE_MUTATION, {
+      input: jobInput,
+    })
+    if (jobCreate.userErrors?.length && jobInput.salespersonId) {
+      console.warn('[send-to-jobber] jobCreate with salespersonId failed — retrying unassigned', {
+        leadId, salespersonId: jobInput.salespersonId,
+        userErrors: JSON.stringify(jobCreate.userErrors),
+      })
+      await writeSyncLog({
+        location_id: locationSlug,
+        entity_id: leadId,
+        entity_type: 'client',
+        status: 'success',
+        message: `[send-to-jobber] topic=JOB_ASSIGN_RETRY salespersonId=${jobInput.salespersonId} rejected (${jobCreate.userErrors[0]?.message ?? 'unknown'}) — job created unassigned`,
+      })
+      delete jobInput.salespersonId
+      jobCreate = await jobberMutation(locationSlug, JOB_CREATE_MUTATION, {
+        input: jobInput,
+      })
+    }
+    if (jobCreate.userErrors?.length) {
+      return fail('job_create', jobCreate.userErrors[0].message)
+    }
+    const jobRec = jobCreate.data?.jobCreate?.job || null
+    jobberJobGlobalId = jobRec?.id || null
+    if (!jobberJobGlobalId) {
+      return fail('job_create', 'job_create_returned_no_id')
+    }
+
+    // Founded-engagement pre-link (mirrors the request path). When the send
+    // rides on an already-founded engagement, pre-write the local jobs row
+    // and attach it to that engagement NOW — so the JOB_CREATE webhook
+    // (upsertJob merges by jobber_job_id; resolveEngagementForChild founds
+    // only when the job has no engagement_id) attaches idempotently instead
+    // of founding a SECOND engagement for the same job. The response selects
+    // the full Job shape so upsertJob writes a coherent row (real jobStatus
+    // → no unmapped-status alarm). Non-fatal: the Jobber side already
+    // succeeded; a failed local link degrades to webhook-founds and is
+    // logged. Bare sends (no engagementId) skip this and let the webhook
+    // found via rule 5 exactly as before — a job self-founds, no double.
+    if (engagementId) {
+      try {
+        const jRes = await upsertJob(jobRec, null, leadId, locationSlug)
+        await attachToEngagement('jobs', jRes.id, engagementId)
+      } catch (err: any) {
+        console.error('[send-to-jobber] founded-engagement job link failed', {
+          leadId, engagementId, error: err?.message || String(err),
+        })
+      }
+    }
   }
-  // job_direct branch removed: gated at validation. Restore the mutation
-  // when JobCreateAttributes' required fields are wired up — schema
-  // confirmed via introspection, see commit history for the prior shape.
 
   // ─────────────────────────────────────────────────────────────────
   // 5. Writeback to lead
@@ -737,10 +890,13 @@ export async function POST(
   const jobberPropertyId   = extractJobberId(jobberPropertyGlobalId)
   const jobberRequestId    = extractJobberId(jobberRequestGlobalId)
   const jobberAssessmentId = extractJobberId(jobberAssessmentGlobalId)
+  const jobberJobId        = extractJobberId(jobberJobGlobalId)
 
   const typeLabel = creation_type === 'request_only'
     ? 'Request'
-    : 'Request + Assessment'
+    : creation_type === 'request_with_assessment'
+      ? 'Request + Assessment'
+      : 'Job'
   const syncedAtIso = new Date().toISOString()
 
   const writeback: Record<string, any> = {
@@ -748,10 +904,18 @@ export async function POST(
     jobber_property_id:   jobberPropertyId,
     jobber_request_id:    jobberRequestId    ?? lead.jobber_request_id ?? null,
     jobber_assessment_id: jobberAssessmentId ?? lead.jobber_assessment_id ?? null,
+    jobber_job_id:        jobberJobId        ?? lead.jobber_job_id ?? null,
     jobber_match_status:  matchStatus,
     jobber_sync_status:   `Success: ${typeLabel} — ${syncedAtIso.slice(0, 19)}`,
     jobber_synced_at:     syncedAtIso,
     updated_at:           syncedAtIso,
+  }
+  // Job path: mirror the JOB_CREATE webhook's lead-level scheduled_at write
+  // so the lead reflects the target start date immediately (webhook heals it).
+  if (creation_type === 'job_direct') {
+    writeback.scheduled_at = jobScheduledDate
+      ? new Date(`${jobScheduledDate}T00:00:00`).toISOString()
+      : (lead.scheduled_at ?? null)
   }
 
   const { error: writeErr } = await supabaseService
@@ -810,6 +974,7 @@ export async function POST(
       jobber_client_id:     jobberClientId,
       jobber_request_id:    jobberRequestId,
       jobber_assessment_id: jobberAssessmentId,
+      jobber_job_id:        jobberJobId,
     })
   }
 
@@ -817,15 +982,16 @@ export async function POST(
   await writeSyncLog({
     location_id:      locationSlug,
     entity_id:        leadId,
-    entity_type:      'request',
+    entity_type:      creation_type === 'job_direct' ? 'job' : 'request',
     direction:        'outbound',
-    jobber_record_id: jobberRequestId || jobberClientId || '',
+    jobber_record_id: (creation_type === 'job_direct' ? jobberJobId : jobberRequestId) || jobberClientId || '',
     status:           'success',
     message:
       `Send-to-Jobber (${typeLabel}); match=${matchStatus}; ` +
       `client=${jobberClientId}` +
       (jobberRequestId    ? `; request=${jobberRequestId}`    : '') +
       (jobberAssessmentId ? `; assessment=${jobberAssessmentId}` : '') +
+      (jobberJobId        ? `; job=${jobberJobId}`            : '') +
       (engagementId       ? `; engagement=${engagementId}`    : '') +
       `; contact=phone:${contactWriteback.phone},email:${contactWriteback.email}`,
   })
@@ -837,6 +1003,7 @@ export async function POST(
     jobber_property_id:   jobberPropertyId,
     jobber_request_id:    jobberRequestId,
     jobber_assessment_id: jobberAssessmentId,
+    jobber_job_id:        jobberJobId,
     contact_writeback:    contactWriteback,
   })
 }

@@ -6,17 +6,22 @@
 // bespoke Popup (a fixed div, hardcoded colors, no mobile sheet, no Esc,
 // no scroll-lock) that lived in BeeHub.
 //
-// The 4-step wizard is preserved EXACTLY: 'history' -> 'action' ->
-// 'request-details' -> 'confirm' (initial 'history' only when the person
-// already carries a linked jobberClient, else 'action'). The endpoint, the
-// request body, buildScheduledIso, the creation_type derivation, the
-// assessment toggle/type/date/time picker, and the address-required guard
-// are byte-for-byte the same behavior — only the chrome changed.
+// The wizard: 'history' -> 'action' -> details -> 'confirm' (initial
+// 'history' only when the person already carries a linked jobberClient, else
+// 'action'). The action chooser routes to one of two details steps:
+//   · 'request-details' — Request path (UNCHANGED, byte-for-byte: the
+//     endpoint, request body, buildScheduledIso, the request creation_type
+//     derivation, the assessment toggle/type/date/time picker, and the
+//     assessment address guard are exactly as before).
+//   · 'job-details' — Job path (Path 2, restored): one real line item
+//     (work + price, never a placeholder) + an OPTIONAL start date; a job
+//     always needs a property, so the address guard is unconditional here.
 //
 // ONE CLICK CREATES REAL JOBBER RECORDS (client / property / request /
-// assessment). The confirm step is the only guard; it spells out every
-// record this send will create (variant 2) and keeps the live-account
-// notice so the weight of the button is honest.
+// assessment, or client / property / job). The confirm step is the only
+// guard; it spells out every record this send will create — honestly per
+// path (a Job confirm never claims a request or estimate) — and keeps the
+// live-account notice so the weight of the button is honest.
 //
 // THIS COMPONENT DOES NOT OWN THE AFTER-SUCCESS. onDone hands the caller
 // (a) the person-shape patch it always handed up AND (b) the raw Jobber
@@ -39,7 +44,7 @@ import { T } from './shared/tokens'
 import { formatFullDate } from './shared/engagementStatus'
 import {
   IconFileText, IconMapPin, IconMessage, IconCalendar, IconClock,
-  IconCheck, IconSend, IconAlertTriangle,
+  IconCheck, IconSend, IconAlertTriangle, IconHammer, IconCash,
 } from '@/components/ui/icons'
 
 // SIZING (standing preference — compact, square-ish, never chunky). Shared
@@ -49,11 +54,14 @@ import {
 // full-width slab.
 const MODAL_WIDTH = 380
 
-// One action today — the direct-job option was retired (the server 400-gates
-// job_direct since JobCreateAttributes grew required fields we don't
-// collect). The chooser stays a step so the wizard's shape is unchanged.
+// Two action paths. Request (default) founds at the Request stage and can
+// attach an assessment. Job (Path 2, restored) skips the request AND the
+// estimate and books the work directly — for work that's already sold; it
+// founds the engagement at "Job in Progress". Selecting Job routes to a
+// job-details step (line items + optional schedule) instead of request-details.
 const ACTIONS = [
   { key: 'request', Icon: IconFileText, title: 'Create a Request', desc: 'Add a request in Jobber. Optionally attach an assessment.' },
+  { key: 'job',     Icon: IconHammer,   title: 'Create a Job',     desc: 'Skip the request and estimate — book the work directly. For work already sold.' },
 ]
 
 const ASSESSMENT_TYPES = [
@@ -122,6 +130,13 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
     if (person.assessment) return person.assessment.split(' at ')[1] || '10:00 AM'
     return '10:00 AM'
   })
+  // Job path (Path 2). One real line item — work description + price — plus
+  // an OPTIONAL start date (empty = unscheduled; the owner slots the visit
+  // in Jobber). Path 2's premise is the work is already sold, so the price
+  // is known; we never ship a zero/placeholder line item.
+  const [jobWork, setJobWork] = useState('')
+  const [jobPrice, setJobPrice] = useState('')
+  const [jobDate, setJobDate] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [errorMsg, setErrorMsg] = useState(null)
 
@@ -145,8 +160,18 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
   }
   const hasAddress = leadHasUsableAddress(person)
   const wantsAssessment = action === 'request' && includeAssessment && !!date
-  const addressRequired = wantsAssessment && assessmentType === 'in-person'
+  // Address is required for an in-person assessment AND for any job (a job
+  // needs a property, a property needs an address — server-mandated too).
+  const addressRequired =
+    (wantsAssessment && assessmentType === 'in-person') || action === 'job'
   const blockSendForAddress = addressRequired && !hasAddress
+
+  // Job line-item completeness — a real price, greater than zero. Gates both
+  // the job-details "Review →" and the confirm "Send".
+  const jobPriceNum = Number(String(jobPrice).replace(/[^0-9.]/g, ''))
+  const jobPriceValid = Number.isFinite(jobPriceNum) && jobPriceNum > 0
+  const jobDetailsComplete = !!jobWork.trim() && jobPriceValid
+  const blockSendForJob = action === 'job' && !jobDetailsComplete
 
   // 15-min increments 7am–7pm.
   const times = []
@@ -176,20 +201,32 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
     if (submitting) return
     setErrorMsg(null)
 
+    const isJob = action === 'job'
     const isReq = action === 'request'
     const hasAssessment = isReq && includeAssessment && date
-    // job_direct retired — the chooser only offers Request, matching the
-    // server's validation gate.
-    const creationType = hasAssessment ? 'request_with_assessment' : 'request_only'
 
-    const body = { creation_type: creationType }
-    if (engagementId) body.engagement_id = engagementId
-    if (hasAssessment) {
-      const iso = buildScheduledIso()
-      if (!iso) { setErrorMsg('Pick a date for the assessment'); return }
-      body.scheduled_assessment_at = iso
-      body.assessment_type = assessmentType
+    let body
+    if (isJob) {
+      // Path 2 — job-only. Send the real line item as collected; never a
+      // placeholder. scheduled_at (YYYY-MM-DD) is optional.
+      if (!jobWork.trim()) { setErrorMsg('Add a work description for the job'); return }
+      if (!jobPriceValid) { setErrorMsg('Add a price greater than zero'); return }
+      body = {
+        creation_type: 'job_direct',
+        line_items: [{ name: jobWork.trim(), unitPrice: jobPriceNum, quantity: 1 }],
+      }
+      if (jobDate) body.scheduled_at = jobDate
+    } else {
+      const creationType = hasAssessment ? 'request_with_assessment' : 'request_only'
+      body = { creation_type: creationType }
+      if (hasAssessment) {
+        const iso = buildScheduledIso()
+        if (!iso) { setErrorMsg('Pick a date for the assessment'); return }
+        body.scheduled_assessment_at = iso
+        body.assessment_type = assessmentType
+      }
     }
+    if (engagementId) body.engagement_id = engagementId
 
     setSubmitting(true)
     let json
@@ -254,6 +291,7 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
       {
         jobber_client_id: json.jobber_client_id || null,
         jobber_request_id: json.jobber_request_id || null,
+        jobber_job_id: json.jobber_job_id || null,
         jobber_assessment_id: json.jobber_assessment_id || null,
         match_status: json.match_status || null,
       },
@@ -261,10 +299,13 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
   }
 
   // Linear step path (for the progress bar). history is present only when the
-  // person is already a linked client.
+  // person is already a linked client. The middle step depends on the chosen
+  // action — Job routes through 'job-details', everything else through
+  // 'request-details'.
+  const detailStep = action === 'job' ? 'job-details' : 'request-details'
   const steps = person.jobberClient
-    ? ['history', 'action', 'request-details', 'confirm']
-    : ['action', 'request-details', 'confirm']
+    ? ['history', 'action', detailStep, 'confirm']
+    : ['action', detailStep, 'confirm']
   const stepIdx = steps.indexOf(step)
 
   const head = [person.name, person.locationName].filter(Boolean).join(' · ')
@@ -325,7 +366,7 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
             </div>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
               <button type="button" onClick={onClose} style={ghostBtn}>Cancel</button>
-              <button type="button" disabled={!action} onClick={() => action && setStep('request-details')} style={primaryBtn(!!action)}>Continue →</button>
+              <button type="button" disabled={!action} onClick={() => action && setStep(action === 'job' ? 'job-details' : 'request-details')} style={primaryBtn(!!action)}>Continue →</button>
             </div>
           </>
         )}
@@ -394,6 +435,78 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
           </>
         )}
 
+        {step === 'job-details' && (
+          <>
+            <p style={{ fontSize: '12px', color: T.ink.muted, lineHeight: 1.4 }}>
+              Books the work directly — no request, no estimate. The work is already sold, so enter the real price.
+            </p>
+
+            {/* One real line item — work + price. Path 2 never ships a
+                placeholder, so the price is required and must be > 0. */}
+            <div>
+              <label style={lbl}>Work description</label>
+              <input
+                type="text"
+                value={jobWork}
+                onChange={e => setJobWork(e.target.value)}
+                placeholder="e.g. Garage organization — full service"
+                style={inp}
+                aria-label="Job work description"
+              />
+            </div>
+
+            <div>
+              <label style={lbl}>Price</label>
+              <div style={{ position: 'relative' }}>
+                <IconCash size={16} style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', color: T.ink.quiet, pointerEvents: 'none' }} />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={jobPrice}
+                  onChange={e => setJobPrice(e.target.value)}
+                  placeholder="0.00"
+                  style={{ ...inp, paddingLeft: '32px' }}
+                  aria-label="Job price"
+                />
+              </div>
+              {jobPrice && !jobPriceValid && (
+                <p style={{ fontSize: '12px', color: T.state.warning.deep, marginTop: '6px' }}>Enter a price greater than zero.</p>
+              )}
+            </div>
+
+            {/* Optional scheduling — a START DATE (mirrors the assessment date
+                picker). Empty = unscheduled; the owner slots the visit in
+                Jobber. Time-of-day isn't collected: a job's start is a date,
+                and the precise visit time is set in Jobber. */}
+            <div>
+              <label style={lbl}>Schedule (optional)</label>
+              <input
+                type="date"
+                value={jobDate}
+                onChange={e => setJobDate(e.target.value)}
+                min={new Date().toISOString().split('T')[0]}
+                style={inp}
+                aria-label="Job start date"
+              />
+              <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '6px' }}>
+                {jobDate ? `Starts ${jobDate}` : 'Leave empty to create the job unscheduled.'}
+              </p>
+            </div>
+
+            {blockSendForAddress && (
+              <div style={{ padding: '10px 12px', background: T.state.warning.bg, border: `1px solid ${T.state.warning.soft}`, borderRadius: T.radius.control }}>
+                <p style={{ fontSize: '12px', fontWeight: 600, color: T.state.warning.fg, marginBottom: '2px' }}>Address required</p>
+                <p style={{ fontSize: '12px', color: T.state.warning.deep, wordBreak: 'break-word' }}>A job needs a client address for its property. Add one before sending.</p>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button type="button" onClick={() => setStep('action')} style={ghostBtn}>Back</button>
+              <button type="button" disabled={!jobDetailsComplete} onClick={() => jobDetailsComplete && setStep('confirm')} style={primaryBtn(jobDetailsComplete)}>Review →</button>
+            </div>
+          </>
+        )}
+
         {step === 'confirm' && (
           <>
             {/* Variant 2 — itemize the REAL records this send will create,
@@ -407,13 +520,30 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
                 ) : (
                   <CreateRow title="New client" detail={person.name} />
                 )}
-                <CreateRow title="Request" detail="Moves this deal to the Request stage" />
-                {includeAssessment && date && (
-                  <CreateRow
-                    title="Assessment appointment"
-                    detail={`${assessmentType === 'virtual' ? 'Virtual' : 'In-person'} · ${date} at ${time}`}
-                    Glyph={assessmentType === 'virtual' ? IconMessage : IconCalendar}
-                  />
+                {action === 'job' ? (
+                  <>
+                    {/* Job path — honest itemization. NO request, NO estimate. */}
+                    <CreateRow title="Property" detail="Uses the client's service address" Glyph={IconMapPin} />
+                    <CreateRow
+                      title="Job"
+                      detail={`${jobWork.trim() || 'Work'} · $${(jobPriceValid ? jobPriceNum : 0).toFixed(2)} — moves this deal to Job in Progress`}
+                      Glyph={IconHammer}
+                    />
+                    {jobDate && (
+                      <CreateRow title="Scheduled start" detail={jobDate} Glyph={IconCalendar} />
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <CreateRow title="Request" detail="Moves this deal to the Request stage" />
+                    {includeAssessment && date && (
+                      <CreateRow
+                        title="Assessment appointment"
+                        detail={`${assessmentType === 'virtual' ? 'Virtual' : 'In-person'} · ${date} at ${time}`}
+                        Glyph={assessmentType === 'virtual' ? IconMessage : IconCalendar}
+                      />
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -426,7 +556,11 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
             {blockSendForAddress && (
               <div style={{ padding: '10px 12px', background: T.state.warning.bg, border: `1px solid ${T.state.warning.soft}`, borderRadius: T.radius.control }}>
                 <p style={{ fontSize: '12px', fontWeight: 600, color: T.state.warning.fg, marginBottom: '2px' }}>Address required</p>
-                <p style={{ fontSize: '12px', color: T.state.warning.deep, wordBreak: 'break-word' }}>An in-person assessment needs a client address. Add one before sending.</p>
+                <p style={{ fontSize: '12px', color: T.state.warning.deep, wordBreak: 'break-word' }}>
+                  {action === 'job'
+                    ? 'A job needs a client address for its property. Add one before sending.'
+                    : 'An in-person assessment needs a client address. Add one before sending.'}
+                </p>
               </div>
             )}
 
@@ -438,8 +572,8 @@ export default function SendToJobberModal({ person, engagementId = null, onDone,
             )}
 
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button type="button" disabled={submitting} onClick={() => { if (!submitting) { setErrorMsg(null); setStep(action === 'request' ? 'request-details' : 'action') } }} style={{ ...ghostBtn, cursor: submitting ? 'not-allowed' : 'pointer' }}>Back</button>
-              <button type="button" disabled={submitting || blockSendForAddress} onClick={confirm} style={primaryBtn(!(submitting || blockSendForAddress))}>
+              <button type="button" disabled={submitting} onClick={() => { if (!submitting) { setErrorMsg(null); setStep(action === 'job' ? 'job-details' : action === 'request' ? 'request-details' : 'action') } }} style={{ ...ghostBtn, cursor: submitting ? 'not-allowed' : 'pointer' }}>Back</button>
+              <button type="button" disabled={submitting || blockSendForAddress || blockSendForJob} onClick={confirm} style={primaryBtn(!(submitting || blockSendForAddress || blockSendForJob))}>
                 {submitting
                   ? <><IconClock size={16} /> Sending…</>
                   : <><IconSend size={16} /> {errorMsg ? 'Retry' : 'Send to Jobber'}</>}
