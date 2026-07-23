@@ -58,6 +58,38 @@ describe('classifyContinuationResponse', () => {
   it('a 500 is a bounce', () => {
     expect(classifyContinuationResponse({ status: 500 }).outcome).toBe('bounced')
   })
+
+  // Vercel's recursion guard. Observed on the real loc_kc import at ~3,340 of
+  // 3,352 records — the self-chain got depth-capped and the cron sweeper (its
+  // own invocation chain) carried the job to 'completed'.
+  it('a 508 Loop Detected is chain_capped, NOT a bounce', () => {
+    expect(classifyContinuationResponse({ status: 508 }))
+      .toEqual({ outcome: 'chain_capped', redirect: false })
+  })
+
+  it('chain_capped never ages a job toward fail-out', () => {
+    // A 508 says the self-chain is capped. It says nothing about the sweeper,
+    // which is the primary mechanism — so it is not evidence of a broken
+    // handoff and must never contribute to the fail-out clock.
+    expect(agesBounceRun('chain_capped')).toBe(false)
+    expect(consecutiveBounceStartMs([
+      { at: ago(1), outcome: 'chain_capped' },
+      { at: ago(2), outcome: 'chain_capped' },
+    ])).toBeNull()
+  })
+
+  it('chain_capped is not reported as a problem (it is the designed fallback)', () => {
+    // Every long import emits some; alarming on them makes the digest noise.
+    expect(isFailedOutcome('chain_capped')).toBe(false)
+  })
+
+  it('a long run of 508s still cannot fail a job out', () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({ at: ago(i + 1), outcome: 'chain_capped' as const }))
+    expect(decideFailOut({
+      claimAt: null, nowMs: NOW, failAfterMs: FAIL_AFTER,
+      bounceRunStartMs: consecutiveBounceStartMs(many),
+    }).fail).toBe(false)
+  })
 })
 
 // ── the sync_log round trip ──────────────────────────────────────
@@ -317,6 +349,14 @@ describe('postContinuation', () => {
     })
     expect(r.outcome).toBe('errored')
     expect(r.detail).toMatch(/timed out/)
+  })
+
+  it('a 508 reports as chain_capped with a message naming the sweeper handoff', async () => {
+    const fetchImpl = vi.fn(async () => ({ status: 508, type: 'basic', headers: { get: () => null } })) as any
+    const r = await postContinuation({ origin: 'https://x', locationSlug: 'loc_kc', secret: 's', fetchImpl })
+    expect(r.outcome).toBe('chain_capped')
+    expect(r.detail).toMatch(/Loop Detected/)
+    expect(r.detail).toMatch(/sweeper/)
   })
 
   it('the ack timeout has real cold-start headroom', () => {

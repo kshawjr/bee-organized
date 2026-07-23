@@ -392,6 +392,22 @@ describe('GET /api/cron/import-sweeper — continuation handoff', () => {
     expect(h.db.import_jobs[0].status).toBe('running')
   })
 
+  it('CHAIN CAP: a 508 from the self-chain is recorded but never fails a job out', async () => {
+    // Vercel's recursion guard, hit on the real loc_kc import at ~3,340/3,352.
+    // The sweeper runs on its own invocation chain, so a 508 is a handoff TO
+    // it, not evidence that recovery is broken.
+    h.db.import_jobs = [job({ id: 'job-capped' })]
+    h.db.sync_log = [
+      attempt('job-capped', 'loc_kc', 'chain_capped', 2),
+      attempt('job-capped', 'loc_kc', 'chain_capped', 19),
+      attempt('job-capped', 'loc_kc', 'chain_capped', 31),
+    ]
+    const body = await (await sweep()).json()
+    expect(body.failed_out).toBe(0)
+    expect(body.resumed).toBe(1)                       // sweeper still picks it up
+    expect(h.db.import_jobs[0].location_claim_at).not.toBeNull()
+  })
+
   it('a timeout run also never fails a job out', async () => {
     h.db.import_jobs = [job({ id: 'job-slow' })]
     h.db.sync_log = [

@@ -29,6 +29,16 @@
 //      the promise and never keeps the function alive for it. Paired with
 //      `.catch(() => {})`, every failure mode was unobservable.
 //
+// WHICH MECHANISM IS PRIMARY (settled by prod, 2026-07-22):
+// THE CRON SWEEPER IS PRIMARY. The self-chain is only an accelerator. This is
+// not a preference — it is a platform limit: a function that keeps invoking
+// itself eventually gets HTTP 508 Loop Detected from Vercel's recursion guard,
+// no matter how the call is made. The real loc_kc import hit exactly that at
+// ~3,340 of 3,352 records; the sweeper (invoked by cron, so a fresh chain)
+// picked it up and carried the job to 'completed'. So a 508 must be treated as
+// a normal handoff to the sweeper, never as a fault and never as evidence for
+// failing a job out.
+//
 // The fixes this module supports:
 //   • stall age is measured from real signals only — a live claim, or the age
 //     of the CONSECUTIVE BOUNCE RUN. started_at is never a stall reference.
@@ -54,11 +64,31 @@ export type ContinuationSource = 'self_chain' | 'sweeper'
 //   bounced   — redirect (SSO gate), 401, 5xx — the POST never reached the
 //               route's own logic.
 //   errored   — the fetch threw (DNS, connection reset, timeout).
-export type ContinuationOutcome = 'landed' | 'no_claim' | 'bounced' | 'errored'
+//   chain_capped — HTTP 508 Loop Detected. Vercel's recursion guard refusing
+//               a function that has invoked itself too many times. NOT an
+//               error: it is the platform capping the self-chain, and the
+//               sweeper (cron-originated, so a fresh invocation chain) takes
+//               over by design. Observed on the real loc_kc import at ~3,340
+//               of 3,352 records; the sweeper carried it to 'completed'.
+export type ContinuationOutcome = 'landed' | 'no_claim' | 'bounced' | 'errored' | 'chain_capped'
 
-/** Outcomes that mean the handoff did not visibly complete. Drives how the
- *  attempt is recorded + reported — NOT whether the job is failed out. */
-export const isFailedOutcome = (o: ContinuationOutcome): boolean => o !== 'landed'
+// Vercel returns this when a function invokes itself past the platform's
+// recursion limit. It is the reason THE SWEEPER IS THE PRIMARY MECHANISM and
+// the self-chain is only an accelerator: a long import cannot be carried by
+// self-invocation alone, no matter how the call is made.
+export const LOOP_DETECTED_STATUS = 508
+
+/**
+ * Outcomes that represent an actual PROBLEM — drives the sync_log row's
+ * status and whether the digest calls it out. NOT whether the job is failed
+ * out (that is agesBounceRun).
+ *
+ * 'chain_capped' is excluded deliberately: the platform capping a self-chain
+ * is the designed fallback engaging, not a fault, and every long import will
+ * emit some. Alarming on it would make the digest noise that nobody reads.
+ */
+export const isFailedOutcome = (o: ContinuationOutcome): boolean =>
+  o !== 'landed' && o !== 'chain_capped'
 
 /**
  * Outcomes that age a job toward the max-lifetime fail-out. ONLY hard
@@ -73,6 +103,10 @@ export const isFailedOutcome = (o: ContinuationOutcome): boolean => o !== 'lande
  *   • 'errored'  — a POST that times out waiting for the ack may still have
  *     been received and acted on (loc_kc: claim written at 01:14:50, our
  *     10s abort fired at 01:14:53, and the segment ran fine).
+ *   • 'chain_capped' — a 508 says the SELF-CHAIN is depth-capped; it says
+ *     nothing about the sweeper, which runs on its own invocation chain and
+ *     is the primary mechanism. loc_kc 508'd twice at ~3,340/3,352 and the
+ *     sweeper still carried it to 'completed'.
  * Both are ambiguous, and aging a job on ambiguous evidence would kill healthy
  * imports on a different clock — the exact failure this whole change removes.
  * They stay RECORDED and visible; they just never pull the trigger.
@@ -117,11 +151,19 @@ export const CLAIM_VERIFY_INTERVAL_MS = 3_000
 export function classifyContinuationResponse(res: {
   status: number
   type?: string
-}): { outcome: Extract<ContinuationOutcome, 'landed' | 'bounced'>; redirect: boolean } {
+}): {
+  outcome: Extract<ContinuationOutcome, 'landed' | 'bounced' | 'chain_capped'>
+  redirect: boolean
+} {
   const redirect =
     (res as any).type === 'opaqueredirect' ||
     res.status === 0 ||
     (res.status >= 300 && res.status < 400)
+  // Checked BEFORE the generic non-2xx bucket: a 508 is the platform capping
+  // self-invocation, not a broken handoff, and must never age a job.
+  if (!redirect && res.status === LOOP_DETECTED_STATUS) {
+    return { outcome: 'chain_capped', redirect: false }
+  }
   const ok = !redirect && res.status >= 200 && res.status < 300
   return { outcome: ok ? 'landed' : 'bounced', redirect }
 }
@@ -172,7 +214,8 @@ export function parseContinuationLogMessage(
     outcome !== 'landed' &&
     outcome !== 'no_claim' &&
     outcome !== 'bounced' &&
-    outcome !== 'errored'
+    outcome !== 'errored' &&
+    outcome !== 'chain_capped'
   ) {
     return null
   }
@@ -380,9 +423,12 @@ export async function postContinuation(opts: {
       detail: redirect
         ? `blocked by a redirect to ${redirectedTo ?? 'an unknown location'} — ` +
           `origin ${opts.origin} looks SSO-gated`
-        : outcome === 'bounced'
-          ? `import route returned ${res.status}`
-          : undefined,
+        : outcome === 'chain_capped'
+          ? `self-chain depth-capped by the platform (HTTP ${LOOP_DETECTED_STATUS} ` +
+            `Loop Detected) — the cron sweeper continues from here, as designed`
+          : outcome === 'bounced'
+            ? `import route returned ${res.status}`
+            : undefined,
     }
   } catch (err: any) {
     const aborted = err?.name === 'AbortError' || controller.signal.aborted

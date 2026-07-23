@@ -334,7 +334,15 @@ export async function POST(req: NextRequest) {
       status: post.status,
       detail: post.detail,
     })
-    if (post.outcome !== 'landed') {
+    if (post.outcome === 'chain_capped') {
+      // Expected on a long import — Vercel refuses a self-invocation chain past
+      // its recursion limit. The sweeper runs on its own chain and picks up
+      // within ~60s. Informational, not a warning.
+      console.log(
+        `[jobber-import] self-chain depth-capped for ${locSlug} (job ${jobIdForLog}) — ` +
+        `handing off to the cron sweeper`,
+      )
+    } else if (post.outcome !== 'landed') {
       console.warn(
         `[jobber-import] self-continue ${post.outcome} for ${locSlug} (job ${jobIdForLog}): ` +
         `status=${post.status ?? 'n/a'} ${post.detail ?? ''} — sweeper will retry`,
