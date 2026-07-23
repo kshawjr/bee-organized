@@ -83,6 +83,13 @@ import {
   attachToEngagement,
   maybeAdvanceEngagementStage,
 } from '@/lib/engagements'
+import {
+  isJobParked,
+  computeResumeAfter,
+  parkedPhase,
+  DEFERRED_WRITE_PACE_MS,
+} from '@/lib/import-phase'
+import { buildLastChildActivity, selectSampleClients } from '@/lib/import-sample'
 
 export const runtime = 'nodejs'
 export const maxDuration = 800
@@ -189,7 +196,11 @@ export async function POST(req: NextRequest) {
   try { body = await req.json() } catch { /* no body is fine */ }
 
   const input = queryLocId || body.location_id
-  const mode  = (queryMode || body.mode || 'full') as 'full' | 'dev'
+  // 'sample' = sample-now/bulk-later: write a ~75-client curated slice, then
+  // PARK the job (resume_after) for an overnight bulk run. Only the OPENING
+  // POST carries it — continuations are mode-less — so sample-ness is
+  // persisted server-side (see the __sample flag below), never re-sent.
+  const mode  = (queryMode || body.mode || 'full') as 'full' | 'dev' | 'sample'
   if (!input) {
     return NextResponse.json({ error: 'location_id required' }, { status: 400 })
   }
@@ -242,7 +253,7 @@ export async function POST(req: NextRequest) {
   const findRunning = async () =>
     supabaseService
       .from('import_jobs')
-      .select('id, location_claim_at')
+      .select('id, location_claim_at, resume_after')
       .eq('location_id', locSlug)
       .eq('type', 'jobber_clients')
       .eq('status', 'running')
@@ -251,6 +262,35 @@ export async function POST(req: NextRequest) {
       .maybeSingle()
 
   const { data: existing } = await findRunning()
+
+  // ─── parked-job guard (route-level backstop for EVERY caller) ──
+  // A sample import parks its job (status stays 'running', resume_after in
+  // the future) so the bulk remainder runs off-hours. The sweeper and the
+  // browser poller both hold off on their own, but this guard is the
+  // backstop: a stale-deployment sweeper, a Settings "Start Import" click
+  // at 2pm, or any other POST gets a parked ack — never a resumed bulk run.
+  // ?force=resume is the explicit ops override: it clears resume_after (so
+  // subsequent segments chain normally and pacing is off) and runs now.
+  const forceResume = url.searchParams.get('force') === 'resume'
+  // Threaded into runImport: non-null = this job was parked and its window
+  // has opened (or was force-opened) — i.e. the deferred bulk run.
+  let jobResumeAfter: string | null = (existing as any)?.resume_after ?? null
+  if (existing && isJobParked(jobResumeAfter, Date.now())) {
+    if (!forceResume) {
+      return NextResponse.json({
+        job_id: existing.id,
+        started: false,
+        parked: true,
+        resume_after: jobResumeAfter,
+      })
+    }
+    await supabaseService
+      .from('import_jobs')
+      .update({ resume_after: null })
+      .eq('id', existing.id)
+    jobResumeAfter = null
+    console.log(`[jobber-import] force=resume cleared park on job ${existing.id} (${locSlug})`)
+  }
 
   let jobId: string
   if (existing) {
@@ -423,6 +463,27 @@ export async function POST(req: NextRequest) {
         const cursors: Record<string, string | null> = fetchRow?.fetch_cursors || {}
         const complete: Record<string, boolean> = fetchRow?.fetch_complete || {}
         const allFetchedUpfront = ['clients', 'requests', 'quotes', 'jobs'].every(e => complete[e])
+
+        // ─── sample-mode persistence ──────────────────────────────
+        // Only the opening POST carries mode=sample; continuations (self-chain,
+        // sweeper, browser poller) are mode-less and default to 'full'. If a
+        // multi-segment FETCH yields mid-sample, the continuation must still
+        // write the sample slice — not everything — so sample-ness is
+        // persisted here, keyed to THIS job id ('__sample' in fetch_cursors;
+        // never collides with the entity keys). Keying by job id means a
+        // cancelled sample's leftover flag can't infect a later fresh import
+        // (new job = new id = mismatch → full). Cleared when the sample parks
+        // (overnight segments must write everything); the whole row is
+        // deleted at completion.
+        const SAMPLE_FLAG = '__sample'
+        if (mode === 'sample' && cursors[SAMPLE_FLAG] !== jobId) {
+          cursors[SAMPLE_FLAG] = jobId
+          await supabaseService
+            .from('import_location_fetch')
+            .update({ fetch_cursors: cursors, updated_at: new Date().toISOString() })
+            .eq('location_id', locSlug)
+        }
+        const sampleRun = mode === 'sample' || cursors[SAMPLE_FLAG] === jobId
 
         // Only refresh the Jobber token if we actually have fetching to do.
         // Write-only resume segments need zero Jobber calls (data is already
@@ -690,6 +751,29 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        // ─── sample slice (sample mode only) ───────────────────────
+        // Curated over the FULL staged data via the maps just built: the
+        // newest clients (recognizable names) + the most-recently-active
+        // clients WITH quote/job/invoice history (records that render rich).
+        // Selection runs over `unwritten`, so a resumed sample segment
+        // re-selects from what's left. Full mode: writeSet === unwritten —
+        // behavior identical to today.
+        let writeSet = unwritten
+        if (sampleRun) {
+          const lastChildActivity = buildLastChildActivity(unwritten, {
+            reqByClient, quotesByReq, jobsByReq,
+            reqlessQuotesByClient, reqlessJobsByClient,
+          })
+          writeSet = selectSampleClients(unwritten, lastChildActivity)
+          console.log(`[jobber-import] sample mode: selected ${writeSet.length} of ${unwritten.length} unwritten (job ${jobId})`)
+          // Progress total = the sample target, so the call-time bar fills to
+          // 100% at park instead of freezing at "75 of 3,352". The park write
+          // below restores the full total for the gap-state UI.
+          await updateProgress(jobId, {
+            total_records: alreadyWritten.size + writeSet.length,
+          })
+        }
+
         const stats = {
           leads_created: 0, leads_updated: 0,
           requests_created: 0, requests_updated: 0,
@@ -719,16 +803,24 @@ export async function POST(req: NextRequest) {
         let hitCap = false
         let yieldReason = ''
 
+        // Deferred-bulk pacing: a job that was parked and whose window has
+        // opened writes with a small per-record delay so the overnight run
+        // can't saturate Supabase the way the live KC import did (504s,
+        // 2026-07-22). Normal imports and the sample segment have
+        // resume_after NULL — no pacing, zero behavior change.
+        const paceMs = !sampleRun && jobResumeAfter ? DEFERRED_WRITE_PACE_MS : 0
+
         // processed counts against clients.length (not unwritten.length) so
         // the UI's X-of-Y bee animation reflects overall progress including
         // prior segments' work.
         let processed = alreadyWritten.size
-        for (const client of unwritten) {
+        for (const client of writeSet) {
           // Stop this invocation on batch-cap OR low wall-clock time — the
           // sweeper + selfContinue re-poke to continue from the persisted
           // cursor. Checked BEFORE each record so we never die mid-write.
           const yieldNow = writeLoopShouldYield(wroteThisRun, WRITE_BATCH_CAP, timeLow())
           if (yieldNow.stop) { hitCap = true; yieldReason = yieldNow.reason; break }
+          if (paceMs > 0) await new Promise((r) => setTimeout(r, paceMs))
 
           try {
             const { id: leadId, created } = await upsertLead(client, locSlug, locUuid, {
@@ -953,6 +1045,58 @@ export async function POST(req: NextRequest) {
               await releaseMutex()
               return
             }
+          }
+        }
+
+        // ─── sample park (sample mode, remainder pending) ──────────
+        // The sample slice is written (or the segment ran out of time
+        // mid-slice — parking a slightly-short sample is fine; the rest goes
+        // tonight either way). PARK instead of self-continuing: status stays
+        // 'running' (the partial unique index keeps blocking rival imports),
+        // resume_after moves to the off-hours window, the parked phase string
+        // never matches the pollers' auto-continue predicate, and the sample
+        // flag is cleared so the overnight segments write EVERYTHING left.
+        // A small location whose sample covered everyone has no remainder
+        // and falls through to the normal completion path below.
+        if (sampleRun) {
+          const remaining = clients.length - processed
+          if (remaining > 0) {
+            const resumeAfterIso = computeResumeAfter(Date.now())
+            delete cursors[SAMPLE_FLAG]
+            await supabaseService
+              .from('import_location_fetch')
+              .update({ fetch_cursors: cursors, updated_at: new Date().toISOString() })
+              .eq('location_id', locSlug)
+            // Guarded on status='running' so a cancel that landed mid-write
+            // isn't resurrected into a parked job.
+            const { data: parkedRow } = await supabaseService
+              .from('import_jobs')
+              .update({
+                phase: parkedPhase(processed, clients.length),
+                processed_records: processed,
+                total_records: clients.length,
+                resume_after: resumeAfterIso,
+              })
+              .eq('id', jobId)
+              .eq('status', 'running')
+              .select('id')
+            if (parkedRow && parkedRow.length > 0) {
+              await writeSyncLog({
+                location_id: locSlug,
+                entity_id: locSlug,
+                status: 'success',
+                message:
+                  `Sample import parked: ${processed}/${clients.length} written, ` +
+                  `${remaining} resume after ${resumeAfterIso} (job=${jobId})`,
+              })
+              console.log(
+                `[jobber-import] sample parked for ${locSlug} (job ${jobId}): ` +
+                `${processed}/${clients.length}, resume_after=${resumeAfterIso}`,
+              )
+            }
+            await releaseMutex()
+            emit({ parked: true, processed, total: clients.length, resume_after: resumeAfterIso, job_id: jobId })
+            return
           }
         }
 

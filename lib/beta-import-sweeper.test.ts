@@ -48,6 +48,7 @@ const h = vi.hoisted(() => {
       const val = rest.join('.')
       if (op === 'is' && val === 'null') return r[col] == null
       if (op === 'lt') return r[col] != null && String(r[col]) < val
+      if (op === 'lte') return r[col] != null && String(r[col]) <= val
       return false
     })
 
@@ -494,5 +495,75 @@ describe('GET /api/cron/import-sweeper — continuation handoff', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0][0]).toContain('loc_young')
     expect(body).toMatchObject({ resumed: 1, failed_out: 1, checked: 2 })
+  })
+
+  // ── PARKED (sample-now / bulk-later) — LEAK 3a ─────────────────
+  // A sample import parks its job: status stays 'running', claim released,
+  // resume_after in the future, phase 'parked — …'. To the pre-park sweeper
+  // that is indistinguishable from a cleanly-yielded job — which gets
+  // re-poked within ~60s. The resume_after filter is what makes the park
+  // hold until the off-hours window.
+  const parked = (over: Partial<Record<string, any>> = {}) =>
+    job({
+      id: 'job-parked',
+      location_claim_at: null,
+      phase: 'parked — sample of 75 imported, 3277 resume overnight',
+      processed_records: 75,
+      resume_after: new Date(Date.now() + 6 * 60 * MIN).toISOString(),  // tonight
+      ...over,
+    })
+
+  it('PARKED: a future resume_after is SKIPPED — not re-poked, not failed out, claim stays released', async () => {
+    h.db.import_jobs = [parked()]
+    const body = await (await sweep()).json()
+    // checked 0 = the parked job never even entered the candidate set (the
+    // zero-candidate early return carries no failed_out field).
+    expect(body).toMatchObject({ resumed: 0, checked: 0 })
+    expect(fetchMock).not.toHaveBeenCalled()
+    const row = h.db.import_jobs[0]
+    expect(row.status).toBe('running')            // still parked, still blocking rival imports
+    expect(row.location_claim_at).toBeNull()      // nobody claimed it
+    expect(row.resume_after).not.toBeNull()       // the park survived the sweep
+  })
+
+  it('PARKED: stays parked across many sweeps (the every-minute cron cannot erode it)', async () => {
+    h.db.import_jobs = [parked()]
+    for (let i = 0; i < 5; i++) await sweep()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(h.db.import_jobs[0].status).toBe('running')
+  })
+
+  it('RESUME: a PAST resume_after is picked up like any cleanly-yielded job — a segment claims', async () => {
+    h.db.import_jobs = [parked({ resume_after: ago(1) })]   // the window opened a minute ago
+    const body = await (await sweep()).json()
+    expect(body).toMatchObject({ resumed: 1, checked: 1, failed_out: 0 })
+    expect(h.db.import_jobs[0].location_claim_at).not.toBeNull()   // the overnight run took it
+  })
+
+  it('PARKED filter shape: resume_after gates alongside the claim filter, and NULL matches as before', async () => {
+    // A normal job (no resume_after) must still be found — the new filter's
+    // null arm is what keeps every pre-existing import behaving identically.
+    h.db.import_jobs = [job()]
+    const body = await (await sweep()).json()
+    expect(body).toMatchObject({ resumed: 1, checked: 1 })
+    const orClauses = h.ops.filter((o) => o[0] === 'or').map((o) => o[1][0])
+    const parkClause = orClauses.find((c: string) => c.includes('resume_after'))
+    expect(parkClause).toMatch(/resume_after\.is\.null/)
+    expect(parkClause).toMatch(/resume_after\.lte\./)
+  })
+
+  it('MIXED batch: a parked job is invisible while its neighbors resume/fail normally', async () => {
+    h.db.import_jobs = [
+      parked({ location_id: 'loc_parked' }),
+      job({ id: 'yielded', location_id: 'loc_young', location_claim_at: null }),
+      job({ id: 'dead', location_id: 'loc_old', location_claim_at: HOPELESS_STALE(), phase: 'writing' }),
+    ]
+    const body = await (await sweep()).json()
+    expect(body).toMatchObject({ resumed: 1, failed_out: 1, checked: 2 })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toContain('loc_young')
+    const parkedRow = h.db.import_jobs.find((j) => j.id === 'job-parked')!
+    expect(parkedRow.status).toBe('running')
+    expect(parkedRow.location_claim_at).toBeNull()
   })
 })

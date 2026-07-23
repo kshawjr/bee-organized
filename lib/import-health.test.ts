@@ -80,6 +80,25 @@ describe('fetchImportHealth', () => {
     expect(orClause).toContain('location_claim_at.lt.')
   })
 
+  it('LEAK 3d: the stalled query excludes PARKED jobs (future resume_after) but keeps NULL matching as before', async () => {
+    // A sample-now/bulk-later job parks for hours by design (status stays
+    // 'running', claim released). Without this filter every 3h digest would
+    // call it out as stalled until the overnight run. NULL resume_after —
+    // every normal import — must keep matching exactly as before; a PAST
+    // resume_after (deferred bulk in progress) is stall-monitored normally.
+    const { supabase, calls } = makeSupabase({ failed: [], running: [] })
+    await fetchImportHealth({ nowMs: NOW, supabase })
+    const runningCall = calls.find((c) => c.status === 'running')!
+    const orClauses = runningCall.ops.filter((o) => o[0] === 'or').map((o) => o[1][0])
+    const parkClause = orClauses.find((c: string) => c.includes('resume_after'))
+    expect(parkClause).toBeTruthy()
+    expect(parkClause).toContain('resume_after.is.null')
+    expect(parkClause).toContain(`resume_after.lte.${new Date(NOW).toISOString()}`)
+    // And the two filters are separate AND-ed groups, not one merged OR (a
+    // merged OR would let "resume_after null" alone match a fresh claim).
+    expect(orClauses.length).toBeGreaterThanOrEqual(2)
+  })
+
   it('the stall threshold is well above the sweeper 2-min re-poke cutoff', () => {
     // Normal handoffs (~2min) must never read as a digest stall.
     expect(IMPORT_DIGEST_STALL_MS).toBeGreaterThan(2 * 60 * 1000)

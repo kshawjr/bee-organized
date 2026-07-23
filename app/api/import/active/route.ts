@@ -62,11 +62,14 @@ export async function GET(req: NextRequest) {
   }
 
   // ─── most recent running job for this location ──
-  // import_jobs.location_id stores the slug.
+  // import_jobs.location_id stores the slug. A PARKED sample-now/bulk-later
+  // job is still status='running' (resume_after in the future), so it comes
+  // back here too — that's what feeds the gap-state UI (onboarding step,
+  // Settings card, and the ImportGapBanner on Home/Clients).
   const { data: job } = await supabaseService
     .from('import_jobs')
     .select(
-      'id, status, phase, processed_records, total_records, error_message, started_at, completed_at, location_id',
+      'id, status, phase, processed_records, total_records, error_message, started_at, completed_at, resume_after, location_id',
     )
     .eq('location_id', location.location_id)
     .eq('status', 'running')
@@ -75,13 +78,38 @@ export async function GET(req: NextRequest) {
     .maybeSingle()
 
   if (!job) {
+    // Overnight-completion signal for the gap banner's success state: the
+    // most recent completed job that had been parked (resume_after non-null),
+    // finished within the last 36h. The banner shows "All N clients imported
+    // overnight" on next login, dismissible client-side.
+    let recentDeferred: any = null
+    {
+      const sinceIso = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString()
+      const { data: rd } = await supabaseService
+        .from('import_jobs')
+        .select('id, processed_records, total_records, completed_at')
+        .eq('location_id', location.location_id)
+        .eq('type', 'jobber_clients')
+        .eq('status', 'completed')
+        .not('resume_after', 'is', null)
+        .gte('completed_at', sinceIso)
+        .order('completed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      recentDeferred = rd ?? null
+    }
+
     // Pre-flight count for the import prompt's time estimate. One cheap
     // GraphQL request (no nodes selected — trivial complexity cost).
     // NOTE: not yet verified that our Jobber API version exposes
     // clients.totalCount — hence the blanket try/catch: any error or
     // unexpected shape degrades to null, never a failed response.
+    // ?skip_count=1 (the gap banner's periodic poll) skips the Jobber
+    // round-trip entirely — the banner never needs the estimate, and a
+    // background poll must not burn Jobber rate budget.
     let clientCount: number | null = null
-    if (location.jobber_access_token) {
+    const skipCount = req.nextUrl.searchParams.get('skip_count') === '1'
+    if (!skipCount && location.jobber_access_token) {
       try {
         const token = await getValidJobberToken(location)
         const res = await jobberQuery(token, '{ clients { totalCount } }')
@@ -91,7 +119,7 @@ export async function GET(req: NextRequest) {
         console.warn('[import-active] client count fetch failed (non-fatal):', err?.message || err)
       }
     }
-    return NextResponse.json({ job: null, client_count: clientCount })
+    return NextResponse.json({ job: null, client_count: clientCount, recent_deferred: recentDeferred })
   }
 
   // Strip location_id from response — internal field, not for the UI.

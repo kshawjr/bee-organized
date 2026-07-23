@@ -106,14 +106,25 @@ export async function GET(req: NextRequest) {
 
   // ─── Find candidate jobs ───────────────────────────────────────
   // Both states above: a released (null) claim and a stale one.
+  // PARKED jobs are excluded: a sample-now/bulk-later import parks its job
+  // (status stays 'running', resume_after in the future) and must NOT be
+  // re-poked until the off-hours window opens — without this filter the
+  // sweeper would resume the bulk run within ~60s of the park. NULL
+  // resume_after = every pre-existing/normal job, matched exactly as before;
+  // a PAST resume_after = the window opened, resume it. The two .or() calls
+  // AND together (separate PostgREST or= groups). The import route also
+  // refuses to resume a parked job, so even a stale-deployment sweeper
+  // running pre-filter code can re-poke but never actually resume one.
   const now = Date.now()
+  const nowIso = new Date(now).toISOString()
   const cutoffIso = new Date(now - STALE_AFTER_MS).toISOString()
   const { data: stalled, error: findErr } = await supabaseService
     .from('import_jobs')
-    .select('id, location_id, location_claim_at, started_at, phase, processed_records, total_records')
+    .select('id, location_id, location_claim_at, started_at, phase, processed_records, total_records, resume_after')
     .eq('status', 'running')
     .eq('type', 'jobber_clients')
     .or(`location_claim_at.is.null,location_claim_at.lt.${cutoffIso}`)
+    .or(`resume_after.is.null,resume_after.lte.${nowIso}`)
     .order('started_at', { ascending: true })
     .limit(RESUME_LIMIT)
   if (findErr) {

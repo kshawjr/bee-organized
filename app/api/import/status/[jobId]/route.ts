@@ -31,10 +31,12 @@ export async function GET(
   if (!hubUser) return NextResponse.json({ error: 'no_profile' }, { status: 403 })
 
   // ─── read job ──
+  // resume_after: non-null + future = a parked sample-now/bulk-later job —
+  // the pollers stop auto-continuing and render the parked/gap state.
   const { data: job } = await supabaseService
     .from('import_jobs')
     .select(
-      'id, status, phase, processed_records, total_records, error_message, started_at, completed_at, location_id',
+      'id, status, phase, processed_records, total_records, error_message, started_at, completed_at, resume_after, location_id',
     )
     .eq('id', params.jobId)
     .maybeSingle()

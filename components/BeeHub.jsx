@@ -65,7 +65,11 @@ import {
   daysUntilNextRenewal,
   prorateToNextRenewal,
 } from "@/lib/subscription-math"
-import { importEstimateLine } from "@/lib/import-estimate"
+import { importEstimateLine, SAMPLE_MODE_MIN_CLIENTS } from "@/lib/import-estimate"
+// Pure phase/park vocabulary shared with the import route — lib/import-phase
+// only (never lib/jobber-import here: that module instantiates the
+// service-role Supabase client at load and must not reach the browser).
+import { isParkedPhase, phaseAutoContinues } from "@/lib/import-phase"
 import { mergePartnerRow } from "@/lib/crm"
 
 // Reviews-link URL validation. Used by onboarding location step + Settings
@@ -12096,9 +12100,12 @@ export function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboardin
   }, [locationId])
 
   const isTerminal = status?.status === 'completed' || status?.status === 'failed'
-  const isRunning  = jobId && !isTerminal && !error
+  // Parked (sample-now/bulk-later): still status='running' server-side, but
+  // the gap state renders its own explicit panel — never the progress bar.
+  const isParked   = status?.status === 'running' && isParkedPhase(status?.phase)
+  const isRunning  = jobId && !isTerminal && !isParked && !error
   const isDone     = status?.status === 'completed'
-  const isFailed   = status?.status === 'failed' || (!!error && !isRunning)
+  const isFailed   = status?.status === 'failed' || (!!error && !isRunning && !isParked)
 
   // Polling loop — fires once per jobId; chains setTimeout instead of
   // setInterval so a slow status fetch doesn't pile up overlapping requests.
@@ -12120,8 +12127,10 @@ export function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboardin
     const maybeContinue = async (d) => {
       if (continuingRef.current) return
       if (d?.status !== 'running') return
-      const phase = d?.phase || ''
-      if (!/^fetching|^batched|^writing/.test(phase)) return
+      // phaseAutoContinues is the ONE phase→re-POST predicate (shared with
+      // the import route via lib/import-phase). A PARKED job's phase never
+      // matches — an open onboarding tab must not launch the bulk run.
+      if (!phaseAutoContinues(d?.phase)) return
       if (!locationId) return
       continuingRef.current = true
       try {
@@ -12138,6 +12147,12 @@ export function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboardin
         if (!r.ok) { setError(d.error || 'status_fetch_failed'); return }
         setStatus(d)
         if (d.status === 'completed' || d.status === 'failed') {
+          etaSamplesRef.current = []; lastProgressRef.current = null
+          return
+        }
+        // Parked: render the gap state and STOP polling — nothing changes
+        // until the overnight window; a reload's mount check re-attaches.
+        if (isParkedPhase(d.phase)) {
           etaSamplesRef.current = []; lastProgressRef.current = null
           return
         }
@@ -12161,8 +12176,15 @@ export function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboardin
       // writes progress to import_jobs. We just need the job_id to start the
       // status poller (useEffect above), which drives the "X of Y" UI off
       // processed_records.
+      //
+      // Sample-now/bulk-later: on a big book (> SAMPLE_MODE_MIN_CLIENTS) the
+      // onboarding import opens in sample mode — ~75 curated clients land
+      // during the call, the job parks, and the rest runs overnight. Small
+      // or unknown counts import fully, exactly as before.
+      const useSample = typeof clientCount === 'number' && clientCount > SAMPLE_MODE_MIN_CLIENTS
       const res = await fetch(
-        '/api/import/jobber-clients?location_id=' + encodeURIComponent(locationId),
+        '/api/import/jobber-clients?location_id=' + encodeURIComponent(locationId)
+          + (useSample ? '&mode=sample' : ''),
         { method: 'POST' },
       )
       if (!res.ok) {
@@ -12246,6 +12268,46 @@ export function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboardin
         )
       })()}
     </div>
+    )
+  }
+
+  // ─── parked (sample in, bulk overnight) ──
+  // The explicit gap state — never a frozen progress bar. The owner keeps
+  // moving through the checklist; the remainder is the sweeper's job tonight.
+  if (isParked) {
+    const sampleN   = status?.processed_records || 0
+    const totalN    = status?.total_records || 0
+    const remaining = Math.max(0, totalN - sampleN)
+    const nextStepId = onAdvanceFromStep ? onAdvanceFromStep('import') : null
+    const buttonLabel = nextStepId        ? 'Continue →'
+                      : onSkipOnboarding  ? 'Continue to Hub →'
+                      :                     '✓ Complete Step'
+    return (
+      <div style={{ display:'grid', gap:'10px' }}>
+        <div style={{ padding:'14px', background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:'10px', textAlign:'center' }}>
+          <p style={{ fontSize:'22px', marginBottom:'4px' }}>🐝</p>
+          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>
+            Sample imported — {sampleN.toLocaleString()} clients are in your Hub now
+          </p>
+          <p style={{ fontSize:'11px', color:'#5a6e6a', lineHeight:1.5 }}>
+            Your remaining {remaining > 0 ? `~${remaining.toLocaleString()}` : ''} clients finish importing
+            overnight, automatically. Nothing is lost — everything from Jobber arrives by morning.
+          </p>
+        </div>
+        <button onClick={()=>{
+            markDone('import')
+            if (nextStepId) {
+              setActiveStepOpen(nextStepId)
+            } else if (onSkipOnboarding) {
+              onSkipOnboarding()
+            } else {
+              setActiveStepOpen(null)
+            }
+          }}
+          style={{ width:'100%', padding:'11px', background:'#22c55e', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+          {buttonLabel}
+        </button>
+      </div>
     )
   }
 
@@ -12372,6 +12434,95 @@ export function ImportStepContent({ markDone, setActiveStepOpen, onSkipOnboardin
           No location assigned to your account. Contact your admin.
         </p>
       )}
+    </div>
+  )
+}
+
+// ─── Import gap banner (Home + Clients) ────────────────────────────────────
+// The persistent surface for the sample-now/bulk-later gap: after the sample
+// lands and the onboarding tab closes, the owner's Hub shows a partial book —
+// this is what keeps that reading as "preview, rest arrives tonight" instead
+// of data loss. Two states, driven by /api/import/active (skip_count=1 — the
+// banner never needs the Jobber pre-flight estimate):
+//   • parked job   → "sample in, remaining N finish overnight" (not dismissible
+//     — it IS the gap explanation, and it clears itself when the bulk lands)
+//   • recent deferred completion → "All N clients imported overnight" success,
+//     dismissible per job id (localStorage), shown on next login.
+// Renders nothing while loading, on error, without a locationId, or when
+// there's a live (non-parked) import — the import UIs own that state.
+export function ImportGapBanner({ locationId }) {
+  const [state, setState] = useState(null) // null | {kind:'parked',...} | {kind:'done',...}
+
+  useEffect(() => {
+    if (!locationId) { setState(null); return }
+    let cancelled = false
+    const check = async () => {
+      try {
+        const r = await fetch('/api/import/active?location_id=' + encodeURIComponent(locationId) + '&skip_count=1')
+        if (!r.ok) { if (!cancelled) setState(null); return }
+        const { job, recent_deferred } = await r.json()
+        if (cancelled) return
+        if (job && job.status === 'running' && isParkedPhase(job.phase)) {
+          setState({
+            kind: 'parked',
+            processed: job.processed_records || 0,
+            total: job.total_records || 0,
+          })
+          return
+        }
+        if (!job && recent_deferred) {
+          let dismissed = false
+          try { dismissed = localStorage.getItem('bee.importGapBanner.dismissed.' + recent_deferred.id) === '1' } catch {}
+          if (!dismissed) {
+            setState({
+              kind: 'done',
+              jobId: recent_deferred.id,
+              total: recent_deferred.processed_records || recent_deferred.total_records || 0,
+            })
+            return
+          }
+        }
+        setState(null)
+      } catch { if (!cancelled) setState(null) }
+    }
+    check()
+    // Light re-check so the banner flips parked→done without a reload if the
+    // tab is left open across the overnight run. 5 min; no Jobber calls.
+    const timer = setInterval(check, 5 * 60 * 1000)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [locationId])
+
+  if (!state) return null
+
+  if (state.kind === 'parked') {
+    const remaining = Math.max(0, state.total - state.processed)
+    return (
+      <div style={{ margin:'10px 12px 0', padding:'10px 14px', background:'rgba(34,197,94,0.07)', border:'1px solid rgba(34,197,94,0.22)', borderRadius:'10px', display:'flex', alignItems:'center', gap:'10px' }}>
+        <span style={{ fontSize:'16px', flexShrink:0 }}>🐝</span>
+        <p style={{ fontSize:'12px', color:'#3a4e4a', lineHeight:1.5, flex:1, minWidth:0 }}>
+          <span style={{ fontWeight:600 }}>Your first {state.processed.toLocaleString()} clients are in.</span>{' '}
+          The remaining {remaining > 0 ? `~${remaining.toLocaleString()}` : ''} import automatically overnight — nothing is lost.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ margin:'10px 12px 0', padding:'10px 14px', background:'rgba(34,197,94,0.07)', border:'1px solid rgba(34,197,94,0.22)', borderRadius:'10px', display:'flex', alignItems:'center', gap:'10px' }}>
+      <span style={{ fontSize:'16px', flexShrink:0 }}>🎉</span>
+      <p style={{ fontSize:'12px', color:'#3a4e4a', lineHeight:1.5, flex:1, minWidth:0 }}>
+        <span style={{ fontWeight:600 }}>All {state.total.toLocaleString()} clients imported overnight.</span>{' '}
+        Your full Jobber book is now in Bee Hub.
+      </p>
+      <button
+        onClick={() => {
+          try { localStorage.setItem('bee.importGapBanner.dismissed.' + state.jobId, '1') } catch {}
+          setState(null)
+        }}
+        aria-label="Dismiss"
+        style={{ background:'none', border:'none', fontSize:'14px', color:'#8a9e9a', cursor:'pointer', padding:'2px 6px', flexShrink:0, fontFamily:'inherit' }}>
+        ✕
+      </button>
     </div>
   )
 }
@@ -16278,12 +16429,16 @@ export function JobberCard({ settings, updateLocation }) {
   // Connected splits by import phase into ONE status + ONE next step. Everything
   // "fine to an owner" (connected AND auto-refreshing AND already imported)
   // reads the same calm way; the only healthy call-to-action is a first import.
-  const connectedHeadline = importing ? 'Bringing in your clients' : 'Jobber is connected'
+  const connectedHeadline =
+      importing                 ? 'Bringing in your clients'
+    : importPhase === 'parked'  ? 'Sample imported — finishing overnight'
+    :                             'Jobber is connected'
   const connectedBody =
-      importing              ? 'Bringing in your existing clients now — this usually takes a few minutes. You can leave this page; it keeps going.'
-    : importPhase === 'error'? 'Your connection is fine, but the last import didn’t finish. You can try again below.'
-    : hasImported            ? 'Your clients, jobs, and invoices are in Bee Hub and stay up to date automatically. There’s nothing you need to do here.'
-    :                          'Next step: bring your existing clients into Bee Hub so everything’s in one place. New clients then sync automatically.'
+      importing                ? 'Bringing in your existing clients now — this usually takes a few minutes. You can leave this page; it keeps going.'
+    : importPhase === 'parked' ? 'A starter set of your clients is in Bee Hub now. The rest import automatically overnight — nothing is lost.'
+    : importPhase === 'error'  ? 'Your connection is fine, but the last import didn’t finish. You can try again below.'
+    : hasImported              ? 'Your clients, jobs, and invoices are in Bee Hub and stay up to date automatically. There’s nothing you need to do here.'
+    :                            'Next step: bring your existing clients into Bee Hub so everything’s in one place. New clients then sync automatically.'
   const headline = status === 'connected' ? connectedHeadline : v.headline
   const body     = status === 'connected' ? connectedBody     : v.body
 
@@ -16459,7 +16614,9 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
           if (!cancelled && job && job.status === 'running') {
             setStatus(job)
             setJobId(job.id)
-            setImportState('running')
+            // A parked job (sample in, bulk overnight) renders the gap state
+            // directly — attaching the poller would just re-discover it.
+            setImportState(isParkedPhase(job.phase) ? 'parked' : 'running')
           }
         }
       } catch { /* fall through to idle — user can still start manually */ }
@@ -16484,8 +16641,9 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
     const maybeContinue = async (d) => {
       if (continuingRef.current) return
       if (d?.status !== 'running') return
-      const phase = d?.phase || ''
-      if (!/^fetching|^batched|^writing/.test(phase)) return
+      // Shared predicate (lib/import-phase): a PARKED job's phase never
+      // matches, so an open Settings tab can't launch the bulk run mid-day.
+      if (!phaseAutoContinues(d?.phase)) return
       if (!locationId) return
       continuingRef.current = true
       try {
@@ -16517,6 +16675,13 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
         if (d.status === 'failed' || d.status === 'error') {
           setError(d.error || d.status_message || 'import_failed')
           setImportState('error')
+          etaSamplesRef.current = []; lastProgressRef.current = null
+          return
+        }
+        // Parked (sample-now/bulk-later): show the gap state and stop
+        // polling — nothing changes until the overnight window opens.
+        if (isParkedPhase(d.phase)) {
+          setImportState('parked')
           etaSamplesRef.current = []; lastProgressRef.current = null
           return
         }
@@ -16714,6 +16879,19 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
         </div>
       )
     }
+    if (importState === 'parked') {
+      // Sample-now/bulk-later gap state — informational only; the unified
+      // JobberCard header carries the headline, this the detail.
+      return (
+        <div style={{ marginTop:'10px', padding:'10px 12px', background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:'9px' }}>
+          <p style={{ fontSize:'12px', color:'#5a6e6a', lineHeight:1.5 }}>
+            A starter set of {(status?.processed_records || 0).toLocaleString()} clients is in Bee Hub now.
+            The remaining {Math.max(0, (status?.total_records || 0) - (status?.processed_records || 0)).toLocaleString()} import
+            automatically overnight — nothing is lost.
+          </p>
+        </div>
+      )
+    }
     if (importState === 'error') {
       return (
         <div style={{ marginTop:'12px' }}>
@@ -16764,6 +16942,7 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
             {importState === 'running' && (preCount
               ? humanizeImportPhase(rawPhase)
               : `Importing… ${processed} of ${status?.total_records ?? '?'} clients`)}
+            {importState === 'parked' && `Sample imported — ${processed.toLocaleString()} clients in, the rest finish overnight`}
             {importState === 'complete' && `${summary?.total_clients ?? status?.processed_records ?? 0} clients imported`}
             {importState === 'error' && (error || 'Import failed')}
           </p>
@@ -16853,6 +17032,20 @@ export function ClientImportCard({ isJobberConnected, locationId, initialImportC
             style={{ width:'100%', padding:'8px', background:'transparent', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:500, color:'#8a9e9a', cursor:'pointer' }}>
             Cancel import
           </button>
+        </div>
+      )}
+
+      {/* Parked (sample-now/bulk-later) — the explicit gap state, never a
+          frozen progress bar. Counts stay honest; this reframes them. */}
+      {importState === 'parked' && (
+        <div style={{ padding:'0 14px 12px' }}>
+          <div style={{ padding:'10px 12px', background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:'9px' }}>
+            <p style={{ fontSize:'11px', color:'#5a6e6a', lineHeight:1.5 }}>
+              A starter set of {processed.toLocaleString()} clients is in Bee Hub now.
+              The remaining {Math.max(0, (status?.total_records || 0) - processed).toLocaleString()} import
+              automatically overnight — nothing is lost.
+            </p>
+          </div>
         </div>
       )}
 
@@ -21818,6 +22011,10 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'5rem' }}>
       <PastDueBar />
+      {/* Sample-now/bulk-later gap state on Home — same banner as the Clients
+          surface, so the partial book reads as "rest arrives tonight" from the
+          first screen the owner lands on. */}
+      <ImportGapBanner locationId={effectiveLocId} />
 
       {/* Header */}
       <div style={{ background:BRAND.dark, padding:'1.5rem 1.25rem 2rem', position:'relative', overflow:'hidden' }}>
@@ -33537,6 +33734,9 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     )
     if (activeNav==='hive') return (
       <div style={pageStyle}>
+        {/* Sample-now/bulk-later gap state: the Clients surface must explain a
+            partial book ("rest arrives tonight"), or it reads as data loss. */}
+        <ImportGapBanner locationId={viewAsUser?.locationId || (locFilter==='all' ? null : locFilter)} />
         <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} locationRequired={!!initialAllOverview} onOpenLocationPicker={()=>setShowLocPicker(true)} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} initialSelectedEngagementId={globalSelectedEngagementId} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onEngagementChange={(id)=>setGlobalSelectedEngagementId(id)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} initialHiveIntent={hiveIntent} onHiveIntentConsumed={()=>setHiveIntent(null)} />
         {toast && <InlineToast {...toast} />}
       </div>

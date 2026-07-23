@@ -23,6 +23,15 @@ export const SEC_PER_CLIENT = 0.5
 // minutes" instead. (200 clients ≈ 100s of write time.)
 const FEW_MINUTES_CUTOFF = 200
 
+// Above this, the onboarding step opens the import in SAMPLE mode
+// (mode=sample → write ~75 curated clients now, park the rest for an
+// overnight bulk run). At or below it, a full import is "a few minutes" —
+// not dead time on a call — so it runs exactly as today. Deliberately the
+// same line as FEW_MINUTES_CUTOFF: the estimate copy and the sample
+// decision should flip at the same size. Unknown count → full import
+// (today's behavior; never sample on a guess).
+export const SAMPLE_MODE_MIN_CLIENTS = 200
+
 // Estimates render as minute values from this ladder, so ranges look
 // human ("3–7", "10–20") rather than computed ("5.4–8.1").
 const NICE_MINUTES = [1, 2, 3, 5, 7, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240]

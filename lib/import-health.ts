@@ -82,7 +82,13 @@ export async function fetchImportHealth(opts: {
     .limit(20)
 
   // Running + genuinely stalled: started longer ago than the threshold AND the
-  // claim is null or staler than the threshold.
+  // claim is null or staler than the threshold. PARKED jobs (sample-now/
+  // bulk-later: resume_after in the future) are excluded — a job waiting for
+  // its off-hours window is by design idle for hours and would otherwise be
+  // called out as stalled in every digest until it resumes. NULL resume_after
+  // (all normal imports) matches exactly as before; a past resume_after is a
+  // deferred bulk run in progress and IS stall-monitored normally.
+  const nowIso = new Date(opts.nowMs).toISOString()
   const { data: stalled } = await supabase
     .from('import_jobs')
     .select('location_id, phase, processed_records, total_records, started_at, location_claim_at')
@@ -90,6 +96,7 @@ export async function fetchImportHealth(opts: {
     .eq('status', 'running')
     .lt('started_at', stallCutoff)
     .or(`location_claim_at.is.null,location_claim_at.lt.${stallCutoff}`)
+    .or(`resume_after.is.null,resume_after.lte.${nowIso}`)
     .order('started_at', { ascending: true })
     .limit(20)
 
