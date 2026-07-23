@@ -36,7 +36,7 @@
 
 import React, { useEffect, useState } from 'react'
 import { T } from './tokens'
-import { useReducedMotion, useMotionKeyframes } from './motion'
+import { useReducedMotion } from './motion'
 
 // How long a load must run before the bee is worth showing. Tuned to the
 // post-Fix-2 reality: below this, a load is perceived as instant and a loader
@@ -60,9 +60,15 @@ const SPIN_MS = 2600
 // continuously true for `delayMs`. Resets the moment it goes false, so a
 // second load starts its own clock rather than inheriting the first one's.
 export function useDelayedFlag(active, delayMs = SHOW_AFTER_MS) {
-  const [shown, setShown] = useState(false)
+  // delayMs <= 0 seeds TRUE rather than waiting for an effect. That matters
+  // beyond saving a tick: app/loading.tsx is streamed as HTML before any JS
+  // runs, so a false-then-effect initial state would render an EMPTY fallback
+  // through the whole pre-hydration wait — precisely the wait it exists to
+  // cover. Same value on server and client, so no hydration mismatch.
+  const [shown, setShown] = useState(delayMs <= 0 ? !!active : false)
   useEffect(() => {
     if (!active) { setShown(false); return }
+    if (delayMs <= 0) { setShown(true); return }
     const t = setTimeout(() => setShown(true), delayMs)
     return () => clearTimeout(t)
   }, [active, delayMs])
@@ -78,7 +84,6 @@ export default function BeeLoader({
   delay = SHOW_AFTER_MS,
 }) {
   const reduced = useReducedMotion()
-  useMotionKeyframes()
   const show = useDelayedFlag(true, delay)
 
   // Nothing at all before the threshold — no placeholder, no reserved box.
@@ -110,7 +115,7 @@ export default function BeeLoader({
         }}
       >
         {/* the pot — centred anchor the bee circles */}
-        <span style={{
+        <span className="bee-loader-pot" style={{
           fontSize: `${s.pot}px`, lineHeight: 1, userSelect: 'none',
           animation: reduced ? undefined : `beePotBreathe ${SPIN_MS * 2}ms ease-in-out infinite`,
         }}>
@@ -120,7 +125,7 @@ export default function BeeLoader({
         {/* the orbit ring — full-box, rotates about its centre. The bee is
             pushed out to the radius inside it, so one rotation carries the bee
             all the way round without any per-frame position maths. */}
-        <div style={{
+        <div className="bee-loader-orbit" style={{
           position: 'absolute', inset: 0,
           animation: reduced ? undefined : `beeOrbit ${SPIN_MS}ms linear infinite`,
           // Under reduced motion the ring is static, so park the bee at a
@@ -135,7 +140,7 @@ export default function BeeLoader({
             transform: `translate(-50%, -50%) translateX(${s.orbit}px)`,
             fontSize: `${s.bee}px`, lineHeight: 1, userSelect: 'none',
           }}>
-            <span style={{
+            <span className="bee-loader-counter" style={{
               display: 'inline-block',
               animation: reduced ? undefined : `beeOrbitCounter ${SPIN_MS}ms linear infinite`,
               transform: reduced ? 'rotate(35deg)' : undefined,

@@ -43,6 +43,11 @@ export function useReducedMotion() {
 
 // One-time keyframes injection (idempotent across mounts). Color-free —
 // transforms + opacity only, so no literal ever lands outside tokens.
+//
+// NOTE: BeeLoader's orbit keyframes deliberately do NOT live here. They are in
+// app/globals.css because app/loading.tsx streams as HTML before any JS runs,
+// and an effect-injected keyframe would not exist yet — the bee would sit
+// frozen through the wait it exists to cover.
 let injected = false
 export function useMotionKeyframes() {
   useEffect(() => {
@@ -68,19 +73,6 @@ export function useMotionKeyframes() {
         0%   { opacity: 0; transform: translateY(-7px) scale(0.94); }
         60%  { opacity: 1; transform: translateY(0) scale(1.04); }
         100% { opacity: 1; transform: translateY(0) scale(1); }
-      }
-      /* BeeLoader — the bee orbits the pot. TWO paired keyframes: the ring
-         rotates, and the bee counter-rotates at the same rate so it stays
-         upright instead of tumbling head-over-heels round the circle. Change
-         one duration and you must change the other. Transform-only, so the
-         browser composites it without a single reflow. */
-      @keyframes beeOrbit        { from { transform: rotate(0deg); }   to { transform: rotate(360deg); } }
-      @keyframes beeOrbitCounter { from { transform: rotate(0deg); }   to { transform: rotate(-360deg); } }
-      /* The pot's slow breath — the "still working" cue when the bee is
-         behind it. Scale only; no color, no layout. */
-      @keyframes beePotBreathe {
-        0%, 100% { transform: scale(1); }
-        50%      { transform: scale(1.06); }
       }
     `
     document.head.appendChild(el)

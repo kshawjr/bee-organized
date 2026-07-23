@@ -25377,6 +25377,52 @@ function AssignUserPicker({ locationId, currentUserIds=[], onSelect, onClose }) 
 }
 
 // ─── View As User Sheet ───────────────────────────────────────────────────────
+// ─── Scope-switch progress bar ────────────────────────────────────────────────
+// The "your click registered" cue for a location switch. Deliberately NOT
+// BeeLoader: that component's 350ms gate is correct for a section load (is this
+// slow enough to warrant a loader?) and wrong for this (did my click land?),
+// where any delay is the whole problem. So this shows on the first frame.
+//
+// Indeterminate on purpose. router.refresh() reports no progress, so a
+// percentage would be invented — the bar communicates "working", not "62%".
+//
+// Fixed to the very top above every layer, 2px tall, no layout impact, so a
+// fast switch flashes a hairline rather than throwing a panel over the screen.
+//
+// REDUCED MOTION: the sweep animation is stopped by the media query in
+// globals.css (which also covers the pre-hydration window), and the bar falls
+// back to a still, full-width accent band — still visible, because removing the
+// only feedback these users get would be worse than an un-animated bar.
+// role="status" + aria-live carries it for screen readers either way.
+function ScopeSwitchProgress({ active }) {
+  if (!active) return null
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        position: 'fixed', top: 0, left: 0, right: 0, height: '2px',
+        zIndex: 10030, pointerEvents: 'none', overflow: 'hidden',
+        background: 'rgba(26,46,43,0.08)',
+      }}
+    >
+      <div
+        className="bee-scope-bar"
+        style={{
+          height: '100%', width: '100%',
+          background: 'linear-gradient(90deg, rgba(168,201,196,0) 0%, #a8c9c4 35%, #1a2e2b 65%, rgba(26,46,43,0) 100%)',
+          animation: 'beeScopeBar 1.1s ease-in-out infinite',
+          transformOrigin: 'left center',
+        }}
+      />
+      {/* Announced once; the bar itself is decorative. */}
+      <span style={{ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' }}>
+        Switching location…
+      </span>
+    </div>
+  )
+}
+
 // ─── Global Search ────────────────────────────────────────────────────────────
 function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClose, scopeLabel='all locations', locationsById={} }) {
   const [q, setQ] = useState('')
@@ -33029,6 +33075,18 @@ export default function App({
   // mode, disabled storage) the client-side filter still applies and the server
   // simply keeps its previous scope — the pre-Phase-1 behavior. Never let a
   // cookie failure block the scope change the user asked for.
+  // ── Switch feedback ────────────────────────────────────────────────────────
+  // router.refresh() re-fetches the RSC payload and reconciles it into the
+  // EXISTING tree: nothing unmounts, no Suspense boundary engages, no
+  // loading.tsx fires. So the old location's content sat there fully rendered
+  // and fully interactive for the whole round trip with no acknowledgment that
+  // the click had registered — there was simply no loading state in the tree
+  // for a loader to attach to.
+  //
+  // useTransition is what React provides for exactly this: isPending goes true
+  // synchronously on click and false when the refreshed payload has committed.
+  // It is the only thing that knows the refresh is still in flight.
+  const [isScopePending, startScopeTransition] = React.useTransition()
   const applyLocScope = React.useCallback((next) => {
     setLocFilter(next)
     try {
@@ -33039,7 +33097,14 @@ export default function App({
     // Re-runs the server component with the new cookie. React state (open
     // panels, selections, scroll) is preserved; only the initial* props change,
     // which the prop-sync effects below fold into state.
-    try { router.refresh() } catch (e) { console.error('[scope] refresh failed:', e) }
+    //
+    // Inside a transition so the pending state above tracks it. The refresh
+    // itself is unchanged — this wraps it, it does not replace it.
+    try {
+      startScopeTransition(() => { router.refresh() })
+    } catch (e) {
+      console.error('[scope] refresh failed:', e)
+    }
   }, [router])
   // ── Cookie reconcile (Fix 2, Phase 2) ──────────────────────────────────────
   // Make the cookie say what the server ACTUALLY scoped to. A Server Component
@@ -34152,9 +34217,30 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         })()}
       </div>
 
+      {/* Scope-switch feedback (immediate, no delay gate).
+          BeeLoader's 350ms threshold is right for a SECTION load, where the
+          question is "is this slow enough to be worth a loader". This is a
+          different question — "did my click land" — and the answer has to be
+          instant or the button feels dead. A thin bar appearing for 150ms is
+          not the flash problem; a full loader would be. */}
+      <ScopeSwitchProgress active={isScopePending} />
+
       {/* Main content - offset by sidebar on desktop */}
       <div className="bee-main" style={{ marginLeft:0 }}>
-        {screen()}
+        {/* While the switch is in flight this content is the PREVIOUS
+            location's — correct-looking and completely stale. Dimming says so,
+            and pointer-events:none stops a click landing on a row that is
+            about to be replaced by a different location's record. The chrome
+            (sidebar, picker, nav) stays live, so the switch can be changed or
+            repeated mid-flight. */}
+        <div
+          aria-busy={isScopePending || undefined}
+          style={isScopePending
+            ? { opacity: 0.45, pointerEvents: 'none', transition: 'opacity 140ms ease-out' }
+            : { transition: 'opacity 140ms ease-out' }}
+        >
+          {screen()}
+        </div>
       </div>
 
       {showGlobalSearch&&(
