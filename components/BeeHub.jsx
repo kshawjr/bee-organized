@@ -9671,7 +9671,7 @@ async function patchLeadAPI(leadId, patch) {
   }
 }
 
-function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, initialSelectedEngagementId=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onEngagementChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, initialHiveIntent=null, onHiveIntentConsumed=()=>{} }) {
+function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], peopleUnavailable=false, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, initialSelectedEngagementId=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onEngagementChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, initialHiveIntent=null, onHiveIntentConsumed=()=>{} }) {
   if (!people) return null
   const allPeople = locFilter==='all' ? people : people.filter(p=>p.locationId===locFilter)
   // Real hub_users roster (LocationUsersContext) drives the "Assigned To"
@@ -9964,6 +9964,7 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], readOnly
           // without this an impersonated franchise owner would see corporate's
           // transfer queue — a view-as over-exposure artifact.
           transferPeople={isElevated ? transferPeople : []}
+          peopleUnavailable={peopleUnavailable}
           // Deep-link intent (Home "Needs attention" cards): land on the
           // right tab + view + expanded/scrolled target. One-shot; consumed
           // back up to the App so it can't re-fire.
@@ -21738,7 +21739,7 @@ function HomeGreeting({ ownerName, ownerEmail }) {
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, transferPeople=[], locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false }) {
+function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, transferPeople=[], allOverview=null, leadsTruncated=false, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
@@ -21830,6 +21831,33 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   // refresh together with the data rather than once per render.
   const homeDerived = useMemo(() => {
   const nowHome = Date.now()
+  // ── 'All Locations' reads the SERVER overview (Fix 2, Phase 4) ────────────
+  // On 'all' there is no people graph to derive from — that is the whole point
+  // of Phase 4. The server computes these with the SAME pure functions used
+  // below (deriveClientStatus + the shared thresholds), so the two paths agree
+  // by construction rather than by two implementations happening to match.
+  //
+  // transferLeads stays local: it reads the dedicated loc_other queue, which is
+  // fetched outside the scope and is present on every path (Phase 2).
+  if (allOverview) {
+    const ov = allOverview
+    return {
+      newUncontacted: [], newCount: ov.newUncontacted.count, newUncontactedOldest: ov.newUncontacted.oldestDays,
+      estimateFollowUps: [], estimateCount: ov.estimateFollowUps.count, estimateOldest: ov.estimateFollowUps.oldestDays,
+      upcomingAssessments: ov.upcomingAssessments || [],
+      assessDetail: (ov.upcomingAssessments || []).length
+        ? `Next: ${ov.upcomingAssessments[0].client || 'Client'} · ${new Date(ov.upcomingAssessments[0].scheduled_at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}`
+        : '',
+      agingInvoices: [], agingCount: ov.agingInvoices.count,
+      agingTotal: ov.agingInvoices.total, agingOldest: ov.agingInvoices.oldestDays,
+      transferLeads: isElevated ? (transferPeople || []).filter(p => !p.isJunk) : [],
+      openEngagementsCount: ov.openEngagementsCount,
+      activeClientsCount: ov.activeClientsCount,
+      newThisWeekCount: ov.newThisWeekCount,
+      outstandingTotal: ov.outstandingTotal,
+      overviewTruncated: !!ov.truncated,
+    }
+  }
   // Client-side location scope (mirrors HiveShell.filtered): effectiveLocId null
   // = the all-locations view (elevated on 'all').
   const scopedPeopleH = effectiveLocId ? (people||[]).filter(p=>p.locationId===effectiveLocId) : (people||[])
@@ -21937,25 +21965,30 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     .reduce((s,inv)=> s + (Number(inv.balance)>0 ? Number(inv.balance) : 0), 0)
 
   return {
-    newUncontacted, newUncontactedOldest,
-    estimateFollowUps, estimateOldest,
+    // Counts are returned EXPLICITLY alongside the arrays so the cards below
+    // read one shape on both paths — the 'all' branch has numbers without rows
+    // and must not have to fabricate array elements to satisfy `.length`.
+    newUncontacted, newCount: newUncontacted.length, newUncontactedOldest,
+    estimateFollowUps, estimateCount: estimateFollowUps.length, estimateOldest,
     upcomingAssessments, assessDetail,
-    agingInvoices, agingTotal, agingOldest,
+    agingInvoices, agingCount: agingInvoices.length, agingTotal, agingOldest,
     transferLeads,
     openEngagementsCount, activeClientsCount, newThisWeekCount, outstandingTotal,
+    overviewTruncated: false,
   }
   // Deps = every value the block READS. `nowHome` (Date.now()) is deliberately
   // NOT a dep: keeping it out is the whole point — the block must not recompute
   // on the clock tick. `engagements` is the stable server prop; `people` is App
   // state (new ref only on a real change); the rest are primitives/booleans.
-  }, [people, engagements, transferPeople, effectiveLocId, isElevated, canSeeFinancials])
+  }, [people, engagements, transferPeople, allOverview, effectiveLocId, isElevated, canSeeFinancials])
   const {
-    newUncontacted, newUncontactedOldest,
-    estimateFollowUps, estimateOldest,
+    newCount, newUncontactedOldest,
+    estimateCount, estimateOldest,
     upcomingAssessments, assessDetail,
-    agingInvoices, agingTotal, agingOldest,
+    agingCount, agingTotal, agingOldest,
     transferLeads,
     openEngagementsCount, activeClientsCount, newThisWeekCount, outstandingTotal,
+    overviewTruncated,
   } = homeDerived
 
   // Home-scoped collapse memory for the info lists (Tier 2d) — REUSES the
@@ -21976,15 +22009,15 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   // HiveShell deep-link intent (onOpenHive) — except assessments, which have no
   // dedicated Clients view, so that card reveals Home's own Upcoming list.
   const alertCards = [
-    newUncontacted.length > 0 && {
+    newCount > 0 && {
       key:'new-uncontacted', tone:'red', icon:'✨',
-      title:`${newUncontacted.length} new lead${newUncontacted.length>1?'s':''} not contacted`,
+      title:`${newCount} new lead${newCount>1?'s':''} not contacted`,
       detail:`No outreach yet · oldest ${newUncontactedOldest}d`,
       onOpen:()=> onOpenHive && onOpenHive({ tab:'inbox', section:'new' }),
     },
-    estimateFollowUps.length > 0 && {
+    estimateCount > 0 && {
       key:'estimate-followup', tone:'red', icon:'📋',
-      title:`${estimateFollowUps.length} estimate${estimateFollowUps.length>1?'s':''} awaiting follow-up`,
+      title:`${estimateCount} estimate${estimateCount>1?'s':''} awaiting follow-up`,
       detail:`Sent >${ESTIMATE_FOLLOWUP_DAYS}d ago · oldest ${estimateOldest}d`,
       onOpen:()=> onOpenHive && onOpenHive({ tab:'engagements', view:'list', group:'Estimate' }),
     },
@@ -21994,10 +22027,10 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       detail:assessDetail,
       onOpen:()=> revealHomeSection('upcoming'),
     },
-    (canSeeFinancials && agingInvoices.length > 0) && {
+    (canSeeFinancials && agingCount > 0) && {
       key:'invoices-aging', tone:'amber', icon:'💳',
       title:`${fmt(agingTotal)} unpaid`,
-      detail:`${agingInvoices.length} invoice${agingInvoices.length>1?'s':''} · oldest issued ${agingOldest}d ago`,
+      detail:`${agingCount} invoice${agingCount>1?'s':''} · oldest issued ${agingOldest}d ago`,
       onOpen:()=> onOpenHive && onOpenHive({ tab:'engagements', view:'list', group:'Final Processing' }),
     },
     transferLeads.length > 0 && {
@@ -22007,8 +22040,8 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       onOpen:()=> onOpenHive && onOpenHive({ tab:'inbox', section:'transfer' }),
     },
   ].filter(Boolean)
-  const attentionCount = newUncontacted.length + estimateFollowUps.length + upcomingAssessments.length
-    + (canSeeFinancials ? agingInvoices.length : 0) + transferLeads.length
+  const attentionCount = newCount + estimateCount + upcomingAssessments.length
+    + (canSeeFinancials ? agingCount : 0) + transferLeads.length
   const homeScope = (isElevated && locFilter==='all')
     ? 'All locations'
     : (selectedLoc?.name || currentLocation?.name || locationName || 'Your location')
@@ -22119,7 +22152,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     // allow browsing but read-only during grace
   }
 
-  if (activeNav==='hive') return <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} locations={locations} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} setToast={setToast} engagements={engagements} newBoardAllowed={newBoardAllowed} engagementsClosedCount={engagementsClosedCount} engagementsClosedWonCount={engagementsClosedWonCount} />{toast && <InlineToast {...toast} />}</>
+  if (activeNav==='hive') return <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} peopleUnavailable={!!allOverview} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} locations={locations} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} setToast={setToast} engagements={engagements} newBoardAllowed={newBoardAllowed} engagementsClosedCount={engagementsClosedCount} engagementsClosedWonCount={engagementsClosedWonCount} />{toast && <InlineToast {...toast} />}</>
 
   if (activeNav==='schedule') return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'5rem' }}>
@@ -22233,6 +22266,25 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
       </div>
 
       <div style={{ padding:'1.25rem', display:'grid', gap:'1.5rem' }}>
+
+        {/* ═══ Truncation notice (Fix 2 Phase 4) ═══
+            A load that hit its row ceiling used to whisper into Vercel's logs
+            and render short numbers as if they were complete — the exact
+            silent-failure mode this whole effort is retiring. If the counts
+            below are under-counted, the page says so. */}
+        {(leadsTruncated || overviewTruncated) && (
+          <div style={{ padding:'11px 14px', borderRadius:'12px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.25)', display:'flex', gap:'10px', alignItems:'flex-start' }}>
+            <span style={{ fontSize:'15px', lineHeight:1.2 }}>⚠️</span>
+            <div>
+              <p style={{ fontSize:'13px', fontWeight:700, color:'#b91c1c', marginBottom:'2px' }}>Some records weren&apos;t loaded</p>
+              <p style={{ fontSize:'12px', color:'#7f1d1d', lineHeight:1.5 }}>
+                This location has more records than a single page load carries, so the
+                numbers below are <strong>under-counted</strong>. Nothing is lost — reach
+                out so the limit can be raised.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* ═══ Needs attention (hero) — ALWAYS open, never collapsed ═══ */}
         <div>
@@ -25324,8 +25376,37 @@ function AssignUserPicker({ locationId, currentUserIds=[], onSelect, onClose }) 
 
 // ─── View As User Sheet ───────────────────────────────────────────────────────
 // ─── Global Search ────────────────────────────────────────────────────────────
-function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClose, scopeLabel='all locations' }) {
+function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClose, scopeLabel='all locations', locationsById={} }) {
   const [q, setQ] = useState('')
+  // ── Server-backed search (Fix 2, Phase 4) ────────────────────────────────
+  // This was an in-memory scan of the loaded people array. Since Phase 1 an
+  // elevated user holds ONE location, so it quietly searched only that one —
+  // the same silent-narrowing class as MAX_LEADS dropping leads without an
+  // error. Phase 2 labelled the scope as a stopgap; this queries the server,
+  // which searches every location for an elevated user and stays fenced for
+  // everyone else. Partners remain a local scan: they are a 3-row table.
+  const [remote, setRemote] = useState({ rows: [], loading: false, truncated: false, failed: false })
+  React.useEffect(() => {
+    const term = q.trim()
+    if (term.length < 2) { setRemote({ rows: [], loading: false, truncated: false, failed: false }); return }
+    let cancelled = false
+    setRemote(r => ({ ...r, loading: true, failed: false }))
+    // Debounced: a keystroke-per-request would hammer the endpoint and land
+    // responses out of order.
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`, { credentials: 'include' })
+        if (!res.ok) throw new Error(String(res.status))
+        const json = await res.json()
+        if (!cancelled) setRemote({ rows: json.results || [], loading: false, truncated: !!json.truncated, failed: false })
+      } catch (e) {
+        // Degrade to the local scan rather than showing nothing — but SAY so,
+        // because a silently local result set is the bug being fixed.
+        if (!cancelled) setRemote({ rows: [], loading: false, truncated: false, failed: true })
+      }
+    }, 220)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [q])
 
   React.useEffect(()=>{
     const prev = document.body.style.overflow
@@ -25334,7 +25415,10 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
   }, [])
 
   const query = q.toLowerCase().trim()
-  const matchedPeople   = !query ? [] : people.filter(p => !p.isJunk && (p.name.toLowerCase().includes(query) || (p.email||'').toLowerCase().includes(query) || (p.phone||'').toLowerCase().includes(query) || (p.project||'').toLowerCase().includes(query))).slice(0,8)
+  // Server results are authoritative. The local scan is the FALLBACK only —
+  // when the endpoint fails — and is labelled as scope-limited when it runs.
+  const localPeople = !query ? [] : people.filter(p => !p.isJunk && (p.name.toLowerCase().includes(query) || (p.email||'').toLowerCase().includes(query) || (p.phone||'').toLowerCase().includes(query) || (p.project||'').toLowerCase().includes(query))).slice(0,8)
+  const matchedPeople = remote.failed ? localPeople : remote.rows
   const matchedPartners = !query ? [] : partners.filter(p => p.name.toLowerCase().includes(query) || (p.company||'').toLowerCase().includes(query) || (p.title||'').toLowerCase().includes(query)).slice(0,4)
   const hasResults = matchedPeople.length > 0 || matchedPartners.length > 0
 
@@ -25378,21 +25462,40 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
                   <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>🍯 Client ({matchedPeople.length})</p>
                 </div>
                 {matchedPeople.map(p=>{
-                  const loc = ALL_LOCATIONS.find(l=>l.id===p.locationId)
-                  const sc = STAGES.find(s=>s.key===p.stage)||STAGES[0]
+                  // Server results carry locationName directly. The local
+                  // fallback rows carry only locationId, so resolve it from the
+                  // REAL locations roster — the old lookup read ALL_LOCATIONS,
+                  // the mock array, and therefore showed nothing for real data.
+                  const locName = p.locationName || locationsById[p.locationId] || null
+                  const sub = [p.project, locName, p.phone || p.email].filter(Boolean).join(' · ')
                   return (
                     <button key={p.id} onClick={()=>{ onSelectPerson(p); onClose() }} style={{ width:'100%', padding:'14px 20px', background:'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'14px', textAlign:'left' }}>
                       <div style={{ width:'42px', height:'42px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'14px', fontWeight:700, color:'white', flexShrink:0 }}>
-                        {p.name.split(' ').map(w=>w[0]).join('').slice(0,2)}
+                        {(p.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2)}
                       </div>
                       <div style={{ flex:1, minWidth:0 }}>
                         <p style={{ fontSize:'15px', fontWeight:600, color:'#1a2e2b', marginBottom:'3px' }}>{p.name}</p>
-                        <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{p.project}{loc?` · ${loc.name}`:''} · {p.phone}</p>
+                        <p style={{ fontSize:'12px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sub || '—'}</p>
                       </div>
-                      <span style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:sc.bg||'rgba(0,0,0,0.05)', color:sc.color||'#8a9e9a', fontWeight:600, flexShrink:0 }}>{sc.icon} {p.stage}</span>
+                      {/* The location is the ACTIONABLE fact on a cross-location
+                          hit — "which Sarah?" — so it gets a chip, not a
+                          buried clause. */}
+                      {locName && (
+                        <span style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:'rgba(26,46,43,0.05)', color:'#5a6e6a', fontWeight:600, flexShrink:0, maxWidth:'40%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>📍 {locName}</span>
+                      )}
                     </button>
                   )
                 })}
+                {remote.truncated && (
+                  <p style={{ padding:'8px 20px', fontSize:'11px', color:'#8a9e9a', background:'#f7f5f0' }}>
+                    Showing the first {matchedPeople.length} matches — refine the search to narrow it.
+                  </p>
+                )}
+                {remote.failed && (
+                  <p style={{ padding:'8px 20px', fontSize:'11px', color:'#b45309', background:'rgba(245,158,11,0.08)' }}>
+                    Search is offline — showing only {scopeLabel} from this page.
+                  </p>
+                )}
               </>
             )}
             {matchedPartners.length > 0 && (
@@ -26880,18 +26983,43 @@ function LocationDrilldown({ loc, people, users, partners, onClose }) {
     return ()=>{ document.body.style.overflow = prev }
   }, [])
 
-  const locPeople   = people.filter(p=>p.locationId===loc.id&&!p.isJunk)
+  // ── Counts come from the server (Fix 2, Phase 4) ─────────────────────────
+  // This used to do `people.filter(p => p.locationId === loc.id)` for an
+  // ARBITRARY location, which only ever worked because 'All Locations' loaded
+  // every lead in the tenant — 28.57 MB to render five integers and a
+  // histogram. Phase 4 stops loading them, so the numbers are read from
+  // /api/admin/locations/:id/summary (head:true counts, no rows on the wire).
+  //
+  // The counts also became MORE correct in the move: they now read ENGAGEMENT
+  // stage, the system of record since HIVE Phase 1, where this read the legacy
+  // person-level `stage` string.
+  const [summary, setSummary] = useState(null)
+  const [summaryErr, setSummaryErr] = useState(false)
+  React.useEffect(() => {
+    if (!loc?.id) return
+    let cancelled = false
+    setSummary(null); setSummaryErr(false)
+    fetch(`/api/admin/locations/${loc.id}/summary`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
+      .then(d => { if (!cancelled) setSummary(d) })
+      .catch(() => { if (!cancelled) setSummaryErr(true) })
+    return () => { cancelled = true }
+  }, [loc?.id])
+
   const locUsers    = users.filter(u=>u.locationId===loc.id)
   const locPartners = partners.filter(p=>p.locationId===loc.id&&!p.isDeleted)
-  const active      = locPeople.filter(p=>!['Closed Won','Closed Lost'].includes(p.stage))
-  const closedWon   = locPeople.filter(p=>p.stage==='Closed Won')
+  // Rendered as '—' until the counts land, never as 0: a placeholder zero is
+  // indistinguishable from a real zero, and this panel exists to be read.
+  const fmtCount = (v) => summaryErr ? '—' : (summary ? v : '…')
+  const active      = { length: summary?.active ?? 0 }
+  const closedWon   = { length: summary?.closedWon ?? 0 }
   const revData     = seedRevByLoc(loc.id)
   const totalRev    = revData.reduce((s,v)=>s+v,0)
   const royalty     = Math.round(totalRev*0.06)
   const sc          = CRM_STATUS_CONF[loc.crmStatus]
 
   const pipelineStages = STAGES.filter(s=>!['Closed Won','Closed Lost'].includes(s.key)).map(s=>({
-    ...s, count: locPeople.filter(p=>p.stage===s.key).length
+    ...s, count: (summary?.stageCounts || {})[s.key] || 0
   })).filter(s=>s.count>0)
   const maxCount = Math.max(...pipelineStages.map(s=>s.count),1)
 
@@ -26928,8 +27056,8 @@ function LocationDrilldown({ loc, people, users, partners, onClose }) {
             {/* KPI row */}
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'8px' }}>
               {[
-                {label:'Active',   value:active.length,               color:'#1a2e2b'},
-                {label:'Closed',   value:closedWon.length,            color:'#22c55e'},
+                {label:'Active',   value:fmtCount(active.length),     color:'#1a2e2b'},
+                {label:'Closed',   value:fmtCount(closedWon.length),  color:'#22c55e'},
                 {label:'Revenue',  value:`$${(totalRev/1000).toFixed(0)}k`, color:'#d4a046'},
               ].map(s=>(
                 <div key={s.label} style={{ background:'white', borderRadius:'12px', padding:'12px', border:'1px solid rgba(0,0,0,0.06)' }}>
@@ -27008,23 +27136,20 @@ function LocationDrilldown({ loc, people, users, partners, onClose }) {
                 </div>
               )) : <p style={{ fontSize:'13px', color:'#b0c0bc', textAlign:'center', padding:'1.5rem 0' }}>No open clients</p>}
             </div>
-            {/* Recent client */}
-            <div style={{ background:'white', borderRadius:'14px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.06)' }}>
-              <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', padding:'14px 16px 8px' }}>Recent Client</p>
-              {locPeople.slice(0,8).map((p,i)=>{
-                const s = STAGES.find(st=>st.key===p.stage)||STAGES[0]
-                return (
-                  <div key={p.id} style={{ padding:'10px 16px', borderTop:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:'10px' }}>
-                    <Avatar name={p.name} size={28} />
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <p style={{ fontSize:'13px', fontWeight:500, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name}</p>
-                      <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{p.project}</p>
-                    </div>
-                    <span style={{ fontSize:'10px', padding:'2px 7px', borderRadius:'20px', background:s.bg, color:s.color, fontWeight:600, flexShrink:0 }}>{s.icon} {s.label}</span>
-                  </div>
-                )
-              })}
-              {locPeople.length===0&&<p style={{ padding:'1.5rem', textAlign:'center', color:'#b0c0bc', fontSize:'13px' }}>No clients yet</p>}
+            {/* Client roster — removed in Fix 2 Phase 4.
+                This listed rows out of the tenant-wide people graph, which is
+                the 28.57 MB this phase stopped loading. Rather than ship a list
+                that is always empty (indistinguishable from "this location has
+                no clients"), the panel states the total and sends the reader to
+                the place that can actually show them: the location itself. */}
+            <div style={{ background:'white', borderRadius:'14px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.06)', padding:'14px 16px' }}>
+              <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', marginBottom:'4px' }}>Clients</p>
+              <p style={{ fontSize:'13px', color:'#5a6e6a', lineHeight:1.6 }}>
+                {summaryErr ? 'Counts unavailable right now.'
+                  : summary ? `${summary.leads.toLocaleString()} client${summary.leads===1?'':'s'} at this location.`
+                  : 'Loading…'}
+                {' '}Switch to this location to work them.
+              </p>
             </div>
           </div>
         )}
@@ -32657,6 +32782,8 @@ export default function App({
   initialLookups,            // server-rendered admin-managed lookups grouped by category (Sitting 1A)
   initialPeople,             // server-rendered Supabase leads → Person shape (Phase 3A); null/empty → fall back to ALL_PEOPLE mock
   initialBinPeople,          // server-rendered is_junk=true leads (Recycle Bin)
+  initialAllOverview,        // Fix 2 Phase 4: server-reduced corporate overview for 'All Locations' (null on a scoped load) — replaces the people graph on that scope
+  initialLeadsTruncated,     // true when the leads load hit MAX_LEADS; rendered as a banner so a short count is never presented as complete
   initialTransferPeople,     // loc_other unrouted leads — fetched OUTSIDE the selected scope so the routing queue survives a location switch (Fix 2 Phase 2). Elevated only; [] for franchise.
   initialScopeLocationId,    // the location the SERVER actually scoped to (null = all) — the client reconciles its cookie to this after hydration
   initialEngagements,        // Phase 1 step 4: open engagements for the new board (dual-read; super_admin-flagged)
@@ -33007,6 +33134,13 @@ export default function App({
   const [showLocPicker, setShowLocPicker]   = useState(false)
   const [showRolePicker, setShowRolePicker] = useState(false)
   const [showGlobalSearch, setShowGlobalSearch] = useState(false)
+  // id → name for the REAL locations roster. Declared here, not inline in the
+  // GlobalSearch JSX: that subtree renders conditionally, and a hook inside it
+  // would run only while the search is open — a hooks-order violation.
+  const locationNameById = useMemo(
+    () => Object.fromEntries((initialLocations || []).map(l => [l.id, l.name])),
+    [initialLocations]
+  )
   const [globalSelectedPerson, setGlobalSelectedPerson]   = useState(() => {
     if (!initialSelectedLeadId || !Array.isArray(initialPeople)) return null
     return initialPeople.find(p => p.id === initialSelectedLeadId) || null
@@ -33711,12 +33845,18 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     if (activeNav==='reports') return <div style={pageStyle}><ReportsScreen role={role} franchiseRole={franchiseRole} people={people} locFilter={locFilter} /></div>
     if (activeNav==='settings') return (
       <div style={pageStyle}>
-        <SettingsScreen onStatusChange={()=>{}} selectedLoc={selectedLoc} locationId={viewAsUser?.locationId || (locFilter==='all'?'loc_kc':locFilter)} franchiseRole={franchiseRole} isSuperAdmin={role==='super_admin'&&!viewAsUser} onOpenManual={()=>setShowManual(true)} />
+        {/* locationId: was `locFilter==='all' ? 'loc_kc' : locFilter` — a
+            hardcoded slug papering over the fact that an elevated user on 'all'
+            had no resolved location. Since Phase 3 they land on a real one, so
+            the literal is gone; on 'all' this is null and SettingsScreen falls
+            through to its own context/selectedLoc resolution rather than
+            silently showing Kansas City's team to whoever is looking. */}
+        <SettingsScreen onStatusChange={()=>{}} selectedLoc={selectedLoc} locationId={viewAsUser?.locationId || (locFilter==='all' ? null : locFilter)} franchiseRole={franchiseRole} isSuperAdmin={role==='super_admin'&&!viewAsUser} onOpenManual={()=>setShowManual(true)} />
       </div>
     )
     if (activeNav==='hive') return (
       <div style={pageStyle}>
-        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} initialSelectedEngagementId={globalSelectedEngagementId} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onEngagementChange={(id)=>setGlobalSelectedEngagementId(id)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} initialHiveIntent={hiveIntent} onHiveIntentConsumed={()=>setHiveIntent(null)} />
+        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} peopleUnavailable={!!initialAllOverview} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} initialSelectedEngagementId={globalSelectedEngagementId} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onEngagementChange={(id)=>setGlobalSelectedEngagementId(id)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} initialHiveIntent={hiveIntent} onHiveIntentConsumed={()=>setHiveIntent(null)} />
         {toast && <InlineToast {...toast} />}
       </div>
     )
@@ -33772,6 +33912,8 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           people={people}
           setPeople={setPeople}
           transferPeople={transferPeople}
+          allOverview={allOverview}
+          leadsTruncated={!!initialLeadsTruncated}
           locations={initialLocations || ALL_LOCATIONS}
           activeNav={activeNav}
           nav={nav}
@@ -34023,13 +34165,17 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           // failure class as MAX_LEADS dropping leads without an error. The
           // real cross-location search endpoint is Phase 4.
           scopeLabel={locFilter === 'all' ? 'all locations' : (selectedLoc?.name || currentLocation?.name || 'this location')}
+          locationsById={locationNameById}
           onSelectPerson={(p)=>{
-            setActiveNav('hive')
-            setGlobalSelectedPerson(p)
             setShowGlobalSearch(false)
-            if (typeof window !== 'undefined') {
-              window.history.pushState({}, '', '/clients/' + p.id)
-            }
+            // router.push, NOT pushState. A search hit can now live at ANOTHER
+            // location (the server searches all of them), and only a real
+            // navigation re-runs the server component — which is what triggers
+            // the Phase 2 deep-link override and loads the page around that
+            // lead. A pushState would change the URL while leaving the scope
+            // and the loaded data behind, and the record would never open.
+            setActiveNav('hive')
+            router.push(clientPath(p.id))
           }}
           onSelectPartner={(p)=>{ setActiveNav('partners'); setGlobalSelectedPartner(p); setShowGlobalSearch(false) }}
           onClose={()=>setShowGlobalSearch(false)}

@@ -193,7 +193,7 @@ describe('BeeHub wiring — Phase 2', () => {
   })
 
   it('transferPeople is recomputed when it changes (memo dep)', () => {
-    expect(src).toContain('}, [people, engagements, transferPeople, effectiveLocId, isElevated, canSeeFinancials])')
+    expect(src).toContain('}, [people, engagements, transferPeople, allOverview, effectiveLocId, isElevated, canSeeFinancials])')
   })
 
   it('the queue is role-gated where isElevated lives — view-as cannot leak it', () => {

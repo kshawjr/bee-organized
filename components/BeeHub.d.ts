@@ -171,6 +171,22 @@ interface BeeHubProps {
   // loc_other unrouted leads, fetched outside the selected location scope so
   // the routing queue survives a location switch (Fix 2 Phase 2).
   initialTransferPeople?: any[]
+  // Server-reduced corporate overview for 'All Locations' (Fix 2 Phase 4).
+  // Null on a scoped load, where Home derives from the loaded people graph.
+  initialAllOverview?: {
+    newUncontacted: { count: number; oldestDays: number }
+    estimateFollowUps: { count: number; oldestDays: number }
+    upcomingAssessments: Array<{ id: string; scheduled_at: string; client: string }>
+    agingInvoices: { count: number; total: number; oldestDays: number }
+    openEngagementsCount: number
+    activeClientsCount: number
+    newThisWeekCount: number
+    outstandingTotal: number
+    leadCount: number
+    truncated: boolean
+  } | null
+  // True when the leads load hit MAX_LEADS, so the page's counts are short.
+  initialLeadsTruncated?: boolean
   // The location the server actually scoped to (null = all locations). The
   // client reconciles its scope cookie to this after hydration.
   initialScopeLocationId?: string | null

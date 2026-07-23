@@ -63,7 +63,11 @@ describe('BeeHub wiring — one shared predicate, no drift', () => {
     const assessPush = beehub.slice(Math.max(0, idx - 120), idx)
     expect(assessPush).not.toContain('canSeeFinancials')
     // money cards remain money-gated
-    expect(beehub).toContain('(canSeeFinancials && agingInvoices.length > 0)')
+    // Phase 4 gave the hero cards explicit COUNT fields so 'all' (which has
+    // numbers without rows) and a scoped load share one shape. The money gate
+    // this test exists for is unchanged — still canSeeFinancials, still the
+    // only thing between a manager and the unpaid-invoice card.
+    expect(beehub).toContain('(canSeeFinancials && agingCount > 0)')
     expect(beehub).toContain('canSeeFinancials && <HomeMetricTile label="Outstanding"')
   })
 })

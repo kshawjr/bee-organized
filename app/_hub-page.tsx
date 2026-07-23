@@ -26,6 +26,7 @@ import {
   LOC_OTHER_SLUG,
   TRANSFER_QUEUE_MAX,
 } from '@/lib/hub-scope'
+import { buildAllOverview } from '@/lib/hub-all-overview'
 import BeeHub from '@/components/BeeHub'
 
 function mapRole(dbRole: string | null | undefined): {
@@ -953,7 +954,29 @@ export default async function HubPage({
   let initialEngagements: any[] = []
   let initialEngagementsClosedCount = 0
   let initialEngagementsClosedWonCount = 0
-  {
+
+  // ── 'All Locations' is an OVERVIEW, not a data scope (Fix 2, Phase 4) ──────
+  // Phases 1–3 made scoped loads fast and left 'all' as the only slow path:
+  // 7,028 leads + 19,361 child rows + 6,065 engagements = 28.57 MB, the closest
+  // thing on this page to Vercel's 25s ceiling — all of it loaded so the
+  // BROWSER could reduce it to five headline numbers.
+  //
+  // On 'all' the people graph is no longer loaded at all. The server reduces
+  // and ships numbers (lib/hub-all-overview.ts), and the ENGAGEMENT board still
+  // ships in full because it is genuinely bounded: 292 open engagements across
+  // the whole tenant, 397 KB with their children and client names. That is the
+  // dividing line for every surface — engagements and counts work on 'all';
+  // anything that enumerates PEOPLE asks for a location.
+  //
+  // Elevated only. A franchise user with a null location_id also has no scope
+  // uuid, and must keep the unscoped path they have always had.
+  const overviewOnly = isElevated && !scopeLocationUuid
+  let initialAllOverview: any = null
+  // Set when the leads load hits MAX_LEADS. Shipped to the client so the
+  // shortfall is stated on screen rather than inferred from a log.
+  let leadsTruncated = false
+
+  if (!overviewOnly) {
     // Paginated load — a single .limit(1000) silently truncated locations
     // with >1000 leads (Portland: 1616), so the client-side "Active" count
     // and every derived stat ran over an incomplete set. Same short-page
@@ -962,7 +985,11 @@ export default async function HubPage({
     // view — hitting it is the trigger point for moving these stats to
     // server-side counts instead of shipping every row to the client.
     const PAGE = 1000
-    const MAX_LEADS = 10000
+    // Lowered from 10,000 in Phase 4. It now only ever guards ONE location —
+    // 'all' no longer loads leads at all — and the largest is Kansas City at
+    // 3,306, so 5,000 is ~1.5x headroom on the real worst case instead of a
+    // number chosen when this guarded the whole tenant.
+    const MAX_LEADS = 5000
     let leadsRaw: any[] | null = []
     let leadsError: { message: string } | null = null
     for (let from = 0; from < MAX_LEADS; from += PAGE) {
@@ -987,8 +1014,13 @@ export default async function HubPage({
       leadsRaw.push(...(pageRows || []))
       if ((pageRows || []).length < PAGE) break
       if (from + PAGE >= MAX_LEADS) {
+        // VISIBLE, not whispered. A truncated load that only reaches Vercel's
+        // logs is the exact silent-failure mode this whole effort is retiring:
+        // the page renders, the counts are simply wrong, and nobody is told.
+        // The flag rides to the client and Home renders a banner.
+        leadsTruncated = true
         console.warn(
-          `[hub-page] leads load hit ${MAX_LEADS}-row safety ceiling for ${hubUser.email} — stats are truncated; time to move to server-side counts`
+          `[hub-page] leads load hit the ${MAX_LEADS}-row ceiling for ${hubUser.email} — counts on this page are UNDER-COUNTED; the user has been shown a truncation notice`
         )
       }
     }
@@ -1227,13 +1259,133 @@ export default async function HubPage({
         }
       }
     }
+  } else {
+    // ── The 'all' path: engagements + counts, NO people graph ───────────────
+    // Everything here is bounded by STATE (open engagements) rather than by
+    // tenant size, which is what makes a corporate view affordable at all.
+    const PAGE = 1000
+    const engOpen: any[] = []
+    let engErr: { message: string } | null = null
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabaseService
+        .from('engagements')
+        .select('*')
+        .not('stage', 'in', '("Closed Won","Closed Lost")')
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: true })
+        .range(from, from + PAGE - 1)
+      if (error) { engErr = error; break }
+      engOpen.push(...(data || []))
+      if ((data || []).length < PAGE) break
+    }
+
+    if (engErr) {
+      console.error('[hub-page] all-overview engagements fetch error:', engErr.message)
+    } else if (engOpen.length > 0) {
+      const engIds = engOpen.map((e: any) => e.id)
+      const clientIds = Array.from(new Set(engOpen.map((e: any) => e.client_id).filter(Boolean)))
+
+      // Chunked `.in()` reads — bounded by the open-engagement set, never by
+      // the tenant. These are the ONLY lead rows read on this path, and only
+      // four columns of them: the board's card headline.
+      const chunked = async (table: string, cols: string, col: string, ids: string[]) => {
+        const acc: any[] = []
+        for (let i = 0; i < ids.length; i += 200) {
+          const { data, error } = await supabaseService
+            .from(table).select(cols).in(col, ids.slice(i, i + 200))
+          if (error) { console.error(`[hub-page] all-overview ${table} read failed: ${error.message}`); break }
+          acc.push(...(data || []))
+        }
+        return acc
+      }
+
+      const [leadRows, quotesRaw, jobsRaw, invoicesRaw, assessmentsRaw, serviceRequestsRaw, repeatRows] =
+        await Promise.all([
+          chunked('leads', 'id, name, phone, email', 'id', clientIds),
+          chunked('quotes', 'id, engagement_id, status, total, sent_at, approved_at', 'engagement_id', engIds),
+          chunked('jobs', 'id, engagement_id, status, title, scheduled_start, completed_at', 'engagement_id', engIds),
+          chunked('invoices', 'id, engagement_id, status, total, balance_owing', 'engagement_id', engIds),
+          chunked('assessments', 'id, engagement_id, scheduled_at, status, completed_at', 'engagement_id', engIds),
+          chunked('service_requests', 'id, engagement_id', 'engagement_id', engIds),
+          // repeat_count: ALL engagements per client on the board, closed
+          // included — bounded by clientIds, where the scoped path gets it from
+          // a full tenant sweep it no longer runs here.
+          chunked('engagements', 'id, client_id', 'client_id', clientIds),
+        ])
+
+      const leadInfoById: Record<string, any> = {}
+      for (const l of leadRows) leadInfoById[l.id] = { name: l.name || 'Unknown', phone: l.phone || null, email: l.email || null }
+      const repeatCounts: Record<string, number> = {}
+      for (const r of repeatRows) repeatCounts[r.client_id] = (repeatCounts[r.client_id] || 0) + 1
+
+      const byEng = (rows: any[]) => {
+        const out: Record<string, any[]> = {}
+        for (const r of rows || []) { if (r.engagement_id) (out[r.engagement_id] ||= []).push(r) }
+        return out
+      }
+      const quotesByEng = byEng(quotesRaw), jobsByEng = byEng(jobsRaw)
+      const invoicesByEng = byEng(invoicesRaw), assessmentsByEng = byEng(assessmentsRaw)
+      const serviceReqsByEng = byEng(serviceRequestsRaw)
+
+      // Same projection the scoped path ships — HiveShell's boardSignature
+      // reads this shape, and two shapes would read as a phantom board change.
+      initialEngagements = engOpen.map((e: any) => ({
+        ...e,
+        client_name: leadInfoById[e.client_id]?.name || 'Unknown',
+        client_phone: leadInfoById[e.client_id]?.phone ?? null,
+        client_email: leadInfoById[e.client_id]?.email ?? null,
+        repeat_count: repeatCounts[e.client_id] || 1,
+        quotes: (quotesByEng[e.id] || []).map((q: any) => ({
+          id: q.id, status: q.status, total: q.total, sent_at: q.sent_at, approved_at: q.approved_at,
+        })),
+        jobs: (jobsByEng[e.id] || []).map((j: any) => ({
+          id: j.id, status: j.status, title: j.title,
+          scheduled_start: j.scheduled_start, completed_at: j.completed_at,
+        })),
+        invoices: (invoicesByEng[e.id] || []).map((i: any) => ({
+          id: i.id, status: i.status, total: i.total, balance_owing: i.balance_owing,
+        })),
+        assessments: (assessmentsByEng[e.id] || []).map((a: any) => ({
+          id: a.id, scheduled_at: a.scheduled_at, status: a.status, completed_at: a.completed_at,
+        })),
+        service_requests: (serviceReqsByEng[e.id] || []).map((sr: any) => ({ id: sr.id })),
+      }))
+    }
+
+    const [closedRes, wonRes] = await Promise.all([
+      supabaseService.from('engagements').select('id', { count: 'exact', head: true })
+        .in('stage', ['Closed Won', 'Closed Lost']),
+      supabaseService.from('engagements').select('id', { count: 'exact', head: true })
+        .eq('stage', 'Closed Won'),
+    ])
+    initialEngagementsClosedCount = closedRes.count ?? 0
+    initialEngagementsClosedWonCount = wonRes.count ?? 0
+
+    // The corporate overview. Takes the board set already loaded above so the
+    // two can never disagree about what is open.
+    try {
+      initialAllOverview = await buildAllOverview(supabaseService, initialEngagements)
+      console.log(
+        `[hub-page] all-overview: ${initialAllOverview.leadCount} leads counted, ` +
+        `${initialAllOverview.newUncontacted.count} new-uncontacted, ` +
+        `${initialAllOverview.openEngagementsCount} open engagements` +
+        (initialAllOverview.truncated ? ' — TRUNCATED' : '')
+      )
+    } catch (e: any) {
+      // Non-fatal: Home falls back to its empty state rather than a broken page.
+      console.error('[hub-page] all-overview build failed:', e?.message || e)
+    }
   }
 
   // Recycle Bin: load is_junk=true leads, same location-scoping as the main
   // query. Joined-table data (notes, touchpoints, etc.) is skipped — the bin
   // only renders name/location/timestamp, and on restore the PATCH response
   // returns the full row. 90-day retention keeps this bounded.
-  {
+  //
+  // Skipped entirely on 'all' (Phase 4): the bin enumerates PEOPLE, so it falls
+  // on the ask-for-a-location side of the line. The tab renders a picker prompt
+  // rather than a misleading empty bin.
+  if (!overviewOnly) {
     let binQ = supabaseService
       .from('leads')
       .select('*')
@@ -1473,6 +1625,12 @@ export default async function HubPage({
       initialLookups={initialLookups}
       initialPeople={initialPeople}
       initialBinPeople={initialBinPeople}
+      // Corporate overview for 'All Locations' — server-reduced counts that
+      // replace the people graph on that scope (null on a scoped load).
+      initialAllOverview={initialAllOverview}
+      // True when the leads load hit MAX_LEADS and the counts on this page are
+      // therefore short. Rendered as a banner, never left implicit.
+      initialLeadsTruncated={leadsTruncated}
       initialTransferPeople={initialTransferPeople}
       // The scope the server ACTUALLY used, so the client can reconcile the
       // cookie to it after hydration (a Server Component cannot write cookies).

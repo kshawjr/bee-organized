@@ -128,6 +128,25 @@ function TabPill({ tab, active, onSelect, badgeCount = null }) {
 // board: HiveScreen passes its locFilter prop through and the engagement
 // set filters client-side on location_uuid (locFilter holds 'all' or the
 // location uuid — the same vocabulary people-mapper documents).
+// 'All Locations' loads no people graph (Fix 2 Phase 4) — 7,028 leads and
+// 19,361 child rows existed only so the browser could filter them back down to
+// one location. The lenses that enumerate people therefore have nothing to
+// show on that scope, and an empty list would read as "you have no clients".
+// This says what is actually true and points at the fix.
+function PickALocation({ lens }) {
+  const what = lens === 'inbox' ? 'The inbox works one location at a time' : 'The client list works one location at a time'
+  return (
+    <div style={{ padding: '56px 24px', textAlign: 'center', border: T.border.dashedSoft, borderRadius: T.radius.inset, margin: '8px 0' }}>
+      <div style={{ fontSize: '26px', marginBottom: '10px' }}>📍</div>
+      <p style={{ fontSize: '14px', fontWeight: 600, color: T.ink.strong, marginBottom: '6px' }}>{what}</p>
+      <p style={{ fontSize: '12.5px', color: T.ink.quiet, lineHeight: 1.6, maxWidth: '380px', margin: '0 auto' }}>
+        Pick a location from the switcher to work its clients. Engagements and the
+        home overview still show every location.
+      </p>
+    </div>
+  )
+}
+
 export default function HiveShell({
   engagements = [],
   closedCount = 0,
@@ -139,6 +158,12 @@ export default function HiveShell({
   // locFilter, which is exactly what used to empty the queue. Already
   // role-gated upstream (HiveScreen sends [] for a non-elevated viewer).
   transferPeople = [],
+  // Fix 2 Phase 4: true when the page is on 'All Locations', where the people
+  // graph is deliberately not loaded. Lenses that enumerate PEOPLE (Inbox,
+  // Client List) say so and point at the picker instead of rendering an empty
+  // list that reads as "you have no clients". The Engagements lenses are
+  // unaffected — open engagements ARE loaded on 'all' (292 tenant-wide).
+  peopleUnavailable = false,
   // Location team roster (id/name/email/locationId) — BeeHub bridges its
   // LocationUsersContext here so the profile's assigned-to picker can
   // stay §8.5-clean (props only, no context in the hive chunk).
@@ -680,7 +705,9 @@ export default function HiveShell({
         </div>
       )}
 
-      {lens === 'inbox' ? (
+      {peopleUnavailable && (lens === 'inbox' || lens === 'clients') ? (
+        <PickALocation lens={lens} />
+      ) : lens === 'inbox' ? (
         <InboxScreen
           people={patchedPeople}
           transferPeople={transferPeople}

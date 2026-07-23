@@ -530,8 +530,13 @@ describe('_hub-page wiring — scope', () => {
     expect(src).toContain(`const initialLocFilter = isElevated\n    ? (scope.locationUuid || 'all')\n    : hubUser.location_id || 'all'`)
   })
 
-  it('MAX_LEADS stays at 10,000 in Phase 1', () => {
-    expect(src).toContain('const MAX_LEADS = 10000')
+  it('MAX_LEADS is the single leads ceiling (lowered to 5,000 in Phase 4)', () => {
+    // Phase 1 held it at 10,000 because it still guarded the whole tenant.
+    // Phase 4 stopped loading leads on 'all' entirely, so it now guards ONE
+    // location — the largest being Kansas City at 3,306 — and 5,000 is ~1.5x
+    // headroom on the real worst case rather than a number sized for a load
+    // that no longer happens.
+    expect(src).toContain('const MAX_LEADS = 5000')
   })
 })
 

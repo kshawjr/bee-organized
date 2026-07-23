@@ -287,8 +287,11 @@ describe('_hub-page wiring — Phase 3', () => {
     expect(src).toContain("const initialLocFilter = isElevated\n    ? (scope.locationUuid || 'all')\n    : hubUser.location_id || 'all'")
   })
 
-  it('MAX_LEADS is untouched and no schema change crept in', () => {
-    expect(src).toContain('const MAX_LEADS = 10000')
+  it('MAX_LEADS is the single leads ceiling (lowered to 5,000 in Phase 4)', () => {
+    // Untouched by Phase 3; deliberately lowered by Phase 4 once 'all' stopped
+    // loading leads and the ceiling began guarding one location instead of the
+    // tenant. See lib/beta-hub-scope-phase4.test.ts.
+    expect(src).toContain('const MAX_LEADS = 5000')
   })
 })
 
