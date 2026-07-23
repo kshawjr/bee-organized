@@ -35,6 +35,8 @@ import AddressAutofill from "@/components/hive/shared/AddressAutofill"
 // icons above. §8.5's dynamic rule guards the heavy board tree, not this.
 import SendToJobberModal from "@/components/hive/SendToJobberModal"
 import NetworkScreen from "@/components/hive/NetworkScreen"
+import NetworkPersonRecord from "@/components/hive/NetworkPersonRecord"
+import NetworkCompanyRecord from "@/components/hive/NetworkCompanyRecord"
 import AskBeeHubPanel from "@/components/hive/AskBeeHubPanel"
 // Pure presentational icon set (inline SVG, zero deps) — safe to import
 // statically like betaGate; it pulls no beta-chunk surface code with it.
@@ -13591,13 +13593,16 @@ function AddCompanyModal({ onAdd, onClose, partners=[], onUpdatePartner=()=>{} }
   )
 }
 
-function AddPartnerModal({ onAdd, onClose, defaultType='partner', defaultName='', companies=[], onCreateCompany=()=>{} }) {
+// defaultCompany ({id,name} | null): the company a new person is created
+// INTO (the company record's "+ Add person") — pre-links the real
+// company_id FK, not just the display string.
+function AddPartnerModal({ onAdd, onClose, defaultType='partner', defaultName='', defaultCompany=null, companies=[], onCreateCompany=()=>{} }) {
   const [type, setType] = useState(defaultType)
   // Pre-fill name fields from defaultName (e.g. the referrer picker's typed
   // search text). First token → first name, remainder → last name.
   const _np = (defaultName||'').trim().split(/\s+/).filter(Boolean)
-  const [form, setForm] = useState({ firstName:_np[0]||'', lastName:_np.slice(1).join(' ')||'', company:'', title:'', phone:'', email:'', website:'', howWeMet:'', relationship:'', specialties:[], tags:[], tier:null, street:'', apt:'', city:'', state:'', zip:'' })
-  const [companyId, setCompanyId] = useState(null)
+  const [form, setForm] = useState({ firstName:_np[0]||'', lastName:_np.slice(1).join(' ')||'', company:defaultCompany?.name||'', title:'', phone:'', email:'', website:'', howWeMet:'', relationship:'', specialties:[], tags:[], tier:null, street:'', apt:'', city:'', state:'', zip:'' })
+  const [companyId, setCompanyId] = useState(defaultCompany?.id||null)
   const [companySearch, setCompanySearch] = useState('')
   const [showCompanyPicker, setShowCompanyPicker] = useState(false)
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
@@ -14914,38 +14919,22 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
 // ─── Partners Screen ──────────────────────────────────────────────────────────
 // Exported for lib/network-saved-views.test.tsx (mount test — saved views
 // must survive a remount). Not routed anywhere except App's nav.
-export function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{}, readOnly=false }) {
+export function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{}, readOnly=false, setToast=()=>{} }) {
   if (!partners) return null
-  // Phase 2: the Classic list is RETIRED — NetworkScreen (beta-chunk module,
-  // components/hive/NetworkScreen.jsx) renders the entire screen: what's-next
-  // strip, honest stats, specialty bands with MIXED person/company rows
-  // (approved Option C), search + filters + the persisted saved views. This
-  // host keeps only the record OVERLAYS (PartnerPanel, company detail, add /
-  // edit modals) until Phase 3 rebuilds the record itself. Writes still go
-  // through the App-level CRM helpers (PartnersContext / CompaniesContext).
-  // The partner/contact TYPE SPLIT is gone from the UI — one merged list;
-  // rows keep their `type` value in the DB but nothing renders on it here.
+  // Phase 2 retired the Classic LIST (NetworkScreen renders the screen);
+  // Phase 3 retired the Classic RECORDS — PartnerPanel + the inline company
+  // overlay are replaced by NetworkPersonRecord / NetworkCompanyRecord
+  // (§8.5 beta-chunk modules). This host is now only: the screen, the two
+  // record overlays, and the two add modals. Writes still go through the
+  // App-level CRM helpers (PartnersContext / CompaniesContext).
   const partnersApi  = useContext(PartnersContext)
   const companiesApi = useContext(CompaniesContext)
   const [selected, setSelected] = useState(initialSelected)
   React.useEffect(()=>{ if(initialSelected){ setSelected(initialSelected); onInitialSelectedConsumed() } },[initialSelected])
   const [showAdd, setShowAdd] = useState(false)  // add modal open
   const [addType, setAddType] = useState(null)    // 'partner' | 'company' (post-merge: no separate 'contact' door)
-  const [companyModalPartner, setCompanyModalPartner] = useState(null) // partner whose company link is being edited
-  const [companyModalQ, setCompanyModalQ]           = useState('')
-  const [editingCompanyInfo, setEditingCompanyInfo] = useState(null) // company whose info is being edited
-  const [editingPartnerInfo, setEditingPartnerInfo] = useState(null)
-  const [viewingCard, setViewingCard]               = useState(null) // partner/contact whose card to show
+  const [addCompanyPreset, setAddCompanyPreset] = useState(null) // company a new person is created INTO
   const [selectedCompany, setSelectedCompany] = useState(null)
-  // Hydration-safe viewport tracking for the company detail popup — see
-  // PersonPanel comment for rationale. Drives the centered-popup (desktop)
-  // vs bottom-sheet (mobile) branch.
-  const [companyWinW, setCompanyWinW] = useState(0)
-  React.useEffect(()=>{ function check(){ setCompanyWinW(window.innerWidth) } check(); window.addEventListener('resize',check); return ()=>window.removeEventListener('resize',check) },[])
-  const companyIsMobile = companyWinW > 0 && companyWinW < 768
-  const [companyDeleteConfirm, setCompanyDeleteConfirm] = useState(false) // company pending delete confirmation
-  const [companyDeleteError, setCompanyDeleteError]     = useState(null)  // inline error if DELETE fails
-  const [companyDeleting, setCompanyDeleting]           = useState(false) // delete request in flight
 
   const allPartners = (locFilter==='all' ? partners : partners.filter(p=>p.locationId===locFilter)).filter(p=>!p.isDeleted)
   const allCompanies = locFilter==='all' ? companies : companies.filter(c=>c.locationId===locFilter)
@@ -14970,222 +14959,42 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
         />
       </div>
 
-      {selected&&<PartnerPanel partner={selected} people={people} companies={allCompanies} onCreateCompany={co=>companiesApi?.addCompany?.(co)} onClose={()=>setSelected(null)} onUpdate={updatePartner} onDelete={(id)=>{ partnersApi?.deletePartner ? partnersApi.deletePartner(id) : setPartners(prev=>prev.map(p=>p.id===id?{...p,isDeleted:true,deletedAt:new Date().toISOString()}:p)); setSelected(null) }} onAddToHive={(p,mode)=>{ onAddToHive&&onAddToHive(p,mode); if(mode==='view'||!mode) setSelected(null) }} onOpenCompanyModal={(p)=>{ setCompanyModalPartner(p); setCompanyModalQ(p.company||'') }} onOpenInfoEdit={(p)=>setEditingPartnerInfo(p)} onViewCard={(p)=>setViewingCard(p)} />}
+      {/* Phase 3: the beta records replace Classic's PartnerPanel + inline
+          company overlay (both retired-unrendered above in this file, like
+          the Classic list). Person + company records are §8.5 modules; the
+          host supplies state access + the CRM write paths. */}
+      {selected&&(
+        <NetworkPersonRecord
+          partner={selected}
+          companies={allCompanies}
+          people={people}
+          onClose={()=>setSelected(null)}
+          onUpdate={(updated)=>updatePartner(updated)}
+          onDelete={(id)=>{ partnersApi?.deletePartner ? partnersApi.deletePartner(id) : setPartners(prev=>prev.map(p=>p.id===id?{...p,isDeleted:true,deletedAt:new Date().toISOString()}:p)); setSelected(null) }}
+          onOpenCompany={(c)=>{ setSelected(null); setSelectedCompany(c) }}
+          setToast={setToast}
+          readOnly={readOnly}
+        />
+      )}
 
-      {/* Company detail — centered popup (desktop) / bottom-sheet (mobile),
-          matching the PersonPanel/PartnerPanel conversion. */}
       {selectedCompany&&(
-        <div style={companyIsMobile
-          ? { position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'flex-end' }
-          : { position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
-          <div style={{ position:'absolute', inset:0, background: companyIsMobile ? 'rgba(26,46,43,0.25)' : 'rgba(26,46,43,0.45)' }} onClick={()=>setSelectedCompany(null)} />
-          <div onClick={e=>e.stopPropagation()} style={companyIsMobile
-            ? { position:'relative', background:'white', width:'100%', borderRadius:'16px 16px 0 0', zIndex:1, maxHeight:'88vh', minHeight:0, display:'flex', flexDirection:'column', boxShadow:'0 -8px 40px rgba(26,46,43,0.15)' }
-            : { position:'relative', background:'white', width:'100%', maxWidth:'720px', maxHeight:'90vh', borderRadius:'16px', zIndex:1, minHeight:0, display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', overflow:'hidden', boxSizing:'border-box' }}>
-            {/* Sticky header — name/industry + close × top-right */}
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'12px', padding:'16px 16px 12px', borderBottom:'1px solid rgba(0,0,0,0.06)', flexShrink:0 }}>
-              <div style={{ minWidth:0 }}>
-                <p style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'2px' }}>{selectedCompany.name}</p>
-                <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{selectedCompany.industry||'No industry set'}</p>
-              </div>
-              <button onClick={()=>setSelectedCompany(null)} aria-label="Close" style={{ background:'none', border:'none', fontSize:'26px', color:'#4a5e5a', cursor:'pointer', flexShrink:0, width:'44px', height:'44px', display:'flex', alignItems:'center', justifyContent:'center', padding:0, marginRight:'-8px', lineHeight:1, fontFamily:'inherit' }}>×</button>
-            </div>
-            {/* Scrollable body */}
-            <div style={{ flex:1, overflowY:'auto', minHeight:0 }}>
-              <EntityInfoCard
-                phone={selectedCompany.phone} email={selectedCompany.email} website={selectedCompany.website}
-                onEdit={()=>setEditingCompanyInfo(selectedCompany)}
-              />
-              {/* Address */}
-              <CompanyAddressSection
-                company={selectedCompany}
-                onUpdate={addresses=>{ const next={...selectedCompany,addresses}; companiesApi?.updateCompany ? companiesApi.updateCompany(next) : setCompanies(prev=>prev.map(c=>c.id===selectedCompany.id?next:c)); setSelectedCompany(next) }}
-              />
-              {/* People at this company */}
-              {(()=>{
-                const linked = allPartners.filter(p=>p.companyId===selectedCompany.id)
-                const linkedPartners = linked.filter(p=>p.type!=='contact')
-                const linkedContacts = linked.filter(p=>p.type==='contact')
-                return (
-                  <div style={{ padding:'12px 16px' }}>
-                    <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'10px' }}>
-                      {linked.length} {linked.length===1?'person':'people'} · {linkedPartners.length} partner{linkedPartners.length!==1?'s':''}, {linkedContacts.length} contact{linkedContacts.length!==1?'s':''}
-                    </p>
-                    <div style={{ display:'grid', gap:'8px' }}>
-                      {linked.map(p=>{
-                        const isC = p.type==='contact'
-                        return (
-                          <button key={p.id} onClick={()=>{ setSelectedCompany(null); setSelected(p) }}
-                            style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 12px', background:isC?'rgba(168,201,196,0.05)':'white', border:`1px solid ${isC?'rgba(168,201,196,0.2)':'rgba(0,0,0,0.07)'}`, borderLeft:isC?'3px solid #a8c9c4':undefined, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
-                            <Avatar name={p.name} size={34} />
-                            <div style={{ flex:1, minWidth:0 }}>
-                              <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{p.name}</p>
-                              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{p.title}</p>
-                            </div>
-                            <span style={{ fontSize:'10px', color:isC?'#4a7a74':'#8a9e9a', background:isC?'rgba(168,201,196,0.12)':'rgba(0,0,0,0.04)', padding:'2px 7px', borderRadius:'20px', flexShrink:0 }}>{isC?'Contact':'Partner'}</span>
-                          </button>
-                        )
-                      })}
-                      {linked.length===0&&<p style={{ fontSize:'12px', color:'#8a9e9a', textAlign:'center', padding:'16px' }}>No partners or contacts linked yet</p>}
-                    </div>
-                    {selectedCompany.notes?.length>0&&(
-                      <div style={{ marginTop:'14px', borderTop:'1px solid rgba(0,0,0,0.06)', paddingTop:'12px' }}>
-                        <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Notes</p>
-                        {selectedCompany.notes.map(n=>(
-                          <div key={n.id} style={{ padding:'8px 10px', background:'rgba(0,0,0,0.02)', borderRadius:'8px', marginBottom:'4px' }}>
-                            <p style={{ fontSize:'12px', color:'#1a2e2b' }}>{n.text}</p>
-                            <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'2px' }}>{n.ts} · {n.user}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })()}
-              {/* Delete Company — destructive action at the bottom of the body,
-                  mirroring PartnerPanel's delete affordance. */}
-              <div style={{ padding:'12px 16px 20px', borderTop:'1px solid rgba(0,0,0,0.06)' }}>
-                <button onClick={()=>{ setCompanyDeleteError(null); setCompanyDeleteConfirm(true) }}
-                  style={{ width:'100%', padding:'11px', background:'rgba(239,68,68,0.06)', border:'1.5px solid rgba(239,68,68,0.2)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#ef4444', cursor:'pointer' }}>
-                  🗑️ Delete Company
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete-company confirmation — linked count, inline error, stays open on failure */}
-      {selectedCompany&&companyDeleteConfirm&&(
-        <div style={companyIsMobile
-          ? { position:'fixed', inset:0, zIndex:10006, display:'flex', alignItems:'flex-end' }
-          : { position:'fixed', inset:0, zIndex:10006, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
-          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={()=>{ if(!companyDeleting){ setCompanyDeleteConfirm(false); setCompanyDeleteError(null) } }} />
-          <div style={companyIsMobile
-            ? { position:'relative', background:'white', width:'100%', borderRadius:'16px 16px 0 0', zIndex:1, padding:'1.5rem', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }
-            : { position:'relative', background:'white', width:'100%', maxWidth:'420px', borderRadius:'16px', zIndex:1, padding:'1.5rem', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', boxSizing:'border-box' }}>
-            <div style={{ textAlign:'center', marginBottom:'1.25rem' }}>
-              <div style={{ fontSize:'40px', marginBottom:'10px' }}>🗑️</div>
-              <p style={{ fontSize:'17px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'6px' }}>Delete this company?</p>
-              <p style={{ fontSize:'13px', color:'#8a9e9a', lineHeight:1.5 }}>
-                <strong>{selectedCompany.name}</strong>
-                {(()=>{ const n = allPartners.filter(p=>p.companyId===selectedCompany.id).length; return n>0
-                  ? <> will be deleted. This will also unlink it from <strong>{n}</strong> {n===1?'partner/contact':'partners/contacts'}.</>
-                  : <> will be deleted.</> })()}
-              </p>
-            </div>
-            {companyDeleteError&&<p style={{ fontSize:'12px', color:'#ef4444', textAlign:'center', marginBottom:'12px' }}>{companyDeleteError}</p>}
-            <div style={{ display:'flex', gap:'10px' }}>
-              <button disabled={companyDeleting} onClick={()=>{ setCompanyDeleteConfirm(false); setCompanyDeleteError(null) }} style={{ flex:1, padding:'13px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', color:'#4a5e5a', cursor:companyDeleting?'not-allowed':'pointer', opacity:companyDeleting?0.6:1 }}>Cancel</button>
-              <button disabled={companyDeleting} onClick={async()=>{
-                const target = selectedCompany
-                setCompanyDeleting(true); setCompanyDeleteError(null)
-                try {
-                  if (companiesApi?.deleteCompany) await companiesApi.deleteCompany(target.id)
-                  else setCompanies(prev=>prev.filter(c=>c.id!==target.id))
-                  setCompanyDeleteConfirm(false); setSelectedCompany(null)
-                } catch(e) {
-                  setCompanyDeleteError('Could not delete company. Please try again.')
-                } finally { setCompanyDeleting(false) }
-              }} style={{ flex:1, padding:'13px', background:companyDeleting?'#f3a4a4':'#ef4444', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:companyDeleting?'not-allowed':'pointer' }}>{companyDeleting?'Deleting…':'Delete Company'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {viewingCard&&<CardViewerModal cardImage={viewingCard.cardImage||null} onClose={()=>setViewingCard(null)} />}
-
-      {/* Company modal rendered at screen level - outside PartnerPanel to avoid z-index/touch issues */}
-      {/* Partner/Contact info edit modal - at screen level to avoid iOS z-index issues */}
-      {editingPartnerInfo&&(
-        <EntityInfoEditModal
-          fields={{
-            phone:editingPartnerInfo.phone||'', email:editingPartnerInfo.email||'', website:editingPartnerInfo.website||'',
-            title:editingPartnerInfo.title||'', howWeMet:editingPartnerInfo.howWeMet||'', relationship:editingPartnerInfo.relationship||''
-          }}
-          extraFields={editingPartnerInfo.type==='contact' ? (vals, setVals, inp, lbl)=>(
-            <>
-              <div><label style={lbl}>Title / Role</label><input style={inp} value={vals.title||''} onChange={e=>setVals(p=>({...p,title:e.target.value}))} placeholder='Site Manager' /></div>
-              <div>
-                <label style={lbl}>Relationship</label>
-                <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
-                  {['Neighbor','Realtor','Past Client','Friend','Family','Vendor','Other'].map(r=>(
-                    <button key={r} onClick={()=>setVals(p=>({...p,relationship:p.relationship===r?'':r}))}
-                      style={{ padding:'5px 12px', borderRadius:'20px', border:'1.5px solid '+(vals.relationship===r?'#1a2e2b':'rgba(0,0,0,0.1)'), background:vals.relationship===r?'#1a2e2b':'white', fontSize:'12px', fontFamily:'inherit', color:vals.relationship===r?'white':'#4a5e5a', cursor:'pointer' }}>{r}</button>
-                  ))}
-                </div>
-              </div>
-              <div><label style={lbl}>How / Where We Met</label><input style={inp} value={vals.howWeMet||''} onChange={e=>setVals(p=>({...p,howWeMet:e.target.value}))} placeholder='Home show, referral…' /></div>
-            </>
-          ) : (vals, setVals, inp, lbl)=>(
-            <>
-              <div><label style={lbl}>Title / Role</label><input style={inp} value={vals.title||''} onChange={e=>setVals(p=>({...p,title:e.target.value}))} placeholder='Real Estate Agent' /></div>
-              <div><label style={lbl}>How / Where We Met</label><input style={inp} value={vals.howWeMet||''} onChange={e=>setVals(p=>({...p,howWeMet:e.target.value}))} placeholder='Denver Business Expo…' /></div>
-            </>
-          )}
-          onSave={vals=>{ updatePartner({...editingPartnerInfo,...vals}) }}
-          onClose={()=>setEditingPartnerInfo(null)}
+        <NetworkCompanyRecord
+          company={selectedCompany}
+          partners={allPartners}
+          onClose={()=>setSelectedCompany(null)}
+          onUpdateCompany={(updated)=>{ companiesApi?.updateCompany ? companiesApi.updateCompany(updated) : setCompanies(prev=>prev.map(c=>c.id===updated.id?updated:c)); setSelectedCompany(updated) }}
+          onOpenPerson={(p)=>{ setSelectedCompany(null); setSelected(p) }}
+          onAddPerson={(co)=>{ setAddCompanyPreset(co); setAddType('partner'); setShowAdd(true) }}
+          onDelete={async (id)=>{ if (companiesApi?.deleteCompany) { await companiesApi.deleteCompany(id) } else { setCompanies(prev=>prev.filter(c=>c.id!==id)) } setSelectedCompany(null) }}
+          setToast={setToast}
+          readOnly={readOnly}
         />
       )}
 
-      {/* Company contact info edit modal */}
-      {editingCompanyInfo&&(
-        <EntityInfoEditModal
-          fields={{ phone:editingCompanyInfo.phone||'', email:editingCompanyInfo.email||'', website:editingCompanyInfo.website||'', industry:editingCompanyInfo.industry||'' }}
-          extraFields={(vals, setVals, inp, lbl)=>(
-            <div><label style={lbl}>Industry</label><input style={inp} value={vals.industry||''} onChange={e=>setVals(p=>({...p,industry:e.target.value}))} placeholder='Real Estate, Moving Services, etc.' /></div>
-          )}
-          onSave={vals=>{ const next={...editingCompanyInfo,...vals}; companiesApi?.updateCompany ? companiesApi.updateCompany(next) : setCompanies(prev=>prev.map(c=>c.id===editingCompanyInfo.id?next:c)) }}
-          onClose={()=>setEditingCompanyInfo(null)}
-        />
-      )}
-      {companyModalPartner&&(
-        <div style={{ position:'fixed', inset:0, zIndex:10050, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
-          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={()=>setCompanyModalPartner(null)} />
-          <div style={{ position:'relative', background:'white', borderRadius:'20px', padding:'12px', width:'100%', maxWidth:'400px', boxShadow:'0 20px 60px rgba(26,46,43,0.25)', zIndex:1 }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px' }}>
-              <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>🏢 Company</p>
-              <button onClick={()=>setCompanyModalPartner(null)} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
-            </div>
-            <input autoFocus value={companyModalQ} onChange={e=>setCompanyModalQ(e.target.value)}
-              placeholder='Search or type company name…'
-              style={{ width:'100%', padding:'10px 12px', border:'1.5px solid #a8c9c4', borderRadius:'9px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', marginBottom:'10px' }} />
-            <div style={{ maxHeight:'240px', overflowY:'auto', display:'grid', gap:'4px', marginBottom:'10px' }}>
-              {allCompanies.filter(c=>c.name.toLowerCase().includes(companyModalQ.toLowerCase())||c.industry.toLowerCase().includes(companyModalQ.toLowerCase())).map(c=>(
-                <button key={c.id} onClick={()=>{ updatePartner({...companyModalPartner, company:c.name, companyId:c.id}); setCompanyModalPartner(null) }}
-                  style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 12px', background:companyModalPartner.companyId===c.id?'rgba(168,201,196,0.1)':'white', border:`1.5px solid ${companyModalPartner.companyId===c.id?'#a8c9c4':'rgba(0,0,0,0.08)'}`, borderRadius:'9px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
-                  <span style={{ fontSize:'18px' }}>🏢</span>
-                  <div style={{ flex:1 }}>
-                    <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{c.name}</p>
-                    {c.industry&&<p style={{ fontSize:'11px', color:'#8a9e9a' }}>{c.industry}</p>}
-                  </div>
-                  {companyModalPartner.companyId===c.id&&<span style={{ color:'#a8c9c4' }}>✓</span>}
-                </button>
-              ))}
-              {companyModalQ.trim()&&!allCompanies.find(c=>c.name.toLowerCase()===companyModalQ.trim().toLowerCase())&&(
-                <button onClick={async()=>{
-                  const co={name:companyModalQ.trim(),industry:'',phone:'',email:'',website:'',notes:[],activity:[{type:'event',label:'Created inline',ts:'Just now'}]}
-                  const real = companiesApi?.addCompany ? await companiesApi.addCompany(co) : co
-                  updatePartner({...companyModalPartner,company:real.name,companyId:real.id}); setCompanyModalPartner(null)
-                }} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 12px', background:'rgba(168,201,196,0.06)', border:'1.5px dashed rgba(168,201,196,0.4)', borderRadius:'9px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
-                  <span style={{ fontSize:'18px' }}>➕</span>
-                  <div><p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Create "{companyModalQ.trim()}"</p><p style={{ fontSize:'11px', color:'#8a9e9a' }}>Add as new company and link</p></div>
-                </button>
-              )}
-            </div>
-            {companyModalPartner.company&&(
-              <button onClick={()=>{ updatePartner({...companyModalPartner,company:'',companyId:null}); setCompanyModalPartner(null) }}
-                style={{ width:'100%', padding:'9px', background:'transparent', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#ef4444', cursor:'pointer' }}>
-                × Remove company
-              </button>
-            )}
-          </div>
-        </div>
-      )}
       {/* Add modals — post-merge there are two doors: person (partners row,
           type stays 'partner') and company. The 'contact' door is gone with
           the type split. */}
-      {showAdd&&addType==='partner'&&<AddPartnerModal onAdd={addPartner} onClose={()=>{ setShowAdd(false); setAddType(null) }} defaultType='partner' companies={allCompanies} onCreateCompany={co=>companiesApi?.addCompany?.(co)} />}
+      {showAdd&&addType==='partner'&&<AddPartnerModal onAdd={addPartner} onClose={()=>{ setShowAdd(false); setAddType(null); setAddCompanyPreset(null) }} defaultType='partner' defaultCompany={addCompanyPreset} companies={allCompanies} onCreateCompany={co=>companiesApi?.addCompany?.(co)} />}
       {showAdd&&addType==='company'&&<AddCompanyModal onAdd={co=>companiesApi?.addCompany?.(co)} onClose={()=>{ setShowAdd(false); setAddType(null) }} partners={allPartners} onUpdatePartner={updatePartner} />}
     </>
   )
@@ -21954,6 +21763,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         setCompanies={setCompanies}
         people={people}
         readOnly={isReadOnly || isLiteUser}
+        setToast={setToast}
         onAddToHive={(partner, mode)=>{
           if (mode==='view') {
             nav('hive')
@@ -33184,11 +32994,22 @@ if (Array.isArray(initialPeople)) return
     setCompanies(prev => [local, ...prev]); return local
   }
   function updateCompany(updated) {
+    // SOURCE OF TRUTH (Phase 3): partners.company_id is the link;
+    // partners.company (the string) is a DISPLAY CACHE. A rename must
+    // refresh the cache on every linked person or the two drift — each
+    // refresh rides updatePartner (diff PATCH), so only the one changed
+    // field travels per row.
+    const prevName = companies.find(c => c.id === updated.id)?.name
     setCompanies(prev => prev.map(c => c.id === updated.id ? updated : c))
     if (isUuidStr(updated?.id)) {
       fetch(`/api/companies/${updated.id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(updated) })
         .then(r => { if (!r.ok) console.error('[companies] update failed:', r.status) })
         .catch(e => console.error('[companies] update error:', e))
+    }
+    if (prevName && updated?.name && prevName !== updated.name) {
+      for (const p of partnersLiveRef.current.filter(p => p.companyId === updated.id)) {
+        updatePartner({ ...p, company: updated.name })
+      }
     }
   }
   // DELETE /api/companies/:id soft-deletes server-side (sets deleted_at).
@@ -33699,7 +33520,8 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     )
     if (activeNav==='partners') return (
       <div style={pageStyle}>
-        <PartnersScreen onNavigate={nav} partners={partners} setPartners={setPartners} companies={companies} setCompanies={setCompanies} locFilter={locFilter} isElevated={isElevated} people={people} initialSelected={globalSelectedPartner} onInitialSelectedConsumed={()=>setGlobalSelectedPartner(null)} onAddToHive={(partner)=>{ addPersonFromPartner(partner); nav('hive') }} readOnly={role==='franchise' && ['light','readonly'].includes(franchiseRole)} />
+        <PartnersScreen onNavigate={nav} partners={partners} setPartners={setPartners} companies={companies} setCompanies={setCompanies} locFilter={locFilter} isElevated={isElevated} people={people} initialSelected={globalSelectedPartner} onInitialSelectedConsumed={()=>setGlobalSelectedPartner(null)} onAddToHive={(partner)=>{ addPersonFromPartner(partner); nav('hive') }} readOnly={role==='franchise' && ['light','readonly'].includes(franchiseRole)} setToast={setToast} />
+        {toast && <InlineToast {...toast} />}
       </div>
     )
     // Franchise owner/manager feedback triage. AdminFeedbackScreen calls

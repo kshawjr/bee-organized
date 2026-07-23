@@ -70,44 +70,68 @@ export async function GET(
     return NextResponse.json({ error: peopleRes.error.message }, { status: 500 })
   }
 
-  const leadRows = directRes.data ?? []
+  // Leads referred BY ITS PEOPLE ride the same response (Phase 3): the
+  // company view is "everything this org sends us", attributed. No
+  // double-count is possible — a lead has exactly ONE referred_by
+  // (kind + id), so direct-company rows and via-person rows are disjoint.
+  const people = peopleRes.data ?? []
+  const nameByPerson = new Map(people.map((p) => [p.id, p.name]))
+  let viaRows: any[] = []
+  if (people.length > 0) {
+    const viaRes = await supabaseService
+      .from('leads')
+      .select('id, name, created_at, referred_by_id')
+      .eq('referred_by_kind', 'partner')
+      .in('referred_by_id', people.map((p) => p.id))
+      .not('is_junk', 'is', true)
+      .order('created_at', { ascending: false })
+      .range(0, REFERRED_CAP - 1)
+    if (viaRes.error) {
+      return NextResponse.json({ error: viaRes.error.message }, { status: 500 })
+    }
+    viaRows = viaRes.data ?? []
+  }
+
+  const directRows = directRes.data ?? []
+  const allLeadRows = [...directRows, ...viaRows]
   let engagements: any[] = []
-  if (leadRows.length > 0) {
+  if (allLeadRows.length > 0) {
     const { data: engs, error: engErr } = await supabaseService
       .from('engagements')
       .select('client_id, stage, total_paid')
-      .in('client_id', leadRows.map((l) => l.id))
+      .in('client_id', allLeadRows.map((l) => l.id))
     if (engErr) {
       return NextResponse.json({ error: engErr.message }, { status: 500 })
     }
     engagements = engs ?? []
   }
 
-  // Per-person direct referral counts — one grouped fetch, reduced in JS
-  // (PostgREST aggregates are disabled on this instance).
-  const people = peopleRes.data ?? []
+  // Per-person referral counts reduce from the SAME via fetch (PostgREST
+  // aggregates are disabled on this instance).
   const referralCountByPerson: Record<string, number> = {}
-  if (people.length > 0) {
-    const { data: personLeads } = await supabaseService
-      .from('leads')
-      .select('referred_by_id')
-      .eq('referred_by_kind', 'partner')
-      .in('referred_by_id', people.map((p) => p.id))
-      .not('is_junk', 'is', true)
-    for (const row of personLeads ?? []) {
-      if (!row.referred_by_id) continue
-      referralCountByPerson[row.referred_by_id] =
-        (referralCountByPerson[row.referred_by_id] || 0) + 1
-    }
+  for (const row of viaRows) {
+    if (!row.referred_by_id) continue
+    referralCountByPerson[row.referred_by_id] =
+      (referralCountByPerson[row.referred_by_id] || 0) + 1
   }
 
-  const referred = rollupReferredLeads(leadRows, engagements)
+  // One rollup over the combined set; each row carries its attribution.
+  const viaById = new Map(viaRows.map((l) => [l.id, l.referred_by_id]))
+  const directIds = new Set(directRows.map((l) => l.id))
+  const referred = rollupReferredLeads(allLeadRows, engagements)
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+    .map((r) => ({
+      ...r,
+      via: directIds.has(r.id)
+        ? { kind: 'company', id: company.id, name: company.name }
+        : { kind: 'partner', id: viaById.get(r.id) ?? null, name: nameByPerson.get(viaById.get(r.id)) ?? null },
+    }))
 
   return NextResponse.json({
     company: { id: company.id, name: company.name, industry: company.industry },
     referred,
     totals: referralTotals(referred),
-    total: directRes.count ?? referred.length,
+    total: (directRes.count ?? directRows.length) + viaRows.length,
     people: people.map((p) => ({
       ...p,
       referral_count: referralCountByPerson[p.id] || 0,

@@ -347,7 +347,15 @@ function Row({ it, last, dashed, nowMs, expanded, onToggle, actionSlot }) {
   )
 }
 
-export default function Timeline({ leadId, engagementId = null, locationUuid = null, setToast = () => {}, onLeadPatched = () => {}, nowMs: nowMsProp = null, readOnly = false }) {
+// SUBJECT MODES (Network Phase 3): pass `leadId` (the original contract,
+// byte-identical behavior) OR `partnerId` — the partner mode fetches
+// /api/partners/:id/timeline (touchpoints only; partner touchpoints are
+// real rows since network_phase1.sql) and skips the drip projection
+// entirely (partners have no drips). buildTimelineItems reads the same
+// payload shape with every key optional, so the merge/render path is ONE
+// implementation, not a fork. `refreshKey`: bump to re-fetch after the
+// host logs a touchpoint.
+export default function Timeline({ leadId = null, partnerId = null, engagementId = null, locationUuid = null, setToast = () => {}, onLeadPatched = () => {}, nowMs: nowMsProp = null, readOnly = false, refreshKey = 0 }) {
   const [agg, setAgg] = useState(null)
   const [drips, setDrips] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
@@ -358,18 +366,25 @@ export default function Timeline({ leadId, engagementId = null, locationUuid = n
   useEffect(() => {
     let dead = false
     setAgg(null); setDrips(null); setLoadErr(null); setRemovedIds(new Set())
-    fetch(`/api/leads/${leadId}/timeline`)
+    const aggPath = partnerId ? `/api/partners/${partnerId}/timeline` : `/api/leads/${leadId}/timeline`
+    fetch(aggPath)
       .then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `HTTP ${r.status}`); return r.json() })
       .then(d => { if (!dead) setAgg(d) })
       .catch(e => { if (!dead) setLoadErr(String(e.message || e)) })
-    // Drip projection degrades soft — a failure here should not blank the
-    // whole timeline.
-    fetch(`/api/leads/${leadId}/outreach-timeline`)
-      .then(r => (r.ok ? r.json() : { items: [] }))
-      .then(d => { if (!dead) setDrips(d) })
-      .catch(() => { if (!dead) setDrips({ items: [] }) })
+    if (partnerId) {
+      // Partners have no drip machinery — resolve the second source empty
+      // instead of fetching a lead-shaped endpoint that doesn't apply.
+      setDrips({ items: [] })
+    } else {
+      // Drip projection degrades soft — a failure here should not blank the
+      // whole timeline.
+      fetch(`/api/leads/${leadId}/outreach-timeline`)
+        .then(r => (r.ok ? r.json() : { items: [] }))
+        .then(d => { if (!dead) setDrips(d) })
+        .catch(() => { if (!dead) setDrips({ items: [] }) })
+    }
     return () => { dead = true }
-  }, [leadId])
+  }, [leadId, partnerId, refreshKey])
 
   const nowMs = nowMsProp ?? Date.now()
   const { future, past } = useMemo(
