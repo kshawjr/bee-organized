@@ -84,4 +84,57 @@ describe('fetchImportHealth', () => {
     // Normal handoffs (~2min) must never read as a digest stall.
     expect(IMPORT_DIGEST_STALL_MS).toBeGreaterThan(2 * 60 * 1000)
   })
+
+  // ── continuation bounces (the leading indicator of a stall) ────
+  // Recorded by recordContinuationAttempt as sync_log rows with
+  // entity_type='location' + status='error'. The mock keys its data off the
+  // .eq('status', …) filter, so these rows come back under 'error'.
+  const bounce = (loc: string, outcome: string, job = 'job-1') => ({
+    location_id: loc,
+    message: `[continuation] source=sweeper outcome=${outcome} job=${job} status=0 — blocked by a redirect`,
+    created_at: new Date(NOW - 60_000).toISOString(),
+  })
+
+  it('aggregates failed continuation attempts per location', async () => {
+    const { supabase } = makeSupabase({
+      failed: [], running: [],
+      error: [bounce('loc_kc', 'bounced'), bounce('loc_kc', 'bounced'), bounce('loc_kc', 'no_claim'), bounce('loc_pdx', 'errored')],
+    })
+    const out = await fetchImportHealth({ nowMs: NOW, supabase })
+    expect(out.bounced).toHaveLength(2)
+    // Busiest location first.
+    expect(out.bounced[0]).toMatchObject({ location_id: 'loc_kc', count: 3 })
+    expect(out.bounced[0].outcomes).toContain('bounced×2')
+    expect(out.bounced[0].outcomes).toContain('no_claim×1')
+    expect(out.bounced[1]).toMatchObject({ location_id: 'loc_pdx', count: 1 })
+  })
+
+  it('ignores non-continuation sync_log rows sharing the same scope', async () => {
+    const { supabase } = makeSupabase({
+      failed: [], running: [],
+      error: [
+        { location_id: 'loc_kc', message: 'Leads: 3 created; Errors: 2', created_at: new Date(NOW).toISOString() },
+        bounce('loc_kc', 'bounced'),
+      ],
+    })
+    const out = await fetchImportHealth({ nowMs: NOW, supabase })
+    expect(out.bounced).toEqual([expect.objectContaining({ location_id: 'loc_kc', count: 1 })])
+  })
+
+  it('a landed attempt is never reported as a bounce', async () => {
+    const { supabase } = makeSupabase({
+      failed: [], running: [], error: [bounce('loc_kc', 'landed')],
+    })
+    expect((await fetchImportHealth({ nowMs: NOW, supabase })).bounced).toEqual([])
+  })
+
+  it('reads continuation rows scoped to entity_type=location within the window', async () => {
+    const { supabase, calls } = makeSupabase({ failed: [], running: [], error: [] })
+    await fetchImportHealth({ nowMs: NOW, supabase })
+    const bounceCall = calls.find((c) => c.status === 'error')!
+    const eqCols = bounceCall.ops.filter((o) => o[0] === 'eq').map((o) => o[1])
+    expect(eqCols).toEqual(expect.arrayContaining([['entity_type', 'location'], ['status', 'error']]))
+    const gte = bounceCall.ops.find((o) => o[0] === 'gte')
+    expect(gte?.[1][1]).toBe(new Date(NOW - IMPORT_DIGEST_WINDOW_MS).toISOString())
+  })
 })

@@ -20,6 +20,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { supabaseService } from './supabase-service'
+import { parseContinuationLogMessage, isFailedOutcome } from './import-continuation'
 
 // Match the digest cadence (vercel.json: "0 */3 * * *") so a failed import is
 // reported exactly once, in the window it failed.
@@ -40,9 +41,22 @@ export type ImportJobRow = {
   location_claim_at?: string | null
 }
 
+// A continuation handoff that did NOT land, aggregated per location. The
+// handoff is what picks a job back up after a segment yields gracefully; when
+// it bounces, the import can only be recovered by the sweeper's next pass, and
+// if it keeps bouncing the job eventually fails out. A console.warn is not a
+// surface anyone reads, so the bounces come here. See lib/import-continuation.
+export type ContinuationBounceRow = {
+  location_id: string
+  count: number
+  outcomes: string      // e.g. "bounced×3, no_claim×1"
+  sample: string        // the newest failing message, for the actual cause
+}
+
 export type ImportHealthData = {
   failed: ImportJobRow[]
   stalled: ImportJobRow[]
+  bounced: ContinuationBounceRow[]
 }
 
 export async function fetchImportHealth(opts: {
@@ -79,5 +93,37 @@ export async function fetchImportHealth(opts: {
     .order('started_at', { ascending: true })
     .limit(20)
 
-  return { failed: failed ?? [], stalled: stalled ?? [] }
+  // Continuation attempts that failed to land, within the same window.
+  // entity_type='location' is where recordContinuationAttempt writes; the
+  // parser drops any other row that happens to share that scope.
+  const { data: attempts } = await supabase
+    .from('sync_log')
+    .select('location_id, message, created_at')
+    .eq('entity_type', 'location')
+    .eq('status', 'error')
+    .gte('created_at', windowCutoff)
+    .order('created_at', { ascending: false })
+    .limit(200)
+
+  const byLocation = new Map<string, { count: number; outcomes: Map<string, number>; sample: string }>()
+  for (const row of attempts ?? []) {
+    const parsed = parseContinuationLogMessage((row as any).message)
+    if (!parsed || !isFailedOutcome(parsed.outcome)) continue
+    const loc = (row as any).location_id || 'unknown'
+    const entry = byLocation.get(loc) ?? { count: 0, outcomes: new Map(), sample: (row as any).message }
+    entry.count++
+    entry.outcomes.set(parsed.outcome, (entry.outcomes.get(parsed.outcome) ?? 0) + 1)
+    byLocation.set(loc, entry)
+  }
+
+  const bounced: ContinuationBounceRow[] = Array.from(byLocation.entries())
+    .map(([location_id, e]) => ({
+      location_id,
+      count: e.count,
+      outcomes: Array.from(e.outcomes.entries()).map(([o, n]) => `${o}×${n}`).join(', '),
+      sample: e.sample,
+    }))
+    .sort((a, b) => b.count - a.count)
+
+  return { failed: failed ?? [], stalled: stalled ?? [], bounced }
 }

@@ -146,10 +146,37 @@ describe('jobber-clients route — write-guard wiring', () => {
     const block = src.slice(src.indexOf('if (hitCap) {'))
     const persistAt = block.indexOf('processed_records: processed')
     const releaseAt = block.indexOf('await releaseMutex()')
-    const continueAt = block.indexOf('selfContinue()')
+    const continueAt = block.indexOf('await selfContinue(')
     expect(persistAt).toBeGreaterThanOrEqual(0)
     expect(releaseAt).toBeGreaterThan(persistAt)
     expect(continueAt).toBeGreaterThan(releaseAt)
+  })
+
+  // ── the continuation handoff must be AWAITED, never fire-and-forget ──
+  // A nested waitUntil() here is a SILENT NO-OP: @vercel/functions resolves it
+  // as `getContext().waitUntil?.(p)`, and by the time a segment yields the HTTP
+  // response is long gone, so there is no request context to register with —
+  // the promise is dropped and the function is not held open for it. Awaiting
+  // inside the outer waitUntil(runImport()) is what keeps the lambda alive for
+  // the handoff. This is the loc_kc fast-path regression; pin it.
+  it('EVERY self-continue call site is awaited', () => {
+    const calls = src.match(/^[^\n]*selfContinue\(jobId\)/gm) ?? []
+    expect(calls.length).toBeGreaterThanOrEqual(2)   // fetch-phase + write-phase yields
+    for (const line of calls) expect(line).toMatch(/await\s+selfContinue\(jobId\)/)
+  })
+
+  it('self-continue never wraps its POST in a nested waitUntil', () => {
+    const decl = src.slice(src.indexOf('const selfContinue ='), src.indexOf('// Run the import detached'))
+    expect(decl).not.toContain('waitUntil')
+    expect(decl).toContain('await postContinuation(')
+  })
+
+  it('self-continue records its outcome so a bounce is not silently swallowed', () => {
+    const decl = src.slice(src.indexOf('const selfContinue ='), src.indexOf('// Run the import detached'))
+    expect(decl).toContain('recordContinuationAttempt(')
+    expect(decl).toMatch(/source:\s*'self_chain'/)
+    // The old code ended in `.catch(() => {})` — every failure vanished.
+    expect(decl).not.toMatch(/catch\(\s*\(\)\s*=>\s*\{\s*\}\s*\)/)
   })
 
   it('releaseMutex nulls BOTH the segment mutex and the location claim', () => {

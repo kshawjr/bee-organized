@@ -55,6 +55,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { canRunImport } from '@/lib/auth'
 import { writeSyncLog } from '@/lib/sync-log'
 import { resolveInternalOrigin } from '@/lib/internal-origin'
+import { postContinuation, recordContinuationAttempt } from '@/lib/import-continuation'
 import {
   CLIENTS_QUERY,
   INCREMENTAL_CLIENTS_QUERY,
@@ -299,17 +300,46 @@ export async function POST(req: NextRequest) {
   }
 
   // Fire the next segment server-side so the import continues without a
-  // browser. Uses this deployment's own origin + the internal-continue
-  // secret (matches x-import-continue-secret gate at top of POST) to pass
-  // auth without a user session. Best-effort — cron sweeper is the backstop
-  // if the fetch fails or the chain otherwise breaks.
-  const selfContinue = () => {
-    waitUntil(
-      fetch(`${selfOrigin}/api/import/jobber-clients?location_id=${encodeURIComponent(locSlug)}&_continue=1`, {
-        method: 'POST',
-        headers: { 'x-import-continue-secret': process.env.CRON_SECRET || '' },
-      }).catch(() => {})
-    )
+  // browser. Uses a non-SSO-gated origin + the internal-continue secret
+  // (matches the x-import-continue-secret gate at the top of POST) to pass
+  // auth without a user session.
+  //
+  // MUST BE AWAITED BY THE CALLER — never fire-and-forget.
+  // This used to wrap the POST in a NESTED waitUntil(), called from inside the
+  // already-detached runImport() minutes after the HTTP response was sent.
+  // @vercel/functions implements waitUntil as `getContext().waitUntil?.(p)` —
+  // optional-chained, so with no live request context it is a SILENT NO-OP:
+  // the promise is never registered, the function is never held open for it,
+  // and the trailing `.catch(() => {})` swallowed every failure mode. That is
+  // the classic fire-and-forget-on-a-dying-lambda trap, and it is why the fast
+  // path stopped working (the loc_kc stalls, 2026-07-22).
+  //
+  // Awaiting instead is correct AND cheap: we are already inside the outer
+  // waitUntil(runImport()), so the function stays alive as long as this promise
+  // is pending, and the receiving segment claims + returns 200 in well under a
+  // second (it defers its own work to its own waitUntil). Outcome is recorded
+  // to sync_log either way — a bounce is now readable, and the cron sweeper is
+  // still the net if it doesn't land.
+  const selfContinue = async (jobIdForLog: string) => {
+    const post = await postContinuation({
+      origin: selfOrigin,
+      locationSlug: locSlug,
+      secret: process.env.CRON_SECRET || '',
+    })
+    await recordContinuationAttempt({
+      jobId: jobIdForLog,
+      locationSlug: locSlug,
+      source: 'self_chain',
+      outcome: post.outcome,
+      status: post.status,
+      detail: post.detail,
+    })
+    if (post.outcome !== 'landed') {
+      console.warn(
+        `[jobber-import] self-continue ${post.outcome} for ${locSlug} (job ${jobIdForLog}): ` +
+        `status=${post.status ?? 'n/a'} ${post.detail ?? ''} — sweeper will retry`,
+      )
+    }
   }
 
   // Run the import detached from the request via waitUntil so it survives
@@ -497,7 +527,7 @@ export async function POST(req: NextRequest) {
           })
           await releaseMutex()
           emit({ continue: true, job_id: jobId })
-          selfContinue()
+          await selfContinue(jobId)
           return
         }
 
@@ -931,7 +961,7 @@ export async function POST(req: NextRequest) {
           })
           await releaseMutex()
           emit({ continue: true, processed, total: clients.length, reason: yieldReason, job_id: jobId })
-          selfContinue()
+          await selfContinue(jobId)
           return
         }
 

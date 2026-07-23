@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
     // Import health (item 2): failed + stalled jobs in the window. Best-effort
     // — a hiccup reading import_jobs must not take down the webhook digest, so
     // degrade to empty rather than failing the whole run.
-    let importJobs: Awaited<ReturnType<typeof fetchImportHealth>> = { failed: [], stalled: [] }
+    let importJobs: Awaited<ReturnType<typeof fetchImportHealth>> = { failed: [], stalled: [], bounced: [] }
     try {
       importJobs = await fetchImportHealth({ nowMs })
     } catch (err: any) {
@@ -92,6 +92,7 @@ export async function GET(req: NextRequest) {
       importHealth: {
         failed: importJobs.failed,
         stalled: importJobs.stalled,
+        bounced: importJobs.bounced,
         originGated,
         originTarget: internalOrigin,
         nowMs,

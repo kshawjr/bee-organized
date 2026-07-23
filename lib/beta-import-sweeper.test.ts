@@ -1,83 +1,188 @@
 // @vitest-environment node
 //
-// import-sweeper recovery (stalled-Scottsdale, Bug 2). The sweeper finds jobs
-// stuck in status='running' with a stale location_claim_at and re-pokes the
-// import route to resume them. Root cause of the real stall: the re-poke POST
-// resolved its origin to the SSO-gated deployment URL, so Vercel Deployment
-// Protection redirected it to a login page before the route ran — every
-// re-poke bounced (prod: detection matched Scottsdale for ~58 min, zero
-// recoveries). These tests pin the path that was broken:
+// import-sweeper recovery — the continuation handoff's safety net.
 //
-//   • IDENTIFY  — filters status='running' + a stale location_claim_at.
-//   • RE-POKE   — POSTs with x-import-continue-secret == CRON_SECRET so it
-//                 passes the import route's internal-continue gate.
-//   • ORIGIN    — targets the non-SSO custom domain, NEVER the gated
-//                 req.nextUrl.origin the sweeper was invoked on. (The fix.)
+// These run the REAL route handler against an in-memory Supabase and a fake
+// import endpoint that performs the REAL compare-and-swap claim. So the
+// end-to-end assertions are about DB STATE ("a new segment claimed the job"),
+// not about whether a function was called. We already shipped a fix once that
+// looked right at the call-spy level and did not work in production.
+//
+// What is pinned:
+//   • IDENTIFY  — the find-query matches a CLEANLY-YIELDED job (status running,
+//                 location_claim_at NULL), not just a stale claim.
+//   • E2E       — a cleanly-yielded job is re-poked and a new segment claims.
+//   • REGRESSION— a clean yield 40 minutes into a long import is re-poked, NOT
+//                 failed out. (loc_kc: the fail-out aged jobs from started_at,
+//                 turning the 15-min last resort into a hard 15-min ceiling on
+//                 total import duration. 3,352 records need ~9 segments.)
+//   • ORIGIN    — targets the non-SSO custom domain, never the gated
+//                 req.nextUrl.origin the cron invoked us on.
 //   • REDIRECT  — an opaqueredirect (redirect:'manual' → status 0) reads as a
-//                 blocked failure, not a silent ok:false.
+//                 blocked failure, and is RECORDED to sync_log, not swallowed.
+//   • NO_CLAIM  — a 2xx that leaves the claim unheld is the silent-failure
+//                 class and must be recorded as a failure.
+//   • FAIL-OUT  — still fires, but only on real evidence: a stale held claim,
+//                 or a bounce run past the ceiling.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-// ── recording supabase mock: one import_jobs query, records its filter ops ──
+// ── in-memory Supabase: table-aware, applies the filters for real ──
 const h = vi.hoisted(() => {
-  const state = {
-    jobs: [] as any[],
-    ops: [] as [string, any[]][],
-    touched: false,
+  const db: Record<string, any[]> = { import_jobs: [], sync_log: [] }
+  const ops: [string, any[]][] = []
+  const state = { touched: false }
+  const reset = () => {
+    db.import_jobs = []
+    db.sync_log = []
+    ops.length = 0
+    state.touched = false
   }
-  const reset = () => { state.jobs = []; state.ops = []; state.touched = false }
-  const builder = () => {
+
+  // `col.op.value` terms, OR'd. Only the ops the sweeper actually emits.
+  const orMatcher = (clause: string) => (r: any) =>
+    clause.split(',').some((term) => {
+      const [col, op, ...rest] = term.split('.')
+      const val = rest.join('.')
+      if (op === 'is' && val === 'null') return r[col] == null
+      if (op === 'lt') return r[col] != null && String(r[col]) < val
+      return false
+    })
+
+  const from = (table: string) => {
     state.touched = true
-    const b: any = {}
-    // 'update' is chainable + records its patch so fail-out tests can assert
-    // the job was marked failed; its .eq() chain is awaited by the route.
-    for (const m of ['select', 'eq', 'or', 'order', 'update']) {
-      b[m] = (...args: any[]) => { state.ops.push([m, args]); return b }
+    db[table] ??= []
+    const preds: Array<(r: any) => boolean> = []
+    let mode: 'select' | 'update' | 'insert' = 'select'
+    let patch: any = null
+    let order: { col: string; asc: boolean } | null = null
+    let cap: number | null = null
+
+    const rows = () => {
+      let out = db[table].filter((r) => preds.every((p) => p(r)))
+      if (order) {
+        const { col, asc } = order
+        out = [...out].sort((a, b) => {
+          const av = a[col] ?? '', bv = b[col] ?? ''
+          return (av < bv ? -1 : av > bv ? 1 : 0) * (asc ? 1 : -1)
+        })
+      }
+      if (cap != null) out = out.slice(0, cap)
+      return out
     }
-    b.limit = (...args: any[]) => {
-      state.ops.push(['limit', args])
-      return Promise.resolve({ data: state.jobs, error: null })
+    const resolve = () => {
+      if (mode === 'update') {
+        const hit = rows()
+        hit.forEach((r) => Object.assign(r, patch))
+        return { data: hit, error: null }
+      }
+      return { data: rows(), error: null }
     }
-    b.then = (res: any, rej: any) => Promise.resolve({ data: state.jobs, error: null }).then(res, rej)
+
+    const b: any = {
+      select: (...a: any[]) => { ops.push(['select', a]); return b },
+      insert: (row: any) => { ops.push(['insert', [row]]); mode = 'insert'; db[table].push({ ...row }); return b },
+      update: (p: any) => { ops.push(['update', [p]]); mode = 'update'; patch = p; return b },
+      eq: (c: string, v: any) => { ops.push(['eq', [c, v]]); preds.push((r) => r[c] === v); return b },
+      in: (c: string, v: any[]) => { ops.push(['in', [c, v]]); preds.push((r) => v.includes(r[c])); return b },
+      gte: (c: string, v: any) => { ops.push(['gte', [c, v]]); preds.push((r) => r[c] != null && String(r[c]) >= v); return b },
+      or: (clause: string) => { ops.push(['or', [clause]]); preds.push(orMatcher(clause)); return b },
+      order: (c: string, o: any = {}) => { ops.push(['order', [c, o]]); order = { col: c, asc: o.ascending !== false }; return b },
+      limit: (n: number) => { ops.push(['limit', [n]]); cap = n; return Promise.resolve(resolve()) },
+      maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
+      then: (res: any, rej: any) => Promise.resolve(resolve()).then(res, rej),
+    }
     return b
   }
-  return { state, reset, builder }
+  return { db, ops, state, reset, from }
 })
-vi.mock('@/lib/supabase-service', () => ({
-  supabaseService: { from: () => h.builder() },
+
+vi.mock('@/lib/supabase-service', () => ({ supabaseService: { from: h.from } }))
+// writeSyncLog builds its own Supabase client — point it at the fake DB so
+// the recorded continuation trail is assertable.
+vi.mock('@/lib/sync-log', () => ({
+  writeSyncLog: async (row: any) => {
+    h.db.sync_log.push({ ...row, created_at: new Date().toISOString() })
+  },
 }))
 
 import { NextRequest } from 'next/server'
 import { GET } from '@/app/api/cron/import-sweeper/route'
+import { CONTINUATION_LOG_PREFIX, formatContinuationLogMessage } from '@/lib/import-continuation'
 
-const GATED = 'https://bee-hub-dep123.vercel.app'      // deployment origin GET is invoked on — SSO-gated
-const PUBLIC = 'https://beehive.beeorganized.com'       // non-SSO custom domain the re-poke must use
+const GATED = 'https://bee-hub-dep123.vercel.app'   // deployment origin the cron hits — SSO-gated
+const PUBLIC = 'https://beehive.beeorganized.com'    // non-SSO custom domain the re-poke must use
 const URL_BASE = `${GATED}/api/cron/import-sweeper`
+const SECRET = 'sweep-secret'
+const MIN = 60_000
+const ago = (mins: number) => new Date(Date.now() - mins * MIN).toISOString()
 
-// Claim staleness fixtures. Stale enough to be found + re-poked (past the 2min
-// re-poke cutoff) but NOT past the 15min max-lifetime fail-out — so these
-// exercise the resume path, not the give-up path.
-const RESUMABLE_STALE = () => new Date(Date.now() - 4 * 60 * 1000).toISOString()
-// Well past the 15min fail-out threshold → the sweeper gives up (marks failed).
-const HOPELESS_STALE = () => new Date(Date.now() - 20 * 60 * 1000).toISOString()
+// A claim stale enough to be found + re-poked, but not past the 15min ceiling.
+const RESUMABLE_STALE = () => ago(4)
+// Well past the ceiling → the sweeper gives up.
+const HOPELESS_STALE = () => ago(20)
 
-// Minimal fetch Response stand-in (undici-shaped for the fields the sweeper reads).
 const resp = (over: Partial<{ status: number; type: string; location: string | null }> = {}) => ({
   status: over.status ?? 200,
   type: over.type ?? 'basic',
   headers: { get: (k: string) => (k === 'location' ? over.location ?? null : null) },
 })
 
+// A running job row. Defaults to the CLEANLY-YIELDED state — released claim,
+// mid-import, long-running — because that is the state the old fail-out killed.
+const job = (over: Partial<Record<string, any>> = {}) => ({
+  id: 'job-1',
+  location_id: 'loc_kc',
+  type: 'jobber_clients',
+  status: 'running',
+  location_claim_at: null,
+  segment_started_at: null,
+  started_at: ago(40),
+  phase: 'batched — 636/3352, continuing (time budget)',
+  processed_records: 636,
+  total_records: 3352,
+  ...over,
+})
+
+// A sync_log continuation row, as recordContinuationAttempt writes it.
+const attempt = (jobId: string, slug: string, outcome: any, minsAgo: number) => ({
+  location_id: slug,
+  entity_id: slug,
+  entity_type: 'location',
+  status: outcome === 'landed' ? 'success' : 'error',
+  message: formatContinuationLogMessage({ source: 'sweeper', outcome, jobId }),
+  created_at: ago(minsAgo),
+})
+
+// The fake import endpoint: performs the SAME compare-and-swap claim the real
+// route does (tryClaim — take it if location_claim_at is null or >90s old),
+// against the same in-memory DB. So "landed" means a segment really claimed.
+const CLAIM_TTL_MS = 90_000
+const realImportRoute = async (url: string, opts: any) => {
+  if (opts?.headers?.['x-import-continue-secret'] !== SECRET) return resp({ status: 401 })
+  const slug = new URL(url).searchParams.get('location_id')
+  const row = h.db.import_jobs.find((j) => j.location_id === slug && j.status === 'running')
+  if (!row) return resp({ status: 200 })
+  const claimMs = row.location_claim_at ? Date.parse(row.location_claim_at) : NaN
+  if (!Number.isFinite(claimMs) || claimMs < Date.now() - CLAIM_TTL_MS) {
+    row.location_claim_at = new Date().toISOString()   // this segment claims
+  }
+  return resp({ status: 200 })
+}
+
+const continuationRows = () =>
+  h.db.sync_log.filter((r) => String(r.message).startsWith(CONTINUATION_LOG_PREFIX))
+
 let fetchMock: ReturnType<typeof vi.fn>
 
-describe('GET /api/cron/import-sweeper — recovery', () => {
+describe('GET /api/cron/import-sweeper — continuation handoff', () => {
   beforeEach(() => {
     h.reset()
-    process.env.CRON_SECRET = 'sweep-secret'
+    process.env.CRON_SECRET = SECRET
     process.env.NEXT_PUBLIC_APP_URL = PUBLIC
     process.env.NEXT_PUBLIC_SITE_URL = PUBLIC
     delete process.env.INTERNAL_BASE_URL
     delete process.env.VERCEL_PROJECT_PRODUCTION_URL
-    fetchMock = vi.fn(async () => resp())
+    fetchMock = vi.fn(realImportRoute as any)
     vi.stubGlobal('fetch', fetchMock)
   })
   afterEach(() => {
@@ -86,8 +191,9 @@ describe('GET /api/cron/import-sweeper — recovery', () => {
     delete process.env.NEXT_PUBLIC_SITE_URL
   })
 
-  const stalled = () => new NextRequest(URL_BASE, { headers: { authorization: 'Bearer sweep-secret' } })
+  const sweep = () => GET(new NextRequest(URL_BASE, { headers: { authorization: `Bearer ${SECRET}` } }))
 
+  // ── auth ───────────────────────────────────────────────────────
   it('fail-closed 500 without CRON_SECRET, never touching the DB', async () => {
     delete process.env.CRON_SECRET
     const res = await GET(new NextRequest(URL_BASE))
@@ -102,123 +208,225 @@ describe('GET /api/cron/import-sweeper — recovery', () => {
   })
 
   it('no stalled jobs → resumed 0, no re-pokes', async () => {
-    h.state.jobs = []
-    const res = await GET(stalled())
-    expect((await res.json())).toMatchObject({ resumed: 0, checked: 0 })
+    const res = await sweep()
+    expect(await res.json()).toMatchObject({ resumed: 0, checked: 0 })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('IDENTIFY: filters on status=running + a stale location_claim_at', async () => {
-    h.state.jobs = [{ id: 'job-1', location_id: 'loc_scottsdale', location_claim_at: RESUMABLE_STALE() }]
-    await GET(stalled())
-    const eqCols = h.state.ops.filter((o) => o[0] === 'eq').map((o) => o[1][0])
+  // ── IDENTIFY ───────────────────────────────────────────────────
+  it('IDENTIFY: filters on status=running + type, and matches a NULL claim as well as a stale one', async () => {
+    h.db.import_jobs = [job()]
+    await sweep()
+    const eqCols = h.ops.filter((o) => o[0] === 'eq').map((o) => o[1][0])
     expect(eqCols).toContain('status')
     expect(eqCols).toContain('type')
-    const orClause = h.state.ops.find((o) => o[0] === 'or')?.[1]?.[0] ?? ''
-    expect(orClause).toContain('location_claim_at')
-    expect(orClause).toMatch(/location_claim_at\.lt\./) // staleness cutoff
+    const orClause = h.ops.find((o) => o[0] === 'or')?.[1]?.[0] ?? ''
+    expect(orClause).toMatch(/location_claim_at\.is\.null/)   // the clean-yield state
+    expect(orClause).toMatch(/location_claim_at\.lt\./)       // the dead-segment state
   })
 
-  it('RE-POKE + ORIGIN + AUTH: resumes the stalled job via the NON-gated domain with the internal secret', async () => {
-    h.state.jobs = [{ id: 'job-1', location_id: 'loc_scottsdale', location_claim_at: RESUMABLE_STALE() }]
-    const res = await GET(stalled())
+  it("IDENTIFY: the find-query really returns a cleanly-yielded job (null claim, status running)", async () => {
+    // Runs the OR clause through the fake DB's filter, not just a string check.
+    h.db.import_jobs = [
+      job({ id: 'yielded', location_claim_at: null }),
+      job({ id: 'fresh', location_id: 'loc_other', location_claim_at: ago(0.1) }),  // healthy — must be skipped
+      job({ id: 'not-running', location_id: 'loc_done', status: 'completed', location_claim_at: null }),
+    ]
+    const body = await (await sweep()).json()
+    expect(body.checked).toBe(1)
+    expect(body.results.map((r: any) => r.job_id)).toEqual(['yielded'])
+  })
 
+  // ── END-TO-END ─────────────────────────────────────────────────
+  it('E2E: a cleanly-yielded job is picked up — a new segment CLAIMS it', async () => {
+    h.db.import_jobs = [job()]
+    const body = await (await sweep()).json()
+
+    // The outcome that matters is DB state, not the call count: the claim the
+    // graceful yield released is now held again → a segment took over.
+    const row = h.db.import_jobs[0]
+    expect(row.location_claim_at).not.toBeNull()
+    expect(Date.parse(row.location_claim_at)).toBeGreaterThan(Date.now() - 5000)
+    expect(row.status).toBe('running')          // NOT failed out
+    expect(body).toMatchObject({ resumed: 1, failed_out: 0, checked: 1 })
+    expect(body.results[0]).toMatchObject({ ok: true, outcome: 'landed' })
+  })
+
+  it('E2E: the landing is recorded to sync_log so Kevin can see the handoff worked', async () => {
+    h.db.import_jobs = [job()]
+    await sweep()
+    const rows = continuationRows()
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ location_id: 'loc_kc', entity_type: 'location', status: 'success' })
+    expect(rows[0].message).toContain('outcome=landed')
+    expect(rows[0].message).toContain('source=sweeper')
+    expect(rows[0].message).toContain('job=job-1')
+  })
+
+  it('REGRESSION (loc_kc): a clean yield 40 minutes into a long import is RE-POKED, not failed out', async () => {
+    // The exact prod row: 636/3352, claim released by the graceful yield,
+    // started_at 40 min ago. The old fail-out aged this from started_at and
+    // marked it failed WITHOUT re-poking. A 3,352-record import needs ~9
+    // segments — killing it at 15 min made completion impossible.
+    h.db.import_jobs = [job({ started_at: ago(40) })]
+    const body = await (await sweep()).json()
+    expect(body.failed_out).toBe(0)
+    expect(body.resumed).toBe(1)
+    expect(h.db.import_jobs[0].status).toBe('running')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('REGRESSION: even a 4-hour-old job is re-poked while it keeps making progress', async () => {
+    h.db.import_jobs = [job({ started_at: ago(240), processed_records: 2067 })]
+    const body = await (await sweep()).json()
+    expect(body).toMatchObject({ failed_out: 0, resumed: 1 })
+  })
+
+  it('re-pokes every candidate in the batch', async () => {
+    h.db.import_jobs = [
+      job({ id: 'a', location_id: 'loc_a', location_claim_at: null }),
+      job({ id: 'b', location_id: 'loc_b', location_claim_at: RESUMABLE_STALE() }),
+    ]
+    const body = await (await sweep()).json()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(body.resumed).toBe(2)
+    expect(h.db.import_jobs.every((j) => j.location_claim_at != null)).toBe(true)
+  })
+
+  // ── ORIGIN ─────────────────────────────────────────────────────
+  it('ORIGIN + AUTH: re-pokes via the NON-gated domain with the internal secret', async () => {
+    h.db.import_jobs = [job()]
+    await sweep()
     const [url, opts] = fetchMock.mock.calls[0]
-    // Origin is the fix: the public custom domain, NOT the gated deployment URL.
     expect(url).toContain(PUBLIC)
     expect(url).not.toContain(GATED)
-    expect(url).toContain('location_id=loc_scottsdale')
+    expect(url).toContain('location_id=loc_kc')
     expect(url).toContain('_continue=1')
-    // Authenticates via the internal-continue gate the import route honors.
     expect(opts.method).toBe('POST')
-    expect(opts.headers['x-import-continue-secret']).toBe('sweep-secret')
+    expect(opts.headers['x-import-continue-secret']).toBe(SECRET)
     expect(opts.redirect).toBe('manual')
-
-    const body = await res.json()
-    expect(body).toMatchObject({ resumed: 1, checked: 1 })
-    expect(body.results[0]).toMatchObject({ location_id: 'loc_scottsdale', ok: true })
   })
 
-  it('re-pokes every stalled job in the batch', async () => {
-    h.state.jobs = [
-      { id: 'a', location_id: 'loc_a', location_claim_at: null },
-      { id: 'b', location_id: 'loc_b', location_claim_at: RESUMABLE_STALE() },
-    ]
-    const res = await GET(stalled())
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect((await res.json()).resumed).toBe(2)
-  })
+  // ── bounces are LOUD ───────────────────────────────────────────
+  it('REDIRECT: an opaqueredirect (status 0) is a blocked re-poke, RECORDED, and does not claim', async () => {
+    fetchMock.mockResolvedValue(resp({ status: 0, type: 'opaqueredirect', location: 'https://vercel.com/sso' }))
+    h.db.import_jobs = [job()]
+    const body = await (await sweep()).json()
 
-  it('REDIRECT: an opaqueredirect (status 0) reads as a blocked re-poke, not a success', async () => {
-    // Exactly what redirect:'manual' yields when the origin IS still SSO-gated.
-    fetchMock.mockResolvedValue(resp({ status: 0, type: 'opaqueredirect' }))
-    h.state.jobs = [{ id: 'job-1', location_id: 'loc_scottsdale', location_claim_at: RESUMABLE_STALE() }]
-    const res = await GET(stalled())
-    const body = await res.json()
     expect(body.resumed).toBe(0)
-    expect(body.results[0].ok).toBe(false)
+    expect(body.results[0]).toMatchObject({ ok: false, outcome: 'bounced', status: 0 })
+    expect(h.db.import_jobs[0].location_claim_at).toBeNull()   // nobody took it
+
+    const rows = continuationRows()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].status).toBe('error')                        // surfaces as a problem
+    expect(rows[0].message).toContain('outcome=bounced')
+    expect(rows[0].message).toMatch(/SSO-gated/)
   })
 
-  it('REDIRECT: a raw 302 is also counted as blocked, not resumed', async () => {
+  it('REDIRECT: a raw 302 is also counted as blocked and recorded', async () => {
     fetchMock.mockResolvedValue(resp({ status: 302, location: 'https://vercel.com/sso' }))
-    h.state.jobs = [{ id: 'job-1', location_id: 'loc_scottsdale', location_claim_at: RESUMABLE_STALE() }]
-    const res = await GET(stalled())
-    const body = await res.json()
-    expect(body.resumed).toBe(0)
-    expect(body.results[0]).toMatchObject({ ok: false, status: 302, redirected_to: 'https://vercel.com/sso' })
+    h.db.import_jobs = [job()]
+    const body = await (await sweep()).json()
+    expect(body.results[0]).toMatchObject({ ok: false, outcome: 'bounced', status: 302, redirected_to: 'https://vercel.com/sso' })
+    expect(continuationRows()[0].status).toBe('error')
   })
 
-  // ── Max-lifetime fail-out (item 1b) ──────────────────────────────
-  it('FAIL-OUT: a job stalled past the 15min ceiling is marked failed, NOT re-poked', async () => {
-    h.state.jobs = [{
-      id: 'job-dead', location_id: 'loc_scottsdale',
-      location_claim_at: HOPELESS_STALE(), started_at: HOPELESS_STALE(),
-      phase: 'writing', processed_records: 607, total_records: 709,
-    }]
-    const res = await GET(stalled())
+  it('a thrown fetch is recorded as errored, never an unhandled rejection', async () => {
+    fetchMock.mockRejectedValue(new Error('ECONNRESET'))
+    h.db.import_jobs = [job()]
+    const body = await (await sweep()).json()
+    expect(body.results[0]).toMatchObject({ ok: false, outcome: 'errored' })
+    expect(continuationRows()[0].message).toContain('outcome=errored')
+  })
 
-    // Never re-poked — we gave up on it.
-    expect(fetchMock).not.toHaveBeenCalled()
+  it('NO_CLAIM: a 2xx that leaves the claim unheld is recorded as a failure, not a phantom success', async () => {
+    // The silent-failure class: the route answered 200 but no segment took the
+    // job. HTTP status alone would have called this a success.
+    fetchMock.mockResolvedValue(resp({ status: 200 }))   // no claim side-effect
+    h.db.import_jobs = [job()]
+    const body = await (await sweep()).json()
+    expect(body.resumed).toBe(0)
+    expect(body.results[0]).toMatchObject({ ok: false, outcome: 'no_claim' })
+    expect(continuationRows()[0].status).toBe('error')
+    expect(continuationRows()[0].message).toContain('outcome=no_claim')
+  })
 
-    // It was UPDATEd to status:'failed' with both mutexes released.
-    const updates = h.state.ops.filter((o) => o[0] === 'update').map((o) => o[1][0])
-    expect(updates.length).toBe(1)
-    expect(updates[0]).toMatchObject({
-      status: 'failed',
-      segment_started_at: null,
-      location_claim_at: null,
+  it('a job that FINISHED during the re-poke counts as landed, not no_claim', async () => {
+    fetchMock.mockImplementation(async () => {
+      h.db.import_jobs[0].status = 'completed'
+      return resp({ status: 200 })
     })
-    expect(updates[0].error_message).toMatch(/stalled/i)
-    expect(updates[0].error_message).toContain('607/709')
+    h.db.import_jobs = [job()]
+    const body = await (await sweep()).json()
+    expect(body.results[0]).toMatchObject({ ok: true, outcome: 'landed' })
+  })
 
-    const body = await res.json()
+  // ── FAIL-OUT: last resort, on real evidence only ───────────────
+  it('FAIL-OUT: a claim held and stale past the ceiling is marked failed, NOT re-poked', async () => {
+    h.db.import_jobs = [job({ id: 'job-dead', location_claim_at: HOPELESS_STALE(), phase: 'writing', processed_records: 607, total_records: 709 })]
+    const body = await (await sweep()).json()
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    const row = h.db.import_jobs[0]
+    expect(row.status).toBe('failed')
+    expect(row.segment_started_at).toBeNull()
+    expect(row.location_claim_at).toBeNull()
+    expect(row.error_message).toMatch(/died without releasing/)
+    expect(row.error_message).toContain('607/709')
     expect(body).toMatchObject({ resumed: 0, failed_out: 1, checked: 1 })
-    expect(body.results.find((r: any) => r.job_id === 'job-dead')).toMatchObject({ failed_out: true })
+    expect(body.results.find((r: any) => r.job_id === 'job-dead')).toMatchObject({ failed_out: true, reason: 'stale_claim' })
   })
 
   it('FAIL-OUT is guarded on status=running (never clobbers a natural transition)', async () => {
-    h.state.jobs = [{
-      id: 'job-dead', location_id: 'loc_x',
-      location_claim_at: HOPELESS_STALE(), started_at: HOPELESS_STALE(),
-      phase: 'fetching jobs', processed_records: 0, total_records: 0,
-    }]
-    await GET(stalled())
-    // The fail-out update chains .eq('id',…).eq('status','running').
-    const eqCols = h.state.ops.filter((o) => o[0] === 'eq').map((o) => o[1])
+    h.db.import_jobs = [job({ id: 'job-dead', location_claim_at: HOPELESS_STALE() })]
+    await sweep()
+    const eqCols = h.ops.filter((o) => o[0] === 'eq').map((o) => o[1])
     expect(eqCols).toEqual(expect.arrayContaining([['id', 'job-dead'], ['status', 'running']]))
   })
 
-  it('MIXED batch: recent-stale is re-poked, hopeless is failed out', async () => {
-    h.state.jobs = [
-      { id: 'young', location_id: 'loc_young', location_claim_at: RESUMABLE_STALE(), started_at: RESUMABLE_STALE() },
-      { id: 'old',   location_id: 'loc_old',   location_claim_at: HOPELESS_STALE(),  started_at: HOPELESS_STALE(), phase: 'writing' },
+  it('FAIL-OUT: a null-claim job whose re-pokes have all bounced past the ceiling gives up', async () => {
+    // The only way a cleanly-yielded job can be failed out: recorded evidence
+    // that the handoff itself is broken, for longer than the ceiling.
+    h.db.import_jobs = [job({ id: 'job-bouncy' })]
+    h.db.sync_log = [
+      attempt('job-bouncy', 'loc_kc', 'bounced', 1),
+      attempt('job-bouncy', 'loc_kc', 'bounced', 8),
+      attempt('job-bouncy', 'loc_kc', 'bounced', 17),
     ]
-    const res = await GET(stalled())
-    // Only the young one is re-poked.
+    const body = await (await sweep()).json()
+    expect(body).toMatchObject({ failed_out: 1, resumed: 0 })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(h.db.import_jobs[0].error_message).toMatch(/re-poke has failed to land/)
+    expect(h.db.import_jobs[0].error_message).toContain(CONTINUATION_LOG_PREFIX)
+  })
+
+  it('a bounce run that already RECOVERED does not fail the job out', async () => {
+    h.db.import_jobs = [job({ id: 'job-ok' })]
+    h.db.sync_log = [
+      attempt('job-ok', 'loc_kc', 'landed', 2),    // newest — the run ended here
+      attempt('job-ok', 'loc_kc', 'bounced', 20),
+      attempt('job-ok', 'loc_kc', 'bounced', 30),
+    ]
+    const body = await (await sweep()).json()
+    expect(body).toMatchObject({ failed_out: 0, resumed: 1 })
+  })
+
+  it("another job's bounce history never ages this job", async () => {
+    h.db.import_jobs = [job({ id: 'job-mine' })]
+    h.db.sync_log = [attempt('job-someone-else', 'loc_kc', 'bounced', 40)]
+    const body = await (await sweep()).json()
+    expect(body).toMatchObject({ failed_out: 0, resumed: 1 })
+  })
+
+  it('MIXED batch: a clean yield resumes while a dead-claim job fails out', async () => {
+    h.db.import_jobs = [
+      job({ id: 'yielded', location_id: 'loc_young', location_claim_at: null, started_at: ago(90) }),
+      job({ id: 'dead', location_id: 'loc_old', location_claim_at: HOPELESS_STALE(), phase: 'writing' }),
+    ]
+    const body = await (await sweep()).json()
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0][0]).toContain('loc_young')
-    const body = await res.json()
     expect(body).toMatchObject({ resumed: 1, failed_out: 1, checked: 2 })
   })
 })

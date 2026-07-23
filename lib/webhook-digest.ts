@@ -101,6 +101,16 @@ export type ImportHealthInput = {
     location_claim_at?: string | null
     started_at?: string | null
   }>
+  // Continuation handoffs that failed to land in the window, per location.
+  // A bouncing handoff is the leading indicator of a stall — it shows up here
+  // BEFORE the job stops progressing and long before it fails out. Optional so
+  // a pre-fix caller (or a sync_log read that errored) degrades to no section.
+  bounced?: Array<{
+    location_id?: string | null
+    count: number
+    outcomes?: string
+    sample?: string
+  }>
   originGated: boolean | null   // true = SSO-gated (BAD); false = healthy; null = not probed
   originTarget?: string
   nowMs: number
@@ -125,8 +135,10 @@ export function buildImportHealthSection(
 
   const failedCount = input.failed.length
   const stalledCount = input.stalled.length
+  const bounced = input.bounced ?? []
+  const bouncedCount = bounced.reduce((n, b) => n + (b.count || 0), 0)
   const originGated = input.originGated === true
-  const hasProblems = failedCount > 0 || stalledCount > 0 || originGated
+  const hasProblems = failedCount > 0 || stalledCount > 0 || originGated || bouncedCount > 0
   if (!hasProblems) return { lines: [], failedCount, stalledCount, originGated, hasProblems: false }
 
   const lines: string[] = [`*:package: Imports* (${windowLabel})`]
@@ -159,6 +171,21 @@ export function buildImportHealthSection(
     }
     const more = stalledCount - MAX_IMPORT_LINES
     if (more > 0) lines.push(`    _…plus ${more} more_`)
+  }
+
+  // Leading indicator: the handoff is failing but the job hasn't died yet.
+  // Surfacing this is the whole point — the previous continuation failures
+  // were console.warn-only, so a silently broken handoff looked like nothing
+  // at all until an import had already stalled for 15 minutes.
+  if (bouncedCount > 0) {
+    lines.push(`• :arrows_counterclockwise: ${bouncedCount} continuation re-poke(s) did NOT land:`)
+    for (const b of bounced.slice(0, MAX_IMPORT_LINES)) {
+      const loc = b.location_id || 'unknown'
+      const detail = (b.sample || '').replace(/\s+/g, ' ').trim().slice(0, 160)
+      lines.push(`    • ${loc} — ${b.outcomes || `${b.count} failed`}${detail ? `: ${detail}` : ''}`)
+    }
+    const more = bounced.length - MAX_IMPORT_LINES
+    if (more > 0) lines.push(`    _…plus ${more} more locations_`)
   }
 
   return { lines, failedCount, stalledCount, originGated, hasProblems: true }

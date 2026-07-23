@@ -322,6 +322,51 @@ describe('buildWebhookDigest — import health (item 2/3)', () => {
     expect(d.text).not.toContain(':package: Imports')
   })
 
+  // ── continuation bounces: a broken handoff must be VISIBLE ──────
+  // These used to be console.warn-only, so a silently failing handoff looked
+  // identical to a healthy window until an import had already stalled out.
+  it('a continuation re-poke that did not land raises the Imports section', () => {
+    const d = buildWebhookDigest({
+      events: [], appUrl: APP,
+      importHealth: {
+        failed: [], stalled: [], originGated: false, nowMs: NOW,
+        bounced: [{
+          location_id: 'loc_kc', count: 3, outcomes: 'bounced×2, no_claim×1',
+          sample: '[continuation] source=sweeper outcome=bounced job=job-1 status=0 — blocked by a redirect',
+        }],
+      },
+    })
+    expect(d.suppressed).toBe(false)
+    expect(d.text).toContain('*:package: Imports*')
+    expect(d.text).toContain('continuation re-poke(s) did NOT land')
+    expect(d.text).toContain('loc_kc')
+    expect(d.text).toContain('bounced×2')
+    expect(d.text).toContain('blocked by a redirect')
+  })
+
+  it('bounce counts sum across locations', () => {
+    const d = buildWebhookDigest({
+      events: [], appUrl: APP,
+      importHealth: {
+        failed: [], stalled: [], originGated: false, nowMs: NOW,
+        bounced: [
+          { location_id: 'loc_kc', count: 3, outcomes: 'bounced×3' },
+          { location_id: 'loc_pdx', count: 1, outcomes: 'errored×1' },
+        ],
+      },
+    })
+    expect(d.text).toContain('4 continuation re-poke(s) did NOT land')
+  })
+
+  it('an omitted bounced list degrades to no section (pre-fix callers stay quiet)', () => {
+    const d = buildWebhookDigest({
+      events: [], appUrl: APP,
+      importHealth: { failed: [], stalled: [], originGated: false, nowMs: NOW },
+    })
+    expect(d.text).not.toContain('did NOT land')
+    expect(d.suppressed).toBe(true)
+  })
+
   it('originGated null (probe failed) is NOT treated as a problem', () => {
     const d = buildWebhookDigest({
       events: [], appUrl: APP,
