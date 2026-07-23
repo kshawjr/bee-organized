@@ -48,6 +48,7 @@ import {
   stageFamilyKey, POTENTIAL_BAND, JUST_MET_BAND,
 } from './shared/networkGroups'
 import { CHIP_STYLES } from './shared/stageConfig'
+import PickALocation from './shared/PickALocation'
 
 const PARTNER_STAGE_KEYS = ['New Contact', 'Reaching Out', 'Building', 'Active Partner', 'Dormant']
 
@@ -96,6 +97,18 @@ export default function NetworkScreen({
   onOpenPerson = () => {},
   onOpenCompany = () => {},
   onAdd = () => {},           // ('partner' | 'company')
+  // Fix 2 Phase 4b, extended to Network: true when the page is on 'All
+  // Locations' for an elevated user, where NO partner/company rows are loaded.
+  // The record list shows the shared picker prompt; the tenant-wide referral
+  // rollup (the genuinely cross-location piece) stays live in the stats strip.
+  // Server truth (!!initialAllOverview upstream), NOT locFilter === 'all' —
+  // a franchise user's scope label must never trip it.
+  locationRequired = false,
+  // Opens the location switcher from inside the prompt (App owns the picker).
+  onOpenLocationPicker = null,
+  // True when the SSR network load hit its row ceiling — the list below is
+  // incomplete, and this screen says so rather than rendering quietly short.
+  truncated = false,
 }) {
   const nowMs = Date.now()
 
@@ -205,10 +218,12 @@ export default function NetworkScreen({
         <div>
           <h1 style={{ fontSize: '22px', fontWeight: 600, color: T.ink.primary, letterSpacing: T.type.trackTitle }}>Network</h1>
           <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '2px' }}>
-            {stats.inNetwork} in your referral network
+            {/* On 'all' no rows are loaded, so a count here would be a fake
+                zero — name the scope instead. */}
+            {locationRequired ? 'Referral totals across all locations' : `${stats.inNetwork} in your referral network`}
           </p>
         </div>
-        {!readOnly && (
+        {!readOnly && !locationRequired && (
           // ONE entry point — the merged NetworkAddSheet asks Person vs
           // Company via its own segmented toggle.
           <button onClick={() => onAdd()}
@@ -218,8 +233,26 @@ export default function NetworkScreen({
         )}
       </div>
 
+      {/* ── truncation notice (Phase 4b) — the load hit its row ceiling ──
+          A quietly short list is the silent-failure mode this effort is
+          retiring: the screen renders, the network is simply missing rows,
+          and nobody is told. Mirrors the Home leadsTruncated banner. */}
+      {truncated && (
+        <div data-testid="network-truncated" style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', background: T.state.danger.soft, border: `1px solid ${T.state.danger.fg}40`, borderRadius: T.radius.card, padding: '11px 14px', marginBottom: '14px' }}>
+          <span style={{ fontSize: '15px', lineHeight: 1.2 }}>⚠️</span>
+          <div>
+            <p style={{ fontSize: '13px', fontWeight: 600, color: T.state.danger.fg, marginBottom: '2px' }}>Some network records weren&apos;t loaded</p>
+            <p style={{ fontSize: '12px', color: T.state.danger.fg, lineHeight: 1.5 }}>
+              This location has more partners or companies than a single page load
+              carries, so the list below is <strong>incomplete</strong>. Nothing is
+              lost — reach out so the limit can be raised.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ── "What's next" strip (next_steps, surfaced at last) ── */}
-      {strip.length > 0 && (
+      {!locationRequired && strip.length > 0 && (
         <div data-testid="whats-next" style={{ background: T.surface.raised, border: T.border.card, borderRadius: T.radius.card, boxShadow: T.shadow.card, padding: '12px 14px', marginBottom: '14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
             <span style={{ fontSize: '12px', fontWeight: 600, color: T.ink.primary }}>What’s next</span>
@@ -253,13 +286,19 @@ export default function NetworkScreen({
         </div>
       )}
 
-      {/* ── stats (honest numbers — '—' while the summary loads) ── */}
+      {/* ── stats (honest numbers — '—' while the summary loads) ──
+          On 'all' the two row-derived tiles (In network, Gone cold) have no
+          rows to count and would render fake zeros — they are dropped, the
+          same suppression posture as the shell's tab badges. The three
+          summary-backed tiles stay: /api/network/summary is tenant-wide for
+          an elevated caller, and cross-location referral totals are exactly
+          what the corporate overview is for. */}
       <div data-testid="network-stats" style={{ display: 'flex', gap: '8px', marginBottom: '14px', flexWrap: 'wrap' }}>
-        <StatTile label="In network" value={stats.inNetwork} />
+        {!locationRequired && <StatTile label="In network" value={stats.inNetwork} />}
         <StatTile label="Leads referred" value={stats.leadsReferred ?? '—'} />
         <StatTile label="Converted" value={stats.converted ?? '—'} />
         <StatTile label="Referral revenue" value={stats.revenue == null ? '—' : money(stats.revenue)} />
-        <StatTile label="Gone cold 60d+" value={stats.goneCold} danger={stats.goneCold > 0} />
+        {!locationRequired && <StatTile label="Gone cold 60d+" value={stats.goneCold} danger={stats.goneCold > 0} />}
       </div>
       {summaryErr && (
         <p style={{ fontSize: '11px', color: T.state.danger.fg, marginBottom: '12px' }}>
@@ -267,6 +306,14 @@ export default function NetworkScreen({
         </p>
       )}
 
+      {/* ── the record list asks for a location on 'all' (Phase 4b) ──
+          The SAME prompt component the Inbox / Client List / Engagements use —
+          never a second empty state, never a blended list. Everything below
+          this point enumerates a location's records. */}
+      {locationRequired ? (
+        <PickALocation lens="network" onPick={onOpenLocationPicker} />
+      ) : (
+      <>
       {/* ── search + filters + saved views ── */}
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
         <input
@@ -402,6 +449,8 @@ export default function NetworkScreen({
           </div>
         )
       })}
+      </>
+      )}
     </div>
   )
 }

@@ -23,7 +23,20 @@ import {
 
 export const runtime = 'nodejs'
 
+// Pagination bounds for GET. The route used to run with NO .limit(), which
+// does not mean "unlimited" — PostgREST's invisible 1,000-row default was the
+// ceiling, so past 1,000 partners this list quietly shrank BELOW what the
+// Network tab (SSR, paginated) shows, and the two surfaces disagreed with no
+// signal. Now: short-page loop to MAX_ROWS, plus an exact count so the
+// response can state a truthful total even when it truncates.
+const PAGE = 1000
+const MAX_ROWS = 5000
+
 // GET /api/partners?location_id=<uuid> — non-deleted partners+contacts, by name.
+// Response: { rows, total, truncated } — total is the exact DB count, so a
+// truncated response says how many rows exist rather than pretending
+// rows.length is all of them. (Shape changed from a bare array 2026-07-23;
+// ReferrerPicker, the one GET consumer, reads both.)
 export async function GET(request: NextRequest) {
   const supabase = await createServerSupabaseClient()
   const caller = await loadCaller(supabase)
@@ -39,19 +52,39 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
-  const { data, error } = await supabase
-    .from('partners')
-    .select(PARTNER_COLS)
-    .eq('location_id', locationId)
-    .is('deleted_at', null)
-    .order('name', { ascending: true })
+  const rows: any[] = []
+  for (let from = 0; from < MAX_ROWS; from += PAGE) {
+    const { data, error } = await supabase
+      .from('partners')
+      .select(PARTNER_COLS)
+      .eq('location_id', locationId)
+      .is('deleted_at', null)
+      .order('name', { ascending: true })
+      .range(from, from + PAGE - 1)
 
-  if (error) {
-    console.error('[partners GET]', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) {
+      console.error('[partners GET]', error)
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+    rows.push(...(data || []))
+    if ((data || []).length < PAGE) break
   }
 
-  return NextResponse.json((data || []).map(mapPartnerRow))
+  let total = rows.length
+  const truncated = rows.length >= MAX_ROWS
+  if (truncated) {
+    // head:true count is the one aggregate PostgREST allows here — see
+    // reference_postgrest_aggregates_disabled.
+    const { count } = await supabase
+      .from('partners')
+      .select('id', { count: 'exact', head: true })
+      .eq('location_id', locationId)
+      .is('deleted_at', null)
+    if (typeof count === 'number') total = count
+    console.warn(`[partners GET] ${locationId} hit the ${MAX_ROWS}-row ceiling (${total} total) — response flagged truncated`)
+  }
+
+  return NextResponse.json({ rows: rows.map(mapPartnerRow), total, truncated })
 }
 
 // POST /api/partners — create a partner or contact.

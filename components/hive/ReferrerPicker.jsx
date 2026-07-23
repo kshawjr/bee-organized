@@ -67,8 +67,27 @@ export default function ReferrerPicker({
   const [partnerRows, setPartnerRows] = useState(null) // null = loading
   const [companyRows, setCompanyRows] = useState(null) // null = loading
   const [loadErr, setLoadErr] = useState(null)
+  // { shown, total } when either GET flagged truncation — the note below the
+  // list says the pool is short instead of letting the picker quietly show
+  // fewer referrers than the Network tab.
+  const [poolTruncation, setPoolTruncation] = useState(null)
   const [creating, setCreating] = useState(null) // 'partner' | 'contact' while a create POST runs
   const [createErr, setCreateErr] = useState(null)
+
+  // Both GETs return { rows, total, truncated } since 2026-07-23 (the
+  // silent-cap fix); the bare-array reader stays so older mocks/responses
+  // degrade to "complete".
+  const parseListPayload = (json) => {
+    if (Array.isArray(json)) return { rows: json, total: json.length, truncated: false }
+    const rows = Array.isArray(json?.rows) ? json.rows : []
+    return { rows, total: typeof json?.total === 'number' ? json.total : rows.length, truncated: !!json?.truncated }
+  }
+  const noteTruncation = (p) => {
+    if (p.truncated) setPoolTruncation(prev => ({
+      shown: (prev?.shown || 0) + p.rows.length,
+      total: (prev?.total || 0) + p.total,
+    }))
+  }
 
   // Partners + companies fetch — once per mount, same location scope. A
   // failed fetch degrades to what did load (with an inline note for the
@@ -77,16 +96,17 @@ export default function ReferrerPicker({
   useEffect(() => {
     let dead = false
     if (!locationUuid) { setPartnerRows([]); setCompanyRows([]); setLoadErr('No location context'); return }
+    setPoolTruncation(null)
     fetch(`/api/partners?location_id=${encodeURIComponent(locationUuid)}`)
       .then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `HTTP ${r.status}`); return r.json() })
-      .then(rows => { if (!dead) setPartnerRows(Array.isArray(rows) ? rows : []) })
+      .then(json => { if (!dead) { const p = parseListPayload(json); setPartnerRows(p.rows); noteTruncation(p) } })
       .catch(e => { if (!dead) { setPartnerRows([]); setLoadErr(String(e?.message || e)) } })
     fetch(`/api/companies?location_id=${encodeURIComponent(locationUuid)}`)
       .then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `HTTP ${r.status}`); return r.json() })
-      .then(rows => { if (!dead) setCompanyRows(Array.isArray(rows) ? rows : []) })
+      .then(json => { if (!dead) { const p = parseListPayload(json); setCompanyRows(p.rows); noteTruncation(p) } })
       .catch(() => { if (!dead) setCompanyRows([]) })
     return () => { dead = true }
-  }, [locationUuid])
+  }, [locationUuid]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const q = search.trim().toLowerCase()
   const nameMatch = (v) => !q || (v || '').toLowerCase().includes(q)
@@ -176,6 +196,13 @@ export default function ReferrerPicker({
       <div style={{ maxHeight: '240px', overflowY: 'auto', padding: '0 8px 8px' }}>
         {partnerRows === null && <p style={{ fontSize: '12px', color: T.ink.quiet, padding: '8px 10px' }}>Loading partners…</p>}
         {loadErr && <p style={{ fontSize: '11px', color: T.ink.muted, padding: '4px 10px' }}>Partners unavailable ({loadErr}) — clients still searchable.</p>}
+        {poolTruncation && (
+          <p data-testid="referrer-pool-truncated" style={{ fontSize: '11px', color: T.state.danger.fg, padding: '4px 10px' }}>
+            {/* Honest copy: this search filters the LOADED rows, so it cannot
+                reach the unloaded remainder — say what shipped, promise nothing. */}
+            Showing the first {poolTruncation.shown.toLocaleString()} of {poolTruncation.total.toLocaleString()} network records.
+          </p>
+        )}
         {sections.map(s => s.items.length > 0 && (
           <React.Fragment key={s.key}>
             <p style={sectionLbl}>{s.label}</p>

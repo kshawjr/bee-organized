@@ -18,7 +18,15 @@ import {
 
 export const runtime = 'nodejs'
 
+// Pagination bounds — same fix as /api/partners GET: no .limit() meant
+// PostgREST's invisible 1,000-row default silently capped the list.
+const PAGE = 1000
+const MAX_ROWS = 5000
+
 // GET /api/companies?location_id=<uuid> — non-deleted companies, by name.
+// Response: { rows, total, truncated } — mirrors /api/partners GET; the
+// ReferrerPicker (the one GET consumer) reads both this and the old bare-array
+// shape.
 export async function GET(request: NextRequest) {
   const supabase = await createServerSupabaseClient()
   const caller = await loadCaller(supabase)
@@ -34,19 +42,37 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
-  const { data, error } = await supabase
-    .from('companies')
-    .select(COMPANY_COLS)
-    .eq('location_id', locationId)
-    .is('deleted_at', null)
-    .order('name', { ascending: true })
+  const rows: any[] = []
+  for (let from = 0; from < MAX_ROWS; from += PAGE) {
+    const { data, error } = await supabase
+      .from('companies')
+      .select(COMPANY_COLS)
+      .eq('location_id', locationId)
+      .is('deleted_at', null)
+      .order('name', { ascending: true })
+      .range(from, from + PAGE - 1)
 
-  if (error) {
-    console.error('[companies GET]', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) {
+      console.error('[companies GET]', error)
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+    rows.push(...(data || []))
+    if ((data || []).length < PAGE) break
   }
 
-  return NextResponse.json((data || []).map(mapCompanyRow))
+  let total = rows.length
+  const truncated = rows.length >= MAX_ROWS
+  if (truncated) {
+    const { count } = await supabase
+      .from('companies')
+      .select('id', { count: 'exact', head: true })
+      .eq('location_id', locationId)
+      .is('deleted_at', null)
+    if (typeof count === 'number') total = count
+    console.warn(`[companies GET] ${locationId} hit the ${MAX_ROWS}-row ceiling (${total} total) — response flagged truncated`)
+  }
+
+  return NextResponse.json({ rows: rows.map(mapCompanyRow), total, truncated })
 }
 
 // POST /api/companies — create a company. Returns the created row (client shape).

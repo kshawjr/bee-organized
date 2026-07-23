@@ -1534,46 +1534,68 @@ export default async function HubPage({
   }
 
   // Partners + Contacts (one table, `type` discriminator) and Companies — the
-  // CRM module behind the "Contacts" tab. Location-scoped like leads; elevated
-  // users get every location's rows. Soft-deleted rows are excluded (the recycle
-  // bin re-fetches lazily / restores via the API response). Mapped to the same
-  // camelCase client shape the API returns so setPartners/setCompanies snapshots
-  // stay consistent across reloads and writes.
+  // CRM module behind the Network tab. Location-scoped like leads.
+  //
+  // Skipped entirely on 'all' (Phase 4b, late): Network shipped after the
+  // Phase 4 work but on Phase-1-era semantics — an elevated user on 'all' got
+  // every location's partners and companies BLENDED, the exact pattern the
+  // Inbox, Client List and Engagements retired. Network enumerates records
+  // belonging to a specific location, so it sits on the ask-for-a-location
+  // side of the line; the tab renders the same picker prompt. The tenant-wide
+  // referral rollup (/api/network/summary, elevated-only) stays live — that is
+  // the genuinely cross-location piece, like the loc_other queue on the Inbox.
   let initialPartners: any[] = []
   let initialCompanies: any[] = []
-  {
-    let pq = supabaseService
-      .from('partners')
-      .select(PARTNER_COLS)
-      .is('deleted_at', null)
-      .order('name', { ascending: true })
-      .limit(2000)
-    let cq = supabaseService
-      .from('companies')
-      .select(COMPANY_COLS)
-      .is('deleted_at', null)
-      .order('name', { ascending: true })
-      .limit(2000)
+  // Set when either network load hits MAX_NETWORK_ROWS. Rides to the client so
+  // the Network screen states the shortfall — the old limit(2000) cap truncated
+  // with no error, no flag, no banner.
+  let networkTruncated = false
+  if (!overviewOnly) {
+    // Paginated short-page loop, same shape as the leads loader above: a bare
+    // bare limit(2000) silently dropped row 2001+ once a location outgrew it.
+    // MAX_NETWORK_ROWS is a payload safety ceiling per table, ~alignment with
+    // MAX_LEADS; hitting it sets the visible flag instead of whispering.
+    const PAGE = 1000
+    const MAX_NETWORK_ROWS = 5000
+    const loadNetworkRows = async (table: 'partners' | 'companies', cols: string) => {
+      const rows: any[] = []
+      for (let from = 0; from < MAX_NETWORK_ROWS; from += PAGE) {
+        // ⚠️ partners/companies.location_id holds the location UUID, NOT the
+        // slug — the column NAME matches the child tables' slug column but the
+        // VALUE form does not. Verified against prod 2026-07-22. Do not
+        // "harmonize" this to scope.locationSlug; it would match nothing,
+        // silently, and empty the Network tab.
+        let q = supabaseService
+          .from(table)
+          .select(cols)
+          .is('deleted_at', null)
+          .order('name', { ascending: true })
+          .range(from, from + PAGE - 1)
+        if (scopeLocationUuid) q = q.eq('location_id', scopeLocationUuid)
 
-    // ⚠️ partners/companies.location_id holds the location UUID, NOT the slug —
-    // the column NAME matches the child tables' slug column but the VALUE form
-    // does not. Verified against prod 2026-07-22. Do not "harmonize" this to
-    // scope.locationSlug; it would match nothing, silently, and empty the
-    // Contacts tab. (This is why the child tables go through
-    // childLocationFilter() rather than reading a column name off a list.)
-    if (scopeLocationUuid) {
-      pq = pq.eq('location_id', scopeLocationUuid)
-      cq = cq.eq('location_id', scopeLocationUuid)
+        const { data: pageRows, error: pageErr } = await q
+        if (pageErr) {
+          console.error(`[hub-page] ${table} fetch error:`, pageErr.message)
+          return null
+        }
+        rows.push(...(pageRows || []))
+        if ((pageRows || []).length < PAGE) break
+        if (from + PAGE >= MAX_NETWORK_ROWS) {
+          networkTruncated = true
+          console.warn(
+            `[hub-page] ${table} load hit the ${MAX_NETWORK_ROWS}-row ceiling for ${hubUser.email} — the Network tab is INCOMPLETE; the user has been shown a truncation notice`
+          )
+        }
+      }
+      return rows
     }
 
-    const [{ data: partnersRaw, error: partnersErr }, { data: companiesRaw, error: companiesErr }] =
-      await Promise.all([pq, cq])
-
-    if (partnersErr) console.error('[hub-page] partners fetch error:', partnersErr.message)
-    else initialPartners = (partnersRaw || []).map(mapPartnerRow)
-
-    if (companiesErr) console.error('[hub-page] companies fetch error:', companiesErr.message)
-    else initialCompanies = (companiesRaw || []).map(mapCompanyRow)
+    const [partnersRaw, companiesRaw] = await Promise.all([
+      loadNetworkRows('partners', PARTNER_COLS),
+      loadNetworkRows('companies', COMPANY_COLS),
+    ])
+    if (partnersRaw) initialPartners = partnersRaw.map(mapPartnerRow)
+    if (companiesRaw) initialCompanies = companiesRaw.map(mapCompanyRow)
   }
 
   const initialLookups: Record<string, any[]> = {}
@@ -1641,6 +1663,9 @@ export default async function HubPage({
       initialEngagementsClosedWonCount={initialEngagementsClosedWonCount}
       initialPartners={initialPartners}
       initialCompanies={initialCompanies}
+      // True when a network load hit MAX_NETWORK_ROWS — the Network screen
+      // states the shortfall instead of rendering a quietly short list.
+      initialNetworkTruncated={networkTruncated}
       currentSubscription={currentSubscription}
       currentLocation={currentLocation}
       currentUser={{

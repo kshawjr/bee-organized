@@ -483,8 +483,9 @@ describe('_hub-page wiring — scope', () => {
     expect(src).toContain(`cq = cq.eq('location_uuid', scopeLocationUuid)`)
     expect(src).toContain(`wq = wq.eq('location_uuid', scopeLocationUuid)`)
     expect(src).toContain(`binQ = binQ.eq('location_uuid', scopeLocationUuid)`)
-    expect(src).toContain(`pq = pq.eq('location_id', scopeLocationUuid)`)
-    expect(src).toContain(`cq = cq.eq('location_id', scopeLocationUuid)`)
+    // Partners + companies load through ONE paginated helper since Phase 4b —
+    // a single filter site covers both tables, so they cannot drift apart.
+    expect(src).toContain(`if (scopeLocationUuid) q = q.eq('location_id', scopeLocationUuid)`)
     // No site may still hard-code the user's own location as the filter.
     expect(src).not.toContain(`q.eq('location_uuid', hubUser.location_id)`)
   })

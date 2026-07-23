@@ -187,6 +187,9 @@ interface BeeHubProps {
   } | null
   // True when the leads load hit MAX_LEADS, so the page's counts are short.
   initialLeadsTruncated?: boolean
+  // True when the partners/companies load hit MAX_NETWORK_ROWS — the Network
+  // screen states the shortfall instead of rendering a quietly short list.
+  initialNetworkTruncated?: boolean
   // The location the server actually scoped to (null = all locations). The
   // client reconciles its scope cookie to this after hydration.
   initialScopeLocationId?: string | null

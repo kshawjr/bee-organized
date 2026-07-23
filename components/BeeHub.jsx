@@ -15082,7 +15082,7 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
 // ─── Partners Screen ──────────────────────────────────────────────────────────
 // Exported for lib/network-saved-views.test.tsx (mount test — saved views
 // must survive a remount). Not routed anywhere except App's nav.
-export function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{}, readOnly=false, setToast=()=>{} }) {
+export function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{}, readOnly=false, setToast=()=>{}, locationRequired=false, onOpenLocationPicker=null, networkTruncated=false }) {
   if (!partners) return null
   // Phase 2 retired the Classic LIST (NetworkScreen renders the screen);
   // Phase 3 retired the Classic RECORDS — PartnerPanel + the inline company
@@ -15121,6 +15121,9 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
           onOpenPerson={(p)=>setSelected(p)}
           onOpenCompany={(c)=>setSelectedCompany(c)}
           onAdd={openAdd}
+          locationRequired={locationRequired}
+          onOpenLocationPicker={onOpenLocationPicker}
+          truncated={networkTruncated}
         />
       </div>
 
@@ -21533,7 +21536,7 @@ function HomeGreeting({ ownerName, ownerEmail }) {
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, transferPeople=[], allOverview=null, leadsTruncated=false, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false }) {
+function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, transferPeople=[], allOverview=null, leadsTruncated=false, networkTruncated=false, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
@@ -22003,6 +22006,9 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         people={people}
         readOnly={isReadOnly || isLiteUser}
         setToast={setToast}
+        locationRequired={!!allOverview}
+        onOpenLocationPicker={onClickLocation}
+        networkTruncated={networkTruncated}
         onAddToHive={(partner, mode)=>{
           if (mode==='view') {
             nav('hive')
@@ -25280,10 +25286,10 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
   // error. Phase 2 labelled the scope as a stopgap; this queries the server,
   // which searches every location for an elevated user and stays fenced for
   // everyone else. Partners remain a local scan: they are a 3-row table.
-  const [remote, setRemote] = useState({ rows: [], loading: false, truncated: false, failed: false })
+  const [remote, setRemote] = useState({ rows: [], partners: null, loading: false, truncated: false, failed: false })
   React.useEffect(() => {
     const term = q.trim()
-    if (term.length < 2) { setRemote({ rows: [], loading: false, truncated: false, failed: false }); return }
+    if (term.length < 2) { setRemote({ rows: [], partners: null, loading: false, truncated: false, failed: false }); return }
     let cancelled = false
     setRemote(r => ({ ...r, loading: true, failed: false }))
     // Debounced: a keystroke-per-request would hammer the endpoint and land
@@ -25293,11 +25299,12 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
         const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`, { credentials: 'include' })
         if (!res.ok) throw new Error(String(res.status))
         const json = await res.json()
-        if (!cancelled) setRemote({ rows: json.results || [], loading: false, truncated: !!json.truncated, failed: false })
+        // partners: null (endpoint predates the field / mock) → local scan.
+        if (!cancelled) setRemote({ rows: json.results || [], partners: Array.isArray(json.partners) ? json.partners : null, loading: false, truncated: !!json.truncated, failed: false })
       } catch (e) {
         // Degrade to the local scan rather than showing nothing — but SAY so,
         // because a silently local result set is the bug being fixed.
-        if (!cancelled) setRemote({ rows: [], loading: false, truncated: false, failed: true })
+        if (!cancelled) setRemote({ rows: [], partners: null, loading: false, truncated: false, failed: true })
       }
     }, 220)
     return () => { cancelled = true; clearTimeout(t) }
@@ -25314,7 +25321,14 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
   // when the endpoint fails — and is labelled as scope-limited when it runs.
   const localPeople = !query ? [] : people.filter(p => !p.isJunk && (p.name.toLowerCase().includes(query) || (p.email||'').toLowerCase().includes(query) || (p.phone||'').toLowerCase().includes(query) || (p.project||'').toLowerCase().includes(query))).slice(0,8)
   const matchedPeople = remote.failed ? localPeople : remote.rows
-  const matchedPartners = !query ? [] : partners.filter(p => p.name.toLowerCase().includes(query) || (p.company||'').toLowerCase().includes(query) || (p.title||'').toLowerCase().includes(query)).slice(0,4)
+  // Partners: server hits when the endpoint returned them (it searches every
+  // location for an elevated user — since Phase 4b stopped loading partners on
+  // 'all', the loaded array there is EMPTY, and a local-only scan would have
+  // silently lost partner search on the one scope meant for cross-location
+  // lookup). Local scan remains the fallback: endpoint failed, short query, or
+  // an older response with no partners field.
+  const localPartnerScan = !query ? [] : partners.filter(p => p.name.toLowerCase().includes(query) || (p.company||'').toLowerCase().includes(query) || (p.title||'').toLowerCase().includes(query)).slice(0,4)
+  const matchedPartners = (!remote.failed && remote.partners) ? remote.partners.slice(0,4) : localPartnerScan
   const hasResults = matchedPeople.length > 0 || matchedPartners.length > 0
 
   return (
@@ -25398,7 +25412,11 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
                 <div style={{ padding:'8px 20px 5px', background:'#f7f5f0', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
                   <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>🤝 Partners ({matchedPartners.length})</p>
                 </div>
-                {matchedPartners.map(p=>(
+                {matchedPartners.map(p=>{
+                  // Server hits can live at ANY location for an elevated
+                  // user — name it, same as the people rows ("which Karen?").
+                  const locName = locationsById[p.locationId] || null
+                  return (
                   <button key={p.id} onClick={()=>{ onSelectPartner(p); onClose() }} style={{ width:'100%', padding:'14px 20px', background:'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'14px', textAlign:'left' }}>
                     <div style={{ width:'42px', height:'42px', borderRadius:'50%', background:'linear-gradient(135deg,#d4a046,#b07a20)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'14px', fontWeight:700, color:'white', flexShrink:0 }}>
                       {p.name.split(' ').map(w=>w[0]).join('').slice(0,2)}
@@ -25407,8 +25425,11 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
                       <p style={{ fontSize:'15px', fontWeight:600, color:'#1a2e2b', marginBottom:'3px' }}>{p.name}</p>
                       <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{p.title}{p.company?` · ${p.company}`:''}</p>
                     </div>
+                    {locName && (
+                      <span style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:'rgba(26,46,43,0.05)', color:'#5a6e6a', fontWeight:600, flexShrink:0, maxWidth:'40%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>📍 {locName}</span>
+                    )}
                   </button>
-                ))}
+                )})}
               </>
             )}
             <div style={{ height:'0.5rem' }} />
@@ -32679,6 +32700,7 @@ export default function App({
   initialBinPeople,          // server-rendered is_junk=true leads (Recycle Bin)
   initialAllOverview,        // Fix 2 Phase 4: server-reduced corporate overview for 'All Locations' (null on a scoped load) — replaces the people graph on that scope
   initialLeadsTruncated,     // true when the leads load hit MAX_LEADS; rendered as a banner so a short count is never presented as complete
+  initialNetworkTruncated,   // true when the partners/companies load hit MAX_NETWORK_ROWS; the Network screen states the shortfall
   initialTransferPeople,     // loc_other unrouted leads — fetched OUTSIDE the selected scope so the routing queue survives a location switch (Fix 2 Phase 2). Elevated only; [] for franchise.
   initialScopeLocationId,    // the location the SERVER actually scoped to (null = all) — the client reconciles its cookie to this after hydration
   initialEngagements,        // Phase 1 step 4: open engagements for the new board (dual-read; super_admin-flagged)
@@ -33797,7 +33819,10 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     )
     if (activeNav==='partners') return (
       <div style={pageStyle}>
-        <PartnersScreen onNavigate={nav} partners={partners} setPartners={setPartners} companies={companies} setCompanies={setCompanies} locFilter={locFilter} isElevated={isElevated} people={people} initialSelected={globalSelectedPartner} onInitialSelectedConsumed={()=>setGlobalSelectedPartner(null)} onAddToHive={(partner)=>{ addPersonFromPartner(partner); nav('hive') }} readOnly={role==='franchise' && ['light','readonly'].includes(franchiseRole)} setToast={setToast} />
+        {/* locationRequired mirrors HiveScreen above: server truth
+            (!!initialAllOverview), so Network prompts on 'all' exactly when
+            the record lenses do — never for a franchise user. */}
+        <PartnersScreen onNavigate={nav} partners={partners} setPartners={setPartners} companies={companies} setCompanies={setCompanies} locFilter={locFilter} isElevated={isElevated} people={people} initialSelected={globalSelectedPartner} onInitialSelectedConsumed={()=>setGlobalSelectedPartner(null)} onAddToHive={(partner)=>{ addPersonFromPartner(partner); nav('hive') }} readOnly={role==='franchise' && ['light','readonly'].includes(franchiseRole)} setToast={setToast} locationRequired={!!initialAllOverview} onOpenLocationPicker={()=>setShowLocPicker(true)} networkTruncated={!!initialNetworkTruncated} />
         {toast && <InlineToast {...toast} />}
       </div>
     )
@@ -33850,6 +33875,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           transferPeople={transferPeople}
           allOverview={initialAllOverview}
           leadsTruncated={!!initialLeadsTruncated}
+          networkTruncated={!!initialNetworkTruncated}
           locations={initialLocations || ALL_LOCATIONS}
           activeNav={activeNav}
           nav={nav}

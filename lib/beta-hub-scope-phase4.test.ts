@@ -347,21 +347,27 @@ describe('HiveShell — the record lenses on "all" (Phase 4b)', () => {
   const src = readFileSync('components/hive/HiveShell.jsx', 'utf8')
 
   it('Client List AND Engagements swap for the shared prompt', () => {
-    expect(src).toContain('function PickALocation')
+    // PickALocation moved to shared/ when Network (mounted outside the shell)
+    // joined the same rule — the shell now imports the one shared prompt.
+    expect(src).toContain("import PickALocation from './shared/PickALocation'")
     expect(src).toContain("locationRequired && (lens === 'clients' || lens === 'engagements')")
   })
 
-  it('ONE prompt component covers all three lenses — no second empty state', () => {
-    expect(src).toContain('const PICK_COPY = {')
-    for (const k of ['inbox:', 'clients:', 'engagements:']) expect(src).toContain(k)
+  it('ONE prompt component covers every lens — no second empty state', () => {
+    const shared = readFileSync('components/hive/shared/PickALocation.jsx', 'utf8')
+    expect(shared).toContain('const PICK_COPY = {')
+    for (const k of ['inbox:', 'clients:', 'engagements:', 'network:']) expect(shared).toContain(k)
     // Copy is about HOW THE PRODUCT WORKS, never about missing data.
-    expect(src).toContain('works one location at a time')
+    expect(shared).toContain('works one location at a time')
     expect(src).not.toContain('No engagements found')
+    // The shell defines no local copy of the prompt — one component, period.
+    expect(src).not.toContain('function PickALocation')
   })
 
   it('the prompt opens the switcher rather than describing where it is', () => {
-    expect(src).toContain('Choose a location')
-    expect(src).toContain('onClick={onPick}')
+    const shared = readFileSync('components/hive/shared/PickALocation.jsx', 'utf8')
+    expect(shared).toContain('Choose a location')
+    expect(shared).toContain('onClick={onPick}')
   })
 
   it('the Inbox is NOT swapped — it owns the cross-location transfer queue', () => {

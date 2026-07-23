@@ -37,7 +37,8 @@ import { useEngagementsRealtime } from '@/lib/use-engagements-realtime'
 import { useStoredState } from './shared/useStoredControls'
 import { nextRecordOverlay } from './shared/hubUrl'
 import useIsMobile from './shared/useIsMobile'
-import { IconInbox, IconLayoutKanban, IconList, IconUsers, IconPlus, IconMapPin } from '@/components/ui/icons'
+import PickALocation from './shared/PickALocation'
+import { IconInbox, IconLayoutKanban, IconList, IconUsers, IconPlus } from '@/components/ui/icons'
 import { TEXT_TOKENS, BORDER_TOKENS, WARNING_TOKENS } from '@/components/ui/tokens'
 import { CHIP_STYLES } from './shared/stageConfig'
 import { T } from './shared/tokens'
@@ -129,55 +130,12 @@ function TabPill({ tab, active, onSelect, badgeCount = null }) {
 // set filters client-side on location_uuid (locFilter holds 'all' or the
 // location uuid — the same vocabulary people-mapper documents).
 // ── The 'All Locations' prompt (Fix 2 Phase 4b) ───────────────────────────
-// ONE component for all three record lenses. 'All Locations' is a corporate
-// OVERVIEW, not a data scope: it answers "how is the business doing", and every
-// surface that enumerates records belonging to a specific location asks you to
-// pick one.
-//
-// The Engagements board is the clearest case for why. Blending Kansas City,
-// Portland and Temecula deals into shared stage columns produces a column
-// nobody can work — it is a blend, not a view. So it follows the same rule the
-// Inbox and Client List already follow.
-//
-// The copy is deliberately about HOW THE PRODUCT WORKS, never about missing
-// data: "works one location at a time", not "no results" or "nothing loaded".
-// And the button opens the switcher right here, so the answer is one click away
-// rather than something to go hunting for — that button is most of what makes
-// this read as intentional rather than broken.
-const PICK_COPY = {
-  inbox:       'The inbox works one location at a time',
-  clients:     'The client list works one location at a time',
-  engagements: 'Engagements work one location at a time',
-}
-
-function PickALocation({ lens, onPick }) {
-  return (
-    <div style={{ padding: '56px 24px', textAlign: 'center', border: T.border.dashedSoft, borderRadius: T.radius.inset, margin: '8px 0' }}>
-      <div style={{ fontSize: '26px', marginBottom: '10px' }}>📍</div>
-      <p style={{ fontSize: '14px', fontWeight: 600, color: T.ink.strong, marginBottom: '6px' }}>
-        {PICK_COPY[lens] || PICK_COPY.clients}
-      </p>
-      <p style={{ fontSize: '12.5px', color: T.ink.quiet, lineHeight: 1.6, maxWidth: '400px', margin: '0 auto 16px' }}>
-        You&apos;re viewing <strong>All Locations</strong>, which shows the
-        cross-location picture: the home overview, unrouted leads, and search.
-        Choose a location to work its records.
-      </p>
-      {onPick && (
-        <button
-          onClick={onPick}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: '7px',
-            height: '34px', padding: '0 16px', borderRadius: T.radius.pill,
-            border: 'none', background: T.ink.primary, color: T.ink.inverse,
-            fontSize: '13px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
-          }}
-        >
-          <IconMapPin size={14} /> Choose a location
-        </button>
-      )}
-    </div>
-  )
-}
+// Hoisted to shared/PickALocation.jsx when the Network tab (mounted outside
+// this shell, via PartnersScreen) joined the same rule — one component, one
+// copy table, no second empty state. The Engagements board is the clearest
+// case for why the rule exists: blending Kansas City, Portland and Temecula
+// deals into shared stage columns produces a column nobody can work — it is a
+// blend, not a view.
 
 export default function HiveShell({
   engagements = [],

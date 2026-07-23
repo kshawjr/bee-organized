@@ -24,10 +24,12 @@ import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
+import { PARTNER_COLS, mapPartnerRow } from '@/lib/crm'
 
 export const runtime = 'nodejs'
 
 const LIMIT = 20
+const PARTNER_LIMIT = 10
 const MIN_TERM = 2
 
 // PostgREST's `or=(a.ilike.*x*,b.ilike.*y*)` grammar makes `,` `(` `)` `.` and
@@ -98,6 +100,31 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'search_failed', detail: error.message }, { status: 500 })
   }
 
+  // Partners (the Network tab's rows) ride the same fence: every location for
+  // an elevated caller, hard-scoped for everyone else. Added when Phase 4b
+  // stopped loading partners on 'all' — GlobalSearch's partner scan reads the
+  // LOADED array, so without a server search 'all' would have silently lost
+  // partner lookup, the exact narrowing class this endpoint exists to end.
+  // Client-shaped rows (mapPartnerRow) because a selected hit is handed
+  // straight to the Network record overlay. Non-fatal on error: partner hits
+  // degrade to the local scan, lead search still answers.
+  let partnerHits: any[] = []
+  {
+    // partners.location_id holds the location UUID (same vocabulary as
+    // scopeUuid — verified against prod 2026-07-22).
+    let pq = supabaseService
+      .from('partners')
+      .select(PARTNER_COLS)
+      .is('deleted_at', null)
+      .or([`name.ilike.${like}`, `company.ilike.${like}`, `title.ilike.${like}`].join(','))
+      .order('name', { ascending: true })
+      .limit(PARTNER_LIMIT)
+    if (scopeUuid) pq = pq.eq('location_id', scopeUuid)
+    const { data: partnerRows, error: partnerErr } = await pq
+    if (partnerErr) console.error('[search] partner search failed:', partnerErr.message)
+    else partnerHits = (partnerRows || []).map(mapPartnerRow)
+  }
+
   // Resolve location NAMES for the hits — the point of a cross-location search
   // is knowing WHERE a result lives. One bounded lookup over the distinct
   // locations actually present in the results.
@@ -115,6 +142,9 @@ export async function GET(req: Request) {
     // `truncated` is stated rather than implied: a capped result set that looks
     // complete is the same silent-narrowing problem in a smaller box.
     truncated: (data || []).length >= LIMIT,
+    // Client-shaped partner hits (see above). Absent from older cached
+    // responses/mocks — GlobalSearch falls back to its local scan then.
+    partners: partnerHits,
     results: (data || []).map((r: any) => ({
       id: r.id,
       name: r.name || 'Unnamed',
