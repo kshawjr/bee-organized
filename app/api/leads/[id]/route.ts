@@ -282,12 +282,13 @@ export async function PATCH(
     }
   }
 
-  // referred_by_kind must be one of allowed values (or null)
+  // referred_by_kind must be one of allowed values (or null). 'company' is
+  // Network Phase 1 (network_phase1.sql widens the DB CHECK to match).
   if ('referred_by_kind' in patch) {
     const v = patch.referred_by_kind
-    if (v !== null && v !== 'partner' && v !== 'lead') {
+    if (v !== null && v !== 'partner' && v !== 'lead' && v !== 'company') {
       return NextResponse.json(
-        { error: 'invalid_referred_by_kind', allowed: ['partner', 'lead', null] },
+        { error: 'invalid_referred_by_kind', allowed: ['partner', 'lead', 'company', null] },
         { status: 400 }
       )
     }

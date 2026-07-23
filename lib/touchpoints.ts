@@ -6,14 +6,30 @@
 // record (same table, same columns, same reach_out side-effect). Never throws:
 // returns { ok, ... } so fail-soft callers (Slack) can swallow it.
 //
+// NETWORK PHASE 1: the subject is now lead XOR partner (exactly one). The
+// lead path is BYTE-IDENTICAL to before — a lead insert never carries a
+// partner_id key at all (not even null), so it works unchanged before AND
+// after migrations/network_phase1.sql. The partner path requires that
+// migration (touchpoints.partner_id + the XOR CHECK); before it's applied a
+// partner insert fails loudly at the DB ({ ok:false }), never silently.
+//
+// Side-effects stay subject-symmetric:
+//   lead    reach_out → bump leads.updated_at            (unchanged)
+//   partner reach_out → bump partners.last_contacted_at  (the stored cache
+//     network_phase1.sql §5 adds — this writer is its ONLY maintainer; the
+//     legacy free-text partners.last_contact is never written here)
+//
 // Auth/validation/scoping stay in the route (it has the session); this module
-// is only the resolved insert + the reach_out updated_at bump.
+// is only the resolved insert + the side-effect.
 // ─────────────────────────────────────────────────────────────
 
 import { supabaseService } from './supabase-service'
 
 export type TouchpointRow = {
-  lead_id: string
+  // Subject: exactly one of the two. lead_id-only callers are the existing
+  // contract and compile unchanged.
+  lead_id?: string | null
+  partner_id?: string | null
   location_uuid: string
   kind: string
   label: string
@@ -34,12 +50,22 @@ export type InsertTouchpointResult =
   | { ok: false; error: string }
 
 // Insert a touchpoint row exactly as POST /api/touchpoints does, then run the
-// reach_out side-effect (bump leads.updated_at). engagement_id is omitted from
-// the payload entirely when absent — matching the route's conditional spread,
-// so a client-level touchpoint behaves exactly as before.
+// subject's side-effect. engagement_id is omitted from the payload entirely
+// when absent — matching the route's conditional spread, so a client-level
+// touchpoint behaves exactly as before. The absent subject key is likewise
+// OMITTED (not null'd): the lead payload shape is identical to the
+// pre-partner one.
 export async function insertTouchpoint(row: TouchpointRow): Promise<InsertTouchpointResult> {
+  const hasLead = typeof row.lead_id === 'string' && row.lead_id.length > 0
+  const hasPartner = typeof row.partner_id === 'string' && row.partner_id.length > 0
+  if (hasLead === hasPartner) {
+    // both or neither — mirrors the DB XOR CHECK so no malformed insert is
+    // ever attempted.
+    return { ok: false, error: 'exactly_one_subject_required' }
+  }
+
   const insertRow: Record<string, unknown> = {
-    lead_id: row.lead_id,
+    ...(hasLead ? { lead_id: row.lead_id } : { partner_id: row.partner_id }),
     location_uuid: row.location_uuid,
     kind: row.kind,
     ...(typeof row.engagement_id === 'string' && row.engagement_id
@@ -61,12 +87,23 @@ export async function insertTouchpoint(row: TouchpointRow): Promise<InsertTouchp
     .single()
   if (error) return { ok: false, error: error.message }
 
-  // Reach-out side effect: bump lead's updated_at (mirrors the route 1:1).
+  // Reach-out side effects (mirror each other):
+  //   lead    → bump updated_at (the pre-existing behavior, 1:1)
+  //   partner → stamp last_contacted_at with the touchpoint's own moment
+  //             (occurred_at when backdated, else now) + updated_at
   if (row.kind === 'reach_out') {
-    await supabaseService
-      .from('leads')
-      .update({ updated_at: new Date().toISOString() })
-      .eq('id', row.lead_id)
+    if (hasLead) {
+      await supabaseService
+        .from('leads')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', row.lead_id)
+    } else {
+      const contactedAt = row.occurred_at || new Date().toISOString()
+      await supabaseService
+        .from('partners')
+        .update({ last_contacted_at: contactedAt, updated_at: new Date().toISOString() })
+        .eq('id', row.partner_id)
+    }
   }
 
   return { ok: true, touchpoint: data }

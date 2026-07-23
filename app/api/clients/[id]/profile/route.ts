@@ -58,11 +58,16 @@ export async function GET(
 
   // Referrer resolution — referred_by_id is polymorphic on kind:
   // 'partner' → partners row (contacts included; they share the table),
-  // 'lead' → another leads row. Resolved to a NAME so the profile can
-  // say who, not just "via partner".
+  // 'lead' → another leads row, 'company' → companies row (Network
+  // Phase 1 — legal once network_phase1.sql widens the kind CHECK).
+  // Resolved to a NAME so the profile can say who, not just "via partner".
+  const referrerTable =
+    lead.referred_by_kind === 'lead' ? 'leads'
+    : lead.referred_by_kind === 'company' ? 'companies'
+    : 'partners'
   const referrerQuery = lead.referred_by_kind && lead.referred_by_id
     ? supabaseService
-        .from(lead.referred_by_kind === 'lead' ? 'leads' : 'partners')
+        .from(referrerTable)
         .select('id, name')
         .eq('id', lead.referred_by_id)
         .maybeSingle()

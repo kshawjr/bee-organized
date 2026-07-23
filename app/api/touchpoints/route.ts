@@ -1,9 +1,13 @@
 // app/api/touchpoints/route.ts
 //
-// POST /api/touchpoints — log a touchpoint event on a lead
+// POST /api/touchpoints — log a touchpoint event on a lead OR a partner
+// (Network Phase 1: exactly one of lead_id / partner_id — the same XOR the
+// DB CHECK enforces after migrations/network_phase1.sql; the partner path
+// fails loudly at the DB until that migration is applied, and the lead path
+// is byte-identical to the pre-partner contract either way).
 //
 // Kinds:
-//   - reach_out    — manual outreach (call, sms, email, in-person)
+//   - reach_out    — manual outreach (call, sms, email, in-person, coffee…)
 //   - drip         — automated drip campaign send (system-fired)
 //   - system       — auto-generated event ("Jobber search ran", etc.)
 //   - stage_change — written automatically by PATCH /api/leads/[id]
@@ -11,10 +15,13 @@
 //
 // Methods (if relevant for the kind):
 //   call | sms | email | system | call_prompt | in_person
+//   | coffee | event | thank_you   ← partner-relationship vocabulary
+//   (Classic's 'text' maps to sms, 'thankyou' to thank_you; 'referral' is
+//   NOT a method — a referral is the referred lead row itself.)
 //
 // Auth: must be a logged-in hub_user.
-// Scope: super_admin/admin can write to any lead. owner can only write
-//        to leads in their location. lite_user blocked.
+// Scope: super_admin/admin can write anywhere. owner can only write to
+//        leads/partners in their location. lite_user blocked.
 
 import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
@@ -24,7 +31,12 @@ import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { insertTouchpoint } from '@/lib/touchpoints'
 
 const VALID_KINDS = ['reach_out', 'drip', 'system', 'stage_change', 'note'] as const
-const VALID_METHODS = ['call', 'sms', 'email', 'system', 'call_prompt', 'in_person'] as const
+const VALID_METHODS = [
+  'call', 'sms', 'email', 'system', 'call_prompt', 'in_person',
+  // Partner-relationship vocabulary (network_phase1.sql widens the DB CHECK
+  // to match; until it runs, nothing sends these values).
+  'coffee', 'event', 'thank_you',
+] as const
 
 type TouchpointKind = (typeof VALID_KINDS)[number]
 type TouchpointMethod = (typeof VALID_METHODS)[number]
@@ -62,6 +74,7 @@ export async function POST(req: Request) {
   }
 
   const lead_id = body.lead_id as string | undefined
+  const partner_id = body.partner_id as string | undefined
   const kind = body.kind as string | undefined
   const method = body.method as string | null | undefined
   const label = body.label as string | undefined
@@ -70,9 +83,14 @@ export async function POST(req: Request) {
   const notes = body.notes as string | null | undefined
   const occurred_at = body.occurred_at as string | undefined
 
-  // Validate required fields
-  if (!lead_id || typeof lead_id !== 'string') {
-    return NextResponse.json({ error: 'lead_id_required' }, { status: 400 })
+  // Validate the subject: exactly one of lead_id / partner_id (the DB XOR).
+  const hasLead = typeof lead_id === 'string' && lead_id.length > 0
+  const hasPartner = typeof partner_id === 'string' && partner_id.length > 0
+  if (!hasLead && !hasPartner) {
+    return NextResponse.json({ error: 'lead_id_or_partner_id_required' }, { status: 400 })
+  }
+  if (hasLead && hasPartner) {
+    return NextResponse.json({ error: 'one_subject_only' }, { status: 400 })
   }
   if (!kind || !VALID_KINDS.includes(kind as TouchpointKind)) {
     return NextResponse.json(
@@ -94,20 +112,34 @@ export async function POST(req: Request) {
     }
   }
 
-  // Load lead for scoping
-  const { data: lead, error: leadError } = await supabaseService
-    .from('leads')
-    .select('id, location_uuid')
-    .eq('id', lead_id)
-    .single()
-
-  if (leadError || !lead) {
-    return NextResponse.json({ error: 'lead_not_found' }, { status: 404 })
+  // Load the subject for scoping — lead path unchanged; partner rows carry
+  // location_id (uuid, same value form as leads.location_uuid).
+  let subjectLocation: string
+  if (hasLead) {
+    const { data: lead, error: leadError } = await supabaseService
+      .from('leads')
+      .select('id, location_uuid')
+      .eq('id', lead_id)
+      .single()
+    if (leadError || !lead) {
+      return NextResponse.json({ error: 'lead_not_found' }, { status: 404 })
+    }
+    subjectLocation = lead.location_uuid
+  } else {
+    const { data: partner, error: partnerError } = await supabaseService
+      .from('partners')
+      .select('id, location_id')
+      .eq('id', partner_id)
+      .single()
+    if (partnerError || !partner) {
+      return NextResponse.json({ error: 'partner_not_found' }, { status: 404 })
+    }
+    subjectLocation = partner.location_id
   }
 
   // Location scoping
   if (!isAdmin(hubUser.role)) {
-    if (hubUser.location_id !== lead.location_uuid) {
+    if (hubUser.location_id !== subjectLocation) {
       return NextResponse.json(
         { error: 'forbidden_wrong_location' },
         { status: 403 }
@@ -116,7 +148,7 @@ export async function POST(req: Request) {
   }
 
   // ─── Read-only guard (868kawwmh) ──────────────────────────────
-  const roBlock = await readOnlyWriteBlock(hubUser, lead.location_uuid)
+  const roBlock = await readOnlyWriteBlock(hubUser, subjectLocation)
   if (roBlock) return roBlock
 
   // Insert via the shared writer (lib/touchpoints.ts) so the Slack "Log call"
@@ -124,8 +156,8 @@ export async function POST(req: Request) {
   // reach_out updated_at bump lives inside insertTouchpoint. system/drip events
   // have no human author; everything else is attributed to the session user.
   const result = await insertTouchpoint({
-    lead_id,
-    location_uuid: lead.location_uuid,
+    ...(hasLead ? { lead_id } : { partner_id }),
+    location_uuid: subjectLocation,
     kind,
     // Phase 1: touchpoints can carry engagement context (column exists
     // since the step-1 migration). Optional — client-level touchpoints

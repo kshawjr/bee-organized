@@ -25,6 +25,7 @@ import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { financialsVisible } from "@/lib/financial-access"
 import { splitNameForPrefill } from "@/lib/name-prefill"
 import { captureViewAsSnapshot, revertViewAsCancel, viewAsIdentityFor, isElevatedRole, visibleTransferQueue } from "@/lib/view-as-identity"
+import { makeUpdatePartner } from "@/lib/partner-writes"
 import AddressAutofill from "@/components/hive/shared/AddressAutofill"
 // The Send-to-Jobber wizard — extracted from this file onto the hive modal
 // system (OverlayShell + tokens). Used by BOTH the classic PersonPanel and
@@ -14919,7 +14920,9 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
 }
 
 // ─── Partners Screen ──────────────────────────────────────────────────────────
-function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{}, readOnly=false }) {
+// Exported for lib/network-saved-views.test.tsx (mount test — saved views
+// must survive a remount). Not routed anywhere except App's nav.
+export function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{}, readOnly=false }) {
   if (!partners) return null
   // Writes go through the App-level CRM helpers (POST/PATCH/DELETE + state);
   // the partners/companies props are App state and stay the read source.
@@ -14951,8 +14954,15 @@ function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCo
   const [tierFilter, setTierFilter]   = useState('')
   const [tagFilter, setTagFilter]     = useState('')
   const [search, setSearch]           = useState('')
-  const [savedViews, setSavedViews]   = useState([])
-  const [activeViewId, setActiveViewId] = useState(null)
+  // Saved views PERSIST (they were plain useState and evaporated on reload).
+  // One stored object — views + the active id — via the shared SSR-safe hook
+  // (bee_hive_* pattern; hydrates after mount, write-through on change). The
+  // two setter shims keep every existing call site unchanged.
+  const [savedViewsStore, setSavedViewsStore] = useStoredState('bee_network_saved_views', { views: [], activeViewId: null })
+  const savedViews   = savedViewsStore.views
+  const activeViewId = savedViewsStore.activeViewId
+  const setSavedViews = (updater) => setSavedViewsStore(s => ({ ...s, views: typeof updater === 'function' ? updater(s.views) : updater }))
+  const setActiveViewId = (updater) => setSavedViewsStore(s => ({ ...s, activeViewId: typeof updater === 'function' ? updater(s.activeViewId) : updater }))
 
   const allPartners = (locFilter==='all' ? partners : partners.filter(p=>p.locationId===locFilter)).filter(p=>!p.isDeleted)
   const allCompanies = locFilter==='all' ? companies : companies.filter(c=>c.locationId===locFilter)
@@ -33358,8 +33368,10 @@ if (Array.isArray(initialPeople)) return
   // ─── CRM persistence (partners + companies) ─────────────────────────────────
   // State lives in the useState above; these helpers wrap setPartners/setCompanies
   // with API calls so writes reach Supabase. Creates are server-first (we need the
-  // real uuid for referral linkage); updates/deletes are optimistic + fire the API.
-  // On API failure we keep the optimistic local change so the UI stays responsive.
+  // real uuid for referral linkage). Partner UPDATES go through lib/partner-writes
+  // (makeUpdatePartner): optimistic apply → field-level PATCH of the diff only →
+  // on failure REVERT + toast, so a failed save never sits on screen looking
+  // saved. Deletes/restores stay optimistic + fire the API.
   const crmLocationId = (obj) => {
     if (isUuidStr(obj?.locationId)) return obj.locationId
     if (isUuidStr(currentLocation?.id)) return currentLocation.id
@@ -33385,14 +33397,16 @@ if (Array.isArray(initialPeople)) return
   function mergePartner(row) {
     setPartners(prev => mergePartnerRow(prev, row))
   }
-  function updatePartner(updated) {
-    setPartners(prev => prev.map(p => p.id === updated.id ? updated : p))
-    if (isUuidStr(updated?.id)) {
-      fetch(`/api/partners/${updated.id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(updated) })
-        .then(r => { if (!r.ok) console.error('[partners] update failed:', r.status) })
-        .catch(e => console.error('[partners] update error:', e))
-    }
-  }
+  // Live ref so the diff baseline is read at CALL time, not the render that
+  // built the closure — two quick edits in a row diff against each other,
+  // not both against the same stale snapshot.
+  const partnersLiveRef = useRef(partners)
+  partnersLiveRef.current = partners
+  const updatePartner = makeUpdatePartner({
+    getPartners: () => partnersLiveRef.current,
+    applyRow: (row) => setPartners(prev => prev.map(p => p.id === row.id ? row : p)),
+    setToast,
+  })
   function deletePartner(id) {
     setPartners(prev => prev.map(p => p.id === id ? { ...p, isDeleted:true, deletedAt:new Date().toISOString() } : p))
     if (isUuidStr(id)) fetch(`/api/partners/${id}`, { method:'DELETE' }).catch(e => console.error('[partners] delete error:', e))

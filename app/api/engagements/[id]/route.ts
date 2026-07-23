@@ -183,12 +183,17 @@ export async function GET(
 
   // Referrer name resolution — same polymorphic lookup as the profile
   // route: kind 'partner' → partners row (contacts share the table),
-  // kind 'lead' → another leads row. The panel's ReferrerField shows who.
+  // kind 'lead' → another leads row, 'company' → companies row (Network
+  // Phase 1). The panel's ReferrerField shows who.
   let referredByName: string | null = null
   const clientLead = clientRes.data
   if (clientLead?.referred_by_kind && clientLead?.referred_by_id) {
+    const referrerTable =
+      clientLead.referred_by_kind === 'lead' ? 'leads'
+      : clientLead.referred_by_kind === 'company' ? 'companies'
+      : 'partners'
     const { data: ref } = await supabaseService
-      .from(clientLead.referred_by_kind === 'lead' ? 'leads' : 'partners')
+      .from(referrerTable)
       .select('name')
       .eq('id', clientLead.referred_by_id)
       .maybeSingle()

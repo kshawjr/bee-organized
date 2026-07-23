@@ -49,7 +49,7 @@ type Body = {
   state?: string | null
   zip?: string | null
   addresses?: any
-  referred_by_kind?: 'partner' | 'lead' | null
+  referred_by_kind?: 'partner' | 'lead' | 'company' | null
   referred_by_id?: string | null
   marketing_opt_out?: boolean
   request_details?: string | null
@@ -110,7 +110,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid_stage' }, { status: 400 })
   }
 
-  if (body.referred_by_kind && !['partner', 'lead'].includes(body.referred_by_kind)) {
+  // 'company' is Network Phase 1 (network_phase1.sql widens the DB CHECK to
+  // match; until it runs, a company referrer is rejected by the DB, loudly).
+  if (body.referred_by_kind && !['partner', 'lead', 'company'].includes(body.referred_by_kind)) {
     return NextResponse.json({ error: 'invalid_referred_by_kind' }, { status: 400 })
   }
 
