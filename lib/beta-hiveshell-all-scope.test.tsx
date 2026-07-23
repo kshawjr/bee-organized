@@ -200,3 +200,73 @@ describe('HiveShell on a SCOPED load — unchanged', () => {
     expect(host.textContent).not.toContain('one location at a time')
   })
 })
+
+// ── Option A, MOUNTED through the real shell ────────────────────────────────
+// The container + the location-named New header are new bindings in
+// InboxScreen (T.corp, the `locations` prop HiveShell now threads). Per the
+// allOverview hotfix: a source pin cannot catch an unbound identifier, and a
+// missing token group would render as `undefined` rather than throw — so both
+// scopes get executed here, with positive assertions on both halves.
+describe('The unrouted queue is visually its own container — both scopes', () => {
+  const openInbox = async (host: HTMLElement) => {
+    const tab = Array.from(host.querySelectorAll('button')).find(b => /inbox/i.test(b.textContent || ''))
+    await act(async () => { (tab as HTMLButtonElement).click() })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+  }
+
+  it("on 'all': the corporate container renders, and no location section is named", async () => {
+    const host = await mount(base({
+      locationRequired: true,
+      locFilter: 'all',
+      transferPeople: [locOther()],
+      onOpenLocationPicker: vi.fn(),
+    }))
+    await openInbox(host)
+    const shell = host.querySelector('#bee-inbox-sec-transfer') as HTMLElement
+    expect(shell).toBeTruthy()
+    expect(shell.textContent).toContain('Corporate · Not yet routed · 1')
+    expect(shell.textContent).toContain("don't belong to any location yet")
+    expect(shell.style.background).toBeTruthy()   // T.corp.bg resolved, not undefined
+    // 'all' has no location section, so its name must not appear.
+    expect(host.textContent).not.toContain('Kansas City · New')
+  })
+
+  it('on a SCOPED load: the container renders AND the location names its own New section', async () => {
+    const host = await mount(base({
+      locFilter: KC,
+      locationRequired: false,
+      transferPeople: [locOther()],
+      people: [person({ id: 'c9', name: 'Fresh Lead' })],
+    }))
+    await openInbox(host)
+    const shell = host.querySelector('#bee-inbox-sec-transfer') as HTMLElement
+    expect(shell).toBeTruthy()
+    expect(shell.textContent).toContain('Corporate · Not yet routed')
+    // The location's OWN section says whose it is — the other half of the fix.
+    expect(host.textContent).toContain('Kansas City · New · 1')
+    expect(host.textContent).toContain('Fresh Lead')
+    // The row action reads Route, in its own color family.
+    const pill = Array.from(host.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Route')
+    expect(pill).toBeTruthy()
+    expect((pill as HTMLElement).textContent).toContain('Route')
+  })
+
+  it('a franchise viewer gets NO container in either scope (empty queue upstream)', async () => {
+    // HiveScreen hands a non-elevated viewer (incl. view-as) an empty queue;
+    // with nothing to route, the container must not appear at all — an empty
+    // sand box would announce a corporate surface they cannot use.
+    for (const scope of ['all', KC]) {
+      const host = await mount(base({
+        locFilter: scope,
+        locationRequired: scope === 'all',
+        transferPeople: [],
+        people: scope === 'all' ? [] : [person({ id: 'c9', name: 'Fresh Lead' })],
+        onOpenLocationPicker: vi.fn(),
+      }))
+      await openInbox(host)
+      expect(host.querySelector('#bee-inbox-sec-transfer')).toBeNull()
+      expect(host.textContent).not.toContain('Corporate · Not yet routed')
+      expect(host.textContent).not.toContain('belong to any location yet')
+    }
+  })
+})

@@ -112,6 +112,20 @@ describe('token values — sharpened light palette', () => {
     expect(CHIP_STYLES.blue).toEqual(T.family.blue)
     expect(CHIP_STYLES.red).toEqual(T.family.red)
   })
+
+  it('the CORPORATE sand is its own family — a category marker, not an urgency one', () => {
+    // It marks "no location owns this yet". If it ever collapses into the
+    // action accent a corporate container reads as clickable; if it collapses
+    // into danger/warning it reads as overdue. Both are wrong.
+    for (const v of [T.corp.bg, T.corp.border, T.corp.fg, T.corp.deep, T.corp.fill]) {
+      expect(v).toMatch(/^#[0-9A-F]{6}$/i)
+    }
+    expect(T.corp.fill).not.toBe(T.accent.fg)
+    expect(T.corp.fill).not.toBe(T.state.warning.fg)
+    expect(T.corp.fill).not.toBe(T.state.danger.strong)
+    expect(T.corp.bg).not.toBe(T.state.warning.bg)
+    expect(T.corp.onFill).toBe(T.ink.inverse)
+  })
 })
 
 // ── C) one-accent action buttons ────────────────────────────────

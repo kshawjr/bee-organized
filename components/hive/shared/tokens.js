@@ -132,6 +132,23 @@ export const T = {
     neutralSoft: 'rgba(0,0,0,0.06)',  // gray action-tone tint
   },
 
+  // ── the CORPORATE category marker (records no location owns yet) ──
+  // A warm SAND family, and deliberately its own group rather than a reuse
+  // of state.warning: this marks a CATEGORY ("corporate holds this, no
+  // location does"), not an urgency. It must not read as the teal action
+  // accent (that would make a container look clickable) and it must not
+  // read as Home's needs-attention urgency tones, which are a saturated
+  // red/orange pair — so these are desaturated, earthy, and darker.
+  // Today's only consumer is the Inbox's unrouted routing queue.
+  corp: {
+    bg: '#F6EFE1',      // the container tint — sand wash on the warm canvas
+    border: '#E5D8C0',  // its own edge, a step deeper than the tint
+    fg: '#7A5C25',      // header label + glyph ink (5.4:1 on bg)
+    deep: '#5A431A',    // body copy on the tint
+    fill: '#8E6620',    // the routing action's filled control (5.2:1 on white)
+    onFill: '#fff',
+  },
+
   // ── chip color families (§8.6 design language — LOCKED pairs) ──
   // Per-stage/status semantics stay; stageConfig composes CHIP_STYLES
   // from THESE. Dark text on light fills, always.

@@ -751,6 +751,10 @@ export default function HiveShell({
         // queue, which is cross-location by nature and MUST stay reachable on
         // 'all' — it is where unrouted leads get routed. It renders that
         // section and shows the prompt in place of New/Attempting.
+        //
+        // `locations` rides along for the same reason the Client List gets it:
+        // the Inbox names the selected location in its New header, so the
+        // location's own section can't be mistaken for the unrouted queue.
 
         <InboxScreen
           people={patchedPeople}
@@ -759,6 +763,7 @@ export default function HiveShell({
           onOpenLocationPicker={onOpenLocationPicker}
           engagements={patched}
           locFilter={locFilter}
+          locations={locations}
           onOpenPerson={openPerson}
           onSendToJobber={onSendToJobber}
           onCallLogged={applyTouchpoint}

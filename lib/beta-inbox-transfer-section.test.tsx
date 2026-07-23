@@ -13,9 +13,18 @@
 //     non-elevated viewer because HiveScreen hands them an empty queue
 //   · a loc_other lead shows its ORIGIN (city, ST zip · project · from global
 //     form) and is EXCLUDED from New (it appears once, in Needs transfer)
-//   · the row's ONLY action is the Transfer pill — no log-call / Send-to-Jobber
+//   · the row's ONLY action is the Route pill — no log-call / Send-to-Jobber
 //     / ··· cluster, since none of those apply to a lead being routed away —
 //     and it opens the same TransferLeadModal the card does
+//
+// Option A (this pass): the queue was a card in the SAME stack as the selected
+// location's leads, separated by a 3px edge accent — so unrouted leads read as
+// that location's new leads sitting on top of its list. It now has its own
+// tinted CORPORATE container with a header that says whose they are, the
+// location's own New section is named for the location, and the row action
+// reads "Route" (they have no home to be moved FROM) in the sand family rather
+// than the teal action accent. Presentation only — the second describe below
+// pins that the write is byte-identical.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -93,7 +102,7 @@ beforeEach(() => { installFetch() })
 const sectionLabels = (host: HTMLElement) =>
   Array.from(host.querySelectorAll('p'))
     .map(p => (p.textContent || ''))
-    .filter(t => /Needs transfer|^New ·|New ·|Attempting ·/.test(t))
+    .filter(t => /Not yet routed|^New ·|New ·|Attempting ·/.test(t))
 
 describe('Inbox — Needs transfer section', () => {
   it('renders the section ABOVE New when a loc_other lead is in scope', async () => {
@@ -102,9 +111,9 @@ describe('Inbox — Needs transfer section', () => {
     )
     const text = host.textContent || ''
     expect(text).toContain('Needs transfer')
-    // ordering: the Needs-transfer banner precedes the New banner in the DOM
+    // ordering: the unrouted queue's header precedes the New banner in the DOM
     const labels = sectionLabels(host)
-    const transferIdx = labels.findIndex(t => t.includes('Needs transfer'))
+    const transferIdx = labels.findIndex(t => t.includes('Not yet routed'))
     const newIdx = labels.findIndex(t => t.startsWith('New'))
     expect(transferIdx).toBeGreaterThanOrEqual(0)
     expect(newIdx).toBeGreaterThan(transferIdx)
@@ -174,7 +183,7 @@ describe('Inbox — Needs transfer section', () => {
     const { host, unmount } = await mount(
       <InboxScreen people={[]} transferPeople={[locOtherLead()]} engagements={[]} locFilter="all" />,
     )
-    const transferBtn = Array.from(host.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Transfer')
+    const transferBtn = Array.from(host.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Route')
     expect(transferBtn).toBeTruthy()
     await act(async () => { transferBtn!.click() })
     await flush()
@@ -192,7 +201,7 @@ describe('Inbox — Needs transfer section', () => {
       .filter(r => (r.textContent || '').includes('Lead'))
     const targetRow = rows.find(r => (r.textContent || '').includes('Second Lead'))
     expect(targetRow).toBeTruthy()
-    const pill = Array.from(targetRow!.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Transfer')
+    const pill = Array.from(targetRow!.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Route')
     await act(async () => { pill!.click() })
     await flush()
     const dlg = document.querySelector('[role="dialog"][aria-label="Transfer lead"]')
@@ -211,7 +220,7 @@ describe('Inbox — Needs transfer section', () => {
       .find(r => (r.textContent || '').includes('Global Lead'))
     expect(row).toBeTruthy()
     const labels = Array.from(row!.querySelectorAll('button')).map(b => b.getAttribute('aria-label'))
-    expect(labels).toEqual(['Transfer'])
+    expect(labels).toEqual(['Route'])
     expect(labels).not.toContain('Log call')
     expect(labels).not.toContain('Send to Jobber')
     expect(labels).not.toContain('More')
@@ -228,26 +237,147 @@ describe('Inbox — Needs transfer section', () => {
     expect(labels).toContain('Log call')
     expect(labels).toContain('Send to Jobber')
     expect(labels).toContain('More')
-    expect(labels).not.toContain('Transfer')
+    expect(labels).not.toContain('Route')
     await unmount()
   })
 
-  it('styles the pill from tokens — accent fill, pill radius, compact', async () => {
+  it('styles the pill from tokens — CORPORATE sand fill, pill radius, compact', async () => {
     const { host, unmount } = await mount(
       <InboxScreen people={[]} transferPeople={[locOtherLead()]} engagements={[]} locFilter="all" />,
     )
     const pill = Array.from(host.querySelectorAll('button'))
-      .find(b => b.getAttribute('aria-label') === 'Transfer') as HTMLButtonElement
+      .find(b => b.getAttribute('aria-label') === 'Route') as HTMLButtonElement
     expect(pill.style.borderRadius).toBe(T.radius.pill)
-    // Filled accent, not a ghost: accent fill + the accent's onFill ink.
-    expect(pill.style.background).toBe(asRendered('background', T.accent.fg))
-    expect(pill.style.color).toBe(asRendered('color', T.accent.onFill))
+    // Sand, NOT the teal action accent: every other green control in the Inbox
+    // acts on a lead this location owns, and this one does the opposite.
+    expect(pill.style.background).toBe(asRendered('background', T.corp.fill))
+    expect(pill.style.color).toBe(asRendered('color', T.corp.onFill))
+    expect(pill.style.background).not.toBe(asRendered('background', T.accent.fg))
     // Compact — a row control, not a call-to-action bar.
     expect(pill.style.fontSize).toBe('13px')
     expect(pill.style.padding).toBe('7px 13px')
-    // Arrow + label.
-    expect(pill.textContent).toContain('Transfer')
+    // Label + arrow.
+    expect(pill.textContent).toContain('Route')
     expect(pill.querySelector('svg')).toBeTruthy()
+    await unmount()
+  })
+})
+
+// ── the Option A container: the queue is its own thing, and the location's
+//    own section says whose it is ───────────────────────────────────────────
+describe('Inbox — the unrouted queue reads as CORPORATE, not as this location', () => {
+  const shell = (host: HTMLElement) => host.querySelector('#bee-inbox-sec-transfer') as HTMLElement
+
+  it('wraps the queue in its own tinted container with the corporate header', async () => {
+    const { host, unmount } = await mount(
+      <InboxScreen people={[person()]} transferPeople={[locOtherLead()]} engagements={[]}
+        locFilter="loc-uuid-1" locations={[{ id: 'loc-uuid-1', name: 'Kansas City' }]} />,
+    )
+    const sec = shell(host)
+    expect(sec).toBeTruthy()
+    // A container, not a bare section: its own tint, border and radius.
+    expect(sec.style.background).toBe(asRendered('background', T.corp.bg))
+    expect(sec.style.border).toContain(asRendered('color', T.corp.border))
+    expect(sec.style.borderRadius).toBe(T.radius.card)
+    // Header names the OWNER first, then the count.
+    const text = (sec.textContent || '')
+    expect(text).toContain('Corporate · Not yet routed · 1')
+    await unmount()
+  })
+
+  it('explains what unrouted MEANS in plain language, not our vocabulary', async () => {
+    const { host, unmount } = await mount(
+      <InboxScreen people={[]} transferPeople={[locOtherLead()]} engagements={[]} locFilter="all" />,
+    )
+    const text = shell(host).textContent || ''
+    expect(text).toContain("These leads don't belong to any location yet")
+    expect(text).toContain('Route them to assign an owner')
+    await unmount()
+  })
+
+  it('the container carries the grouping — rows sit on a light card INSIDE it', async () => {
+    const { host, unmount } = await mount(
+      <InboxScreen people={[]} transferPeople={[locOtherLead()]} engagements={[]} locFilter="all" />,
+    )
+    const sec = shell(host)
+    const row = sec.querySelector('.bee-inbox-row') as HTMLElement
+    expect(row).toBeTruthy()
+    // The rows' card is a descendant of the tinted shell, and it is light —
+    // the tint is the grouping, the rows are not individually tinted.
+    const card = row.parentElement as HTMLElement
+    expect(sec.contains(card)).toBe(true)
+    expect(card.style.background).toBe(asRendered('background', T.surface.raised))
+    await unmount()
+  })
+
+  it('the sand family is distinct from the action green AND from urgency red', async () => {
+    // A CATEGORY marker, not an urgency marker: it must not borrow the tone
+    // Home's needs-attention cards use, or it reads as "these are overdue".
+    expect(T.corp.fill).not.toBe(T.accent.fg)
+    expect(T.corp.fill).not.toBe(T.state.success.fg)
+    expect(T.corp.fill).not.toBe(T.state.danger.fg)
+    expect(T.corp.fill).not.toBe(T.state.danger.strong)
+    expect(T.corp.bg).not.toBe(T.surface.raised)
+    expect(T.corp.bg).not.toBe(T.surface.canvas)
+  })
+
+  it("names the LOCATION on its own New section — '<Location> · New · N'", async () => {
+    const { host, unmount } = await mount(
+      <InboxScreen people={[person(), person({ name: 'Second' })]} transferPeople={[locOtherLead()]}
+        engagements={[]} locFilter="loc-uuid-1" locations={[{ id: 'loc-uuid-1', name: 'Kansas City' }]} />,
+    )
+    const label = Array.from(host.querySelectorAll('p')).map(p => p.textContent || '')
+      .find(t => t.includes('New ·'))
+    expect(label).toContain('Kansas City · New · 2')
+    await unmount()
+  })
+
+  it('does NOT render a location New header on "all" — there is no location section there', async () => {
+    const { host, unmount } = await mount(
+      <InboxScreen people={[]} transferPeople={[locOtherLead()]} engagements={[]}
+        locationRequired locFilter="all" locations={[{ id: 'loc-uuid-1', name: 'Kansas City' }]} />,
+    )
+    // The queue is there; the location's own section (and its name) is not.
+    expect(host.textContent).toContain('Corporate · Not yet routed')
+    expect(host.textContent).not.toContain('Kansas City')
+    expect(host.querySelector('#bee-inbox-sec-new')).toBeNull()
+    await unmount()
+  })
+
+  it('falls back to a bare "New" when the roster cannot resolve the scope id', async () => {
+    const { host, unmount } = await mount(
+      <InboxScreen people={[person()]} transferPeople={[]} engagements={[]}
+        locFilter="loc-uuid-1" locations={[{ id: 'some-other-loc', name: 'Boulder' }]} />,
+    )
+    const label = Array.from(host.querySelectorAll('p')).map(p => p.textContent || '')
+      .find(t => t.includes('New ·'))
+    expect(label).toContain('New · 1 ·')
+    expect(label).not.toContain('Boulder')
+    await unmount()
+  })
+
+  it('still hits the SAME endpoint with the SAME payload — this was a relabel', async () => {
+    // The whole change is presentation. If the verb swap ever moved the write,
+    // this is where it shows up.
+    const fetchMock = installFetch()
+    const { host, unmount } = await mount(
+      <InboxScreen people={[]} transferPeople={[locOtherLead({ id: 'lead-77' })]} engagements={[]} locFilter="all" />,
+    )
+    const pill = Array.from(host.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Route')
+    await act(async () => { pill!.click() })
+    await flush()
+    const dest = Array.from(document.querySelectorAll('button')).find(b => (b.textContent || '').includes('Boulder'))
+    await act(async () => { dest!.click() })
+    await flush()
+    const confirm = Array.from(document.querySelectorAll('button')).find(b => /^Transfer to /.test(b.textContent || ''))
+    expect(confirm).toBeTruthy()
+    await act(async () => { (confirm as HTMLButtonElement).click() })
+    await flush()
+    const call = fetchMock.mock.calls.find(c => String(c[0]).startsWith('/api/leads/'))
+    expect(call).toBeTruthy()
+    expect(String(call![0])).toBe('/api/leads/lead-77/transfer')
+    expect((call![1] as any).method).toBe('POST')
+    expect(JSON.parse((call![1] as any).body)).toEqual({ destination_location_id: 'dest-active' })
     await unmount()
   })
 })

@@ -122,24 +122,30 @@ function GhostIconButton({ label, icon: Icon, disabled, onClick, ...rest }) {
   )
 }
 
-// The Needs-transfer row's sole action — a filled accent pill rather than
-// a ghost icon, because routing the lead away is the ONLY thing to do with
-// it and the row shouldn't make you hunt for that. Compact by the standing
-// preference: it reads as a row control, not a call-to-action bar.
-function TransferPill({ disabled, onClick }) {
+// The unrouted row's sole action — a filled pill rather than a ghost icon,
+// because routing the lead away is the ONLY thing to do with it and the row
+// shouldn't make you hunt for that. Compact by the standing preference: it
+// reads as a row control, not a call-to-action bar.
+//
+// "Route", not "Transfer": these leads have no home yet, and transfer implies
+// moving one FROM somewhere. The fill is the CORPORATE sand, not the teal
+// action accent — every other green control in the Inbox acts on a lead this
+// location owns, and this one does the opposite. Label and color only; the
+// click still opens the same TransferLeadModal against the same endpoint.
+function RoutePill({ disabled, onClick }) {
   return (
-    <button className="bee-transfer-pill" aria-label="Transfer" title="Transfer"
+    <button className="bee-transfer-pill" aria-label="Route" title="Route to a location"
       disabled={disabled} onClick={onClick}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: '5px',
         padding: '7px 13px', borderRadius: T.radius.pill, border: 'none',
-        background: T.accent.fg, color: T.accent.onFill,
+        background: T.corp.fill, color: T.corp.onFill,
         fontSize: '13px', fontWeight: 600, lineHeight: 1, whiteSpace: 'nowrap',
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.5 : 1,
       }}>
+      Route
       <IconArrowRight size={13} />
-      Transfer
     </button>
   )
 }
@@ -251,7 +257,15 @@ function RowMenu({ anchorId, isMobile, onClose, children }) {
   )
 }
 
-export default function InboxScreen({ people = [], transferPeople = [], locationRequired = false, onOpenLocationPicker = null, engagements = [], locFilter = 'all', onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
+export default function InboxScreen({ people = [], transferPeople = [], locationRequired = false, onOpenLocationPicker = null, engagements = [], locFilter = 'all', locations = [], onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
+  // The selected location's NAME, for the New section's header. Half of why
+  // the unrouted queue read as this location's leads is that the location's
+  // own section wasn't labelled either — both just read as "the inbox". Null
+  // on 'all' (and whenever the roster hasn't resolved the id), where there is
+  // no location section to name; the header falls back to a bare "New".
+  const locName = locFilter === 'all'
+    ? null
+    : ((locations || []).find(l => l.id === locFilter) || {}).name || null
   // One-shot deep-link → scroll a target section into view on mount (Home
   // "Needs attention" cards land here: 'transfer' = Needs-transfer section,
   // 'new' = New section). Sections aren't collapsible (they always render
@@ -702,7 +716,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
          absent: a lead being routed away isn't ours to call or push to
          Jobber, so those doors would be dead ends. The card keeps the
          fuller action set; the row is a single decision. */
-      <TransferPill disabled={busyId === p.id}
+      <RoutePill disabled={busyId === p.id}
         onClick={(ev) => { ev.stopPropagation(); setTransferFor(p) }} />
     ) : (
       <>
@@ -852,9 +866,22 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   }
 
   const cardStyle = { background: T.surface.raised, border: T.border.card, boxShadow: T.shadow.card, borderRadius: T.radius.card, overflow: 'hidden' }
-  // Needs-transfer card carries a left amber accent (the section's "attention"
-  // cue) on top of the neutral card — the banner accent convention.
-  const transferCardStyle = { ...cardStyle, borderLeft: `3px solid ${T.state.warning.fg}` }
+  // The unrouted queue lives in its OWN tinted container rather than a card in
+  // the same stack: a left edge accent was too quiet, and these leads read as
+  // the selected location's new leads sitting above its list. The CONTAINER is
+  // the grouping — sand tint, own border, own radius — and the rows sit on
+  // plain white cards inside it, so the tint (not the rows) carries the
+  // "these belong to nobody yet" meaning.
+  const corpShellStyle = {
+    background: T.corp.bg,
+    border: `1px solid ${T.corp.border}`,
+    borderRadius: T.radius.card,
+    padding: isMobile ? '12px' : '14px 14px 16px',
+    scrollMarginTop: '12px',
+  }
+  // Rows inside the shell: the neutral card, minus the drop shadow (it would
+  // muddy the tint) and with the shell's border in place of the card's.
+  const transferCardStyle = { ...cardStyle, boxShadow: 'none', border: `1px solid ${T.corp.border}` }
 
   return (
     <div>
@@ -989,8 +1016,19 @@ export default function InboxScreen({ people = [], transferPeople = [], location
           {/* Needs transfer — ABOVE New/Attempting, ONLY when loc_other leads
               are in scope (self-gating to corp/admin). */}
           {transfer.length > 0 && (
-            <div id="bee-inbox-sec-transfer" style={{ scrollMarginTop: '12px' }}>
-              <SectionLabel glyph={<IconMapPin size={13} />} color={AMBER.text} label="Needs transfer" count={transfer.length} hint="Route to a Location" />
+            <div id="bee-inbox-sec-transfer" style={corpShellStyle}>
+              {/* Says WHOSE these are before it says what to do with them —
+                  the confusion this container exists to end is readers taking
+                  them for the selected location's new leads. */}
+              <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.6px', textTransform: 'uppercase', color: T.corp.fg, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ display: 'inline-flex', flexShrink: 0 }}><IconMapPin size={13} /></span>
+                Corporate · Not yet routed · {transfer.length}
+              </p>
+              {/* Plain language, because the audience is not technical:
+                  "unrouted" is our word, not theirs. */}
+              <p style={{ fontSize: '12px', color: T.corp.deep, lineHeight: 1.5, margin: '5px 0 10px', maxWidth: '52ch' }}>
+                These leads don&apos;t belong to any location yet. Route them to assign an owner.
+              </p>
               <div style={transferCardStyle}>
                 {transfer.map(p => <Row key={p.id} p={p} family={AMBER} pill="Transfer" />)}
               </div>
@@ -1028,7 +1066,12 @@ export default function InboxScreen({ people = [], transferPeople = [], location
           ) : (
           <>
           <div id="bee-inbox-sec-new" style={{ scrollMarginTop: '12px' }}>
-            <SectionLabel glyph={<IconSparkles size={13} />} color={TEAL.text} label="New" count={fresh.length} hint="No Contact Yet" />
+            {/* Named for the LOCATION, not just "New": the unrouted queue sits
+                directly above, and an unlabelled section next to it invites
+                exactly the reading that these are all one location's leads.
+                Falls back to a bare "New" when the roster can't resolve the
+                id — this branch never renders on 'all'. */}
+            <SectionLabel glyph={<IconSparkles size={13} />} color={TEAL.text} label={locName ? `${locName} · New` : 'New'} count={fresh.length} hint="No Contact Yet" />
             {fresh.length > 0 ? (
               <div style={cardStyle}>
                 {fresh.map(p => <Row key={p.id} p={p} family={TEAL} pill="New" />)}
