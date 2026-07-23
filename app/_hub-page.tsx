@@ -16,12 +16,13 @@ import { supabaseService } from '@/lib/supabase-service'
 import { PARTNER_COLS, COMPANY_COLS, mapPartnerRow, mapCompanyRow } from '@/lib/crm'
 import {
   SCOPE_COOKIE_NAME,
-  normalizeScopeCookie,
+  readScopePreference,
   resolveHubScope,
   isElevatedPickedScope,
+  pickDefaultScopeLocation,
   childLocationFilter,
   isUuid,
-  SCOPE_ALL,
+  ACTIVE_LIFECYCLE,
   LOC_OTHER_SLUG,
   TRANSFER_QUEUE_MAX,
 } from '@/lib/hub-scope'
@@ -384,41 +385,104 @@ export default async function HubPage({
   // filtering in the browser.
   //
   // The cookie is a HINT, never an authority. It is user-controlled, so:
-  //   • normalizeScopeCookie collapses anything that isn't a well-formed uuid
-  //     (absent, '', 'all', a slug, an injection attempt) to SCOPE_ALL before
-  //     it can reach a query;
+  //   • readScopePreference collapses anything that isn't a well-formed uuid
+  //     or the literal 'all' sentinel (absent, '', a slug, an injection
+  //     attempt) to "no preference" before it can reach a query;
   //   • a surviving uuid is then looked up in `locations` — an unknown or
-  //     deleted id yields null and degrades to 'all';
+  //     deleted id yields null;
   //   • the lookup is skipped ENTIRELY for non-elevated users, and
   //     resolveHubScope ignores `validated` for them regardless, so a franchise
   //     user who hand-sets the cookie still cannot escape their own location.
-  //
-  // Every rejection path lands on the same place: locationUuid=null, which is
-  // literally today's behavior. That is what makes Phase 1 revertible by
-  // clearing one cookie.
   const scopeCookieRaw = (await cookies()).get(SCOPE_COOKIE_NAME)?.value
-  const scopeCookie = normalizeScopeCookie(scopeCookieRaw)
+  const scopePref = readScopePreference(scopeCookieRaw)
   let scopeValidated: { id: string; slug: string | null } | null = null
-  if (isElevated && scopeCookie !== SCOPE_ALL) {
+  if (isElevated && scopePref.kind === 'location') {
     const { data: scopeRow, error: scopeErr } = await supabaseService
       .from('locations')
       .select('id, location_id')
-      .eq('id', scopeCookie)
+      .eq('id', scopePref.uuid)
       .maybeSingle()
     if (scopeErr) {
-      // Never fail the page over a scope hint — fall through to 'all'.
-      console.error(`[hub-page] scope validation failed for ${scopeCookie}: ${scopeErr.message} — falling back to all-locations`)
+      // Never fail the page over a scope hint.
+      console.error(`[hub-page] scope validation failed for ${scopePref.uuid}: ${scopeErr.message}`)
     } else if (scopeRow) {
       scopeValidated = { id: (scopeRow as any).id, slug: (scopeRow as any).location_id ?? null }
     } else {
-      console.warn(`[hub-page] scope cookie named an unknown location (${scopeCookie}) for ${hubUser.email} — falling back to all-locations`)
+      console.warn(`[hub-page] scope cookie named an unknown location (${scopePref.uuid}) for ${hubUser.email} — falling back to the default location`)
     }
   }
 
-  // The scope the COOKIE alone asks for, before any deep-link override. Only
-  // used to decide whether a deep-linked lead is already in scope; the single
-  // authoritative scope is `scope` below.
-  const scope0LocationUuid = isElevated && scopeValidated ? scopeValidated.id : null
+  // ── First-login default (Fix 2, Phase 3) ───────────────────────────────────
+  // Phases 1–2 only paid off once a location was MANUALLY picked; a fresh
+  // elevated login still loaded the whole tenant. This picks a real location
+  // instead — the largest ACTIVE one.
+  //
+  // ⚠️ 'All Locations' MUST REMAIN REACHABLE, and this is the edge that would
+  // break it. The picker writes the literal 'all' sentinel when the user
+  // chooses All Locations; if that were treated as "no preference" the default
+  // would immediately override the choice and the option would be
+  // unselectable. Hence `scopePref.kind === 'unset'` — an EXPLICIT 'all' is a
+  // preference and is honored, only an absent/unparseable cookie is not.
+  //
+  // Cost: one locations read plus one bounded, PARALLEL head:true count per
+  // active location (8 today; 650ms measured end to end). It runs only when
+  // there is no usable preference — and the client's reconcile effect writes
+  // the cookie immediately after this render, so in practice it is once per
+  // browser, not once per page load. A browser that cannot persist cookies
+  // pays it every load, which is still far cheaper than the whole tenant.
+  //
+  // Any failure — no active locations, every count zero, a query error —
+  // returns null and the scope degrades to 'all', i.e. today's behavior.
+  //
+  // `kind !== 'all'` rather than `kind === 'unset'`: a cookie naming a location
+  // that no longer exists ALSO wants the default. That user had picked a
+  // location; the honest recovery is another real one, not the full-tenant
+  // load they were never asking for. Only an EXPLICIT All Locations is exempt.
+  let scopeFallback: { id: string; slug: string | null } | null = null
+  const wantsDefault = isElevated && !scopeValidated && scopePref.kind !== 'all'
+  if (wantsDefault) {
+    const { data: activeLocs, error: activeErr } = await supabaseService
+      .from('locations')
+      .select('id, location_id, name')
+      // lifecycle_status, NOT is_active — the latter is true for 12 rows
+      // including loc_other (verified 2026-07-23).
+      .eq('lifecycle_status', ACTIVE_LIFECYCLE)
+      .neq('location_id', LOC_OTHER_SLUG)
+
+    if (activeErr) {
+      console.error(`[hub-page] default-scope location list failed: ${activeErr.message} — falling back to all-locations`)
+    } else if (activeLocs && activeLocs.length > 0) {
+      const counted = await Promise.all(
+        (activeLocs as any[]).map(async (l) => {
+          const { count, error } = await supabaseService
+            .from('leads')
+            .select('id', { count: 'exact', head: true })
+            .eq('location_uuid', l.id)
+            // Mirrors the main leads query, so "largest" means largest by the
+            // rows this page would actually load.
+            .not('is_junk', 'is', true)
+          if (error) console.error(`[hub-page] default-scope count failed for ${l.location_id}: ${error.message}`)
+          return { id: l.id, slug: l.location_id ?? null, leadCount: count ?? 0 }
+        })
+      )
+      scopeFallback = pickDefaultScopeLocation(counted)
+      if (!scopeFallback) {
+        console.warn('[hub-page] no usable default location (no active location has leads) — falling back to all-locations')
+      }
+    } else {
+      console.warn('[hub-page] no active locations to default into — falling back to all-locations')
+    }
+  }
+
+  // The scope in force BEFORE any deep-link override — cookie first, then the
+  // first-login default.
+  //
+  // ⚠️ ORDER IS LOAD-BEARING. The deep-link check below only runs when this is
+  // set, so the default must be resolved FIRST. Resolve it after, and a cold
+  // load of /clients/<a lead at another location> would skip the override,
+  // apply the default, fail to find the lead, and bounce to notfound — exactly
+  // the bug Phase 2 fixed, reintroduced for every first-time deep link.
+  const scope0LocationUuid = isElevated ? (scopeValidated?.id ?? scopeFallback?.id ?? null) : null
 
   // ── Deep-link scope override (Fix 2, Phase 2) ──────────────────────────────
   // /clients/<id> names ONE record — almost always from a lead-notification
@@ -470,6 +534,7 @@ export default async function HubPage({
     hubUserLocationId: hubUser.location_id,
     validated: scopeValidated,
     deepLink: deepLinkScope,
+    fallback: scopeFallback,
   })
 
   // THE single filter value every `location_uuid` query below uses. For a
@@ -481,9 +546,14 @@ export default async function HubPage({
 
   // Child tables are filtered on their OWN location column, which needs BOTH
   // the uuid and the slug (two vocabularies — see lib/hub-scope.ts). Only an
-  // elevated PICKED scope takes that path — 'cookie' (the switcher) or
-  // 'deep-link' (Phase 2), both of which carry a slug. Everyone else keeps the
-  // lead-id paths they use today, so `childScopeLocation` stays null for them.
+  // elevated scope that names ONE location takes that path — 'cookie' (the
+  // switcher), 'deep-link' (Phase 2) or 'default' (Phase 3), all of which
+  // carry a slug. Everyone else keeps the lead-id paths they use today, so
+  // `childScopeLocation` stays null for them.
+  //
+  // isElevatedPickedScope() is the single gate: a source missing from it would
+  // still filter leads to one location but fall back to chunking that
+  // location's lead ids 200 at a time — slower than the whole-tenant read.
   const childScopeLocation =
     isElevatedPickedScope(scope) && scope.locationUuid
       ? { uuid: scope.locationUuid, slug: scope.locationSlug }
@@ -493,6 +563,13 @@ export default async function HubPage({
   // If the server scopes to location A and the client still filters on 'all'
   // it merely renders the scoped set (harmless), but if it filters on
   // location B it filters a scoped array down to EMPTY.
+  //
+  // Derived from `scope`, so it follows every source for free — including the
+  // Phase 3 default, which is the one nobody explicitly asked for and would
+  // therefore be easiest to forget. It is also what makes the default VISIBLE:
+  // the sidebar's location label and the picker's checkmark both read
+  // locFilter, so a first login lands showing the location it chose rather
+  // than silently hiding the other 53.
   const initialLocFilter = isElevated
     ? (scope.locationUuid || 'all')
     : hubUser.location_id || 'all'

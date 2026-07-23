@@ -512,11 +512,18 @@ describe('_hub-page wiring — scope', () => {
   })
 
   it('the cookie is validated against the locations table before it can filter', () => {
-    expect(src).toContain(`normalizeScopeCookie`)
+    // Phase 3 replaced normalizeScopeCookie here with readScopePreference,
+    // which keeps "no cookie" and "the user explicitly chose All Locations"
+    // distinct — without that distinction the Phase 3 default would override
+    // an explicit All Locations choice and make the option unselectable.
+    // normalizeScopeCookie still exists and is now DEFINED in terms of
+    // readScopePreference, so the two readers cannot drift (pinned in
+    // lib/beta-hub-scope-phase3.test.ts).
+    expect(src).toContain(`readScopePreference`)
     expect(src).toContain(`.from('locations')`)
-    expect(src).toContain(`.eq('id', scopeCookie)`)
+    expect(src).toContain(`.eq('id', scopePref.uuid)`)
     // Elevated-only lookup — a franchise user's cookie is never even read back.
-    expect(src).toContain(`if (isElevated && scopeCookie !== SCOPE_ALL)`)
+    expect(src).toContain(`if (isElevated && scopePref.kind === 'location')`)
   })
 
   it('initialLocFilter follows the server scope so the client cannot filter to empty', () => {

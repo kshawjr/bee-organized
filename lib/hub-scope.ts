@@ -55,14 +55,45 @@ export function scopeCookieString(value: string): string {
   return `${SCOPE_COOKIE_NAME}=${v}; path=/; max-age=${SCOPE_COOKIE_MAX_AGE}; samesite=lax`
 }
 
+// What the cookie is actually SAYING. Phase 3 needs a distinction Phase 1 could
+// collapse: "no preference recorded" vs "the user explicitly chose All
+// Locations". Both used to normalize to SCOPE_ALL, which was fine when 'all'
+// was the default — but once a real location is the default, treating an
+// explicit 'all' as "no preference" would silently override the user's choice
+// and make All Locations unselectable. That is the single sharpest edge in
+// this phase.
+//
+//   unset    — absent, empty, or unparseable. No preference → a default may
+//              apply. Garbage lands here deliberately: a forged value carries
+//              no preference, and the result (one location) is strictly less
+//              exposure than the full tenant, never more.
+//   all      — the literal sentinel, written only by the picker's "All
+//              Locations" row. An explicit choice; honor it.
+//   location — a well-formed uuid. An explicit choice, still to be validated
+//              against the locations table before it can filter anything.
+export type ScopePreference =
+  | { kind: 'unset' }
+  | { kind: 'all' }
+  | { kind: 'location'; uuid: string }
+
+export function readScopePreference(raw: string | null | undefined): ScopePreference {
+  if (!raw) return { kind: 'unset' }
+  const trimmed = raw.trim()
+  if (!trimmed) return { kind: 'unset' }
+  if (trimmed === SCOPE_ALL) return { kind: 'all' }
+  if (isUuid(trimmed)) return { kind: 'location', uuid: trimmed }
+  return { kind: 'unset' }
+}
+
 // Normalize a raw cookie value to either a UUID or SCOPE_ALL. Everything that
 // isn't a well-formed UUID — absent, '', 'all', 'undefined', an injection
 // attempt, a slug — collapses to SCOPE_ALL. This runs BEFORE the DB check; it
 // exists so a forged value can never reach a query as a filter.
+//
+// Expressed in terms of readScopePreference so the two readers cannot drift.
 export function normalizeScopeCookie(raw: string | null | undefined): string {
-  if (!raw) return SCOPE_ALL
-  const trimmed = raw.trim()
-  return isUuid(trimmed) ? trimmed : SCOPE_ALL
+  const pref = readScopePreference(raw)
+  return pref.kind === 'location' ? pref.uuid : SCOPE_ALL
 }
 
 export type HubScope = {
@@ -76,16 +107,26 @@ export type HubScope = {
   locationSlug: string | null
   // How this scope was arrived at. Purely for logging/assertions; nothing
   // branches on it in a query except the child-scope gate, which admits the
-  // two ELEVATED sources ('cookie' and 'deep-link') and no others.
-  source: 'own-location' | 'cookie' | 'deep-link' | 'all'
+  // ELEVATED location sources and no others.
+  source: 'own-location' | 'cookie' | 'deep-link' | 'default' | 'all'
 }
 
-// True for the scopes an elevated user arrived at by choosing a location —
-// the only ones that carry a slug and may therefore take the location-filtered
-// child-table path. A franchise user's 'own-location' scope is deliberately
-// excluded: Phase 1's contract is that their load is untouched.
+// The elevated sources that name ONE location: the switcher ('cookie'), a
+// /clients/<id> link to a lead elsewhere ('deep-link'), and the first-login
+// fallback ('default'). These are the scopes that carry a slug and may take
+// the location-filtered child-table path.
+//
+// ⚠️ Every new elevated location source MUST be added here. Miss one and that
+// load still filters leads to a single location but falls back to chunking its
+// lead ids 200 at a time — 17 chunks × 9 tables for Kansas City, SLOWER than
+// the whole-tenant read it replaced. The failure is a silent perf inversion,
+// not an error, which is exactly why this is one predicate rather than an
+// inline disjunction repeated at the call site.
+//
+// A franchise user's 'own-location' scope is deliberately excluded: Phase 1's
+// contract is that their load is untouched.
 export function isElevatedPickedScope(scope: HubScope): boolean {
-  return scope.source === 'cookie' || scope.source === 'deep-link'
+  return scope.source === 'cookie' || scope.source === 'deep-link' || scope.source === 'default'
 }
 
 // Resolve the effective scope for a request.
@@ -105,24 +146,33 @@ export function isElevatedPickedScope(scope: HubScope): boolean {
 // pre-Phase-1 code used (`!isElevated && hubUser.location_id`) and is checked
 // FIRST, so neither the cookie nor a deep link can move a franchise user off
 // their own location. They cannot escape their fence by crafting either one.
+// `fallback` is the first-login default (Fix 2, Phase 3) — the location an
+// elevated user with NO recorded preference lands on instead of the whole
+// tenant. It is the LOWEST-priority location source: a deep link and the
+// cookie both beat it, and the caller must not even compute it when the user
+// explicitly chose All Locations.
 export function resolveHubScope(args: {
   isElevated: boolean
   hubUserLocationId: string | null | undefined
   validated: { id: string; slug: string | null } | null
   deepLink?: { id: string; slug: string | null } | null
+  fallback?: { id: string; slug: string | null } | null
 }): HubScope {
-  const { isElevated, hubUserLocationId, validated, deepLink } = args
+  const { isElevated, hubUserLocationId, validated, deepLink, fallback } = args
 
   if (!isElevated) {
-    // Franchise/manager/lite: hard-fenced to their own location, cookie AND
-    // deep link ignored. location_id NULL (rare, and true for Kevin's own
-    // super_admin row) keeps the historical "no filter" behavior rather than
-    // inventing a scope.
+    // Franchise/manager/lite: hard-fenced to their own location, cookie, deep
+    // link AND default all ignored. location_id NULL (rare, and true for
+    // Kevin's own super_admin row) keeps the historical "no filter" behavior
+    // rather than inventing a scope.
     return hubUserLocationId
       ? { locationUuid: hubUserLocationId, locationSlug: null, source: 'own-location' }
       : { locationUuid: null, locationSlug: null, source: 'all' }
   }
 
+  // Precedence, highest first. Each step is an increasingly weak statement of
+  // what the user wants: this exact record > the location I last chose > a
+  // sensible starting point.
   if (deepLink && isUuid(deepLink.id)) {
     return { locationUuid: deepLink.id, locationSlug: deepLink.slug ?? null, source: 'deep-link' }
   }
@@ -131,9 +181,52 @@ export function resolveHubScope(args: {
     return { locationUuid: validated.id, locationSlug: validated.slug ?? null, source: 'cookie' }
   }
 
-  // Elevated, no usable selection → 'all' → today's behavior, unchanged.
+  if (fallback && isUuid(fallback.id)) {
+    return { locationUuid: fallback.id, locationSlug: fallback.slug ?? null, source: 'default' }
+  }
+
+  // Elevated with no usable location at all → 'all' → today's behavior. Also
+  // where an EXPLICIT All Locations choice lands, because the caller passes no
+  // fallback in that case.
   return { locationUuid: null, locationSlug: null, source: 'all' }
 }
+
+// Pick the first-login default from counted candidates (Fix 2, Phase 3).
+//
+// "Largest active location": most non-junk leads wins. Rationale — the default
+// should be somewhere there is actually work to look at, and for this tenant
+// one location is 47% of it. Cheaper proxies were measured and rejected:
+// ordering by `activated_at` picks Palm Beach (438 leads) and puts Kansas City
+// (3,306) LAST, because KC was migrated most recently. An almost-inverted
+// answer is worse than a bounded count.
+//
+// PURE: the caller does the counting. Kept here so the tie-break and the
+// guards are testable without a database.
+export function pickDefaultScopeLocation(
+  candidates: Array<{ id: string; slug: string | null; leadCount: number }>,
+): { id: string; slug: string | null } | null {
+  const usable = (candidates || []).filter(c =>
+    c && isUuid(c.id) &&
+    // The unrouted holding pen must never be a landing place. It is excluded
+    // by the caller's lifecycle_status='active' filter today, but locations
+    // .is_active is true for it — so an author reaching for the other "active"
+    // column would sail straight past that filter. Belt and braces.
+    c.slug !== LOC_OTHER_SLUG &&
+    Number.isFinite(c.leadCount) && c.leadCount > 0
+  )
+  if (usable.length === 0) return null
+
+  // Count desc, then id asc — a total order, so the default is STABLE across
+  // requests. Two locations tied on count must not alternate between loads.
+  usable.sort((a, b) => (b.leadCount - a.leadCount) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  return { id: usable[0].id, slug: usable[0].slug ?? null }
+}
+
+// lifecycle_status value that means "launched and working leads". NOT
+// locations.is_active, which is true for 12 rows including loc_other — see
+// pickDefaultScopeLocation. Verified against prod 2026-07-23: 8 active, 46
+// onboarding.
+export const ACTIVE_LIFECYCLE = 'active'
 
 // The holding-pen location every unrouted global-form lead lands in. Corp/admin
 // route these to a real location; it is never a transfer TARGET (see
