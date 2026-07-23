@@ -140,17 +140,18 @@ const openReferralFrameC = async (people: any[]) => {
 }
 
 describe('NewClientSheet — referral picker', () => {
-  it("Source='Referral' opens the picker with three populated sections", async () => {
+  it("Source='Referral' opens the picker with the merged Network section + Clients (Phase 2)", async () => {
     const sarah = person()
     const { host, unmount } = await openReferralFrameC([sarah])
     expect(host.querySelector('input[aria-label="Search referrers"]')).toBeTruthy()
     const text = host.textContent || ''
-    // Section heads + one row from each universe.
-    expect(text).toContain('Partners')
-    expect(text).toContain('Contacts')
+    // ONE merged Network section (partner + legacy contact rows together)
+    // + the match-only Clients section. The type split is gone.
+    expect(text).toContain('Network')
     expect(text).toContain('Clients')
+    expect(text).not.toContain('Partners')
     expect(text).toContain('Karen Partner')
-    expect(text).toContain('Carl Contact')
+    expect(text).toContain('Carl Contact')  // legacy type='contact' — same pool
     expect(text).toContain('Sarah Mitchell')
     await unmount()
   })
@@ -184,10 +185,10 @@ describe('NewClientSheet — referral picker', () => {
     await unmount()
   })
 
-  it('inline-creates a PARTNER: POST /api/partners type=partner, auto-selected as kind=partner', async () => {
+  it('inline-creates a NETWORK row: ONE create door, POST type=partner, auto-selected as kind=partner', async () => {
     const { host, unmount } = await openReferralFrameC([person()])
     await type(host.querySelector('input[aria-label="Search referrers"]')!, 'New Pro')
-    await click(buttonContaining(host, 'as partner')!)
+    await click(buttonContaining(host, 'to your network')!)
     expect(partnerPosts).toEqual([{ name: 'New Pro', type: 'partner', location_id: 'loc-uuid-1' }])
     expect(host.textContent).toContain('New Pro') // the chip
     await click(buttonByText(host, 'Create — opens card')!)
@@ -198,24 +199,12 @@ describe('NewClientSheet — referral picker', () => {
     await unmount()
   })
 
-  it("inline-creates a CONTACT: POST type=contact but STILL kind='partner' (two-value enum)", async () => {
-    const { host, unmount } = await openReferralFrameC([person()])
-    await type(host.querySelector('input[aria-label="Search referrers"]')!, 'New Neighbor')
-    await click(buttonContaining(host, 'as contact')!)
-    expect(partnerPosts).toEqual([{ name: 'New Neighbor', type: 'contact', location_id: 'loc-uuid-1' }])
-    await click(buttonByText(host, 'Create — opens card')!)
-    expect(createdBodies[0]).toMatchObject({
-      referred_by_kind: 'partner', // never a 'contact' kind
-      referred_by_id: 'pt-new-1',
-    })
-    await unmount()
-  })
-
-  it('Clients section is MATCH-ONLY: exactly two create rows, none for clients', async () => {
+  it('Clients section is MATCH-ONLY: exactly one create row (network), none for clients', async () => {
     const { host, unmount } = await openReferralFrameC([person()])
     await type(host.querySelector('input[aria-label="Search referrers"]')!, 'Somebody')
-    const createRows = [...host.querySelectorAll('button')].filter(b => (b.textContent || '').includes('Create “Somebody”'))
-    expect(createRows).toHaveLength(2)
+    const createRows = [...host.querySelectorAll('button')].filter(b => (b.textContent || '').includes('“Somebody”'))
+    expect(createRows).toHaveLength(1)
+    expect(createRows[0].textContent).toContain('to your network')
     expect(createRows.map(b => b.textContent).join(' ')).not.toContain('client')
     await unmount()
   })
@@ -411,13 +400,13 @@ describe('ClientProfile — referrer add/edit/clear on an existing lead', () => 
     await unmount()
   })
 
-  it("inline-create works from the profile too: contact → POST /api/partners then PATCH kind='partner'", async () => {
+  it("inline-create works from the profile too: one network door → POST /api/partners then PATCH kind='partner'", async () => {
     const { host, unmount } = await mountProfile({ source: 'webform' })
     await click(host.querySelector('button[aria-label="Add referrer"]')!)
     await flush()
     await type(host.querySelector('input[aria-label="Search referrers"]')!, 'New Neighbor')
-    await click(buttonContaining(host, 'as contact')!)
-    expect(partnerPosts).toEqual([{ name: 'New Neighbor', type: 'contact', location_id: 'loc-uuid-1' }])
+    await click(buttonContaining(host, 'to your network')!)
+    expect(partnerPosts).toEqual([{ name: 'New Neighbor', type: 'partner', location_id: 'loc-uuid-1' }])
     expect(patchBodies).toEqual([{ referred_by_kind: 'partner', referred_by_id: 'pt-new-1', source: 'Referral' }])
     expect(host.textContent).toContain('Referred by New Neighbor')
     await unmount()
@@ -448,7 +437,7 @@ describe('onPartnerCreated seam', () => {
     await selectValue(host.querySelector('select[aria-label="Source"]')!, 'Referral')
     await flush()
     await type(host.querySelector('input[aria-label="Search referrers"]')!, 'New Pro')
-    await click(buttonContaining(host, 'as partner')!)
+    await click(buttonContaining(host, 'to your network')!)
     expect(onPartnerCreated).toHaveBeenCalledTimes(1)
     // The POST response verbatim — id/type/locationId from the server.
     expect(onPartnerCreated.mock.calls[0][0]).toMatchObject({
@@ -469,9 +458,9 @@ describe('onPartnerCreated seam', () => {
     await flush()
     partnerPostFail = true
     await type(host.querySelector('input[aria-label="Search referrers"]')!, 'Doomed')
-    await click(buttonContaining(host, 'as contact')!)
+    await click(buttonContaining(host, 'to your network')!)
     expect(onPartnerCreated).not.toHaveBeenCalled() // no phantom rows on failure
-    expect(setToast).toHaveBeenCalledWith(expect.objectContaining({ kind: 'error', msg: expect.stringContaining('contact') }))
+    expect(setToast).toHaveBeenCalledWith(expect.objectContaining({ kind: 'error', msg: expect.stringContaining('partner') }))
     expect(host.textContent).toContain('Create failed')
     await unmount()
   })
@@ -502,18 +491,17 @@ describe('mergePartnerRow', () => {
     expect(mergePartnerRow(existing, null)).toBe(existing)
   })
 
-  it("lands in the correct Classic tab pool: type 'partner' → Partners, 'contact' → Contacts (PartnersScreen's exact filters)", () => {
+  it("lands in the ONE merged Network pool — the partner/contact type split is gone (Phase 2)", () => {
     const merged = mergePartnerRow(
       mergePartnerRow(existing, { id: 'pt-new-1', name: 'New Pro', type: 'partner', locationId: 'loc-uuid-1' }),
       { id: 'ct-new-1', name: 'New Neighbor', type: 'contact', locationId: 'loc-uuid-1' },
     )
-    // PartnersScreen: locFilter scoping + isDeleted + the type split.
+    // The Network list's exact scoping: locFilter + isDeleted, NO type
+    // filter — a legacy 'contact' row and a 'partner' row sit in the same
+    // pool (both store referred_by_kind='partner' when picked).
     const locFilter = 'loc-uuid-1'
-    const allPartners = (locFilter === 'all' ? merged : merged.filter((p: any) => p.locationId === locFilter)).filter((p: any) => !p.isDeleted)
-    const partnerPool = allPartners.filter((p: any) => p.type !== 'contact')
-    const contactPool = allPartners.filter((p: any) => p.type === 'contact')
-    expect(partnerPool.map((p: any) => p.name)).toEqual(['New Pro', 'Karen Partner'])
-    expect(contactPool.map((p: any) => p.name)).toEqual(['New Neighbor'])
+    const networkPool = (locFilter === 'all' ? merged : merged.filter((p: any) => p.locationId === locFilter)).filter((p: any) => !p.isDeleted)
+    expect(networkPool.map((p: any) => p.name)).toEqual(['New Neighbor', 'New Pro', 'Karen Partner'])
     // And a location-scoped view elsewhere hides it — correct scoping.
     const otherLoc = merged.filter((p: any) => p.locationId === 'loc-uuid-2')
     expect(otherLoc).toEqual([])

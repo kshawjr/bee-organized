@@ -9,11 +9,15 @@
 // sub-records. Soft-delete is `deleted_at` in the DB but the UI reads
 // `isDeleted` (boolean) + `deletedAt`, so we map both directions here.
 
+// last_contacted_at exists since migrations/network_phase1.sql (verified
+// applied 2026-07-23) — a timestamptz cache maintained ONLY by
+// lib/touchpoints.ts on partner reach_out inserts. Read-only here: it is
+// deliberately absent from PARTNER_FIELD_MAP so no PATCH can hand-write it.
 export const PARTNER_COLS =
   'id, location_id, type, name, title, company, company_id, phone, email, website, ' +
   'stage, specialties, tier, tags, how_we_met, met_date, last_contact, is_customer, ' +
   'customer_lead_id, relationship, card_image, addresses, notes, next_steps, referrals, ' +
-  'activity, deleted_at, created_at, updated_at'
+  'activity, last_contacted_at, deleted_at, created_at, updated_at'
 
 export const COMPANY_COLS =
   'id, location_id, name, industry, phone, email, website, addresses, members, ' +
@@ -49,6 +53,7 @@ export function mapPartnerRow(row: any) {
     nextSteps: row.next_steps || [],
     referrals: row.referrals || [],
     activity: row.activity || [],
+    lastContactedAt: row.last_contacted_at || null,
     isDeleted: !!row.deleted_at,
     deletedAt: row.deleted_at || null,
   }

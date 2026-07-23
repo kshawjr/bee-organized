@@ -54,8 +54,13 @@ describe('B) Partner Stages read the admin getter, not the const', () => {
   it('partnerStageConf resolves through getPartnerStages()', () => {
     expect(SRC).toMatch(/function partnerStageConf\(key\)[^\n]*getPartnerStages\(\)/)
   })
-  it('the stage popup + filter chips call getPartnerStages()', () => {
-    expect((UI.match(/getPartnerStages\(\)\.map/g) || []).length).toBeGreaterThanOrEqual(2)
+  it('the stage popup calls getPartnerStages()', () => {
+    // Was ≥2 (popup + the Classic filter-drawer chips) — the Classic list
+    // and its filter drawer were RETIRED by the Network rebuild (Phase 2);
+    // the stage popup in PartnerPanel is the surviving Classic call site.
+    // The new NetworkScreen filter styles stages from tokens, not this
+    // Classic picklist.
+    expect((UI.match(/getPartnerStages\(\)\.map/g) || []).length).toBeGreaterThanOrEqual(1)
   })
 })
 

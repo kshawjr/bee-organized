@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 //
-// Saved views on the Contacts/Network tab PERSIST (Network Phase 1 bug
-// fix). They were plain useState — save a view, reload, gone. Now they
-// live in localStorage via the shared SSR-safe useStoredState hook
-// (bee_network_saved_views: { views, activeViewId }).
+// Saved views on the Network tab PERSIST (Network Phase 1 bug fix; the
+// pills live in NetworkScreen since the Phase 2 rebuild, same
+// bee_network_saved_views store). They were plain useState — save a
+// view, reload, gone.
 //
 // Mount tests (per the allOverview lesson), not source pins:
 //   A) a stored view renders as a pill on a FRESH mount — the reload case
@@ -23,6 +23,13 @@ vi.mock('next/navigation', () => ({
 }))
 
 import { PartnersScreen } from '@/components/BeeHub'
+
+// NetworkScreen (mounted by PartnersScreen) fetches /api/network/summary
+// on mount — stub it so the effect resolves instead of throwing.
+const fetchMock = vi.fn(async () => ({
+  ok: true,
+  json: async () => ({ referrers: [], totals: { count: 0, converted: 0, revenue: 0 } }),
+}))
 
 // happy-dom v20 ships no localStorage — stub one so useStoredState's
 // hydration + write-through paths run for real (the established
@@ -70,6 +77,7 @@ const pillByText = (text: string) =>
 
 beforeEach(() => {
   vi.stubGlobal('localStorage', lsMock)
+  vi.stubGlobal('fetch', fetchMock)
   lsStore.clear()
 })
 afterEach(async () => {

@@ -34,6 +34,7 @@ import AddressAutofill from "@/components/hive/shared/AddressAutofill"
 // are pure leaves, no beta-board surface), imported statically like the
 // icons above. §8.5's dynamic rule guards the heavy board tree, not this.
 import SendToJobberModal from "@/components/hive/SendToJobberModal"
+import NetworkScreen from "@/components/hive/NetworkScreen"
 import AskBeeHubPanel from "@/components/hive/AskBeeHubPanel"
 // Pure presentational icon set (inline SVG, zero deps) — safe to import
 // statically like betaGate; it pulls no beta-chunk surface code with it.
@@ -14364,14 +14365,10 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
               </div>
               {/* Row 4: stage + tier + contact icons (horizontally scrollable) */}
               <div style={{ display:'flex', alignItems:'center', gap:'10px', padding:'4px 20px 8px', overflowX:'auto', WebkitOverflowScrolling:'touch', scrollbarWidth:'none', msOverflowStyle:'none' }}>
+                {/* Post-merge: no Convert to Partner — partner/contact is one
+                    pool now; the type value persists but drives no gate. */}
                 {partner.type==='contact' ? (
-                  <>
-                    <span style={{ fontSize:'12px', padding:'3px 9px', borderRadius:'20px', background:'rgba(168,201,196,0.15)', color:'#4a7a74', fontWeight:600, flexShrink:0 }}>👤 Contact{partner.relationship?` · ${partner.relationship}`:''}</span>
-                    <button onClick={()=>update({ type:'partner', stage:'New Contact', activity:[...partner.activity,{ type:'event', label:'Converted to Partner', ts:'Just now', user:'You' }] })}
-                      style={{ fontSize:'12px', padding:'3px 9px', borderRadius:'20px', background:'rgba(26,46,43,0.06)', color:'#1a2e2b', fontWeight:600, border:'1px solid rgba(26,46,43,0.15)', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>
-                      🤝 Convert to Partner
-                    </button>
-                  </>
+                  <span style={{ fontSize:'12px', padding:'3px 9px', borderRadius:'20px', background:'rgba(168,201,196,0.15)', color:'#4a7a74', fontWeight:600, flexShrink:0 }}>👤 {partner.relationship||'Network contact'}</span>
                 ) : (
                   <>
                     <button onClick={()=>setPopup('stage')} style={{ fontSize:'12px', padding:'3px 9px', borderRadius:'20px', background:s.bg, color:s.color, fontWeight:600, border:`1px solid ${s.color}30`, cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>{s.icon} {s.label}</button>
@@ -14416,16 +14413,11 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
                     </button>
                     <button onClick={()=>setPopup('editName')} style={{ background:'none', border:'none', cursor:'pointer', fontSize:'10px', color:'#c8d8d4', padding:0, fontFamily:'inherit' }}>✏️</button>
                   </div>
-                  {/* Stage + Tier - partners only; contacts get a Convert button */}
+                  {/* Stage + Tier - partners only. Post-merge: no Convert
+                      button — one pool, type persists but drives no gate. */}
                   <div style={{ display:'flex', gap:'6px', alignItems:'center', flexWrap:'wrap' }}>
                     {partner.type==='contact' ? (
-                      <>
-                        <span style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:'rgba(168,201,196,0.15)', color:'#4a7a74', fontWeight:600 }}>👤 Contact{partner.relationship?` · ${partner.relationship}`:''}</span>
-                        <button onClick={()=>update({ type:'partner', stage:'New Contact', activity:[...partner.activity,{ type:'event', label:'Converted to Partner', ts:'Just now', user:'You' }] })}
-                          style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:'rgba(26,46,43,0.06)', color:'#1a2e2b', fontWeight:600, border:'1px solid rgba(26,46,43,0.15)', cursor:'pointer', fontFamily:'inherit' }}>
-                          🤝 Convert to Partner
-                        </button>
-                      </>
+                      <span style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:'rgba(168,201,196,0.15)', color:'#4a7a74', fontWeight:600 }}>👤 {partner.relationship||'Network contact'}</span>
                     ) : (
                       <>
                         <button onClick={()=>setPopup('stage')} style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:s.bg, color:s.color, fontWeight:600, border:`1px solid ${s.color}30`, cursor:'pointer', fontFamily:'inherit' }}>{s.icon} {s.label}</button>
@@ -14924,20 +14916,26 @@ function PartnerPanel({ partner, onClose, onUpdate, onAddToHive, onDelete, peopl
 // must survive a remount). Not routed anywhere except App's nav.
 export function PartnersScreen({ onNavigate, partners, setPartners, companies=[], setCompanies=()=>{}, onAddToHive, locFilter='all', isElevated=false, people=ALL_PEOPLE, initialSelected=null, onInitialSelectedConsumed=()=>{}, readOnly=false }) {
   if (!partners) return null
-  // Writes go through the App-level CRM helpers (POST/PATCH/DELETE + state);
-  // the partners/companies props are App state and stay the read source.
+  // Phase 2: the Classic list is RETIRED — NetworkScreen (beta-chunk module,
+  // components/hive/NetworkScreen.jsx) renders the entire screen: what's-next
+  // strip, honest stats, specialty bands with MIXED person/company rows
+  // (approved Option C), search + filters + the persisted saved views. This
+  // host keeps only the record OVERLAYS (PartnerPanel, company detail, add /
+  // edit modals) until Phase 3 rebuilds the record itself. Writes still go
+  // through the App-level CRM helpers (PartnersContext / CompaniesContext).
+  // The partner/contact TYPE SPLIT is gone from the UI — one merged list;
+  // rows keep their `type` value in the DB but nothing renders on it here.
   const partnersApi  = useContext(PartnersContext)
   const companiesApi = useContext(CompaniesContext)
   const [selected, setSelected] = useState(initialSelected)
   React.useEffect(()=>{ if(initialSelected){ setSelected(initialSelected); onInitialSelectedConsumed() } },[initialSelected])
-  const [showAdd, setShowAdd] = useState(false)  // shows type picker
-  const [addType, setAddType] = useState(null)    // 'partner' | 'contact' | 'company'
-  const [companyModalPartner, setCompanyModalPartner] = useState(null) // partner being edited
+  const [showAdd, setShowAdd] = useState(false)  // add modal open
+  const [addType, setAddType] = useState(null)    // 'partner' | 'company' (post-merge: no separate 'contact' door)
+  const [companyModalPartner, setCompanyModalPartner] = useState(null) // partner whose company link is being edited
   const [companyModalQ, setCompanyModalQ]           = useState('')
   const [editingCompanyInfo, setEditingCompanyInfo] = useState(null) // company whose info is being edited
   const [editingPartnerInfo, setEditingPartnerInfo] = useState(null)
   const [viewingCard, setViewingCard]               = useState(null) // partner/contact whose card to show
-  const [partnerTab, setPartnerTab] = useState('partners') // 'partners' | 'contacts' | 'companies'
   const [selectedCompany, setSelectedCompany] = useState(null)
   // Hydration-safe viewport tracking for the company detail popup — see
   // PersonPanel comment for rationale. Drives the centered-popup (desktop)
@@ -14948,274 +14946,28 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
   const [companyDeleteConfirm, setCompanyDeleteConfirm] = useState(false) // company pending delete confirmation
   const [companyDeleteError, setCompanyDeleteError]     = useState(null)  // inline error if DELETE fails
   const [companyDeleting, setCompanyDeleting]           = useState(false) // delete request in flight
-  const [showFilters, setShowFilters] = useState(false)
-  const [stageFilter, setStageFilter] = useState('')
-  const [specFilter, setSpecFilter]   = useState('')
-  const [tierFilter, setTierFilter]   = useState('')
-  const [tagFilter, setTagFilter]     = useState('')
-  const [search, setSearch]           = useState('')
-  // Saved views PERSIST (they were plain useState and evaporated on reload).
-  // One stored object — views + the active id — via the shared SSR-safe hook
-  // (bee_hive_* pattern; hydrates after mount, write-through on change). The
-  // two setter shims keep every existing call site unchanged.
-  const [savedViewsStore, setSavedViewsStore] = useStoredState('bee_network_saved_views', { views: [], activeViewId: null })
-  const savedViews   = savedViewsStore.views
-  const activeViewId = savedViewsStore.activeViewId
-  const setSavedViews = (updater) => setSavedViewsStore(s => ({ ...s, views: typeof updater === 'function' ? updater(s.views) : updater }))
-  const setActiveViewId = (updater) => setSavedViewsStore(s => ({ ...s, activeViewId: typeof updater === 'function' ? updater(s.activeViewId) : updater }))
 
   const allPartners = (locFilter==='all' ? partners : partners.filter(p=>p.locationId===locFilter)).filter(p=>!p.isDeleted)
   const allCompanies = locFilter==='all' ? companies : companies.filter(c=>c.locationId===locFilter)
-  const partnerPool = allPartners.filter(p=>p.type!=='contact')
-  const contactPool = allPartners.filter(p=>p.type==='contact')
-  const activePool  = partnerTab==='contacts' ? contactPool : partnerPool
 
   function updatePartner(updated) { partnersApi?.updatePartner ? partnersApi.updatePartner(updated) : setPartners(p=>p.map(x=>x.id===updated.id?updated:x)); setSelected(updated) }
   async function addPartner(p) { return partnersApi?.addPartner ? partnersApi.addPartner(p) : setPartners(prev=>[p,...prev]) }
 
-  const filtered = activePool.filter(p => {
-    const q = search.toLowerCase()
-    const matchSearch = !search||p.name.toLowerCase().includes(q)||p.company.toLowerCase().includes(q)||p.email.toLowerCase().includes(q)
-    const matchStage = !stageFilter||p.type==='contact'||p.stage===stageFilter
-    const matchSpec  = !specFilter||p.specialties.includes(specFilter)
-    const matchTier  = !tierFilter||(p.tier||null)===tierFilter
-    const matchTag   = !tagFilter||(p.tags||[]).includes(tagFilter)
-    return matchSearch&&matchStage&&matchSpec&&matchTier&&matchTag
-  })
-
-  const totalReferrals = allPartners.reduce((s,p)=>s+(p.referrals||[]).length,0)
-  const totalRevenue   = allPartners.reduce((s,p)=>s+(p.referrals||[]).reduce((r,ref)=>r+ref.revenue,0),0)
-  const activeCount    = allPartners.filter(p=>p.stage==='Active Partner').length
-
-  // Tab-aware "+ Add" — infer entity type from the active tab, skip the type picker entirely.
-  const addCfg = partnerTab==='contacts'  ? { type:'contact', label:'+ Add Contact' }
-               : partnerTab==='companies' ? { type:'company', label:'+ Add Company' }
-               :                            { type:'partner', label:'+ Add Partner' }
-  const openAdd = () => { setAddType(addCfg.type); setShowAdd(true) }
+  const openAdd = (type) => { setAddType(type === 'company' ? 'company' : 'partner'); setShowAdd(true) }
 
   return (
     <>
       <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
-
-        {/* Header */}
-        <div style={{ background:'#1a2e2b', padding:'1.25rem 1.25rem 1.5rem', position:'relative', overflow:'hidden' }}>
-          <div style={{ position:'absolute', right:'-10px', top:'-10px', opacity:0.05, pointerEvents:'none' }}>
-            <svg width="100" height="100" viewBox="0 0 100 100">
-              {[[25,15],[50,15],[75,15],[12,42],[37,42],[62,42],[87,42],[25,68],[50,68],[75,68]].map(([x,y],i)=>(
-                <polygon key={i} points={`${x},${y-12} ${x+10},${y-6} ${x+10},${y+6} ${x},${y+12} ${x-10},${y+6} ${x-10},${y-6}`} fill="white" />
-              ))}
-            </svg>
-          </div>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
-            <div>
-              <h1 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'white', marginBottom:'2px' }}>
-                {partnerTab==='contacts'?'Contacts 👤':partnerTab==='companies'?'Companies 🏢':'Partners 🤝'}
-              </h1>
-              <p style={{ fontSize:'13px', color:'rgba(168,201,196,0.7)' }}>
-                {partnerTab==='contacts' ? `${contactPool.length} contacts` : partnerTab==='companies' ? `${allCompanies.length} companies` : `${partnerPool.length} partners · ${activeCount} active`}
-              </p>
-            </div>
-{!readOnly&&<>
-              {/* Desktop add button — tab-aware, opens the right modal directly */}
-              <button onClick={openAdd} style={{ padding:'8px 14px', background:'rgba(168,201,196,0.15)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:'white', cursor:'pointer' }} className="desktop-only">{addCfg.label}</button>
-              {/* Mobile FAB */}
-              <button onClick={openAdd} aria-label={addCfg.label} style={{ position:'fixed', bottom:'max(24px, calc(env(safe-area-inset-bottom) + 16px))', right:'16px', zIndex:500, width:'52px', height:'52px', borderRadius:'50%', background:'#1a2e2b', color:'white', border:'none', fontSize:'28px', lineHeight:1, cursor:'pointer', boxShadow:'0 4px 20px rgba(26,46,43,0.4)', display:'flex', alignItems:'center', justifyContent:'center' }} className="mobile-fab">+</button>
-            </>}
-          </div>
-
-          {/* Partners / Contacts / Companies toggle */}
-          <div style={{ display:'flex', background:'rgba(0,0,0,0.2)', borderRadius:'9px', padding:'3px', marginTop:'10px' }}>
-            {[['partners','Partners'],['contacts','Contacts'],['companies','Companies']].map(([v,label])=>(
-              <button key={v} onClick={()=>{ setPartnerTab(v); setSelectedCompany(null) }}
-                style={{ flex:1, padding:'7px', borderRadius:'7px', border:'none', cursor:'pointer', fontSize:'12px', fontFamily:'inherit', fontWeight:500, background:partnerTab===v?'rgba(168,201,196,0.2)':'transparent', color:partnerTab===v?'white':'rgba(168,201,196,0.5)', transition:'all 0.15s', whiteSpace:'nowrap' }}>
-                {label}{v==='contacts'&&contactPool.length>0?` (${contactPool.length})`:v==='companies'&&allCompanies.length>0?` (${allCompanies.length})`:v==='partners'&&partnerPool.length>0?` (${partnerPool.length})`:''}
-              </button>
-            ))}
-          </div>
-
-          {/* Stats - partners only */}
-          {partnerTab==='partners'&&<div style={{ display:'flex', gap:'8px', marginTop:'1rem' }}>
-            {[
-              { label:'Referrals',     value:totalReferrals },
-              { label:'Active',        value:activeCount    },
-              { label:'Revenue',       value:totalRevenue>0?`$${totalRevenue.toLocaleString()}`:'$0' },
-            ].map(st=>(
-              <div key={st.label} style={{ flex:1, padding:'10px 12px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.15)', borderRadius:'10px', textAlign:'center' }}>
-                <p style={{ fontSize:'18px', fontWeight:700, color:'white', fontFamily:'Georgia,serif', marginBottom:'1px' }}>{st.value}</p>
-                <p style={{ fontSize:'10px', color:'rgba(168,201,196,0.7)', fontWeight:500 }}>{st.label}</p>
-              </div>
-            ))}
-          </div>}
-        </div>
-
-        <div style={{ padding:'1rem 1.25rem', display:'grid', gap:'10px' }}>
-
-          {/* Saved views */}
-          <SavedViews
-            views={savedViews}
-            activeViewId={activeViewId}
-            hasActiveFilters={!![stageFilter,tierFilter,specFilter,tagFilter].find(Boolean)}
-            onApply={v=>{ setStageFilter(v.filters.stageFilter||''); setTierFilter(v.filters.tierFilter||''); setSpecFilter(v.filters.specFilter||''); setTagFilter(v.filters.tagFilter||''); setActiveViewId(v.id) }}
-            onDelete={id=>{ setSavedViews(p=>p.filter(v=>v.id!==id)); if(activeViewId===id) setActiveViewId(null) }}
-            onSave={name=>{ const id=`v${Date.now()}`; setSavedViews(p=>[...p,{ id, name, filters:{ stageFilter, tierFilter, specFilter, tagFilter } }]); setActiveViewId(id) }}
-          />
-          {/* Search + Filters - hidden in companies tab */}
-          {partnerTab!=='companies'&&<div style={{ display:'flex', gap:'8px' }}>
-            <input type="text"
-              placeholder={partnerTab==='contacts'?'Search contacts by name, company…':'Search partners by name, company…'}
-              value={search} onChange={e=>setSearch(e.target.value)}
-              style={{ flex:1, padding:'10px 14px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none', boxSizing:'border-box' }} />
-            {partnerTab==='partners'&&<button onClick={()=>setShowFilters(f=>!f)} style={{ display:'flex', alignItems:'center', gap:'6px', padding:'10px 14px', background:showFilters?'#1a2e2b':'white', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', fontSize:'13px', fontWeight:500, color:showFilters?'white':'#4a5e5a', flexShrink:0 }}>
-              <span>⚙️</span>
-              Filters
-              {[stageFilter,tierFilter,specFilter,tagFilter].filter(Boolean).length>0&&<span style={{ background:'#ef4444', color:'white', fontSize:'10px', fontWeight:700, padding:'1px 6px', borderRadius:'10px', marginLeft:'2px' }}>{[stageFilter,tierFilter,specFilter,tagFilter].filter(Boolean).length}</span>}
-            </button>}
-          </div>}
-
-          {/* Filter panel - partners only */}
-          {showFilters&&partnerTab==='partners'&&(
-            <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', padding:'16px', display:'grid', gap:'16px' }}>
-
-              {/* Stage - partners only */}
-              {partnerTab==='partners'&&<div>
-                <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>Stage</p>
-                <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
-                  {getPartnerStages().map(s=>{ const on=stageFilter===s.key; return(
-                    <button key={s.key} onClick={()=>setStageFilter(on?'':s.key)} style={{ padding:'5px 12px', borderRadius:'20px', cursor:'pointer', background:on?s.bg:'white', border:'1.5px solid '+(on?s.color+'50':'rgba(0,0,0,0.08)'), fontFamily:'inherit', fontSize:'12px', fontWeight:on?600:400, color:on?s.color:'#4a5e5a' }}>
-                      {s.icon} {s.label}
-                    </button>
-                  )})}
-                </div>
-              </div>}
-
-              {/* Tier */}
-              <div>
-                <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>Tier</p>
-                <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
-                  {getPartnerTiers().map(t=>{ const on=tierFilter===t.id; return(
-                    <button key={t.id} onClick={()=>setTierFilter(on?'':t.id)} style={{ padding:'5px 12px', borderRadius:'20px', cursor:'pointer', background:on?t.bg:'white', border:'1.5px solid '+(on?t.color+'50':'rgba(0,0,0,0.08)'), fontFamily:'inherit', fontSize:'12px', fontWeight:on?700:400, color:on?t.color:'#4a5e5a' }}>
-                      {t.label}
-                    </button>
-                  )})}
-                </div>
-              </div>
-
-              {/* Specialty */}
-              <div>
-                <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>Specialty</p>
-                <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
-                  {getSpecialties().map(s=>{ const on=specFilter===s.id; return(
-                    <button key={s.id} onClick={()=>setSpecFilter(on?'':s.id)} style={{ padding:'5px 12px', borderRadius:'20px', cursor:'pointer', background:on?s.bg:'white', border:'1.5px solid '+(on?s.color+'40':'rgba(0,0,0,0.08)'), fontFamily:'inherit', fontSize:'12px', fontWeight:on?600:400, color:on?s.color:'#4a5e5a' }}>
-                      {s.label}
-                    </button>
-                  )})}
-                </div>
-              </div>
-
-              {/* Tags */}
-              <div>
-                <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'8px' }}>Tags</p>
-                <div style={{ display:'flex', flexWrap:'wrap', gap:'6px' }}>
-                  {PARTNER_TAGS.map(t=>{ const on=tagFilter===t.id; return(
-                    <button key={t.id} onClick={()=>setTagFilter(on?'':t.id)} style={{ padding:'5px 12px', borderRadius:'20px', cursor:'pointer', background:on?t.bg:'white', border:'1.5px solid '+(on?t.color+'50':'rgba(0,0,0,0.08)'), fontFamily:'inherit', fontSize:'12px', fontWeight:on?600:400, color:on?t.color:'#4a5e5a' }}>
-                      {t.icon} {t.label}
-                    </button>
-                  )})}
-                </div>
-              </div>
-
-              {/* Clear all */}
-              {[stageFilter,tierFilter,specFilter,tagFilter].some(Boolean)&&(
-                <button onClick={()=>{ setStageFilter(''); setTierFilter(''); setSpecFilter(''); setTagFilter('') }} style={{ width:'100%', padding:'9px', background:'rgba(239,68,68,0.06)', border:'1.5px solid rgba(239,68,68,0.2)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#ef4444', cursor:'pointer' }}>
-                  Clear all filters ×
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Companies view */}
-          {partnerTab==='companies'&&(
-            <div style={{ display:'grid', gap:'8px' }}>
-              {/* Company detail now opens as a centered-popup overlay (desktop)
-                  / bottom-sheet (mobile) at screen root below. The list always
-                  renders here. */}
-                <>
-                  {allCompanies.length===0 ? (
-                    <div style={{ padding:'40px 20px', textAlign:'center', background:'white', borderRadius:'12px', border:'1px solid rgba(0,0,0,0.07)' }}>
-                      <p style={{ fontSize:'24px', marginBottom:'8px' }}>🏢</p>
-                      <p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b', marginBottom:'4px' }}>No companies yet</p>
-                      <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Add companies to group partners and contacts together</p>
-                    </div>
-                  ) : allCompanies.map(co=>{
-                    const linked = allPartners.filter(p=>p.companyId===co.id)
-                    const pCount = linked.filter(p=>p.type!=='contact').length
-                    const cCount = linked.filter(p=>p.type==='contact').length
-                    return (
-                      <button key={co.id} onClick={()=>setSelectedCompany(co)}
-                        style={{ display:'flex', alignItems:'center', gap:'12px', padding:'14px 16px', background:'white', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'12px', cursor:'pointer', fontFamily:'inherit', textAlign:'left', boxShadow:'0 1px 4px rgba(0,0,0,0.04)' }}>
-                        <div style={{ width:'44px', height:'44px', borderRadius:'10px', background:'linear-gradient(135deg,rgba(168,201,196,0.3),rgba(168,201,196,0.1))', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'20px', flexShrink:0 }}>🏢</div>
-                        <div style={{ flex:1, minWidth:0 }}>
-                          <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'2px' }}>{co.name}</p>
-                          <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'4px' }}>{co.industry}</p>
-                          <div style={{ display:'flex', gap:'6px' }}>
-                            {pCount>0&&<span style={{ fontSize:'10px', color:'#1a2e2b', background:'rgba(26,46,43,0.07)', padding:'2px 7px', borderRadius:'20px' }}>🤝 {pCount} partner{pCount!==1?'s':''}</span>}
-                            {cCount>0&&<span style={{ fontSize:'10px', color:'#4a7a74', background:'rgba(168,201,196,0.12)', padding:'2px 7px', borderRadius:'20px' }}>👤 {cCount} contact{cCount!==1?'s':''}</span>}
-                            {pCount===0&&cCount===0&&<span style={{ fontSize:'10px', color:'#c8d8d4' }}>No people linked</span>}
-                          </div>
-                        </div>
-                        <span style={{ fontSize:'16px', color:'#c8d8d4' }}>›</span>
-                      </button>
-                    )
-                  })}
-                </>
-            </div>
-          )}
-
-          {/* Partner / Contact cards */}
-          {partnerTab!=='companies'&&<div style={{ display:'grid', gap:'8px' }}>
-            {filtered.map(partner=>{
-              const s = partnerStageConf(partner.stage)
-              const isContact = partner.type==='contact'
-              return (
-                <div key={partner.id} onClick={()=>setSelected(partner)} style={{ background:'white', border:`1px solid ${isContact?'rgba(168,201,196,0.25)':'rgba(0,0,0,0.07)'}`, borderLeft:isContact?'3px solid #a8c9c4':undefined, borderRadius:'12px', padding:'14px 16px', cursor:'pointer', boxShadow:'0 1px 4px rgba(0,0,0,0.04)' }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:'12px' }}>
-                    <Avatar name={partner.name} size={40} />
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'3px', flexWrap:'wrap' }}>
-                        <span style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b' }}>{partner.name}</span>
-                        {isContact
-                          ? <span style={{ fontSize:'11px', padding:'2px 8px', borderRadius:'20px', background:'rgba(168,201,196,0.15)', color:'#4a7a74', fontWeight:600 }}>👤 Contact</span>
-                          : <><span style={{ fontSize:'11px', padding:'2px 8px', borderRadius:'20px', background:s.bg, color:s.color, fontWeight:600 }}>{s.icon} {s.label}</span>{(partner.referrals||[]).length>0&&<span style={{ fontSize:'10px', color:'#10b981', background:'rgba(16,185,129,0.1)', padding:'2px 6px', borderRadius:'20px' }}>🤝 {(partner.referrals||[]).length}</span>}</>
-                        }
-                        {partner.isCustomer&&<span style={{ fontSize:'10px', color:'#d4a046', background:'rgba(212,160,70,0.1)', padding:'2px 6px', borderRadius:'20px' }}>👤</span>}
-                      </div>
-                      <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'4px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{partner.title}{partner.company?` · ${partner.company}`:''}</p>
-                      <div style={{ display:'flex', gap:'5px', flexWrap:'wrap', alignItems:'center' }}>
-                        {isContact&&partner.relationship&&<span style={{ fontSize:'10px', color:'#4a7a74', background:'rgba(168,201,196,0.12)', padding:'2px 7px', borderRadius:'20px' }}>{partner.relationship}</span>}
-                        {!isContact&&partner.specialties.map(id=>{ const sp=specialtyConf(id); return sp?<span key={id} style={{ fontSize:'10px', color:sp.color, background:sp.bg, padding:'2px 7px', borderRadius:'20px' }}>{sp.label}</span>:null })}
-                        {(partner.tags||[]).slice(0,1).map(tid=>{ const t=PARTNER_TAGS.find(x=>x.id===tid); return t?<span key={tid} style={{ fontSize:'10px', color:t.color, background:t.bg, padding:'2px 7px', borderRadius:'20px' }}>{t.label}</span>:null })}
-                        <span style={{ fontSize:'11px', color:'#b0c0bc' }}>via {partner.howWeMet}</span>
-                      </div>
-                      {isElevated&&partner.locationId&&(()=>{ const loc=ALL_LOCATIONS.find(l=>l.id===partner.locationId); return loc?<p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'3px' }}>📍 {loc.name}</p>:null })()}
-                    </div>
-                    <span style={{ fontSize:'11px', color:'#c8d8d4', flexShrink:0 }}>{partner.lastContact}</span>
-                  </div>
-                </div>
-              )
-            })}
-            {filtered.length===0&&(
-              <div style={{ padding:'3rem 1.5rem', textAlign:'center' }}>
-                <p style={{ fontSize:'32px', marginBottom:'10px' }}>{partnerTab==='contacts'?'👤':'🤝'}</p>
-                <p style={{ fontSize:'15px', fontWeight:600, color:'#1a2e2b', marginBottom:'6px' }}>
-                  {search ? `No matching ${partnerTab}` : `No ${partnerTab} yet`}
-                </p>
-                <p style={{ fontSize:'13px', color:'#8a9e9a' }}>
-                  {search ? `No results for "${search}"` : partnerTab==='contacts'?'Add contacts from your network - neighbors, realtors, past clients':'Add your first partner to start tracking referrals'}
-                </p>
-              </div>
-            )}
-          </div>}
-        </div>
+        <NetworkScreen
+          partners={partners}
+          companies={companies}
+          locFilter={locFilter}
+          specialties={getSpecialties().map(s=>({ id:s.id, label:s.label }))}
+          readOnly={readOnly}
+          onOpenPerson={(p)=>setSelected(p)}
+          onOpenCompany={(c)=>setSelectedCompany(c)}
+          onAdd={openAdd}
+        />
       </div>
 
       {selected&&<PartnerPanel partner={selected} people={people} companies={allCompanies} onCreateCompany={co=>companiesApi?.addCompany?.(co)} onClose={()=>setSelected(null)} onUpdate={updatePartner} onDelete={(id)=>{ partnersApi?.deletePartner ? partnersApi.deletePartner(id) : setPartners(prev=>prev.map(p=>p.id===id?{...p,isDeleted:true,deletedAt:new Date().toISOString()}:p)); setSelected(null) }} onAddToHive={(p,mode)=>{ onAddToHive&&onAddToHive(p,mode); if(mode==='view'||!mode) setSelected(null) }} onOpenCompanyModal={(p)=>{ setCompanyModalPartner(p); setCompanyModalQ(p.company||'') }} onOpenInfoEdit={(p)=>setEditingPartnerInfo(p)} onViewCard={(p)=>setViewingCard(p)} />}
@@ -15263,7 +15015,7 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
                       {linked.map(p=>{
                         const isC = p.type==='contact'
                         return (
-                          <button key={p.id} onClick={()=>{ setSelectedCompany(null); setSelected(p); setPartnerTab(isC?'contacts':'partners') }}
+                          <button key={p.id} onClick={()=>{ setSelectedCompany(null); setSelected(p) }}
                             style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 12px', background:isC?'rgba(168,201,196,0.05)':'white', border:`1px solid ${isC?'rgba(168,201,196,0.2)':'rgba(0,0,0,0.07)'}`, borderLeft:isC?'3px solid #a8c9c4':undefined, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
                             <Avatar name={p.name} size={34} />
                             <div style={{ flex:1, minWidth:0 }}>
@@ -15430,9 +15182,10 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
           </div>
         </div>
       )}
-      {/* Tab-aware add modals — type is inferred from the active tab; no picker step. */}
+      {/* Add modals — post-merge there are two doors: person (partners row,
+          type stays 'partner') and company. The 'contact' door is gone with
+          the type split. */}
       {showAdd&&addType==='partner'&&<AddPartnerModal onAdd={addPartner} onClose={()=>{ setShowAdd(false); setAddType(null) }} defaultType='partner' companies={allCompanies} onCreateCompany={co=>companiesApi?.addCompany?.(co)} />}
-      {showAdd&&addType==='contact'&&<AddPartnerModal onAdd={addPartner} onClose={()=>{ setShowAdd(false); setAddType(null) }} defaultType='contact' companies={allCompanies} onCreateCompany={co=>companiesApi?.addCompany?.(co)} />}
       {showAdd&&addType==='company'&&<AddCompanyModal onAdd={co=>companiesApi?.addCompany?.(co)} onClose={()=>{ setShowAdd(false); setAddType(null) }} partners={allPartners} onUpdatePartner={updatePartner} />}
     </>
   )
@@ -22103,7 +21856,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     : [
         { key:'home',     icon:'🏠', label:'Home'     },
         { key:'hive',     icon:'🐝', label:'Clients' },
-        { key:'partners', icon:'👥', label:'Contacts' },
+        { key:'partners', icon:'👥', label:'Network' },
         { key:'settings', icon:'⚙️', label:'Settings' },
       ]
 
@@ -33555,7 +33308,7 @@ if (Array.isArray(initialPeople)) return
   const navItems = [
     { key:'home',     icon:'🏠', label:'Home'    },
     { key:'hive',     icon:'🐝', label:'Clients'    },
-    { key:'partners', icon:'👥', label:'Contacts'},
+    { key:'partners', icon:'👥', label:'Network'},
     { key:'reports',  icon:'📊', label:'Reports' },
     { key:'settings', icon:'⚙️', label:'Settings'},
     // 'Manual' moved out of the nav — the Hive Hub Guide now opens from the
@@ -33615,7 +33368,7 @@ if (Array.isArray(initialPeople)) return
     const screenTitle = (() => {
       if (activeNav === 'home') return 'Home'
       if (activeNav === 'hive') return 'Clients'
-      if (activeNav === 'partners') return 'Contacts'
+      if (activeNav === 'partners') return 'Network'
       if (activeNav === 'reports') return 'Reports'
       if (activeNav === 'settings') return 'Settings'
       if (activeNav === 'admin') return role === 'super_admin' ? 'Admin' : 'Corp'
@@ -34125,7 +33878,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           isMobile={isMobile}
           screenName={
             activeNav === 'hive' ? 'Clients'
-            : activeNav === 'partners' ? 'Contacts'
+            : activeNav === 'partners' ? 'Network'
             : activeNav === 'reports' ? 'Reports'
             : activeNav === 'settings' ? 'Settings'
             : activeNav === 'admin' ? (role === 'super_admin' ? 'Admin' : 'Corp')

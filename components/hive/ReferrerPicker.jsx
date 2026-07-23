@@ -5,23 +5,20 @@
 // beta-chunk module (§8.5: no imports from BeeHub, no PartnersContext —
 // partners come from a direct /api/partners fetch).
 //
-// Three searched sections over TWO storage kinds:
+// Two searched sections over TWO storage kinds (Network Phase 2 —
+// the partner/contact type split is GONE from every UI):
+//   NETWORK  — ALL /api/partners rows, one merged pool. Selecting
+//              writes referred_by_kind='partner' regardless of the
+//              row's legacy `type` value.
 //   CLIENTS  — the already-loaded people prop (location-scoped upstream,
 //              junk excluded here). MATCH-ONLY: creating a lead just to
-//              name a referrer would mint an engagement-less person —
-//              Classic disallows it too. Selecting writes
-//              referred_by_kind='lead'.
-//   PARTNERS — /api/partners rows where type !== 'contact'.
-//   CONTACTS — /api/partners rows where type === 'contact'. Partners and
-//              contacts share the partners table (split on `type`) and
-//              BOTH store as referred_by_kind='partner' — the kind enum
-//              has exactly two values ('lead','partner'), never a third.
+//              name a referrer would mint an engagement-less person.
+//              Selecting writes referred_by_kind='lead'.
 //
-// MATCH-OR-CREATE for partner/contact only: once the user has typed,
-// inline create rows POST /api/partners with the typed name + type and
-// auto-select the created row (kind='partner') — Classic's AddPartner
-// quick-add, beta-native (the row's details fill in later via the
-// classic Contacts tab).
+// MATCH-OR-CREATE for network rows only: once the user has typed, ONE
+// inline create row POSTs /api/partners (type='partner') and
+// auto-selects the created row (kind='partner') — details fill in later
+// via the Network tab.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
@@ -78,16 +75,12 @@ export default function ReferrerPicker({
   const sections = useMemo(() => {
     const rows = partnerRows || []
     return [
-      // kind drives referred_by_kind on select — 'partner' for both
-      // partners-table sections, 'lead' for clients (Classic's split).
+      // kind drives referred_by_kind on select — 'partner' for the merged
+      // network pool (partner + legacy contact rows alike), 'lead' for
+      // clients. The type split died with the Network rename.
       {
-        key: 'partners', label: 'Partners', kind: 'partner',
-        items: rows.filter(p => !p.isDeleted && p.type !== 'contact' && (nameMatch(p.name) || nameMatch(p.company)))
-          .map(p => ({ id: p.id, name: p.name, sub: [p.title, p.company].filter(Boolean).join(' · ') })),
-      },
-      {
-        key: 'contacts', label: 'Contacts', kind: 'partner',
-        items: rows.filter(p => !p.isDeleted && p.type === 'contact' && (nameMatch(p.name) || nameMatch(p.company)))
+        key: 'network', label: 'Network', kind: 'partner',
+        items: rows.filter(p => !p.isDeleted && (nameMatch(p.name) || nameMatch(p.company)))
           .map(p => ({ id: p.id, name: p.name, sub: [p.title, p.company].filter(Boolean).join(' · ') })),
       },
       {
@@ -166,20 +159,16 @@ export default function ReferrerPicker({
         {!hasAnyMatch && !q && partnerRows !== null && (
           <p style={{ fontSize: '12px', color: T.ink.muted, textAlign: 'center', padding: '8px' }}>No matches</p>
         )}
-        {/* Create rows — shown once the user has typed. Partner/contact
-            only; the Clients section is deliberately match-only.
-            Hidden in read-only (defensive — no create affordance). */}
+        {/* Create row — shown once the user has typed. ONE door post-merge
+            (network row, type='partner'); the Clients section is
+            deliberately match-only. Hidden in read-only. */}
         {q && !readOnly && (
-          <>
-            {['partner', 'contact'].map(t => (
-              <button key={t} type="button" disabled={!!creating} onClick={() => createReferrer(t)}
-                style={{ ...rowBtn(false), background: T.accent.faint, marginTop: '4px', opacity: creating ? 0.6 : 1 }}>
-                <span style={{ fontSize: '13px', fontWeight: 500, color: ACCENT }}>
-                  {creating === t ? 'Creating…' : `＋ Create “${search.trim()}” as ${t}`}
-                </span>
-              </button>
-            ))}
-          </>
+          <button type="button" disabled={!!creating} onClick={() => createReferrer('partner')}
+            style={{ ...rowBtn(false), background: T.accent.faint, marginTop: '4px', opacity: creating ? 0.6 : 1 }}>
+            <span style={{ fontSize: '13px', fontWeight: 500, color: ACCENT }}>
+              {creating ? 'Creating…' : `＋ Add “${search.trim()}” to your network`}
+            </span>
+          </button>
         )}
         {createErr && (
           <p style={{ fontSize: '12px', color: T.state.danger.fg, background: T.state.danger.soft, padding: '8px 12px', borderRadius: T.radius.control, margin: '6px 2px 2px' }}>

@@ -245,9 +245,10 @@ describe('PersonCard — field edits', () => {
     await click(host.querySelector('button[aria-label="Add referrer"]')!)
     await flush()
     await type(host.querySelector('input[aria-label="Search referrers"]')!, 'New Neighbor')
-    await click(buttonContaining(host, 'as contact')!)
+    // Phase 2: ONE create door (the merged network pool, type='partner').
+    await click(buttonContaining(host, 'to your network')!)
     expect(onPartnerCreated).toHaveBeenCalledTimes(1)
-    expect(onPartnerCreated.mock.calls[0][0]).toMatchObject({ id: 'pt-new-1', type: 'contact', name: 'New Neighbor' })
+    expect(onPartnerCreated.mock.calls[0][0]).toMatchObject({ id: 'pt-new-1', type: 'partner', name: 'New Neighbor' })
     await unmount()
   })
 

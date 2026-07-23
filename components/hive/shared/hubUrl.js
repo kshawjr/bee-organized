@@ -22,11 +22,14 @@
 // ─────────────────────────────────────────────────────────────
 
 // Internal route slug → activeNav key. 'clients'/'hive' both land on the
-// Clients tab (internal nav key 'hive'); 'contacts'/'partners' both land
-// on Contacts.
+// Clients tab (internal nav key 'hive'); 'network'/'contacts'/'partners'
+// all land on Network (nav key stays 'partners' — renaming the internal
+// key would touch every gate for a string). /contacts is a permanent
+// ALIAS, not a redirect: old links and bookmarks keep resolving.
 export const ROUTE_TO_NAV = {
   clients: 'hive',
   hive:    'hive',
+  network: 'partners',
   contacts:'partners',
   partners:'partners',
   reports: 'reports',
@@ -36,10 +39,11 @@ export const ROUTE_TO_NAV = {
 }
 
 // activeNav key → canonical pathname (the tab's bare URL, no record id).
+// Network's canonical URL is /network; /contacts stays a working alias.
 export const NAV_TO_URL = {
   home:    '/',
   hive:    '/clients',
-  partners:'/contacts',
+  partners:'/network',
   reports: '/reports',
   settings:'/settings',
   admin:   '/admin',
