@@ -33912,7 +33912,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           people={people}
           setPeople={setPeople}
           transferPeople={transferPeople}
-          allOverview={allOverview}
+          allOverview={initialAllOverview}
           leadsTruncated={!!initialLeadsTruncated}
           locations={initialLocations || ALL_LOCATIONS}
           activeNav={activeNav}
