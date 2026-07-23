@@ -1260,98 +1260,94 @@ export default async function HubPage({
       }
     }
   } else {
-    // ── The 'all' path: engagements + counts, NO people graph ───────────────
-    // Everything here is bounded by STATE (open engagements) rather than by
-    // tenant size, which is what makes a corporate view affordable at all.
+    // ── The 'all' path: COUNTS ONLY, no records of any kind ─────────────────
+    // Phase 4 kept the engagement board live here (292 open engagements,
+    // 397 KB). Phase 4b removes it: a board that blends Kansas City, Portland
+    // and Temecula deals into shared stage columns is a BLEND, not a view —
+    // there is no column of work anyone can act on. So 'all' now follows one
+    // rule without exception: any surface that enumerates records belonging to
+    // a specific location asks you to pick one.
+    //
+    // Engagements are still READ here, but only server-side and only the
+    // fields the overview reduces — they are never shipped. initialEngagements
+    // stays empty, which is what drives the Engagements tab's picker prompt.
     const PAGE = 1000
-    const engOpen: any[] = []
-    let engErr: { message: string } | null = null
-    for (let from = 0; ; from += PAGE) {
-      const { data, error } = await supabaseService
-        .from('engagements')
-        .select('*')
-        .not('stage', 'in', '("Closed Won","Closed Lost")')
-        .order('created_at', { ascending: false })
-        .order('id', { ascending: true })
-        .range(from, from + PAGE - 1)
-      if (error) { engErr = error; break }
-      engOpen.push(...(data || []))
-      if ((data || []).length < PAGE) break
-    }
-
-    if (engErr) {
-      console.error('[hub-page] all-overview engagements fetch error:', engErr.message)
-    } else if (engOpen.length > 0) {
-      const engIds = engOpen.map((e: any) => e.id)
-      const clientIds = Array.from(new Set(engOpen.map((e: any) => e.client_id).filter(Boolean)))
-
-      // Chunked `.in()` reads — bounded by the open-engagement set, never by
-      // the tenant. These are the ONLY lead rows read on this path, and only
-      // four columns of them: the board's card headline.
-      const chunked = async (table: string, cols: string, col: string, ids: string[]) => {
-        const acc: any[] = []
-        for (let i = 0; i < ids.length; i += 200) {
-          const { data, error } = await supabaseService
-            .from(table).select(cols).in(col, ids.slice(i, i + 200))
-          if (error) { console.error(`[hub-page] all-overview ${table} read failed: ${error.message}`); break }
-          acc.push(...(data || []))
-        }
-        return acc
+    const overviewEngagements: any[] = []
+    {
+      const engLean: any[] = []
+      let engErr: { message: string } | null = null
+      for (let from = 0; ; from += PAGE) {
+        // Three columns, not `*`. This set exists to be counted, not rendered.
+        const { data, error } = await supabaseService
+          .from('engagements')
+          .select('id, client_id, stage')
+          .not('stage', 'in', '("Closed Won","Closed Lost")')
+          .order('id', { ascending: true })
+          .range(from, from + PAGE - 1)
+        if (error) { engErr = error; break }
+        engLean.push(...(data || []))
+        if ((data || []).length < PAGE) break
       }
 
-      const [leadRows, quotesRaw, jobsRaw, invoicesRaw, assessmentsRaw, serviceRequestsRaw, repeatRows] =
-        await Promise.all([
-          chunked('leads', 'id, name, phone, email', 'id', clientIds),
-          chunked('quotes', 'id, engagement_id, status, total, sent_at, approved_at', 'engagement_id', engIds),
-          chunked('jobs', 'id, engagement_id, status, title, scheduled_start, completed_at', 'engagement_id', engIds),
-          chunked('invoices', 'id, engagement_id, status, total, balance_owing', 'engagement_id', engIds),
-          chunked('assessments', 'id, engagement_id, scheduled_at, status, completed_at', 'engagement_id', engIds),
-          chunked('service_requests', 'id, engagement_id', 'engagement_id', engIds),
-          // repeat_count: ALL engagements per client on the board, closed
-          // included — bounded by clientIds, where the scoped path gets it from
-          // a full tenant sweep it no longer runs here.
-          chunked('engagements', 'id, client_id', 'client_id', clientIds),
+      if (engErr) {
+        console.error('[hub-page] all-overview engagement read failed:', engErr.message)
+      } else if (engLean.length > 0) {
+        const chunked = async (table: string, cols: string, col: string, ids: string[]) => {
+          const acc: any[] = []
+          for (let i = 0; i < ids.length; i += 200) {
+            const { data, error } = await supabaseService
+              .from(table).select(cols).in(col, ids.slice(i, i + 200))
+            if (error) { console.error(`[hub-page] all-overview ${table} read failed: ${error.message}`); break }
+            acc.push(...(data || []))
+          }
+          return acc
+        }
+
+        // Only the two child reads the overview actually reduces:
+        //   quotes      → only for Estimate-stage rows (the follow-up card)
+        //   assessments → for every open row (the today+1 card windows them)
+        // jobs / invoices / service_requests are not read at all here: nothing
+        // on the overview derives from them.
+        const estimateIds = engLean.filter((e: any) => e.stage === 'Estimate').map((e: any) => e.id)
+        const [quoteRows, assessRows] = await Promise.all([
+          estimateIds.length ? chunked('quotes', 'engagement_id, sent_at', 'engagement_id', estimateIds) : Promise.resolve([]),
+          chunked('assessments', 'id, engagement_id, scheduled_at', 'engagement_id', engLean.map((e: any) => e.id)),
         ])
 
-      const leadInfoById: Record<string, any> = {}
-      for (const l of leadRows) leadInfoById[l.id] = { name: l.name || 'Unknown', phone: l.phone || null, email: l.email || null }
-      const repeatCounts: Record<string, number> = {}
-      for (const r of repeatRows) repeatCounts[r.client_id] = (repeatCounts[r.client_id] || 0) + 1
+        const byEng = (rows: any[]) => {
+          const out: Record<string, any[]> = {}
+          for (const r of rows || []) { if (r.engagement_id) (out[r.engagement_id] ||= []).push(r) }
+          return out
+        }
+        const quotesByEng = byEng(quoteRows)
+        const assessByEng = byEng(assessRows)
 
-      const byEng = (rows: any[]) => {
-        const out: Record<string, any[]> = {}
-        for (const r of rows || []) { if (r.engagement_id) (out[r.engagement_id] ||= []).push(r) }
-        return out
+        // client_name is only ever read for an engagement with an assessment
+        // (the "Next: <client>" label), so resolve names for those alone.
+        const namedIds = Array.from(new Set(
+          engLean.filter((e: any) => assessByEng[e.id]?.length).map((e: any) => e.client_id).filter(Boolean)
+        ))
+        const nameById: Record<string, string> = {}
+        if (namedIds.length > 0) {
+          const rows = await chunked('leads', 'id, name', 'id', namedIds)
+          for (const l of rows) nameById[l.id] = l.name || 'Unknown'
+        }
+
+        // The shape buildAllOverview consumes — same contract as the scoped
+        // board projection, populated only where the overview reads it.
+        for (const e of engLean) {
+          overviewEngagements.push({
+            id: e.id, client_id: e.client_id, stage: e.stage,
+            client_name: nameById[e.client_id] || 'Client',
+            quotes: (quotesByEng[e.id] || []).map((q: any) => ({ sent_at: q.sent_at })),
+            assessments: (assessByEng[e.id] || []).map((a: any) => ({ id: a.id, scheduled_at: a.scheduled_at })),
+          })
+        }
       }
-      const quotesByEng = byEng(quotesRaw), jobsByEng = byEng(jobsRaw)
-      const invoicesByEng = byEng(invoicesRaw), assessmentsByEng = byEng(assessmentsRaw)
-      const serviceReqsByEng = byEng(serviceRequestsRaw)
-
-      // Same projection the scoped path ships — HiveShell's boardSignature
-      // reads this shape, and two shapes would read as a phantom board change.
-      initialEngagements = engOpen.map((e: any) => ({
-        ...e,
-        client_name: leadInfoById[e.client_id]?.name || 'Unknown',
-        client_phone: leadInfoById[e.client_id]?.phone ?? null,
-        client_email: leadInfoById[e.client_id]?.email ?? null,
-        repeat_count: repeatCounts[e.client_id] || 1,
-        quotes: (quotesByEng[e.id] || []).map((q: any) => ({
-          id: q.id, status: q.status, total: q.total, sent_at: q.sent_at, approved_at: q.approved_at,
-        })),
-        jobs: (jobsByEng[e.id] || []).map((j: any) => ({
-          id: j.id, status: j.status, title: j.title,
-          scheduled_start: j.scheduled_start, completed_at: j.completed_at,
-        })),
-        invoices: (invoicesByEng[e.id] || []).map((i: any) => ({
-          id: i.id, status: i.status, total: i.total, balance_owing: i.balance_owing,
-        })),
-        assessments: (assessmentsByEng[e.id] || []).map((a: any) => ({
-          id: a.id, scheduled_at: a.scheduled_at, status: a.status, completed_at: a.completed_at,
-        })),
-        service_requests: (serviceReqsByEng[e.id] || []).map((sr: any) => ({ id: sr.id })),
-      }))
     }
 
+    // Closed counts stay: they are two head:true calls, and keeping them means
+    // nothing downstream has to special-case a missing number.
     const [closedRes, wonRes] = await Promise.all([
       supabaseService.from('engagements').select('id', { count: 'exact', head: true })
         .in('stage', ['Closed Won', 'Closed Lost']),
@@ -1361,18 +1357,15 @@ export default async function HubPage({
     initialEngagementsClosedCount = closedRes.count ?? 0
     initialEngagementsClosedWonCount = wonRes.count ?? 0
 
-    // The corporate overview. Takes the board set already loaded above so the
-    // two can never disagree about what is open.
     try {
-      initialAllOverview = await buildAllOverview(supabaseService, initialEngagements)
+      initialAllOverview = await buildAllOverview(supabaseService, overviewEngagements)
       console.log(
         `[hub-page] all-overview: ${initialAllOverview.leadCount} leads counted, ` +
         `${initialAllOverview.newUncontacted.count} new-uncontacted, ` +
-        `${initialAllOverview.openEngagementsCount} open engagements` +
+        `${initialAllOverview.openEngagementsCount} open engagements (counted, not shipped)` +
         (initialAllOverview.truncated ? ' — TRUNCATED' : '')
       )
     } catch (e: any) {
-      // Non-fatal: Home falls back to its empty state rather than a broken page.
       console.error('[hub-page] all-overview build failed:', e?.message || e)
     }
   }

@@ -37,7 +37,7 @@ import { useEngagementsRealtime } from '@/lib/use-engagements-realtime'
 import { useStoredState } from './shared/useStoredControls'
 import { nextRecordOverlay } from './shared/hubUrl'
 import useIsMobile from './shared/useIsMobile'
-import { IconInbox, IconLayoutKanban, IconList, IconUsers, IconPlus } from '@/components/ui/icons'
+import { IconInbox, IconLayoutKanban, IconList, IconUsers, IconPlus, IconMapPin } from '@/components/ui/icons'
 import { TEXT_TOKENS, BORDER_TOKENS, WARNING_TOKENS } from '@/components/ui/tokens'
 import { CHIP_STYLES } from './shared/stageConfig'
 import { T } from './shared/tokens'
@@ -128,21 +128,53 @@ function TabPill({ tab, active, onSelect, badgeCount = null }) {
 // board: HiveScreen passes its locFilter prop through and the engagement
 // set filters client-side on location_uuid (locFilter holds 'all' or the
 // location uuid — the same vocabulary people-mapper documents).
-// 'All Locations' loads no people graph (Fix 2 Phase 4) — 7,028 leads and
-// 19,361 child rows existed only so the browser could filter them back down to
-// one location. The lenses that enumerate people therefore have nothing to
-// show on that scope, and an empty list would read as "you have no clients".
-// This says what is actually true and points at the fix.
-function PickALocation({ lens }) {
-  const what = lens === 'inbox' ? 'The inbox works one location at a time' : 'The client list works one location at a time'
+// ── The 'All Locations' prompt (Fix 2 Phase 4b) ───────────────────────────
+// ONE component for all three record lenses. 'All Locations' is a corporate
+// OVERVIEW, not a data scope: it answers "how is the business doing", and every
+// surface that enumerates records belonging to a specific location asks you to
+// pick one.
+//
+// The Engagements board is the clearest case for why. Blending Kansas City,
+// Portland and Temecula deals into shared stage columns produces a column
+// nobody can work — it is a blend, not a view. So it follows the same rule the
+// Inbox and Client List already follow.
+//
+// The copy is deliberately about HOW THE PRODUCT WORKS, never about missing
+// data: "works one location at a time", not "no results" or "nothing loaded".
+// And the button opens the switcher right here, so the answer is one click away
+// rather than something to go hunting for — that button is most of what makes
+// this read as intentional rather than broken.
+const PICK_COPY = {
+  inbox:       'The inbox works one location at a time',
+  clients:     'The client list works one location at a time',
+  engagements: 'Engagements work one location at a time',
+}
+
+function PickALocation({ lens, onPick }) {
   return (
     <div style={{ padding: '56px 24px', textAlign: 'center', border: T.border.dashedSoft, borderRadius: T.radius.inset, margin: '8px 0' }}>
       <div style={{ fontSize: '26px', marginBottom: '10px' }}>📍</div>
-      <p style={{ fontSize: '14px', fontWeight: 600, color: T.ink.strong, marginBottom: '6px' }}>{what}</p>
-      <p style={{ fontSize: '12.5px', color: T.ink.quiet, lineHeight: 1.6, maxWidth: '380px', margin: '0 auto' }}>
-        Pick a location from the switcher to work its clients. Engagements and the
-        home overview still show every location.
+      <p style={{ fontSize: '14px', fontWeight: 600, color: T.ink.strong, marginBottom: '6px' }}>
+        {PICK_COPY[lens] || PICK_COPY.clients}
       </p>
+      <p style={{ fontSize: '12.5px', color: T.ink.quiet, lineHeight: 1.6, maxWidth: '400px', margin: '0 auto 16px' }}>
+        You&apos;re viewing <strong>All Locations</strong>, which shows the
+        cross-location picture: the home overview, unrouted leads, and search.
+        Choose a location to work its records.
+      </p>
+      {onPick && (
+        <button
+          onClick={onPick}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: '7px',
+            height: '34px', padding: '0 16px', borderRadius: T.radius.pill,
+            border: 'none', background: T.ink.primary, color: T.ink.inverse,
+            fontSize: '13px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
+          }}
+        >
+          <IconMapPin size={14} /> Choose a location
+        </button>
+      )}
     </div>
   )
 }
@@ -158,12 +190,14 @@ export default function HiveShell({
   // locFilter, which is exactly what used to empty the queue. Already
   // role-gated upstream (HiveScreen sends [] for a non-elevated viewer).
   transferPeople = [],
-  // Fix 2 Phase 4: true when the page is on 'All Locations', where the people
-  // graph is deliberately not loaded. Lenses that enumerate PEOPLE (Inbox,
-  // Client List) say so and point at the picker instead of rendering an empty
-  // list that reads as "you have no clients". The Engagements lenses are
-  // unaffected — open engagements ARE loaded on 'all' (292 tenant-wide).
-  peopleUnavailable = false,
+  // Fix 2 Phase 4b: true when the page is on 'All Locations', where NO records
+  // are loaded — not leads, not engagements. Every record lens (Inbox, Client
+  // List, Engagements) shows the picker prompt instead. Renamed from
+  // `peopleUnavailable`: it gates engagements now too, and a name that says
+  // "people" would invite someone to re-enable the board under it.
+  locationRequired = false,
+  // Opens the location switcher from inside the prompt (App owns the picker).
+  onOpenLocationPicker = null,
   // Location team roster (id/name/email/locationId) — BeeHub bridges its
   // LocationUsersContext here so the profile's assigned-to picker can
   // stay §8.5-clean (props only, no context in the hive chunk).
@@ -589,7 +623,12 @@ export default function HiveShell({
   // Per-tab badge counts, all from real sources (never hardcoded): Inbox =
   // New+Attempting (inboxCount), Engagements = open engagements (openCount —
   // the value the removed corner text showed), Client List = clientCount.
-  const tabBadges = { inbox: inboxCount, engagements: openCount, clients: clientCount }
+  // On 'All Locations' no records are loaded, so every one of these is 0 —
+  // which would read as "you have no work", not "this isn't counted here".
+  // Suppressed rather than shown as zero.
+  const tabBadges = locationRequired
+    ? { inbox: null, engagements: null, clients: null }
+    : { inbox: inboxCount, engagements: openCount, clients: clientCount }
   const tabPills = TABS.map(t => <TabPill key={t.key} tab={t} active={t.key === lens} onSelect={() => pickLens(t.key)} badgeCount={t.badge ? tabBadges[t.key] : null} />)
   // Desktop "New" pill — the ONE solid chrome element, visible from all
   // four tabs, left of the counter. Mobile gets the FAB instead. Hidden
@@ -621,7 +660,7 @@ export default function HiveShell({
     { k: 'board', label: 'Board', Icon: IconLayoutKanban },
     { k: 'list',  label: 'List',  Icon: IconList },
   ]
-  const engToggleEl = lens !== 'engagements' ? null : (
+  const engToggleEl = (lens !== 'engagements' || locationRequired) ? null : (
     <div role="group" aria-label="Engagements view" style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', padding: '2px', borderRadius: T.radius.pill, border: `0.5px solid ${T.hairline.line}`, background: T.surface.raised, flexShrink: 0 }}>
       {ENG_VIEWS.map(o => {
         const active = engView === o.k
@@ -705,12 +744,19 @@ export default function HiveShell({
         </div>
       )}
 
-      {peopleUnavailable && (lens === 'inbox' || lens === 'clients') ? (
-        <PickALocation lens={lens} />
+      {locationRequired && (lens === 'clients' || lens === 'engagements') ? (
+        <PickALocation lens={lens} onPick={onOpenLocationPicker} />
       ) : lens === 'inbox' ? (
+        // NOT swapped for the prompt: the Inbox owns the loc_other transfer
+        // queue, which is cross-location by nature and MUST stay reachable on
+        // 'all' — it is where unrouted leads get routed. It renders that
+        // section and shows the prompt in place of New/Attempting.
+
         <InboxScreen
           people={patchedPeople}
           transferPeople={transferPeople}
+          locationRequired={locationRequired}
+          onOpenLocationPicker={onOpenLocationPicker}
           engagements={patched}
           locFilter={locFilter}
           onOpenPerson={openPerson}

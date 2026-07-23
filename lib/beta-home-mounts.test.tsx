@@ -33,6 +33,12 @@ beforeAll(() => {
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'test-anon-key'
 })
 
+// NOTE: App's lens content (HiveShell) is a next/dynamic chunk with ssr:false.
+// It does not resolve under vitest — it renders its `loading: () => null`
+// placeholder — so these App-level mounts cover the SHELL and Home only.
+// Asserting lens content here would assert against an empty container and pass
+// for the wrong reason. The lens gating is mounted directly in
+// lib/beta-hiveshell-all-scope.test.tsx instead.
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
   usePathname: () => '/',
@@ -95,7 +101,13 @@ async function mountApp(props: any) {
   // the output readable while still letting the throw surface.
   const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
   await act(async () => { root.render(React.createElement(App as any, props)) })
-  await act(async () => { await Promise.resolve() })
+  // HiveShell / IdentityScopeControl are next/dynamic with ssr:false, so the
+  // lens content arrives on a later tick than the shell. Flush real macrotasks
+  // until it lands — a microtask turn is not enough for a lazy chunk, and
+  // asserting too early would test the `loading: () => null` placeholder.
+  for (let i = 0; i < 8; i++) {
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+  }
   cleanup.push(() => { errSpy.mockRestore(); try { root.unmount() } catch {} host.remove() })
   return host
 }

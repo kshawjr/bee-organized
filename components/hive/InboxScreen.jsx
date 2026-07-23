@@ -251,7 +251,7 @@ function RowMenu({ anchorId, isMobile, onClose, children }) {
   )
 }
 
-export default function InboxScreen({ people = [], transferPeople = [], engagements = [], locFilter = 'all', onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
+export default function InboxScreen({ people = [], transferPeople = [], locationRequired = false, onOpenLocationPicker = null, engagements = [], locFilter = 'all', onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
   // One-shot deep-link → scroll a target section into view on mount (Home
   // "Needs attention" cards land here: 'transfer' = Needs-transfer section,
   // 'new' = New section). Sections aren't collapsible (they always render
@@ -969,7 +969,14 @@ export default function InboxScreen({ people = [], transferPeople = [], engageme
         </div>
       )}
 
-      {transfer.length === 0 && fresh.length === 0 && working.length === 0 ? (
+      {/* `!locationRequired &&` is load-bearing: on 'All Locations' there are no
+          leads loaded, so all three buckets are empty and this generic empty
+          state would win — showing "New inquiries land here" to someone whose
+          inbox is full at every location. That reads as broken, which is the
+          precise outcome the picker prompt exists to avoid. When a location is
+          required, always fall through to the sections branch so the transfer
+          queue and the prompt render. */}
+      {!locationRequired && transfer.length === 0 && fresh.length === 0 && working.length === 0 ? (
         inboxFilterCount(filters) > 0 ? (
           <FilteredEmpty count={inboxFilterCount(filters)} onClear={clearFilters} noun="inbox leads" />
         ) : (
@@ -989,6 +996,37 @@ export default function InboxScreen({ people = [], transferPeople = [], engageme
               </div>
             </div>
           )}
+          {/* On 'All Locations' the New/Attempting sections have no records to
+              show — no leads are loaded on that scope (Fix 2 Phase 4b). The
+              Needs-transfer section ABOVE stays live, because unrouted leads
+              belong to no location and routing them is the cross-location job
+              this scope exists for. Everything below is per-location work. */}
+          {locationRequired ? (
+            <div style={{ padding: '44px 24px', textAlign: 'center', border: T.border.dashedSoft, borderRadius: T.radius.inset }}>
+              <div style={{ fontSize: '22px', marginBottom: '8px' }}>📍</div>
+              <p style={{ fontSize: '13.5px', fontWeight: 600, color: T.ink.strong, marginBottom: '6px' }}>
+                The inbox works one location at a time
+              </p>
+              <p style={{ fontSize: '12.5px', color: T.ink.quiet, lineHeight: 1.6, maxWidth: '400px', margin: '0 auto 14px' }}>
+                Unrouted leads show here on <strong>All Locations</strong>. Choose a
+                location to work its new and in-progress leads.
+              </p>
+              {onOpenLocationPicker && (
+                <button
+                  onClick={onOpenLocationPicker}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '7px',
+                    height: '32px', padding: '0 15px', borderRadius: T.radius.pill,
+                    border: 'none', background: T.ink.primary, color: T.ink.inverse,
+                    fontSize: '12.5px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  <IconMapPin size={13} /> Choose a location
+                </button>
+              )}
+            </div>
+          ) : (
+          <>
           <div id="bee-inbox-sec-new" style={{ scrollMarginTop: '12px' }}>
             <SectionLabel glyph={<IconSparkles size={13} />} color={TEAL.text} label="New" count={fresh.length} hint="No Contact Yet" />
             {fresh.length > 0 ? (
@@ -1014,6 +1052,8 @@ export default function InboxScreen({ people = [], transferPeople = [], engageme
               </div>
             )}
           </div>
+          </>
+          )}
         </div>
       )}
 

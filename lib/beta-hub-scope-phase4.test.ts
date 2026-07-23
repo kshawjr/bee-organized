@@ -213,11 +213,23 @@ describe('_hub-page wiring — Phase 4', () => {
     expect(src).toContain('if (!overviewOnly) {\n    let binQ')
   })
 
-  it('the overview is handed the SAME open-engagement set the board renders', () => {
-    // Re-querying would let the board and the overview disagree about what is
-    // open, which is exactly the kind of drift the shared-derivation rule
-    // exists to prevent.
-    expect(src).toContain('buildAllOverview(supabaseService, initialEngagements)')
+  it('engagements are COUNTED on "all" but never shipped (Phase 4b)', () => {
+    // Phase 4 kept the board live on 'all'. Phase 4b removed it — a board
+    // blending several locations' deals into shared stage columns is a blend,
+    // not a view. The rows are still read server-side to reduce the overview,
+    // but only the three columns it needs, and initialEngagements stays empty
+    // (which is what drives the Engagements picker prompt).
+    expect(src).toContain('buildAllOverview(supabaseService, overviewEngagements)')
+    expect(src).toContain(`.select('id, client_id, stage')`)
+    // Only the two child tables the overview reduces — no jobs / invoices /
+    // service_requests, and no repeat-count or client-name sweep for a board
+    // that no longer renders.
+    expect(src).toContain(`chunked('quotes', 'engagement_id, sent_at'`)
+    expect(src).toContain(`chunked('assessments', 'id, engagement_id, scheduled_at'`)
+    const block = src.slice(src.indexOf("The 'all' path: COUNTS ONLY"), src.indexOf('// Recycle Bin: load is_junk=true'))
+    expect(block).not.toContain(`chunked('jobs'`)
+    expect(block).not.toContain(`chunked('invoices'`)
+    expect(block).not.toContain(`chunked('service_requests'`)
   })
 
   it('MAX_LEADS is lowered to 5,000 and truncation is made VISIBLE', () => {
@@ -321,20 +333,65 @@ describe('BeeHub wiring — Phase 4', () => {
     expect(src).not.toContain('const locPeople   = people.filter(p=>p.locationId===loc.id&&!p.isJunk)')
   })
 
-  it('the people lenses declare themselves unavailable on "all"', () => {
-    expect(src).toContain('peopleUnavailable={!!initialAllOverview}')
+  it('every record lens is gated on "all", and the picker is one click away', () => {
+    // Renamed from peopleUnavailable in 4b: it gates ENGAGEMENTS now too, and a
+    // name that says "people" would invite someone to re-enable the board.
+    expect(src).toContain('locationRequired={!!initialAllOverview}')
+    expect(src).not.toContain('peopleUnavailable={')
+    // The prompt opens the switcher itself rather than sending the user hunting.
+    expect(src).toContain('onOpenLocationPicker={()=>setShowLocPicker(true)}')
   })
 })
 
-describe('HiveShell — the people lenses on "all"', () => {
+describe('HiveShell — the record lenses on "all" (Phase 4b)', () => {
   const src = readFileSync('components/hive/HiveShell.jsx', 'utf8')
-  it('Inbox and Client List prompt for a location instead of rendering empty', () => {
+
+  it('Client List AND Engagements swap for the shared prompt', () => {
     expect(src).toContain('function PickALocation')
-    expect(src).toContain("peopleUnavailable && (lens === 'inbox' || lens === 'clients')")
+    expect(src).toContain("locationRequired && (lens === 'clients' || lens === 'engagements')")
   })
-  it('the ENGAGEMENT lenses are untouched — they work on "all"', () => {
-    // 292 open engagements tenant-wide is genuinely bounded, so the board is
-    // not gated behind the prompt.
-    expect(src).not.toContain("lens === 'engagements' && peopleUnavailable")
+
+  it('ONE prompt component covers all three lenses — no second empty state', () => {
+    expect(src).toContain('const PICK_COPY = {')
+    for (const k of ['inbox:', 'clients:', 'engagements:']) expect(src).toContain(k)
+    // Copy is about HOW THE PRODUCT WORKS, never about missing data.
+    expect(src).toContain('works one location at a time')
+    expect(src).not.toContain('No engagements found')
+  })
+
+  it('the prompt opens the switcher rather than describing where it is', () => {
+    expect(src).toContain('Choose a location')
+    expect(src).toContain('onClick={onPick}')
+  })
+
+  it('the Inbox is NOT swapped — it owns the cross-location transfer queue', () => {
+    // Phase 4's version replaced the whole Inbox, which took the loc_other
+    // "Needs transfer" section down on 'all'. It renders the queue and shows
+    // the prompt in place of New/Attempting instead.
+    expect(src).toContain('locationRequired={locationRequired}')
+    expect(src).not.toContain("locationRequired && (lens === 'inbox'")
+  })
+
+  it('badges are suppressed, not shown as zero', () => {
+    // A 0 would read as "you have no work" rather than "not counted here".
+    expect(src).toContain('const tabBadges = locationRequired')
+    expect(src).toContain("{ inbox: null, engagements: null, clients: null }")
+  })
+
+  it('the Board/List toggle is hidden when there is no board', () => {
+    expect(src).toContain("const engToggleEl = (lens !== 'engagements' || locationRequired) ? null : (")
+  })
+})
+
+describe('InboxScreen on "all" — the transfer queue survives', () => {
+  const src = readFileSync('components/hive/InboxScreen.jsx', 'utf8')
+  it('renders the queue and prompts only in place of New/Attempting', () => {
+    expect(src).toContain('locationRequired = false')
+    expect(src).toContain('{locationRequired ? (')
+    // The transfer section is rendered BEFORE the branch, so it is unaffected.
+    const transferAt = src.indexOf('bee-inbox-sec-transfer')
+    const branchAt = src.indexOf('{locationRequired ? (')
+    expect(transferAt).toBeGreaterThan(0)
+    expect(transferAt).toBeLessThan(branchAt)
   })
 })
