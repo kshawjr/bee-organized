@@ -25,6 +25,7 @@ import {
   ACTIVE_LIFECYCLE,
   LOC_OTHER_SLUG,
   TRANSFER_QUEUE_MAX,
+  transferQueueSource,
 } from '@/lib/hub-scope'
 import { buildAllOverview } from '@/lib/hub-all-overview'
 import BeeHub from '@/components/BeeHub'
@@ -1423,11 +1424,17 @@ export default async function HubPage({
   // vocabularies again — see lib/hub-scope.ts).
   let initialTransferPeople: any[] = []
   if (isElevated) {
-    // Already loaded? Then filter rather than re-query. True on 'all' (the
-    // whole tenant is in initialPeople) and when loc_other IS the selected
-    // scope. Both paths run the SAME mapper, so the two can't drift in shape —
-    // only in bound, and the slice below applies to both.
-    const alreadyLoaded = !scopeLocationUuid || scope.locationSlug === LOC_OTHER_SLUG
+    // Already loaded? Then filter rather than re-query — see transferQueueSource
+    // in lib/hub-scope.ts, which owns this decision and the history behind it.
+    // The short version: this used to read `!scopeLocationUuid || loc_other`,
+    // and Phase 4's overviewOnly made the 'all' half of that a filter over an
+    // always-empty array, which emptied the routing queue on the one scope that
+    // exists to work it. 'all' now falls through to the bounded query below.
+    const alreadyLoaded = transferQueueSource({
+      overviewOnly,
+      scopeLocationUuid,
+      locationSlug: scope.locationSlug,
+    }) === 'filter-loaded'
     if (alreadyLoaded) {
       initialTransferPeople = initialPeople
         .filter((p: any) => p.atLocOther)

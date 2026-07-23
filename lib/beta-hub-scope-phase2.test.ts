@@ -158,7 +158,15 @@ describe('_hub-page wiring — Phase 2', () => {
   })
 
   it('the transfer queue is not re-queried when the scope already loaded it', () => {
-    expect(src).toContain('const alreadyLoaded = !scopeLocationUuid || scope.locationSlug === LOC_OTHER_SLUG')
+    // The decision moved into transferQueueSource (lib/hub-scope) after the pin
+    // that used to live here encoded the BUG: `!scopeLocationUuid || loc_other`
+    // silently became "filter an empty array" once Phase 4 stopped loading
+    // people on 'all', and this test passed throughout. Its behaviour — every
+    // scope including 'all' — is asserted in
+    // lib/beta-transfer-queue-all-scope.test.tsx.
+    expect(src).toContain('transferQueueSource({')
+    expect(src).toContain('overviewOnly,')
+    expect(src).toContain("}) === 'filter-loaded'")
   })
 
   it('both new props reach BeeHub', () => {
@@ -186,7 +194,7 @@ describe('BeeHub wiring — Phase 2', () => {
   })
 
   it('Home reads the dedicated queue, not the location-scoped people array', () => {
-    expect(src).toContain('const transferLeads = isElevated ? (transferPeople || []).filter(isLivePersonH) : []')
+    expect(src).toContain('const transferLeads = visibleTransferQueue(transferPeople, { isElevated }).filter(isLivePersonH)')
     // The old form filtered scopedPeopleH — which is exactly what emptied under
     // a location scope.
     expect(src).not.toContain('scopedPeopleH.filter(p => isLivePersonH(p) && p.atLocOther)')
@@ -199,7 +207,9 @@ describe('BeeHub wiring — Phase 2', () => {
   it('the queue is role-gated where isElevated lives — view-as cannot leak it', () => {
     // Under view-as the SERVER session is still super_admin, so the prop
     // arrives populated even though the client role reads 'franchise'.
-    expect(src).toContain('transferPeople={isElevated ? transferPeople : []}')
+    // Both directions are MOUNTED in lib/beta-transfer-queue-all-scope.test.tsx
+    // (franchise sees nothing; corp under view-as still does).
+    expect(src).toContain('transferPeople={visibleTransferQueue(transferPeople, { isElevated })}')
   })
 
   it('the queue prop-syncs after a scope switch like the other server arrays', () => {

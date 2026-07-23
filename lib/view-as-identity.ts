@@ -18,6 +18,47 @@ export interface ViewAsIdentity {
   locFilter: string
 }
 
+// The two roles that see corporate-wide surfaces — chief among them the
+// loc_other transfer queue, which is gated CLIENT-side (HiveScreen, Home)
+// because under view-as the server session is still super_admin and ships the
+// prop populated regardless of who is being impersonated.
+//
+// Both directions of this matter and neither is the "safe" default: a franchise
+// owner seeing corporate's routing queue is a view-as over-exposure artifact,
+// and a corp identity NOT seeing it is Leslie unable to do her job.
+export function isElevatedRole(role: string | null | undefined): boolean {
+  return role === 'super_admin' || role === 'corporate'
+}
+
+// The identity to apply when a user is CHOSEN in the picker. Corporate targets
+// stay elevated and land on 'all' (their real working scope — corp has no one
+// location); everyone else drops to franchise, pinned to their own location,
+// carrying their own role as the franchiseRole.
+export function viewAsIdentityFor(user: any): ViewAsIdentity {
+  const isCorp = user?.role === 'corporate'
+  return {
+    role: isCorp ? 'corporate' : 'franchise',
+    franchiseRole: isCorp ? 'owner' : user?.role,
+    viewAsUser: user ?? null,
+    locFilter: isCorp ? 'all' : user?.locationId,
+  }
+}
+
+// The client-side gate on the corporate transfer queue, shared by the Inbox
+// hand-off (HiveScreen) and the Home "needs transfer" card so one identity
+// cannot pass one surface and fail the other.
+//
+// It exists because the SERVER cannot make this call: under view-as the session
+// is still super_admin, so the prop arrives populated no matter who is being
+// impersonated. Elevation is therefore decided here, from the effective role.
+export function visibleTransferQueue(
+  transferPeople: any[] | null | undefined,
+  opts: { isElevated: boolean },
+): any[] {
+  if (!opts.isElevated) return []
+  return Array.isArray(transferPeople) ? transferPeople : []
+}
+
 // Snapshot the caller's real identity the instant an entry point opens the
 // picker — captured BEFORE any pre-flip runs — so cancel can restore it
 // verbatim regardless of which entry (or future entry) opened the picker.

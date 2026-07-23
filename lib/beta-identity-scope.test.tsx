@@ -289,10 +289,15 @@ describe('BeeHub wires the shared snapshot/cancel path (strand cannot reappear)'
     expect((src.match(/snapshotIdentityForViewAs\(\)/g) || []).length).toBe(4)
   })
 
-  it('confirm (successful impersonation) is unchanged — still commits role/franchiseRole/viewAsUser', () => {
-    // The impersonation commit path keeps its setters (only snapshot cleanup added).
-    expect(src).toMatch(/setRole\(isCorp \? 'corporate' : 'franchise'\)/)
-    expect(src).toMatch(/setFranchiseRole\(isCorp \? 'owner' : user\.role\)/)
-    expect(src).toContain('setViewAsUser(user)')
+  it('confirm (successful impersonation) still commits role/franchiseRole/viewAsUser', () => {
+    // The mapping itself moved into viewAsIdentityFor (lib/view-as-identity) so
+    // the log line and the setters cannot describe different identities, and so
+    // "a corporate target stays elevated" is testable without mounting the hub.
+    // Its BEHAVIOUR is asserted in lib/beta-transfer-queue-all-scope.test.tsx;
+    // what this pins is only that confirm still commits all four fields.
+    expect(src).toContain('const next = viewAsIdentityFor(user)')
+    for (const setter of ['setRole(next.role)', 'setFranchiseRole(next.franchiseRole)', 'applyLocScope(next.locFilter)', 'setViewAsUser(user)']) {
+      expect(src).toContain(setter)
+    }
   })
 })

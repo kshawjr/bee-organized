@@ -557,7 +557,10 @@ describe('BeeHub wiring — scope switch + prop sync', () => {
     // The App's own picker/view-as handlers must all be on the helper.
     expect(src).toContain(`applyLocScope(loc.id)`)
     expect(src).toContain(`applyLocScope('all')`)
-    expect(src).toContain(`applyLocScope(isCorp ? 'all' : user.locationId)`)
+    // The view-as confirm handler now maps identity through viewAsIdentityFor
+    // (lib/view-as-identity), so its scope call reads next.locFilter too — the
+    // 'corporate → all' half of that mapping is asserted in
+    // lib/beta-transfer-queue-all-scope.test.tsx.
     expect(src).toContain(`applyLocScope(next.locFilter)`)
     expect(raw.length).toBeGreaterThan(0) // sanity: the regex matches something
   })

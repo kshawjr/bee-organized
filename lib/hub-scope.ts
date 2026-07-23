@@ -241,6 +241,45 @@ export const LOC_OTHER_SLUG = 'loc_other'
 // signal — hence the log at the call site rather than a silent slice.
 export const TRANSFER_QUEUE_MAX = 50
 
+// WHERE the transfer queue's rows come from on a given load.
+//
+//   'filter-loaded' — the people graph already holds them; filter it.
+//   'query'         — run the dedicated unscoped loc_other query.
+//
+// A pure function rather than an inline boolean because this exact decision
+// has now silently emptied the routing queue TWICE, and both times the surface
+// self-gated on emptiness so nothing announced the failure.
+//
+// The regression it exists to prevent (2026-07-23): Phase 2 wrote the shortcut
+// as "already loaded on 'all' (the whole tenant is in initialPeople) OR when
+// loc_other is the selected scope". Phase 4 then stopped loading the people
+// graph on 'all' entirely (overviewOnly) — and left that filter reading an
+// array which is now ALWAYS empty. The queue vanished from 'all': the one
+// scope that exists to work it, since unrouted leads belong to no location.
+//
+// So `overviewOnly` is the guard, because it is precisely the flag that
+// decides whether initialPeople was populated at all. Anything that stops
+// loading people on a scope must make this return 'query' there, not silently
+// hand back an empty filter.
+export function transferQueueSource(input: {
+  // True when the load ships counts only — no people graph (elevated + 'all').
+  overviewOnly: boolean
+  // Null on an unscoped load ('all', or a franchise user with no location).
+  scopeLocationUuid: string | null | undefined
+  // The SLUG of the selected location, not its uuid (the two vocabularies).
+  locationSlug: string | null | undefined
+}): 'filter-loaded' | 'query' {
+  // No people were loaded → there is nothing to filter, whatever the scope.
+  if (input.overviewOnly) return 'query'
+  // loc_other IS the scope: its rows are in initialPeople, through the SAME
+  // mapper as the query path, so the two cannot drift in shape — only in bound.
+  if (input.locationSlug === LOC_OTHER_SLUG) return 'filter-loaded'
+  // Unscoped WITH people loaded (non-elevated): the whole set is in hand.
+  if (!input.scopeLocationUuid) return 'filter-loaded'
+  // Scoped to some real location — loc_other is never that location.
+  return 'query'
+}
+
 // ── THE CHILD-TABLE LOCATION VOCABULARY ──────────────────────────────────────
 //
 // ⚠️ TWO VOCABULARIES. THIS IS THE MOST DANGEROUS TABLE IN THE FILE.

@@ -24,7 +24,7 @@ import { ESTIMATE_FOLLOWUP_DAYS, INVOICE_AGING_DAYS, ASSESSMENT_HORIZON_DAYS } f
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { financialsVisible } from "@/lib/financial-access"
 import { splitNameForPrefill } from "@/lib/name-prefill"
-import { captureViewAsSnapshot, revertViewAsCancel } from "@/lib/view-as-identity"
+import { captureViewAsSnapshot, revertViewAsCancel, viewAsIdentityFor, isElevatedRole, visibleTransferQueue } from "@/lib/view-as-identity"
 import AddressAutofill from "@/components/hive/shared/AddressAutofill"
 // The Send-to-Jobber wizard — extracted from this file onto the hive modal
 // system (OverlayShell + tokens). Used by BOTH the classic PersonPanel and
@@ -9964,7 +9964,7 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], location
           // session is still super_admin so the prop arrives populated, and
           // without this an impersonated franchise owner would see corporate's
           // transfer queue — a view-as over-exposure artifact.
-          transferPeople={isElevated ? transferPeople : []}
+          transferPeople={visibleTransferQueue(transferPeople, { isElevated })}
           locationRequired={locationRequired}
           onOpenLocationPicker={onOpenLocationPicker}
           // Deep-link intent (Home "Needs attention" cards): land on the
@@ -21852,7 +21852,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         : '',
       agingInvoices: [], agingCount: ov.agingInvoices.count,
       agingTotal: ov.agingInvoices.total, agingOldest: ov.agingInvoices.oldestDays,
-      transferLeads: isElevated ? (transferPeople || []).filter(p => !p.isJunk) : [],
+      transferLeads: visibleTransferQueue(transferPeople, { isElevated }).filter(p => !p.isJunk),
       openEngagementsCount: ov.openEngagementsCount,
       activeClientsCount: ov.activeClientsCount,
       newThisWeekCount: ov.newThisWeekCount,
@@ -21946,7 +21946,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   // Still gated on isElevated: the server sends [] to franchise users, and this
   // keeps it empty under view-as too (where the client role flips but the
   // server session is still super_admin, so the prop IS populated).
-  const transferLeads = isElevated ? (transferPeople || []).filter(isLivePersonH) : []
+  const transferLeads = visibleTransferQueue(transferPeople, { isElevated }).filter(isLivePersonH)
 
   // ── Calm metrics (context, not hero) ──
   // Open engagements — open engagement RECORD count in scope (SAME source as the
@@ -33349,7 +33349,10 @@ if (Array.isArray(initialPeople)) return
   }, [showMobileNav])
 
   const roleConf    = ROLES.find(r=>r.key===role)
-  const isElevated  = role==='corporate' || role==='super_admin'
+  // Shared with the view-as mapping (lib/view-as-identity) so the role a
+  // picked identity lands on and the role that unlocks the corporate transfer
+  // queue are read from ONE definition, not two that can drift apart.
+  const isElevated  = isElevatedRole(role)
   const selectedLoc = locFilter==='all' ? null : (initialLocations || ALL_LOCATIONS).find(l=>l.id===locFilter)
 
   // ─── CRM persistence (partners + companies) ─────────────────────────────────
@@ -34274,11 +34277,16 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           users={users}
           locations={initialLocations || ALL_LOCATIONS}
           onConfirm={(user)=>{
-            const isCorp = user.role === 'corporate'
-            logViewAs('enter:confirm', { source:'picker', chosen:{ id:user.id, name:user.name, role:user.role }, role: isCorp?'corporate':'franchise', franchiseRole: isCorp?'owner':user.role, locFilter: isCorp?'all':user.locationId, viewAsUser:{ id:user.id, name:user.name }, viewAsTarget:null })
-            applyLocScope(isCorp ? 'all' : user.locationId)
-            setRole(isCorp ? 'corporate' : 'franchise')
-            setFranchiseRole(isCorp ? 'owner' : user.role)
+            // One source of truth for the mapping (lib/view-as-identity), so
+            // the log line and the setters cannot describe different identities
+            // — and so "a corporate target stays elevated" is unit-testable.
+            // That property is what keeps the transfer queue visible to a corp
+            // identity like Leslie: elevated role → HiveScreen passes it down.
+            const next = viewAsIdentityFor(user)
+            logViewAs('enter:confirm', { source:'picker', chosen:{ id:user.id, name:user.name, role:user.role }, role: next.role, franchiseRole: next.franchiseRole, locFilter: next.locFilter, viewAsUser:{ id:user.id, name:user.name }, viewAsTarget:null })
+            applyLocScope(next.locFilter)
+            setRole(next.role)
+            setFranchiseRole(next.franchiseRole)
             setViewAsUser(user)
             setActiveNav('home')
             setViewAsTarget(null)

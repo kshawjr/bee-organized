@@ -99,8 +99,10 @@ describe('T2b — Needs-attention hero: five real signals, role-scoped, empty st
     // for is unchanged, and now matters MORE — the server ships the queue
     // whenever the SESSION is elevated, so under view-as this ternary is the
     // only thing keeping corporate's routing queue off an impersonated
-    // franchise owner's Home.
-    expect(dash).toContain('const transferLeads = isElevated ? (transferPeople || []).filter(isLivePersonH) : []')
+    // franchise owner's Home. The gate itself is now the shared
+    // visibleTransferQueue, mounted both ways in
+    // lib/beta-transfer-queue-all-scope.test.tsx.
+    expect(dash).toContain('const transferLeads = visibleTransferQueue(transferPeople, { isElevated }).filter(isLivePersonH)')
     expect(dash).toContain("key:'needs-transfer'")
   })
   it('zero alerts → one calm "all caught up" card, never an empty hero', () => {

@@ -63,8 +63,10 @@ describe('Fix 1 — Home derivations are memoized (recompute on DATA, not per re
     // dedicated, scope-independent transferPeople array) because filtering the
     // location-scoped people array silently emptied the queue under any
     // location scope. The elevated gate and the live-person filter are
-    // unchanged, which is what this line still pins.
-    expect(dash).toContain('const transferLeads = isElevated ? (transferPeople || []).filter(isLivePersonH) : []')
+    // unchanged, which is what this line still pins — the elevated gate now
+    // reads from the shared visibleTransferQueue so Home and the Inbox cannot
+    // disagree about who is corporate.
+    expect(dash).toContain('const transferLeads = visibleTransferQueue(transferPeople, { isElevated }).filter(isLivePersonH)')
   })
 
   it('the memo returns the values the render consumes, destructured back out', () => {
