@@ -70,6 +70,7 @@ import InitialsAvatar from './shared/InitialsAvatar'
 import NotesStream from './NotesStream'
 import { MicroLabel, CardMenu, undoToast, ActionRow, actionBtn } from './shared/cardKit'
 import useIsMobile from './shared/useIsMobile'
+import BeeLoader from './shared/BeeLoader'
 
 const QUIET = T.surface.sunken
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -762,7 +763,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   )
 
   const loading = !data && !loadErr && (
-    <div style={{ padding: '40px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px' }}>Loading…</div>
+    <BeeLoader size="screen" label="Gathering this client…" />
   )
   const errBlock = loadErr && (
     <p style={{ margin: '0 24px 24px', fontSize: '12px', color: T.state.danger.fg, background: T.state.danger.soft, padding: '8px 12px', borderRadius: T.radius.control }}>

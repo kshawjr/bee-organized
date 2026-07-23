@@ -25,6 +25,7 @@ import { T } from '@/components/hive/shared/tokens'
 import { SECTION_LABEL, SECTION_COUNT } from '@/components/ui/tokens'
 import FilterChips from '@/components/ui/FilterChips'
 import StatusChip from '@/components/ui/StatusChip'
+import BeeLoader from '@/components/hive/shared/BeeLoader'
 
 // send_status → chip family. Deliberate: 'accepted' is teal (in motion / go),
 // NOT the won-green — green would read as "delivered", which Half A cannot
@@ -208,7 +209,7 @@ export default function AdminNotificationsScreen({ locations = [] }) {
       ) : error ? (
         <Notice title="Couldn’t load the notification log" body={error} />
       ) : loading ? (
-        <p style={{ ...SECTION_LABEL, color: T.ink.quiet, padding: '16px 0' }}>Loading…</p>
+        <BeeLoader label="Gathering the outbound mail log…" />
       ) : rows.length === 0 ? (
         <Notice
           title="Nothing in this window"

@@ -16,6 +16,7 @@ import { deriveClientStatus } from "@/components/hive/shared/clientStatus"
 import { daysSince as sharedDaysSince } from "@/components/hive/shared/engagementStatus"
 import { isTerminal as engIsTerminal, CHIP_STYLES as HIVE_CHIP_STYLES } from "@/components/hive/shared/stageConfig"
 import { useStoredState } from "@/components/hive/shared/useStoredControls"
+import BeeLoader from "@/components/hive/shared/BeeLoader"
 // Scope cookie — the client writes it, app/_hub-page.tsx reads it back. Pure
 // zero-import module, so the name/shape can never drift between the two sides.
 import { scopeCookieString, SCOPE_ALL, SCOPE_COOKIE_NAME } from "@/lib/hub-scope"
@@ -12795,7 +12796,7 @@ function OnboardingPathsEditor({ onComplete }) {
   if (wizardStep==='move') return (
     <div style={{ paddingTop:'12px', display:'grid', gap:'12px' }}>
       {pathsLoading ? (
-        <div style={{ padding:'24px', textAlign:'center', color:'#8a9e9a', fontSize:'13px' }}>Loading paths…</div>
+        <BeeLoader label="Gathering your paths…" />
       ) : movePathOptions.length === 0 ? (
         <div style={{ padding:'14px', background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'10px', fontSize:'12px', color:'#7f1d1d', lineHeight:1.5 }}>
           No master Moving paths found. Contact support — at least one <code>moving-*</code> master drip path must be seeded (see migrations/seed_master_drip_paths.sql).
@@ -12817,7 +12818,7 @@ function OnboardingPathsEditor({ onComplete }) {
   if (wizardStep==='general') return (
     <div style={{ paddingTop:'12px', display:'grid', gap:'12px' }}>
       {pathsLoading ? (
-        <div style={{ padding:'24px', textAlign:'center', color:'#8a9e9a', fontSize:'13px' }}>Loading paths…</div>
+        <BeeLoader label="Gathering your paths…" />
       ) : generalPathOptions.length === 0 ? (
         <div style={{ padding:'14px', background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'10px', fontSize:'12px', color:'#7f1d1d', lineHeight:1.5 }}>
           No master Organizing paths found. Contact support — at least one <code>organizing-*</code> master drip path must be seeded (see migrations/seed_master_drip_paths.sql).
@@ -26440,7 +26441,7 @@ function ConfigureTab() {
   useEffect(() => { refresh() }, [])
 
   if (loading) {
-    return <div style={{ padding: 30, textAlign: 'center', color: '#8a9e9a' }}>Loading…</div>
+    return <BeeLoader size="screen" label="Gathering your configuration…" />
   }
   if (error) {
     return (
@@ -28019,7 +28020,7 @@ function FeedbackModal({ onClose, initialTab = 'mine', viewAsUserId = null }) {
         <div ref={bodyRef} style={{ padding:'18px 20px', overflowY:'auto', flex:1 }}>
           {tab === 'mine' ? (
             loading ? (
-              <p style={{ fontSize:'13px', color:'#8a9e9a', textAlign:'center', padding:'30px 0' }}>Loading…</p>
+              <BeeLoader label="Gathering your reports…" />
             ) : loadError ? (
               <div style={{ textAlign:'center', padding:'24px 0' }}>
                 <p style={{ fontSize:'13px', color:'#b91c1c', marginBottom:'10px' }}>{loadError}</p>
@@ -29722,7 +29723,7 @@ function AdminFeedbackScreen({
       </div>
 
       {loading ? (
-        <p style={{ fontSize:'13px', color:'#8a8a84', textAlign:'center', padding:'30px 0' }}>Loading…</p>
+        <BeeLoader size="screen" label="Gathering the records…" />
       ) : error ? (
         <div style={{ textAlign:'center', padding:'24px 0' }}>
           <p style={{ fontSize:'13px', color:'#b91c1c', marginBottom:'10px' }}>{error}</p>
@@ -29971,7 +29972,7 @@ function AdminWebhookLogScreen() {
       </div>
 
       {loading ? (
-        <p style={{ fontSize:'13px', color:'#8a8a84', textAlign:'center', padding:'30px 0' }}>Loading…</p>
+        <BeeLoader size="screen" label="Gathering the records…" />
       ) : error ? (
         <div style={{ textAlign:'center', padding:'24px 0' }}>
           <p style={{ fontSize:'13px', color:'#b91c1c', marginBottom:'10px' }}>{error}</p>
@@ -30451,7 +30452,7 @@ function AdminDashboard({ locations, users, role, onNavigate }) {
               </div>
             )}
             {!allCounted && (
-              <div style={{ padding:'20px', textAlign:'center', color:'#b0c0bc', fontSize:'13px' }}>Loading…</div>
+              <BeeLoader label="Gathering what needs you…" />
             )}
             <div style={{ display:'grid', gap:'8px' }}>
               {role === 'super_admin' && (actionCounts.conversions || 0) > 0 && (
@@ -30589,7 +30590,7 @@ function JobberHealthAdmin() {
   }
 
   if (state === 'loading') {
-    return <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Loading connection health…</p>
+    return <BeeLoader size="screen" label="Checking every location's Jobber connection…" />
   }
   if (state === 'error') {
     return (

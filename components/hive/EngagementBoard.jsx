@@ -48,6 +48,7 @@ import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCo
 import { FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
+import BeeLoader from './shared/BeeLoader'
 
 const BOARD_SORTS = [
   { key: 'newest', label: 'Newest activity' },
@@ -405,7 +406,7 @@ export default function EngagementBoard({ engagements = [], closedCount = 0, reo
             />
           ))}
           {segLoading && (
-            <div style={{ padding: '14px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px' }}>Loading…</div>
+            <BeeLoader label="Gathering closed deals…" />
           )}
           {!segLoading && segRows.length === 0 && (
             <div style={{ padding: '14px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px', border: T.border.dashedSoft, borderRadius: T.radius.inset }}>

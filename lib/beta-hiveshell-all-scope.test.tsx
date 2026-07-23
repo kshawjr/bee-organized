@@ -148,6 +148,31 @@ describe("HiveShell on 'All Locations' — every record lens prompts", () => {
   })
 })
 
+describe('BeeLoader mounts inside a real consuming screen', () => {
+  // Per the allOverview hotfix: a source pin cannot catch an unbound
+  // identifier, and BeeLoader landed in five hive components by import. Mount
+  // one of its consumers for real so a missing/renamed import fails here
+  // rather than in production.
+  it('EngagementGroupedList renders its closed section with the loader wired', async () => {
+    const host = await mount(base({
+      locFilter: KC,
+      locationRequired: false,
+      engagements: [engagement({ stage: 'Estimate', client_name: 'Sarah Mitchell' })],
+      people: [person({ id: 'c1' })],
+    }))
+    // The list lens owns the closed-engagements section BeeLoader now backs.
+    const listBtn = Array.from(host.querySelectorAll('button')).find(b => /^list$/i.test((b.textContent || '').trim()))
+    if (listBtn) await act(async () => { listBtn.click() })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+    // Mounting at all is the assertion — an unbound BeeLoader would have
+    // thrown and left the container empty. Groups render collapsed, so pin the
+    // list's own structure (which proves the lens rendered) rather than a
+    // client name that lives inside a closed group.
+    expect(host.textContent).toContain('Estimate')
+    expect(host.textContent).toContain('Closed')
+  })
+})
+
 describe('HiveShell on a SCOPED load — unchanged', () => {
   it('renders the board, never the prompt', async () => {
     const host = await mount(base({

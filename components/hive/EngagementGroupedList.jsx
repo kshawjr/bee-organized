@@ -44,6 +44,7 @@ import {
 import { FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
+import BeeLoader from './shared/BeeLoader'
 
 const OPEN_STAGES = ENGAGEMENT_STAGES.filter(s => !s.terminal)
 const CLOSED_WINDOW = 50
@@ -254,7 +255,7 @@ export default function EngagementGroupedList({
           <EngagementRow key={e.id} e={e} nowMs={nowMs} muted onOpen={onOpenEngagement} isMobile={isMobile} />
         ))}
         {closedLoading && (!closedData || (closedData.rows || []).length === 0) && (
-          <div style={{ padding: '8px 4px', fontSize: '12px', color: T.ink.quiet }}>Loading closed engagements…</div>
+          <BeeLoader label="Gathering closed engagements…" />
         )}
         {!closedLoading && closedData && (closedData.rows || []).length === 0 && (
           <div style={{ padding: '8px 4px', fontSize: '12px', color: T.ink.quiet }}>No closed engagements in this view</div>

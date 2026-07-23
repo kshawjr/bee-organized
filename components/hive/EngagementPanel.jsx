@@ -78,6 +78,7 @@ import { Celebration, useReducedMotion, useMotionKeyframes, chipMoveStyle } from
 import { fmtTime, fmtShort, engagementValue, displayTitle, formatFullDate, invoiceNumber, daysInStage, invoicesFullyPaid } from './shared/engagementStatus'
 import { recordJobberUrl, jobberClientUrl } from './shared/jobberLinks'
 import { T } from './shared/tokens'
+import BeeLoader from './shared/BeeLoader'
 
 const fmtMoney = (n) => '$' + Math.round(Number(n) || 0).toLocaleString()
 const fmtDate = (d) => {
@@ -563,7 +564,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
             />
           ))}
           {!data && !loadErr && (
-            <div style={{ padding: '14px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px' }}>Loading…</div>
+            <BeeLoader label="Gathering this engagement…" />
           )}
         </div>
       </div>
