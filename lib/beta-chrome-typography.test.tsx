@@ -105,20 +105,26 @@ async function fire(node: Element) {
 
 describe('token definitions — the named scale, vars on the shell root', () => {
   it('green 3-stop scale is named, distinct, and the teal pair rides GREEN_TEXT', () => {
-    expect(GREEN_FILL).toBe('#0F6E56')
-    expect(GREEN_TEXT).toBe('#085041')
-    expect(TEXT_SUCCESS).toBe('#1D9E75')
+    // Brand pass 7/23: the scale is now the PUBLIC SITE's teal, and
+    // TEXT_SUCCESS was darkened to clear AA (it was 3.39:1 on white
+    // while running "Existing client · …" and the inline-edit ✓).
+    expect(GREEN_FILL).toBe('#054E4A')
+    expect(GREEN_TEXT).toBe('#03403C')
+    expect(TEXT_SUCCESS).toBe('#167959')
     expect(new Set([GREEN_FILL, GREEN_TEXT, TEXT_SUCCESS]).size).toBe(3)
     // ONE teal pair: CHIP_STYLES.teal.text IS the scale's dark stop.
     expect(CHIP_STYLES.teal.text).toBe(GREEN_TEXT)
-    expect(CHIP_STYLES.teal.bg).toBe('#E1F5EE')
+    expect(CHIP_STYLES.teal.bg).toBe('#E3EEEC')
   })
 
   it('root token maps carry the muted/quiet/hairline vars with hex fallbacks in call sites', () => {
     expect(TEXT_TOKENS['--text-muted']).toBe(TEXT_MUTED)
     expect(TEXT_TOKENS['--text-quiet']).toBe(TEXT_QUIET)
     expect(BORDER_TOKENS['--hairline-border']).toBe(HAIRLINE_BORDER)
-    expect(HAIRLINE_BORDER).toBe('rgba(0,0,0,0.15)')
+    // 0.15 → 0.45: this line is a CONTROL boundary (WCAG 1.4.11, 3:1).
+    // At 0.15 it composited to ~1.4:1 on white — in the DOM, invisible
+    // on screen. See beta-palette-contrast.test.ts.
+    expect(HAIRLINE_BORDER).toBe('rgba(0,0,0,0.45)')
   })
 })
 
@@ -278,7 +284,7 @@ describe('shared structural components — one markup, affordances intact', () =
     // Desktop render still shows every column header through SectionHeader
     const html = renderToString(<EngagementBoard engagements={[eng()] as any} closedCount={0} />)
     expect(html).toContain('>Request<')
-    expect(html).toMatch(/font-size:12px;font-weight:500;color:#6b6b66/)
+    expect(html).toMatch(/font-size:12px;font-weight:500;color:#54544F/)
   })
 })
 

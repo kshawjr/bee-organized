@@ -4,6 +4,7 @@
 'use client'
 
 import React from 'react'
+import { TEXT_MUTED } from '@/components/ui/tokens'
 
 export default function Row({ left = null, primary, secondary = null, right = null, onClick = null }) {
   return (
@@ -24,7 +25,7 @@ export default function Row({ left = null, primary, secondary = null, right = nu
           {primary}
         </p>
         {secondary && (
-          <p style={{ fontSize: '11px', color: '#8a8a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <p style={{ fontSize: '11px', color: TEXT_MUTED, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {secondary}
           </p>
         )}

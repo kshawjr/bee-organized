@@ -356,7 +356,7 @@ describe('per-surface Overview content', () => {
     const owingCell = [...band.children].find(c => (c.textContent || '').includes('Owing'))! as HTMLElement
     expect(owingCell.textContent).toContain('$350')
     const value = owingCell.querySelectorAll('p')[1] as HTMLElement
-    expect(['#0F6E56', 'rgb(15, 110, 86)']).toContain(value.style.color)
+    expect(['#054E4A', 'rgb(5, 78, 74)']).toContain(value.style.color)
     await unmount()
   })
 })
@@ -511,7 +511,7 @@ describe('header client identity (Option B)', () => {
     const { host, unmount } = await mountPanel({ onOpenClient: (id: string) => opened.push(id) })
     const view = buttonContaining(host, 'View profile')! as HTMLElement
     expect(view).toBeTruthy()
-    expect(['#0F6E56', 'rgb(15, 110, 86)']).toContain(view.style.color) // THE accent (one-accent rule)
+    expect(['#054E4A', 'rgb(5, 78, 74)']).toContain(view.style.color) // THE accent (one-accent rule)
     // header region: above the tab bar in DOM order
     expect(view.compareDocumentPosition(tabButton(host, 'Overview')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // founding facts ride the same line, FULL-format date (created_at = 5d ago)
@@ -590,11 +590,11 @@ describe('action row', () => {
   it('soft tints, matching text color, no hairline: Call + Send ride THE accent (one-accent rule), neutrals gray, 38px', async () => {
     const ep = await mountPanel({ onSendToJobber: () => {} })
     const call = [...ep.host.querySelectorAll('a')].find(a => (a.textContent || '').includes('Call'))!
-    expect(call.getAttribute('style')).toMatch(/rgba\(15,\s*110,\s*86/) // ~10% accent tint
+    expect(call.getAttribute('style')).toMatch(/#E3EEEC|rgb\(227,\s*238,\s*236\)/i) // the accent tint (a solid hex since the brand pass — an alpha wash has no assertable ratio)
     expect(call.getAttribute('style')).not.toContain('solid')           // no hairline border
-    expect(['#085041', 'rgb(8, 80, 65)']).toContain((call as HTMLElement).style.color)
+    expect(['#03403C', 'rgb(3, 64, 60)']).toContain((call as HTMLElement).style.color)
     const panelSend = buttonContaining(ep.host, 'Send to Jobber')!
-    expect(panelSend.getAttribute('style')).toMatch(/rgba\(15,\s*110,\s*86/) // same accent tint — the forest/blue split is dead
+    expect(panelSend.getAttribute('style')).toMatch(/#E3EEEC|rgb\(227,\s*238,\s*236\)/i) // same accent tint — the forest/blue split is dead
     const log = buttonContaining(ep.host, 'Log touchpoint')!
     expect(log.getAttribute('style')).toMatch(/rgba\(0,\s*0,\s*0/) // neutral gray tint
     expect((log as HTMLElement).style.height).toBe('38px')
@@ -602,7 +602,7 @@ describe('action row', () => {
 
     const pc = await mountPerson()
     const send = buttonContaining(pc.host, 'Send to Jobber')!
-    expect(send.getAttribute('style')).toMatch(/rgba\(15,\s*110,\s*86/) // founding door rides the accent
+    expect(send.getAttribute('style')).toMatch(/#E3EEEC|rgb\(227,\s*238,\s*236\)/i) // founding door rides the accent
     await pc.unmount()
   })
 })

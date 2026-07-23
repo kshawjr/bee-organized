@@ -36,6 +36,10 @@ import { T, sage } from './shared/tokens'
 // the sidebar + chips already use.
 const AVATAR_AMBER = T.scope.avatarAmber
 const RING_AMBER = T.scope.ringAmber
+// The initials ride a GOLD disc. White on brand gold is 2.35:1 — the
+// banned pair — so the disc keeps its brand brightness and the initials
+// go dark instead of the disc going dim.
+const ON_AMBER = T.scope.onAmber
 const SAGE = sage
 
 const rowBase = {
@@ -118,7 +122,7 @@ export default function IdentityScopeControl({
           cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', boxSizing: 'border-box',
         }}
       >
-        <span style={{ width: '32px', height: '32px', borderRadius: T.radius.round, background: AVATAR_AMBER, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700, color: T.ink.inverse, flexShrink: 0 }}>
+        <span style={{ width: '32px', height: '32px', borderRadius: T.radius.round, background: AVATAR_AMBER, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700, color: ON_AMBER, flexShrink: 0 }}>
           {initials}
         </span>
         <span style={{ flex: 1, minWidth: 0 }}>
@@ -144,7 +148,7 @@ export default function IdentityScopeControl({
 
             {/* 1 · Identity — always the REAL signed-in identity */}
             <div data-section="identity" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 14px' }}>
-              <span style={{ width: '34px', height: '34px', borderRadius: T.radius.round, background: AVATAR_AMBER, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 700, color: T.ink.inverse, flexShrink: 0 }}>
+              <span style={{ width: '34px', height: '34px', borderRadius: T.radius.round, background: AVATAR_AMBER, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 700, color: ON_AMBER, flexShrink: 0 }}>
                 {initials}
               </span>
               <span style={{ flex: 1, minWidth: 0 }}>

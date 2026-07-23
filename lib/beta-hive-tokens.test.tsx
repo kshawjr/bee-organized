@@ -94,7 +94,9 @@ describe('token values — sharpened light palette', () => {
 
   it('ONE accent — the brand teal, lockstep with ui/tokens GREEN_FILL/GREEN_TEXT', () => {
     expect(T.accent.fg).toBe(GREEN_FILL)
-    expect(T.accent.fg).toBe('#0F6E56')
+    // Brand pass 7/23 — the site's own deep teal (its color-scheme-inverse
+    // secondary background / button-hover fill), not a near-miss of it.
+    expect(T.accent.fg).toBe('#054E4A')
     expect(T.accent.deep).toBe(GREEN_TEXT)
   })
 
@@ -107,7 +109,7 @@ describe('token values — sharpened light palette', () => {
   })
 
   it('chip families stay the locked §8.6 pairs (they encode meaning — never collapsed into the accent)', () => {
-    expect(T.family.teal.bg).toBe('#E1F5EE')
+    expect(T.family.teal.bg).toBe('#E3EEEC')
     expect(CHIP_STYLES.teal).toEqual(T.family.teal)
     expect(CHIP_STYLES.blue).toEqual(T.family.blue)
     expect(CHIP_STYLES.red).toEqual(T.family.red)
@@ -260,7 +262,7 @@ describe('milestone records view', () => {
     )
     const call = Array.from(host.querySelectorAll('a[href^="tel:"]'))[0] as HTMLElement
     expect(call).toBeTruthy()
-    expect([T.accent.deep, 'rgb(8, 80, 65)']).toContain(call.style.color)
+    expect([T.accent.deep, 'rgb(3, 64, 60)']).toContain(call.style.color)
     await unmount()
   })
 })

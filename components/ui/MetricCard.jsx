@@ -6,6 +6,7 @@
 
 import React from 'react'
 import { CHIP_STYLES } from '@/components/hive/shared/stageConfig'
+import { TEXT_MUTED } from '@/components/ui/tokens'
 
 export default function MetricCard({ label, value, tone = null }) {
   const color = tone ? (CHIP_STYLES[tone] || CHIP_STYLES.gray).text : '#1a1a18'
@@ -17,7 +18,7 @@ export default function MetricCard({ label, value, tone = null }) {
       minWidth: 0,
     }}>
       <p style={{
-        fontSize: '11px', fontWeight: 500, color: '#8a8a84', marginBottom: '3px',
+        fontSize: '11px', fontWeight: 500, color: TEXT_MUTED, marginBottom: '3px',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
       }}>
         {label}

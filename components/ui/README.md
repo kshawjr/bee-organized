@@ -18,16 +18,28 @@ strip, metric cards) `#f7f6f4`; table/section cards radius `12px`;
 buttons radius `8px`; modal radius `16px`; pills/tabs radius `20px`.
 
 **Closed color vocabulary** — every color on a beta surface resolves to:
-the `CHIP_STYLES` families (below, plus `quiet` `#F5F4EF`/`#b5b3ac`),
-the neutrals `#fdfdfc` / `#f7f6f4` / `#fff` / `#1a1a18` / `#6b6b66` /
-`#8a8a84` (`TEXT_MUTED`) / `#b5b3ac` (`TEXT_QUIET`) / `#c9c7c0`,
+the `CHIP_STYLES` families (below, plus `quiet` `#F2F0EA`/`#6A6A65`),
+the neutrals `#fdfdfc` / `#f7f6f4` / `#fff` / `#1a1a18` / `#54544F` /
+`#61615C` (`TEXT_MUTED`) / `#6A6A65` (`TEXT_QUIET`) / `#70706B`,
 hairlines `rgba(0,0,0,0.08)` for cards/dividers and
-`rgba(0,0,0,0.15)` (`HAIRLINE_BORDER`, `--hairline-border`) for buttons
-and inputs, scrims `rgba(26,26,24,…)`, the brand-green 3-stop scale
-`#0F6E56` (`GREEN_FILL`) / `#085041` (`GREEN_TEXT`) / `#1D9E75`
-(`TEXT_SUCCESS`), the stage bar `#1D9E75` / `#378ADD` / `#ECEAE4`, and
-accent blue `#378ADD` for links. Named values live in `ui/tokens.js`.
-Anything else is a bug — grep before pushing.
+`rgba(0,0,0,0.45)` (`HAIRLINE_BORDER`, `--hairline-border`) for buttons
+and inputs, scrims `rgba(26,26,24,…)`, the brand-teal 3-stop scale
+`#054E4A` (`GREEN_FILL`) / `#03403C` (`GREEN_TEXT`) / `#167959`
+(`TEXT_SUCCESS`), and the two brand markers `#A8C9C4` (sage) / `#D4A049`
+(gold) as DECORATIVE FILLS ONLY. Named values live in `ui/tokens.js` and
+`hive/shared/tokens.js`. Anything else is a bug — grep before pushing.
+
+**Contrast is a constraint, not a guideline (brand pass 7/23)** — every
+text/background pair the tokens can produce clears WCAG AA at NORMAL
+size (4.5:1) against both `#fff` and the warm canvas `#F6F5F0`. Nothing
+relies on the large-text exemption. Two pairs are BANNED outright, both
+of which the public marketing site ships: white on sage (1.78:1) and
+white on gold (2.35:1). Use `T.brand.onSage` / `T.brand.onGold` for ink
+on those fills, or `T.brand.goldText` / `T.brand.goldFill` when a gold
+thing must carry or bear text. `lib/beta-palette-contrast.test.ts`
+enforces all of it — when it fails, change the VALUE, not the threshold.
+The one documented exemption is `ink.disabled` (WCAG 1.4.3, inactive
+components).
 
 **Icons** — `components/ui/icons.jsx`: inline Tabler Icons (MIT),
 stroke-based, `currentColor`, default 16px (`size` prop; 14px in tab
@@ -37,22 +49,24 @@ status text). No emoji glyphs on beta surfaces; no icon npm dependency.
 
 **Typography** — 100% sans (app stack); no serif inside Phase 1 surfaces.
 Primary text 13px / weight 500 / near-black `#1a1a18` (never 700).
-Secondary 11px / muted `#8a8a84`. Values 12–13px / weight 500. Section
-labels 12px / weight 500 / `#6b6b66`, sentence case, count after a `·` in
-`#b5b3ac` ("Request · 10").
+Secondary 11px / muted `#61615C`. Values 12–13px / weight 500. Section
+labels 12px / weight 500 / `#54544F`, sentence case, count after a `·` in
+`#6A6A65` ("Request · 10"). Sizes and weights are NOT set by the brand
+pass — the marketing site runs 14px body at weight 300, which would make
+the open "text is too small" complaint worse. That is its own decision.
 
 **Chips** — 11px / weight 500, padding `2px 8px`, radius `10px`, no
 border. Dark-on-light pairs (exact, do not tweak per-surface):
 
 | family | meaning | bg | text |
 |---|---|---|---|
-| teal | new / go / requested | `#E1F5EE` | `#085041` |
+| teal | new / go / requested | `#E3EEEC` | `#03403C` |
 | blue | in-motion (sent / scheduled / in progress / upcoming) | `#E6F1FB` | `#0C447C` |
 | green | approved | `#EAF3DE` | `#27500A` |
-| amber | attention / nurture / never invoiced | `#FAEEDA` | `#633806` |
+| amber | attention / nurture / never invoiced | `#F7EEDD` | `#6B4D19` |
 | red | money owed | `#FCEBEB` | `#791F1F` |
 | purple | repeat / relationship | `#EEEDFE` | `#3C3489` |
-| gray | past / closed / neutral | `#F1EFE8` | `#444441` |
+| gray | past / closed / neutral | `#F1EFE8` | `#3C3C37` |
 
 **Spacing** — 12px between cards, 16px between board columns; generous,
 the layout breathes.
