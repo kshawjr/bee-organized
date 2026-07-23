@@ -209,16 +209,12 @@ export default function NetworkScreen({
           </p>
         </div>
         {!readOnly && (
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button onClick={() => onAdd('partner')}
-              style={{ padding: '8px 14px', borderRadius: T.radius.control, border: 'none', background: T.accent.fg, color: T.accent.onFill, fontSize: '13px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>
-              + Add person
-            </button>
-            <button onClick={() => onAdd('company')}
-              style={{ padding: '8px 14px', borderRadius: T.radius.control, border: T.border.control, background: T.surface.raised, color: T.ink.primary, fontSize: '13px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>
-              + Add company
-            </button>
-          </div>
+          // ONE entry point — the merged NetworkAddSheet asks Person vs
+          // Company via its own segmented toggle.
+          <button onClick={() => onAdd()}
+            style={{ padding: '8px 16px', borderRadius: T.radius.control, border: 'none', background: T.accent.fg, color: T.accent.onFill, fontSize: '13px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>
+            + Add
+          </button>
         )}
       </div>
 

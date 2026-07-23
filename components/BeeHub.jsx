@@ -37,6 +37,7 @@ import SendToJobberModal from "@/components/hive/SendToJobberModal"
 import NetworkScreen from "@/components/hive/NetworkScreen"
 import NetworkPersonRecord from "@/components/hive/NetworkPersonRecord"
 import NetworkCompanyRecord from "@/components/hive/NetworkCompanyRecord"
+import NetworkAddSheet from "@/components/hive/NetworkAddSheet"
 import AskBeeHubPanel from "@/components/hive/AskBeeHubPanel"
 // Pure presentational icon set (inline SVG, zero deps) — safe to import
 // statically like betaGate; it pulls no beta-chunk surface code with it.
@@ -13627,10 +13628,17 @@ function AddPartnerModal({ onAdd, onClose, defaultType='partner', defaultName=''
         id:`p${Date.now()}`,
         type,
         name:`${form.firstName} ${form.lastName}`.trim(),
+        // Parity with NetworkAddSheet's field-loss fixes (0a/0b/0c) — this
+        // Classic modal survives only for the retired shells, but it must
+        // not keep dropping fields there: title now rides, the company
+        // display string rides beside the FK, and stage is always
+        // 'New Contact' ('Contact' was outside the stage vocabulary).
+        title: form.title,
         companyId: companyId || null,
+        company: form.company || '',
         phone:form.phone, email:form.email, website:form.website||'',
         addresses,
-        stage: type==='contact' ? 'Contact' : 'New Contact',
+        stage: 'New Contact',
         specialties: type==='contact' ? [] : form.specialties,
         tier: type==='contact' ? null : form.tier,
         relationship: type==='contact' ? form.relationship : '',
@@ -14931,9 +14939,11 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
   const companiesApi = useContext(CompaniesContext)
   const [selected, setSelected] = useState(initialSelected)
   React.useEffect(()=>{ if(initialSelected){ setSelected(initialSelected); onInitialSelectedConsumed() } },[initialSelected])
-  const [showAdd, setShowAdd] = useState(false)  // add modal open
-  const [addType, setAddType] = useState(null)    // 'partner' | 'company' (post-merge: no separate 'contact' door)
-  const [addCompanyPreset, setAddCompanyPreset] = useState(null) // company a new person is created INTO
+  // ONE add door (the merged NetworkAddSheet — Person/Company toggle
+  // inside). addCompanyPreset = the company a new person is created INTO
+  // (the company record's "+ Add person"); it forces the Person position.
+  const [showAdd, setShowAdd] = useState(false)
+  const [addCompanyPreset, setAddCompanyPreset] = useState(null)
   const [selectedCompany, setSelectedCompany] = useState(null)
 
   const allPartners = (locFilter==='all' ? partners : partners.filter(p=>p.locationId===locFilter)).filter(p=>!p.isDeleted)
@@ -14942,7 +14952,7 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
   function updatePartner(updated) { partnersApi?.updatePartner ? partnersApi.updatePartner(updated) : setPartners(p=>p.map(x=>x.id===updated.id?updated:x)); setSelected(updated) }
   async function addPartner(p) { return partnersApi?.addPartner ? partnersApi.addPartner(p) : setPartners(prev=>[p,...prev]) }
 
-  const openAdd = (type) => { setAddType(type === 'company' ? 'company' : 'partner'); setShowAdd(true) }
+  const openAdd = () => setShowAdd(true)
 
   return (
     <>
@@ -14984,18 +14994,31 @@ export function PartnersScreen({ onNavigate, partners, setPartners, companies=[]
           onClose={()=>setSelectedCompany(null)}
           onUpdateCompany={(updated)=>{ companiesApi?.updateCompany ? companiesApi.updateCompany(updated) : setCompanies(prev=>prev.map(c=>c.id===updated.id?updated:c)); setSelectedCompany(updated) }}
           onOpenPerson={(p)=>{ setSelectedCompany(null); setSelected(p) }}
-          onAddPerson={(co)=>{ setAddCompanyPreset(co); setAddType('partner'); setShowAdd(true) }}
+          onAddPerson={(co)=>{ setAddCompanyPreset(co); setShowAdd(true) }}
           onDelete={async (id)=>{ if (companiesApi?.deleteCompany) { await companiesApi.deleteCompany(id) } else { setCompanies(prev=>prev.filter(c=>c.id!==id)) } setSelectedCompany(null) }}
           setToast={setToast}
           readOnly={readOnly}
         />
       )}
 
-      {/* Add modals — post-merge there are two doors: person (partners row,
-          type stays 'partner') and company. The 'contact' door is gone with
-          the type split. */}
-      {showAdd&&addType==='partner'&&<AddPartnerModal onAdd={addPartner} onClose={()=>{ setShowAdd(false); setAddType(null); setAddCompanyPreset(null) }} defaultType='partner' defaultCompany={addCompanyPreset} companies={allCompanies} onCreateCompany={co=>companiesApi?.addCompany?.(co)} />}
-      {showAdd&&addType==='company'&&<AddCompanyModal onAdd={co=>companiesApi?.addCompany?.(co)} onClose={()=>{ setShowAdd(false); setAddType(null) }} partners={allPartners} onUpdatePartner={updatePartner} />}
+      {/* ONE add door — the merged NetworkAddSheet (Person/Company toggle
+          inside, beta shell). Replaces AddPartnerModal + AddCompanyModal,
+          both retained-unrendered for the retired Classic callers. The
+          admin picklists ride as props (§8.5 — the sheet can't reach the
+          getters). */}
+      {showAdd&&(
+        <NetworkAddSheet
+          onClose={()=>{ setShowAdd(false); setAddCompanyPreset(null) }}
+          onAddPerson={addPartner}
+          onAddCompany={(co)=>companiesApi?.addCompany ? companiesApi.addCompany(co) : Promise.resolve(null)}
+          onUpdatePartner={updatePartner}
+          partners={allPartners}
+          companies={allCompanies}
+          specialties={getSpecialties().map(s=>({ id:s.id, label:s.label }))}
+          tiers={getPartnerTiers().map(t=>({ id:t.id, label:t.label }))}
+          defaultCompany={addCompanyPreset}
+        />
+      )}
     </>
   )
 }
