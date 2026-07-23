@@ -184,8 +184,12 @@ export async function GET(
   // Referrer name resolution — same polymorphic lookup as the profile
   // route: kind 'partner' → partners row (contacts share the table),
   // kind 'lead' → another leads row, 'company' → companies row (Network
-  // Phase 1). The panel's ReferrerField shows who.
+  // Phase 1). EngagementPanel doesn't render a referrer today, but the
+  // payload mirrors the profile route's shape — including
+  // referred_by_missing — so any consumer that does render it can say
+  // "removed referrer" instead of degrading silently on a deleted row.
   let referredByName: string | null = null
+  let referredByMissing = false
   const clientLead = clientRes.data
   if (clientLead?.referred_by_kind && clientLead?.referred_by_id) {
     const referrerTable =
@@ -198,6 +202,8 @@ export async function GET(
       .eq('id', clientLead.referred_by_id)
       .maybeSingle()
     referredByName = ref?.name ?? null
+    // A referrer IS set yet the lookup found nothing → deleted row.
+    referredByMissing = !ref
   }
 
   // Engagement-level assignees (junction → hub_users). Ordered by
@@ -241,6 +247,7 @@ export async function GET(
       referred_by_kind: clientRes.data?.referred_by_kind ?? null,
       referred_by_id: clientRes.data?.referred_by_id ?? null,
       referred_by_name: referredByName,
+      referred_by_missing: referredByMissing,
       buzz: buzzRes.data ?? [],
       lifetime_paid: lifetimePaid,
       prior_engagements: priorCount,

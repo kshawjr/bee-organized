@@ -105,7 +105,8 @@ export default function ReferrerField({
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
             Referred by {lead.referred_by_name
               || (lead.referred_by_missing ? 'a removed referrer'
-                : lead.referred_by_kind === 'lead' ? 'a client' : 'a partner')}
+                : lead.referred_by_kind === 'lead' ? 'a client'
+                : lead.referred_by_kind === 'company' ? 'a company' : 'a partner')}
           </span>
         ) : (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
@@ -116,7 +117,8 @@ export default function ReferrerField({
                   lead (older payloads) still degrades to the kind. */}
               Referred by {lead.referred_by_name
                 || (lead.referred_by_missing ? 'a removed referrer'
-                  : lead.referred_by_kind === 'lead' ? 'a client' : 'a partner')}
+                  : lead.referred_by_kind === 'lead' ? 'a client'
+                  : lead.referred_by_kind === 'company' ? 'a company' : 'a partner')}
             </button>
             <button type="button" aria-label="Clear referrer" onClick={clear}
               style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', color: T.ink.quiet, fontSize: '13px', lineHeight: 1 }}>

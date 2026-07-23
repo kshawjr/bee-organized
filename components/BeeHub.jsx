@@ -38,6 +38,10 @@ import NetworkScreen from "@/components/hive/NetworkScreen"
 import NetworkPersonRecord from "@/components/hive/NetworkPersonRecord"
 import NetworkCompanyRecord from "@/components/hive/NetworkCompanyRecord"
 import NetworkAddSheet from "@/components/hive/NetworkAddSheet"
+// The beta add-client flow — the FAB's target (the Classic NewLeadModal
+// quick-capture it replaced was the last reachable pre-merge referrer UX).
+import NewClientSheet from "@/components/hive/NewClientSheet"
+import { mapLeadToPerson } from "@/lib/people-mapper"
 import AskBeeHubPanel from "@/components/hive/AskBeeHubPanel"
 // Pure presentational icon set (inline SVG, zero deps) — safe to import
 // statically like betaGate; it pulls no beta-chunk surface code with it.
@@ -21534,6 +21538,25 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
   const [showNewLead, setShowNewLead] = useState(false)
+  // Admin-managed option lists for the FAB's NewClientSheet — the same
+  // /api/lookups load HiveShell does, fetched lazily on FIRST open so
+  // Home mounts pay nothing. Without it the sheet's Source select has no
+  // 'Referral' option and the referrer picker is unreachable from here.
+  const [homeLookups, setHomeLookups] = useState(null)
+  useEffect(() => {
+    if (!showNewLead || homeLookups) return
+    let dead = false
+    fetch('/api/lookups')
+      .then(r => r.json())
+      .then(j => {
+        if (dead) return
+        const rows = (j.lookups || []).filter(l => l.is_active !== false)
+        const by = (cat) => rows.filter(l => l.category === cat).map(l => l.label)
+        setHomeLookups({ sources: by('lead_sources'), projectTypes: by('project_types') })
+      })
+      .catch(() => {})
+    return () => { dead = true }
+  }, [showNewLead, homeLookups])
   const [locIndicatorHover, setLocIndicatorHover] = useState(false)
   const [toast, setToast] = useState(null)
   useEffect(() => {
@@ -22150,13 +22173,44 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
 
       </div>
 
-      {showNewLead&&<NewLeadModal
-        startPhase='quick'
+      {/* Quick-capture FAB target — the BETA create flow (NewClientSheet),
+          the same experience the desktop shell's ＋ opens. Replaced Classic
+          NewLeadModal (startPhase='quick'), which was the last REACHABLE
+          mount of the pre-merge referrer picker (partners-only, no
+          companies, no merged Network framing) — phones only, since the
+          FAB hides ≥768px. The sheet needs a real location scope; the FAB
+          renders on scoped Home views where effectiveLocId resolves. */}
+      {showNewLead&&<NewClientSheet
+        people={people}
+        engagements={engagements}
+        locFilter={locFilter}
+        currentLocationUuid={effectiveLocId}
+        currentUserId={currentUserId}
+        lookupOptions={homeLookups || { sources: [], projectTypes: [] }}
+        setToast={setToast}
         onClose={()=>setShowNewLead(false)}
-        onCreate={p=>{ setPeople(prev=>[p,...prev]); setShowNewLead(false) }}
-        existingPeople={people}
-        currentUserId={null}
+        onPartnerCreated={row=>{ if (row?.id) setPartners(prev=>prev.some(x=>x.id===row.id)?prev:[row,...prev]) }}
+        onCreated={leadRow=>{
+          // CONFIRMED insert only (same seam as HiveShell): map the real
+          // returned row, merge into people so Home/Inbox reflect it, then
+          // open the record when the app-level opener is wired.
+          const person = mapLeadToPerson(leadRow, {})
+          if (person) setPeople(prev=>prev.some(x=>x.id===person.id)?prev:[person,...prev])
+          setShowNewLead(false)
+          if (person && onOpenRecord) onOpenRecord(person)
+        }}
+        onFounded={()=>{ /* board state lives in the shell — the founded
+          engagement is real server-side and shows on next Clients load */ }}
+        onOpenClient={(clientId)=>{
+          const p = people.find(x=>x.id===clientId)
+          setShowNewLead(false)
+          if (p && onOpenRecord) onOpenRecord(p)
+        }}
+        onOpenEngagement={()=>{ setShowNewLead(false); if (onOpenHive) onOpenHive({ tab:'engagements' }) }}
+        onSendToJobber={null}
+        readOnly={isReadOnly}
       />}
+      {toast && <InlineToast {...toast} />}
       <BottomNav />
     </div>
   )

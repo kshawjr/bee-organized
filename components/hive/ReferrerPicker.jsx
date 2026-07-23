@@ -5,20 +5,32 @@
 // beta-chunk module (§8.5: no imports from BeeHub, no PartnersContext —
 // partners come from a direct /api/partners fetch).
 //
-// Two searched sections over TWO storage kinds (Network Phase 2 —
+// Three searched sections over THREE storage kinds (Network Phase 2 —
 // the partner/contact type split is GONE from every UI):
-//   NETWORK  — ALL /api/partners rows, one merged pool. Selecting
-//              writes referred_by_kind='partner' regardless of the
-//              row's legacy `type` value.
-//   CLIENTS  — the already-loaded people prop (location-scoped upstream,
-//              junk excluded here). MATCH-ONLY: creating a lead just to
-//              name a referrer would mint an engagement-less person.
-//              Selecting writes referred_by_kind='lead'.
+//   NETWORK   — ALL /api/partners rows, one merged pool. Selecting
+//               writes referred_by_kind='partner' regardless of the
+//               row's legacy `type` value.
+//   COMPANIES — /api/companies rows, same location scope. A company is
+//               a first-class referral source (referred_by_kind=
+//               'company' — the kind the validation, both read routes,
+//               and /api/companies/[id]/referrals' DIRECT bucket were
+//               already built for; this section is the first UI that
+//               can produce the row). Kept as its own section rather
+//               than mixed into Network: person rows carry title ·
+//               company subs, and an org masquerading as a person row
+//               would read as a duplicate of its own people.
+//   CLIENTS   — the already-loaded people prop (location-scoped
+//               upstream, junk excluded here). MATCH-ONLY: creating a
+//               lead just to name a referrer would mint an
+//               engagement-less person. Selecting writes
+//               referred_by_kind='lead'.
 //
 // MATCH-OR-CREATE for network rows only: once the user has typed, ONE
-// inline create row POSTs /api/partners (type='partner') and
+// inline create row POSTs /api/partners (type='partner', stage='New
+// Contact' so the row is born inside the pipeline — a NULL stage
+// matches no stage filter and hides from every saved view) and
 // auto-selects the created row (kind='partner') — details fill in later
-// via the Network tab.
+// via the Network tab. Companies and clients are match-only doors.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
@@ -53,19 +65,26 @@ export default function ReferrerPicker({
 }) {
   const [search, setSearch] = useState('')
   const [partnerRows, setPartnerRows] = useState(null) // null = loading
+  const [companyRows, setCompanyRows] = useState(null) // null = loading
   const [loadErr, setLoadErr] = useState(null)
   const [creating, setCreating] = useState(null) // 'partner' | 'contact' while a create POST runs
   const [createErr, setCreateErr] = useState(null)
 
-  // Partners + contacts fetch — once per mount. A failed fetch degrades
-  // to a clients-only picker (with an inline note) rather than blocking.
+  // Partners + companies fetch — once per mount, same location scope. A
+  // failed fetch degrades to what did load (with an inline note for the
+  // partner half) rather than blocking; a failed companies fetch just
+  // drops that section.
   useEffect(() => {
     let dead = false
-    if (!locationUuid) { setPartnerRows([]); setLoadErr('No location context'); return }
+    if (!locationUuid) { setPartnerRows([]); setCompanyRows([]); setLoadErr('No location context'); return }
     fetch(`/api/partners?location_id=${encodeURIComponent(locationUuid)}`)
       .then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `HTTP ${r.status}`); return r.json() })
       .then(rows => { if (!dead) setPartnerRows(Array.isArray(rows) ? rows : []) })
       .catch(e => { if (!dead) { setPartnerRows([]); setLoadErr(String(e?.message || e)) } })
+    fetch(`/api/companies?location_id=${encodeURIComponent(locationUuid)}`)
+      .then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `HTTP ${r.status}`); return r.json() })
+      .then(rows => { if (!dead) setCompanyRows(Array.isArray(rows) ? rows : []) })
+      .catch(() => { if (!dead) setCompanyRows([]) })
     return () => { dead = true }
   }, [locationUuid])
 
@@ -74,14 +93,21 @@ export default function ReferrerPicker({
 
   const sections = useMemo(() => {
     const rows = partnerRows || []
+    const companies = companyRows || []
     return [
       // kind drives referred_by_kind on select — 'partner' for the merged
-      // network pool (partner + legacy contact rows alike), 'lead' for
-      // clients. The type split died with the Network rename.
+      // network pool (partner + legacy contact rows alike), 'company' for
+      // orgs, 'lead' for clients. The type split died with the Network
+      // rename; companies are the third first-class referral source.
       {
         key: 'network', label: 'Network', kind: 'partner',
         items: rows.filter(p => !p.isDeleted && (nameMatch(p.name) || nameMatch(p.company)))
           .map(p => ({ id: p.id, name: p.name, sub: [p.title, p.company].filter(Boolean).join(' · ') })),
+      },
+      {
+        key: 'companies', label: 'Companies', kind: 'company',
+        items: companies.filter(c => !c.isDeleted && (nameMatch(c.name) || nameMatch(c.industry)))
+          .map(c => ({ id: c.id, name: c.name, sub: c.industry || '' })),
       },
       {
         key: 'clients', label: 'Clients', kind: 'lead',
@@ -89,7 +115,7 @@ export default function ReferrerPicker({
           .map(p => ({ id: p.id, name: p.name, sub: p.email || '' })),
       },
     ]
-  }, [partnerRows, people, q]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [partnerRows, companyRows, people, q]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasAnyMatch = sections.some(s => s.items.length > 0)
 
@@ -100,10 +126,15 @@ export default function ReferrerPicker({
     setCreating(type)
     setCreateErr(null)
     try {
+      // stage seed: a picker-born partner must land INSIDE the pipeline.
+      // Without it the row has a NULL stage — which matches no stage
+      // filter (PARTNER_STAGE_KEYS has no blank option), so it hides
+      // from every stage-filtered and saved Network view until someone
+      // hand-edits it. Same seed AddPartnerModal/NetworkAddSheet use.
       const res = await fetch('/api/partners', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, type, location_id: locationUuid }),
+        body: JSON.stringify({ name, type, location_id: locationUuid, stage: 'New Contact' }),
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok || !json?.id) throw new Error(json?.error || `HTTP ${res.status}`)
@@ -133,7 +164,7 @@ export default function ReferrerPicker({
           autoFocus
           value={search}
           onChange={e => { setSearch(e.target.value); setCreateErr(null) }}
-          placeholder="Search partners, contacts, clients…"
+          placeholder="Search network, companies, clients…"
           aria-label="Search referrers"
           style={{
             width: '100%', padding: '7px 10px', border: T.border.strong,

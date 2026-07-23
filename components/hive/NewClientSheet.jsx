@@ -178,8 +178,9 @@ export default function NewClientSheet({
   // the user asks for it (mirrors Classic's default-off "📍 Add address").
   const [showAddr, setShowAddr] = useState(false)
   // Referral-source referrer link (frame C) — { id, kind, name } | null.
-  // kind is 'lead' or 'partner' (contacts store as 'partner' too); maps
-  // straight onto leads.referred_by_kind / referred_by_id at POST.
+  // kind is 'lead', 'partner' (contacts store as 'partner' too), or
+  // 'company'; maps straight onto leads.referred_by_kind /
+  // referred_by_id at POST.
   const [referrer, setReferrer] = useState(null)
   const [pickReferrer, setPickReferrer] = useState(false)
   const [pickedId, setPickedId] = useState(null) // multi-match: which B row is active
@@ -537,9 +538,10 @@ export default function NewClientSheet({
 
           {/* Referred by — only on the Referral source. Match-or-create
               picker (ReferrerPicker): clients (kind='lead', match-only)
-              + partners/contacts (kind='partner', inline-creatable). A
-              picked referrer shows as a clearable chip; skipping is fine
-              — the create saves nulls and founding is never blocked. */}
+              + partners/contacts (kind='partner', inline-creatable)
+              + companies (kind='company', match-only). A picked referrer
+              shows as a clearable chip; skipping is fine — the create
+              saves nulls and founding is never blocked. */}
           {form.source === 'Referral' && (
             <div>
               <label style={lbl}>Referred by · optional</label>
