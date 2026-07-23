@@ -80,6 +80,131 @@ function mapTier(dbRole: string | null | undefined): string {
   }
 }
 
+// ── Child-table fetch ────────────────────────────────────────────────────
+// Two paths, same rows. Exported for lib/beta-hub-child-rows.test.ts, which
+// pins that the two produce identical grouped output.
+//
+//  chunked — 200 lead ids per `.in()`, each chunk paginated. Keeps the GET
+//    query string bounded (1000+ UUIDs in a URL could fail outright, with the
+//    error silently dropped by `{ data }` destructuring, leaving every lead
+//    with empty joins) and dodges PostgREST's row cap. For a location-scoped
+//    caller this is ~9 requests / ~120ms — still the path they take.
+//
+//  bulk — for the UNSCOPED (elevated) caller, `ids` is every non-junk lead in
+//    the tenant: 7,028 leads = 36 chunks × 9 tables = 324 sequential round
+//    trips. Each individual query is fast (~100ms) — the cost was purely the
+//    round-trip count. lead_contacts burned 275 of those round trips to fetch
+//    zero rows. Unscoped means "the whole table" anyway, so read it straight
+//    through in 1000-row pages instead: 324 → 25 requests, and the stage drops
+//    from 7.4–21.0s to 1.2–1.6s (measured A/B against prod, three runs).
+//
+// The bulk read also sees child rows belonging to junk/bin leads (which are
+// excluded from `ids`), so every page is filtered back to the caller's id set
+// before it lands. That filter is LOAD-BEARING, not hygiene — two consumers
+// downstream iterate these raw arrays instead of looking up by lead id, so
+// extra rows would change their output:
+//   • `tagLookupIds` maps over every lead_tags row, widening the `lookups`
+//     fetch (which is a single un-paginated `.in()`, so widening it risks the
+//     1000-row cap).
+//   • `byEngagement()` maps over quotes/jobs/invoices/assessments/
+//     service_requests and keys by engagement_id — a junked lead's rows would
+//     attach themselves to a live open engagement's board card.
+// Filtering per page also caps retained memory at exactly what the chunked
+// path held: one 1000-row page transient, the same rows kept.
+//
+// Ordering survives the switch: both paths sort by (orderCol, ...keyCols) with
+// keyCols unique, so the sort is a total order and a global ordering restricted
+// to one lead's rows is precisely that lead's chunked ordering. keyCols is 'id'
+// everywhere except lead_tags (composite PK, no id column).
+const CHILD_CHUNK = 200
+// PostgREST caps a response at 1000 rows no matter how wide a range is asked
+// for (verified against prod: range(0,4999) returns 1000). PAGE must therefore
+// be 1000 — any larger and a full page would read as short and terminate the
+// loop early, silently truncating.
+const CHILD_PAGE = 1000
+// Runaway guard only, not a data policy: 500 pages is 500k child rows, ~25×
+// the current tenant. Hitting it logs loudly rather than truncating quietly.
+const CHILD_MAX_PAGES = 500
+
+export function createChildRowFetcher(db: any, opts: { unscoped: boolean }) {
+  const applyOrder = (q: any, orderCol: string | undefined, ascending: boolean, keyCols: string[]) => {
+    if (orderCol) q = q.order(orderCol, { ascending })
+    for (const col of keyCols) q = q.order(col, { ascending: true })
+    return q
+  }
+
+  const chunked = async (
+    table: string,
+    ids: string[],
+    orderCol: string | undefined,
+    ascending: boolean,
+    keyCols: string[],
+  ): Promise<any[]> => {
+    const rows: any[] = []
+    for (let i = 0; i < ids.length; i += CHILD_CHUNK) {
+      const chunk = ids.slice(i, i + CHILD_CHUNK)
+      for (let from = 0; ; from += CHILD_PAGE) {
+        let q = applyOrder(db.from(table).select('*').in('lead_id', chunk), orderCol, ascending, keyCols)
+        q = q.range(from, from + CHILD_PAGE - 1)
+        const { data, error } = await q
+        if (error) {
+          console.error(
+            `[hub-page] ${table} child fetch FAILED (chunk ${i / CHILD_CHUNK + 1}/${Math.ceil(ids.length / CHILD_CHUNK)}, offset ${from}): ${error.message} — leads in this chunk render without ${table} data`
+          )
+          break
+        }
+        rows.push(...(data || []))
+        if ((data || []).length < CHILD_PAGE) break
+      }
+    }
+    return rows
+  }
+
+  const bulk = async (
+    table: string,
+    ids: string[],
+    orderCol: string | undefined,
+    ascending: boolean,
+    keyCols: string[],
+  ): Promise<any[]> => {
+    const want = new Set(ids)
+    const rows: any[] = []
+    for (let page = 0; page < CHILD_MAX_PAGES; page++) {
+      const from = page * CHILD_PAGE
+      let q = applyOrder(db.from(table).select('*'), orderCol, ascending, keyCols)
+      q = q.range(from, from + CHILD_PAGE - 1)
+      const { data, error } = await q
+      if (error) {
+        // A bulk error would blank the table for EVERY lead, where a chunk
+        // error only blanks that chunk. Fall back rather than degrade wider.
+        console.error(
+          `[hub-page] ${table} bulk fetch FAILED (offset ${from}): ${error.message} — retrying on the chunked path`
+        )
+        return chunked(table, ids, orderCol, ascending, keyCols)
+      }
+      for (const r of data || []) if (want.has(r.lead_id)) rows.push(r)
+      if ((data || []).length < CHILD_PAGE) return rows
+    }
+    console.error(
+      `[hub-page] ${table} bulk fetch hit the ${CHILD_MAX_PAGES}-page ceiling — ${table} data is TRUNCATED`
+    )
+    return rows
+  }
+
+  return (
+    table: string,
+    ids: string[],
+    orderCol?: string,
+    ascending = false,
+    keyCols: string[] = ['id'],
+  ): Promise<any[]> =>
+    // Below one chunk there is nothing to win — the chunked path is already a
+    // single request, and bulk would read the whole table to find those rows.
+    opts.unscoped && ids.length > CHILD_CHUNK
+      ? bulk(table, ids, orderCol, ascending, keyCols)
+      : chunked(table, ids, orderCol, ascending, keyCols)
+}
+
 function buildLocationUser(row: any) {
   const name = row.full_name || row.email
   return {
@@ -590,45 +715,14 @@ export default async function HubPage({
     } else if (leadsRaw && leadsRaw.length > 0) {
       const leadIds = leadsRaw.map((l: any) => l.id)
 
-      // Child-table fetch. The single-shot `.in('lead_id', leadIds)` queries
-      // this replaces had two failure modes with a large tenant: PostgREST's
-      // 1000-row cap truncated results tenant-wide (same bug 80ded92 fixed
-      // for leads), and 1000+ UUIDs in a GET query string could fail on URL
-      // length — with the error silently dropped by `{ data }` destructuring,
-      // leaving every lead with empty joins. Chunk the ids to keep URLs
-      // bounded, paginate each chunk, and log errors loudly. A lead's rows
-      // all come from its own chunk, so per-lead ordering is preserved.
-      // keyCols is a unique tiebreaker so pagination is deterministic under
-      // equal orderCol — 'id' everywhere except lead_tags (composite PK).
-      const fetchChildRows = async (
-        table: string,
-        ids: string[],
-        orderCol?: string,
-        ascending = false,
-        keyCols: string[] = ['id'],
-      ): Promise<any[]> => {
-        const CHUNK = 200
-        const rows: any[] = []
-        for (let i = 0; i < ids.length; i += CHUNK) {
-          const chunk = ids.slice(i, i + CHUNK)
-          for (let from = 0; ; from += PAGE) {
-            let q = supabaseService.from(table).select('*').in('lead_id', chunk)
-            if (orderCol) q = q.order(orderCol, { ascending })
-            for (const col of keyCols) q = q.order(col, { ascending: true })
-            q = q.range(from, from + PAGE - 1)
-            const { data, error } = await q
-            if (error) {
-              console.error(
-                `[hub-page] ${table} child fetch FAILED (chunk ${i / CHUNK + 1}/${Math.ceil(ids.length / CHUNK)}, offset ${from}): ${error.message} — leads in this chunk render without ${table} data`
-              )
-              break
-            }
-            rows.push(...(data || []))
-            if ((data || []).length < PAGE) break
-          }
-        }
-        return rows
-      }
+      // Child-table fetch — see createChildRowFetcher above for why there are
+      // two paths. `unscoped` must mirror the leads query's own filter exactly:
+      // when that ran without `.eq('location_uuid', ...)`, leadIds IS the whole
+      // tenant and the bulk read is equivalent by construction.
+      const childRowsUnscoped = !(!isElevated && hubUser.location_id)
+      const fetchChildRows = createChildRowFetcher(supabaseService, {
+        unscoped: childRowsUnscoped,
+      })
 
       const [
         leadNotesRaw,
