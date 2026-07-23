@@ -191,8 +191,11 @@ describe('the old chrome is gone (BeeHub source)', () => {
     // (.* tolerates the [view-as] logViewAs() instrumentation prefix — observation
     //  only, 868kaxm20; the setter wiring these lines guard is unchanged)
     expect(src).toMatch(/onOpenViewAs=\{\(\)=>\{ .*if \(!viewAsUser\) setRole\('franchise'\); setViewAsTarget\(true\) \}\}/)
-    // Old strip Exit path → same reset triple
-    expect(src).toMatch(/onExitViewAs=\{\(\)=>\{ .*setViewAsUser\(null\); setRole\('super_admin'\); setLocFilter\('all'\) \}\}/)
+    // Old strip Exit path → same reset triple. The locFilter reset now goes
+    // through applyLocScope (Fix 2 Phase 1) so the SERVER scope resets with the
+    // client's — a bare setLocFilter here would leave the server pinned to the
+    // impersonated location while the client asked for 'all'.
+    expect(src).toMatch(/onExitViewAs=\{\(\)=>\{ .*setViewAsUser\(null\); setRole\('super_admin'\); applyLocScope\('all'\) \}\}/)
     // The old footer blocks are gone (switcher comment + user-info block)
     expect(src).not.toContain('Location picker — elevated roles only')
     expect(src).not.toContain('User info at bottom')
@@ -272,7 +275,11 @@ describe('BeeHub wires the shared snapshot/cancel path (strand cannot reappear)'
   it('cancelViewAsPicker reverts every identity field from the snapshot', () => {
     const body = src.slice(src.indexOf('const cancelViewAsPicker'))
     expect(body).toContain('revertViewAsCancel(viewAsSnapshot')
-    for (const setter of ['setRole(next.role)', 'setFranchiseRole(next.franchiseRole)', 'setViewAsUser(next.viewAsUser)', 'setLocFilter(next.locFilter)', 'setViewAsTarget(null)']) {
+    // locFilter reverts via applyLocScope (Fix 2 Phase 1): the snapshot restore
+    // must move the SERVER scope back too, not just the client filter.
+    // Reverting this to a bare setLocFilter would leave the server scoped to
+    // wherever the cancelled picker had pointed.
+    for (const setter of ['setRole(next.role)', 'setFranchiseRole(next.franchiseRole)', 'setViewAsUser(next.viewAsUser)', 'applyLocScope(next.locFilter)', 'setViewAsTarget(null)']) {
       expect(body).toContain(setter)
     }
   })

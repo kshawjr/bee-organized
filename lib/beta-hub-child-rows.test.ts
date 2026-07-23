@@ -383,8 +383,15 @@ describe('_hub-page wiring', () => {
   it('unscoped mirrors the leads query filter exactly', () => {
     // If these two drift, bulk would read the whole table for a caller whose
     // leadIds are only one location's — silently handing them other locations'
-    // child rows. The negation must stay tied to the same condition.
-    expect(src).toContain(`const childRowsUnscoped = !(!isElevated && hubUser.location_id)`)
-    expect(src).toContain(`if (!isElevated && hubUser.location_id) {\n        q = q.eq('location_uuid', hubUser.location_id)`)
+    // child rows.
+    //
+    // Phase 1 (Fix 2) made this structurally impossible rather than merely
+    // pinned: both the leads filter and this flag now read the SAME
+    // `scopeLocationUuid` binding, so there is no second copy of the condition
+    // left to drift. The pre-Phase-1 form duplicated `!isElevated &&
+    // hubUser.location_id` in both places and relied on this test to keep them
+    // in step. See lib/beta-hub-scope.test.ts for the full scope suite.
+    expect(src).toContain(`const childRowsUnscoped = !scopeLocationUuid`)
+    expect(src).toContain(`if (scopeLocationUuid) {\n        q = q.eq('location_uuid', scopeLocationUuid)`)
   })
 })

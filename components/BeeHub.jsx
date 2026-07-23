@@ -16,6 +16,9 @@ import { deriveClientStatus } from "@/components/hive/shared/clientStatus"
 import { daysSince as sharedDaysSince } from "@/components/hive/shared/engagementStatus"
 import { isTerminal as engIsTerminal, CHIP_STYLES as HIVE_CHIP_STYLES } from "@/components/hive/shared/stageConfig"
 import { useStoredState } from "@/components/hive/shared/useStoredControls"
+// Scope cookie — the client writes it, app/_hub-page.tsx reads it back. Pure
+// zero-import module, so the name/shape can never drift between the two sides.
+import { scopeCookieString, SCOPE_ALL } from "@/lib/hub-scope"
 import { ESTIMATE_FOLLOWUP_DAYS, INVOICE_AGING_DAYS, ASSESSMENT_HORIZON_DAYS } from "@/components/hive/shared/attentionThresholds"
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { financialsVisible } from "@/lib/financial-access"
@@ -32794,6 +32797,13 @@ export default function App({
   // owner seat; "+ Add seats" (Dispatch 3) and team invite assignment mutate
   // this state. Defaults to [] so renders never crash on a pre-migration env.
   const [seats, setSeats] = useState(Array.isArray(initialSeats) ? initialSeats : [])
+  // prop→state sync after router.refresh() — see the partners/companies/users
+  // effects below for why these were missing. Seats are per-location, so a
+  // scope switch that didn't refresh this would show the previous location's
+  // seat counts in Settings → Billing.
+  useEffect(() => {
+    if (Array.isArray(initialSeats)) setSeats(initialSeats)
+  }, [initialSeats])
   // Pending (unaccepted) invites — kept in context so InviteTeamMemberModal
   // can subtract them from raw seat counts to match the server-side check
   // in /api/hub_users/invite (which would otherwise return 409 after the
@@ -32850,6 +32860,35 @@ export default function App({
   const [viewAsTarget, setViewAsTarget]     = useState(null)
   const [viewAsUser, setViewAsUser]         = useState(null) // full user object when viewing as specific user
   const [locFilter, setLocFilter]           = useState(initialLocFilter ?? 'all')
+  // ── Scope switch (Fix 2, Phase 1) ──────────────────────────────────────────
+  // locFilter used to be a purely client-side array filter, so the server never
+  // learned which location was selected and shipped the whole tenant every
+  // load. `applyLocScope` is now the ONLY way locFilter changes: it writes the
+  // scope cookie the server reads, then router.refresh()es so the RSC re-runs
+  // its queries narrowed to that location.
+  //
+  // Every setLocFilter call site goes through here — including the view-as
+  // enter/exit paths. That is load-bearing, not tidiness: view-as points
+  // locFilter at the impersonated user's location, and if the cookie did not
+  // follow, the server would keep shipping the PREVIOUS scope while the client
+  // filtered for the new one — intersecting to an empty screen.
+  //
+  // Failure is non-fatal by construction: if the cookie write throws (private
+  // mode, disabled storage) the client-side filter still applies and the server
+  // simply keeps its previous scope — the pre-Phase-1 behavior. Never let a
+  // cookie failure block the scope change the user asked for.
+  const applyLocScope = React.useCallback((next) => {
+    setLocFilter(next)
+    try {
+      document.cookie = scopeCookieString(next === 'all' ? SCOPE_ALL : next)
+    } catch (e) {
+      console.error('[scope] cookie write failed, server scope unchanged:', e)
+    }
+    // Re-runs the server component with the new cookie. React state (open
+    // panels, selections, scroll) is preserved; only the initial* props change,
+    // which the prop-sync effects below fold into state.
+    try { router.refresh() } catch (e) { console.error('[scope] refresh failed:', e) }
+  }, [router])
   // ── [view-as] lifecycle instrumentation — OBSERVATION ONLY (868kaxm20).
   // Logs the state delta at every enter / cancel / exit transition so a
   // strand (a transition that flips role+scope but never restores) is
@@ -32897,7 +32936,7 @@ export default function App({
     setRole(next.role)
     setFranchiseRole(next.franchiseRole)
     setViewAsUser(next.viewAsUser)
-    setLocFilter(next.locFilter)
+    applyLocScope(next.locFilter)
     setViewAsSnapshot(null)
     setViewAsTarget(null)
   }
@@ -32986,6 +33025,27 @@ if (Array.isArray(initialPeople)) return
   const [partners, setPartners]             = useState(Array.isArray(initialPartners) ? initialPartners : [])
   const [companies, setCompanies]           = useState(Array.isArray(initialCompanies) ? initialCompanies : [])
   const [users, setUsers]                   = useState(initialUsers ?? USERS_DATA)
+  // ── prop→state sync after router.refresh() (Fix 2, Phase 1) ────────────────
+  // `people` and `binPeople` already did this; these four did not, because
+  // before Phase 1 nothing re-fetched them with a DIFFERENT scope — the server
+  // always shipped the whole tenant, so the mount-time snapshot stayed right
+  // forever. A scope switch changes that: the RSC re-runs with a new location
+  // and hands down new props, and without these the Contacts tab, the admin
+  // user list and the seat counts would keep rendering the PREVIOUS location's
+  // rows with no visible cue.
+  //
+  // Same guarded shape as the people/binPeople effects: only adopt a real
+  // array, so a demo/mock mount (initial* undefined → USERS_DATA etc.) is never
+  // clobbered with an empty list.
+  useEffect(() => {
+    if (Array.isArray(initialPartners)) setPartners(initialPartners)
+  }, [initialPartners])
+  useEffect(() => {
+    if (Array.isArray(initialCompanies)) setCompanies(initialCompanies)
+  }, [initialCompanies])
+  useEffect(() => {
+    if (Array.isArray(initialUsers)) setUsers(initialUsers)
+  }, [initialUsers])
   // Track CRM status overrides from admin panel
   const [locStatuses, setLocStatuses]       = useState({})
   // Mobile nav (hamburger drawer + profile menu). isMobile drives the
@@ -33247,7 +33307,7 @@ if (Array.isArray(initialPeople)) return
           <span style={{ fontSize:'10px', color:'rgba(168,201,196,0.4)' }}>▼</span>
         </button>
         {locFilter!=='all'&&(
-          <button onClick={()=>setLocFilter('all')} style={{ fontSize:'10px', color:'rgba(168,201,196,0.6)', background:'rgba(168,201,196,0.08)', border:'none', borderRadius:'6px', padding:'2px 7px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>All ×</button>
+          <button onClick={()=>applyLocScope('all')} style={{ fontSize:'10px', color:'rgba(168,201,196,0.6)', background:'rgba(168,201,196,0.08)', border:'none', borderRadius:'6px', padding:'2px 7px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>All ×</button>
         )}
       </div>
     )
@@ -33418,7 +33478,7 @@ if (Array.isArray(initialPeople)) return
             </button>
           )}
           {role === 'super_admin' && viewAsUser && (
-            <button onClick={()=>{ logViewAs('exit:restore', { source:'mobile', role:'super_admin', viewAsUser:null, locFilter:'all' }); setShowMobileProfile(false); setViewAsUser(null); setRole('super_admin'); setLocFilter('all') }}
+            <button onClick={()=>{ logViewAs('exit:restore', { source:'mobile', role:'super_admin', viewAsUser:null, locFilter:'all' }); setShowMobileProfile(false); setViewAsUser(null); setRole('super_admin'); applyLocScope('all') }}
               style={{ width:'100%', minHeight:'44px', padding:'12px 14px', background:'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', fontSize:'13px', color:'#ef4444', fontFamily:'inherit', cursor:'pointer', textAlign:'left' }}>
               Exit view-as
             </button>
@@ -33456,7 +33516,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           const lsc = CRM_STATUS_CONF[st]
           const sel = locFilter===loc.id
           return (
-            <button key={loc.id} onClick={()=>{ setLocFilter(loc.id); setShowLocPicker(false) }} style={{ width:'100%', padding:'10px 16px', background:sel?'rgba(26,46,43,0.05)':'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.04)', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
+            <button key={loc.id} onClick={()=>{ applyLocScope(loc.id); setShowLocPicker(false) }} style={{ width:'100%', padding:'10px 16px', background:sel?'rgba(26,46,43,0.05)':'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.04)', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
               <div style={{ flex:1, minWidth:0 }}>
                 <p style={{ fontSize:'13px', fontWeight:sel?700:500, color:'#1a2e2b', marginBottom:'1px' }}>{loc.name}, {loc.state}</p>
                 <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{loc.owner||'Unassigned'}</p>
@@ -33490,7 +33550,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           </div>
           <div style={{ overflowY:'auto', flex:1 }}>
             {/* All locations option */}
-            <button onClick={()=>{ setLocFilter('all'); setShowLocPicker(false) }} style={{ width:'100%', padding:'12px 16px', background:locFilter==='all'?'rgba(26,46,43,0.05)':'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
+            <button onClick={()=>{ applyLocScope('all'); setShowLocPicker(false) }} style={{ width:'100%', padding:'12px 16px', background:locFilter==='all'?'rgba(26,46,43,0.05)':'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
               <span style={{ fontSize:'18px' }}>🌐</span>
               <span style={{ fontSize:'14px', fontWeight:locFilter==='all'?700:500, color:'#1a2e2b', flex:1 }}>All Locations</span>
               {locFilter==='all'&&<span style={{ color:'#a8c9c4' }}>✓</span>}
@@ -33865,7 +33925,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
                 locationCount={(initialLocations || ALL_LOCATIONS).length}
                 canSwitchLocation={isElevated}
                 onOpenViewAs={()=>{ logViewAs('enter:open-picker', { source:'sidebar', roleFlip: !viewAsUser ? 'super_admin→franchise' : 'none', viewAsTarget:true }); snapshotIdentityForViewAs(); if (!viewAsUser) setRole('franchise'); setViewAsTarget(true) }}
-                onExitViewAs={()=>{ logViewAs('exit:restore', { source:'sidebar', role:'super_admin', viewAsUser:null, locFilter:'all' }); setViewAsUser(null); setRole('super_admin'); setLocFilter('all') }}
+                onExitViewAs={()=>{ logViewAs('exit:restore', { source:'sidebar', role:'super_admin', viewAsUser:null, locFilter:'all' }); setViewAsUser(null); setRole('super_admin'); applyLocScope('all') }}
                 onOpenLocationPicker={()=>setShowLocPicker(true)}
                 signOutHref="/api/auth/signout"
               />
@@ -33902,7 +33962,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           onConfirm={(user)=>{
             const isCorp = user.role === 'corporate'
             logViewAs('enter:confirm', { source:'picker', chosen:{ id:user.id, name:user.name, role:user.role }, role: isCorp?'corporate':'franchise', franchiseRole: isCorp?'owner':user.role, locFilter: isCorp?'all':user.locationId, viewAsUser:{ id:user.id, name:user.name }, viewAsTarget:null })
-            setLocFilter(isCorp ? 'all' : user.locationId)
+            applyLocScope(isCorp ? 'all' : user.locationId)
             setRole(isCorp ? 'corporate' : 'franchise')
             setFranchiseRole(isCorp ? 'owner' : user.role)
             setViewAsUser(user)

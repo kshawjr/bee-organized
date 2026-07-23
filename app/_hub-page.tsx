@@ -9,10 +9,18 @@
 // /settings, /admin. Each route just calls <HubPage initialRoute="..." />.
 
 import { redirect } from 'next/navigation'
+import { cookies } from 'next/headers'
 import { requireAuth, getHubUser } from '@/lib/auth'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { PARTNER_COLS, COMPANY_COLS, mapPartnerRow, mapCompanyRow } from '@/lib/crm'
+import {
+  SCOPE_COOKIE_NAME,
+  normalizeScopeCookie,
+  resolveHubScope,
+  childLocationFilter,
+  SCOPE_ALL,
+} from '@/lib/hub-scope'
 import BeeHub from '@/components/BeeHub'
 
 function mapRole(dbRole: string | null | undefined): {
@@ -112,10 +120,23 @@ function mapTier(dbRole: string | null | undefined): string {
 // Filtering per page also caps retained memory at exactly what the chunked
 // path held: one 1000-row page transient, the same rows kept.
 //
-// Ordering survives the switch: both paths sort by (orderCol, ...keyCols) with
-// keyCols unique, so the sort is a total order and a global ordering restricted
-// to one lead's rows is precisely that lead's chunked ordering. keyCols is 'id'
-// everywhere except lead_tags (composite PK, no id column).
+//  locationScoped — for an ELEVATED caller who has PICKED a location (Fix 2
+//    Phase 1). Neither of the paths above fits: chunked would issue
+//    ceil(3306/200)=17 chunks × 9 tables for Kansas City — WORSE than the
+//    unscoped bulk read it replaces — and bulk would read every other
+//    location's rows to throw them away. Instead each child table is filtered
+//    on ITS OWN location column, so one location's rows come back directly:
+//    ≤2 pages per table for the largest location in the tenant.
+//    ⚠️ WHICH column and WHICH value form differs per table and a mismatch
+//    fails SILENTLY — see CHILD_LOCATION_SCOPE in lib/hub-scope.ts. The filter
+//    is never hand-written here; childLocationFilter() is the only source.
+//    Tables with no location column (lead_contacts, lead_tags) fall through to
+//    `bulk`, whose lead-id fence scopes them correctly regardless.
+//
+// Ordering survives the switch: all three paths sort by (orderCol, ...keyCols)
+// with keyCols unique, so the sort is a total order and a global ordering
+// restricted to one lead's rows is precisely that lead's chunked ordering.
+// keyCols is 'id' everywhere except lead_tags (composite PK, no id column).
 const CHILD_CHUNK = 200
 // PostgREST caps a response at 1000 rows no matter how wide a range is asked
 // for (verified against prod: range(0,4999) returns 1000). PAGE must therefore
@@ -126,7 +147,12 @@ const CHILD_PAGE = 1000
 // the current tenant. Hitting it logs loudly rather than truncating quietly.
 const CHILD_MAX_PAGES = 500
 
-export function createChildRowFetcher(db: any, opts: { unscoped: boolean }) {
+export type ChildScopeLocation = { uuid: string; slug: string | null }
+
+export function createChildRowFetcher(
+  db: any,
+  opts: { unscoped: boolean; location?: ChildScopeLocation | null },
+) {
   const applyOrder = (q: any, orderCol: string | undefined, ascending: boolean, keyCols: string[]) => {
     if (orderCol) q = q.order(orderCol, { ascending })
     for (const col of keyCols) q = q.order(col, { ascending: true })
@@ -191,18 +217,72 @@ export function createChildRowFetcher(db: any, opts: { unscoped: boolean }) {
     return rows
   }
 
+  // Elevated + a picked location. Filter the table on its own location column
+  // instead of on the caller's lead ids. The lead-id fence still applies to
+  // every page for the same reason `bulk` applies it: the location's junked/bin
+  // leads are excluded from `ids` but their child rows carry the same location
+  // and would otherwise ride in — and two consumers downstream (byEngagement,
+  // tagLookupIds) iterate these raw arrays rather than looking up by lead id.
+  const locationScoped = async (
+    table: string,
+    ids: string[],
+    orderCol: string | undefined,
+    ascending: boolean,
+    keyCols: string[],
+    filter: { column: string; value: string },
+  ): Promise<any[]> => {
+    const want = new Set(ids)
+    const rows: any[] = []
+    for (let page = 0; page < CHILD_MAX_PAGES; page++) {
+      const from = page * CHILD_PAGE
+      let q = applyOrder(
+        db.from(table).select('*').eq(filter.column, filter.value),
+        orderCol, ascending, keyCols,
+      )
+      q = q.range(from, from + CHILD_PAGE - 1)
+      const { data, error } = await q
+      if (error) {
+        // Same reasoning as bulk's fallback: a failure here would blank the
+        // table for every lead in the scope, where the chunked path degrades
+        // one chunk at a time. Fall back rather than degrade wider.
+        console.error(
+          `[hub-page] ${table} location-scoped fetch FAILED (${filter.column}=${filter.value}, offset ${from}): ${error.message} — retrying on the chunked path`
+        )
+        return chunked(table, ids, orderCol, ascending, keyCols)
+      }
+      for (const r of data || []) if (want.has(r.lead_id)) rows.push(r)
+      if ((data || []).length < CHILD_PAGE) return rows
+    }
+    console.error(
+      `[hub-page] ${table} location-scoped fetch hit the ${CHILD_MAX_PAGES}-page ceiling — ${table} data is TRUNCATED`
+    )
+    return rows
+  }
+
   return (
     table: string,
     ids: string[],
     orderCol?: string,
     ascending = false,
     keyCols: string[] = ['id'],
-  ): Promise<any[]> =>
+  ): Promise<any[]> => {
+    const loc = opts.location
+    if (loc) {
+      const filter = childLocationFilter(table, loc)
+      // A table with a location column reads it directly. One without
+      // (lead_contacts / lead_tags) reads straight through and is fenced by
+      // lead id — exactly what the unscoped elevated path already does for
+      // them, and correct however many rows they grow.
+      return filter
+        ? locationScoped(table, ids, orderCol, ascending, keyCols, filter)
+        : bulk(table, ids, orderCol, ascending, keyCols)
+    }
     // Below one chunk there is nothing to win — the chunked path is already a
     // single request, and bulk would read the whole table to find those rows.
-    opts.unscoped && ids.length > CHILD_CHUNK
+    return opts.unscoped && ids.length > CHILD_CHUNK
       ? bulk(table, ids, orderCol, ascending, keyCols)
       : chunked(table, ids, orderCol, ascending, keyCols)
+  }
 }
 
 function buildLocationUser(row: any) {
@@ -293,7 +373,77 @@ export default async function HubPage({
 
   const { role, franchiseRole } = mapRole(hubUser.role)
   const isElevated = role === 'super_admin' || role === 'corporate'
-  const initialLocFilter = isElevated ? 'all' : hubUser.location_id || 'all'
+
+  // ── Server-side location scope (Fix 2, Phase 1) ────────────────────────────
+  // The picker writes `bee_scope_loc` client-side; this reads it back so the
+  // QUERIES below can be narrowed instead of shipping the whole tenant and
+  // filtering in the browser.
+  //
+  // The cookie is a HINT, never an authority. It is user-controlled, so:
+  //   • normalizeScopeCookie collapses anything that isn't a well-formed uuid
+  //     (absent, '', 'all', a slug, an injection attempt) to SCOPE_ALL before
+  //     it can reach a query;
+  //   • a surviving uuid is then looked up in `locations` — an unknown or
+  //     deleted id yields null and degrades to 'all';
+  //   • the lookup is skipped ENTIRELY for non-elevated users, and
+  //     resolveHubScope ignores `validated` for them regardless, so a franchise
+  //     user who hand-sets the cookie still cannot escape their own location.
+  //
+  // Every rejection path lands on the same place: locationUuid=null, which is
+  // literally today's behavior. That is what makes Phase 1 revertible by
+  // clearing one cookie.
+  const scopeCookieRaw = (await cookies()).get(SCOPE_COOKIE_NAME)?.value
+  const scopeCookie = normalizeScopeCookie(scopeCookieRaw)
+  let scopeValidated: { id: string; slug: string | null } | null = null
+  if (isElevated && scopeCookie !== SCOPE_ALL) {
+    const { data: scopeRow, error: scopeErr } = await supabaseService
+      .from('locations')
+      .select('id, location_id')
+      .eq('id', scopeCookie)
+      .maybeSingle()
+    if (scopeErr) {
+      // Never fail the page over a scope hint — fall through to 'all'.
+      console.error(`[hub-page] scope validation failed for ${scopeCookie}: ${scopeErr.message} — falling back to all-locations`)
+    } else if (scopeRow) {
+      scopeValidated = { id: (scopeRow as any).id, slug: (scopeRow as any).location_id ?? null }
+    } else {
+      console.warn(`[hub-page] scope cookie named an unknown location (${scopeCookie}) for ${hubUser.email} — falling back to all-locations`)
+    }
+  }
+
+  const scope = resolveHubScope({
+    isElevated,
+    hubUserLocationId: hubUser.location_id,
+    validated: scopeValidated,
+  })
+
+  // THE single filter value every `location_uuid` query below uses. For a
+  // non-elevated user this is exactly `hubUser.location_id` — the same value
+  // the old `if (!isElevated && hubUser.location_id)` guard applied — so their
+  // load is unchanged. For an elevated user it is their picked location, or
+  // null (no filter) when they are on 'all'.
+  const scopeLocationUuid = scope.locationUuid
+
+  // Child tables are filtered on their OWN location column, which needs BOTH
+  // the uuid and the slug (two vocabularies — see lib/hub-scope.ts). Only an
+  // elevated scoped load takes that path; everyone else keeps the lead-id
+  // paths they use today, so `childScopeLocation` stays null for them.
+  const childScopeLocation =
+    scope.source === 'cookie' && scope.locationUuid
+      ? { uuid: scope.locationUuid, slug: scope.locationSlug }
+      : null
+
+  // The client's locFilter MUST agree with what the server actually shipped.
+  // If the server scopes to location A and the client still filters on 'all'
+  // it merely renders the scoped set (harmless), but if it filters on
+  // location B it filters a scoped array down to EMPTY.
+  const initialLocFilter = isElevated
+    ? (scope.locationUuid || 'all')
+    : hubUser.location_id || 'all'
+
+  console.log(
+    `[hub-page] scope=${scope.source}${scope.locationUuid ? ` loc=${scope.locationUuid}${scope.locationSlug ? `/${scope.locationSlug}` : ''}` : ''} elevated=${isElevated} user=${hubUser.email}`
+  )
 
   const supabase = await createServerSupabaseClient()
 
@@ -695,8 +845,8 @@ export default async function HubPage({
         .order('created_at', { ascending: false })
         .range(from, from + PAGE - 1)
 
-      if (!isElevated && hubUser.location_id) {
-        q = q.eq('location_uuid', hubUser.location_id)
+      if (scopeLocationUuid) {
+        q = q.eq('location_uuid', scopeLocationUuid)
       }
 
       const { data: pageRows, error: pageErr } = await q
@@ -715,13 +865,24 @@ export default async function HubPage({
     } else if (leadsRaw && leadsRaw.length > 0) {
       const leadIds = leadsRaw.map((l: any) => l.id)
 
-      // Child-table fetch — see createChildRowFetcher above for why there are
-      // two paths. `unscoped` must mirror the leads query's own filter exactly:
-      // when that ran without `.eq('location_uuid', ...)`, leadIds IS the whole
-      // tenant and the bulk read is equivalent by construction.
-      const childRowsUnscoped = !(!isElevated && hubUser.location_id)
+      // Child-table fetch — see createChildRowFetcher above for the three
+      // paths. Both flags below must mirror the leads query's own filter
+      // EXACTLY, or the child read scopes differently than the leads it is
+      // joining to:
+      //   • `unscoped` — true only when the leads query ran with NO location
+      //     filter, because only then is leadIds the whole tenant and the bulk
+      //     whole-table read equivalent by construction. `scopeLocationUuid`
+      //     IS that filter, so deriving it from the same value keeps the two
+      //     tied together; they cannot drift the way two hand-written copies
+      //     of the condition could.
+      //   • `location` — set only for an ELEVATED picked location, which is
+      //     the one case where a location-column filter is both available and
+      //     cheaper than chunking by lead id. A franchise user keeps the
+      //     chunked path they use today, untouched.
+      const childRowsUnscoped = !scopeLocationUuid
       const fetchChildRows = createChildRowFetcher(supabaseService, {
         unscoped: childRowsUnscoped,
+        location: childScopeLocation,
       })
 
       const [
@@ -791,8 +952,8 @@ export default async function HubPage({
           .select('id, client_id, stage, total_paid, total_invoiced, closed_at')
           .order('id', { ascending: true })
           .range(from, from + PAGE - 1)
-        if (!isElevated && hubUser.location_id) {
-          q = q.eq('location_uuid', hubUser.location_id)
+        if (scopeLocationUuid) {
+          q = q.eq('location_uuid', scopeLocationUuid)
         }
         const { data, error } = await q
         if (error) {
@@ -846,8 +1007,8 @@ export default async function HubPage({
             .order('created_at', { ascending: false })
             .order('id', { ascending: true })
             .range(from, from + PAGE - 1)
-          if (!isElevated && hubUser.location_id) {
-            q = q.eq('location_uuid', hubUser.location_id)
+          if (scopeLocationUuid) {
+            q = q.eq('location_uuid', scopeLocationUuid)
           }
           const { data, error } = await q
           if (error) { engErr = error; break }
@@ -910,8 +1071,8 @@ export default async function HubPage({
             .from('engagements')
             .select('id', { count: 'exact', head: true })
             .in('stage', ['Closed Won', 'Closed Lost'])
-          if (!isElevated && hubUser.location_id) {
-            cq = cq.eq('location_uuid', hubUser.location_id)
+          if (scopeLocationUuid) {
+            cq = cq.eq('location_uuid', scopeLocationUuid)
           }
           const { count, error } = await cq
           if (error) console.error('[hub-page] closed-engagement count error:', error.message)
@@ -924,8 +1085,8 @@ export default async function HubPage({
             .from('engagements')
             .select('id', { count: 'exact', head: true })
             .eq('stage', 'Closed Won')
-          if (!isElevated && hubUser.location_id) {
-            wq = wq.eq('location_uuid', hubUser.location_id)
+          if (scopeLocationUuid) {
+            wq = wq.eq('location_uuid', scopeLocationUuid)
           }
           const { count, error } = await wq
           if (error) console.error('[hub-page] closed-won count error:', error.message)
@@ -947,8 +1108,8 @@ export default async function HubPage({
       .order('updated_at', { ascending: false })
       .limit(500)
 
-    if (!isElevated && hubUser.location_id) {
-      binQ = binQ.eq('location_uuid', hubUser.location_id)
+    if (scopeLocationUuid) {
+      binQ = binQ.eq('location_uuid', scopeLocationUuid)
     }
 
     const { data: binRaw, error: binError } = await binQ
@@ -1020,9 +1181,15 @@ export default async function HubPage({
       .order('name', { ascending: true })
       .limit(2000)
 
-    if (!isElevated && hubUser.location_id) {
-      pq = pq.eq('location_id', hubUser.location_id)
-      cq = cq.eq('location_id', hubUser.location_id)
+    // ⚠️ partners/companies.location_id holds the location UUID, NOT the slug —
+    // the column NAME matches the child tables' slug column but the VALUE form
+    // does not. Verified against prod 2026-07-22. Do not "harmonize" this to
+    // scope.locationSlug; it would match nothing, silently, and empty the
+    // Contacts tab. (This is why the child tables go through
+    // childLocationFilter() rather than reading a column name off a list.)
+    if (scopeLocationUuid) {
+      pq = pq.eq('location_id', scopeLocationUuid)
+      cq = cq.eq('location_id', scopeLocationUuid)
     }
 
     const [{ data: partnersRaw, error: partnersErr }, { data: companiesRaw, error: companiesErr }] =
