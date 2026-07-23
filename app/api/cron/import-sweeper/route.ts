@@ -46,6 +46,8 @@ import {
   decideFailOut,
   failOutMessage,
   isFailedOutcome,
+  CLAIM_VERIFY_ATTEMPTS,
+  CLAIM_VERIFY_INTERVAL_MS,
   type ContinuationOutcome,
 } from '@/lib/import-continuation'
 
@@ -231,18 +233,34 @@ export async function GET(req: NextRequest) {
       let detail = post.detail
 
       if (outcome === 'landed') {
-        const { data: after } = await supabaseService
-          .from('import_jobs')
-          .select('status, location_claim_at')
-          .eq('id', j.id)
-          .maybeSingle()
-        // The receiving route claims BEFORE it responds, so by now a real
-        // pickup is already visible. Still null + still running → nobody took
-        // it: the resume did not land, whatever the HTTP status said.
-        const claimed = !!after?.location_claim_at || (after && after.status !== 'running')
+        // Verify against DB STATE, not the HTTP status: did a segment actually
+        // take the job? POLL for it — do NOT read once. The receiving route is
+        // a cold-startable 800s function and was measured taking >9s between
+        // handler entry and its claim write, so a single immediate read
+        // reports "nobody took it" about handoffs that land moments later
+        // (two false no_claims on loc_kc, 2026-07-22). Poll until the verify
+        // window closes, then believe it.
+        let claimed = false
+        for (let attempt = 0; attempt < CLAIM_VERIFY_ATTEMPTS; attempt++) {
+          if (attempt > 0) await new Promise((r) => setTimeout(r, CLAIM_VERIFY_INTERVAL_MS))
+          const { data: after } = await supabaseService
+            .from('import_jobs')
+            .select('status, location_claim_at')
+            .eq('id', j.id)
+            .maybeSingle()
+          // Claim held → a segment is driving it. Left 'running' → it finished.
+          claimed = !!after?.location_claim_at || (!!after && after.status !== 'running')
+          if (claimed) break
+        }
         if (!claimed) {
+          // Recorded and surfaced, but deliberately NOT counted toward the
+          // fail-out clock (agesBounceRun) — this signal is inherently racy
+          // and must never be the reason a healthy import is killed.
           outcome = 'no_claim'
-          detail = 'POST returned 2xx but no segment claimed the job — resume did not take'
+          detail =
+            `POST returned 2xx but no segment claimed the job within ` +
+            `${Math.round((CLAIM_VERIFY_ATTEMPTS * CLAIM_VERIFY_INTERVAL_MS) / 1000)}s — ` +
+            `resume may not have taken`
         }
       }
 

@@ -30,12 +30,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 const h = vi.hoisted(() => {
   const db: Record<string, any[]> = { import_jobs: [], sync_log: [] }
   const ops: [string, any[]][] = []
-  const state = { touched: false }
+  // beforeRead fires on every maybeSingle() — the seam a test uses to make a
+  // claim appear LATE, simulating a cold-starting receiver.
+  const state = { touched: false, beforeRead: null as null | (() => void) }
   const reset = () => {
     db.import_jobs = []
     db.sync_log = []
     ops.length = 0
     state.touched = false
+    state.beforeRead = null
   }
 
   // `col.op.value` terms, OR'd. Only the ops the sweeper actually emits.
@@ -88,7 +91,7 @@ const h = vi.hoisted(() => {
       or: (clause: string) => { ops.push(['or', [clause]]); preds.push(orMatcher(clause)); return b },
       order: (c: string, o: any = {}) => { ops.push(['order', [c, o]]); order = { col: c, asc: o.ascending !== false }; return b },
       limit: (n: number) => { ops.push(['limit', [n]]); cap = n; return Promise.resolve(resolve()) },
-      maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
+      maybeSingle: () => { state.beforeRead?.(); return Promise.resolve({ data: rows()[0] ?? null, error: null }) },
       then: (res: any, rej: any) => Promise.resolve(resolve()).then(res, rej),
     }
     return b
@@ -184,6 +187,11 @@ describe('GET /api/cron/import-sweeper — continuation handoff', () => {
     delete process.env.VERCEL_PROJECT_PRODUCTION_URL
     fetchMock = vi.fn(realImportRoute as any)
     vi.stubGlobal('fetch', fetchMock)
+    // The claim verification sleeps between polls (it must cover a cold-start
+    // receiver in prod). Run those sleeps instantly so the attempt-bounded
+    // loop stays deterministic and fast here. Safe against postContinuation's
+    // abort timer: these fetch stubs ignore the signal.
+    vi.stubGlobal('setTimeout', ((fn: any) => { fn(); return 0 }) as any)
   })
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -350,6 +358,48 @@ describe('GET /api/cron/import-sweeper — continuation handoff', () => {
     expect(body.results[0]).toMatchObject({ ok: false, outcome: 'no_claim' })
     expect(continuationRows()[0].status).toBe('error')
     expect(continuationRows()[0].message).toContain('outcome=no_claim')
+  })
+
+  it('NO_CLAIM: a slow (cold-starting) receiver that claims late still reads as landed', async () => {
+    // Prod, 2026-07-22: the receiver took >9s between handler entry and its
+    // claim write, and a single immediate re-read called that "no segment
+    // claimed". The verification must POLL, not peek. Here the claim appears
+    // only on the 3rd verification read.
+    fetchMock.mockResolvedValue(resp({ status: 200 }))   // no synchronous claim
+    h.db.import_jobs = [job()]
+    let reads = 0
+    h.state.beforeRead = () => {
+      if (++reads === 3) h.db.import_jobs[0].location_claim_at = new Date().toISOString()
+    }
+    const body = await (await sweep()).json()
+    expect(reads).toBeGreaterThanOrEqual(3)              // it kept looking
+    expect(body.results[0]).toMatchObject({ ok: true, outcome: 'landed' })
+    expect(continuationRows()[0].message).toContain('outcome=landed')
+  })
+
+  it('an ambiguous no_claim run NEVER fails a job out (only hard bounces do)', async () => {
+    // The safety property. A racy signal must not become a second way to kill
+    // a healthy import — that is the bug this whole change removes.
+    fetchMock.mockResolvedValue(resp({ status: 200 }))   // never claims
+    h.db.import_jobs = [job({ id: 'job-racy' })]
+    h.db.sync_log = [
+      attempt('job-racy', 'loc_kc', 'no_claim', 2),
+      attempt('job-racy', 'loc_kc', 'no_claim', 18),
+      attempt('job-racy', 'loc_kc', 'errored', 30),
+    ]
+    const body = await (await sweep()).json()
+    expect(body.failed_out).toBe(0)
+    expect(h.db.import_jobs[0].status).toBe('running')
+  })
+
+  it('a timeout run also never fails a job out', async () => {
+    h.db.import_jobs = [job({ id: 'job-slow' })]
+    h.db.sync_log = [
+      attempt('job-slow', 'loc_kc', 'errored', 1),
+      attempt('job-slow', 'loc_kc', 'errored', 25),
+    ]
+    const body = await (await sweep()).json()
+    expect(body.failed_out).toBe(0)
   })
 
   it('a job that FINISHED during the re-poke counts as landed, not no_claim', async () => {

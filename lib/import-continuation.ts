@@ -56,18 +56,54 @@ export type ContinuationSource = 'self_chain' | 'sweeper'
 //   errored   — the fetch threw (DNS, connection reset, timeout).
 export type ContinuationOutcome = 'landed' | 'no_claim' | 'bounced' | 'errored'
 
-/** Outcomes that mean the handoff did NOT complete. */
+/** Outcomes that mean the handoff did not visibly complete. Drives how the
+ *  attempt is recorded + reported — NOT whether the job is failed out. */
 export const isFailedOutcome = (o: ContinuationOutcome): boolean => o !== 'landed'
+
+/**
+ * Outcomes that age a job toward the max-lifetime fail-out. ONLY hard
+ * transport rejections qualify.
+ *
+ * WHY THIS IS NARROWER THAN isFailedOutcome (observed in prod, 2026-07-22):
+ * the receiving function is a cold-startable 800s route, and it was measured
+ * taking >9 SECONDS between entering the handler and writing its claim. So:
+ *   • 'no_claim' — an immediate claim re-read can lose that race and report
+ *     "nobody took it" about a handoff that lands moments later. Two of the
+ *     first two sweeper attempts on loc_kc were exactly this false positive.
+ *   • 'errored'  — a POST that times out waiting for the ack may still have
+ *     been received and acted on (loc_kc: claim written at 01:14:50, our
+ *     10s abort fired at 01:14:53, and the segment ran fine).
+ * Both are ambiguous, and aging a job on ambiguous evidence would kill healthy
+ * imports on a different clock — the exact failure this whole change removes.
+ * They stay RECORDED and visible; they just never pull the trigger.
+ *
+ * 'bounced' is unambiguous: a redirect, 401, or 5xx means the request did not
+ * reach the route's own logic at all. A sustained run of those is a genuinely
+ * broken handoff and is worth giving up on.
+ */
+export const agesBounceRun = (o: ContinuationOutcome): boolean => o === 'bounced'
 
 // Stable, greppable prefix. Kevin can find every continuation attempt with
 // a single sync_log message filter; the parser below reads it back.
 export const CONTINUATION_LOG_PREFIX = '[continuation]'
 
-// How long a POST may hang before we give up on it. The receiving route
-// claims and returns inside its own request scope (it defers the real work to
-// waitUntil), so a healthy response is sub-second. 10s is generous headroom
-// that still can't pin a yielding function open.
-export const CONTINUATION_TIMEOUT_MS = 10_000
+// How long a POST may hang before we give up waiting for the ACK.
+//
+// A warm receiver claims and returns in well under a second (it defers the
+// real work to its own waitUntil). A COLD one does not: this is a Next.js
+// route with maxDuration 800s, and prod showed >9s between handler entry and
+// the claim write. 10s produced false timeouts on handoffs that had actually
+// landed, so give the cold path real headroom. Still bounded — a hung
+// connection must never pin the yielding function open indefinitely.
+export const CONTINUATION_TIMEOUT_MS = 30_000
+
+// After a 2xx, how many times to re-check for the receiving segment's claim
+// before concluding nobody took the job (≈15s of cover). Attempt-bounded
+// rather than clock-bounded so the loop is deterministic and testable. Must
+// comfortably exceed the observed cold-start-to-claim latency, or 'no_claim'
+// is just a race report rather than a finding.
+export const CLAIM_VERIFY_ATTEMPTS = 6
+export const CLAIM_VERIFY_INTERVAL_MS = 3_000
 
 // ─── outcome classification ──────────────────────────────────────
 
@@ -147,21 +183,22 @@ export function parseContinuationLogMessage(
 
 /**
  * Given this job's continuation attempts NEWEST-FIRST, return the timestamp
- * (ms) of the OLDEST bounce in the current consecutive-failure run — i.e. the
- * moment the handoff last stopped working. Walking stops at the most recent
- * 'landed' attempt, so bounces from an earlier, already-recovered stall never
- * age a currently-healthy job.
+ * (ms) of the OLDEST hard bounce in the current consecutive run — i.e. the
+ * moment the handoff last stopped working. Walking stops at any attempt that
+ * does NOT age the run (see agesBounceRun), so an earlier already-recovered
+ * stall — and any ambiguous no_claim/timeout — never ages a healthy job.
  *
- * Returns null when the newest attempt landed, or when there are no attempts
- * at all — a job we have never tried to continue is not "stuck", it is simply
- * waiting for its first re-poke, and must never be failed out on that basis.
+ * Returns null when the newest attempt isn't a hard bounce, or when there are
+ * no attempts at all — a job we have never tried to continue is not "stuck",
+ * it is simply waiting for its first re-poke, and must never be failed out on
+ * that basis.
  */
 export function consecutiveBounceStartMs(
   attempts: Array<{ at: string; outcome: ContinuationOutcome }>,
 ): number | null {
   let oldest: number | null = null
   for (const a of attempts) {
-    if (!isFailedOutcome(a.outcome)) break   // hit a landing — run ends here
+    if (!agesBounceRun(a.outcome)) break     // landing, or ambiguous — run ends
     const ms = Date.parse(a.at)
     if (Number.isFinite(ms)) oldest = ms     // keep walking back
   }

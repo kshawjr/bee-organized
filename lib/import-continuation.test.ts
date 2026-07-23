@@ -25,7 +25,9 @@ import {
   continuationUrl,
   postContinuation,
   isFailedOutcome,
+  agesBounceRun,
   CONTINUATION_LOG_PREFIX,
+  CONTINUATION_TIMEOUT_MS,
 } from './import-continuation'
 
 const MIN = 60_000
@@ -100,12 +102,38 @@ describe('consecutiveBounceStartMs', () => {
     ])).toBeNull()
   })
 
-  it('walks back to the OLDEST bounce in the current run', () => {
+  it('walks back to the OLDEST hard bounce in the current run', () => {
     expect(consecutiveBounceStartMs([
       { at: ago(1), outcome: 'bounced' },
-      { at: ago(2), outcome: 'errored' },
-      { at: ago(3), outcome: 'no_claim' },
+      { at: ago(2), outcome: 'bounced' },
+      { at: ago(3), outcome: 'bounced' },
     ])).toBe(NOW - 3 * MIN)
+  })
+
+  // Observed in prod: the receiving 800s route took >9s from handler entry to
+  // its claim write, so an immediate re-read reported no_claim and a 10s POST
+  // timeout reported errored — for handoffs that had actually landed. Aging a
+  // job on that would kill healthy imports on a different clock.
+  it('an ambiguous no_claim does NOT age the run (cold-start race, not evidence)', () => {
+    expect(consecutiveBounceStartMs([{ at: ago(1), outcome: 'no_claim' }])).toBeNull()
+  })
+
+  it('an ambiguous timeout does NOT age the run', () => {
+    expect(consecutiveBounceStartMs([{ at: ago(1), outcome: 'errored' }])).toBeNull()
+  })
+
+  it('an ambiguous outcome ENDS a run of hard bounces rather than extending it', () => {
+    expect(consecutiveBounceStartMs([
+      { at: ago(1), outcome: 'no_claim' },
+      { at: ago(20), outcome: 'bounced' },
+    ])).toBeNull()
+  })
+
+  it('only bounced ages the run', () => {
+    expect(agesBounceRun('bounced')).toBe(true)
+    expect(agesBounceRun('no_claim')).toBe(false)
+    expect(agesBounceRun('errored')).toBe(false)
+    expect(agesBounceRun('landed')).toBe(false)
   })
 
   it('stops at the last landing — an already-recovered stall never ages a healthy job', () => {
@@ -124,6 +152,18 @@ describe('consecutiveBounceStartMs', () => {
       { at: 'not-a-date', outcome: 'bounced' },
       { at: ago(5), outcome: 'bounced' },
     ])).toBe(NOW - 5 * MIN)
+  })
+
+  it('a run of ambiguous outcomes can NEVER reach the fail-out, however long', () => {
+    // The safety property: no amount of racy evidence kills a job.
+    const many = Array.from({ length: 40 }, (_, i) => ({
+      at: ago(i + 1), outcome: (i % 2 ? 'no_claim' : 'errored') as const,
+    }))
+    expect(consecutiveBounceStartMs(many)).toBeNull()
+    expect(decideFailOut({
+      claimAt: null, nowMs: NOW, failAfterMs: FAIL_AFTER,
+      bounceRunStartMs: consecutiveBounceStartMs(many),
+    }).fail).toBe(false)
   })
 })
 
@@ -277,6 +317,12 @@ describe('postContinuation', () => {
     })
     expect(r.outcome).toBe('errored')
     expect(r.detail).toMatch(/timed out/)
+  })
+
+  it('the ack timeout has real cold-start headroom', () => {
+    // The receiver is a maxDuration-800s Next.js route; prod showed >9s from
+    // handler entry to its claim write. 10s produced false timeouts.
+    expect(CONTINUATION_TIMEOUT_MS).toBeGreaterThanOrEqual(30_000)
   })
 
   it('builds the continuation URL with an encoded slug and no double slash', () => {
