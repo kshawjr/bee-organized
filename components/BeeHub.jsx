@@ -18,7 +18,7 @@ import { isTerminal as engIsTerminal, CHIP_STYLES as HIVE_CHIP_STYLES } from "@/
 import { useStoredState } from "@/components/hive/shared/useStoredControls"
 // Scope cookie — the client writes it, app/_hub-page.tsx reads it back. Pure
 // zero-import module, so the name/shape can never drift between the two sides.
-import { scopeCookieString, SCOPE_ALL } from "@/lib/hub-scope"
+import { scopeCookieString, SCOPE_ALL, SCOPE_COOKIE_NAME } from "@/lib/hub-scope"
 import { ESTIMATE_FOLLOWUP_DAYS, INVOICE_AGING_DAYS, ASSESSMENT_HORIZON_DAYS } from "@/components/hive/shared/attentionThresholds"
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { financialsVisible } from "@/lib/financial-access"
@@ -9671,7 +9671,7 @@ async function patchLeadAPI(leadId, patch) {
   }
 }
 
-function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, initialSelectedEngagementId=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onEngagementChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, initialHiveIntent=null, onHiveIntentConsumed=()=>{} }) {
+function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, initialSelectedEngagementId=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onEngagementChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, initialHiveIntent=null, onHiveIntentConsumed=()=>{} }) {
   if (!people) return null
   const allPeople = locFilter==='all' ? people : people.filter(p=>p.locationId===locFilter)
   // Real hub_users roster (LocationUsersContext) drives the "Assigned To"
@@ -9958,6 +9958,12 @@ function HiveScreen({ onNavigate, people, setPeople, readOnly=false, locFilter='
           closedWonCount={engagementsClosedWonCount}
           people={people}
           readOnly={readOnly}
+          // loc_other routing queue, outside the location scope (Fix 2 Phase 2).
+          // Gated HERE because isElevated lives here: under view-as the server
+          // session is still super_admin so the prop arrives populated, and
+          // without this an impersonated franchise owner would see corporate's
+          // transfer queue — a view-as over-exposure artifact.
+          transferPeople={isElevated ? transferPeople : []}
           // Deep-link intent (Home "Needs attention" cards): land on the
           // right tab + view + expanded/scrolled target. One-shot; consumed
           // back up to the App so it can't re-fire.
@@ -21732,7 +21738,7 @@ function HomeGreeting({ ownerName, ownerEmail }) {
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false }) {
+function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, transferPeople=[], locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
@@ -21898,8 +21904,19 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   const agingOldest = agingInvoices.reduce((m,x)=>x.age>m?x.age:m, 0)
 
   // BLUE · Leads needing transfer (super_admin/corp ONLY) — loc_other unrouted
-  // global-form leads. Self-gates: franchise scopes never receive loc_other rows.
-  const transferLeads = isElevated ? scopedPeopleH.filter(p => isLivePersonH(p) && p.atLocOther) : []
+  // global-form leads.
+  //
+  // Reads the DEDICATED transferPeople array, not `people` (Fix 2 Phase 2).
+  // It used to filter scopedPeopleH, which meant the card vanished the moment
+  // a real location was selected — server-side scoping loads one location, and
+  // loc_other is never that location. The routing work still existed; the card
+  // just stopped mentioning it. transferPeople is fetched outside the scope, so
+  // this now renders in every scope.
+  //
+  // Still gated on isElevated: the server sends [] to franchise users, and this
+  // keeps it empty under view-as too (where the client role flips but the
+  // server session is still super_admin, so the prop IS populated).
+  const transferLeads = isElevated ? (transferPeople || []).filter(isLivePersonH) : []
 
   // ── Calm metrics (context, not hero) ──
   // Open engagements — open engagement RECORD count in scope (SAME source as the
@@ -21931,7 +21948,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   // NOT a dep: keeping it out is the whole point — the block must not recompute
   // on the clock tick. `engagements` is the stable server prop; `people` is App
   // state (new ref only on a real change); the rest are primitives/booleans.
-  }, [people, engagements, effectiveLocId, isElevated, canSeeFinancials])
+  }, [people, engagements, transferPeople, effectiveLocId, isElevated, canSeeFinancials])
   const {
     newUncontacted, newUncontactedOldest,
     estimateFollowUps, estimateOldest,
@@ -22102,7 +22119,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     // allow browsing but read-only during grace
   }
 
-  if (activeNav==='hive') return <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} locations={locations} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} setToast={setToast} engagements={engagements} newBoardAllowed={newBoardAllowed} engagementsClosedCount={engagementsClosedCount} engagementsClosedWonCount={engagementsClosedWonCount} />{toast && <InlineToast {...toast} />}</>
+  if (activeNav==='hive') return <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} locations={locations} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} setToast={setToast} engagements={engagements} newBoardAllowed={newBoardAllowed} engagementsClosedCount={engagementsClosedCount} engagementsClosedWonCount={engagementsClosedWonCount} />{toast && <InlineToast {...toast} />}</>
 
   if (activeNav==='schedule') return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'5rem' }}>
@@ -25307,7 +25324,7 @@ function AssignUserPicker({ locationId, currentUserIds=[], onSelect, onClose }) 
 
 // ─── View As User Sheet ───────────────────────────────────────────────────────
 // ─── Global Search ────────────────────────────────────────────────────────────
-function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClose }) {
+function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClose, scopeLabel='all locations' }) {
   const [q, setQ] = useState('')
 
   React.useEffect(()=>{
@@ -25331,7 +25348,7 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
             autoFocus
             value={q}
             onChange={e=>setQ(e.target.value)}
-            placeholder="Search client, partners, locations…"
+            placeholder={`Search ${scopeLabel}…`}
             style={{ flex:1, border:'none', outline:'none', fontSize:'17px', fontFamily:'inherit', color:'#1a2e2b', background:'transparent' }}
           />
           <button onClick={onClose} style={{ background:'rgba(0,0,0,0.06)', border:'none', borderRadius:'6px', fontSize:'13px', color:'#8a9e9a', cursor:'pointer', padding:'4px 8px', fontFamily:'inherit' }}>esc</button>
@@ -25339,7 +25356,7 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
         {!q && (
           <div style={{ padding:'2.5rem', textAlign:'center', color:'#b0c0bc' }}>
             <p style={{ fontSize:'32px', marginBottom:'10px' }}>🔍</p>
-            <p style={{ fontSize:'14px', fontWeight:500, color:'#8a9e9a' }}>Search across all client and partners</p>
+            <p style={{ fontSize:'14px', fontWeight:500, color:'#8a9e9a' }}>Searching {scopeLabel}</p>
             <p style={{ fontSize:'12px', marginTop:'4px' }}>Name, phone, email, project type</p>
           </div>
         )}
@@ -25347,6 +25364,10 @@ function GlobalSearch({ people, partners, onSelectPerson, onSelectPartner, onClo
           <div style={{ padding:'2.5rem', textAlign:'center', color:'#b0c0bc' }}>
             <p style={{ fontSize:'32px', marginBottom:'8px' }}>🍯</p>
             <p style={{ fontSize:'14px' }}>No results for "{q}"</p>
+            {/* Says WHERE it looked. Without this the empty state reads as
+                "this lead doesn't exist" when it may simply be at another
+                location — the silent-narrowing failure Phase 2 closes. */}
+            <p style={{ fontSize:'12px', marginTop:'4px', color:'#8a9e9a' }}>Searched {scopeLabel}</p>
           </div>
         )}
         {hasResults && (
@@ -32636,6 +32657,8 @@ export default function App({
   initialLookups,            // server-rendered admin-managed lookups grouped by category (Sitting 1A)
   initialPeople,             // server-rendered Supabase leads → Person shape (Phase 3A); null/empty → fall back to ALL_PEOPLE mock
   initialBinPeople,          // server-rendered is_junk=true leads (Recycle Bin)
+  initialTransferPeople,     // loc_other unrouted leads — fetched OUTSIDE the selected scope so the routing queue survives a location switch (Fix 2 Phase 2). Elevated only; [] for franchise.
+  initialScopeLocationId,    // the location the SERVER actually scoped to (null = all) — the client reconciles its cookie to this after hydration
   initialEngagements,        // Phase 1 step 4: open engagements for the new board (dual-read; super_admin-flagged)
   initialEngagementsClosedCount, // Phase 1 step 4: 'Closed · N' chip count (List lens; rows page in lazily)
   initialEngagementsClosedWonCount, // won share of the closed count (Won/Lost chips; lost = closed − won)
@@ -32889,6 +32912,47 @@ export default function App({
     // which the prop-sync effects below fold into state.
     try { router.refresh() } catch (e) { console.error('[scope] refresh failed:', e) }
   }, [router])
+  // ── Cookie reconcile (Fix 2, Phase 2) ──────────────────────────────────────
+  // Make the cookie say what the server ACTUALLY scoped to. A Server Component
+  // cannot write cookies (see the try/catch in lib/supabase-server.ts), so when
+  // the server overrides the requested scope the correction has to land here,
+  // after hydration.
+  //
+  // The case that needs it: a /clients/<id> deep link to a lead outside the
+  // selected location. The server switches scope to that lead's location and
+  // renders the page around it — but the cookie still names the old one, so the
+  // NEXT navigation would bounce the user back and the lead they just opened
+  // would fall out of scope again. Writing it here makes the switch stick.
+  //
+  // It also self-heals a cookie naming a deleted location (server fell back to
+  // 'all', cookie still points at the dead id), which would otherwise re-log a
+  // warning on every single request.
+  //
+  // Deliberately NO router.refresh(): the render in front of the user is
+  // already the correct one. This only records it. Refreshing here would be an
+  // infinite loop.
+  //
+  // `undefined` and `null` mean DIFFERENT things here and the distinction is
+  // load-bearing: null is the server saying "I used all locations" (reconcile
+  // to that), undefined is no server prop at all — a demo/test mount — where
+  // writing the cookie would silently reset a real user's scope to 'all'.
+  const serverScope = initialScopeLocationId === undefined ? null : (initialScopeLocationId || SCOPE_ALL)
+  useEffect(() => {
+    if (serverScope === null) return
+    try {
+      const current = document.cookie
+        .split('; ')
+        .find(c => c.startsWith(`${SCOPE_COOKIE_NAME}=`))
+        ?.slice(SCOPE_COOKIE_NAME.length + 1) || SCOPE_ALL
+      if (current === serverScope) return
+      document.cookie = scopeCookieString(serverScope)
+      console.log(`[scope] cookie reconciled ${current} → ${serverScope} (server-resolved scope)`)
+    } catch (e) {
+      // Non-fatal: the current render is already correct, only persistence is
+      // lost. Degrades to the pre-Phase-2 behavior for the next navigation.
+      console.error('[scope] cookie reconcile failed:', e)
+    }
+  }, [serverScope])
   // ── [view-as] lifecycle instrumentation — OBSERVATION ONLY (868kaxm20).
   // Logs the state delta at every enter / cancel / exit transition so a
   // strand (a transition that flips role+scope but never restores) is
@@ -33015,6 +33079,15 @@ if (Array.isArray(initialPeople)) return
   useEffect(() => {
     if (Array.isArray(initialBinPeople)) setBinPeople(initialBinPeople)
   }, [initialBinPeople])
+  // loc_other unrouted leads (Fix 2 Phase 2). Kept OUT of `people` on purpose:
+  // every people consumer filters by the selected location, which is exactly
+  // what used to make this queue vanish. Held separately so the two surfaces
+  // that need it (Home's transfer card, the Inbox's "Needs transfer" section)
+  // can render it in EVERY scope while nothing else changes.
+  const [transferPeople, setTransferPeople] = useState(Array.isArray(initialTransferPeople) ? initialTransferPeople : [])
+  useEffect(() => {
+    if (Array.isArray(initialTransferPeople)) setTransferPeople(initialTransferPeople)
+  }, [initialTransferPeople])
   // Follow-up reminders are client-side ephemeral state (added via the
   // "+ Reminder" button; not yet persisted server-side). Previously seeded
   // with a mock loc_kc array, which surfaced fake clients (Lisa Patel, etc.)
@@ -33643,7 +33716,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
     )
     if (activeNav==='hive') return (
       <div style={pageStyle}>
-        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} initialSelectedEngagementId={globalSelectedEngagementId} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onEngagementChange={(id)=>setGlobalSelectedEngagementId(id)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} initialHiveIntent={hiveIntent} onHiveIntentConsumed={()=>setHiveIntent(null)} />
+        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} initialSelectedEngagementId={globalSelectedEngagementId} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onEngagementChange={(id)=>setGlobalSelectedEngagementId(id)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} initialHiveIntent={hiveIntent} onHiveIntentConsumed={()=>setHiveIntent(null)} />
         {toast && <InlineToast {...toast} />}
       </div>
     )
@@ -33698,6 +33771,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           setCompanies={setCompanies}
           people={people}
           setPeople={setPeople}
+          transferPeople={transferPeople}
           locations={initialLocations || ALL_LOCATIONS}
           activeNav={activeNav}
           nav={nav}
@@ -33943,6 +34017,12 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         <GlobalSearch
           people={people}
           partners={partners}
+          // ⌘K scans the LOADED people array, which since Phase 1 holds one
+          // location for an elevated user. Naming the scope is the Phase 2
+          // fix: the search silently narrowing with no cue is the same
+          // failure class as MAX_LEADS dropping leads without an error. The
+          // real cross-location search endpoint is Phase 4.
+          scopeLabel={locFilter === 'all' ? 'all locations' : (selectedLoc?.name || currentLocation?.name || 'this location')}
           onSelectPerson={(p)=>{
             setActiveNav('hive')
             setGlobalSelectedPerson(p)

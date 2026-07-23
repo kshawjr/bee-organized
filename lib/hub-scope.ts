@@ -75,8 +75,17 @@ export type HubScope = {
   // filtered on. See CHILD_LOCATION_SCOPE for why both forms are needed.
   locationSlug: string | null
   // How this scope was arrived at. Purely for logging/assertions; nothing
-  // branches on it in a query.
-  source: 'own-location' | 'cookie' | 'all'
+  // branches on it in a query except the child-scope gate, which admits the
+  // two ELEVATED sources ('cookie' and 'deep-link') and no others.
+  source: 'own-location' | 'cookie' | 'deep-link' | 'all'
+}
+
+// True for the scopes an elevated user arrived at by choosing a location —
+// the only ones that carry a slug and may therefore take the location-filtered
+// child-table path. A franchise user's 'own-location' scope is deliberately
+// excluded: Phase 1's contract is that their load is untouched.
+export function isElevatedPickedScope(scope: HubScope): boolean {
+  return scope.source === 'cookie' || scope.source === 'deep-link'
 }
 
 // Resolve the effective scope for a request.
@@ -85,24 +94,37 @@ export type HubScope = {
 // the cookie was absent/'all'/forged, or named a location that does not exist.
 // Passing null is always safe: it degrades to today's unscoped behavior.
 //
+// `deepLink` is the location of a lead the URL named that the cookie's scope
+// does NOT contain (Fix 2, Phase 2). It WINS over the cookie: a /clients/<id>
+// link — typically from a lead-notification email — is an explicit, specific
+// request for one record, and honoring the stale cookie instead would 404 a
+// lead that plainly exists. The caller resolves it from the leads row itself,
+// so unlike the cookie it is not user-authored data.
+//
 // The non-elevated branch is deliberately expressed as the SAME condition the
-// pre-Phase-1 code used (`!isElevated && hubUser.location_id`). A franchise user
-// never consults the cookie, so they cannot escape their own location by
-// setting one, and their load is byte-identical to before.
+// pre-Phase-1 code used (`!isElevated && hubUser.location_id`) and is checked
+// FIRST, so neither the cookie nor a deep link can move a franchise user off
+// their own location. They cannot escape their fence by crafting either one.
 export function resolveHubScope(args: {
   isElevated: boolean
   hubUserLocationId: string | null | undefined
   validated: { id: string; slug: string | null } | null
+  deepLink?: { id: string; slug: string | null } | null
 }): HubScope {
-  const { isElevated, hubUserLocationId, validated } = args
+  const { isElevated, hubUserLocationId, validated, deepLink } = args
 
   if (!isElevated) {
-    // Franchise/manager/lite: hard-fenced to their own location, cookie ignored.
-    // location_id NULL (rare, and true for Kevin's own super_admin row) keeps
-    // the historical "no filter" behavior rather than inventing a scope.
+    // Franchise/manager/lite: hard-fenced to their own location, cookie AND
+    // deep link ignored. location_id NULL (rare, and true for Kevin's own
+    // super_admin row) keeps the historical "no filter" behavior rather than
+    // inventing a scope.
     return hubUserLocationId
       ? { locationUuid: hubUserLocationId, locationSlug: null, source: 'own-location' }
       : { locationUuid: null, locationSlug: null, source: 'all' }
+  }
+
+  if (deepLink && isUuid(deepLink.id)) {
+    return { locationUuid: deepLink.id, locationSlug: deepLink.slug ?? null, source: 'deep-link' }
   }
 
   if (validated && isUuid(validated.id)) {
@@ -112,6 +134,19 @@ export function resolveHubScope(args: {
   // Elevated, no usable selection → 'all' → today's behavior, unchanged.
   return { locationUuid: null, locationSlug: null, source: 'all' }
 }
+
+// The holding-pen location every unrouted global-form lead lands in. Corp/admin
+// route these to a real location; it is never a transfer TARGET (see
+// app/api/locations/transfer-targets). Named here because the transfer queue is
+// deliberately fetched OUTSIDE the selected scope (Fix 2, Phase 2) — otherwise
+// picking any real location would silently empty the routing queue.
+export const LOC_OTHER_SLUG = 'loc_other'
+
+// Bound on the always-on transfer queue. Two non-junk rows today; 50 is a
+// ceiling that keeps the query O(1) on the page load rather than a data policy.
+// If it is ever hit, the queue is badly backed up and the number itself is the
+// signal — hence the log at the call site rather than a silent slice.
+export const TRANSFER_QUEUE_MAX = 50
 
 // ── THE CHILD-TABLE LOCATION VOCABULARY ──────────────────────────────────────
 //

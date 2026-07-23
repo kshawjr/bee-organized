@@ -18,8 +18,12 @@ import {
   SCOPE_COOKIE_NAME,
   normalizeScopeCookie,
   resolveHubScope,
+  isElevatedPickedScope,
   childLocationFilter,
+  isUuid,
   SCOPE_ALL,
+  LOC_OTHER_SLUG,
+  TRANSFER_QUEUE_MAX,
 } from '@/lib/hub-scope'
 import BeeHub from '@/components/BeeHub'
 
@@ -411,10 +415,61 @@ export default async function HubPage({
     }
   }
 
+  // The scope the COOKIE alone asks for, before any deep-link override. Only
+  // used to decide whether a deep-linked lead is already in scope; the single
+  // authoritative scope is `scope` below.
+  const scope0LocationUuid = isElevated && scopeValidated ? scopeValidated.id : null
+
+  // ── Deep-link scope override (Fix 2, Phase 2) ──────────────────────────────
+  // /clients/<id> names ONE record — almost always from a lead-notification
+  // email. Before Phase 2, if that lead sat outside the cookie's scope the page
+  // loaded without it and the guard further down bounced the user to
+  // /clients?notfound=1 — a "not found" toast on a lead that plainly exists.
+  // Phase 1 created that gap and Phase 3 (a real location as the DEFAULT) would
+  // make it the common case, so it is closed here.
+  //
+  // Resolved BEFORE the queries run, not after: discovering the miss at the
+  // guard would mean re-running the entire page load. One indexed lookup up
+  // front instead lets the whole page render around the right lead in a single
+  // pass — leads, children, engagements, bin, contacts, all at the lead's own
+  // location.
+  //
+  // Only consulted when a scope is actually active. On 'all' the lead is
+  // already loaded, so the query would be pure waste.
+  //
+  // `is_junk IS NOT TRUE` mirrors the main leads query exactly: a junked lead
+  // lives in the bin, not initialPeople, so switching scope for one would move
+  // the user's whole page and STILL bounce them. Matching the filter keeps
+  // junked deep links behaving exactly as they do today.
+  let deepLinkScope: { id: string; slug: string | null } | null = null
+  if (isElevated && scope0LocationUuid && initialSelectedLeadId && isUuid(initialSelectedLeadId)) {
+    const { data: leadRow, error: leadErr } = await supabaseService
+      .from('leads')
+      // leads carries BOTH forms and they are consistent tenant-wide (verified
+      // 2026-07-22: 0 rows where slug(location_uuid) !== location_id), so this
+      // one row yields the uuid AND the slug the child tables need — no second
+      // lookup, and no chance of pairing a uuid with another location's slug.
+      .select('id, location_uuid, location_id')
+      .eq('id', initialSelectedLeadId)
+      .not('is_junk', 'is', true)
+      .maybeSingle()
+    if (leadErr) {
+      // Never fail the page over a deep-link hint — fall through to the
+      // cookie's scope and let the existing guard decide.
+      console.error(`[hub-page] deep-link lookup failed for ${initialSelectedLeadId}: ${leadErr.message}`)
+    } else if (leadRow?.location_uuid && leadRow.location_uuid !== scope0LocationUuid) {
+      deepLinkScope = { id: (leadRow as any).location_uuid, slug: (leadRow as any).location_id ?? null }
+      console.log(
+        `[hub-page] deep-link ${initialSelectedLeadId} lives at ${deepLinkScope.slug || deepLinkScope.id}, outside the selected scope — switching scope to load it`
+      )
+    }
+  }
+
   const scope = resolveHubScope({
     isElevated,
     hubUserLocationId: hubUser.location_id,
     validated: scopeValidated,
+    deepLink: deepLinkScope,
   })
 
   // THE single filter value every `location_uuid` query below uses. For a
@@ -426,10 +481,11 @@ export default async function HubPage({
 
   // Child tables are filtered on their OWN location column, which needs BOTH
   // the uuid and the slug (two vocabularies — see lib/hub-scope.ts). Only an
-  // elevated scoped load takes that path; everyone else keeps the lead-id
-  // paths they use today, so `childScopeLocation` stays null for them.
+  // elevated PICKED scope takes that path — 'cookie' (the switcher) or
+  // 'deep-link' (Phase 2), both of which carry a slug. Everyone else keeps the
+  // lead-id paths they use today, so `childScopeLocation` stays null for them.
   const childScopeLocation =
-    scope.source === 'cookie' && scope.locationUuid
+    isElevatedPickedScope(scope) && scope.locationUuid
       ? { uuid: scope.locationUuid, slug: scope.locationSlug }
       : null
 
@@ -1126,10 +1182,99 @@ export default async function HubPage({
     }
   }
 
+  // ── loc_other transfer queue (Fix 2, Phase 2) ──────────────────────────────
+  // The unrouted global-form leads corp/admin routes to a real location — the
+  // Home "needs transfer" card and the Inbox "Needs transfer" section. Both
+  // used to read `atLocOther` off the loaded people graph, which meant Phase 1
+  // silently emptied the routing queue the moment any real location was
+  // selected: the work still existed, the surface that shows it just stopped
+  // rendering. Phase 3 (a real location as the DEFAULT) would have made that
+  // permanent.
+  //
+  // So this is fetched OUTSIDE the selected scope, deliberately. It is the one
+  // read on this page that ignores `scopeLocationUuid`, because the queue is a
+  // corporate routing surface rather than a view of a location's book.
+  //
+  // ELEVATED ONLY. A franchise user gets [] and the sections self-gate on
+  // emptiness — the same posture as before, where their scope simply never
+  // contained loc_other rows. `leads.location_id` is the SLUG here (the two
+  // vocabularies again — see lib/hub-scope.ts).
+  let initialTransferPeople: any[] = []
+  if (isElevated) {
+    // Already loaded? Then filter rather than re-query. True on 'all' (the
+    // whole tenant is in initialPeople) and when loc_other IS the selected
+    // scope. Both paths run the SAME mapper, so the two can't drift in shape —
+    // only in bound, and the slice below applies to both.
+    const alreadyLoaded = !scopeLocationUuid || scope.locationSlug === LOC_OTHER_SLUG
+    if (alreadyLoaded) {
+      initialTransferPeople = initialPeople
+        .filter((p: any) => p.atLocOther)
+        .slice(0, TRANSFER_QUEUE_MAX)
+    } else {
+      const { data: transferRaw, error: transferErr } = await supabaseService
+        .from('leads')
+        .select('*')
+        .eq('location_id', LOC_OTHER_SLUG)
+        .not('is_junk', 'is', true)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: true })
+        .limit(TRANSFER_QUEUE_MAX)
+
+      if (transferErr) {
+        // Non-fatal: the queue is additive to the page. Log loudly — a silently
+        // empty routing queue is the exact failure this block exists to end.
+        console.error(`[hub-page] transfer queue fetch error: ${transferErr.message} — the needs-transfer surface will render EMPTY this load`)
+      } else if (transferRaw && transferRaw.length > 0) {
+        // These rows are pre-routing by definition (no Jobber record yet), but
+        // the Inbox's touch-band filter reads outreachTimeline, so fetch the
+        // two child tables that can legitimately carry data for an unrouted
+        // lead. The Jobber-owned tables are skipped: a lead that has never been
+        // routed cannot have quotes/jobs/invoices/assessments/service_requests.
+        // Bounded at TRANSFER_QUEUE_MAX ids, so this is one chunk per table.
+        const fetchTransferChildRows = createChildRowFetcher(supabaseService, { unscoped: false })
+        const transferIds = transferRaw.map((r: any) => r.id)
+        const [transferNotes, transferTouches] = await Promise.all([
+          fetchTransferChildRows('lead_notes', transferIds, 'created_at'),
+          fetchTransferChildRows('touchpoints', transferIds, 'occurred_at'),
+        ])
+        const byLead = (rows: any[]) => {
+          const out: Record<string, any[]> = {}
+          for (const r of rows || []) (out[r.lead_id] ||= []).push(r)
+          return out
+        }
+        const notesByLead = byLead(transferNotes)
+        const touchByLead = byLead(transferTouches)
+
+        const { mapLeadToPerson } = await import('@/lib/people-mapper')
+        initialTransferPeople = transferRaw.map((row: any) =>
+          mapLeadToPerson(row, {
+            lead_notes: notesByLead[row.id] || [],
+            touchpoints: touchByLead[row.id] || [],
+          })
+        )
+      }
+      if (initialTransferPeople.length >= TRANSFER_QUEUE_MAX) {
+        console.warn(
+          `[hub-page] transfer queue hit its ${TRANSFER_QUEUE_MAX}-row bound — more unrouted leads exist than are being shown`
+        )
+      }
+    }
+    if (initialTransferPeople.length > 0) {
+      console.log(`[hub-page] ${initialTransferPeople.length} lead(s) awaiting transfer for ${hubUser.email}`)
+    }
+  }
+
   // /clients/[id] passes initialSelectedLeadId — if the id doesn't exist in
   // the user's accessible leads (deleted, wrong location, or invalid uuid),
   // bounce to /clients with notfound=1 so the panel doesn't open and the
   // user gets a toast. initialPeople is already location-scoped above.
+  //
+  // For an ELEVATED user the scope has already moved to the lead's own location
+  // if it lived outside the selection (the deep-link override above), so this
+  // now fires only when the lead genuinely isn't reachable: it doesn't exist,
+  // it's junked, or the id is malformed. For a franchise user nothing changed —
+  // the override never applies to them, so another location's lead still
+  // bounces here exactly as before. That fence is the point, not a side effect.
   if (initialSelectedLeadId) {
     const found = initialPeople.some((p: any) => p.id === initialSelectedLeadId)
     if (!found) {
@@ -1251,6 +1396,11 @@ export default async function HubPage({
       initialLookups={initialLookups}
       initialPeople={initialPeople}
       initialBinPeople={initialBinPeople}
+      initialTransferPeople={initialTransferPeople}
+      // The scope the server ACTUALLY used, so the client can reconcile the
+      // cookie to it after hydration (a Server Component cannot write cookies).
+      // Carries the deep-link override and the fall-back-to-'all' cases alike.
+      initialScopeLocationId={scope.locationUuid}
       initialEngagements={initialEngagements}
       initialEngagementsClosedCount={initialEngagementsClosedCount}
       initialEngagementsClosedWonCount={initialEngagementsClosedWonCount}

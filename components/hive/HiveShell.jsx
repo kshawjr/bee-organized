@@ -133,6 +133,12 @@ export default function HiveShell({
   closedCount = 0,
   closedWonCount = 0,
   people = [],
+  // loc_other unrouted leads, fetched OUTSIDE the location scope so the
+  // routing queue survives a location switch (Fix 2 Phase 2). Deliberately
+  // NOT merged into `people`: every consumer here filters people by
+  // locFilter, which is exactly what used to empty the queue. Already
+  // role-gated upstream (HiveScreen sends [] for a non-elevated viewer).
+  transferPeople = [],
   // Location team roster (id/name/email/locationId) — BeeHub bridges its
   // LocationUsersContext here so the profile's assigned-to picker can
   // stay §8.5-clean (props only, no context in the hive chunk).
@@ -677,6 +683,7 @@ export default function HiveShell({
       {lens === 'inbox' ? (
         <InboxScreen
           people={patchedPeople}
+          transferPeople={transferPeople}
           engagements={patched}
           locFilter={locFilter}
           onOpenPerson={openPerson}

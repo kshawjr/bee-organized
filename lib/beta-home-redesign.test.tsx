@@ -94,7 +94,13 @@ describe('T2b — Needs-attention hero: five real signals, role-scoped, empty st
     expect(dash).not.toContain('dueDate')
   })
   it('the transfer card renders ONLY for elevated (super_admin/corp)', () => {
-    expect(dash).toContain('const transferLeads = isElevated ? scopedPeopleH.filter(p => isLivePersonH(p) && p.atLocOther) : []')
+    // Source moved to the dedicated queue in Fix 2 Phase 2 (see
+    // lib/beta-hub-scope-phase2.test.ts); the isElevated gate this test exists
+    // for is unchanged, and now matters MORE — the server ships the queue
+    // whenever the SESSION is elevated, so under view-as this ternary is the
+    // only thing keeping corporate's routing queue off an impersonated
+    // franchise owner's Home.
+    expect(dash).toContain('const transferLeads = isElevated ? (transferPeople || []).filter(isLivePersonH) : []')
     expect(dash).toContain("key:'needs-transfer'")
   })
   it('zero alerts → one calm "all caught up" card, never an empty hero', () => {

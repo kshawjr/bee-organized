@@ -2,10 +2,15 @@
 //
 // Inbox "Needs transfer" section — corp/admin routes loc_other global-form
 // leads to a real location, from a section that sits ABOVE New/Attempting.
+// Since Fix 2 Phase 2 the queue arrives on its OWN prop (transferPeople),
+// fetched outside the selected location scope — server-side scoping loads one
+// location and loc_other is never that location, so deriving it from `people`
+// meant the queue silently emptied the moment any location was picked.
+//
 // Pins:
-//   · the section renders ONLY when loc_other leads are in scope, and it
-//     renders ABOVE New/Attempting (self-gating: franchise scopes never
-//     receive loc_other rows, so the section is simply absent for them)
+//   · the section renders when the queue is non-empty, ABOVE New/Attempting,
+//     and it renders in EVERY scope (the Phase 2 property); it is absent for a
+//     non-elevated viewer because HiveScreen hands them an empty queue
 //   · a loc_other lead shows its ORIGIN (city, ST zip · project · from global
 //     form) and is EXCLUDED from New (it appears once, in Needs transfer)
 //   · the row's ONLY action is the Transfer pill — no log-call / Send-to-Jobber
@@ -93,7 +98,7 @@ const sectionLabels = (host: HTMLElement) =>
 describe('Inbox — Needs transfer section', () => {
   it('renders the section ABOVE New when a loc_other lead is in scope', async () => {
     const { host, unmount } = await mount(
-      <InboxScreen people={[locOtherLead(), person()]} engagements={[]} locFilter="all" />,
+      <InboxScreen people={[person()]} transferPeople={[locOtherLead()]} engagements={[]} locFilter="all" />,
     )
     const text = host.textContent || ''
     expect(text).toContain('Needs transfer')
@@ -108,7 +113,7 @@ describe('Inbox — Needs transfer section', () => {
 
   it('shows the loc_other lead origin, and excludes it from New (New counts only the normal lead)', async () => {
     const { host, unmount } = await mount(
-      <InboxScreen people={[locOtherLead(), person({ name: 'Normal New' })]} engagements={[]} locFilter="all" />,
+      <InboxScreen people={[person({ name: 'Normal New' })]} transferPeople={[locOtherLead()]} engagements={[]} locFilter="all" />,
     )
     expect(host.textContent).toContain('Austin, TX 78701')
     expect(host.textContent).toContain('from global form')
@@ -119,17 +124,55 @@ describe('Inbox — Needs transfer section', () => {
     await unmount()
   })
 
-  it('is ABSENT for a franchise-scoped view (no loc_other leads in scope)', async () => {
+  it('is ABSENT for a franchise-scoped view (HiveScreen sends an empty queue)', async () => {
+    // The gate moved: it used to be "a franchise scope never contains
+    // loc_other rows". Now the queue is fetched OUTSIDE the location scope, so
+    // the gate is the empty array HiveScreen passes for a non-elevated viewer
+    // (which also covers view-as, where the server session is still elevated
+    // and the prop would otherwise arrive populated).
     const { host, unmount } = await mount(
-      <InboxScreen people={[person(), person({ name: 'Another' })]} engagements={[]} locFilter="loc-uuid-1" />,
+      <InboxScreen people={[person(), person({ name: 'Another' })]} transferPeople={[]} engagements={[]} locFilter="loc-uuid-1" />,
     )
     expect(host.textContent).not.toContain('Needs transfer')
     await unmount()
   })
 
+  it('SURVIVES a location scope — the Phase 2 property', async () => {
+    // THE regression this whole change exists to prevent. Before Fix 2 Phase 2
+    // the queue was filtered out of the location-scoped people array, so
+    // picking any real location silently emptied Leslie's routing queue: the
+    // unrouted leads still existed, the surface just stopped mentioning them.
+    // A loc_other lead's locationId can NEVER equal the selected location, so
+    // if this ever renders empty the queue has been re-coupled to the scope.
+    const { host, unmount } = await mount(
+      <InboxScreen
+        people={[person()]}
+        transferPeople={[locOtherLead()]}
+        engagements={[]}
+        locFilter="loc-uuid-1"
+      />,
+    )
+    expect(host.textContent).toContain('Needs transfer')
+    expect(host.textContent).toContain('Austin, TX 78701')
+    await unmount()
+  })
+
+  it('does not double-render on an all-locations load (row in BOTH arrays)', async () => {
+    // On 'all' the server leaves loc_other rows in `people` AND ships them in
+    // transferPeople. The people loop drops them so they appear exactly once.
+    const dupe = locOtherLead({ name: 'Only Once' })
+    const { host, unmount } = await mount(
+      <InboxScreen people={[dupe, person()]} transferPeople={[dupe]} engagements={[]} locFilter="all" />,
+    )
+    const rows = Array.from(host.querySelectorAll('.bee-inbox-row'))
+      .filter(r => (r.textContent || '').includes('Only Once'))
+    expect(rows).toHaveLength(1)
+    await unmount()
+  })
+
   it('opens the transfer modal from the row Transfer pill', async () => {
     const { host, unmount } = await mount(
-      <InboxScreen people={[locOtherLead()]} engagements={[]} locFilter="all" />,
+      <InboxScreen people={[]} transferPeople={[locOtherLead()]} engagements={[]} locFilter="all" />,
     )
     const transferBtn = Array.from(host.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Transfer')
     expect(transferBtn).toBeTruthy()
@@ -143,7 +186,7 @@ describe('Inbox — Needs transfer section', () => {
   it('opens the pill modal for the CORRECT lead when several await transfer', async () => {
     const target = locOtherLead({ name: 'Second Lead', originCity: 'Reno', originState: 'NV', originZip: '89501' })
     const { host, unmount } = await mount(
-      <InboxScreen people={[locOtherLead({ name: 'First Lead' }), target]} engagements={[]} locFilter="all" />,
+      <InboxScreen people={[]} transferPeople={[locOtherLead({ name: 'First Lead' }), target]} engagements={[]} locFilter="all" />,
     )
     const rows = Array.from(host.querySelectorAll('.bee-inbox-row'))
       .filter(r => (r.textContent || '').includes('Lead'))
@@ -162,7 +205,7 @@ describe('Inbox — Needs transfer section', () => {
 
   it('renders the pill as the ONLY action — no log-call / Send-to-Jobber / ··· on a transfer row', async () => {
     const { host, unmount } = await mount(
-      <InboxScreen people={[locOtherLead()]} engagements={[]} locFilter="all" />,
+      <InboxScreen people={[]} transferPeople={[locOtherLead()]} engagements={[]} locFilter="all" />,
     )
     const row = Array.from(host.querySelectorAll('.bee-inbox-row'))
       .find(r => (r.textContent || '').includes('Global Lead'))
@@ -177,7 +220,7 @@ describe('Inbox — Needs transfer section', () => {
 
   it('leaves the normal row cluster intact (the pill is transfer-only)', async () => {
     const { host, unmount } = await mount(
-      <InboxScreen people={[locOtherLead(), person({ name: 'Normal New' })]} engagements={[]} locFilter="all" />,
+      <InboxScreen people={[person({ name: 'Normal New' })]} transferPeople={[locOtherLead()]} engagements={[]} locFilter="all" />,
     )
     const row = Array.from(host.querySelectorAll('.bee-inbox-row'))
       .find(r => (r.textContent || '').includes('Normal New'))
@@ -191,7 +234,7 @@ describe('Inbox — Needs transfer section', () => {
 
   it('styles the pill from tokens — accent fill, pill radius, compact', async () => {
     const { host, unmount } = await mount(
-      <InboxScreen people={[locOtherLead()]} engagements={[]} locFilter="all" />,
+      <InboxScreen people={[]} transferPeople={[locOtherLead()]} engagements={[]} locFilter="all" />,
     )
     const pill = Array.from(host.querySelectorAll('button'))
       .find(b => b.getAttribute('aria-label') === 'Transfer') as HTMLButtonElement

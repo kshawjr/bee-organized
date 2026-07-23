@@ -33,7 +33,11 @@ describe('Fix 1 — Home derivations are memoized (recompute on DATA, not per re
   })
 
   it('the memo is keyed on the real data inputs — and NOT on any clock/time value', () => {
-    expect(dash).toContain('}, [people, engagements, effectiveLocId, isElevated, canSeeFinancials])')
+    // transferPeople joined the dep list in Fix 2 Phase 2 — the Home transfer
+    // card reads it now, so a queue that changed without recomputing here
+    // would render a stale count. Still no clock/time value: that omission is
+    // the whole point of the memo and is asserted below.
+    expect(dash).toContain('}, [people, engagements, transferPeople, effectiveLocId, isElevated, canSeeFinancials])')
     // The whole point: no time value in the deps (that would bust the memo on
     // every render/tick and defeat the fix). nowHome is captured INSIDE.
     expect(dash).not.toMatch(/\}, \[[^\]]*\bnow\b[^\]]*\]\)/)
@@ -51,7 +55,12 @@ describe('Fix 1 — Home derivations are memoized (recompute on DATA, not per re
     expect(dash).toContain('sharedDaysSince(sent, nowHome) > ESTIMATE_FOLLOWUP_DAYS')
     expect(dash).toContain('for (const a of (e.assessments||[]))')
     expect(dash).toContain('sharedDaysSince(inv.date, nowHome)')
-    expect(dash).toContain('const transferLeads = isElevated ? scopedPeopleH.filter(p => isLivePersonH(p) && p.atLocOther) : []')
+    // Fix 2 Phase 2 moved the SOURCE of this card (scopedPeopleH → the
+    // dedicated, scope-independent transferPeople array) because filtering the
+    // location-scoped people array silently emptied the queue under any
+    // location scope. The elevated gate and the live-person filter are
+    // unchanged, which is what this line still pins.
+    expect(dash).toContain('const transferLeads = isElevated ? (transferPeople || []).filter(isLivePersonH) : []')
   })
 
   it('the memo returns the values the render consumes, destructured back out', () => {

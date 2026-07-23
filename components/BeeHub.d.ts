@@ -168,6 +168,12 @@ interface BeeHubProps {
   initialLookups?: LookupsByCategory
   initialPeople?: any[]
   initialBinPeople?: any[]
+  // loc_other unrouted leads, fetched outside the selected location scope so
+  // the routing queue survives a location switch (Fix 2 Phase 2).
+  initialTransferPeople?: any[]
+  // The location the server actually scoped to (null = all locations). The
+  // client reconciles its scope cookie to this after hydration.
+  initialScopeLocationId?: string | null
   // HIVE Phase 1 step 4: open engagements for the new EngagementBoard
   // (dual-read; unused by the legacy board). Rows carry client_name,
   // repeat_count, and minimal quotes/jobs/invoices for the stage chips.

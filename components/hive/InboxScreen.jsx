@@ -251,7 +251,7 @@ function RowMenu({ anchorId, isMobile, onClose, children }) {
   )
 }
 
-export default function InboxScreen({ people = [], engagements = [], locFilter = 'all', onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
+export default function InboxScreen({ people = [], transferPeople = [], engagements = [], locFilter = 'all', onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
   // One-shot deep-link → scroll a target section into view on mount (Home
   // "Needs attention" cards land here: 'transfer' = Needs-transfer section,
   // 'new' = New section). Sections aren't collapsible (they always render
@@ -384,18 +384,34 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
       if (p.inboxDismissedAt || dismissedIds.has(p.id)) continue
       if (transferredIds.has(p.id)) continue // just-transferred — optimistic removal from every section
       if (!passesInboxFilters(p)) continue
-      // Needs transfer sits ABOVE New/Attempting: loc_other global-form leads
-      // corp/admin routes to a real location. They're pulled out here and
-      // EXCLUDED from New/Attempting (a loc_other New lead shows ONLY in this
-      // section). The section self-gates — franchise scopes never receive
-      // loc_other rows, so `transfer` is empty and the section doesn't render.
-      if (p.atLocOther) { transfer.push(p); continue }
+      // loc_other rows are EXCLUDED from New/Attempting (a loc_other New lead
+      // shows ONLY in the transfer section) but are no longer collected here —
+      // `transfer` is built from the dedicated transferPeople array below.
+      // On an 'all' load these rows are in BOTH arrays; dropping them here is
+      // what keeps them from rendering twice.
+      if (p.atLocOther) continue
       // The section IS the derivation now: a call logged this session is in
       // the timeline, so the person derives Attempting here and everywhere
       // else — no Inbox-local reassignment papering over a stale snapshot.
       const status = deriveClientStatus(p, openClientIds, nowMs, wonClientIds)
       if (status === 'New') fresh.push(p)
       else if (status === 'Attempting') working.push(p)
+    }
+    // Needs transfer sits ABOVE New/Attempting: loc_other global-form leads
+    // corp/admin routes to a real location. Sourced from transferPeople rather
+    // than the location-scoped `scoped` array so the queue survives a location
+    // switch (Fix 2 Phase 2) — before, selecting any real location silently
+    // emptied it. The same soft-removal rules apply (a transferred/junked/
+    // snoozed/dismissed row leaves the section immediately), and the array is
+    // already role-gated upstream, so a franchise viewer gets [] and the
+    // section self-gates on emptiness exactly as it did before.
+    for (const p of (transferPeople || [])) {
+      if (p.isJunk || junkedIds.has(p.id)) continue
+      if (snoozedIds.has(p.id) || (p.snoozeUntil && new Date(p.snoozeUntil).getTime() > nowMs)) continue
+      if (p.inboxDismissedAt || dismissedIds.has(p.id)) continue
+      if (transferredIds.has(p.id)) continue
+      if (!passesInboxFilters(p)) continue
+      transfer.push(p)
     }
     const created = (p) => new Date(p.created || 0).getTime() || 0
     const cmp = inboxSort === 'oldest' ? (a, b) => created(a) - created(b)
@@ -406,7 +422,7 @@ export default function InboxScreen({ people = [], engagements = [], locFilter =
     fresh.sort(cmp)
     working.sort(cmp)
     return { transfer, fresh, working }
-  }, [scoped, openClientIds, wonClientIds, junkedIds, snoozedIds, dismissedIds, transferredIds, filters, inboxSort]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scoped, transferPeople, openClientIds, wonClientIds, junkedIds, snoozedIds, dismissedIds, transferredIds, filters, inboxSort]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Selection universe ─────────────────────────────────────
   // The VISIBLE rows (filters + section derivation already applied),

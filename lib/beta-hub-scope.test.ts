@@ -33,6 +33,7 @@ import {
   SCOPE_ALL,
   normalizeScopeCookie,
   resolveHubScope,
+  isElevatedPickedScope,
   childLocationFilter,
   CHILD_LOCATION_SCOPE,
   scopeCookieString,
@@ -496,8 +497,18 @@ describe('_hub-page wiring — scope', () => {
     expect(src).toContain(`location: childScopeLocation,`)
   })
 
-  it('the child scope is gated on source==="cookie" — franchise users never take it', () => {
-    expect(src).toContain(`scope.source === 'cookie' && scope.locationUuid`)
+  it('the child scope is gated on an ELEVATED PICKED scope — franchise users never take it', () => {
+    // Phase 1 inlined `scope.source === 'cookie'` here. Phase 2 added a second
+    // elevated way to pick a location (a deep link to a lead outside the
+    // selection), so the gate moved into isElevatedPickedScope() — one
+    // predicate both sources go through, rather than a growing inline
+    // disjunction that a third source could quietly miss.
+    expect(src).toContain(`isElevatedPickedScope(scope) && scope.locationUuid`)
+    // The property that actually matters, asserted on behavior rather than on
+    // the source string: a franchise user's scope never opens this gate.
+    expect(isElevatedPickedScope(resolveHubScope({
+      isElevated: false, hubUserLocationId: PDX_UUID, validated: { id: KC_UUID, slug: KC_SLUG },
+    }))).toBe(false)
   })
 
   it('the cookie is validated against the locations table before it can filter', () => {
