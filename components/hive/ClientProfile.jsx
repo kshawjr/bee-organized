@@ -55,6 +55,7 @@ import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
 import TouchpointModal from './TouchpointModal'
 import TransferLeadModal from './TransferLeadModal'
+import NetworkConvertSheet from './NetworkConvertSheet'
 import ContactField from './shared/ContactField'
 import AddressField from './shared/AddressField'
 import SourceField from './shared/SourceField'
@@ -89,7 +90,7 @@ const STAGE_ICON = {
 // siblings/onNavigate: the opener's natural ordering (e.g. the client
 // directory's visible rows). When absent the prev/next chevrons hide —
 // a panel→profile swap or a fresh create has no "next client".
-export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, lookupOptions = { sources: [], projectTypes: [], clientTags: [] }, locationUsers = [], siblings = null, onNavigate = () => {}, jobberLinks = {}, readOnly = false }) {
+export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, lookupOptions = { sources: [], projectTypes: [], clientTags: [] }, specialties = [], locationUsers = [], siblings = null, onNavigate = () => {}, jobberLinks = {}, readOnly = false }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -101,6 +102,8 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   const [touchOpen, setTouchOpen] = useState(false)
   // Transfer modal — only reachable for a loc_other lead (see actionBar).
   const [transferOpen, setTransferOpen] = useState(false)
+  // "Add to Network" sheet + this client's Network twin, if any.
+  const [convertOpen, setConvertOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const nowMs = Date.now()
 
@@ -113,6 +116,25 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
       .then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `HTTP ${r.status}`); return r.json() })
       .then(d => { if (!dead) setData(d) })
       .catch(e => { if (!dead) setLoadErr(String(e.message || e)) })
+    return () => { dead = true }
+  }, [clientId])
+
+  // ── the Network twin ──
+  // The link is one-directional — partners.customer_lead_id → leads.id, with
+  // no leads.partner_id going back — so "is this client also in my Network?"
+  // is a query, not a column on the profile payload. Deliberately kept that
+  // way (one link column, one owner, nothing to drift). null = not loaded yet,
+  // so the menu never flickers "Add to Network" onto someone already in it.
+  const [networkTwin, setNetworkTwin] = useState(null)
+  useEffect(() => {
+    let dead = false
+    setNetworkTwin(null)
+    fetch(`/api/partners?customer_lead_id=${clientId}`)
+      .then(r => r.ok ? r.json() : { rows: [] })
+      .then(j => { if (!dead) setNetworkTwin((j.rows || [])[0] || false) })
+      // Not load-bearing: a failed lookup just leaves the door open, and the
+      // conversion route re-checks the link server-side before it writes.
+      .catch(() => { if (!dead) setNetworkTwin(false) })
     return () => { dead = true }
   }, [clientId])
 
@@ -660,6 +682,25 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
           }}
         />
       )}
+      {convertOpen && !readOnly && c && (
+        <NetworkConvertSheet
+          person={{ id: c.id, name: c.name }}
+          specialties={specialties}
+          onClose={() => setConvertOpen(false)}
+          setToast={setToast}
+          onConverted={(res) => {
+            // The twin now exists — swap the menu door for the header link
+            // without a refetch, and hand the CONFIRMED rows up (partner →
+            // the Network's state, lead columns → people state).
+            // ?. — HiveShell's onPartnerCreated defaults to null, and a null
+            // prop beats a default parameter (defaults fire on undefined only).
+            if (res?.partner?.id) { setNetworkTwin(res.partner); onPartnerCreated?.(res.partner) }
+            if (res?.lead_patch && Object.keys(res.lead_patch).length > 0) {
+              onLeadPatched?.(c.id, res.lead_patch)
+            }
+          }}
+        />
+      )}
     </div>
   )
 
@@ -704,6 +745,19 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
                 </a>
               </>
             )}
+            {/* The reverse of the Network's gold Client badge. /network is
+                the real destination — the screen has no per-partner deep
+                link, so this opens the tab rather than faking a param it
+                would ignore. */}
+            {networkTwin && (
+              <>
+                {' · '}
+                <a className="bee-contact-link" data-testid="client-network-twin" href="/network"
+                  style={{ color: T.accent.fg, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                  In your Network <IconExternalLink size={11} />
+                </a>
+              </>
+            )}
           </p>
         </div>
         {siblings && siblings.length > 1 && (
@@ -720,8 +774,17 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         )}
         {/* Jobber-owns-deletion rule (Kevin 7/10): linked records are
             never junkable here — Jobber's *_DESTROY webhooks are their
-            only deletion path. CardMenu renders nothing on empty items. */}
-        <CardMenu items={(jobberLinked || readOnly) ? [] : [{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]} />
+            only deletion path. CardMenu renders nothing on empty items.
+            "Add to Network" is NOT under that rule (it deletes nothing) and
+            so rides on linked records too; it hides once a twin exists, and
+            stays hidden while the lookup is still in flight (null) so it
+            can't flash onto someone already in the Network. */}
+        <CardMenu items={readOnly ? [] : [
+          ...(networkTwin === false
+            ? [{ key: 'network', label: 'Add to Network…', onPick: () => setConvertOpen(true) }]
+            : []),
+          ...(jobberLinked ? [] : [{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]),
+        ]} />
       </div>
 
       {/* Metric band — full-bleed money row (v4): Collected / Invoiced /

@@ -64,8 +64,12 @@ const PARTNERS = [
     lastContactedAt: daysAgo(90), isDeleted: false, nextSteps: [],
   },
   {
+    // No specialty ON PURPOSE: since the band rule was narrowed (the
+    // lead→Network conversion), the customer signal only claims someone with
+    // no stated referral direction. A warm realtor now bands as a realtor —
+    // that case is pinned in network-lead-convert.test.ts.
     id: 'p3', name: 'Warm Wendy', type: 'partner', locationId: 'loc-1',
-    specialties: ['real-estate'], stage: 'Reaching Out', tags: ['warm'],
+    specialties: [], stage: 'Reaching Out', tags: ['warm'],
     lastContactedAt: null, isDeleted: false, nextSteps: [],
   },
   {

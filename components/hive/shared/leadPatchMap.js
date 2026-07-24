@@ -21,6 +21,10 @@ const LEAD_COL_TO_PERSON_FIELD = {
   request_details: 'jobDetail',
   snoozed_until: 'snoozeUntil', // Timeline's un-snooze → Inbox reflects live
   is_junk: 'isJunk',            // card ··· menu junk → Inbox row drops live
+  // "Move to Network" soft-hide → the Inbox row drops live. Inbox-scoped
+  // only, exactly like the column: deriveClientStatus stays blind to it, so
+  // the person keeps their true status everywhere else.
+  inbox_dismissed_at: 'inboxDismissedAt',
   // Build-3 preference/assignment writes (PreferencesBlock + AssignedToField)
   marketing_opt_out: 'marketingOptOut',
   paused: 'paused',

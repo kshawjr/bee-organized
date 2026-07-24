@@ -58,10 +58,11 @@ import { formatInboxAgeParts } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import { TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY } from '@/components/ui/tokens'
 import { T } from './shared/tokens'
-import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock, IconDots, IconMapPin, IconArrowRight } from '@/components/ui/icons'
+import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock, IconDots, IconMapPin, IconArrowRight, IconUsers } from '@/components/ui/icons'
 import InitialsAvatar from './shared/InitialsAvatar'
 import TouchpointModal, { METHODS } from './TouchpointModal'
 import TransferLeadModal from './TransferLeadModal'
+import NetworkConvertSheet from './NetworkConvertSheet'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
@@ -257,7 +258,7 @@ function RowMenu({ anchorId, isMobile, onClose, children }) {
   )
 }
 
-export default function InboxScreen({ people = [], transferPeople = [], locationRequired = false, onOpenLocationPicker = null, engagements = [], locFilter = 'all', locations = [], onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
+export default function InboxScreen({ people = [], transferPeople = [], locationRequired = false, onOpenLocationPicker = null, engagements = [], locFilter = 'all', locations = [], onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, specialties = [], setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
   // The selected location's NAME, for the New section's header. Half of why
   // the unrouted queue read as this location's leads is that the location's
   // own section wasn't labelled either — both just read as "the inbox". Null
@@ -293,6 +294,10 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   // Held as the person so the modal's origin subline survives the row
   // re-deriving out of the section the instant the move lands.
   const [transferFor, setTransferFor] = useState(null)
+  // The lead whose "Add to Network" sheet is open. Held as the person for the
+  // same reason as the two above: a Move re-derives the row out of its section
+  // the instant it lands, and the sheet must survive its own success.
+  const [convertFor, setConvertFor] = useState(null)
   // Session-local optimistic removal for a just-transferred lead: the moved
   // lead still reads atLocOther in this snapshot until the Realtime refetch
   // re-maps it, so suppress it here so it leaves the Needs-transfer section
@@ -745,6 +750,15 @@ export default function InboxScreen({ people = [], transferPeople = [], location
               label={<><IconClock size={13} />Snooze until next week</>} />
             <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); dismissLead(p) }}
               label={<><IconCheck size={13} />Dismiss</>} />
+            {/* The lead→Network door. Sits with the other soft dispositions
+                because that is what it is: "this record doesn't belong in my
+                worklist" — with a better destination than snooze or junk.
+                ONE entry; the sheet asks Add-vs-Move where the consequences
+                can be explained. NOT gated on `linked`: the Jobber-owns-
+                deletion rule covers junk and delete, and neither Add nor Move
+                deletes anything (Move only soft-hides from this list). */}
+            <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); setConvertFor(p) }}
+              label={<><IconUsers size={13} />Add to Network…</>} />
             {/* Jobber-owns-deletion rule: no junk door on linked rows
                 (the API 409s it anyway — this keeps the UI honest). Junk is
                 destructive (stops drips), so it's confirm-first: the first
@@ -1115,6 +1129,33 @@ export default function InboxScreen({ people = [], transferPeople = [], location
           subline={transferOriginLine(transferFor)}
           onClose={() => setTransferFor(null)}
           onDone={(dest) => onTransferred(transferFor, dest)}
+        />
+      )}
+
+      {convertFor && !readOnly && (
+        <NetworkConvertSheet
+          person={{ id: convertFor.id, name: convertFor.name }}
+          specialties={specialties}
+          onClose={() => setConvertFor(null)}
+          setToast={setToast}
+          onConverted={(res) => {
+            // CONFIRMED rows only (§8.5), both directions:
+            //   · the partner goes UP to the same partners state the Network
+            //     tab reads, so it appears there without a reload
+            //   · the lead columns go UP through onLeadPatched → people state,
+            //     so a Move drops this row live. Also mirrored into the local
+            //     dismissedIds set: `people` is a prop, and the section rebuild
+            //     must not wait on the parent's re-render to stop showing a
+            //     row the user just filed elsewhere.
+            // ?. because HiveShell's onPartnerCreated defaults to null, and a
+            // null prop beats a default parameter (defaults fire on undefined
+            // only) — the seam is optional by design.
+            if (res?.partner?.id) onPartnerCreated?.(res.partner)
+            if (res?.lead_patch && Object.keys(res.lead_patch).length > 0) {
+              onLeadPatched?.(convertFor.id, res.lead_patch)
+              if (res.lead_patch.inbox_dismissed_at) addTo(setDismissedIds, convertFor.id)
+            }
+          }}
         />
       )}
     </div>

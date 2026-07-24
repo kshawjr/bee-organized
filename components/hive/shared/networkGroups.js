@@ -14,8 +14,13 @@
 //     just-met band
 //   · "Potential customers" (purple) — people who may HIRE us, not refer
 //     us: stage 'Customer', isCustomer, or the 'warm' (Warm Client) tag.
-//     This signal WINS over specialty: the relationship's direction
-//     (they buy vs. they send) matters more than their trade.
+//     NARROWED (lead→Network conversion): this signal only claims someone
+//     with NO specialty. It used to win outright, which meant the moment a
+//     realtor was ALSO marked a client she left her trade band — exactly
+//     the Karen Pell case the conversion door exists for (she buys from us
+//     AND refers us). A stated specialty IS a stated referral direction;
+//     the customer half is carried by the gold Client badge instead. The
+//     purple band keeps its literal meaning: may hire us, direction unknown.
 //   · "Just met · no intent yet" (gray) — no customer signal, no
 //     specialty. Collected, not yet directed.
 //   Special bands sit at the BOTTOM, in that order.
@@ -63,9 +68,12 @@ export function stageFamilyKey(stage) {
 export function personBand(partner) {
   const stage = partner?.stage || ''
   const tags = partner?.tags || []
-  if (stage === 'Customer' || partner?.isCustomer || tags.includes('warm')) return POTENTIAL_BAND
+  // Specialty FIRST (see header): a stated trade is a stated referral
+  // direction, and it survives being marked a customer.
   const primary = (partner?.specialties || [])[0]
-  return primary || JUST_MET_BAND
+  if (primary) return primary
+  if (stage === 'Customer' || partner?.isCustomer || tags.includes('warm')) return POTENTIAL_BAND
+  return JUST_MET_BAND
 }
 
 export function companyBand(company, linkedPeople = [], specialtyIds = []) {

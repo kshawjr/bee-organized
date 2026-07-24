@@ -205,6 +205,12 @@ export default function HiveShell({
   // partners state (PartnersScreen) shows it without a reload. The
   // picker never touches PartnersContext (§8.5).
   onPartnerCreated = null,
+  // Admin partner-specialty vocabulary [{ id, label }] — passed DOWN from
+  // BeeHub rather than re-derived from /api/lookups here, because BeeHub
+  // owns the fallback to the built-in list when no admin rows exist. Two
+  // sources would mean the conversion sheet could offer a different set of
+  // specialties than the Network bands are grouped by.
+  specialties = [],
   setToast = () => {},
   onExitBeta = () => {},
   // Read-only mode (868kawwmh) — lite_user or paused/inactive location.
@@ -725,6 +731,9 @@ export default function HiveShell({
           onOpenPerson={openPerson}
           onSendToJobber={onSendToJobber}
           onCallLogged={applyTouchpoint}
+          onLeadPatched={handleLeadPatched}
+          onPartnerCreated={onPartnerCreated}
+          specialties={specialties}
           setToast={setToast}
           readOnly={readOnly}
           initialSection={inboxInitialSection}
@@ -899,6 +908,7 @@ export default function HiveShell({
           jobberLinks={jobberLinks}
           setToast={setToast}
           lookupOptions={lookupOptions}
+          specialties={specialties}
         />
       )}
     </div>

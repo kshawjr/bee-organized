@@ -431,7 +431,15 @@ describe('card menus enforce the linked guard', () => {
       <ClientProfile clientId="lead-9" onClose={() => {}} setToast={setToast} />
     )
     expect(m2.host.textContent).toContain('Dana Client') // profile loaded
-    expect(m2.host.querySelector('button[aria-label="More"]')).toBeFalsy()
+    // The rule is "Jobber owns DELETION", so what must vanish on a linked
+    // record is the junk door — not the whole menu. Since the lead→Network
+    // conversion this menu also carries "Add to Network…", which deletes
+    // nothing and stays available (a Jobber-imported client is exactly the
+    // kind of record that turns out to be a realtor). Assert the rule
+    // itself now that the menu's emptiness is no longer a proxy for it.
+    await click(m2.host.querySelector('button[aria-label="More"]')!)
+    expect(buttonByText(m2.host, 'Mark as junk')).toBeFalsy()
+    expect(buttonByText(m2.host, 'Add to Network…')).toBeTruthy()
     await m2.unmount()
   })
 

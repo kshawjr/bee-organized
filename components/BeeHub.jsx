@@ -10008,6 +10008,10 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], location
           // merge it into the same partners state PartnersScreen reads so it
           // shows in Classic's Partners/Contacts tabs without a reload.
           onPartnerCreated={(row)=>{ hivePartnersCtx?.mergePartner?.(row) }}
+          // Partner-specialty vocabulary for the lead→Network conversion
+          // sheet. Same getSpecialties() the Network screen + Add sheet read,
+          // so the sheet can only offer bands the Network actually groups by.
+          specialties={getSpecialties().map(s=>({ id:s.id, label:s.label }))}
           setToast={setToast}
           onExitBeta={()=>{ setView('kanban'); try{localStorage.setItem('bee_hive_view','kanban')}catch(e){} }}
           // URL id the beta board's open client should reflect. HiveShell
@@ -21712,6 +21716,16 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   // refresh together with the data rather than once per render.
   const homeDerived = useMemo(() => {
   const nowHome = Date.now()
+  // Inbox-liveness, hoisted ABOVE the 'all' early-return so BOTH branches
+  // share one definition. It used to live below it, and the 'all' branch
+  // hand-rolled `.filter(p => !p.isJunk)` — so a snoozed or dismissed
+  // loc_other lead left the Inbox's Needs-transfer section but KEPT counting
+  // on Home's card, but only on All Locations. The server-side transfer query
+  // excludes is_junk and nothing else, so this filter is the only gate there
+  // is; two copies of it meant two answers to the same question.
+  const isLivePersonH = (p) => !p.isJunk
+    && !(p.snoozeUntil && new Date(p.snoozeUntil).getTime() > nowHome)
+    && !p.inboxDismissedAt
   // ── 'All Locations' reads the SERVER overview (Fix 2, Phase 4) ────────────
   // On 'all' there is no people graph to derive from — that is the whole point
   // of Phase 4. The server computes these with the SAME pure functions used
@@ -21731,7 +21745,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         : '',
       agingInvoices: [], agingCount: ov.agingInvoices.count,
       agingTotal: ov.agingInvoices.total, agingOldest: ov.agingInvoices.oldestDays,
-      transferLeads: visibleTransferQueue(transferPeople, { isElevated }).filter(p => !p.isJunk),
+      transferLeads: visibleTransferQueue(transferPeople, { isElevated }).filter(isLivePersonH),
       openEngagementsCount: ov.openEngagementsCount,
       activeClientsCount: ov.activeClientsCount,
       newThisWeekCount: ov.newThisWeekCount,
@@ -21749,9 +21763,6 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   // person.wonEngagements carries the 'Client' read at hydration).
   const openClientIdsH = new Set(openEngsH.map(e=>e.client_id))
   const wonClientIdsH  = new Set(scopedEngsH.filter(e=>e.stage==='Closed Won').map(e=>e.client_id))
-  const isLivePersonH = (p) => !p.isJunk
-    && !(p.snoozeUntil && new Date(p.snoozeUntil).getTime() > nowHome)
-    && !p.inboxDismissedAt
 
   // RED · New leads not contacted — deriveClientStatus 'New' (has contact info,
   // no open engagement, no won/paid, NO reach-out in 30d, created <30d). This IS

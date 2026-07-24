@@ -37,6 +37,16 @@ const MAX_ROWS = 5000
 // truncated response says how many rows exist rather than pretending
 // rows.length is all of them. (Shape changed from a bare array 2026-07-23;
 // ReferrerPicker, the one GET consumer, reads both.)
+//
+// GET /api/partners?customer_lead_id=<uuid> — the REVERSE of the client link.
+// partners.customer_lead_id points partner → lead and there is no
+// leads.partner_id going back, so "does this client also live in my Network?"
+// is a query rather than a column read. Deliberately no migration: one link
+// column with one owner cannot drift out of sync with itself, where a mirrored
+// column on leads would need an invariant nobody maintains. Same response
+// shape, and location scoping comes from the ROWS (the caller has a lead id,
+// not a location) — a franchise user asking about someone else's client gets
+// an empty list, never a 403 that would confirm the row exists.
 export async function GET(request: NextRequest) {
   const supabase = await createServerSupabaseClient()
   const caller = await loadCaller(supabase)
@@ -44,9 +54,29 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
+  const customerLeadId = request.nextUrl.searchParams.get('customer_lead_id')
+  if (customerLeadId) {
+    const { data, error } = await supabase
+      .from('partners')
+      .select(PARTNER_COLS)
+      .eq('customer_lead_id', customerLeadId)
+      .is('deleted_at', null)
+      .order('name', { ascending: true })
+      .range(0, PAGE - 1)
+    if (error) {
+      console.error('[partners GET by lead]', error)
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+    const visible = (data || []).filter((r: any) => canReadLocation(caller, r.location_id))
+    return NextResponse.json({ rows: visible.map(mapPartnerRow), total: visible.length, truncated: false })
+  }
+
   const locationId = request.nextUrl.searchParams.get('location_id')
   if (!locationId) {
-    return NextResponse.json({ error: 'location_id query param required' }, { status: 400 })
+    return NextResponse.json(
+      { error: 'location_id or customer_lead_id query param required' },
+      { status: 400 }
+    )
   }
   if (!canReadLocation(caller, locationId)) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
