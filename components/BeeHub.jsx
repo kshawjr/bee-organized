@@ -120,7 +120,7 @@ export const CurrentUserContext = createContext(null)
 // screen that needs the live jobber_connected / jobber_account_id state
 // instead of falling back to the ALL_LOCATIONS mock.
 // Value shape: { id, name, jobber_connected, jobber_account_id, jobber_account_name, last_sync_status, token_expiry } or null.
-const CurrentLocationContext = createContext(null)
+export const CurrentLocationContext = createContext(null)
 
 // Real hub_users roster from Supabase. For super_admin / corporate this is
 // the full org (capped at 500 in page.tsx); for franchise sign-ins it's
@@ -11160,9 +11160,15 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
           body: JSON.stringify({
             default_drip_path:      dripGeneral,
             default_move_drip_path: dripMove,
-            calendar_link:          prefs?.calendarLink || '',
-            // Only present when a rate-quoting path (A/B) was picked; the
+            // Both value fields are write-only-when-provided from the wizard.
+            // calendar_link: the route clears on '', and the wizard must never
+            // wipe a link the owner (or an admin) already stored — e.g. a
+            // reply-to-schedule re-run after a booking-link choice. rate: the
             // API ignores empty strings so C/D never wipe a saved rate.
+            // Clearing either is a Settings action, not an onboarding one.
+            ...(prefs?.calendarLink && prefs.calendarLink.trim()
+              ? { calendar_link: prefs.calendarLink.trim() }
+              : {}),
             rate_per_hour:          prefs?.ratePerHour || '',
           }),
         })
@@ -12797,7 +12803,7 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
   if (step.id==='paths') {
     return (
       <div style={{ paddingTop:'12px' }}>
-        <OnboardingPathsEditor onComplete={(prefs)=>{ savePaths ? savePaths(prefs) : (setSavedPaths(prefs), markDone('paths'), setActiveStepOpen(null), prefs?.generalDefault && prefs.generalDefault !== 'custom' && setDefaultPathId('organizing-'+prefs.generalDefault.replace('path-','')), prefs?.moveDefault && prefs.moveDefault !== 'custom' && setDefaultMovePathId('moving-'+prefs.moveDefault.replace('path-',''))) }} />
+        <OnboardingPathsEditor profileForm={profileForm} locationForm={locationForm} onComplete={(prefs)=>{ savePaths ? savePaths(prefs) : (setSavedPaths(prefs), markDone('paths'), setActiveStepOpen(null), prefs?.generalDefault && prefs.generalDefault !== 'custom' && setDefaultPathId('organizing-'+prefs.generalDefault.replace('path-','')), prefs?.moveDefault && prefs.moveDefault !== 'custom' && setDefaultMovePathId('moving-'+prefs.moveDefault.replace('path-',''))) }} />
         {stepError && stepError.paths && (
           <div style={{ marginTop:'8px', padding:'9px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'9px', fontSize:'12px', color:'#b91c1c' }}>
             {stepError.paths}
@@ -12824,7 +12830,7 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
   return null
 }
 
-function PathChooser({ projectLabel, stepIndex, emoji, current, onSelect, previewPath, setPreviewPath, PLAIN, pathOptions, getSteps, sectionKey: sectionKeyProp }) {
+function PathChooser({ projectLabel, stepIndex, emoji, current, onSelect, previewPath, setPreviewPath, PLAIN, pathOptions, getSteps, sectionKey: sectionKeyProp, previewSettings = null }) {
   // sectionKey is the path_key prefix matching the master drip_paths
   // ('moving-a' / 'organizing-a' / ...). Passed explicitly so the copy above
   // is free to change without silently re-pointing which masters we read.
@@ -12834,6 +12840,9 @@ function PathChooser({ projectLabel, stepIndex, emoji, current, onSelect, previe
   // body). Mirrors Settings → Communications: the inline expand lists the
   // steps, and each step's 👁 Preview opens TemplateQuickPeekModal.
   const [peekTemplate, setPeekTemplate] = useState(null)
+  // Shared 14-variable preview pipeline (lib/preview-vars) — one build per
+  // render backs every step row's substituted subject line.
+  const previewVars = previewSettings ? buildPreviewVars(previewSettings) : null
 
   return (
     <div style={{ display:'grid', gap:'8px' }}>
@@ -12897,11 +12906,17 @@ function PathChooser({ projectLabel, stepIndex, emoji, current, onSelect, previe
                   )}
                   {steps.map(step=>{
                     const icon = {email:'📧',sms:'💬',call:'📞'}[step.type]||'📧'
+                    // Row title is the subject line — render it through the
+                    // shared preview pipeline so {{location_name}}-style
+                    // subjects read as they'll send, matching the peek modal.
+                    const rowName = previewVars
+                      ? (applyPreviewVars(step.name, previewVars) || step.name)
+                      : step.name
                     return (
                       <div key={step.id} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 12px', background:'white', borderRadius:'9px', border:'1px solid rgba(0,0,0,0.07)' }}>
                         <span style={{ fontSize:'12px', flexShrink:0 }}>{icon}</span>
                         <div style={{ flex:1, minWidth:0 }}>
-                          <p style={{ fontSize:'11px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Step {step.order}: {step.name}</p>
+                          <p style={{ fontSize:'11px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Step {step.order}: {rowName}</p>
                           <p style={{ fontSize:'10px', color:'#8a9e9a' }}>{step.delay}</p>
                         </div>
                         {step.body
@@ -12929,26 +12944,27 @@ function PathChooser({ projectLabel, stepIndex, emoji, current, onSelect, previe
       {/* Full subject + body preview — matches Settings → Communications. No
           select button here: onboarding just previews, the choice is committed
           via the radio selection above. */}
-      <TemplateQuickPeekModal template={peekTemplate} showSelectButton={false} onClose={()=>setPeekTemplate(null)} />
+      <TemplateQuickPeekModal template={peekTemplate} showSelectButton={false} settings={previewSettings} onClose={()=>setPeekTemplate(null)} />
     </div>
   )
 }
 
-export function OnboardingPathsEditor({ onComplete }) {
+export function OnboardingPathsEditor({ onComplete, profileForm = null, locationForm = null }) {
   // Onboarding picker reads from the corp master drip_paths
   // (/api/drip-paths/masters) rather than per-location rows: with the
   // master/copy model introduced by seed_master_drip_paths.sql, new
   // locations don't have their own drip_paths until an owner clicks
   // "Customize" in Settings → Communications.
   const currentLocationCtx = useContext(CurrentLocationContext)
+  const currentUserCtx     = useContext(CurrentUserContext)
 
   const [wizardStep, setWizardStep] = useState('intro')
   const [selectedMove, setSelectedMove]       = useState(null)
   const [selectedGeneral, setSelectedGeneral] = useState(null)
   const [previewPath, setPreviewPath]         = useState(null)
-  const [calendarLink, setCalendarLink]       = useState('')
-  // Pre-seed from the location so re-running the wizard doesn't demand a
-  // re-type of a rate that's already saved.
+  // Pre-seed both value asks from the location so re-running the wizard
+  // doesn't demand a re-type of something that's already saved.
+  const [calendarLink, setCalendarLink]       = useState(currentLocationCtx?.calendar_link || '')
   const [ratePerHour, setRatePerHour]         = useState(currentLocationCtx?.rate_per_hour || '')
 
   // Which PATH_STYLES are backed by a master drip_paths row. `null` while
@@ -13012,6 +13028,64 @@ export function OnboardingPathsEditor({ onComplete }) {
   ]
   const pathsLoading = availableMoveStyleIds === null || availableGeneralStyleIds === null
 
+  // Preview open by default: entering a chooser screen expands the emails of
+  // the current selection (or the first style) instead of a wall of closed
+  // cards — the owner reads real copy without hunting for the ▼ toggle. This
+  // is the "real email text visible" half of confirm-not-choose; pre-selected
+  // corporate defaults complete it later with just a default flip. Runs on
+  // screen entry only, so ▲ Hide still sticks within a screen.
+  React.useEffect(() => {
+    if (pathsLoading) return
+    if (wizardStep === 'move' && movePathOptions.length) {
+      setPreviewPath(p => p ?? (selectedMove || movePathOptions[0].id))
+    } else if (wizardStep === 'general' && generalPathOptions.length) {
+      setPreviewPath(p => p ?? (selectedGeneral || generalPathOptions[0].id))
+    }
+  }, [wizardStep, pathsLoading])
+
+  // Intro cadence, read from the masters that actually send (fix for the
+  // hardcoded "3 emails / 5 days / 30 days" claim — the copy now can't drift
+  // from seed_master_drip_paths.sql). null while the fetch is in flight;
+  // uniform=false if the masters ever stop sharing one schedule, which swaps
+  // the specific claim for an honest generic one.
+  const introCadence = React.useMemo(() => {
+    const lists = Object.entries(masterSteps)
+      .filter(([k]) => k.startsWith('moving-') || k.startsWith('organizing-'))
+      .map(([, steps]) => steps)
+      .filter(steps => steps.length > 0)
+    if (!lists.length) return null
+    const sig = steps => steps.map(s => s.delay_days).join(',')
+    const first = lists[0]
+    return { steps: first, uniform: lists.every(l => sig(l) === sig(first)) }
+  }, [masterSteps])
+
+  // Preview settings for the 👁 peeks, in the SettingsScreen shape that
+  // lib/preview-vars.buildPreviewVars() consumes — the wizard rides the SAME
+  // 14-variable pipeline as Settings → Communications (RenderedTemplatePreview),
+  // so onboarding preview and send can't drift. Typed-but-unsaved wizard
+  // values (rate, calendar link) win over the stored row so the preview
+  // tracks what the owner is about to save; buildPreviewVars fills anything
+  // still unknown with its labelled samples rather than a hole.
+  const previewSettings = React.useMemo(() => ({
+    profile: {
+      firstName:   profileForm?.firstName || currentUserCtx?.first_name || '',
+      lastName:    profileForm?.lastName  || currentUserCtx?.last_name  || '',
+      phone:       profileForm?.phone     || currentUserCtx?.phone      || '',
+      bookingLink: currentUserCtx?.booking_link || '',
+    },
+    location: {
+      name:          currentLocationCtx?.name || '',
+      phone:         locationForm?.phone         || currentLocationCtx?.phone           || '',
+      city:          locationForm?.city          || currentLocationCtx?.city            || '',
+      state:         locationForm?.state         || currentLocationCtx?.state           || '',
+      sendFromName:  locationForm?.senderName    || currentLocationCtx?.sender_name     || '',
+      sendFromEmail: locationForm?.sendFromEmail || currentLocationCtx?.send_from_email || '',
+      bookingLink:   calendarLink.trim()         || currentLocationCtx?.calendar_link   || '',
+      ratePerHour:   ratePerHour.trim()          || currentLocationCtx?.rate_per_hour   || '',
+      reviewsLink:   locationForm?.reviewsLink   || currentLocationCtx?.reviews_link    || '',
+    },
+  }), [currentLocationCtx, currentUserCtx, profileForm, locationForm, ratePerHour, calendarLink])
+
   const needsCalendar = PATH_STYLES.find(p=>p.id===selectedMove)?.tags?.includes('calendar')
                      || PATH_STYLES.find(p=>p.id===selectedGeneral)?.tags?.includes('calendar')
   // The rate-included styles quote {{rate_per_hour}} verbatim (the 'rates'
@@ -13050,10 +13124,30 @@ export function OnboardingPathsEditor({ onComplete }) {
           Think of it like a friendly robot that follows up for you while you're busy with a job. 🐝
         </p>
         <div style={{ background:'white', borderRadius:'9px', padding:'10px 12px', border:'1px solid rgba(0,0,0,0.07)', marginBottom:'10px' }}>
-          <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', marginBottom:'6px' }}>Every option is the same 3 emails, on the same schedule:</p>
-          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.8 }}>1️⃣ <strong>Right away</strong> - your pitch, asking for the next step. <strong>This is the one that changes.</strong></p>
-          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.8 }}>2️⃣ <strong>5 days later</strong> - a nudge if you haven't heard back</p>
-          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.8 }}>3️⃣ <strong>30 days later</strong> - one last check-in</p>
+          {/* Schedule read from the masters that send (introCadence) — never a
+              hardcoded count/cadence that can drift from the seeded rows. */}
+          {introCadence === null ? (
+            <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Loading your email schedule…</p>
+          ) : introCadence.uniform ? (
+            <>
+              <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', marginBottom:'6px' }}>Every option is the same {introCadence.steps.length} email{introCadence.steps.length === 1 ? '' : 's'}, on the same schedule:</p>
+              {introCadence.steps.map((s, i) => {
+                const when = s.delay_days > 0 ? `${s.delay_days} day${s.delay_days === 1 ? '' : 's'} later` : 'Right away'
+                const num  = i + 1 <= 9 ? `${i + 1}️⃣` : `${i + 1}.`
+                return (
+                  <p key={s.id} style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.8 }}>
+                    {num} <strong>{when}</strong> - {i === 0
+                      ? <>your pitch, asking for the next step. <strong>This is the one that changes.</strong></>
+                      : i === introCadence.steps.length - 1
+                        ? "one last check-in"
+                        : "a nudge if you haven't heard back"}
+                  </p>
+                )
+              })}
+            </>
+          ) : (
+            <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>Each option is a short series of emails — you'll see each one's schedule on the next screens.</p>
+          )}
           <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.6, marginTop:'8px', paddingTop:'8px', borderTop:'1px solid rgba(0,0,0,0.06)' }}>🐝 Separately, a <strong>Welcome Email</strong> from Bee Organized HQ goes out 24 hours after that first email. It's the same whichever option you pick, and sends automatically.</p>
         </div>
         <p style={{ fontSize:'12px', color:'#8a9e9a', fontStyle:'italic' }}>💡 Don't stress - you can change the emails and timing anytime in Settings. This just gets you started.</p>
@@ -13075,7 +13169,7 @@ export function OnboardingPathsEditor({ onComplete }) {
           No master Moving emails found. Contact support — at least one <code>moving-*</code> master must be seeded (see migrations/seed_master_drip_paths.sql).
         </div>
       ) : (
-        <PathChooser projectLabel="Moving" stepIndex={1} sectionKey="moving" emoji="📦" current={selectedMove} onSelect={setSelectedMove} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={movePathOptions} getSteps={getSteps} />
+        <PathChooser projectLabel="Moving" stepIndex={1} sectionKey="moving" emoji="📦" current={selectedMove} onSelect={id=>{ setSelectedMove(id); setPreviewPath(id) }} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={movePathOptions} getSteps={getSteps} previewSettings={previewSettings} />
       )}
       <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center' }}>Templates and timing can be customized anytime in Settings → Communications</p>
       <div style={{ display:'flex', gap:'8px' }}>
@@ -13097,7 +13191,7 @@ export function OnboardingPathsEditor({ onComplete }) {
           No master Organizing emails found. Contact support — at least one <code>organizing-*</code> master must be seeded (see migrations/seed_master_drip_paths.sql).
         </div>
       ) : (
-        <PathChooser projectLabel="Organizing" stepIndex={2} sectionKey="organizing" emoji="🏠" current={selectedGeneral} onSelect={setSelectedGeneral} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={generalPathOptions} getSteps={getSteps} />
+        <PathChooser projectLabel="Organizing" stepIndex={2} sectionKey="organizing" emoji="🏠" current={selectedGeneral} onSelect={id=>{ setSelectedGeneral(id); setPreviewPath(id) }} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={generalPathOptions} getSteps={getSteps} previewSettings={previewSettings} />
       )}
       <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center' }}>Templates and timing can be customized anytime in Settings → Communications</p>
       <div style={{ display:'flex', gap:'8px' }}>
