@@ -190,6 +190,69 @@ export async function activateLocationSubscription(args: {
   return { alreadyActive: false, seat, location: updated as ActivationResult['location'] }
 }
 
+// ── Comp / manual seat grants (super_admin, no payment) ───────
+// The pre-Stripe "turn on a tester" lever. A super_admin grants a seat
+// WITHOUT a payment; the seat carries a comp marker in `notes` so
+// "who paid vs who was comped" stays answerable later.
+//
+// The marker rides `subscription_seats.notes` — the SAME field the
+// Stripe webhook stamps "Paid via Stripe checkout (stripe_session=…)"
+// into. A comp seat says "Comp/manual grant … (comp_grant admin=<id>)"
+// and, unlike a paid activation, writes NO billing_invoices row (no
+// money moved) and carries prorated_cost = 0. So a comp grant is
+// distinguishable from a paid one three ways: the notes marker, the
+// absent invoice, and the zero cost.
+//
+// Activation itself (subscription flip + owner seat) still goes through
+// activateLocationSubscription — the ONE activation path. This helper
+// only mints ADDITIONAL pool seats (the manual sibling of
+// addStripePurchasedSeats), so the two never disagree.
+export const MANUAL_GRANT_MARKER = 'comp_grant'
+
+export function manualGrantSeatNote(grantedBy?: string | null, reason?: string | null): string {
+  const who = grantedBy ? ` admin=${grantedBy}` : ''
+  const why = reason && reason.trim() ? ` — ${reason.trim().slice(0, 200)}` : ''
+  return `Comp/manual grant — no payment (${MANUAL_GRANT_MARKER}${who})${why}`
+}
+
+export async function addManuallyGrantedSeats(args: {
+  locationId: string
+  tier: string
+  quantity: number
+  grantedBy?: string | null
+  reason?: string | null
+}): Promise<{ seats: any[]; ownerCapHit: boolean }> {
+  const { locationId, tier, quantity, grantedBy, reason } = args
+  const qty = Math.max(1, Math.min(50, Math.trunc(quantity)))
+
+  // Mirror /api/seats POST + addStripePurchasedSeats: max 2 active owner seats.
+  if (tier === 'owner') {
+    const { count } = await supabaseService
+      .from('subscription_seats')
+      .select('id', { count: 'exact', head: true })
+      .eq('location_id', locationId)
+      .eq('tier', 'owner')
+      .eq('status', 'active')
+    if ((count ?? 0) + qty > 2) return { seats: [], ownerCapHit: true }
+  }
+
+  const baseRow: Record<string, any> = {
+    location_id: locationId,
+    tier,
+    user_id: null,
+    added_by: grantedBy ?? null,
+    prorated_cost: 0, // comp — no charge
+    notes: manualGrantSeatNote(grantedBy ?? null, reason),
+  }
+
+  const { data: seats, error } = await supabaseService
+    .from('subscription_seats')
+    .insert(Array.from({ length: qty }, () => ({ ...baseRow })))
+    .select(SEAT_COLS)
+  if (error) throw new Error(`manual seat insert failed: ${error.message}`)
+  return { seats: seats || [], ownerCapHit: false }
+}
+
 // ── Stripe invoice recording ──────────────────────────────────
 // Returns 'inserted' | 'duplicate'. 'duplicate' means the payment_intent
 // already has a billing_invoices row (unique partial index) — the caller

@@ -26672,6 +26672,155 @@ function ConfigureTab() {
     </div>
   )
 }
+// ─── Grant Seat (comp / no payment) — super_admin only ───────────────────────
+// The pre-Stripe lever to turn on a tester without a payment. Lives in the
+// super_admin Pricing tab, right beside the Stripe Payment Link config — the
+// comp path next to the paid path. Posts to /api/admin/grant-seat, which
+// enforces super_admin, reuses the shared activation function, and marks every
+// grant as manual (comp) in the seat's notes. The route is the real gate; this
+// UI is convenience only.
+function GrantSeatCard() {
+  const [owners, setOwners]   = useState(null)   // null = loading, [] = none
+  const [loadErr, setLoadErr] = useState('')
+  const [ownerId, setOwnerId] = useState('')
+  const [tier, setTier]       = useState('owner')
+  const [qty, setQty]         = useState(1)
+  const [reason, setReason]   = useState('')
+  const [busy, setBusy]       = useState(false)
+  const [result, setResult]   = useState(null)   // { ok, msg } | { err, msg }
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const res = await fetch('/api/admin/grant-seat')
+        if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error || `HTTP ${res.status}`)
+        const data = await res.json()
+        if (alive) setOwners(Array.isArray(data) ? data : [])
+      } catch (e) {
+        if (alive) { setOwners([]); setLoadErr(e.message || 'Failed to load owners') }
+      }
+    })()
+    return () => { alive = false }
+  }, [])
+
+  const selected = (owners || []).find(o => o.owner_user_id === ownerId) || null
+  // Owner tier on an inactive location activates the subscription; otherwise
+  // it just mints pool seats. Mirror the server's dispatch in the label.
+  const willActivate = tier === 'owner' && selected && selected.subscription_status !== 'active'
+  const effectiveQty = tier === 'owner' ? 1 : qty
+  const tierOptions = FRANCHISE_ROLES.filter(r => !isDeferredTier(r.key))
+
+  async function grant() {
+    if (!ownerId || busy) return
+    setBusy(true); setResult(null)
+    try {
+      const res = await fetch('/api/admin/grant-seat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner_user_id: ownerId, tier, quantity: effectiveQty, reason: reason.trim() || undefined }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.message || body.error || `Grant failed (${res.status})`)
+      const who = selected ? (selected.owner_name || selected.owner_email || 'owner') : 'owner'
+      const loc = selected?.location_name || 'their location'
+      setResult({ ok: true, msg: body.activated
+        ? `✅ Activated ${loc} (comp) — owner seat granted to ${who}. Paid through ${body.paid_through_date}.`
+        : `✅ Granted ${effectiveQty} ${tier} seat${effectiveQty===1?'':'s'} (comp) to ${loc}.` })
+      // Reflect the new status locally so a follow-up owner grant reads "active".
+      if (body.activated) {
+        setOwners(prev => (prev || []).map(o => o.location_id === selected?.location_id ? { ...o, subscription_status: 'active' } : o))
+      }
+      setReason('')
+    } catch (e) {
+      setResult({ ok: false, msg: e.message || 'Grant failed' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div>
+      <div style={{ padding:'0 0 10px' }}>
+        <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b' }}>Grant Seat · Comp / No Payment</p>
+        <p style={{ fontSize:'12px', color:'#8a9e9a' }}>
+          super_admin only. Turns on a seat for a tester without a payment — activation runs through the SAME
+          path a Stripe payment uses. Every grant is marked as a comp (manual) grant, so it stays
+          distinguishable from a real payment.
+        </p>
+      </div>
+      <div style={{ background:'white', borderRadius:'12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', padding:'14px 16px', display:'grid', gap:'12px' }}>
+        {loadErr && (
+          <div style={{ padding:'10px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'10px', fontSize:'12px', color:'#991b1b' }}>{loadErr}</div>
+        )}
+
+        {/* Owner */}
+        <div>
+          <p style={{ fontSize:'11px', fontWeight:700, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px' }}>Owner</p>
+          <select
+            value={ownerId}
+            onChange={e => { setOwnerId(e.target.value); setResult(null) }}
+            disabled={owners === null}
+            style={{ width:'100%', padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', background:'white' }}
+          >
+            <option value="">{owners === null ? 'Loading owners…' : (owners.length ? 'Select an owner…' : 'No owners found')}</option>
+            {(owners || []).map(o => (
+              <option key={o.owner_user_id} value={o.owner_user_id}>
+                {(o.owner_name || o.owner_email || o.owner_user_id)} — {o.location_name || 'no location'}{o.subscription_status === 'active' ? ' (active)' : ` (${o.subscription_status || 'inactive'})`}
+              </option>
+            ))}
+          </select>
+          <p style={{ fontSize:'11px', color:'#b0c0bc', marginTop:'5px' }}>Seats live on the owner’s location. An owner with several territories appears once per location.</p>
+        </div>
+
+        {/* Tier + Quantity */}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 110px', gap:'10px' }}>
+          <div>
+            <p style={{ fontSize:'11px', fontWeight:700, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px' }}>Tier</p>
+            <select value={tier} onChange={e => { setTier(e.target.value); setResult(null) }}
+              style={{ width:'100%', padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', background:'white' }}>
+              {tierOptions.map(r => <option key={r.key} value={r.key}>{r.icon} {r.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <p style={{ fontSize:'11px', fontWeight:700, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px' }}>How many</p>
+            <input
+              type="text" inputMode="numeric" pattern="[0-9]*"
+              value={tier === 'owner' ? 1 : qty}
+              disabled={tier === 'owner'}
+              onChange={e => setQty(Math.max(1, Math.min(50, parseInt(e.target.value.replace(/\D/g,''), 10) || 1)))}
+              style={{ width:'100%', padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#1a2e2b', outline:'none', boxSizing:'border-box', textAlign:'center', background: tier==='owner' ? 'rgba(0,0,0,0.03)' : 'white' }}
+            />
+          </div>
+        </div>
+        {tier === 'owner' && (
+          <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'-6px' }}>
+            {willActivate ? 'Owner tier on an inactive location activates the subscription (one owner seat).' : 'Location already active — this adds a co-owner seat (max 2 owners).'}
+          </p>
+        )}
+
+        {/* Reason (optional) */}
+        <div>
+          <p style={{ fontSize:'11px', fontWeight:700, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px' }}>Reason <span style={{ fontWeight:400, textTransform:'none', color:'#b0c0bc' }}>(optional — recorded on the seat)</span></p>
+          <input value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Beta tester — comp through launch"
+            style={{ width:'100%', padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
+        </div>
+
+        {result && (
+          <div style={{ padding:'10px 12px', borderRadius:'10px', fontSize:'12px', background: result.ok ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)', border:`1px solid ${result.ok ? 'rgba(34,197,94,0.25)' : 'rgba(239,68,68,0.25)'}`, color: result.ok ? '#166534' : '#991b1b' }}>
+            {result.msg}
+          </div>
+        )}
+
+        <button onClick={grant} disabled={!ownerId || busy}
+          style={{ width:'100%', padding:'12px', background: (!ownerId || busy) ? '#e5e7eb' : '#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:(!ownerId || busy) ? '#9ca3af' : 'white', cursor:(!ownerId || busy) ? 'not-allowed' : 'pointer' }}>
+          {busy ? 'Granting…' : willActivate ? 'Activate (comp) →' : 'Grant Seat (comp) →'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function PricingManagementTab() {
   const tierPricesCtx = useContext(TierPricesContext)
   const tierPrices = tierPricesCtx?.tierPrices ?? []
@@ -26897,6 +27046,10 @@ function PricingManagementTab() {
           })}
         </div>
       </div>
+
+      {/* Grant Seat (comp / no payment) — super_admin lever, next to the
+          paid Stripe path. */}
+      <GrantSeatCard />
 
       {/* Add-ons */}
       <div>
