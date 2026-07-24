@@ -167,12 +167,15 @@ export async function POST(request: NextRequest) {
       (s: any) => !s.user_id && !s.scheduled_removal_at
     ).length
 
+    // Expired invites can never be accepted (accept 410s them), so they must
+    // not reserve a seat forever. NULL expiry is treated as non-expiring.
     const { count: pendingCount, error: pendingErr } = await supabaseService
       .from('pending_invites')
       .select('id', { count: 'exact', head: true })
       .eq('location_id', location_id)
       .eq('tier', tier)
       .is('accepted_at', null)
+      .or(`invite_expires_at.is.null,invite_expires_at.gt.${new Date().toISOString()}`)
     if (pendingErr) {
       console.error('[invite pending count]', pendingErr)
       return NextResponse.json({ error: pendingErr.message }, { status: 500 })

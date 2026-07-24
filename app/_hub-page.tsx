@@ -755,15 +755,25 @@ export default async function HubPage({
     }
   }
 
+  // Seats + pending invites power Settings → Team & Billing. Franchise users
+  // read their own location (currentLocation). Elevated users have NO
+  // currentLocation (location_id NULL by design) — before the scope fix their
+  // seats were always [], so the merged section showed "No seats yet" for a
+  // live location. Now an elevated PICKED scope (switcher/deep-link/default)
+  // reads the scoped location's rows; 'all' keeps [] — there is no single
+  // location to bill against.
+  const seatsLocationId =
+    currentLocation?.id ||
+    (isElevated && isElevatedPickedScope(scope) ? scope.locationUuid : null)
   let initialSeats: any[] = []
   let initialPendingInvites: any[] = []
-  if (currentLocation?.id) {
+  if (seatsLocationId) {
     const { data: seatsRaw, error: seatsErr } = await supabaseService
       .from('subscription_seats')
       .select(
         'id, location_id, tier, user_id, status, is_primary, added_at, removed_at, prorated_cost, added_by, notes, scheduled_removal_at'
       )
-      .eq('location_id', currentLocation.id)
+      .eq('location_id', seatsLocationId)
       .eq('status', 'active')
       .order('added_at', { ascending: true })
 
@@ -773,7 +783,7 @@ export default async function HubPage({
     const { data: pendingRaw, error: pendingErr } = await supabaseService
       .from('pending_invites')
       .select('id, location_id, email, full_name, role, tier, invite_expires_at, accepted_at, created_at')
-      .eq('location_id', currentLocation.id)
+      .eq('location_id', seatsLocationId)
       .is('accepted_at', null)
       .order('created_at', { ascending: true })
 

@@ -73,7 +73,9 @@ const sectionKeys = async (franchiseRole?: string): Promise<string[]> => {
   return Array.from(select!.querySelectorAll('option')).map(o => (o as HTMLOptionElement).value)
 }
 
-const ALL_SECTIONS = ['profile', 'location', 'team', 'billing', 'paths', 'templates', 'automation', 'notifs']
+// 'billing' is gone as a standalone section (merged into 'team' — Team &
+// Billing); it survives only as an initialSection alias, pinned below.
+const ALL_SECTIONS = ['profile', 'location', 'team', 'paths', 'templates', 'automation', 'notifs']
 
 describe('SettingsScreen sections by franchiseRole', () => {
   it("owner sees the full section list (and elevated mounts pass franchiseRole='owner', so this also covers admin/super_admin)", async () => {
@@ -107,6 +109,38 @@ describe('SettingsScreen sections by franchiseRole', () => {
   it("lite_user's Profile is genuinely useful: the Booking Link self-edit field renders (1bc9fa5)", async () => {
     await sectionKeys('viewer')
     expect(container.textContent).toContain('Booking Link')
+  })
+})
+
+describe('Team & Billing merge', () => {
+  const mount = async (initialSection: string) => {
+    await act(async () => {
+      root.render(
+        <CurrentUserContext.Provider value={currentUser}>
+          <SettingsScreen initialSection={initialSection} franchiseRole="owner" />
+        </CurrentUserContext.Provider>,
+      )
+    })
+    await act(async () => {})
+    return container.querySelector('select[aria-label="Settings section"]') as HTMLSelectElement
+  }
+
+  it("initialSection='billing' is an alias — lands on the merged team section, not the no-access notice", async () => {
+    const select = await mount('billing')
+    expect(select.value).toBe('team')
+    expect(container.textContent).not.toContain("You don't have access to this section")
+    // The billing deep-link opens with the billing footer EXPANDED, so the
+    // old destination's content (the seat pool) is immediately visible.
+    expect(container.textContent).toContain('Your seats this year')
+  })
+
+  it('the merged section shows the roster AND a collapsed billing footer by default', async () => {
+    const select = await mount('team')
+    expect(select.value).toBe('team')
+    expect(container.textContent).toContain('Team Members')
+    expect(container.textContent).toContain('Billing & seat details')
+    // Collapsed: the seat pool only renders after the footer is expanded.
+    expect(container.textContent).not.toContain('Your seats this year')
   })
 })
 

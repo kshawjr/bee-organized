@@ -11964,7 +11964,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
             <p style={{ fontSize:'36px', marginBottom:'12px' }}>🐝</p>
             <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'8px' }}>No worries - invite them later!</h2>
             <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'20px' }}>
-              You can invite your team anytime from <strong>Settings → Team</strong>. They'll get an email with setup instructions.
+              You can invite your team anytime from <strong>Settings → Team &amp; Billing</strong>. They'll get an email with setup instructions.
             </p>
             <div style={{ background:'rgba(168,201,196,0.08)', borderRadius:'10px', padding:'12px', marginBottom:'20px', textAlign:'left' }}>
               <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>
@@ -18328,7 +18328,7 @@ function SmsVoiceInfoModal({ onClose }) {
 }
 
 
-function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, profile=null, onGoToLocation=()=>{} }) {
+function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, profile=null, onGoToLocation=()=>{}, dbLocationIdOverride=null }) {
   // Real hub_users from context when page.tsx populates it; otherwise mock.
   // Initializer reads context once (snapshot at mount) — subsequent invites
   // mutate local state via addUser/removeUser, which is the existing pattern.
@@ -18339,8 +18339,10 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
   const usersSource      = locationUsersCtx || USERS_DATA
   // Real DB-backed locationId — TeamSection's prop is the legacy mock id;
   // when a franchise owner is signed in we want the actual uuid for invites
-  // and seat freeing.
-  const dbLocationId     = currentLocationCtx?.id || null
+  // and seat freeing. Elevated users have no currentLocationCtx (null by
+  // design) — dbLocationIdOverride carries the switcher-picked location's
+  // uuid so invite/remove/roster controls work for them too.
+  const dbLocationId     = currentLocationCtx?.id || dbLocationIdOverride || null
   const [removing, setRemoving]         = useState(null)
   const [users, setUsers] = useState(()=>{
     const fromData = usersSource.filter(u=>u.locationId===locationId)
@@ -18361,7 +18363,14 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
     return []
   })
   const [showInvite, setShowInvite]         = useState(false)
+  // Tier preselected in the invite modal when opened from a ghost seat row.
+  const [invitePresetTier, setInvitePresetTier] = useState(null)
   const [selectedMember, setSelectedMember] = useState(null)
+  // Seat freed by the last "Remove access" — drives the one-shot prompt to
+  // also schedule the seat's removal, closing the pay-for-an-empty-seat trap
+  // (removal frees the seat but it stays billable until scheduled).
+  const [freedSeat, setFreedSeat] = useState(null)
+  const [schedulingFreedSeat, setSchedulingFreedSeat] = useState(false)
   // Jobber roster cache from locations.jobber_team_roster. Used to power
   // the "linked status" badges + the manual override dropdown in
   // MemberDetailPopup. Refreshed on demand via the button below.
@@ -18467,6 +18476,12 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
   async function offboardMember(member) {
     if (!member?.id) return
     setRemoving(member.id)
+    // Snapshot the seat this member occupies BEFORE the server frees it —
+    // afterwards user_id is null and it's indistinguishable from any other
+    // open seat.
+    const memberSeat = (seatsCtx?.seats || []).find(
+      s => s.user_id === member.id && s.status === 'active'
+    ) || null
     try {
       const r = await fetch(`/api/hub_users/${encodeURIComponent(member.id)}/access`, {
         method: 'POST',
@@ -18479,6 +18494,9 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
       // that in seats context to refresh the billing card immediately.
       setUsers(prev => prev.map(u => u.id === member.id ? { ...u, disabled: true, status: 'removed' } : u))
       seatsCtx?.setSeats?.(prev => prev.map(s => s.user_id === member.id && s.status === 'active' ? { ...s, user_id: null } : s))
+      if (memberSeat && !memberSeat.scheduled_removal_at) {
+        setFreedSeat({ ...memberSeat, user_id: null })
+      }
     } catch (err) {
       alert(err?.message || 'Could not remove access')
     } finally {
@@ -18553,8 +18571,11 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
         {users.length===0&&<p style={{ fontSize:'13px', color:'#b0c0bc', fontStyle:'italic', padding:'8px 0' }}>No team members yet.</p>}
         {users.map(u=>{
           const rc2 = FRANCHISE_ROLES.find(r=>r.key===u.role)||{ icon:'👑', label:'Owner', bg:'rgba(212,160,70,0.1)', color:'#d4a046' }
-          const sub = subData[u.id]||{ status:'active', method:'ach', last4:'????', note:'' }
-          const sc  = subConf[sub.status]||subConf.active
+          // The seat this member occupies — the REAL billable object. The old
+          // pill here rendered mock subData ('✅ Active' for everyone); the
+          // seat chip replaces it so the roster and billing can't disagree.
+          const memberSeat = (seatsCtx?.seats || []).find(sr => sr.user_id === u.id && sr.status === 'active') || null
+          const seatMeta = memberSeat ? SUBSCRIPTION_TIER_META.find(m=>m.key===memberSeat.tier) : null
           const jLinked = !!u.jobberUserId
           // Only surface a "not linked" warning when the location is
           // connected to Jobber — otherwise the badge would nag for an
@@ -18570,7 +18591,9 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
                   <span style={{ fontSize:'10px', color:rc2.color, background:rc2.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>{rc2.icon} {rc2.label}</span>
                   {u.disabled
                     ? <span title="Access removed — login is off and their seat has been freed" style={{ fontSize:'10px', color:'#ef4444', background:'rgba(239,68,68,0.08)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>🔒 Removed</span>
-                    : <span style={{ fontSize:'10px', color:sc.color, background:sc.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>{sc.icon} {sc.label}</span>}
+                    : seatMeta
+                      ? <span title={memberSeat.scheduled_removal_at ? 'Seat scheduled for removal' : 'The paid seat this member occupies'} style={{ fontSize:'10px', color:memberSeat.scheduled_removal_at?'#d97706':'#4a5e5a', background:memberSeat.scheduled_removal_at?'rgba(217,119,6,0.10)':'rgba(26,46,43,0.05)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>{memberSeat.scheduled_removal_at?'🕐':'🪑'} {seatMeta.name} seat</span>
+                      : null}
                   {!u.disabled && showJobberBadge && (
                     jLinked
                       ? <span title="Linked to Jobber — can be assigned to Jobber jobs" style={{ fontSize:'10px', color:'#22c55e', background:'rgba(34,197,94,0.08)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>✓ Jobber</span>
@@ -18582,12 +18605,67 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
             </div>
           )
         })}
+        {/* Ghost rows — pooled seats nobody occupies yet. One row per open
+            seat so "what am I paying for" is answered on the roster itself;
+            Invite opens the modal with this tier preselected. Scheduled
+            seats are excluded (they're not invitable — see seat helpers). */}
+        {(seatsCtx?.seats || [])
+          .filter(sr => sr.status === 'active' && !sr.user_id && !sr.scheduled_removal_at)
+          .map(sr => {
+            const meta = SUBSCRIPTION_TIER_META.find(m=>m.key===sr.tier)
+            return (
+              <div key={sr.id} style={{ background:'rgba(26,46,43,0.02)', borderRadius:'10px', marginBottom:'6px', border:'1px dashed rgba(0,0,0,0.14)', display:'flex', alignItems:'center', gap:'12px', padding:'11px 14px' }}>
+                <div style={{ width:'36px', height:'36px', borderRadius:'50%', border:'1.5px dashed rgba(138,158,154,0.6)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'15px', flexShrink:0 }}>{meta?.icon || '🪑'}</div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <p style={{ fontSize:'13px', fontWeight:600, color:'#4a5e5a', marginBottom:'2px' }}>Open {meta?.name || sr.tier} seat</p>
+                  <p style={{ fontSize:'10.5px', color:'#8a9e9a' }}>Paid for and ready — invite someone to fill it</p>
+                </div>
+                <button onClick={()=>{ setInvitePresetTier(sr.tier); setShowInvite(true) }}
+                  style={{ flexShrink:0, padding:'5px 12px', background:'white', border:'1px solid rgba(26,46,43,0.2)', borderRadius:'7px', fontSize:'11px', fontWeight:600, color:'#1a2e2b', cursor:'pointer', fontFamily:'inherit' }}>
+                  Invite →
+                </button>
+              </div>
+            )
+          })}
       </div>
+
+      {/* One-shot follow-through after "Remove access": the seat is free but
+          still billable. Offer the schedule-removal half here so a full
+          offboard no longer requires finding the seat in the billing footer. */}
+      {freedSeat && (
+        <div style={{ margin:'10px 12px 0', padding:'12px 14px', background:'rgba(217,119,6,0.06)', border:'1px solid rgba(217,119,6,0.25)', borderRadius:'10px' }}>
+          <p style={{ fontSize:'12.5px', fontWeight:600, color:'#92400e', marginBottom:'2px' }}>
+            🕐 Their {SUBSCRIPTION_TIER_META.find(m=>m.key===freedSeat.tier)?.name || freedSeat.tier} seat is now open — and still billable
+          </p>
+          <p style={{ fontSize:'11.5px', color:'#92400e', lineHeight:1.5, marginBottom:'10px' }}>
+            Keep it to invite a replacement, or schedule it to end at renewal so you stop paying for it.
+          </p>
+          <div style={{ display:'flex', gap:'8px' }}>
+            <button onClick={()=>setFreedSeat(null)}
+              style={{ flex:1, padding:'8px', background:'transparent', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:'pointer' }}>
+              Keep the seat
+            </button>
+            <button onClick={()=>setSchedulingFreedSeat(true)}
+              style={{ flex:1, padding:'8px', background:'#d97706', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:'pointer' }}>
+              Schedule removal
+            </button>
+          </div>
+        </div>
+      )}
+      {schedulingFreedSeat && freedSeat && (
+        <ScheduleRemovalModal
+          seat={freedSeat}
+          tierMeta={SUBSCRIPTION_TIER_META.find(m=>m.key===freedSeat.tier)}
+          onClose={()=>setSchedulingFreedSeat(false)}
+          onScheduled={(updated)=>{ seatsCtx?.setSeats?.(prev=>prev.map(sr=>sr.id===updated.id?updated:sr)); setSchedulingFreedSeat(false); setFreedSeat(null) }}
+        />
+      )}
 
       {showInvite && dbLocationId && (
         <InviteTeamMemberModal
           locationId={dbLocationId}
-          onClose={()=>setShowInvite(false)}
+          initialTier={invitePresetTier}
+          onClose={()=>{ setShowInvite(false); setInvitePresetTier(null) }}
           onInviteCreated={()=>{ /* no-op: invite is pending until accept, so don't add to users list yet */ }}
         />
       )}
@@ -19645,7 +19723,21 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       location: locLocationRef.current,
     })
   }, [selectedLoc?.id, currentLocationCtx?.id])
-  const [activeSection, setActiveSection] = useState(initialSection||'profile')
+  // 'billing' is a legacy alias: the Billing section merged into Team
+  // (Team & Billing), so old deep-links/props land on the merged tab with
+  // the billing details expanded rather than a "no access" notice.
+  const [activeSection, setActiveSection] = useState(initialSection==='billing' ? 'team' : (initialSection||'profile'))
+  // Billing footer (seat pool / history / plans) inside Team & Billing —
+  // collapsed by default so the roster stays the hero; a billing deep-link
+  // opens it. Lifted here because the section renders via an IIFE.
+  const [showBillingDetails, setShowBillingDetails] = useState(initialSection==='billing')
+  // The location the billing/seat surfaces act on. Franchise owners: their
+  // own location (context). Elevated users: the location picked in the
+  // switcher (selectedLoc, a real uuid) — before this fallback every
+  // seat/invite control was dead for them because currentLocationCtx is
+  // null by design. selectedLoc is null for franchise users, so the two
+  // sources can't fight.
+  const resolvedBillingLocationId = currentLocationCtx?.id || selectedLoc?.id || null
 
   function updateProfile(key, val) { setSettings(s=>({...s, profile:{...s.profile,[key]:val}})) }
   function updateLocation(key, val) {
@@ -20364,8 +20456,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   const sections = [
     { key:'profile',   label:'Profile',    icon:'👤' },
     ...(ownerConfig ? [{ key:'location',  label:'My Location',icon:'📍' }] : []),
-    ...(canManageTeam ? [{ key:'team', label:'Team', icon:'👥' }] : []),
-    ...(canViewBilling ? [{ key:'billing', label:'Billing', icon:'💳' }] : []),
+    // Team & Billing merged (2026-07): seats are the billable half of the
+    // roster, so one section owns both. canViewBilling still gates the
+    // billing footer inside it; 'billing' survives as a deep-link alias.
+    ...(canManageTeam ? [{ key:'team', label:'Team & Billing', icon:'👥' }] : []),
     ...(ownerConfig ? [
       { key:'paths',     label:'Communication', icon:'📧' },
       { key:'templates', label:'Templates',  icon:'📝' },
@@ -20403,7 +20497,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               gap + a solid divider injected at the cluster boundary. */}
           <div className="bee-tab-pills" style={{ display:'flex', alignItems:'stretch', gap:'2px', width:'100%' }}>
             {sections.map((sec,i)=>{
-              const SHORT = { profile:'Profile', location:'Location', team:'Team', billing:'Billing', paths:'Communication', templates:'Templates', automation:'Automation', notifs:'Alerts' }
+              const SHORT = { profile:'Profile', location:'Location', team:'Team & Billing', paths:'Communication', templates:'Templates', automation:'Automation', notifs:'Alerts' }
               const clusterOf = k => ['paths','templates','automation','notifs'].includes(k) ? 'customer' : 'foundation'
               const isActive = activeSection===sec.key
               const showDivider = i>0 && clusterOf(sec.key)!==clusterOf(sections[i-1].key)
@@ -20551,15 +20645,15 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           </>
         )}
 
-        {/* ── Billing ── */}
-        {/* Post-onboarding billing view: payment-source-specific status card,
-           current seat breakdown, "+ Add seat" CTA (stub), and the general
-           tier reference (TierPlansInline) at the bottom. The prorated
-           "Due today" number is intentionally absent — that's an onboarding
-           concept; once a location is active the user only needs to know
-           what they have, what renews when, and how to add more. */}
-        {activeSection==='billing'&&(()=>{
-          const billingPaymentSource = currentLocationCtx?.payment_source || 'direct'
+        {/* ── Team & Billing (merged) ── */}
+        {/* One section owns people AND the seats they occupy: payment-status
+           strip on top, the team roster as the hero (each member row carries
+           its seat tier; unassigned seats appear as ghost rows), and the
+           billing details — seat pool, per-seat removal scheduling, history,
+           plan matrix — in a collapsed footer. The prorated "Due today"
+           number is intentionally absent — that's an onboarding concept. */}
+        {activeSection==='team'&&(()=>{
+          const billingPaymentSource = currentLocationCtx?.payment_source || selectedLoc?.payment_source || 'direct'
           // Per-tier counts derived from real subscription_seats via SeatsContext
           // (Dispatch 1). Falls back to a single owner seat if context isn't
           // mounted — keeps SettingsScreen renderable in isolation (storybook,
@@ -20588,9 +20682,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           }
           return (
             <>
-              <SectionHeader title="Subscription" desc="Your plan and seats" />
-              <div style={{ padding:'0 12px' }}>
-                {/* Payment status summary */}
+              {/* Payment status summary strip */}
+              <div style={{ padding:'16px 12px 0' }}>
                 <div style={{ background:'white', borderRadius:'14px', border:'1px solid rgba(0,0,0,0.08)', borderLeft:`4px solid ${summaryAccent}`, padding:'14px 16px', marginBottom:'12px' }}>
                   <p style={{ fontSize:'10px', fontWeight:700, color:summaryAccent, textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'6px' }}>
                     {summaryTitle}
@@ -20604,7 +20697,33 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                     </div>
                   )}
                 </div>
+              </div>
 
+              {/* Roster hero — TeamSection renders its own header + invite. */}
+              <TeamSection locationId={locationId} settings={settings} updateLocation={updateLocation} profile={settings.profile} onGoToLocation={()=>setActiveSection('location')} dbLocationIdOverride={resolvedBillingLocationId} />
+
+              {/* Billing details footer — collapsed so the roster stays the
+                  hero; a legacy 'billing' deep-link opens it expanded. Gated
+                  on canViewBilling so the money surfaces stay owner-only even
+                  if the team gate ever loosens. */}
+              {canViewBilling && (
+              <div style={{ margin:'20px 12px 0' }}>
+                <button
+                  type="button"
+                  onClick={()=>setShowBillingDetails(v=>!v)}
+                  aria-expanded={showBillingDetails}
+                  style={{ display:'flex', alignItems:'center', gap:'10px', width:'100%', padding:'12px 14px', background:'white', border:'1px solid rgba(0,0,0,0.08)', borderRadius:'12px', fontFamily:'inherit', textAlign:'left', cursor:'pointer' }}>
+                  <span style={{ fontSize:'16px' }}>💳</span>
+                  <span style={{ flex:1, fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Billing &amp; seat details</span>
+                  <span style={{ fontSize:'12px', color:'#8a9e9a', transform:showBillingDetails?'rotate(90deg)':'none', display:'inline-block', transition:'transform 0.15s' }}>›</span>
+                </button>
+              </div>
+              )}
+
+              {canViewBilling && showBillingDetails && (
+                <>
+              <SectionHeader title="Subscription" desc="Your plan and seats" />
+              <div style={{ padding:'0 12px' }}>
                 {/* Seat breakdown — one row per tier with at least 1 seat,
                    ordered by SUBSCRIPTION_TIER_META (owner→manager→light→
                    readonly). Each row shows total / assigned / available so
@@ -20646,15 +20765,15 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                     <button
                       type="button"
                       onClick={()=>setShowAddSeatsModal(true)}
-                      disabled={!currentLocationCtx?.id}
-                      style={{ display:'block', width:'100%', padding:'12px 14px', background:'transparent', border:'none', borderTop:'1px dashed rgba(0,0,0,0.08)', fontFamily:'inherit', textAlign:'left', cursor:currentLocationCtx?.id?'pointer':'not-allowed', opacity:currentLocationCtx?.id?1:0.5 }}
-                      onMouseEnter={e=>{ if(currentLocationCtx?.id){ e.currentTarget.style.background='rgba(26,46,43,0.03)' } }}
-                      onMouseLeave={e=>{ if(currentLocationCtx?.id){ e.currentTarget.style.background='transparent' } }}>
+                      disabled={!resolvedBillingLocationId}
+                      style={{ display:'block', width:'100%', padding:'12px 14px', background:'transparent', border:'none', borderTop:'1px dashed rgba(0,0,0,0.08)', fontFamily:'inherit', textAlign:'left', cursor:resolvedBillingLocationId?'pointer':'not-allowed', opacity:resolvedBillingLocationId?1:0.5 }}
+                      onMouseEnter={e=>{ if(resolvedBillingLocationId){ e.currentTarget.style.background='rgba(26,46,43,0.03)' } }}
+                      onMouseLeave={e=>{ if(resolvedBillingLocationId){ e.currentTarget.style.background='transparent' } }}>
                       <p style={{ fontSize:'12.5px', fontWeight:600, color:'#4a5e5a', marginBottom:'2px' }}>
                         + Pre-buy seats
                       </p>
                       <p style={{ fontSize:'10.5px', color:'#8a9e9a', lineHeight:1.45 }}>
-                        Already know how many seats you need? Buy them now and invite people anytime. Or use Team → Invite to buy + invite in one step.
+                        Already know how many seats you need? Buy them now and invite people anytime. Or use + Invite in the roster above to buy + invite in one step.
                       </p>
                     </button>
                   </div>
@@ -20728,6 +20847,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               </div>
 
               <TierPlansInline />
+                </>
+              )}
             </>
           )
         })()}
@@ -21211,10 +21332,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           )
         })()}
         {/* ── Notifications ── */}
-        {activeSection==='team'&&(
-          <TeamSection locationId={locationId} settings={settings} updateLocation={updateLocation} profile={settings.profile} onGoToLocation={()=>setActiveSection('location')} />
-        )}
-
         {activeSection==='automation'&&(
           <div style={{ padding:'0 12px 24px' }}>
             <SectionHeader title="How Automation Works" desc="What Bee Hub does automatically - and when you need to step in" />
@@ -21496,16 +21613,16 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         />
       )}
 
-      {showAddSeatsModal && currentLocationCtx?.id && (
+      {showAddSeatsModal && resolvedBillingLocationId && (
         <AddSeatsModal
-          locationId={currentLocationCtx.id}
+          locationId={resolvedBillingLocationId}
           onClose={()=>setShowAddSeatsModal(false)}
           onSeatsAdded={(rows)=>{ seatsCtx?.setSeats?.(prev=>[...prev, ...rows]) }}
         />
       )}
       {showBillingHistory && (
         <BillingHistorySheet
-          locationId={currentLocationCtx?.id || null}
+          locationId={resolvedBillingLocationId}
           onClose={()=>setShowBillingHistory(false)}
         />
       )}
@@ -25392,7 +25509,7 @@ function MassUpdateModal({ count, locationId, onApply, onClose }) {
           {locUsers.length === 0 && (
             <div style={{ padding:'24px 16px', textAlign:'center', color:'#8a9e9a', fontSize:'13px', lineHeight:1.5 }}>
               {hiddenForNoJobberLink > 0
-                ? <>No team members linked to Jobber yet.<br/>Go to <strong style={{ color:'#1a2e2b' }}>Settings → Team</strong> to link users.</>
+                ? <>No team members linked to Jobber yet.<br/>Go to <strong style={{ color:'#1a2e2b' }}>Settings → Team &amp; Billing</strong> to link users.</>
                 : 'No active team members for this location.'}
             </div>
           )}
@@ -25472,7 +25589,7 @@ function AssignUserPicker({ locationId, currentUserIds=[], onSelect, onClose }) 
           {locUsers.length === 0 && (
             <div style={{ padding:'24px 16px', textAlign:'center', color:'#8a9e9a', fontSize:'13px', lineHeight:1.5 }}>
               {hiddenForNoJobberLink > 0
-                ? <>No team members linked to Jobber yet.<br/>Go to <strong style={{ color:'#1a2e2b' }}>Settings → Team</strong> to link users.</>
+                ? <>No team members linked to Jobber yet.<br/>Go to <strong style={{ color:'#1a2e2b' }}>Settings → Team &amp; Billing</strong> to link users.</>
                 : 'No active team members for this location.'}
             </div>
           )}
@@ -32554,7 +32671,7 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
               </h2>
               <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
                 {step === 'paymentConfirm'
-                  ? `Adds ${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'} to your pool. Invite people later from Settings → Team.`
+                  ? `Adds ${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'} to your pool. Each appears as an open seat on the team roster, ready to invite into.`
                   : 'Billed annually, prorated to next March 1. Once added, you can invite team members anytime.'}
               </p>
             </div>
@@ -32656,7 +32773,7 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
 //
 // AddSeatsModal still exists for pre-buying ahead of inviting — see
 // Settings > Billing.
-function InviteTeamMemberModal({ locationId, onClose, onInviteCreated }) {
+function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTier=null }) {
   const seatsCtx = useContext(SeatsContext)
   const tierPricesCtx = useContext(TierPricesContext)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
@@ -32668,7 +32785,13 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated }) {
   // (created during onboarding co-owner flow, capped at 2) and intentionally
   // not invitable from here.
   const TIER_OPTIONS = SUBSCRIPTION_TIER_META.filter(t => t.key !== 'owner')
-  const [tier, setTier] = useState(TIER_OPTIONS[0]?.key || 'manager')
+  // initialTier: preselect when opened from an open-seat ghost row. Ignored
+  // if it isn't a real selectable tier (deferred tiers stay unselectable).
+  const [tier, setTier] = useState(
+    initialTier && TIER_OPTIONS.some(t => t.key === initialTier) && !isDeferredTier(initialTier)
+      ? initialTier
+      : (TIER_OPTIONS[0]?.key || 'manager')
+  )
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [createdInvite, setCreatedInvite] = useState(null)
@@ -33224,7 +33347,13 @@ export default function App({
     const total = seats.filter(
       s => s.tier === tier && !s.user_id && !s.scheduled_removal_at && (s.status === 'active' || !s.status)
     ).length
-    const pending = pendingInvites.filter(p => p.tier === tier && !p.accepted_at).length
+    // Expired invites can never be accepted (the accept route 410s them), so
+    // they must not reserve a seat forever. Null expiry = non-expiring.
+    const now = Date.now()
+    const pending = pendingInvites.filter(p =>
+      p.tier === tier && !p.accepted_at &&
+      (!p.invite_expires_at || new Date(p.invite_expires_at).getTime() > now)
+    ).length
     return Math.max(0, total - pending)
   }
   const seatsValue = {
