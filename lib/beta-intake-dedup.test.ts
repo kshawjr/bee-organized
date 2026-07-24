@@ -63,6 +63,7 @@ vi.mock('@/lib/sync-log', () => ({
 import { POST } from '@/app/api/leads/intake/route'
 import { startDripForLead } from '@/lib/drip-lifecycle'
 import { sendDripStep } from '@/lib/drip-send'
+import { writeSyncLog } from '@/lib/sync-log'
 
 // ── helpers ────────────────────────────────────────────────
 const LOC = {
@@ -444,5 +445,107 @@ describe('intake capture — message → request_details, preferred_contact', ()
     for (const u of updatePayloads('leads')) {
       expect(u.request_details).toBeUndefined()
     }
+  })
+})
+
+// ═══ description aliases + no-description observability ═══════════
+// Website-lead-descriptions scout (7/23): the intake pipeline was healthy —
+// the "missing" descriptions were payloads that genuinely carried none. Two
+// hardenings so the next incident self-diagnoses off the Webhooks tab:
+//   1. accept `description` / `request_details` as fallback keys (priority:
+//      message → description → request_details) — a producer-side key
+//      rename must not silently blank every description; an alias winning
+//      is flagged desc_key=<alias> on the sync_log row.
+//   2. a payload with NO description under any key logs no_description=true
+//      (legitimate — the form field is optional — but never invisible).
+const syncLogDetails = () =>
+  vi.mocked(writeSyncLog).mock.calls.map(c => c[0]?.message ?? '')
+
+describe('intake capture — description key aliases + no-description flag', () => {
+  it('`description` key → request_details; sync_log flags desc_key=description', async () => {
+    h.enqueue('leads', [])
+    h.enqueue('leads', [])
+    h.enqueue('leads', { id: 'lead-alias-1' })
+    const res = await POST(makeReq(submission({
+      description: '  Garage is overflowing, need shelving systems.  ',
+    })))
+    expect((await res.json()).success).toBe(true)
+    expect(insertPayloads('leads')[0].request_details).toBe(
+      'Garage is overflowing, need shelving systems.',
+    )
+    const success = syncLogDetails().find(m => m.includes('lead=lead-alias-1'))
+    expect(success).toContain('desc_key=description')
+    expect(success).not.toContain('no_description=true')
+  })
+
+  it('`request_details` key → request_details; sync_log flags desc_key=request_details', async () => {
+    h.enqueue('leads', [])
+    h.enqueue('leads', [])
+    h.enqueue('leads', { id: 'lead-alias-2' })
+    await POST(makeReq(submission({ request_details: 'Pantry + playroom reset' })))
+    expect(insertPayloads('leads')[0].request_details).toBe('Pantry + playroom reset')
+    expect(syncLogDetails().find(m => m.includes('lead=lead-alias-2')))
+      .toContain('desc_key=request_details')
+  })
+
+  it('`message` outranks aliases when both present, and carries no desc_key flag', async () => {
+    h.enqueue('leads', [])
+    h.enqueue('leads', [])
+    h.enqueue('leads', { id: 'lead-alias-3' })
+    await POST(makeReq(submission({
+      message: 'the contract key wins',
+      description: 'the alias must lose',
+    })))
+    expect(insertPayloads('leads')[0].request_details).toBe('the contract key wins')
+    const success = syncLogDetails().find(m => m.includes('lead=lead-alias-3'))
+    expect(success).not.toContain('desc_key=')
+  })
+
+  it('non-string `message` is ignored; a string alias still rescues the description', async () => {
+    h.enqueue('leads', [])
+    h.enqueue('leads', [])
+    h.enqueue('leads', { id: 'lead-alias-4' })
+    await POST(makeReq(submission({
+      message: { text: 'Make collection object, not a string' },
+      description: 'rescued by the alias',
+    })))
+    expect(insertPayloads('leads')[0].request_details).toBe('rescued by the alias')
+  })
+
+  it('no description under any key → console.warn + no_description=true on sync_log', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    h.enqueue('leads', [])
+    h.enqueue('leads', [])
+    h.enqueue('leads', { id: 'lead-nodesc-1' })
+    const res = await POST(makeReq(submission()))
+    expect((await res.json()).success).toBe(true)
+    expect(warn.mock.calls.some(c => String(c[0]).includes('no description'))).toBe(true)
+    expect(syncLogDetails().find(m => m.includes('lead=lead-nodesc-1')))
+      .toContain('no_description=true')
+    warn.mockRestore()
+  })
+
+  it('SOLID merge: alias-resolved description backfills; merge log flags no_description when absent', async () => {
+    // alias backfills on the fill-empty merge path
+    h.enqueue('leads', [storedLead({ city: 'Boulder' })])
+    const res = await POST(makeReq(submission({
+      email: 'sarah@email.com',
+      description: 'alias text reaches the merge fill',
+    })))
+    expect((await res.json()).merged).toBe(true)
+    expect(updatePayloads('leads')[0]).toMatchObject({
+      request_details: 'alias text reaches the merge fill',
+    })
+    expect(syncLogDetails().find(m => m.includes('lead=lead-A')))
+      .not.toContain('no_description=true')
+
+    // and a description-less merge is flagged
+    h.reset()
+    vi.clearAllMocks()
+    h.enqueue('locations', LOC)
+    h.enqueue('leads', [storedLead({ city: 'Boulder' })])
+    await POST(makeReq(submission({ email: 'sarah@email.com' })))
+    expect(syncLogDetails().find(m => m.includes('lead=lead-A')))
+      .toContain('no_description=true')
   })
 })

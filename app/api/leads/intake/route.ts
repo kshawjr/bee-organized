@@ -137,8 +137,33 @@ export async function POST(req: NextRequest) {
   // leads.request_details (what /api/leads POST writes, EditableDesc edits,
   // and engagements/people-mapper read as the description). Trimmed; empty
   // stays null so the merge path never overwrites good data with a blank.
-  const requestDetails: string | null =
-    typeof message === 'string' && message.trim() ? message.trim() : null
+  //
+  // ALIASES: `message` is the contract key, but a producer-side key rename
+  // must not silently blank every description — accept the obvious aliases
+  // in priority order. A non-contract key winning is surfaced on the
+  // sync_log row (desc_key=…) so the Make mapping can be fixed; a payload
+  // with NO description under any key is flagged no_description=true —
+  // legitimate (the form field is optional, ~10% of real submissions skip
+  // it) but it must be readable off the Webhooks tab, never invisible.
+  const DESC_KEYS = ['message', 'description', 'request_details'] as const
+  let requestDetails: string | null = null
+  let descKey: (typeof DESC_KEYS)[number] | null = null
+  for (const key of DESC_KEYS) {
+    const v = (body || {})[key]
+    if (typeof v === 'string' && v.trim()) {
+      requestDetails = v.trim()
+      descKey = key
+      break
+    }
+  }
+  if (descKey && descKey !== 'message') {
+    console.warn(
+      `[intake] description arrived under non-contract key "${descKey}" — update the producer mapping to \`message\``,
+    )
+  }
+  if (!requestDetails) {
+    console.warn('[intake] payload has no description under any accepted key (message/description/request_details)')
+  }
   // preferred_contact ("Text" | "Email" | "Phone" | …) — producer-agnostic
   // free-text mirroring Zoho's Preferred_Method_of_Contact. Stored in the
   // dedicated leads.preferred_contact column (see migrations/leads_preferred_contact.sql).
@@ -244,7 +269,9 @@ export async function POST(req: NextRequest) {
         matched: verdict.match,
         matchedOn: verdict.matchedOn ?? 'email',
         location,
-        submission: { email: validEmail, phone, address, city, state, zip, project_type, message, preferred_contact },
+        // message carries the alias-resolved description so a non-contract
+        // key still backfills + reaches the resubmission touchpoint note.
+        submission: { email: validEmail, phone, address, city, state, zip, project_type, message: requestDetails, preferred_contact },
         source: source || 'web_form',
         baseWarnings: dedupWarnings,
         now,
@@ -550,6 +577,11 @@ export async function POST(req: NextRequest) {
     detail:
       `lead=${lead.id} source=${source || 'web_form'} dedup=${dedupTier}` +
       ` drip_enrolled=${dripEnrolled} notified=${notifiedCount}` +
+      // Description observability: absent-under-any-key is flagged, and a
+      // non-contract alias winning names the drifted key. Both tokens are
+      // presence-signals — a normal `message` lead carries neither.
+      (!requestDetails ? ' no_description=true' : '') +
+      (descKey && descKey !== 'message' ? ` desc_key=${descKey}` : '') +
       // Only when muted, so the token's presence is the signal. Without it a
       // muted location reads as `notified=0`, which is indistinguishable from
       // "nobody was subscribed" — the ambiguity this flag has to avoid.
@@ -737,6 +769,9 @@ async function mergeResubmission(args: {
     detail:
       `lead=${matched.id} source=${source} merged (matched on ${matchedOn})` +
       ` drip_enrolled=${dripEnrolled}` +
+      // submission.message is the alias-resolved description (see POST) —
+      // same presence-signal as the create path.
+      (!submission.message?.trim() ? ' no_description=true' : '') +
       (dripSkippedReason ? ` drip_skipped_reason=${dripSkippedReason}` : '') +
       (warnings.length ? ` — warnings: ${warnings.join('; ')}` : ''),
   })
