@@ -47,6 +47,8 @@ import {
   getValidJobberToken,
   jobberGraphQL,
   JobberReauthRequiredError,
+  computeTokenExpiryMs,
+  DEFAULT_TOKEN_LIFETIME_MS,
 } from '@/lib/jobber'
 
 // ── fetch stub: routes OAuth token vs GraphQL by URL ──
@@ -149,6 +151,80 @@ describe('getValidJobberToken', () => {
     // never clobber the token columns on a failed refresh
     expect('jobber_access_token' in patch).toBe(false)
     expect('jobber_refresh_token' in patch).toBe(false)
+  })
+})
+
+describe('token lifetime from expires_in', () => {
+  const MARGIN = 60_000
+
+  it('uses Jobber-reported expires_in (minus the margin) instead of the 55-min assumption', () => {
+    const before = Date.now()
+    const expiry = computeTokenExpiryMs(3600, 'test')
+    const after = Date.now()
+    expect(expiry).toBeGreaterThanOrEqual(before + 3600_000 - MARGIN)
+    expect(expiry).toBeLessThanOrEqual(after + 3600_000 - MARGIN)
+  })
+
+  it('accepts a numeric-string expires_in', () => {
+    const before = Date.now()
+    const expiry = computeTokenExpiryMs('1800', 'test')
+    expect(expiry).toBeGreaterThanOrEqual(before + 1800_000 - MARGIN)
+  })
+
+  it.each([undefined, null, 'soon', '', -5, 0, NaN])(
+    'falls back to the 55-min default on unusable expires_in (%s) — never NaN/null',
+    (bad) => {
+      const before = Date.now()
+      const expiry = computeTokenExpiryMs(bad, 'test')
+      expect(Number.isFinite(expiry)).toBe(true)
+      expect(expiry).toBeGreaterThanOrEqual(before + DEFAULT_TOKEN_LIFETIME_MS)
+      expect(expiry).toBeLessThanOrEqual(Date.now() + DEFAULT_TOKEN_LIFETIME_MS)
+    },
+  )
+
+  it('rejects a non-credible lifetime (looks like milliseconds, not seconds) and falls back', () => {
+    const before = Date.now()
+    const expiry = computeTokenExpiryMs(3_600_000, 'test')
+    expect(expiry).toBeGreaterThanOrEqual(before + DEFAULT_TOKEN_LIFETIME_MS)
+    expect(expiry).toBeLessThanOrEqual(Date.now() + DEFAULT_TOKEN_LIFETIME_MS)
+  })
+
+  it('a very short grant still yields a future expiry (half-grant clamp, never past)', () => {
+    const before = Date.now()
+    const expiry = computeTokenExpiryMs(90, 'test') // margin would leave 30s; clamp gives 45s
+    expect(expiry).toBeGreaterThan(before)
+    expect(expiry).toBeLessThanOrEqual(Date.now() + 90_000)
+  })
+
+  it('refresh persists the observed lifetime as epoch-ms (parseInt-compatible)', async () => {
+    state.row = baseRow()
+    oauth.mockResolvedValue(resp(200, {
+      access_token: 'new_access',
+      refresh_token: 'refresh_v1',
+      expires_in: 3600,
+    }))
+
+    const before = Date.now()
+    await getValidJobberToken(baseRow())
+
+    const patch = state.updates.at(-1)!.patch
+    const written = parseInt(String(patch.token_expiry))
+    expect(Number.isInteger(written)).toBe(true)
+    expect(String(written)).toBe(String(patch.token_expiry)) // pure epoch-ms, no decoration
+    expect(written).toBeGreaterThanOrEqual(before + 3600_000 - MARGIN)
+    expect(written).toBeLessThanOrEqual(Date.now() + 3600_000 - MARGIN)
+  })
+
+  it('refresh without expires_in still writes the 55-min default expiry', async () => {
+    state.row = baseRow()
+    oauth.mockResolvedValue(resp(200, { access_token: 'new_access', refresh_token: 'refresh_v1' }))
+
+    const before = Date.now()
+    await getValidJobberToken(baseRow())
+
+    const written = parseInt(String(state.updates.at(-1)!.patch.token_expiry))
+    expect(written).toBeGreaterThanOrEqual(before + DEFAULT_TOKEN_LIFETIME_MS)
+    expect(written).toBeLessThanOrEqual(Date.now() + DEFAULT_TOKEN_LIFETIME_MS)
   })
 })
 

@@ -96,6 +96,51 @@ export async function jobberQueryThrottled(
   return result
 }
 
+// ── Token lifetime from Jobber's OAuth response ───────────────
+// token_expiry is written from Jobber's `expires_in` (seconds, per the OAuth
+// spec) minus a safety margin, so we refresh slightly early instead of racing
+// the real expiry. Falls back to the historical 55-minute assumption whenever
+// expires_in is absent or unusable — never writes NaN/null. Note: expiry is
+// only a preference for picking a certainly-valid token; health comes from
+// the REFRESH token (see the reconnect handling in performRefresh).
+
+export const DEFAULT_TOKEN_LIFETIME_MS = 55 * 60 * 1000
+const TOKEN_EXPIRY_MARGIN_MS = 60 * 1000
+// expires_in beyond a day is not credible for an OAuth access token — most
+// likely a unit change on Jobber's side (e.g. milliseconds). Trusting it
+// would hold a dead token for hours, so fall back instead.
+const MAX_CREDIBLE_LIFETIME_MS = 24 * 60 * 60 * 1000
+
+// One log line per distinct observed lifetime per warm instance, so a change
+// in Jobber's token lifetime is visible without spamming every refresh.
+const observedLifetimes = new Set<number>()
+
+export function computeTokenExpiryMs(expiresIn: unknown, context: string): number {
+  const seconds =
+    typeof expiresIn === 'number' ? expiresIn :
+    typeof expiresIn === 'string' && expiresIn.trim() !== '' ? Number(expiresIn) :
+    NaN
+
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds * 1000 > MAX_CREDIBLE_LIFETIME_MS) {
+    if (expiresIn !== undefined && expiresIn !== null) {
+      console.warn(`[jobber-token] unusable expires_in ${JSON.stringify(expiresIn)} (${context}) — using 55-min default`)
+    }
+    return Date.now() + DEFAULT_TOKEN_LIFETIME_MS
+  }
+
+  const grantedMs = seconds * 1000
+  // For very short grants the full margin would leave zero/negative lifetime;
+  // half the grant keeps expiry in the future and still ahead of the real one.
+  const effectiveMs = Math.max(grantedMs - TOKEN_EXPIRY_MARGIN_MS, Math.floor(grantedMs / 2))
+
+  if (effectiveMs !== DEFAULT_TOKEN_LIFETIME_MS && !observedLifetimes.has(seconds)) {
+    observedLifetimes.add(seconds)
+    console.log(`[jobber-token] Jobber reports expires_in=${seconds}s (~${Math.round(seconds / 60)}min) (${context}) — writing ${Math.round(effectiveMs / 60000)}min expiry instead of the assumed 55min`)
+  }
+
+  return Date.now() + effectiveMs
+}
+
 // ── Get location from Supabase ────────────────────────────────
 export async function getLocation(locationId: string) {
   const { data, error } = await supabase
@@ -224,7 +269,7 @@ async function performRefresh(location: any, opts: { force?: boolean }): Promise
     throw new Error(`Jobber token refresh failed (${res.status}) for ${locId}: ${detail}`)
   }
 
-  const expiryMs = Date.now() + 55 * 60 * 1000
+  const expiryMs = computeTokenExpiryMs(tokens.expires_in, `refresh:${locId}`)
 
   // Write refreshed tokens back to Supabase. Guard the refresh_token: only
   // overwrite when Jobber returned a new one, so a partial/odd response can

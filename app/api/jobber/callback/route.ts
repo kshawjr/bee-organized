@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getZohoLocation, zohoUpdate } from '@/lib/zoho'
 import { supabaseService } from '@/lib/supabase-service'
+import { computeTokenExpiryMs } from '@/lib/jobber'
 import {
   fetchRosterWithToken,
   persistRosterAndMatch,
@@ -98,7 +99,7 @@ export async function GET(request: NextRequest) {
     const accountData = await accountRes.json()
     const accountId   = accountData.data?.account?.id ?? null
     const accountName = accountData.data?.account?.name ?? null
-    const expiryMs    = Date.now() + 55 * 60 * 1000
+    const expiryMs    = computeTokenExpiryMs(tokens.expires_in, `callback:${locationId}`)
     const syncStatus  = `Connected via Hub: ${new Date().toLocaleString()}`
 
     // 4. Supabase write — REQUIRED (this is the source of truth)
