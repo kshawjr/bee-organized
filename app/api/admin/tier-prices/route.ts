@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { isValidPaymentLinkUrl } from '@/lib/stripe-links'
 
 const VALID_TIER_IDS = ['owner', 'manager', 'light', 'readonly'] as const
 type TierId = (typeof VALID_TIER_IDS)[number]
@@ -11,9 +12,13 @@ type TierPriceRow = {
   description: string | null
   sort_order: number
   updated_at: string
+  payment_link_url?: string | null // absent pre-migration (tier_prices_payment_links.sql)
 }
 
 // GET — fetch all tier prices, ordered by sort_order. Any authenticated user.
+// select('*') on purpose: payment_link_url may not exist yet (held
+// migration), and an explicit column list would turn every read into an
+// unknown-column error until it's applied.
 export async function GET() {
   const supabase = await createServerSupabaseClient()
 
@@ -26,7 +31,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from('tier_prices')
-    .select('id, display_name, price_annual, description, sort_order, updated_at')
+    .select('*')
     .order('sort_order', { ascending: true })
 
   if (error) {
@@ -38,7 +43,10 @@ export async function GET() {
 }
 
 // PUT — update one or more tier prices. Super_admin or admin only.
-// Body: { prices: [{ id, price_annual }, ...] }
+// Body: { prices: [{ id, price_annual, payment_link_url? }, ...] }
+// payment_link_url is OPTIONAL per entry and only written when the key is
+// present ('' clears to null) — so price-only saves keep working on a
+// pre-migration schema that lacks the column.
 export async function PUT(request: NextRequest) {
   const supabase = await createServerSupabaseClient()
 
@@ -89,22 +97,41 @@ export async function PUT(request: NextRequest) {
         { status: 400 }
       )
     }
+    if ('payment_link_url' in entry) {
+      const link = entry.payment_link_url
+      const cleared = link === null || link === ''
+      if (!cleared && !isValidPaymentLinkUrl(link)) {
+        return NextResponse.json(
+          { error: `payment_link_url must be an https URL (or empty to clear) for tier ${entry.id}` },
+          { status: 400 }
+        )
+      }
+    }
   }
 
-  for (const { id, price_annual } of prices) {
+  for (const entry of prices) {
+    const update: Record<string, any> = {
+      price_annual: entry.price_annual,
+      updated_by: user.id,
+      updated_at: new Date().toISOString(),
+    }
+    if ('payment_link_url' in entry) {
+      update.payment_link_url =
+        entry.payment_link_url === '' ? null : entry.payment_link_url
+    }
     const { error: upErr } = await supabase
       .from('tier_prices')
-      .update({
-        price_annual,
-        updated_by: user.id,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', id)
+      .update(update)
+      .eq('id', entry.id)
 
     if (upErr) {
-      console.error('[tier_prices PUT]', id, upErr)
+      console.error('[tier_prices PUT]', entry.id, upErr)
+      const hint =
+        'payment_link_url' in entry && /payment_link_url/.test(upErr.message)
+          ? ' — has migrations/tier_prices_payment_links.sql been applied?'
+          : ''
       return NextResponse.json(
-        { error: `update failed for ${id}: ${upErr.message}` },
+        { error: `update failed for ${entry.id}: ${upErr.message}${hint}` },
         { status: 500 }
       )
     }
@@ -112,7 +139,7 @@ export async function PUT(request: NextRequest) {
 
   const { data: updated, error: readErr } = await supabase
     .from('tier_prices')
-    .select('id, display_name, price_annual, description, sort_order, updated_at')
+    .select('*')
     .order('sort_order', { ascending: true })
 
   if (readErr) {

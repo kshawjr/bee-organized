@@ -639,9 +639,12 @@ export default async function HubPage({
     }
   })
 
+  // select('*') on purpose — payment_link_url arrives with the held
+  // tier_prices_payment_links.sql migration; an explicit column list
+  // would break every page load until it's applied.
   const { data: tierPricesRaw } = await supabaseService
     .from('tier_prices')
-    .select('id, display_name, price_annual, description, sort_order, updated_at')
+    .select('*')
     .order('sort_order', { ascending: true })
 
   const initialTierPrices = tierPricesRaw || []

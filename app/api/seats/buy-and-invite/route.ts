@@ -105,6 +105,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
+  // NOTE (milestone 1, Kevin's call): no Stripe gate here — the free
+  // grant stays open so buy-and-invite keeps working everywhere. When a
+  // Payment Link exists the client shows the Stripe path instead of
+  // calling this; the server-side closure (402 payment_required, which
+  // the client already handles) comes as a separate step once the paid
+  // path is proven.
+
   const normalizedEmail = String(email).trim().toLowerCase()
 
   // Refuse if email already a hub_user at this location — they'd double-

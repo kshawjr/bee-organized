@@ -24,6 +24,7 @@ import { ESTIMATE_FOLLOWUP_DAYS, INVOICE_AGING_DAYS, ASSESSMENT_HORIZON_DAYS } f
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { financialsVisible } from "@/lib/financial-access"
+import { buildStripePayUrl } from "@/lib/stripe-links"
 import { splitNameForPrefill } from "@/lib/name-prefill"
 import { captureViewAsSnapshot, revertViewAsCancel, viewAsIdentityFor, isElevatedRole, visibleTransferQueue } from "@/lib/view-as-identity"
 import { makeUpdatePartner } from "@/lib/partner-writes"
@@ -10982,9 +10983,8 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     livePricesForPay,
   )
   const effectiveProratedForPay = paySubDisplay.prorated
-  const ccAmount = Math.round(effectiveProratedForPay * 1.03 * 100) / 100
-  // Back-compat shim — the legacy payment screens (method picker, ACH form,
-  // CC form, post-pay confirm) read `proration.*`.
+  // Back-compat shim — the pay screens (pricing, confirm, done) read
+  // `proration.*`.
   const proration = {
     prorated: effectiveProratedForPay,
     annual:   paySubDisplay.annual,
@@ -10992,21 +10992,25 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     renewDate: formatRenewalDate(paySubDisplay.renewalDate),
   }
 
-  // Payment
+  // Payment. The old fake card/ACH forms (and their digit state) are GONE —
+  // direct locations pay on Stripe's hosted checkout when a Payment Link is
+  // configured, and fall back to the honest record-only confirm when not.
+  // payStep: pricing | pay_confirm | stripe_wait | stripe_done | processing | done
   const [payStep, setPayStep]   = useState('pricing')
   const [showSmsModal, setShowSmsModal] = useState(false)
-  const [method, setMethod]     = useState(null)
   // Activation state: in-flight flag + last error message. Used by completePay
   // to gate the "Continue Setup →" button and surface a retry-able error if
-  // the seat insert or subscription_status flip fails.
+  // the activation call fails.
   const [activating, setActivating]         = useState(false)
   const [activateError, setActivateError]   = useState('')
-  const [routing, setRouting]   = useState('')
-  const [bankAcct, setBankAcct] = useState('')
-  const [cardNum, setCardNum]   = useState('')
-  const [expiry, setExpiry]     = useState('')
-  const [cvv, setCvv]           = useState('')
-  const [cardName, setCardName] = useState('')
+  // Stripe checkout URL returned by a 402 payment_required response —
+  // backstop for when the server has a link the client context missed.
+  const [serverPayUrl, setServerPayUrl]     = useState(null)
+  // The real Stripe checkout URL for owner activation (null → record-only
+  // fallback). Location identity + email are appended client-side.
+  const ownerStripeUrl = paymentSourceForPay === 'direct'
+    ? (buildStripePayUrl(tierPricesCtx?.getTierLink?.('owner'), currentLocationCtx?.id, currentUserCtx?.email) || serverPayUrl)
+    : null
 
   // Per-step forms - prefilled from invite data, or from DB on remount (Pass 2)
   const [profileForm, setProfileForm] = useState({
@@ -11362,7 +11366,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     } catch {}
   }, [completedSteps, activeStepOpen])
 
-  const finalAmt = method==='cc' ? ccAmount : proration.prorated
+  const finalAmt = proration.prorated
 
   // Task 4 Pass 1 — persistStep is the DB write half of markDone. Fire-and-
   // forget: a network failure doesn't roll back the optimistic local update,
@@ -11500,19 +11504,33 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   const allDone   = doneCount === STEPS.length
 
   // ── Payment processing ──────────────────────────────────────────────────────
+  // Record-only theater between the confirm click and the done modal — the
+  // real write happens in completePay from the done modal's Continue button.
   function processPayment() {
     setPayStep('processing')
-    setTimeout(()=>setPayStep('done'), 2200)
+    setTimeout(()=>setPayStep('done'), 1200)
   }
-  // completePay is the persistence boundary for onboarding Activate. Prior to
-  // Dispatch 1, this just advanced the step locally. Now:
-  //   1. POST /api/seats to record the owner's first seat row.
-  //      - direct mode: include prorated_cost in cents
-  //      - prepaid_corporate / corporate_sponsored: omit prorated_cost
-  //   2. POST /api/locations/[id]/complete-onboarding to flip
-  //      subscription_status='deferred' → 'active' on the locations row.
-  //   3. Push the new seat into SeatsContext so Settings > Billing and the
-  //      team UI reflect it without a reload.
+  // Pull the location's seats fresh into SeatsContext — used after the
+  // Stripe webhook lands writes this client didn't make itself.
+  async function refreshSeats() {
+    const locId = currentLocationCtx?.id
+    if (!locId || !seatsCtx?.setSeats) return
+    try {
+      const res = await fetch(`/api/seats?location_id=${locId}`, { cache:'no-store' })
+      if (res.ok) {
+        const rows = await res.json().catch(() => null)
+        if (Array.isArray(rows)) seatsCtx.setSeats(rows)
+      }
+    } catch {}
+  }
+  // completePay is the persistence boundary for the RECORD-ONLY onboarding
+  // Activate (no Payment Link configured). One POST to
+  // /api/locations/[id]/complete-onboarding, which activates through
+  // lib/subscription-activation.ts — the same function the Stripe webhook
+  // uses — creating/claiming the owner seat AND flipping
+  // subscription_status='deferred' → 'active' server-side.
+  // A 402 payment_required means a Stripe link IS configured (this client
+  // just didn't know) — bounce back to the confirm step in Stripe mode.
   // On failure we surface the error inline and stay on the 'done' modal so
   // the user can retry. If we're rendered in a view-as / demo path with no
   // real location or user, we skip the DB writes and advance locally — the
@@ -11524,37 +11542,35 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     if (!locId || !userId) {
       markDone('pay')
       setPayStep('pricing')
-      setMethod(null)
       return
     }
     setActivating(true)
     setActivateError('')
     try {
       const isDirect = paymentSourceForPay === 'direct'
-      const seatBody = { location_id: locId, tier: 'owner', user_id: userId }
-      if (isDirect) {
-        seatBody.prorated_cost = Math.round(proration.prorated * 100)
-      }
-      const seatRes = await fetch('/api/seats', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(seatBody),
-      })
-      const seatJson = await seatRes.json().catch(() => ({}))
-      if (!seatRes.ok) throw new Error(seatJson.error || 'Failed to record seat')
-
       const subRes = await fetch(`/api/locations/${locId}/complete-onboarding`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          isDirect ? { prorated_cost: Math.round(proration.prorated * 100) } : {}
+        ),
       })
       const subJson = await subRes.json().catch(() => ({}))
+      if (subRes.status === 402 && subJson?.pay_url) {
+        setServerPayUrl(subJson.pay_url)
+        setPayStep('pay_confirm')
+        setActivateError('')
+        return
+      }
       if (!subRes.ok) throw new Error(subJson.error || 'Failed to activate subscription')
 
-      if (seatsCtx?.setSeats) {
-        seatsCtx.setSeats(prev => [...prev, seatJson])
+      if (subJson.seat && seatsCtx?.setSeats) {
+        seatsCtx.setSeats(prev =>
+          prev.some(s => s.id === subJson.seat.id) ? prev : [...prev, subJson.seat]
+        )
       }
       markDone('pay')
       setPayStep('pricing')
-      setMethod(null)
     } catch (err) {
       setActivateError(err?.message || 'Activation failed — please try again')
     } finally {
@@ -11640,8 +11656,35 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
         <div style={{ position:'fixed', inset:0, zIndex:100, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(26,46,43,0.6)' }}>
           <div style={{ background:'white', borderRadius:'20px', padding:'40px 32px', textAlign:'center', maxWidth:'320px', width:'90%', boxShadow:'0 20px 60px rgba(26,46,43,0.3)' }}>
             <div style={{ fontSize:'48px', marginBottom:'16px' }}>🐝</div>
-            <h2 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'8px' }}>Processing payment…</h2>
-            <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Please don't close this page</p>
+            <h2 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'8px' }}>Recording your order…</h2>
+            <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Just a moment</p>
+          </div>
+        </div>
+      </div>
+    )
+    // Stripe path success — the webhook already created the seat and flipped
+    // the subscription; this modal is pure celebration + advance. No
+    // completePay call (there is nothing left to write).
+    if (payStep==='stripe_done') return (
+      <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingTop:`${topOffset}px` }}>
+        <div style={{ position:'fixed', inset:0, zIndex:100, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(26,46,43,0.55)', padding:'12px' }}>
+          <div style={{ background:'white', borderRadius:'20px', padding:'28px 24px', maxWidth:'360px', width:'100%', boxShadow:'0 20px 60px rgba(26,46,43,0.3)' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'20px' }}>
+              <span style={{ fontSize:'36px' }}>🎉</span>
+              <div>
+                <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'2px' }}>Payment confirmed!</h2>
+                <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Paid via Stripe · renews {proration.renewDate}</p>
+              </div>
+            </div>
+            <div style={{ background:'#f7f5f0', borderRadius:'12px', padding:'12px 14px', marginBottom:'16px' }}>
+              {[['Plan','Owner · Annual'],['Paid','via Stripe checkout'],['Active','Immediately'],['Renews',proration.renewDate]].map(([l,v])=>(
+                <div key={l} style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
+                  <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{l}</span>
+                  <span style={{ fontSize:'12px', color:'#1a2e2b', fontWeight:500 }}>{v}</span>
+                </div>
+              ))}
+            </div>
+            <button onClick={()=>{ markDone('pay'); setPayStep('pricing') }} style={{ width:'100%', padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Continue Setup →</button>
           </div>
         </div>
       </div>
@@ -11654,11 +11697,11 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
               <span style={{ fontSize:'36px' }}>🎉</span>
               <div>
                 <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'2px' }}>Welcome to Bee Hub!</h2>
-                <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Payment confirmed · renews {proration.renewDate}</p>
+                <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Order recorded · renews {proration.renewDate}</p>
               </div>
             </div>
             <div style={{ background:'#f7f5f0', borderRadius:'12px', padding:'12px 14px', marginBottom:'16px' }}>
-              {[['Plan','Owner · Annual'],['Paid',`$${finalAmt} via ${method==='cc'?'Credit Card':'ACH'}`],['Active','Immediately'],['Renews',proration.renewDate]].map(([l,v])=>(
+              {[['Plan','Owner · Annual'],['Order total',`$${finalAmt}`],['Billing','Invoiced separately'],['Renews',proration.renewDate]].map(([l,v])=>(
                 <div key={l} style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
                   <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{l}</span>
                   <span style={{ fontSize:'12px', color:'#1a2e2b', fontWeight:500 }}>{v}</span>
@@ -11687,7 +11730,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
           </div>
         </div>
         <div style={{ background:BRAND.cream, borderRadius:'20px 20px 0 0', padding:'1.25rem 1.25rem 6rem', minHeight:'calc(100vh - 80px)' }}>
-          {(payStep==='pricing'||payStep==='method')&&(
+          {payStep==='pricing'&&(
             <>
               {/* Tier reference — rendered at the top of the pay step for both
                  pricing and method sub-steps across all three payment_source
@@ -11734,57 +11777,9 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                   setActiveStepOpen(null)
                   return
                 }
-                setPayStep(paymentSourceForPay === 'direct' ? 'pay_confirm' : 'method')
+                setPayStep('pay_confirm')
               }} style={{ width:'100%', padding:'15px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', marginBottom:'10px' }}>{effectiveProratedForPay === 0 ? 'Continue →' : paymentSourceForPay === 'direct' ? `Activate for ${formatCurrency(proration.prorated)} →` : 'Continue →'}</button>}
               {showSmsModal&&<SmsVoiceInfoModal onClose={()=>setShowSmsModal(false)} />}
-              {payStep==='method'&&(
-                <>
-                  <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'10px' }}>Choose payment method</p>
-                  <div style={{ display:'grid', gap:'10px', marginBottom:'10px' }}>
-                    {[{key:'ach',icon:'🏦',label:'ACH / Bank Transfer',sub:'Free - no processing fee'},{key:'cc',icon:'💳',label:'Credit Card',sub:`+3% fee - pay $${ccAmount}`}].map(m=>(
-                      <button key={m.key} onClick={()=>{ setMethod(m.key); setPayStep(m.key) }} style={{ width:'100%', padding:'16px', background:'white', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'12px', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'14px', textAlign:'left' }}>
-                        <span style={{ fontSize:'24px' }}>{m.icon}</span>
-                        <div style={{ flex:1 }}><p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>{m.label}</p><p style={{ fontSize:'12px', color:m.key==='ach'?'#22c55e':'#f59e0b' }}>{m.sub}</p></div>
-                        <span style={{ fontSize:'16px', color:'#c8d8d4' }}>→</span>
-                      </button>
-                    ))}
-                  </div>
-                  <button onClick={()=>setPayStep('pricing')} style={{ width:'100%', padding:'10px', background:'transparent', border:'none', fontSize:'13px', color:'#8a9e9a', cursor:'pointer', fontFamily:'inherit' }}>← Back</button>
-                </>
-              )}
-            </>
-          )}
-          {payStep==='ach'&&(
-            <>
-              <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'20px' }}>
-                <button onClick={()=>setPayStep('method')} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>←</button>
-                <div><p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>ACH / Bank Transfer</p><p style={{ fontSize:'12px', color:'#22c55e' }}>No processing fee</p></div>
-              </div>
-              <div style={{ marginBottom:'14px' }}><p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Routing Number</p><input value={routing} onChange={e=>setRouting(e.target.value.replace(/\D/g,'').slice(0,9))} placeholder="123456789" inputMode="numeric" style={{ width:'100%', padding:'13px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} /></div>
-              <div style={{ marginBottom:'20px' }}><p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Account Number</p><input value={bankAcct} onChange={e=>setBankAcct(e.target.value.replace(/\D/g,'').slice(0,17))} placeholder="00000000000" inputMode="numeric" style={{ width:'100%', padding:'13px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} /></div>
-              <button onClick={processPayment} disabled={routing.length<9||bankAcct.length<6} style={{ width:'100%', padding:'15px', background:routing.length>=9&&bankAcct.length>=6?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:routing.length>=9&&bankAcct.length>=6?'white':'#9ca3af', cursor:'pointer', marginBottom:'12px' }}>Pay ${proration.prorated} via ACH</button>
-              <p style={{ fontSize:'11px', color:'#b0c0bc', textAlign:'center' }}>🔒 Secured by Stripe</p>
-            </>
-          )}
-          {payStep==='cc'&&(
-            <>
-              <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'20px' }}>
-                <button onClick={()=>setPayStep('method')} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>←</button>
-                <div><p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Credit Card</p><p style={{ fontSize:'12px', color:'#f59e0b' }}>3% processing fee</p></div>
-              </div>
-              <div style={{ background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.2)', borderRadius:'10px', padding:'12px 14px', marginBottom:'20px' }}>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'4px' }}><span style={{ fontSize:'13px', color:'#4a5e5a' }}>Subtotal</span><span style={{ fontSize:'13px' }}>${proration.prorated}</span></div>
-                <div style={{ display:'flex', justifyContent:'space-between', paddingBottom:'6px', borderBottom:'1px solid rgba(245,158,11,0.15)' }}><span style={{ fontSize:'13px', color:'#4a5e5a' }}>Fee (3%)</span><span style={{ fontSize:'13px', color:'#f59e0b' }}>+${(ccAmount-proration.prorated).toFixed(2)}</span></div>
-                <div style={{ display:'flex', justifyContent:'space-between', marginTop:'6px' }}><span style={{ fontSize:'14px', fontWeight:600 }}>Total</span><span style={{ fontSize:'20px', fontWeight:700, fontFamily:'Georgia,serif' }}>${ccAmount}</span></div>
-              </div>
-              <div style={{ marginBottom:'14px' }}><p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Name on Card</p><input value={cardName} onChange={e=>setCardName(e.target.value)} placeholder="Full name" style={{ width:'100%', padding:'13px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'15px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} /></div>
-              <div style={{ marginBottom:'14px' }}><p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Card Number</p><input value={formatCardNum(cardNum)} onChange={e=>setCardNum(e.target.value.replace(/\D/g,'').slice(0,maxCardLen(e.target.value.replace(/\D/g,''))))} placeholder={cardPlaceholder(cardNum)} placeholder="0000 0000 0000 0000" inputMode="numeric" style={{ width:'100%', padding:'13px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', letterSpacing:'1px' }} /></div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'20px' }}>
-                <div><p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Expiry</p><input value={expiry} onChange={e=>{ const v=e.target.value.replace(/\D/g,'').slice(0,4); setExpiry(v.length>2?v.slice(0,2)+'/'+v.slice(2):v) }} placeholder="MM/YY" style={{ width:'100%', padding:'13px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} /></div>
-                <div><p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>CVV</p><input value={cvv} onChange={e=>setCvv(e.target.value.replace(/\D/g,'').slice(0,cvvLen(cardNum)))} placeholder={cvvLen(cardNum)===4?"••••":"•••"} inputMode="numeric" style={{ width:'100%', padding:'13px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} /></div>
-              </div>
-              <button onClick={processPayment} disabled={!cardReady(cardNum,expiry,cvv,cardName)} style={{ width:'100%', padding:'15px', background:cardReady(cardNum,expiry,cvv,cardName)?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:cardReady(cardNum,expiry,cvv,cardName)?'white':'#9ca3af', cursor:'pointer', marginBottom:'12px' }}>Pay ${ccAmount} via Credit Card</button>
-              <p style={{ fontSize:'11px', color:'#b0c0bc', textAlign:'center' }}>🔒 Secured by Stripe</p>
             </>
           )}
           {payStep==='pay_confirm'&&(() => {
@@ -11829,11 +11824,26 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                     onCancel={() => setPayStep('pricing')}
                     isProcessing={false}
                     error={activateError || null}
+                    stripePayUrl={ownerStripeUrl}
+                    onStripeOpen={() => { setActivateError(''); setPayStep('stripe_wait') }}
                   />
                 </div>
               </div>
             )
           })()}
+          {payStep==='stripe_wait'&&(
+            <div style={{ maxWidth:'520px', margin:'0 auto' }}>
+              <div style={{ background:'white', borderRadius:'14px', padding:'18px 18px 16px', border:'1px solid rgba(0,0,0,0.06)', boxShadow:'0 2px 10px rgba(26,46,43,0.05)' }}>
+                <StripeCheckoutWait
+                  locationId={currentLocationCtx?.id}
+                  payUrl={ownerStripeUrl}
+                  until={(status) => status.subscription_status === 'active'}
+                  onPaid={async () => { await refreshSeats(); setPayStep('stripe_done') }}
+                  onBack={() => setPayStep('pay_confirm')}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     )
@@ -15999,24 +16009,8 @@ const DEFAULT_ADDONS = [
 
 let APP_ADDONS = [...DEFAULT_ADDONS]
 
-// ─── Card helpers (Amex aware) ────────────────────────────────────────────────
-function isAmex(num) { return num.startsWith('34') || num.startsWith('37') }
-function maxCardLen(num) { return isAmex(num) ? 15 : 16 }
-function cvvLen(num) { return isAmex(num) ? 4 : 3 }
-function formatCardNum(num) {
-  if (isAmex(num)) {
-    // 4-6-5
-    const p1 = num.slice(0,4), p2 = num.slice(4,10), p3 = num.slice(10,15)
-    return [p1, p2, p3].filter(Boolean).join(' ').trim()
-  }
-  return num.replace(/(\d{4})/g,'$1 ').trim()
-}
-function cardPlaceholder(num) { return isAmex(num) ? '0000 000000 00000' : '0000 0000 0000 0000' }
-function cardReady(num, exp, cvv, name) {
-  const maxLen = maxCardLen(num)
-  const minCvv = cvvLen(num)
-  return num.length === maxLen && exp.length === 5 && cvv.length >= minCvv && name.trim().length > 0
-}
+// (Card-format helpers removed with the fake card forms — checkout is
+// Stripe-hosted; Bee Hub never renders a card field.)
 
 function calcProration(annualRate) {
   const now   = new Date('2026-05-05')
@@ -17850,153 +17844,61 @@ function BillingHistorySheet({ onClose, locationId=null }) {
 }
 
 // ─── Update Payment Method Modal ──────────────────────────────────────────────
+// Milestone 1 honesty fix: the old fake card/ACH form collected digits it
+// discarded. There IS no card on file with Bee Hub — payments run on
+// Stripe's hosted checkout, entered fresh each time — so this modal now
+// says exactly that instead of pretending to store a payment method.
 function UpdatePaymentModal({ current, onSave, onClose }) {
-  const [method, setMethod]     = useState(current?.type||'ach')
-  const [routing, setRouting]   = useState('')
-  const [bankAcct, setBankAcct] = useState('')
-  const [bankName, setBankName] = useState('')
-  const [cardNum, setCardNum]   = useState('')
-  const [expiry, setExpiry]     = useState('')
-  const [cvv, setCvv]           = useState('')
-  const [cardName, setCardName] = useState('')
-  const [step, setStep]         = useState('form') // form | processing | done
-  const [saved, setSaved]       = useState(null)
-
   React.useEffect(()=>{
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return ()=>{ document.body.style.overflow = prev }
   }, [])
 
-  function save() {
-    setStep('processing')
-    setTimeout(()=>{
-      const m = method==='ach'
-        ? { type:'ach', last4:bankAcct.slice(-4), label:bankName||'Bank Account' }
-        : { type:'cc',  last4:cardNum.slice(-4),  label:'Credit Card' }
-      setSaved(m)
-      setStep('done')
-    }, 1500)
-  }
-
-  const achReady = routing.length===9&&bankAcct.length>=6
-  const ccReady  = cardReady(cardNum,expiry,cvv,cardName)
-  const canSave  = method==='ach'?achReady:ccReady
-
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
       <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
-      <div style={{ position:'relative', background:'white', width:'100%', borderRadius:'16px', zIndex:1, maxHeight:'92vh', overflowY:'auto', boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
+      <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'420px', borderRadius:'16px', zIndex:1, boxShadow:'0 -8px 40px rgba(26,46,43,0.2)' }}>
         <div style={{ width:'36px', height:'4px', background:'rgba(0,0,0,0.12)', borderRadius:'2px', margin:'12px auto 0' }} />
-
-        {step==='processing'&&(
-          <div style={{ padding:'3rem', textAlign:'center' }}>
-            <div style={{ fontSize:'40px', marginBottom:'12px' }}>🔄</div>
-            <p style={{ fontSize:'16px', fontWeight:600, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Updating…</p>
+        <div style={{ padding:'1.25rem' }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'14px' }}>
+            <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>Payment Method</h2>
+            <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
           </div>
-        )}
-
-        {step==='done'&&(
-          <div style={{ padding:'2.5rem 1.5rem', textAlign:'center' }}>
-            <div style={{ fontSize:'48px', marginBottom:'12px' }}>✅</div>
-            <h2 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'8px' }}>Payment method updated</h2>
-            <p style={{ fontSize:'13px', color:'#8a9e9a', marginBottom:'6px' }}>{saved?.label} ····{saved?.last4}</p>
-            <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'24px' }}>Will be charged automatically on March 1</p>
-            <button onClick={()=>onSave(saved)} style={{ width:'100%', padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Done</button>
-            <div style={{ height:'1rem' }} />
-          </div>
-        )}
-
-        {step==='form'&&(
-          <div style={{ padding:'1.25rem' }}>
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'16px' }}>
-              <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>Update Payment Method</h2>
-              <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
+          <div style={{ borderRadius:'12px', border:'1.5px solid rgba(99,91,255,0.35)', background:'rgba(99,91,255,0.05)', padding:'12px 14px', marginBottom:'16px' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px' }}>
+              <span style={{ fontSize:'18px' }}>🔒</span>
+              <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b', textTransform:'uppercase', letterSpacing:'0.6px' }}>Handled by Stripe</p>
             </div>
-            {current.last4&&(
-              <div style={{ padding:'10px 14px', background:'rgba(168,201,196,0.08)', border:'1px solid rgba(168,201,196,0.2)', borderRadius:'10px', marginBottom:'16px', display:'flex', alignItems:'center', gap:'8px' }}>
-                <span style={{ fontSize:'16px' }}>{current.type==='ach'?'🏦':'💳'}</span>
-                <p style={{ fontSize:'12px', color:'#4a5e5a' }}>Current: {current.label} ····{current.last4}</p>
-              </div>
-            )}
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'16px' }}>
-              {[{key:'ach',icon:'🏦',label:'ACH / Bank',sub:'Free'},{key:'cc',icon:'💳',label:'Credit Card',sub:'+3%'}].map(m=>(
-                <button key={m.key} onClick={()=>setMethod(m.key)} style={{ padding:'12px', background:method===m.key?'rgba(26,46,43,0.06)':'white', border:`1.5px solid ${method===m.key?'#1a2e2b':'rgba(0,0,0,0.1)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
-                  <span style={{ fontSize:'20px', display:'block', marginBottom:'4px' }}>{m.icon}</span>
-                  <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{m.label}</p>
-                  <p style={{ fontSize:'11px', color:m.key==='ach'?'#22c55e':'#f59e0b' }}>{m.sub}</p>
-                </button>
-              ))}
-            </div>
-            {method==='ach'&&(
-              <div style={{ display:'grid', gap:'12px', marginBottom:'20px' }}>
-                {[{label:'Bank Name',val:bankName,set:setBankName,ph:'e.g. Chase Bank',numeric:false,max:50},{label:'Routing Number',val:routing,set:setRouting,ph:'9-digit ABA routing',numeric:true,max:9},{label:'Account Number',val:bankAcct,set:setBankAcct,ph:'Bank account number',numeric:true,max:17}].map(({label,val,set,ph,numeric,max})=>(
-                  <div key={label}>
-                    <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px' }}>{label}</p>
-                    <input value={val} onChange={e=>set(numeric?e.target.value.replace(/\D/g,'').slice(0,max):e.target.value)} placeholder={ph} inputMode={numeric?'numeric':'text'} style={{ width:'100%', padding:'11px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-                  </div>
-                ))}
-              </div>
-            )}
-            {method==='cc'&&(
-              <div style={{ display:'grid', gap:'12px', marginBottom:'20px' }}>
-                <div>
-                  <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px' }}>Name on Card</p>
-                  <input value={cardName} onChange={e=>setCardName(e.target.value)} placeholder="Full name" style={{ width:'100%', padding:'11px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-                </div>
-                <div>
-                  <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px' }}>Card Number</p>
-                  <input value={formatCardNum(cardNum)} onChange={e=>setCardNum(e.target.value.replace(/\D/g,'').slice(0,maxCardLen(e.target.value.replace(/\D/g,''))))} placeholder={cardPlaceholder(cardNum)} placeholder="0000 0000 0000 0000" inputMode="numeric" style={{ width:'100%', padding:'11px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', letterSpacing:'1px' }} />
-                </div>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
-                  <div>
-                    <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px' }}>Expiry</p>
-                    <input value={expiry} onChange={e=>{ const v=e.target.value.replace(/\D/g,'').slice(0,4); setExpiry(v.length>2?v.slice(0,2)+'/'+v.slice(2):v) }} placeholder="MM/YY" style={{ width:'100%', padding:'11px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-                  </div>
-                  <div>
-                    <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px' }}>CVV</p>
-                    <input value={cvv} onChange={e=>setCvv(e.target.value.replace(/\D/g,'').slice(0,cvvLen(cardNum)))} placeholder={cvvLen(cardNum)===4?"••••":"•••"} inputMode="numeric" style={{ width:'100%', padding:'11px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-                  </div>
-                </div>
-              </div>
-            )}
-            <button onClick={save} disabled={!canSave} style={{ width:'100%', padding:'13px', background:canSave?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:canSave?'white':'#9ca3af', cursor:canSave?'pointer':'not-allowed', marginBottom:'8px' }}>
-              Save Payment Method
-            </button>
-            <p style={{ fontSize:'11px', color:'#b0c0bc', textAlign:'center' }}>🔒 Secured by Stripe</p>
-            <div style={{ height:'1rem' }} />
+            <p style={{ fontSize:'12.5px', color:'#4a5e5a', lineHeight:1.5 }}>
+              Bee Hub never stores your card details. Payments run on Stripe's secure
+              checkout, where you enter payment details fresh each time — so there's
+              no card on file here to update.
+            </p>
           </div>
-        )}
+          <button onClick={onClose} style={{ width:'100%', padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+            Got it
+          </button>
+          <div style={{ height:'1rem' }} />
+        </div>
       </div>
     </div>
   )
 }
 
 // ─── Subscription Payment Modal ───────────────────────────────────────────────
+// Milestone 1 honesty fix: the fake ACH/CC forms are gone. This modal is a
+// record-only confirm (same contract as PaymentConfirmStep's no-charge
+// path): nothing is charged, Bee Organized invoices separately, and
+// onPaid records the purchase exactly as before.
 function SubscriptionPaymentModal({ plan, amount, annual, renewDate, isProrated, role, onClose, onPaid }) {
-  const [method, setMethod]   = useState('ach') // 'ach' | 'cc'
-  const [step, setStep]       = useState('review') // 'review' | 'ach' | 'cc' | 'done'
-  const [cardNum, setCardNum] = useState('')
-  const [expiry, setExpiry]   = useState('')
-  const [cvv, setCvv]         = useState('')
-  const [routing, setRouting] = useState('')
-  const [account, setAccount] = useState('')
-  const [processing, setProcessing] = useState(false)
+  const [step, setStep] = useState('review') // 'review' | 'done'
 
   React.useEffect(()=>{
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return ()=>{ document.body.style.overflow = prev }
   }, [])
-
-  const ccAmount  = withCC(amount)
-  const finalAmt  = method==='cc' ? ccAmount : amount
-  const ccFee     = method==='cc' ? Math.round((ccAmount-amount)*100)/100 : 0
-
-  function pay() {
-    setProcessing(true)
-    setTimeout(()=>{ setProcessing(false); setStep('done') }, 2000)
-  }
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10005, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
@@ -18007,18 +17909,18 @@ function SubscriptionPaymentModal({ plan, amount, annual, renewDate, isProrated,
         {step==='done' ? (
           <div style={{ padding:'2.5rem 1.5rem', textAlign:'center' }}>
             <div style={{ fontSize:'56px', marginBottom:'16px' }}>🎉</div>
-            <h2 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'8px' }}>Payment received!</h2>
+            <h2 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'8px' }}>Order recorded!</h2>
             <p style={{ fontSize:'14px', color:'#8a9e9a', marginBottom:'4px' }}>
-              ${finalAmt.toLocaleString()} paid via {method==='cc'?'Credit Card':'ACH Bank Transfer'}
+              ${amount.toLocaleString()} — Bee Organized will invoice you separately
             </p>
-            <p style={{ fontSize:'13px', color:'#8a9e9a', marginBottom:'28px' }}>Subscription active through {renewDate}</p>
+            <p style={{ fontSize:'13px', color:'#8a9e9a', marginBottom:'28px' }}>Active through {renewDate}</p>
             <button onClick={onPaid} style={{ width:'100%', padding:'14px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Done</button>
           </div>
         ) : (
           <div style={{ padding:'1.25rem' }}>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'1.25rem' }}>
               <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>
-                {isProrated ? 'Activation Payment' : 'Subscription Renewal'}
+                {isProrated ? 'Activation' : 'Subscription Renewal'}
               </h2>
               <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
             </div>
@@ -18034,78 +17936,27 @@ function SubscriptionPaymentModal({ plan, amount, annual, renewDate, isProrated,
                   Covers today through {renewDate} · then ${annual.toLocaleString()}/yr
                 </p>
               )}
-              {method==='cc'&&(
-                <div style={{ display:'flex', justifyContent:'space-between', paddingTop:'6px', borderTop:'1px solid rgba(0,0,0,0.06)' }}>
-                  <span style={{ fontSize:'12px', color:'#8a9e9a' }}>Credit card fee (3%)</span>
-                  <span style={{ fontSize:'12px', color:'#f59e0b' }}>+${ccFee.toLocaleString()}</span>
-                </div>
-              )}
               <div style={{ display:'flex', justifyContent:'space-between', paddingTop:'8px', borderTop:'1px solid rgba(0,0,0,0.08)', marginTop:'4px' }}>
-                <span style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b' }}>Total due today</span>
-                <span style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>${finalAmt.toLocaleString()}</span>
+                <span style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b' }}>Order total</span>
+                <span style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>${amount.toLocaleString()}</span>
               </div>
             </div>
 
-            {/* Payment method toggle */}
-            <p style={{ fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'8px' }}>Payment Method</p>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'16px' }}>
-              {[
-                { key:'ach', icon:'🏦', label:'ACH / Bank',  sub:'Free' },
-                { key:'cc',  icon:'💳', label:'Credit Card', sub:'+3% fee' },
-              ].map(m=>(
-                <button key={m.key} onClick={()=>setMethod(m.key)} style={{ padding:'12px', background:method===m.key?'rgba(26,46,43,0.06)':'white', border:`1.5px solid ${method===m.key?'#1a2e2b':'rgba(0,0,0,0.1)'}`, borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
-                  <span style={{ fontSize:'20px', display:'block', marginBottom:'4px' }}>{m.icon}</span>
-                  <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{m.label}</p>
-                  <p style={{ fontSize:'11px', color:m.key==='ach'?'#22c55e':'#f59e0b' }}>{m.sub}</p>
-                </button>
-              ))}
+            {/* No-charge notice — same honest contract as PaymentConfirmStep */}
+            <div style={{ borderRadius:'12px', border:'1.5px solid rgba(212,160,70,0.45)', background:'rgba(212,160,70,0.07)', padding:'12px 14px', marginBottom:'16px' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px' }}>
+                <span style={{ fontSize:'18px' }}>💳</span>
+                <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b', textTransform:'uppercase', letterSpacing:'0.6px' }}>No charge today</p>
+              </div>
+              <p style={{ fontSize:'12.5px', color:'#4a5e5a', lineHeight:1.5 }}>
+                Online payment isn't set up for this yet, so <strong>no card will be charged</strong>.
+                Confirming records this purchase and Bee Organized will invoice you for it separately.
+              </p>
             </div>
 
-            {/* ACH fields */}
-            {method==='ach'&&(
-              <div style={{ display:'grid', gap:'10px', marginBottom:'20px' }}>
-                {[
-                  { label:'Routing Number', val:routing, set:setRouting, placeholder:'9-digit routing number', maxLen:9 },
-                  { label:'Account Number', val:account, set:setAccount, placeholder:'Account number', maxLen:17 },
-                ].map(({label,val,set,placeholder,maxLen})=>(
-                  <div key={label}>
-                    <p style={{ fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px' }}>{label}</p>
-                    <input value={val} onChange={e=>set(e.target.value.replace(/\D/g,'').slice(0,maxLen))} placeholder={placeholder} inputMode="numeric"
-                      style={{ width:'100%', padding:'11px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* CC fields */}
-            {method==='cc'&&(
-              <div style={{ display:'grid', gap:'10px', marginBottom:'20px' }}>
-                <div>
-                  <p style={{ fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px' }}>Card Number</p>
-                  <input value={formatCardNum(cardNum)} onChange={e=>setCardNum(e.target.value.replace(/\D/g,'').slice(0,maxCardLen(e.target.value.replace(/\D/g,''))))} placeholder={cardPlaceholder(cardNum)} inputMode="numeric"
-                    style={{ width:'100%', padding:'11px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-                </div>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
-                  <div>
-                    <p style={{ fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px' }}>Expiry</p>
-                    <input value={expiry} onChange={e=>setExpiry(e.target.value)} placeholder="MM/YY"
-                      style={{ width:'100%', padding:'11px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-                  </div>
-                  <div>
-                    <p style={{ fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'5px' }}>CVV</p>
-                    <input value={cvv} onChange={e=>setCvv(e.target.value.replace(/\D/g,'').slice(0,cvvLen(cardNum)))} placeholder={cvvLen(cardNum)===4?"••••":"•••"}
-                      style={{ width:'100%', padding:'11px 14px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <button onClick={pay} disabled={processing} style={{ width:'100%', padding:'14px', background:processing?'#a8c9c4':'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:processing?'not-allowed':'pointer' }}>
-              {processing ? 'Processing…' : `Pay $${finalAmt.toLocaleString()}`}
+            <button onClick={()=>setStep('done')} style={{ width:'100%', padding:'14px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+              Confirm — ${amount.toLocaleString()}, invoiced separately
             </button>
-            <p style={{ fontSize:'11px', color:'#b0c0bc', textAlign:'center', marginTop:'10px' }}>
-              🔒 Payments are processed securely. ACH via Plaid · Cards via Stripe.
-            </p>
             <div style={{ height:'0.5rem' }} />
           </div>
         )}
@@ -26841,11 +26692,23 @@ function PricingManagementTab() {
     return out
   }
   const [rolePrices, setRolePrices]   = useState(initialRolePrices)
-  // Reset local buffer when context price set changes identity (e.g. another
+  // Stripe Payment Link buffer — one URL per tier, '' = not configured
+  // (every Pay surface falls back to record-only for that tier).
+  const initialRoleLinks = () => {
+    const out = {}
+    for (const r of FRANCHISE_ROLES) {
+      const row = tierPrices.find(t => t.id === r.key)
+      out[r.key] = row?.payment_link_url || ''
+    }
+    return out
+  }
+  const [roleLinks, setRoleLinks] = useState(initialRoleLinks)
+  // Reset local buffers when context price set changes identity (e.g. another
   // session save, initial hydration). Cheap shallow-compare via JSON key.
-  const tierPricesKey = tierPrices.map(t => `${t.id}:${t.price_annual}`).join('|')
+  const tierPricesKey = tierPrices.map(t => `${t.id}:${t.price_annual}:${t.payment_link_url || ''}`).join('|')
   useEffect(() => {
     setRolePrices(initialRolePrices())
+    setRoleLinks(initialRoleLinks())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tierPricesKey])
   const [addons, setAddons]           = useState([...DEFAULT_ADDONS])
@@ -26864,10 +26727,15 @@ function PricingManagementTab() {
     setSaveError('')
     try {
       const payload = {
-        prices: Object.entries(rolePrices).map(([id, price_annual]) => ({
-          id,
-          price_annual: parseInt(price_annual, 10) || 0,
-        })),
+        // payment_link_url rides along ONLY when edited — price-only saves
+        // keep working on a pre-migration schema without the column.
+        prices: Object.entries(rolePrices).map(([id, price_annual]) => {
+          const entry = { id, price_annual: parseInt(price_annual, 10) || 0 }
+          const loaded = tierPrices.find(t => t.id === id)?.payment_link_url || ''
+          const edited = (roleLinks[id] ?? '').trim()
+          if (edited !== loaded) entry.payment_link_url = edited
+          return entry
+        }),
       }
       const res = await fetch('/api/admin/tier-prices', {
         method: 'PUT',
@@ -26978,6 +26846,50 @@ function PricingManagementTab() {
                     <span style={{ fontSize:'10px', color:'#8a9e9a' }}>/yr</span>
                     <span style={{ fontSize:'11px', color:'#a8c9c4', marginLeft:'2px' }}>✏️</span>
                   </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Stripe payment links — one Payment Link per tier. A blank tier
+          keeps that tier on the record-only "invoice separately" flow. */}
+      <div>
+        <div style={{ padding:'0 0 10px' }}>
+          <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b' }}>Stripe Payment Links</p>
+          <p style={{ fontSize:'12px', color:'#8a9e9a' }}>
+            Paste one Stripe Payment Link per tier. Each link: one-time payment, unit price EQUAL to the
+            tier's annual price above (seat count is computed as amount ÷ price), quantity adjustable
+            (owner link: keep quantity fixed at 1), and metadata key <code style={{ background:'rgba(0,0,0,0.05)', padding:'1px 5px', borderRadius:'4px' }}>tier</code> set
+            to the tier id — Bee Hub adds the location automatically at click time. Blank = owners see the
+            "invoiced separately" flow for that tier.
+          </p>
+        </div>
+        <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
+          {FRANCHISE_ROLES.filter(r => !isDeferredTier(r.key)).map((r, i, arr) => {
+            const val = roleLinks[r.key] ?? ''
+            const invalid = val.trim() !== '' && !/^https:\/\//.test(val.trim())
+            const offHost = !invalid && val.trim() !== '' && !val.trim().startsWith('https://buy.stripe.com/')
+            return (
+              <div key={r.key} style={{ background:'white', borderBottom:i<arr.length-1?'1px solid rgba(0,0,0,0.05)':'none', padding:'12px 16px' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px' }}>
+                  <span style={{ fontSize:'16px' }}>{r.icon}</span>
+                  <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b' }}>{r.label}</p>
+                  <code style={{ fontSize:'10px', color:'#8a9e9a', background:'rgba(0,0,0,0.04)', padding:'1px 6px', borderRadius:'4px' }}>tier={r.key}</code>
+                </div>
+                <input
+                  type="url"
+                  value={val}
+                  onChange={e => setRoleLinks(prev => ({ ...prev, [r.key]: e.target.value }))}
+                  placeholder="https://buy.stripe.com/…  (blank = record-only)"
+                  style={{ width:'100%', padding:'8px 10px', border:`1.5px solid ${invalid?'#ef4444':'rgba(0,0,0,0.1)'}`, borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }}
+                />
+                {invalid && (
+                  <p style={{ fontSize:'11px', color:'#ef4444', marginTop:'4px' }}>Must be an https:// URL (or blank to turn Stripe checkout off for this tier).</p>
+                )}
+                {offHost && (
+                  <p style={{ fontSize:'11px', color:'#d4a046', marginTop:'4px' }}>Heads up: not a buy.stripe.com URL — double-check this is really a Stripe Payment Link.</p>
                 )}
               </div>
             )
@@ -32374,6 +32286,14 @@ function ReportsScreen({ role, franchiseRole='owner', people=[], locFilter='all'
 //   onCancel     — fn to return to the prior view
 //   isProcessing — bool; disables the confirm button and swaps label to a busy state
 //   error        — optional string rendered inline above the buttons
+//   stripePayUrl — when set, this is a REAL Stripe checkout: the amber
+//                  no-charge notice becomes a Stripe-checkout notice, the
+//                  confirm button opens the link in a new tab and fires
+//                  onStripeOpen() (caller switches to StripeCheckoutWait).
+//                  onConfirm/isProcessing are unused in this variant. No
+//                  card field ever renders in Bee Hub — checkout is
+//                  entirely Stripe-hosted.
+//   onStripeOpen — fired after window.open on the Stripe link
 function PaymentConfirmStep({
   title = 'Confirm payment',
   lineItems = [],
@@ -32383,6 +32303,8 @@ function PaymentConfirmStep({
   onCancel,
   isProcessing = false,
   error = null,
+  stripePayUrl = null,
+  onStripeOpen = null,
 }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:'14px', width:'100%' }}>
@@ -32422,21 +32344,40 @@ function PaymentConfirmStep({
         </div>
       </div>
 
-      {/* No-charge notice. Online payment isn't wired up yet (real Stripe
-         Elements drop in here later) — say so plainly instead of rendering a
-         fake card. Confirming records the purchase; billing happens offline. */}
-      <div style={{ borderRadius:'12px', border:'1.5px solid rgba(212,160,70,0.45)', background:'rgba(212,160,70,0.07)', padding:'12px 14px' }}>
-        <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px' }}>
-          <span style={{ fontSize:'18px' }}>💳</span>
-          <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b', textTransform:'uppercase', letterSpacing:'0.6px' }}>
-            No charge today
+      {stripePayUrl ? (
+        /* Real Stripe checkout — the honest replacement for the fake card
+           form. Bee Hub never sees card details; the webhook activates the
+           purchase when Stripe confirms payment. */
+        <div style={{ borderRadius:'12px', border:'1.5px solid rgba(99,91,255,0.35)', background:'rgba(99,91,255,0.05)', padding:'12px 14px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px' }}>
+            <span style={{ fontSize:'18px' }}>🔒</span>
+            <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b', textTransform:'uppercase', letterSpacing:'0.6px' }}>
+              Secure Stripe checkout
+            </p>
+          </div>
+          <p style={{ fontSize:'12.5px', color:'#4a5e5a', lineHeight:1.5 }}>
+            You'll complete payment on <strong>Stripe's secure checkout page</strong> — Bee Hub
+            never sees your card details. The final amount is shown at checkout, and your
+            purchase activates automatically once Stripe confirms the payment.
           </p>
         </div>
-        <p style={{ fontSize:'12.5px', color:'#4a5e5a', lineHeight:1.5 }}>
-          Online payment isn't set up yet, so <strong>no card will be charged</strong>.
-          Confirming records this purchase and Bee Organized will invoice you for it separately.
-        </p>
-      </div>
+      ) : (
+        /* No-charge notice. Online payment isn't configured for this tier —
+           say so plainly instead of rendering a fake card. Confirming records
+           the purchase; billing happens offline. */
+        <div style={{ borderRadius:'12px', border:'1.5px solid rgba(212,160,70,0.45)', background:'rgba(212,160,70,0.07)', padding:'12px 14px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px' }}>
+            <span style={{ fontSize:'18px' }}>💳</span>
+            <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b', textTransform:'uppercase', letterSpacing:'0.6px' }}>
+              No charge today
+            </p>
+          </div>
+          <p style={{ fontSize:'12.5px', color:'#4a5e5a', lineHeight:1.5 }}>
+            Online payment isn't set up yet, so <strong>no card will be charged</strong>.
+            Confirming records this purchase and Bee Organized will invoice you for it separately.
+          </p>
+        </div>
+      )}
 
       {error && (
         <p style={{ padding:'8px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.18)', borderRadius:'9px', color:'#b91c1c', fontSize:'12px' }}>
@@ -32449,11 +32390,83 @@ function PaymentConfirmStep({
           style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:isProcessing?'not-allowed':'pointer', opacity:isProcessing?0.5:1 }}>
           ← Back
         </button>
-        <button onClick={onConfirm} disabled={isProcessing}
-          style={{ flex:2, padding:'12px', background:isProcessing?'#8a9e9a':'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:isProcessing?'wait':'pointer' }}>
-          {isProcessing ? 'Processing…' : `${confirmLabel} ${formatCurrency(total, { showCents:'auto' })} →`}
-        </button>
+        {stripePayUrl ? (
+          <button onClick={() => { window.open(stripePayUrl, '_blank', 'noopener'); if (onStripeOpen) onStripeOpen() }}
+            style={{ flex:2, padding:'12px', background:'#635bff', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+            Pay with Stripe →
+          </button>
+        ) : (
+          <button onClick={onConfirm} disabled={isProcessing}
+            style={{ flex:2, padding:'12px', background:isProcessing?'#8a9e9a':'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:isProcessing?'wait':'pointer' }}>
+            {isProcessing ? 'Processing…' : `${confirmLabel} ${formatCurrency(total, { showCents:'auto' })} →`}
+          </button>
+        )}
       </div>
+    </div>
+  )
+}
+
+// ─── StripeCheckoutWait ────────────────────────────────────────────────────
+// Shown after the owner opens Stripe checkout in a new tab. Polls
+// /api/locations/[id]/activation-status every 4s until `until(status)`
+// says the webhook's writes are visible, then fires onPaid(status).
+// Timeout never claims failure — the payment may still land (webhook
+// retries for days); it just tells the owner what to expect.
+function StripeCheckoutWait({ locationId, until, onPaid, onBack, payUrl }) {
+  const [elapsed, setElapsed] = useState(0)
+  const untilRef = useRef(until);  untilRef.current  = until
+  const onPaidRef = useRef(onPaid); onPaidRef.current = onPaid
+
+  React.useEffect(() => {
+    let stopped = false
+    let pollTimer = null
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/locations/${locationId}/activation-status`, { cache:'no-store' })
+        if (res.ok) {
+          const json = await res.json().catch(() => null)
+          if (!stopped && json && untilRef.current(json)) {
+            onPaidRef.current(json)
+            return
+          }
+        }
+      } catch {}
+      if (!stopped) pollTimer = setTimeout(poll, 4000)
+    }
+    pollTimer = setTimeout(poll, 3000)
+    const clock = setInterval(() => setElapsed(s => s + 1), 1000)
+    return () => { stopped = true; clearTimeout(pollTimer); clearInterval(clock) }
+  }, [locationId])
+
+  const slow = elapsed >= 120
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:'14px', width:'100%', textAlign:'center', padding:'8px 0' }}>
+      <div style={{ fontSize:'40px' }}>🐝</div>
+      <div>
+        <h3 style={{ fontSize:'17px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>Complete your payment in the Stripe tab</h3>
+        <p style={{ fontSize:'12.5px', color:'#8a9e9a', lineHeight:1.5 }}>
+          This page updates automatically once Stripe confirms your payment — usually within a few seconds of paying.
+        </p>
+      </div>
+      {slow && (
+        <div style={{ borderRadius:'10px', border:'1px solid rgba(212,160,70,0.4)', background:'rgba(212,160,70,0.07)', padding:'10px 12px', textAlign:'left' }}>
+          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5 }}>
+            Already paid? Confirmation can occasionally take a minute or two — you can keep waiting,
+            or come back later; your purchase activates automatically either way. If it still hasn't
+            appeared after a few minutes, contact Bee Organized.
+          </p>
+        </div>
+      )}
+      {payUrl && (
+        <button onClick={() => window.open(payUrl, '_blank', 'noopener')}
+          style={{ padding:'10px', background:'transparent', border:'none', fontSize:'12px', color:'#635bff', cursor:'pointer', fontFamily:'inherit', textDecoration:'underline' }}>
+          Reopen Stripe checkout
+        </button>
+      )}
+      <button onClick={onBack}
+        style={{ padding:'10px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>
+        ← Back
+      </button>
     </div>
   )
 }
@@ -32598,14 +32611,27 @@ function CancelScheduledRemovalModal({ seat, tierMeta, onClose, onCanceled }) {
 // the billing card refreshes without a reload. No real Stripe yet —
 // "Pay" just records the prorated_cost on each seat row.
 function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
-  const tierPricesCtx = useContext(TierPricesContext)
+  const tierPricesCtx  = useContext(TierPricesContext)
+  const currentUserCtx = useContext(CurrentUserContext)
+  const seatsCtx       = useContext(SeatsContext)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
 
-  const [step, setStep]         = useState('form') // form | paymentConfirm
+  const [step, setStep]         = useState('form') // form | paymentConfirm | stripeWait
   const [tier, setTier]         = useState('manager')
   const [quantity, setQuantity] = useState(1)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]       = useState('')
+  // Stripe path: when a Payment Link is configured for the tier, the
+  // confirm step becomes a real "Pay with Stripe" and the seat is created
+  // by the webhook — /api/seats 402s for owners on these tiers.
+  const [serverPayUrl, setServerPayUrl] = useState(null)
+  const baselineRef = useRef(null) // active seat count at tier before checkout opened
+  const stripePayUrl =
+    buildStripePayUrl(tierPricesCtx?.getTierLink?.(tier), locationId, currentUserCtx?.email) ||
+    serverPayUrl
+  // Quantity on the Stripe path is chosen ON the checkout page (links are
+  // quantity-adjustable; Payment Links don't accept a quantity URL param),
+  // so the in-modal picker hides and the webhook grants amount ÷ price.
 
   React.useEffect(() => {
     const prev = document.body.style.overflow
@@ -32649,6 +32675,12 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
         }),
       })
       const json = await res.json().catch(() => ({}))
+      // Server says this tier is Stripe-only (the client context missed the
+      // link) — flip the confirm step into Stripe mode instead of erroring.
+      if (res.status === 402 && json?.pay_url) {
+        setServerPayUrl(json.pay_url)
+        return
+      }
       if (!res.ok) throw new Error(json.error || 'Failed to add seats')
       const inserted = Array.isArray(json) ? json : [json]
       onSeatsAdded(inserted)
@@ -32660,6 +32692,36 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
     }
   }
 
+  // Snapshot the current active seat count at the tier, then show the
+  // waiting screen — "paid" = the webhook made the count go up.
+  async function beginStripeWait() {
+    baselineRef.current = null
+    try {
+      const res = await fetch(`/api/locations/${locationId}/activation-status`, { cache:'no-store' })
+      if (res.ok) {
+        const j = await res.json().catch(() => null)
+        baselineRef.current = j?.active_seats_by_tier?.[tier] ?? 0
+      }
+    } catch {}
+    setStep('stripeWait')
+  }
+
+  async function finishStripePurchase() {
+    try {
+      const res = await fetch(`/api/seats?location_id=${locationId}`, { cache:'no-store' })
+      if (res.ok) {
+        const rows = await res.json().catch(() => null)
+        if (Array.isArray(rows)) {
+          const known = new Set((seatsCtx?.seats || []).map(s => s.id))
+          const fresh = rows.filter(r => !known.has(r.id))
+          if (fresh.length > 0) onSeatsAdded(fresh)
+          else if (seatsCtx?.setSeats) seatsCtx.setSeats(rows)
+        }
+      }
+    } catch {}
+    onClose()
+  }
+
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10020, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
       <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
@@ -32668,10 +32730,14 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
             <div>
               <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>
-                {step === 'paymentConfirm' ? 'Confirm payment' : 'Add seats to your plan'}
+                {step === 'stripeWait' ? 'Waiting for payment' : step === 'paymentConfirm' ? 'Confirm payment' : 'Add seats to your plan'}
               </h2>
               <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
-                {step === 'paymentConfirm'
+                {step === 'stripeWait'
+                  ? `Your ${tierMeta?.name || tier} seats appear on the roster as soon as Stripe confirms the payment.`
+                  : step === 'paymentConfirm' && stripePayUrl
+                  ? `Pick the number of ${tierMeta?.name || tier} seats on the Stripe checkout page — each lands as an open seat on the team roster, ready to invite into.`
+                  : step === 'paymentConfirm'
                   ? `Adds ${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'} to your pool. Each appears as an open seat on the team roster, ready to invite into.`
                   : 'Billed annually, prorated to next March 1. Once added, you can invite team members anytime.'}
               </p>
@@ -32684,16 +32750,37 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
           {step === 'paymentConfirm' && (
             <PaymentConfirmStep
               title="Confirm pre-buy"
-              lineItems={[{
-                label: `${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'} (prorated to ${renewalLabel})`,
-                amount: totalProrated,
-              }]}
-              total={totalProrated}
+              lineItems={stripePayUrl
+                ? [{
+                    label: `${tierMeta?.name || tier} seat — quantity chosen at checkout`,
+                    amount: annualEach,
+                  }]
+                : [{
+                    label: `${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'} (prorated to ${renewalLabel})`,
+                    amount: totalProrated,
+                  }]}
+              total={stripePayUrl ? annualEach : totalProrated}
               confirmLabel="Confirm & Add Seats"
               onConfirm={runAddSeats}
               onCancel={() => { setError(''); setStep('form') }}
               isProcessing={submitting}
               error={error || null}
+              stripePayUrl={stripePayUrl}
+              onStripeOpen={beginStripeWait}
+            />
+          )}
+
+          {step === 'stripeWait' && (
+            <StripeCheckoutWait
+              locationId={locationId}
+              payUrl={stripePayUrl}
+              until={(status) => {
+                const n = status.active_seats_by_tier?.[tier] ?? 0
+                if (baselineRef.current == null) { baselineRef.current = n; return false }
+                return n > baselineRef.current
+              }}
+              onPaid={finishStripePurchase}
+              onBack={() => setStep('paymentConfirm')}
             />
           )}
 
@@ -32723,6 +32810,11 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
           </div>
 
           <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'8px' }}>Quantity</p>
+          {stripePayUrl ? (
+            <p style={{ fontSize:'11px', color:'#8a9e9a', marginBottom:'18px' }}>
+              You'll pick the number of seats on the Stripe checkout page.
+            </p>
+          ) : (
           <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'18px' }}>
             <button onClick={()=>setQuantity(q=>Math.max(1, q-1))} disabled={quantity<=1}
               style={{ width:'36px', height:'36px', borderRadius:'9px', background:'white', border:'1.5px solid rgba(0,0,0,0.1)', fontSize:'18px', color:quantity<=1?'#c8d8d4':'#1a2e2b', cursor:quantity<=1?'not-allowed':'pointer', fontFamily:'inherit' }}>−</button>
@@ -32731,6 +32823,7 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
               style={{ width:'36px', height:'36px', borderRadius:'9px', background:'white', border:'1.5px solid rgba(0,0,0,0.1)', fontSize:'18px', color:quantity>=10?'#c8d8d4':'#1a2e2b', cursor:quantity>=10?'not-allowed':'pointer', fontFamily:'inherit' }}>+</button>
             <span style={{ fontSize:'11px', color:'#b0c0bc', marginLeft:'6px' }}>Cap 10 per request</span>
           </div>
+          )}
 
           <div style={{ background:'rgba(26,46,43,0.03)', border:'1px solid rgba(0,0,0,0.06)', borderRadius:'10px', padding:'12px 14px' }}>
             <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'6px' }}>
@@ -32777,9 +32870,10 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
 function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTier=null }) {
   const seatsCtx = useContext(SeatsContext)
   const tierPricesCtx = useContext(TierPricesContext)
+  const currentUserCtx = useContext(CurrentUserContext)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
 
-  const [step, setStep] = useState('form') // form | paymentConfirm | success
+  const [step, setStep] = useState('form') // form | paymentConfirm | stripeWait | success
   const [email, setEmail] = useState('')
   const [fullName, setFullName] = useState('')
   // All 3 employee tiers always selectable — owner tier is special-cased
@@ -32797,6 +32891,15 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTi
   const [error, setError] = useState('')
   const [createdInvite, setCreatedInvite] = useState(null)
   const [copied, setCopied] = useState(false)
+  // Stripe path (buy-and-invite becomes pay → seat lands → invite): when a
+  // Payment Link exists for the tier, the purchase half runs on Stripe's
+  // checkout and the webhook creates the seat; the invite then fires
+  // against the now-available seat.
+  const [serverPayUrl, setServerPayUrl] = useState(null)
+  const baselineRef = useRef(null)
+  const stripePayUrl =
+    buildStripePayUrl(tierPricesCtx?.getTierLink?.(tier), locationId, currentUserCtx?.email) ||
+    serverPayUrl
 
   React.useEffect(() => {
     const prev = document.body.style.overflow
@@ -32844,6 +32947,12 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTi
       return
     }
 
+    await sendInvite()
+  }
+
+  // The invite half, against an available seat. Reused by the direct path
+  // (seat already pooled) and the Stripe path (webhook just landed one).
+  async function sendInvite() {
     setSubmitting(true)
     try {
       const res = await fetch('/api/hub_users/invite', {
@@ -32866,9 +32975,40 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTi
       if (onInviteCreated) onInviteCreated(json)
     } catch (err) {
       setError(err?.message || 'Could not complete invite')
+      // Coming from the Stripe wait, the seat is paid and pooled but the
+      // invite failed — drop back to the form; the availability line now
+      // shows the seat, so retrying takes the direct-invite path.
+      setStep('form')
     } finally {
       setSubmitting(false)
     }
+  }
+
+  // Snapshot the tier's active seat count, then wait for the webhook to
+  // raise it — that's the "payment landed" signal.
+  async function beginStripeWait() {
+    baselineRef.current = null
+    try {
+      const res = await fetch(`/api/locations/${locationId}/activation-status`, { cache:'no-store' })
+      if (res.ok) {
+        const j = await res.json().catch(() => null)
+        baselineRef.current = j?.active_seats_by_tier?.[tier] ?? 0
+      }
+    } catch {}
+    setStep('stripeWait')
+  }
+
+  async function finishStripeBuy() {
+    // Refresh the seat pool so availability math sees the webhook's seat,
+    // then send the invite against it.
+    try {
+      const res = await fetch(`/api/seats?location_id=${locationId}`, { cache:'no-store' })
+      if (res.ok) {
+        const rows = await res.json().catch(() => null)
+        if (Array.isArray(rows)) seatsCtx?.setSeats?.(rows)
+      }
+    } catch {}
+    await sendInvite()
   }
 
   // Runs from PaymentConfirmStep's onConfirm. Single combined endpoint
@@ -32891,6 +33031,13 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTi
         }),
       })
       const json = await res.json().catch(() => ({}))
+      // Server says this tier is Stripe-only — flip the confirm step into
+      // Stripe mode (Pay with Stripe → webhook seat → invite).
+      if (res.status === 402 && json?.pay_url) {
+        setServerPayUrl(json.pay_url)
+        setSubmitting(false)
+        return
+      }
       if (!res.ok) throw new Error(json.error || 'Failed to buy seat and invite')
       if (json.seat) {
         seatsCtx?.setSeats?.(prev => [...prev, json.seat])
@@ -33041,16 +33188,34 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTi
           {step === 'paymentConfirm' && (
             <PaymentConfirmStep
               title="Confirm seat purchase"
-              lineItems={[{
-                label: `1 ${tierMeta?.name || tier} seat (prorated to ${renewalLabel})`,
-                amount: proratedDollars,
-              }]}
-              total={proratedDollars}
+              lineItems={stripePayUrl
+                ? [{ label: `1 ${tierMeta?.name || tier} seat`, amount: annualPrice }]
+                : [{
+                    label: `1 ${tierMeta?.name || tier} seat (prorated to ${renewalLabel})`,
+                    amount: proratedDollars,
+                  }]}
+              total={stripePayUrl ? annualPrice : proratedDollars}
               confirmLabel="Confirm & Send Invite"
               onConfirm={runBuyAndInvite}
               onCancel={() => { setError(''); setStep('form') }}
               isProcessing={submitting}
               error={error || null}
+              stripePayUrl={stripePayUrl}
+              onStripeOpen={beginStripeWait}
+            />
+          )}
+
+          {step === 'stripeWait' && (
+            <StripeCheckoutWait
+              locationId={locationId}
+              payUrl={stripePayUrl}
+              until={(status) => {
+                const n = status.active_seats_by_tier?.[tier] ?? 0
+                if (baselineRef.current == null) { baselineRef.current = n; return false }
+                return n > baselineRef.current
+              }}
+              onPaid={finishStripeBuy}
+              onBack={() => setStep('paymentConfirm')}
             />
           )}
 
@@ -33301,10 +33466,19 @@ export default function App({
     light:    getTierPrice('light'),
     readonly: getTierPrice('readonly'),
   }
+  // Stripe Payment Link per tier — null until Kevin pastes links in
+  // Admin > Pricing (and the tier_prices_payment_links migration is
+  // applied; pre-migration rows simply lack the column → null → every
+  // pay surface falls back to the record-only flow).
+  const getTierLink = (tierId) => {
+    const row = tierPrices.find(t => t.id === tierId)
+    return row?.payment_link_url || null
+  }
   const tierPricesValue = {
     tierPrices,
     setTierPrices: setTierPricesState,
     getTierPrice,
+    getTierLink,
     livePrices,
   }
   // Subscription seats — pool model. Onboarding Activate seeds the first

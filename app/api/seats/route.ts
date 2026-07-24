@@ -154,6 +154,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
+  // NOTE (milestone 1, Kevin's call): the free grant deliberately stays
+  // OPEN here — owners can still record-only create seats even when a
+  // Stripe link exists, because buy-and-invite (an owner's first team
+  // member) rides this rail. The UI prefers the Stripe Pay button when a
+  // link is configured; closing this grant server-side (402
+  // payment_required, which the clients already handle) is a separate
+  // step once the paid path is proven.
+
   // Hard cap: a location may have at most 2 owner seats (primary + one
   // co-owner). Counts assigned AND unassigned active owner seats so a
   // pre-allocated-but-unclaimed seat still counts toward the limit. Includes
