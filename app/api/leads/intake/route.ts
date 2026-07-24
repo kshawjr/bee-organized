@@ -46,6 +46,7 @@ import {
   queryLeadMatches,
   classifyLeadMatches,
 } from '@/components/hive/shared/clientMatch'
+import { normalizeLeadSource, DEFAULT_LEAD_SOURCE } from '@/lib/lead-source'
 
 export const runtime = 'nodejs'
 
@@ -165,6 +166,13 @@ export async function POST(req: NextRequest) {
   if (!requestDetails) {
     console.warn('[intake] payload has no description under any accepted key (message/description/request_details)')
   }
+  // leads.source answers "how did the client hear about us" in the admin
+  // lead_sources vocabulary. Producers send per-form slugs — normalize
+  // here (the ONLY seam every stored value passes through) so the picker
+  // and the card share one vocabulary. Unknown values pass through
+  // verbatim; see lib/lead-source.ts.
+  const leadSource = normalizeLeadSource(source) ?? DEFAULT_LEAD_SOURCE
+
   // preferred_contact ("Text" | "Email" | "Phone" | …) — producer-agnostic
   // free-text mirroring Zoho's Preferred_Method_of_Contact. Stored in the
   // dedicated leads.preferred_contact column (see migrations/leads_preferred_contact.sql).
@@ -273,7 +281,7 @@ export async function POST(req: NextRequest) {
         // message carries the alias-resolved description so a non-contract
         // key still backfills + reaches the resubmission touchpoint note.
         submission: { email: validEmail, phone, address, city, state, zip, project_type, message: requestDetails, preferred_contact },
-        source: source || 'web_form',
+        source: leadSource,
         baseWarnings: dedupWarnings,
         now,
       })
@@ -326,7 +334,7 @@ export async function POST(req: NextRequest) {
       zip: zip || null,
       project_type: project_type || null,
       stage: 'New',
-      source: source || 'web_form',
+      source: leadSource,
       request_details: requestDetails,
       preferred_contact: preferredContact,
       metadata: metadata || {},
@@ -570,7 +578,7 @@ export async function POST(req: NextRequest) {
         project_type: project_type || null,
         request_details: requestDetails,
         preferred_contact: preferredContact,
-        source: source || 'web_form',
+        source: leadSource,
       },
     })
     // Only a real send failure warns; a quiet skip (not connected / not yet
@@ -607,7 +615,7 @@ export async function POST(req: NextRequest) {
     status: 'success', landed: 'landed', locationSlug: location.location_id,
     entityId: lead.id,
     detail:
-      `lead=${lead.id} source=${source || 'web_form'} dedup=${dedupTier}` +
+      `lead=${lead.id} source=${leadSource} dedup=${dedupTier}` +
       ` drip_enrolled=${dripEnrolled} notified=${notifiedCount}` +
       // Assignment observability. `assigned=0` is the alarm state (rule 5 —
       // never nobody); the basis token says WHICH tier decided it, so a

@@ -220,7 +220,9 @@ describe('intake observability — success rows', () => {
     const msg = lastLog().message
     expect(msg).toMatch(/^\[intake\] topic=LEAD_INTAKE /)
     expect(msg).toContain('lead=lead-new-1')
-    expect(msg).toContain('source=facebook_lead_ad')
+    // Producer slugs are normalized into the lead_sources vocabulary at
+    // intake (lib/lead-source.ts) — the log reports the STORED value.
+    expect(msg).toContain('source=Facebook')
     expect(msg).toContain('dedup=none')
     expect(msg).toContain('drip_enrolled=true')
     // Exactly one row per request.
