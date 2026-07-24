@@ -203,6 +203,49 @@ describe('resolveLeadRecipients — effective SEND list (B2)', () => {
   })
 })
 
+// ── External twins of interface users are suppressed at the send list ───────
+// Externals carry no subscribe flag, so a seeded twin of a hub_user would keep
+// that person on the send list after they unsubscribe or lose access. The
+// resolver drops any external whose address matches an interface user at the
+// location — the user's pref governs. lite_user addresses never match (they
+// are not interface users), so their external rows keep working.
+describe('resolveLeadRecipients — external twin suppression', () => {
+  it('an UNSUBSCRIBED user\'s external twin does not resurrect them (case-insensitive)', async () => {
+    // fred is unsubscribed; his seeded twin arrives with different casing.
+    tableData.current.lead_notification_externals.push(
+      { id: 'e-twin', location_id: 'loc1', first_name: 'Fired', last_name: 'Fred', email: 'FRED@X.com', phone: null, category: 'all', created_at: '2026-07-19' },
+    )
+    const eff = await resolveLeadRecipients('loc1')
+    expect(eff.some(r => r.email.toLowerCase() === 'fred@x.com')).toBe(false)
+  })
+  it('a SUBSCRIBED user\'s twin collapses to the single user entry (their configured category wins)', async () => {
+    tableData.current.lead_notification_externals.push(
+      { id: 'e-twin2', location_id: 'loc1', first_name: null, last_name: null, email: 'manny@x.com', phone: null, category: 'all', created_at: '2026-07-19' },
+    )
+    const eff = await resolveLeadRecipients('loc1')
+    const manny = eff.filter(r => r.email === 'manny@x.com')
+    expect(manny).toHaveLength(1)
+    expect(manny[0].source).toBe('user')
+    expect(manny[0].category).toBe('moving') // the pref, not the seeded 'all'
+  })
+  it("a lite_user's external row is NOT suppressed — it is what notifies them", async () => {
+    tableData.current.lead_notification_externals.push(
+      { id: 'e-lite', location_id: 'loc1', first_name: 'Larry', last_name: 'Lite', email: 'larry@x.com', phone: null, category: 'all', created_at: '2026-07-19' },
+    )
+    const eff = await resolveLeadRecipients('loc1')
+    const larry = eff.find(r => r.email === 'larry@x.com')!
+    expect(larry).toBeTruthy()
+    expect(larry.source).toBe('external')
+  })
+  it('the management UI list still SHOWS the twin (suppression is send-time only)', async () => {
+    tableData.current.lead_notification_externals.push(
+      { id: 'e-twin3', location_id: 'loc1', first_name: null, last_name: null, email: 'olivia@x.com', phone: null, category: 'all', created_at: '2026-07-19' },
+    )
+    const { externals } = await getManageableRecipients('loc1')
+    expect(externals.some(e => e.id === 'e-twin3')).toBe(true)
+  })
+})
+
 // ── B3: Zoho fallback for non-interface locations ───────────────────────────
 describe('resolveLeadRecipients — Zoho fallback (B3)', () => {
   it('a location WITH interface recipients uses those; Zoho is NOT called', async () => {
