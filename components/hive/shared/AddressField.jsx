@@ -46,6 +46,7 @@ import React, { useState, useRef } from 'react'
 import { IconMapPin } from '@/components/ui/icons'
 import { T } from './tokens'
 import { EditPencil, InlineEditControls } from './inlineEdit'
+import { metaRowStyle, metaIconStyle, metaValueStyle, metaAddStyle, META_ICON } from './metaRow'
 import AddressAutofill from './AddressAutofill'
 import { composeLeadAddress, deriveStreet, formatLeadAddress, normalizeAddressKey } from '@/lib/lead-address'
 
@@ -181,15 +182,17 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
 
   return display ? (
     <p onClick={readOnly ? undefined : open} title={readOnly ? undefined : 'Edit address'}
-      style={{ fontSize: '12px', color: T.ink.primary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, cursor: readOnly ? 'default' : 'text' }}>
-      <span style={{ color: T.ink.muted, display: 'inline-flex', flexShrink: 0 }}><IconMapPin size={13} /></span>
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{display}</span>
+      data-meta-row="address"
+      style={{ ...metaRowStyle(), cursor: readOnly ? 'default' : 'text' }}>
+      <span style={metaIconStyle}><IconMapPin size={META_ICON} /></span>
+      <span style={metaValueStyle}>{display}</span>
       {!readOnly && <EditPencil />}
     </p>
   ) : readOnly ? null : (
-    <p onClick={open} style={{ fontSize: '12px', color: T.ink.faint, display: 'flex', alignItems: 'center', gap: '7px', cursor: 'text' }}>
-      <span style={{ display: 'inline-flex' }}><IconMapPin size={13} /></span>
-      <span style={{ borderBottom: T.border.underline }}>add address</span>
+    <p onClick={open} data-meta-row="address"
+      style={{ ...metaRowStyle({ tone: 'faint' }), cursor: 'text' }}>
+      <span style={{ ...metaIconStyle, color: 'inherit' }}><IconMapPin size={META_ICON} /></span>
+      <span style={metaAddStyle}>add address</span>
     </p>
   )
 }

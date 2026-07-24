@@ -228,7 +228,9 @@ describe('ReferrerPicker — Companies section', () => {
   })
 
   it("EDIT surface (ReferrerField): picking a company PATCHes kind='company' + source coupling", async () => {
-    const lead = { id: 'lead-77', referred_by_kind: null, referred_by_id: null, referred_by_name: null, source: 'Webform' }
+    // Referral-sourced: the field only mounts there when nothing is
+    // stored yet (7/23 gate — beta-referrer-visibility).
+    const lead = { id: 'lead-77', referred_by_kind: null, referred_by_id: null, referred_by_name: null, source: 'Referral' }
     const host = await mount(
       <ReferrerField lead={lead} locationUuid={LOC} people={[]} />
     )

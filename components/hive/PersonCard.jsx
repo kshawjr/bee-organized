@@ -43,7 +43,9 @@ import StatusChip from '@/components/ui/StatusChip'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
 import { CHIP_STYLES } from './shared/stageConfig'
 import { T } from './shared/tokens'
-import { IconPhone, IconMail, IconSend } from '@/components/ui/icons'
+import { EditPencil } from './shared/inlineEdit'
+import { metaRowStyle, metaIconStyle, metaLabelStyle, metaValueStyle, metaAddStyle, META_ICON } from './shared/metaRow'
+import { IconPhone, IconMail, IconSend, IconSparkles } from '@/components/ui/icons'
 
 
 export default function PersonCard({ person, people = [], onClose, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, lookupOptions = { sources: [], projectTypes: [] }, readOnly = false }) {
@@ -215,13 +217,16 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
   // prop whenever the loaded (or None-cleared) value was null.
   const effSource = data ? (c?.source ?? null) : (person.source ?? null)
 
-  const contactRow = (Icon, value, href) => value ? (
-    <p style={{ fontSize: '12px', color: T.ink.primary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
-      <span style={{ color: T.ink.muted, display: 'inline-flex' }}><Icon size={13} /></span>
+  // Contact rows read THE shared meta-row anatomy (shared/metaRow) — the
+  // same one SourceField / ReferrerField render, so the whole key-facts
+  // stack sits on one left edge and one type size.
+  const contactRow = (Icon, value, href, kind) => value ? (
+    <p style={metaRowStyle()} data-meta-row={kind}>
+      <span style={metaIconStyle}><Icon size={META_ICON} /></span>
       {href ? (
-        <a href={href} style={{ color: T.accent.fg, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</a>
+        <a href={href} style={{ ...metaValueStyle, color: T.accent.fg, textDecoration: 'none' }}>{value}</a>
       ) : (
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
+        <span style={metaValueStyle}>{value}</span>
       )}
     </p>
   ) : null
@@ -234,18 +239,47 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
       {/* Key facts */}
       <div style={{ background: T.surface.sunken, borderRadius: T.radius.control, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <MicroLabel>Key facts</MicroLabel>
-        {contactRow(IconPhone, person.phone, person.phone ? `tel:${person.phone}` : null)}
-        {contactRow(IconMail, person.email, person.email ? `mailto:${person.email}` : null)}
+        {contactRow(IconPhone, person.phone, person.phone ? `tel:${person.phone}` : null, 'phone')}
+        {contactRow(IconMail, person.email, person.email ? `mailto:${person.email}` : null, 'email')}
         {/* Source only — leads are pre-deal, source is theirs. The Type
             pill left in card-restore build 2: project type is
             DEAL-scoped and edits on the EngagementPanel masthead once
             an engagement exists (leads.project_type still seeds
             founding server-side — no write path lost, just no
             pre-engagement editor). */}
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <MetaSelect label="Source" value={effSource} options={lookupOptions.sources} onPick={(v) => saveLeadField('source', v)} readOnly={readOnly} />
-        </div>
-        {/* Referrer — the shared field (lead-level, same as the profile). */}
+        {/* Source wears the meta-row anatomy, not MetaSelect's default
+            11px pill: on this card it sits between the phone/email rows
+            and the referrer row, and a pill among rows was the visible
+            rhythm break Kevin flagged (different type size, different
+            left edge, extra pill height). Still a <button>, still the
+            same MetaSelect popover + write path — only the trigger's
+            clothes changed. */}
+        <MetaSelect
+          label="Source"
+          value={effSource}
+          options={lookupOptions.sources}
+          onPick={(v) => saveLeadField('source', v)}
+          readOnly={readOnly}
+          renderTrigger={(toggle) => (
+            <button type="button" onClick={toggle} title="Edit source" data-meta-row="source"
+              style={metaRowStyle({ tone: effSource ? 'primary' : 'faint', interactive: true })}>
+              <span style={{ ...metaIconStyle, ...(effSource ? null : { color: 'inherit' }) }}><IconSparkles size={META_ICON} /></span>
+              {effSource ? (
+                <>
+                  <span style={metaValueStyle}>
+                    <span style={metaLabelStyle}>Source: </span>{effSource}
+                  </span>
+                  <EditPencil />
+                </>
+              ) : (
+                <span style={metaAddStyle}>Source · add</span>
+              )}
+            </button>
+          )}
+        />
+        {/* Referrer — the shared field (lead-level, same as the profile).
+            It renders only on a referral-sourced lead, or whenever one is
+            already stored (ReferrerField's gate). */}
         {c && (
           <ReferrerField
             lead={c}

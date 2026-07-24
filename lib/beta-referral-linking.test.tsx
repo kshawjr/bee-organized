@@ -360,10 +360,14 @@ const mountProfile = async (clientOver: any = {}, people: any[] = []) => {
 }
 
 describe('ClientProfile — referrer add/edit/clear on an existing lead', () => {
+  // Since 7/23 the field only mounts on a referral-sourced lead
+  // (beta-referrer-visibility). Starting from the VARIANT label proves
+  // two things at once: the gate accepts an admin lookup that isn't the
+  // canonical spelling, and the write still canonicalizes to 'Referral'.
   it("no referrer: 'Add referrer' opens the picker; picking a partner PATCHes kind+id AND source='Referral'; the line updates", async () => {
     const sarah = person()
-    const { host, unmount } = await mountProfile({ source: 'webform' }, [sarah])
-    expect(host.textContent).toContain('Source: webform')
+    const { host, unmount } = await mountProfile({ source: 'Client Referral' }, [sarah])
+    expect(host.textContent).toContain('Source: Client Referral')
     await click(host.querySelector('button[aria-label="Add referrer"]')!)
     await flush() // partners fetch
     expect(host.querySelector('input[aria-label="Search referrers"]')).toBeTruthy()
@@ -403,7 +407,7 @@ describe('ClientProfile — referrer add/edit/clear on an existing lead', () => 
   })
 
   it("inline-create works from the profile too: one network door → POST /api/partners then PATCH kind='partner'", async () => {
-    const { host, unmount } = await mountProfile({ source: 'webform' })
+    const { host, unmount } = await mountProfile({ source: 'Referral' })
     await click(host.querySelector('button[aria-label="Add referrer"]')!)
     await flush()
     await type(host.querySelector('input[aria-label="Search referrers"]')!, 'New Neighbor')
@@ -417,7 +421,7 @@ describe('ClientProfile — referrer add/edit/clear on an existing lead', () => 
   it('the client never appears as their own referrer option', async () => {
     const self = person({ id: 'lead-1', name: 'Dana Client' })
     const other = person({ name: 'Other Person' })
-    const { host, unmount } = await mountProfile({ source: 'webform' }, [self, other])
+    const { host, unmount } = await mountProfile({ source: 'Referral' }, [self, other])
     await click(host.querySelector('button[aria-label="Add referrer"]')!)
     await flush()
     const rowButtons = [...host.querySelectorAll('button')].filter(b => (b.textContent || '').includes('Dana Client'))

@@ -87,11 +87,16 @@ let leadPatches: Array<{ url: string, body: any }> = []
 let engPatches: any[] = []
 let partnerPosts: any[] = []
 let leadPatchFail = false
+// The client columns the /profile fetch answers with. Tests that drive
+// the referrer flow set a referral source here — since 7/23 the field
+// only mounts on a referral-sourced lead (beta-referrer-visibility).
+let profileClientOver: any = {}
 const installFetch = () => {
   leadPatches = []
   engPatches = []
   partnerPosts = []
   leadPatchFail = false
+  profileClientOver = {}
   const mock = vi.fn(async (url: any, opts: any = {}) => {
     const u = String(url)
     if (u.includes('/api/partners') && opts.method === 'POST') {
@@ -116,7 +121,7 @@ const installFetch = () => {
       })
     }
     if (u.includes('/api/engagements/')) return jsonRes(engagementPayload())
-    if (u.includes('/profile')) return jsonRes(profilePayload())
+    if (u.includes('/profile')) return jsonRes(profilePayload(profileClientOver))
     return jsonRes({})
   })
   ;(globalThis as any).fetch = mock
@@ -172,16 +177,22 @@ describe('leadColsToPersonFields', () => {
 })
 
 // ═══ PersonCard ════════════════════════════════════════════
-const mountPersonCard = async (over: any = {}) => {
+const mountPersonCard = async (over: any = {}, source = 'Webform') => {
+  profileClientOver = { source }
   const onLeadPatched = vi.fn()
   const setToast = vi.fn()
   const mounted = await mount(
-    <PersonCard person={person()} people={[person({ id: 'p-other', name: 'Other Person' })]}
+    <PersonCard person={person({ source })} people={[person({ id: 'p-other', name: 'Other Person' })]}
       onClose={() => {}} setToast={setToast} onLeadPatched={onLeadPatched} lookupOptions={LOOKUPS} {...over} />
   )
   await flush() // profile fetch
   return { ...mounted, onLeadPatched, setToast }
 }
+// The referrer field only mounts on a referral-sourced lead (7/23 gate,
+// beta-referrer-visibility). The retroactive path is now: set Source to
+// Referral first, THEN the referrer affordance appears — so these mount
+// there. The coupling on WRITE is unchanged and still asserted.
+const mountReferralPersonCard = (over: any = {}) => mountPersonCard(over, 'Referral')
 
 describe('PersonCard — field edits', () => {
   it('Source pick updates the pill IMMEDIATELY, PATCHes the lead, and propagates via onLeadPatched', async () => {
@@ -225,7 +236,7 @@ describe('PersonCard — field edits', () => {
   })
 
   it('has the shared ReferrerField: add referrer PATCHes kind+id AND source (the coupling)', async () => {
-    const { host, unmount, onLeadPatched } = await mountPersonCard()
+    const { host, unmount, onLeadPatched } = await mountReferralPersonCard()
     await click(host.querySelector('button[aria-label="Add referrer"]')!)
     await flush() // partners fetch
     await click(buttonContaining(host, 'Karen Partner')!)
@@ -241,7 +252,7 @@ describe('PersonCard — field edits', () => {
 
   it('inline-create from the card hands the CONFIRMED partner row up onPartnerCreated (the Classic seam)', async () => {
     const onPartnerCreated = vi.fn()
-    const { host, unmount } = await mountPersonCard({ onPartnerCreated })
+    const { host, unmount } = await mountReferralPersonCard({ onPartnerCreated })
     await click(host.querySelector('button[aria-label="Add referrer"]')!)
     await flush()
     await type(host.querySelector('input[aria-label="Search referrers"]')!, 'New Neighbor')
@@ -252,8 +263,11 @@ describe('PersonCard — field edits', () => {
     await unmount()
   })
 
+  // This one also pins the visibility EDGE CASE from the other side: a
+  // stored referrer survives the source going to None — it does NOT
+  // vanish with the source that let it be added.
   it("the coupling doesn't re-lock: Source clears to None AFTER a referrer set it, referrer stays", async () => {
-    const { host, unmount } = await mountPersonCard()
+    const { host, unmount } = await mountReferralPersonCard()
     await click(host.querySelector('button[aria-label="Add referrer"]')!)
     await flush()
     await click(buttonContaining(host, 'Karen Partner')!)

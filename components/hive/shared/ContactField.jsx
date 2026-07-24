@@ -42,6 +42,7 @@ import React, { useState, useRef } from 'react'
 import { IconPhone, IconMail } from '@/components/ui/icons'
 import { T } from './tokens'
 import { EditPencil, InlineEditControls } from './inlineEdit'
+import { metaRowStyle, metaIconStyle, metaValueStyle, metaAddStyle, META_ICON } from './metaRow'
 import { normalizePhoneDigits } from '@/lib/jobber-contact-writeback'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -143,18 +144,20 @@ export default function ContactField({ kind, leadId, value, onSaved = () => {}, 
 
   return value ? (
     <p onClick={readOnly ? undefined : open} title={readOnly ? undefined : `Edit ${kind}`}
-      style={{ fontSize: '12px', color: T.ink.primary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, cursor: readOnly ? 'default' : 'text' }}>
-      <span style={{ color: T.ink.muted, display: 'inline-flex', flexShrink: 0 }}><f.Icon size={13} /></span>
+      data-meta-row={kind}
+      style={{ ...metaRowStyle(), cursor: readOnly ? 'default' : 'text' }}>
+      <span style={metaIconStyle}><f.Icon size={META_ICON} /></span>
       <a className="bee-contact-link" href={f.href(value)} onClick={e => e.stopPropagation()}
-        style={{ color: T.accent.fg, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        style={{ ...metaValueStyle, color: T.accent.fg, textDecoration: 'none' }}>
         {value}
       </a>
       {!readOnly && <EditPencil />}
     </p>
   ) : readOnly ? null : (
-    <p onClick={open} style={{ fontSize: '12px', color: T.ink.faint, display: 'flex', alignItems: 'center', gap: '7px', cursor: 'text' }}>
-      <span style={{ display: 'inline-flex' }}><f.Icon size={13} /></span>
-      <span style={{ borderBottom: T.border.underline }}>{f.empty}</span>
+    <p onClick={open} data-meta-row={kind}
+      style={{ ...metaRowStyle({ tone: 'faint' }), cursor: 'text' }}>
+      <span style={{ ...metaIconStyle, color: 'inherit' }}><f.Icon size={META_ICON} /></span>
+      <span style={metaAddStyle}>{f.empty}</span>
     </p>
   )
 }

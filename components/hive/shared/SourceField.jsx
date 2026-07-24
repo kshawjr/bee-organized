@@ -21,8 +21,8 @@
 import React, { useState } from 'react'
 import { IconSparkles } from '@/components/ui/icons'
 import MetaSelect from '../MetaSelect'
-import { T } from './tokens'
 import { EditPencil } from './inlineEdit'
+import { metaRowStyle, metaIconStyle, metaLabelStyle, metaValueStyle, metaAddStyle, META_ICON } from './metaRow'
 
 export default function SourceField({ leadId, value, options = [], onSaved = () => {}, setToast = () => {}, readOnly = false }) {
   // undefined = no optimistic override in flight; null is a real value
@@ -52,10 +52,10 @@ export default function SourceField({ leadId, value, options = [], onSaved = () 
   // no edit pencil. Empty stays empty (no 'add source' affordance).
   if (readOnly) {
     return shown ? (
-      <p style={{ fontSize: '12px', color: T.ink.primary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
-        <span style={{ color: T.ink.muted, display: 'inline-flex', flexShrink: 0 }}><IconSparkles size={13} /></span>
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          <span style={{ color: T.ink.muted }}>Source: </span>{shown}
+      <p style={metaRowStyle()} data-meta-row="source">
+        <span style={metaIconStyle}><IconSparkles size={META_ICON} /></span>
+        <span style={metaValueStyle}>
+          <span style={metaLabelStyle}>Source: </span>{shown}
         </span>
       </p>
     ) : null
@@ -68,18 +68,19 @@ export default function SourceField({ leadId, value, options = [], onSaved = () 
       options={options}
       onPick={save}
       renderTrigger={(toggle) => shown ? (
-        <p onClick={toggle} title="Edit source"
-          style={{ fontSize: '12px', color: T.ink.primary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, cursor: 'pointer' }}>
-          <span style={{ color: T.ink.muted, display: 'inline-flex', flexShrink: 0 }}><IconSparkles size={13} /></span>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            <span style={{ color: T.ink.muted }}>Source: </span>{shown}
+        <p onClick={toggle} title="Edit source" data-meta-row="source"
+          style={{ ...metaRowStyle(), cursor: 'pointer' }}>
+          <span style={metaIconStyle}><IconSparkles size={META_ICON} /></span>
+          <span style={metaValueStyle}>
+            <span style={metaLabelStyle}>Source: </span>{shown}
           </span>
           <EditPencil />
         </p>
       ) : (
-        <p onClick={toggle} style={{ fontSize: '12px', color: T.ink.faint, display: 'flex', alignItems: 'center', gap: '7px', cursor: 'pointer' }}>
-          <span style={{ display: 'inline-flex' }}><IconSparkles size={13} /></span>
-          <span style={{ borderBottom: T.border.underline }}>add source</span>
+        <p onClick={toggle} data-meta-row="source"
+          style={{ ...metaRowStyle({ tone: 'faint' }), cursor: 'pointer' }}>
+          <span style={{ ...metaIconStyle, color: 'inherit' }}><IconSparkles size={META_ICON} /></span>
+          <span style={metaAddStyle}>add source</span>
         </p>
       )}
     />
