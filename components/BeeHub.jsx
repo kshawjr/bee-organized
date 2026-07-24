@@ -12744,7 +12744,7 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
   return null
 }
 
-function PathChooser({ title, emoji, current, onSelect, previewPath, setPreviewPath, PLAIN, pathOptions, getSteps, getTemplate }) {
+function PathChooser({ title, emoji, current, onSelect, previewPath, setPreviewPath, PLAIN, pathOptions, getSteps }) {
   // sectionKey is the path_key prefix matching the master drip_paths
   // ('moving-a' / 'organizing-a' / ...). title carries enough signal to
   // disambiguate without threading another prop through.
@@ -12808,8 +12808,10 @@ function PathChooser({ title, emoji, current, onSelect, previewPath, setPreviewP
                   <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>💡 {pd.explain}</p>
                 </div>
                 <div style={{ padding:'0 10px 10px', display:'grid', gap:'6px' }}>
+                  {steps.length===0 && (
+                    <p style={{ fontSize:'11px', color:'#8a9e9a', textAlign:'center', padding:'8px' }}>Couldn't load this path's emails — you can review them in Settings → Paths.</p>
+                  )}
                   {steps.map(step=>{
-                    const tmpl = getTemplate(step.templateId)
                     const icon = {email:'📧',sms:'💬',call:'📞'}[step.type]||'📧'
                     return (
                       <div key={step.id} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 12px', background:'white', borderRadius:'9px', border:'1px solid rgba(0,0,0,0.07)' }}>
@@ -12818,9 +12820,9 @@ function PathChooser({ title, emoji, current, onSelect, previewPath, setPreviewP
                           <p style={{ fontSize:'11px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Step {step.order}: {step.name}</p>
                           <p style={{ fontSize:'10px', color:'#8a9e9a' }}>{step.delay}</p>
                         </div>
-                        {tmpl
-                          ? <button onClick={()=>setPeekTemplate(tmpl)} title="Preview this email" style={{ display:'flex', alignItems:'center', gap:'4px', fontSize:'10px', fontWeight:600, color:'#6366f1', background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'5px', padding:'3px 8px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>👁 Preview</button>
-                          : <span style={{ fontSize:'10px', color:'#e5a0a0', flexShrink:0 }}>No template</span>}
+                        {step.body
+                          ? <button onClick={()=>setPeekTemplate({ type:step.type, name:`Step ${step.order} · ${step.delay}`, subject:step.subject, body:step.body })} title="Preview this email" style={{ display:'flex', alignItems:'center', gap:'4px', fontSize:'10px', fontWeight:600, color:'#6366f1', background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'5px', padding:'3px 8px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>👁 Preview</button>
+                          : <span style={{ fontSize:'10px', color:'#e5a0a0', flexShrink:0 }}>No content</span>}
                       </div>
                     )
                   })}
@@ -12872,6 +12874,10 @@ export function OnboardingPathsEditor({ onComplete }) {
   const [availableMoveStyleIds,    setAvailableMoveStyleIds]    = useState(null)
   const [availableGeneralStyleIds, setAvailableGeneralStyleIds] = useState(null)
   const [pathsLoadError, setPathsLoadError] = useState(null)
+  // { [path_key]: uiSteps } built from the SAME masters response. The 👁 Preview
+  // in the picker renders these — i.e. the exact subject/body that will send —
+  // instead of the prototype copy the wizard used to show from the JS bundle.
+  const [masterSteps, setMasterSteps] = useState({})
 
   React.useEffect(() => {
     let cancelled = false
@@ -12894,6 +12900,7 @@ export function OnboardingPathsEditor({ onComplete }) {
         }
         setAvailableMoveStyleIds(Array.from(move))
         setAvailableGeneralStyleIds(Array.from(gen))
+        setMasterSteps(masterStepsByKey(masters))
       } catch (err) {
         if (cancelled) return
         console.error('[OnboardingPathsEditor] masters fetch failed:', err)
@@ -12933,14 +12940,16 @@ export function OnboardingPathsEditor({ onComplete }) {
   const rateReady     = !needsRate || ratePerHour.trim() !== ''
   const confirmReady  = calendarReady && rateReady
 
-  function getSteps(pathId) { return DEFAULT_PATH_STEPS[pathId]||[] }
-  function getTemplate(templateId) { return DEFAULT_TEMPLATES.find(t=>t.id===templateId) }
+  // Steps come from the master rows fetched above — the content that actually
+  // sends. No local fallback: if masters didn't load, the preview shows the
+  // "couldn't load" note rather than inventing copy.
+  function getSteps(pathId) { return masterSteps[pathId] || [] }
 
   const PLAIN = {
-    'path-a': { emoji:'📅', tagline:"Ask if they're free this week + share your rates", explain:"You'll send a welcome email, then ask \"Do you have availability this week?\" and show your hourly rates. Simple and direct." },
-    'path-b': { emoji:'🔗', tagline:'Send a calendar link + share your rates', explain:"You'll send a welcome email, then share a booking link so they can pick a time themselves, plus your rates. Great if you prefer self-scheduling." },
-    'path-c': { emoji:'📲', tagline:"Just ask if they're free - keep it casual", explain:"You'll send a welcome email, then a casual \"hey, are you free this week?\" No rates, no links. Friendly and low pressure." },
-    'path-d': { emoji:'🤝', tagline:'Ask + calendar link + phone number', explain:"You'll send a welcome email, then give them three ways to connect - reply, book online, or call. Best for people who like options." },
+    'path-a': { emoji:'📅', tagline:"Ask if they're free this week + share your rates", explain:"Your first email asks \"Do you have availability this week?\" and shows your hourly rates. Simple and direct." },
+    'path-b': { emoji:'🔗', tagline:'Send a calendar link + share your rates', explain:"Your first email shares a booking link so they can pick a time themselves, plus your rates. Great if you prefer self-scheduling." },
+    'path-c': { emoji:'📲', tagline:"Just ask if they're free - keep it casual", explain:"Your first email is a casual \"hey, are you free this week?\" No rates, no links. Friendly and low pressure." },
+    'path-d': { emoji:'🤝', tagline:'Ask + calendar link + phone number', explain:"Your first email gives them three ways to connect - reply, book online, or call. Best for people who like options." },
     'path-e': { emoji:'💛', tagline:'Availability check + warm referral follow-up', explain:"Similar to Path A but with a warmer, referral-focused tone. Great for word-of-mouth clients who already trust you." },
   }
 
@@ -12957,9 +12966,11 @@ export function OnboardingPathsEditor({ onComplete }) {
           Think of it like a friendly robot that follows up for you while you're busy with a job. 🐝
         </p>
         <div style={{ background:'white', borderRadius:'9px', padding:'10px 12px', border:'1px solid rgba(0,0,0,0.07)', marginBottom:'10px' }}>
-          <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', marginBottom:'6px' }}>Every path starts with the same 2 things:</p>
-          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.8 }}>1️⃣ A welcome email - goes out right when they sign up</p>
-          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.8 }}>2️⃣ A follow-up email 1–2 days later - <strong>this is what changes between paths</strong></p>
+          <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', marginBottom:'6px' }}>Every path is the same 3 emails, on the same schedule:</p>
+          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.8 }}>1️⃣ <strong>Right away</strong> - your pitch, asking for the next step. <strong>This is what changes between paths.</strong></p>
+          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.8 }}>2️⃣ <strong>5 days later</strong> - a nudge if you haven't heard back</p>
+          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.8 }}>3️⃣ <strong>30 days later</strong> - one last check-in</p>
+          <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.6, marginTop:'8px', paddingTop:'8px', borderTop:'1px solid rgba(0,0,0,0.06)' }}>🐝 Separately, a <strong>Welcome Email</strong> from Bee Organized HQ goes out 24 hours after that first email. It's the same on every path and sends automatically.</p>
         </div>
         <p style={{ fontSize:'12px', color:'#8a9e9a', fontStyle:'italic' }}>💡 Don't stress - you can change the emails and timing anytime in Settings. This just gets you started.</p>
       </div>
@@ -12980,7 +12991,7 @@ export function OnboardingPathsEditor({ onComplete }) {
           No master Moving paths found. Contact support — at least one <code>moving-*</code> master drip path must be seeded (see migrations/seed_master_drip_paths.sql).
         </div>
       ) : (
-        <PathChooser title="For Moving projects, use this path" emoji="📦" current={selectedMove} onSelect={setSelectedMove} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={movePathOptions} getSteps={getSteps} getTemplate={getTemplate} />
+        <PathChooser title="For Moving projects, use this path" emoji="📦" current={selectedMove} onSelect={setSelectedMove} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={movePathOptions} getSteps={getSteps} />
       )}
       <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center' }}>Templates and timing can be customized anytime in Settings → Templates</p>
       <div style={{ display:'flex', gap:'8px' }}>
@@ -13002,7 +13013,7 @@ export function OnboardingPathsEditor({ onComplete }) {
           No master Organizing paths found. Contact support — at least one <code>organizing-*</code> master drip path must be seeded (see migrations/seed_master_drip_paths.sql).
         </div>
       ) : (
-        <PathChooser title="For Organizing projects, use this path" emoji="🏠" current={selectedGeneral} onSelect={setSelectedGeneral} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={generalPathOptions} getSteps={getSteps} getTemplate={getTemplate} />
+        <PathChooser title="For Organizing projects, use this path" emoji="🏠" current={selectedGeneral} onSelect={setSelectedGeneral} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={generalPathOptions} getSteps={getSteps} />
       )}
       <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center' }}>Templates and timing can be customized anytime in Settings → Templates</p>
       <div style={{ display:'flex', gap:'8px' }}>
@@ -15233,324 +15244,60 @@ const TEMPLATE_VARIABLES = [
   { key:'{{service_area}}',   label:'Service Area'   },
 ]
 
-const DEFAULT_TEMPLATES = [
-  {
-    id:'t1', name:'Welcome Email', type:'email', tag:'welcome',
-    subject:'Welcome, {{first_name}} - let\'s get organized 🐝',
-    body:`Hi {{first_name}},
-
-Thanks so much for reaching out! I'm {{organizer_name}} with Bee Organized {{location_name}} and I'm thrilled you connected with us.
-
-We specialize in creating calm, functional spaces that actually work for your life - from kitchens and closets to whole-home transformations.
-
-I'd love to learn more about what you're working on. Would you be open to a quick call this week?
-
-Talk soon,
-{{organizer_name}}
-Bee Organized {{location_name}}
-{{phone}}`,
-    usedIn:['email-nurture:step1'],
-  },
-  {
-    id:'t2', name:'How We Help', type:'email', tag:'nurture',
-    subject:'What a Bee Organized session looks like',
-    body:`Hi {{first_name}},
-
-I wanted to share a little more about what working with us actually looks like.
-
-Here's what a typical session includes:
-• A walkthrough of your space to understand how you live and work
-• Sorting, editing, and categorizing everything together
-• Strategic placement so things are easy to find and put back
-• A customized system built around your lifestyle
-
-Most clients tell us they feel a weight lifted the moment we finish - not just from the clutter, but from the mental load of knowing where everything is.
-
-Ready to get started? Book a free assessment here:
-{{booking_link}}
-
-{{organizer_name}}
-Bee Organized {{location_name}}`,
-    usedIn:['email-nurture:step2'],
-  },
-  {
-    id:'t3', name:'Real Results', type:'email', tag:'social-proof',
-    subject:'What our clients are saying...',
-    body:`Hi {{first_name}},
-
-I thought you might enjoy hearing from some of our recent clients:
-
-"I can actually find things now. It sounds simple but it's changed my mornings completely." - Sarah M.
-
-"They transformed our pantry in one afternoon. Worth every penny." - Jennifer T.
-
-We serve {{service_area}} and would love to do the same for you.
-
-Book your free assessment: {{booking_link}}
-
-{{organizer_name}}
-Bee Organized {{location_name}}`,
-    usedIn:['email-nurture:step3'],
-  },
-  {
-    id:'t4', name:'Ready to Book?', type:'email', tag:'cta',
-    subject:'Still thinking about it? Let\'s chat.',
-    body:`Hi {{first_name}},
-
-I know life gets busy - no pressure at all.
-
-If you're still thinking about getting organized, I'd love to answer any questions you have. Sometimes it helps to just talk through the space before committing.
-
-You can book a free 20-minute call here: {{booking_link}}
-
-Or just reply to this email - I'm happy to chat.
-
-{{organizer_name}}
-Bee Organized {{location_name}}
-{{phone}}`,
-    usedIn:['email-nurture:step4'],
-  },
-  {
-    id:'t5', name:'Welcome Text', type:'sms', tag:'welcome',
-    subject:'',
-    body:`Hi {{first_name}}! It's {{organizer_name}} from Bee Organized {{location_name}}. So glad you reached out! I'd love to learn more about your space. When's a good time for a quick call? 🐝`,
-    usedIn:['quick-connect:step1'],
-  },
-  {
-    id:'t6', name:'Quick Follow-up Text', type:'sms', tag:'follow-up',
-    subject:'',
-    body:`Hey {{first_name}}, just checking in! Would love to help you get organized. Feel free to book a time here: {{booking_link}}`,
-    usedIn:['quick-connect:step2'],
-  },
-  {
-    id:'t7', name:'Booking Link Text', type:'sms', tag:'cta',
-    subject:'',
-    body:`Hi {{first_name}}! Ready when you are 🐝 Book your free assessment here: {{booking_link}} - takes 2 min!`,
-    usedIn:['direct-book:step1'],
-  },
-  {
-    id:'t8', name:'Call Prompt Script', type:'call', tag:'call',
-    subject:'',
-    body:`Hi, may I speak with {{first_name}}?
-
-[If available]: Hi {{first_name}}, this is {{organizer_name}} calling from Bee Organized {{location_name}}. You recently reached out about getting organized - I just wanted to introduce myself and see if you had any questions!
-
-[Goal]: Schedule an in-person or virtual assessment.
-
-[If voicemail]: Hi {{first_name}}, this is {{organizer_name}} from Bee Organized {{location_name}}. I'm just following up on your inquiry - would love to chat! Give me a call back at {{phone}} or book a time at {{booking_link}}. Talk soon!`,
-    usedIn:['quick-connect:step2','personal-touch:step1'],
-  },
-  {
-    id:'t9', name:'Personal Follow-up Email', type:'email', tag:'nurture',
-    subject:'{{first_name}}, I wanted to personally reach out',
-    body:`Hi {{first_name}},
-
-I wanted to send a personal note rather than just another automated email.
-
-I genuinely believe we could create something special in your space. Every home is different and I love working through the puzzle of what system will work best for you.
-
-If you're ready to take the next step - even just to look around - I'd love to come by for a free assessment.
-
-{{booking_link}}
-
-No pressure, no commitment. Just a conversation.
-
-{{organizer_name}}
-Bee Organized {{location_name}}
-{{phone}}`,
-    usedIn:['personal-touch:step2'],
-  },
-  // Path A - Availability + Rates (Move)
-  { id:'ta1', name:'Move · Avail + Rates', type:'email', tag:'cta',
-    subject:'{{first_name}}, do you have availability this week?',
-    body:`Hi {{first_name}},
-
-Moving is a lot - we want to make it as smooth as possible.
-
-Do you have any availability this week for us to come by and get your space organized? Even a few hours can make a huge difference on move day.
-
-Our rates are $X/hr for a two-organizer team, with a 3-hour minimum. Most move projects run 4–6 hours.
-
-What does your week look like?
-
-{{organizer_name}}
-Bee Organized {{location_name}}
-{{phone}}`,
-    usedIn:['move-a:step2'],
-  },
-  // Path A - Availability + Rates (General)
-  { id:'ta2', name:'Organizing · Avail + Rates', type:'email', tag:'cta',
-    subject:'{{first_name}}, do you have availability this week?',
-    body:`Hi {{first_name}},
-
-Do you have any availability this week to get started?
-
-We work in 3-hour minimum sessions at $X/hr for a two-organizer team. Most clients see significant progress in a single session - and many spaces are fully transformed in one day.
-
-What does your schedule look like?
-
-{{organizer_name}}
-Bee Organized {{location_name}}
-{{phone}}`,
-    usedIn:['general-a:step3'],
-  },
-  // Path B - Calendar + Rates (Move)
-  { id:'tb1', name:'Move · Calendar + Rates', type:'email', tag:'cta',
-    subject:'Book a quick call - let\u2019s plan your move, {{first_name}}',
-    body:`Hi {{first_name}},
-
-Moving is hectic and we want to make sure we set you up for success.
-
-Book a quick 15-minute discovery call so we can understand your space, timeline, and priorities:
-{{booking_link}}
-
-Our rates are $X/hr for a two-organizer team (3-hr minimum). Most move projects run 4–6 hours.
-
-We'd love to help make this move your smoothest one yet.
-
-{{organizer_name}}
-Bee Organized {{location_name}}`,
-    usedIn:['move-b:step2'],
-  },
-  // Path B - Calendar + Rates (General)
-  { id:'tb2', name:'Organizing · Calendar + Rates', type:'email', tag:'cta',
-    subject:'Book a free discovery call, {{first_name}}',
-    body:`Hi {{first_name}},
-
-I'd love to learn more about your space before we dive in.
-
-Book a free 15-minute discovery call here - no commitment, just a conversation:
-{{booking_link}}
-
-For reference, our rates are $X/hr for a two-organizer team (3-hr minimum).
-
-Looking forward to connecting!
-
-{{organizer_name}}
-Bee Organized {{location_name}}`,
-    usedIn:['general-b:step3'],
-  },
-  // Path C - Availability only (Move)
-  { id:'tc1', name:'Move · Availability Only', type:'email', tag:'cta',
-    subject:'{{first_name}} - do you have time this week?',
-    body:`Hi {{first_name}},
-
-With your move coming up, I just wanted to check - do you have any availability this week?
-
-Even a few hours of organization before or after the move can make the whole experience so much less overwhelming.
-
-What's your schedule looking like?
-
-{{organizer_name}}
-Bee Organized {{location_name}}`,
-    usedIn:['move-c:step2'],
-  },
-  // Path C - Availability only (General)
-  { id:'tc2', name:'Organizing · Availability Only', type:'email', tag:'cta',
-    subject:'{{first_name}}, do you have time this week?',
-    body:`Hi {{first_name}},
-
-Just wanted to check in - do you have any availability this week to get started on your space?
-
-Reply here and we'll find a time that works for you.
-
-{{organizer_name}}
-Bee Organized {{location_name}}`,
-    usedIn:['general-c:step3'],
-  },
-  // Path D - Availability + Calendar + Phone (Move)
-  { id:'td1', name:'Move · Avail + Calendar + Phone', type:'email', tag:'cta',
-    subject:'{{first_name}} - a few ways to connect',
-    body:`Hi {{first_name}},
-
-Moving week is almost here - let's make sure your space is ready.
-
-A few ways to connect with us:
-
-📅 Do you have availability this week? Just reply and we'll make it work.
-
-🔗 Or book a quick call here: {{booking_link}}
-
-📞 Prefer to just call? Reach us at {{phone}}
-
-Whatever works best for you - we're here!
-
-{{organizer_name}}
-Bee Organized {{location_name}}`,
-    usedIn:['move-d:step2'],
-  },
-  // Path D - Availability + Calendar + Phone (General)
-  { id:'td2', name:'Organizing · Avail + Calendar + Phone', type:'email', tag:'cta',
-    subject:'{{first_name}} - let’s find a time',
-    body:`Hi {{first_name}},
-
-A few easy ways to connect and get your project started:
-
-📅 Do you have availability this week? Reply here and we'll get it on the calendar.
-
-🔗 Or book a discovery call at your convenience: {{booking_link}}
-
-📞 Prefer to talk it through first? Call us at {{phone}}
-
-Looking forward to working with you!
-
-{{organizer_name}}
-Bee Organized {{location_name}}`,
-    usedIn:['general-d:step3'],
-  },
-]
-
-// Generic 3-step summary used by the onboarding picker and Settings → Paths
-// preview. Real per-master content lives in drip_path_steps.subject/body for
-// the 8 seeded masters (see migrations/seed_master_drip_paths.sql) and is
-// shown via Admin → Content + Settings → Templates editors. The keys here
-// match the new master path_keys; the templateIds remain pointing at the
-// legacy t1/t2/… template rows so the preview cards keep rendering until
-// the picker preview is migrated to fetch from /api/drip-paths/masters.
-const DEFAULT_PATH_STEPS = {
-  // Moving paths
-  'moving-a': [
-    { id:'ma1', order:1, name:'Thank you for reaching out', type:'email', delay:'Immediately',  templateId:'t1'  },
-    { id:'ma2', order:2, name:'Following up',               type:'email', delay:'5 days later', templateId:'ta1' },
-    { id:'ma3', order:3, name:'Still interested?',          type:'email', delay:'30 days later', templateId:'t9' },
-  ],
-  'moving-b': [
-    { id:'mb1', order:1, name:'Thank you for reaching out', type:'email', delay:'Immediately',  templateId:'t1'  },
-    { id:'mb2', order:2, name:'Following up',               type:'email', delay:'5 days later', templateId:'tb1' },
-    { id:'mb3', order:3, name:'Still interested?',          type:'email', delay:'30 days later', templateId:'t9' },
-  ],
-  'moving-c': [
-    { id:'mc1', order:1, name:'Thank you for reaching out', type:'email', delay:'Immediately',  templateId:'t1'  },
-    { id:'mc2', order:2, name:'Following up',               type:'email', delay:'5 days later', templateId:'tc1' },
-    { id:'mc3', order:3, name:'Still interested?',          type:'email', delay:'30 days later', templateId:'t9' },
-  ],
-  'moving-d': [
-    { id:'md1', order:1, name:'Thank you for reaching out', type:'email', delay:'Immediately',  templateId:'t1'  },
-    { id:'md2', order:2, name:'Following up',               type:'email', delay:'5 days later', templateId:'td1' },
-    { id:'md3', order:3, name:'Still interested?',          type:'email', delay:'30 days later', templateId:'t9' },
-  ],
-  // Organizing paths
-  'organizing-a': [
-    { id:'oa1', order:1, name:'Thank you for reaching out', type:'email', delay:'Immediately',  templateId:'t1'  },
-    { id:'oa2', order:2, name:'Following up',               type:'email', delay:'5 days later', templateId:'ta2' },
-    { id:'oa3', order:3, name:'Still interested?',          type:'email', delay:'30 days later', templateId:'t9' },
-  ],
-  'organizing-b': [
-    { id:'ob1', order:1, name:'Thank you for reaching out', type:'email', delay:'Immediately',  templateId:'t1'  },
-    { id:'ob2', order:2, name:'Following up',               type:'email', delay:'5 days later', templateId:'tb2' },
-    { id:'ob3', order:3, name:'Still interested?',          type:'email', delay:'30 days later', templateId:'t9' },
-  ],
-  'organizing-c': [
-    { id:'oc1', order:1, name:'Thank you for reaching out', type:'email', delay:'Immediately',  templateId:'t1'  },
-    { id:'oc2', order:2, name:'Following up',               type:'email', delay:'5 days later', templateId:'tc2' },
-    { id:'oc3', order:3, name:'Still interested?',          type:'email', delay:'30 days later', templateId:'t9' },
-  ],
-  'organizing-d': [
-    { id:'od1', order:1, name:'Thank you for reaching out', type:'email', delay:'Immediately',  templateId:'t1'  },
-    { id:'od2', order:2, name:'Following up',               type:'email', delay:'5 days later', templateId:'td2' },
-    { id:'od3', order:3, name:'Still interested?',          type:'email', delay:'30 days later', templateId:'t9' },
-  ],
-  'custom': [],
+// ─── Master drip content helpers ──────────────────────────────────────────────
+// The 8 corp master paths in drip_paths (seed_master_drip_paths.sql) are the
+// ONLY source of drip copy. Onboarding and Settings → Paths both read them via
+// GET /api/drip-paths/masters, which returns each master's steps with their
+// inline subject/body.
+//
+// Historical note: this file used to carry DEFAULT_TEMPLATES + DEFAULT_PATH_STEPS
+// — prototype copy invented for the 5/23 build ("How We Help", "Real Results").
+// Those constants seeded the legacy t1–t9 / ta1–td2 template rows AND were what
+// the onboarding preview rendered and what savePathToDb() materialized into real
+// per-location paths, so a first customization silently swapped an owner's live
+// drip from Kevin's content to the prototype (Portland/moving-d, 7/13). Both
+// constants are deleted: prototype copy no longer ships in the bundle at all.
+
+function daysToDelayLabel(days) {
+  if (!days || days <= 0) return 'Immediately'
+  return `${days} day${days === 1 ? '' : 's'} later`
+}
+
+// One master path's steps → the shape the path editors render
+// ({ id, order, name, type, delay, subject, body }). Steps carry their content
+// INLINE — a master step has no template row behind it, which is exactly why a
+// customization must copy subject/body rather than a template pointer.
+function masterStepsToUi(master) {
+  return (master?.steps || [])
+    .filter(s => s?.is_active !== false)
+    .map((s, i) => {
+      const order = s.step_order ?? (i + 1)
+      const type  = s.channel === 'sms' ? 'sms' : 'email'
+      return {
+        id: `master_${master.path_key}_${order}`,
+        order,
+        // Emails lead with their subject — it is the most honest one-line
+        // summary of what the owner is about to send.
+        name: s.subject || `${type === 'sms' ? 'Text' : 'Email'} ${order}`,
+        type,
+        delay: daysToDelayLabel(s.delay_days),
+        delay_days: s.delay_days ?? 0,
+        subject: s.subject ?? null,
+        body: s.body ?? null,
+        fromMaster: true,
+      }
+    })
+    .sort((a, b) => a.order - b.order)
+}
+
+// masters array from /api/drip-paths/masters → { [path_key]: uiSteps }
+function masterStepsByKey(masters) {
+  const out = {}
+  for (const m of masters || []) {
+    if (!m?.path_key) continue
+    out[m.path_key] = masterStepsToUi(m)
+  }
+  return out
 }
 
 // ─── Template Editor Popup ────────────────────────────────────────────────────
@@ -15955,8 +15702,13 @@ function StepTemplatePicker({ step, templates, onSelect, onClose, smsEnabled=tru
   // When set, the inline "+ Create new template" editor is open. Holds the
   // name to pre-fill. Only reachable when onCreateTemplate is provided.
   const [creatingName, setCreatingName] = useState(null)
+  // isActive gates the quarantine: a template flipped dark (the 17 Gen 1
+  // prototype rows) stays resolvable for steps that already point at it, but
+  // can never be newly assigned. `step.templateId===t.id` is kept visible so an
+  // existing assignment still renders as "✓ Current" rather than vanishing.
   const compatible = templates.filter(t =>
     t.type === step.type &&
+    (t.isActive || step.templateId === t.id) &&
     (smsEnabled || t.type !== 'sms') &&
     (!search || t.name.toLowerCase().includes(search.toLowerCase()))
   )
@@ -19746,13 +19498,13 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     })
   }
 
-  // Templates load from /api/templates on mount. Falls back to DEFAULT_TEMPLATES
-  // so the UI renders something on first paint (and during failed-fetch dev paths)
-  // — the DB-backed list replaces it once the request resolves. Each row maps
-  // legacy_id → id so existing in-memory references (step.templateId='t1' etc.)
-  // keep working. After the templates rework the list is a mix of masters
-  // (isMaster=true, no location) and own customs (isMaster=false).
-  const [templates, setTemplates]   = useState(DEFAULT_TEMPLATES)
+  // Templates load from /api/templates on mount. Starts EMPTY — there is no
+  // local fallback content, because the only local content this file ever had
+  // was the Gen 1 prototype copy. `templatesLoading` covers the gap. Each row
+  // maps legacy_id → id so existing in-memory references keep working. After
+  // the templates rework the list is a mix of masters (isMaster=true, no
+  // location) and own customs (isMaster=false).
+  const [templates, setTemplates]   = useState([])
   const [templatesLoading, setTemplatesLoading] = useState(true)
   const [templatesError, setTemplatesError]     = useState(null)
   useEffect(() => {
@@ -19786,16 +19538,24 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       .finally(() => { if (!cancelled) setTemplatesLoading(false) })
     return () => { cancelled = true }
   }, [])
-  const [pathSteps, setPathSteps]   = useState(DEFAULT_PATH_STEPS)
+  // Starts EMPTY and is filled from the DB: master previews for path_keys this
+  // location hasn't customized, real location steps for the ones it has. It used
+  // to start as DEFAULT_PATH_STEPS (prototype copy), which is what savePathToDb
+  // then materialized into live per-location paths.
+  const [pathSteps, setPathSteps]   = useState({})
   // dbPaths is keyed by path_key (e.g. 'organizing-a') so the UI's existing
   // pathId mental model maps 1:1. Each entry holds the DB row's id so
   // saves know whether to insert or update. Populated by the load effect
   // below for real franchise locations only.
   const [dbPaths, setDbPaths] = useState({})
-  // Masters keyed by path_key → { id, path_key, name } for the 8 corp masters.
-  // Fed by /api/drip-paths/masters. Used by the "Customize" button to know
-  // which master to clone for a given path slot.
+  // Masters keyed by path_key → { id, path_key, name, steps[] } for the 8 corp
+  // masters. Fed by /api/drip-paths/masters. Used by the "Customize" button to
+  // know which master to clone, and as the preview + reset source.
   const [dbMasters, setDbMasters] = useState({})
+  // { [path_key]: uiSteps } derived from dbMasters — the master preview shown
+  // for any path this location has not customized, and what "Reset to master"
+  // repaints locally after the DB copy is deleted.
+  const [masterSteps, setMasterSteps] = useState({})
   const [pathsSaving, setPathsSaving] = useState(null) // pathId currently being saved
   const [pathsErr, setPathsErr] = useState(null)
   const [editingTemplate, setEditingTemplate] = useState(null) // template obj or 'new'
@@ -19839,10 +19599,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   }
 
   // Load DB drip paths + their steps. Merges into pathSteps using path_key
-  // as the UI's pathId. Leaves DEFAULT_PATH_STEPS untouched for path_keys
-  // that aren't in the DB yet so the user can still preview the master.
-  // Loads corp masters in parallel so the "Customize" button knows which
-  // master_id to clone from.
+  // as the UI's pathId. Path_keys with no location copy keep the master
+  // preview loaded by the masters effect below, so what an owner reads is
+  // always what would actually send.
   async function loadLocationPaths() {
     if (!realLocId) return
     try {
@@ -19882,10 +19641,11 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     }
   }
 
+  // Masters load for EVERY caller, real location or not — they're the preview
+  // source, and a demo / view-as session should still see real corp content
+  // rather than nothing. Read-allowed to any authenticated hub_user.
   useEffect(() => {
-    if (!realLocId) return
     let cancelled = false
-    loadLocationPaths()
     fetch('/api/drip-paths/masters', { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(j => {
@@ -19894,9 +19654,27 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         const map = {}
         for (const m of list) map[m.path_key] = m
         setDbMasters(map)
+        const byKey = masterStepsByKey(list)
+        setMasterSteps(byKey)
+        // Seed the preview ONLY where this location has no copy of its own.
+        // `dbId` on a step marks it as a real location row, so this is safe
+        // in either resolution order relative to loadLocationPaths().
+        setPathSteps(prev => {
+          const next = { ...prev }
+          for (const [key, steps] of Object.entries(byKey)) {
+            const existing = next[key]
+            if (!existing || !existing.some(s => s.dbId)) next[key] = steps
+          }
+          return next
+        })
       })
       .catch(e => { if (!cancelled) console.error('[Settings/Paths] masters fetch failed', e) })
     return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    if (!realLocId) return
+    loadLocationPaths()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realLocId])
 
@@ -19946,8 +19724,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         // 409 means active progress — surface the detail message.
         throw new Error(j?.detail || j?.error || `HTTP ${res.status}`)
       }
-      // Drop from local state; pathSteps for this id will be re-derived from
-      // DEFAULT_PATH_STEPS preview (or refetched on next reload).
+      // Drop from local state and repaint from the MASTER we just fell back to,
+      // so the panel shows the content that will now send.
       setDbPaths(prev => {
         const next = { ...prev }
         delete next[pathId]
@@ -19955,8 +19733,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       })
       setPathSteps(prev => {
         const next = { ...prev }
-        // Restore preview from the static preview map, if available.
-        if (DEFAULT_PATH_STEPS[pathId]) next[pathId] = DEFAULT_PATH_STEPS[pathId]
+        if (masterSteps[pathId]) next[pathId] = masterSteps[pathId]
         else delete next[pathId]
         return next
       })
@@ -19967,9 +19744,18 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     }
   }
 
-  // Save a path's current steps to DB. Creates the drip_paths row first if
-  // it doesn't exist yet (e.g. user is editing general-b for a location
-  // that was seeded with only general-a + move-a).
+  // Save a path's current steps to DB.
+  //
+  // A location with no copy of this path yet is CLONED from the corp master
+  // (subject + body copied verbatim by the clone route) before its steps are
+  // written. It used to POST a bare, empty drip_paths row instead, then PATCH
+  // steps that carried no content at all — which left every step with
+  // subject/body NULL pointing at the legacy t1/td1/t9 template rows, so the
+  // owner's first delay tweak silently swapped their live drip over to the
+  // Gen 1 prototype copy. That is how Portland/moving-d broke on 7/13.
+  //
+  // The step payload now carries subject/body, so re-saving an already-
+  // customized path preserves its content instead of nulling it.
   async function savePathToDb(pathId) {
     if (!realLocId) {
       alert('Pick a real location first.')
@@ -19981,13 +19767,17 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     try {
       let dbPath = dbPaths[pathId]
       if (!dbPath) {
-        // Friendly name from style label; fallback to path key.
-        const friendly = (PATH_STYLES.find(s => pathId.endsWith(s.id.replace('path-','')))?.label) || pathId
-        const res = await fetch(`/api/locations/${realLocId}/drip-paths`, {
+        const master = dbMasters[pathId]
+        if (!master) {
+          // No master to clone from → refuse rather than materialize an empty
+          // path. Previously this branch created a content-free path row.
+          throw new Error(`No master template found for "${pathId}". Reload and try again.`)
+        }
+        const res = await fetch(`/api/locations/${realLocId}/drip-paths/clone`, {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path_key: pathId, name: friendly }),
+          body: JSON.stringify({ master_id: master.id }),
         })
         const j = await res.json().catch(()=>({}))
         if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
@@ -20000,7 +19790,12 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           step_order: s.order ?? (i + 1),
           delay_days: delayToDays(s.delay),
           channel: s.type === 'sms' ? 'sms' : 'email',
-          master_template_id: tmpl?.dbId || s.masterTemplateId || null,
+          master_template_id: s.masterTemplateId ?? tmpl?.dbId ?? null,
+          // Inline content is the authority when present (master-derived and
+          // hand-edited steps). Steps that point at a template row instead
+          // send null here and resolve through master_template_id at send time.
+          subject: s.subject ?? null,
+          body: s.body ?? null,
         }
       })
       const res2 = await fetch(`/api/drip-paths/${dbPath.id}/steps`, {
@@ -20011,6 +19806,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       })
       const j2 = await res2.json().catch(()=>({}))
       if (!res2.ok) throw new Error(j2?.error || `HTTP ${res2.status}`)
+      // Re-read so the panel reflects the rows that now exist (step dbIds,
+      // the "Customized" badge, and the saved content).
+      await loadLocationPaths()
       setPathsErr(null)
     } catch (e) {
       setPathsErr(String(e?.message || e))
@@ -20207,10 +20005,18 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     }
   }
 
+  // Pointing a step at a template row makes that row the content source, so
+  // any inline subject/body the step was carrying (e.g. copied from the master)
+  // is cleared — otherwise the inline copy would keep winning at send time
+  // (drip-send.ts: step.subject ?? linkedTpl.subject) and the owner's pick
+  // would appear to do nothing.
   function assignTemplate(pathId, stepId, templateId) {
+    const tmpl = templates.find(t => t.id === templateId)
     setPathSteps(prev=>({
       ...prev,
-      [pathId]: prev[pathId].map(s=>s.id===stepId?{...s,templateId}:s)
+      [pathId]: prev[pathId].map(s=>s.id===stepId
+        ? { ...s, templateId, masterTemplateId: tmpl?.dbId ?? null, subject: null, body: null, name: tmpl?.name || s.name }
+        : s)
     }))
     setEditingStep(null)
   }
@@ -20737,20 +20543,33 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                             {/* Customize / Reset banner — only for master-backed paths (i.e. not 'custom') when a real location is loaded */}
                             {realLocId && style.id!=='custom' && dbMasters[pathId] && (
                               dbPaths[pathId] ? (
-                                <div style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 10px', background:'rgba(245,158,11,0.08)', border:'0.5px solid rgba(245,158,11,0.30)', borderRadius:'8px', marginBottom:'8px' }}>
-                                  <span style={{ fontSize:'12px', color:'#7a5d24', flex:1 }}>This path is <strong>customized</strong> for your location. Resetting will restore the corp master content.</span>
-                                  <button onClick={()=>resetPathToMaster(pathId)} disabled={pathsSaving===pathId}
-                                    style={{ padding:'5px 10px', background:'transparent', border:'0.5px solid rgba(180,83,9,0.5)', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#7a5d24', cursor: pathsSaving===pathId ? 'wait' : 'pointer', flexShrink:0 }}>
-                                    {pathsSaving===pathId ? 'Resetting…' : 'Reset to master'}
-                                  </button>
+                                <div style={{ padding:'8px 10px', background:'rgba(245,158,11,0.08)', border:'0.5px solid rgba(245,158,11,0.30)', borderRadius:'8px', marginBottom:'8px' }}>
+                                  <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                                    <span style={{ fontSize:'12px', color:'#7a5d24', flex:1 }}>This path is <strong>customized</strong> for your location. Resetting will restore the corp master content.</span>
+                                    <button onClick={()=>resetPathToMaster(pathId)} disabled={pathsSaving===pathId}
+                                      style={{ padding:'5px 10px', background:'transparent', border:'0.5px solid rgba(180,83,9,0.5)', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#7a5d24', cursor: pathsSaving===pathId ? 'wait' : 'pointer', flexShrink:0 }}>
+                                      {pathsSaving===pathId ? 'Resetting…' : 'Reset to master'}
+                                    </button>
+                                  </div>
+                                  {/* Snapshot semantics, said out loud: a copy is frozen at the
+                                      moment it was made. Owners should not have to discover that
+                                      HQ revisions stop reaching them once they customize. */}
+                                  <p style={{ fontSize:'11px', color:'#8a6a2e', lineHeight:1.5, marginTop:'6px' }}>
+                                    📌 Your copy is a <strong>snapshot</strong>. If Bee Organized HQ updates this path later, those changes <strong>won't</strong> reach your version — reset to pick up the newest master content.
+                                  </p>
                                 </div>
                               ) : (
-                                <div style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 10px', background:'rgba(168,201,196,0.12)', border:'0.5px solid rgba(168,201,196,0.35)', borderRadius:'8px', marginBottom:'8px' }}>
-                                  <span style={{ fontSize:'12px', color:'#4a5e5a', flex:1 }}>Using the corp <strong>master template</strong>. Click Customize to fork a copy you can edit for this location only.</span>
-                                  <button onClick={()=>customizeFromMaster(pathId)} disabled={pathsSaving===pathId}
-                                    style={{ padding:'5px 10px', background:'#1a2e2b', border:'none', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor: pathsSaving===pathId ? 'wait' : 'pointer', flexShrink:0 }}>
-                                    {pathsSaving===pathId ? 'Customizing…' : 'Customize'}
-                                  </button>
+                                <div style={{ padding:'8px 10px', background:'rgba(168,201,196,0.12)', border:'0.5px solid rgba(168,201,196,0.35)', borderRadius:'8px', marginBottom:'8px' }}>
+                                  <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                                    <span style={{ fontSize:'12px', color:'#4a5e5a', flex:1 }}>Using the corp <strong>master template</strong> — you'll automatically get HQ's latest content.</span>
+                                    <button onClick={()=>customizeFromMaster(pathId)} disabled={pathsSaving===pathId}
+                                      style={{ padding:'5px 10px', background:'#1a2e2b', border:'none', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor: pathsSaving===pathId ? 'wait' : 'pointer', flexShrink:0 }}>
+                                      {pathsSaving===pathId ? 'Customizing…' : 'Customize'}
+                                    </button>
+                                  </div>
+                                  <p style={{ fontSize:'11px', color:'#5f7a75', lineHeight:1.5, marginTop:'6px' }}>
+                                    Customizing forks a copy you can edit for this location only. That copy is a <strong>snapshot</strong> — later HQ updates won't reach it.
+                                  </p>
                                 </div>
                               )
                             )}
@@ -20763,6 +20582,13 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                               <div style={{ display:'grid', gap:'5px' }}>
                                 {steps.map(step=>{
                                   const tmpl = templates.find(t=>t.id===step.templateId)
+                                  // Steps carrying their own subject/body (master-derived, or
+                                  // edited here) are the content themselves — there is no
+                                  // template row behind them, and that's the healthy shape.
+                                  const inline = !tmpl && step.body
+                                    ? { type: step.type, name: step.name, subject: step.subject, body: step.body }
+                                    : null
+                                  const peek = tmpl || inline
                                   const stepIcon = {email:'mail',sms:'message',call:'phone'}[step.type] || 'mail'
                                   const stepColor = {email:'#4f46e5',sms:'#0a7d5f',call:'#b45309'}[step.type] || '#4f46e5'
                                   if (step.type==='sms'&&!settings.location.smsEnabled) return null
@@ -20779,10 +20605,13 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                                             {tmpl.type!=='email'&&<span style={{ fontSize:'10px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{tmpl.body.slice(0,40)}…</span>}
                                           </button>
                                         )}
-                                        {!tmpl&&<span style={{ fontSize:'10px', color:'#e5a0a0' }}>No template assigned</span>}
+                                        {inline&&step.type==='email'&&step.subject&&(
+                                          <p style={{ fontSize:'10px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{step.subject}</p>
+                                        )}
+                                        {!peek&&<span style={{ fontSize:'10px', color:'#e5a0a0' }}>No content yet</span>}
                                       </div>
-                                      {tmpl&&(
-                                        <button onClick={()=>setPeekTemplate(tmpl)} title="Preview this email" style={{ fontSize:'10px', fontWeight:600, color:'#4f46e5', background:'rgba(99,102,241,0.08)', border:'0.5px solid rgba(99,102,241,0.30)', borderRadius:'6px', padding:'3px 8px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>Preview</button>
+                                      {peek&&(
+                                        <button onClick={()=>setPeekTemplate(peek)} title="Preview this email" style={{ fontSize:'10px', fontWeight:600, color:'#4f46e5', background:'rgba(99,102,241,0.08)', border:'0.5px solid rgba(99,102,241,0.30)', borderRadius:'6px', padding:'3px 8px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>Preview</button>
                                       )}
                                       <button onClick={()=>setEditingStep({pathId,step})} style={{ fontSize:'10px', color:'#3a5e58', background:'rgba(168,201,196,0.14)', border:'0.5px solid rgba(168,201,196,0.4)', borderRadius:'6px', padding:'3px 8px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>Change</button>
                                     </div>
@@ -20863,8 +20692,13 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           // After the templates rework: list contains masters (isMaster=true)
           // and the caller's own customs (isOwnCustom=true). Owners cannot
           // edit/delete masters; that lives in the Admin/Corp → Content tab.
-          const masters = templates.filter(t => t.isMaster)
-          const myCustoms = templates.filter(t => t.isOwnCustom)
+          // is_active=false is the QUARANTINE flag: the 17 Gen 1 prototype
+          // rows (t1–t9, ta1–td2) get flipped dark rather than deleted, so a
+          // step still pointing at one keeps resolving at send time while the
+          // row stops being offerable here. Nothing else uses is_active today,
+          // so this filter is inert until that flip happens.
+          const masters = templates.filter(t => t.isMaster && t.isActive)
+          const myCustoms = templates.filter(t => t.isOwnCustom && t.isActive)
           const TYPE_META = {
             email: { icon:'📧', label:'Email Templates', color:'#6366f1' },
             sms:   { icon:'💬', label:'SMS Templates',   color:'#10b981' },
