@@ -20812,11 +20812,14 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           // Tag-based grouping for the masters list: surface Welcome and the 6
           // Opportunity Stage masters as their own labeled sections so owners
           // can find them quickly (the generic "Other Templates" bucket holds
-          // legacy t1–t9 / ta-td masters).
-          const welcomeMasters = masters.filter(t => t.legacy_id === 'welcome')
-          const oppStageMasters = masters.filter(t => (t.legacy_id || '').startsWith('opp_'))
+          // legacy t1–t9 / ta-td masters). Rows are mapped to camelCase on
+          // fetch, so the key is `legacyId` — reading `legacy_id` here left
+          // both Gen 2 groups permanently empty and dumped every master into
+          // the Other bucket.
+          const welcomeMasters = masters.filter(t => t.legacyId === 'welcome')
+          const oppStageMasters = masters.filter(t => (t.legacyId || '').startsWith('opp_'))
           const otherMasters = masters.filter(t =>
-            t.legacy_id !== 'welcome' && !(t.legacy_id || '').startsWith('opp_'))
+            t.legacyId !== 'welcome' && !(t.legacyId || '').startsWith('opp_'))
           const masterActions = (tpl) => (
             <>
               <button onClick={()=>setPreviewTemplate(tpl)} style={{ padding:'5px 10px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#4a7a74', cursor:'pointer' }}>Preview</button>

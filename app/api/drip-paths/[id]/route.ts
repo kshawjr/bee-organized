@@ -4,8 +4,9 @@
 // PATCH  /api/drip-paths/:id  — rename / toggle active / toggle default
 // DELETE /api/drip-paths/:id  — delete a path (cascade-removes steps)
 //
-// Auth: super_admin can hit any path; franchise owners only paths in their
-// own location.
+// Auth: super_admin/admin can hit any path; franchise owners only paths in
+// their own location, and never a corp master (is_master = true) — those are
+// cloned, not mutated.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
@@ -26,7 +27,7 @@ async function loadPathWithAuth(pathId: string) {
 
   const { data: path } = await supabaseService
     .from('drip_paths')
-    .select('id, location_uuid, path_key, name, is_active, is_default')
+    .select('id, location_uuid, path_key, name, is_active, is_default, is_master')
     .eq('id', pathId)
     .maybeSingle()
   if (!path) return { error: 'not_found', status: 404 as const }
@@ -35,6 +36,15 @@ async function loadPathWithAuth(pathId: string) {
   // (operational lead — leads/CRM/feedback only) are both blocked here.
   if (hubUser.role === 'lite_user' || hubUser.role === 'manager') {
     return { error: 'forbidden_read_only', status: 403 as const }
+  }
+  // Corp masters are super_admin/admin territory — owners customize by cloning
+  // (POST /api/locations/:id/drip-paths/clone), never by mutating the master.
+  // This check is explicit rather than relying on the location comparison
+  // below: a master's location_uuid is NULL, so a caller whose own location_id
+  // is also NULL would otherwise compare equal and slip straight through to
+  // PATCH/DELETE. Mirrors forbidden_master_step in /api/drip-path-steps.
+  if (path.is_master && !isAdmin(hubUser.role)) {
+    return { error: 'forbidden_master_path', status: 403 as const }
   }
   if (!isAdmin(hubUser.role) && hubUser.location_id !== path.location_uuid) {
     return { error: 'forbidden_wrong_location', status: 403 as const }
