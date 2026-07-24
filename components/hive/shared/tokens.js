@@ -145,16 +145,30 @@ export const T = {
   // baseline instead of each component picking its own height. Both
   // cards reach through cardKit.pillStyle to this, never per-card px.
   badge: {
-    font: '11px',      // chip + pill text (StatusChip references this too)
+    font: '11px',      // chip text — StatusChip's LOCKED 11px anatomy
+    actionFont: '12px',// small-action TYPE — pillStyle (tag/assignee pills, the
+                       // dashed "+ add" affordances), rowActionBtn (row verbs),
+                       // and the one-off small actions (Reopen, buzz-add,
+                       // referrer ×, show-more links). #59 ROUND 2: the round-1
+                       // height step was visually inert because globals.css
+                       // floors EVERY <button> at 16px!important (an iOS
+                       // zoom-on-focus guard) — inline font-size on a button is
+                       // dead. A small-action BUTTON must therefore also wear
+                       // className="bee-small-action"; globals.css releases
+                       // that class at THIS value (lockstep pinned by the
+                       // beta-hive-tokens small-action-type test). 12px sits a
+                       // step under the 13px titles and level with the 12px
+                       // meta rows — chrome, not content.
     weight: 500,
     height: '20px',    // shared small-control height — pillStyle (tags, assignee
                        // pills, the dashed "+ add" affordances) AND cardKit.rowActionBtn
                        // (the Preferences row verbs) both read THIS one value, so a
                        // column of mixed pills + row-verbs sits on one guaranteed
-                       // baseline. Stepped down from 22px (7/24): the small actions
-                       // read too large; 20px also lands level with StatusChip's
-                       // ~20px natural height (padding 2px + 11px/1.5 lh), so "chips
-                       // read level" holds without the chips changing.
+                       // baseline. With actionFont at 12px the height genuinely
+                       // binds (12px content in a 20px box) and lands level with
+                       // StatusChip's ~20px natural height (padding 2px +
+                       // 11px/1.5 lh), so "chips read level" holds without the
+                       // chips changing.
     padX: '10px',      // pill / + add horizontal inset
     padAvatarL: '4px', // tighter left inset when a leading avatar rides
     gap: '6px',

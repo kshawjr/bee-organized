@@ -45,12 +45,13 @@ export default function PinnedBuzz({ notes = [], onPost = () => {}, emptyLabel =
   if (!latest && !open) {
     return (
       <button
+        className="bee-small-action"
         aria-label="Add buzz"
         onClick={() => setOpen(true)}
         style={{
           display: 'flex', alignItems: 'center', gap: '7px', width: '100%',
           border: 'none', background: 'transparent', padding: '4px 0', margin: 0,
-          fontFamily: 'inherit', fontSize: '12px', color: T.ink.muted,
+          fontFamily: 'inherit', fontSize: T.badge.actionFont, color: T.ink.muted,
           cursor: 'pointer', textAlign: 'left',
         }}
       >

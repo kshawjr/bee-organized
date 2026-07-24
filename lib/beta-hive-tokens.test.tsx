@@ -35,7 +35,12 @@ import { createRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
 import { T } from '@/components/hive/shared/tokens'
 import { GREEN_FILL, GREEN_TEXT } from '@/components/ui/tokens'
-import { ACTION_TONES, actionBtn } from '@/components/hive/shared/cardKit'
+import { ACTION_TONES, actionBtn, pillStyle, rowActionBtn } from '@/components/hive/shared/cardKit'
+import PreferencesBlock from '@/components/hive/shared/PreferencesBlock'
+import TagsRow from '@/components/hive/shared/TagsRow'
+import ContactsBlock from '@/components/hive/shared/ContactsBlock'
+import PinnedBuzz from '@/components/hive/shared/PinnedBuzz'
+import ReferrerField from '@/components/hive/shared/ReferrerField'
 import { milestoneFamilies, STAGE_RECORD_FAMILY, CHIP_STYLES } from '@/components/hive/shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
 import EngagementPanel from '@/components/hive/EngagementPanel'
@@ -293,7 +298,7 @@ describe('milestone rail — continuous line node-to-node', () => {
 
 describe('one chip / pill / avatar token scale — both cards reach for it', () => {
   it('T.badge + T.avatar carry the shared anatomy (font/weight/height + avatar sizes)', () => {
-    expect(T.badge).toMatchObject({ font: '11px', weight: 500, height: '20px' })
+    expect(T.badge).toMatchObject({ font: '11px', actionFont: '12px', weight: 500, height: '20px' })
     expect(T.avatar).toMatchObject({ identity: '32px', inline: '18px' })
   })
 
@@ -327,6 +332,71 @@ describe('one chip / pill / avatar token scale — both cards reach for it', () 
     expect(readFileSync('components/ui/StatusChip.jsx', 'utf8')).toContain('T.badge')
     expect(readFileSync('components/hive/shared/InitialsAvatar.jsx', 'utf8')).toContain('T.avatar.identity')
     expect(readFileSync('components/hive/shared/EngagementAssignees.jsx', 'utf8')).toContain('T.avatar.inline')
+  })
+})
+
+// ── #59 ROUND 2 — the small-action TYPE scale ──────────────────
+// Round 1 moved the height token and every test stayed green while the
+// UI didn't change: globals.css floors EVERY <button> at 16px!important
+// (an iOS zoom-on-focus guard), so an inline fontSize on a button never
+// reaches the screen. These tests pin the WHOLE render path — token →
+// style objects → the CSS release class that actually beats the floor →
+// mounted buttons wearing the class. A change that leaves any link of
+// that chain out is a visual no-op and must fail here.
+describe('small-action TYPE scale (#59 round 2)', () => {
+  it('pillStyle + rowActionBtn read the ONE type token (T.badge.actionFont = 12px); chips keep their locked 11px', () => {
+    expect(T.badge.actionFont).toBe('12px')
+    expect(pillStyle().fontSize).toBe(T.badge.actionFont)
+    expect(pillStyle({ dashed: true }).fontSize).toBe(T.badge.actionFont)
+    expect(rowActionBtn().fontSize).toBe(T.badge.actionFont)
+    expect(rowActionBtn(true).fontSize).toBe(T.badge.actionFont)
+    // chips are NOT actions — StatusChip's locked anatomy is untouched
+    expect(T.badge.font).toBe('11px')
+  })
+
+  it('globals.css: the 16px!important button floor exists AND .bee-small-action releases at the token value (lockstep)', () => {
+    const css = readFileSync('app/globals.css', 'utf8')
+    // the floor that made round 1 invisible — if it ever goes away, the
+    // release class becomes redundant and this pin should be revisited
+    expect(css).toMatch(/button[^{}]*\{[^}]*font-size:\s*16px\s*!important/)
+    // the release rule carries the SAME value as the token
+    const m = css.match(/\.bee-small-action\s*\{\s*font-size:\s*([\d.]+px)\s*!important/)
+    expect(m?.[1]).toBe(T.badge.actionFont)
+  })
+
+  it('every small-action <button> on the profile blocks wears the release class (mounted, not source-grepped)', async () => {
+    const noop = () => {}
+    const cases: Array<[string, React.ReactElement, number]> = [
+      // Opt out… / Snooze… / Pause
+      ['PreferencesBlock', <PreferencesBlock client={{ id: 'x', marketing_opt_out: false, snoozed_until: null, snoozed_note: null, paused: false }} openCount={0} onPatched={noop} setToast={noop} />, 3],
+      // pill ✗ + the "+ Tag" affordance
+      ['TagsRow', <TagsRow leadId="x" tags={[{ id: 't1', label: 'VIP' }]} options={[]} onChange={noop} setToast={noop} />, 2],
+      // + Add contact
+      ['ContactsBlock', <ContactsBlock leadId="x" contacts={[]} onChange={noop} setToast={noop} />, 1],
+      // the empty-state "Add a note about this client" affordance
+      ['PinnedBuzz', <PinnedBuzz notes={[]} />, 1],
+      // the Referred-by value/✎ wrapper + the × clear
+      ['ReferrerField', <ReferrerField lead={{ id: 'x', referred_by_kind: 'lead', referred_by_id: 'y', referred_by_name: 'Dot Nguyen', source: 'Referral' }} locationUuid="loc" />, 2],
+    ]
+    for (const [label, ui, minButtons] of cases) {
+      const { host, unmount } = await mount(ui)
+      const btns = [...host.querySelectorAll('button')]
+      expect(btns.length, label).toBeGreaterThanOrEqual(minButtons)
+      for (const b of btns) expect(b.className, `${label}: "${b.textContent}"`).toContain('bee-small-action')
+      await unmount()
+    }
+  })
+
+  it('Reopen composes the shared row-verb + release class — the bespoke rect that rendered at the 16px floor is gone', () => {
+    const cp = readFileSync('components/hive/ClientProfile.jsx', 'utf8')
+    const i = cp.indexOf('aria-label="Reopen engagement"')
+    expect(i).toBeGreaterThan(-1)
+    const src = cp.slice(i - 300, i + 300)
+    expect(src).toContain('bee-small-action')
+    expect(src).toContain('rowActionBtn()')
+    // referrer row: edit wrapper + × clear + add-affordance all released
+    const rf = readFileSync('components/hive/shared/ReferrerField.jsx', 'utf8')
+    expect((rf.match(/bee-small-action/g) || []).length).toBeGreaterThanOrEqual(3)
   })
 })
 

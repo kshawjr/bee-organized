@@ -70,7 +70,7 @@ import CardTabs from './shared/CardTabs'
 import PinnedBuzz from './shared/PinnedBuzz'
 import InitialsAvatar from './shared/InitialsAvatar'
 import NotesStream from './NotesStream'
-import { MicroLabel, CardMenu, undoToast, ActionRow, actionBtn } from './shared/cardKit'
+import { MicroLabel, CardMenu, undoToast, ActionRow, actionBtn, rowActionBtn } from './shared/cardKit'
 import useIsMobile from './shared/useIsMobile'
 import BeeLoader from './shared/BeeLoader'
 
@@ -445,8 +445,8 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
                 <p key={r.id} style={{ fontSize: '12px', color: T.ink.primary }}>{r.name}</p>
               ))}
               {hiddenLocal > 0 && (
-                <button type="button" onClick={() => setShowAllReferred(true)}
-                  style={{ border: 'none', background: 'transparent', padding: '2px 0 0', font: 'inherit', fontSize: '12px', cursor: 'pointer', color: T.ink.muted, borderBottom: T.border.underline }}>
+                <button type="button" className="bee-small-action" onClick={() => setShowAllReferred(true)}
+                  style={{ border: 'none', background: 'transparent', padding: '2px 0 0', font: 'inherit', fontSize: T.badge.actionFont, cursor: 'pointer', color: T.ink.muted, borderBottom: T.border.underline }}>
                   Show {hiddenLocal} more
                 </button>
               )}
@@ -580,10 +580,15 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
                     {displayTitle(e)}{Number(money) > 0 ? ` · ${fmtMoney(money)}` : ''} · {won ? 'won' : 'lost'} {monthYear(e.closed_at) || ''}{reason ? ` · ${reason}` : ''}
                   </span>
                   {/* Reopen (resurrect) — Closed LOST only; re-derives the
-                      open stage server-side. Closed Won is out of scope. */}
+                      open stage server-side. Closed Won is out of scope.
+                      Composes the shared row-verb (rowActionBtn + the
+                      bee-small-action release) so it sits on the same
+                      20px/12px scale as the Preferences verbs — it was a
+                      bespoke rect that rendered at the 16px button floor,
+                      the largest control on the card. */}
                   {!won && !readOnly && (
-                    <button onClick={(ev) => reopenEngagement(e.id, ev)} disabled={busy} aria-label="Reopen engagement"
-                      style={{ flexShrink: 0, border: T.border.control, background: T.surface.raised, borderRadius: T.radius.control, padding: '2px 8px', fontSize: '11px', fontWeight: 500, color: T.ink.secondary, cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+                    <button className="bee-small-action" onClick={(ev) => reopenEngagement(e.id, ev)} disabled={busy} aria-label="Reopen engagement"
+                      style={{ ...rowActionBtn(), marginLeft: 0, color: T.ink.secondary, cursor: busy ? 'default' : 'pointer' }}>
                       Reopen
                     </button>
                   )}
@@ -597,7 +602,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             )
           })}
           {closed.length > 2 && !showClosed && (
-            <button onClick={() => setShowClosed(true)} style={{ border: 'none', background: 'transparent', padding: '2px 12px', textAlign: 'left', fontSize: '11px', color: T.ink.muted, cursor: 'pointer', fontFamily: 'inherit' }}>
+            <button className="bee-small-action" onClick={() => setShowClosed(true)} style={{ border: 'none', background: 'transparent', padding: '2px 12px', textAlign: 'left', fontSize: T.badge.actionFont, color: T.ink.muted, cursor: 'pointer', fontFamily: 'inherit' }}>
               Show {closed.length - 2} more closed
             </button>
           )}

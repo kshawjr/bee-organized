@@ -161,13 +161,22 @@ export default function ReferrerField({
                   (ContactField / SourceField / AddressField). It opens the
                   inline ReferrerPicker (an EDIT, not a link), so no dashed
                   underline. */}
-              <button type="button" aria-label="Edit referrer" onClick={() => setPicking(v => !v)}
+              {/* bee-small-action on both: these are <button>s, so without
+                  the release class the globals.css 16px!important floor
+                  inflates the value line AND the × past the 12px meta rows
+                  they sit among (#59 round 2). */}
+              <button type="button" className="bee-small-action" aria-label="Edit referrer" onClick={() => setPicking(v => !v)}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', minWidth: 0, border: 'none', background: 'transparent', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer' }}>
                 <span style={metaValueStyle}><span style={metaLabelStyle}>Referred by </span>{referrerName}</span>
                 <EditPencil />
               </button>
-              <button type="button" aria-label="Clear referrer" onClick={clear}
-                style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', color: T.ink.quiet, fontSize: '13px', lineHeight: 1, flexShrink: 0 }}>
+              {/* × is CLEAR (null out the referrer) — a distinct destructive
+                  action the pencil can't reach: the picker only replaces,
+                  it has no "no referrer" option, and the clear-path
+                  asymmetry above depends on this door. It stays, at the
+                  same 12px scale as the sibling pencil. */}
+              <button type="button" className="bee-small-action" aria-label="Clear referrer" onClick={clear}
+                style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', color: T.ink.quiet, fontSize: T.badge.actionFont, lineHeight: 1, flexShrink: 0 }}>
                 ×
               </button>
             </>
@@ -176,7 +185,7 @@ export default function ReferrerField({
       ) : readOnly ? null : (
         <p style={metaRowStyle({ tone: 'faint' })} data-meta-row="referrer">
           <span style={{ ...metaIconStyle, color: 'inherit' }}><IconUserCheck size={META_ICON} /></span>
-          <button type="button" aria-label="Add referrer" onClick={() => setPicking(v => !v)}
+          <button type="button" className="bee-small-action" aria-label="Add referrer" onClick={() => setPicking(v => !v)}
             style={{ ...metaAddStyle, border: 'none', background: 'transparent', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer' }}>
             add referrer
           </button>

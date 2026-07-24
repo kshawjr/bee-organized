@@ -52,8 +52,8 @@ function ContactForm({ initial = null, busy, err, onSave, onCancel, onDelete = n
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
         <InlineEditControls busy={busy} onSave={() => onSave(draft)} onCancel={onCancel} />
         {onDelete && !readOnly && (
-          <button disabled={busy} onClick={onDelete}
-            style={{ marginLeft: 'auto', border: 'none', background: 'transparent', fontSize: '11px', color: T.state.danger.fg, cursor: 'pointer', fontFamily: 'inherit', padding: '2px 4px' }}>
+          <button className="bee-small-action" disabled={busy} onClick={onDelete}
+            style={{ marginLeft: 'auto', border: 'none', background: 'transparent', fontSize: T.badge.actionFont, color: T.state.danger.fg, cursor: 'pointer', fontFamily: 'inherit', padding: '2px 4px' }}>
             Remove contact
           </button>
         )}
@@ -143,7 +143,7 @@ export default function ContactsBlock({ leadId, contacts = [], onChange = () => 
         {editingId === 'new' && !readOnly ? (
           <ContactForm busy={busy} err={err} onSave={(d) => save(d)} onCancel={close} />
         ) : readOnly ? null : (
-          <button onClick={() => { setErr(null); setEditingId('new') }}
+          <button className="bee-small-action" onClick={() => { setErr(null); setEditingId('new') }}
             style={{ ...pillStyle({ dashed: true }), alignSelf: 'flex-start', cursor: 'pointer' }}>
             + Add contact
           </button>

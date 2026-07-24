@@ -81,6 +81,15 @@ select{-webkit-appearance:none}
 .bee-inline-cancel:not(:disabled):hover { color: #1a1a18 !important; border-color: rgba(0, 0, 0, 0.3) !important }
 @keyframes bee-inline-spin { to { transform: rotate(360deg) } }
 
+/* bee-small-action — the small-action TYPE release (#59 round 2). The
+ * 16px!important button floor above is an iOS zoom-on-focus guard for
+ * text fields; the 20px pills / row-verbs / add-affordances on the
+ * record cards don't zoom, but the floor was silently inflating their
+ * labels to 16px (inline font-size loses to !important). This value is
+ * lockstep with T.badge.actionFont in components/hive/shared/tokens.js
+ * — the beta-hive-tokens small-action-type test fails if they drift. */
+.bee-small-action { font-size: 12px !important }
+
 /* ── BeeLoader (components/hive/shared/BeeLoader.jsx) ───────────────────────
    These live HERE rather than in shared/motion.jsx's effect-injected block for
    one reason: app/loading.tsx is streamed as HTML before any JavaScript has
