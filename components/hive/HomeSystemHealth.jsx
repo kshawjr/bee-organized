@@ -17,6 +17,12 @@
 // line + open feedback, then a link to the deep view. No window toggle (the
 // compact view is always "last 24 hours"), no per-panel deep-dives.
 //
+// DASHBOARD LAYOUT (presentation only): a one-line verdict banner, four status
+// tiles across, then "Needs a look" and "Last 24 hours" side by side at half
+// width each, and a full-width Feedback panel split internally into two
+// columns. Collapses to a single column below the app's mobile breakpoint
+// (useIsMobile → 768px). No data, fetch, or verdict logic changes here.
+//
 // TOKENS ONLY, like SystemHealthScreen: ui/tokens + hive/shared/tokens, NO
 // color literal of its own (the sweep in lib/beta-home-system-health.test.tsx
 // enforces it). HONESTY RULE holds: unknowns render as explicit gaps, never
@@ -28,6 +34,7 @@ import { T } from '@/components/hive/shared/tokens'
 import { SECTION_LABEL, SECTION_COUNT, GREEN_FILL } from '@/components/ui/tokens'
 import StatusChip from '@/components/ui/StatusChip'
 import BeeLoader from '@/components/hive/shared/BeeLoader'
+import useIsMobile from '@/components/hive/shared/useIsMobile'
 
 const fmtAgo = (iso) => {
   if (!iso) return '—'
@@ -59,14 +66,14 @@ function Tile({ label, tone = 'none', state, sub }) {
   return (
     <div style={{
       background: T.surface.raised, border: T.border.card, borderRadius: T.radius.inset,
-      boxShadow: T.shadow.card, padding: '10px 12px', minWidth: 0,
+      boxShadow: T.shadow.card, padding: '9px 11px', minWidth: 0,
     }}>
       <div style={{ ...SECTION_LABEL, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '7px', margin: '6px 0 2px' }}>
-        <span aria-hidden="true" style={{ width: '9px', height: '9px', borderRadius: T.radius.round, background: fg, flexShrink: 0 }} />
-        <span style={{ fontSize: '15px', fontWeight: 600, color: fg, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{state}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: '5px 0 1px' }}>
+        <span aria-hidden="true" style={{ width: '8px', height: '8px', borderRadius: T.radius.round, background: fg, flexShrink: 0 }} />
+        <span style={{ fontSize: '14px', fontWeight: 600, color: fg, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{state}</span>
       </div>
-      <div style={{ fontSize: '12px', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={sub || ''}>{sub || ' '}</div>
+      <div style={{ fontSize: '11px', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={sub || ''}>{sub || ' '}</div>
     </div>
   )
 }
@@ -75,7 +82,7 @@ function Card({ children }) {
   return (
     <div style={{
       background: T.surface.raised, border: T.border.card, borderRadius: T.radius.inset,
-      boxShadow: T.shadow.card, padding: '13px 15px',
+      boxShadow: T.shadow.card, padding: '11px 13px',
     }}>
       {children}
     </div>
@@ -94,11 +101,11 @@ function SectionLabel({ children, count, right }) {
 
 function Stat({ value, label }) {
   return (
-    <div style={{ background: T.surface.sunken, borderRadius: T.radius.control, padding: '9px 6px 8px', textAlign: 'center', minWidth: 0 }}>
-      <div style={{ fontSize: '19px', fontWeight: 650, color: T.ink.primary, lineHeight: 1.15, fontVariantNumeric: 'tabular-nums' }}>
+    <div style={{ background: T.surface.sunken, borderRadius: T.radius.control, padding: '7px 5px 6px', textAlign: 'center', minWidth: 0 }}>
+      <div style={{ fontSize: '18px', fontWeight: 650, color: T.ink.primary, lineHeight: 1.15, fontVariantNumeric: 'tabular-nums' }}>
         {value == null ? '—' : value}
       </div>
-      <div style={{ fontSize: '11px', color: T.ink.muted }}>{label}</div>
+      <div style={{ fontSize: '11px', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
     </div>
   )
 }
@@ -113,6 +120,9 @@ export default function HomeSystemHealth({ onOpenFull = null }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  // Two-column dashboard layout collapses to one column below the app's
+  // standard mobile breakpoint (useIsMobile → 768px). Presentation only.
+  const isMobile = useIsMobile()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -213,98 +223,116 @@ export default function HomeSystemHealth({ onOpenFull = null }) {
   const quietCount = look.filter(item => item.key === 'quiet').length
   const a = data.activity
   const fbItems = (data.feedback?.newest) || []
+  const fbShown = fbItems.slice(0, 3)
+  // Overflow beyond the three shown cells; folds into the fourth cell so three
+  // items take two rows, not three. open is the tenant-wide total (newest is
+  // capped at 3 by the API), so the remainder is open − shown.
+  const fbMore = Math.max(0, (typeof data.feedback?.open === 'number' ? data.feedback.open : fbShown.length) - fbShown.length)
   const openFull = onOpenFull || (() => {})
 
+  const twoCol = { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr' }
+
   return (
-    <div style={{ display: 'grid', gap: '12px' }}>
-      {/* ── verdict banner (hero) + digest heartbeat subline ── */}
+    <div style={{ display: 'grid', gap: '10px' }}>
+      {/* ── verdict banner — ONE line: dot + title + · reason, digest pushed right ── */}
       <div style={{
-        borderRadius: T.radius.control, padding: '12px 15px',
-        display: 'flex', gap: '11px', alignItems: 'baseline', flexWrap: 'wrap',
+        borderRadius: T.radius.control, padding: '9px 13px',
+        display: 'flex', gap: '8px', alignItems: 'center',
         background: bannerFamily.bg, color: bannerFamily.text,
       }}>
-        <span aria-hidden="true" style={{ width: '11px', height: '11px', borderRadius: T.radius.round, background: bannerDot, flexShrink: 0, alignSelf: 'center' }} />
-        <span style={{ fontSize: '15px', fontWeight: 600, flex: '1 1 auto', minWidth: '180px' }}>
+        <span aria-hidden="true" style={{ width: '10px', height: '10px', borderRadius: T.radius.round, background: bannerDot, flexShrink: 0 }} />
+        <span style={{ fontSize: '14px', fontWeight: 600, flexShrink: 0 }}>
           {v.level === 'green' ? 'System healthy' : v.level === 'red' ? 'Needs attention' : 'A few things to look at'}
         </span>
-        <span style={{ fontSize: '12px', color: digestLine.warn ? T.state.warning.fg : bannerFamily.text, opacity: digestLine.warn ? 1 : 0.85 }}>
+        <span style={{ fontSize: '13px', fontWeight: 500, opacity: 0.9, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          · {bannerCopy}
+        </span>
+        <span style={{ fontSize: '12px', flexShrink: 0, whiteSpace: 'nowrap', color: digestLine.warn ? T.state.warning.fg : bannerFamily.text, opacity: digestLine.warn ? 1 : 0.85 }}>
           {digestLine.text}
         </span>
-        <span style={{ flexBasis: '100%', fontSize: '13px', fontWeight: 500, opacity: 0.95 }}>{bannerCopy}</span>
       </div>
 
-      {/* ── status tiles ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '9px' }}>
+      {/* ── status tiles — stay FOUR ACROSS (four systems, four states) ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '8px' }}>
         <Tile label="Jobber" tone={jobberTile.tone} state={jobberTile.state} sub={jobberTile.sub} />
         <Tile label="Webhooks · 24h" tone={webhookTile.tone} state={webhookTile.state} sub={webhookTile.sub} />
         <Tile label="Imports" tone={importTile.tone} state={importTile.state} sub={importTile.sub} />
         <Tile label="Emails · 24h" tone={emailTile.tone} state={emailTile.state} sub={emailTile.sub} />
       </div>
 
-      {/* ── needs a look — self-clearing tier, 3 rows max, each taps through ── */}
-      <Card>
-        <SectionLabel count={look.length}>Needs a look</SectionLabel>
-        {look.length === 0 ? (
-          <p style={{ fontSize: '13px', color: T.ink.quiet, margin: '10px 0 2px' }}>Nothing needs a look.</p>
-        ) : (
-          <div style={{ display: 'grid', gap: '6px', marginTop: '10px' }}>
-            {look.slice(0, 3).map((item, i) => (
-              <button
-                key={`${item.key}-${i}`}
-                onClick={openFull}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '10px', textAlign: 'left', width: '100%',
-                  background: T.family.amber.bg, color: T.family.amber.text, border: 'none', cursor: 'pointer',
-                  borderRadius: T.radius.control, padding: '8px 12px', fontFamily: 'inherit',
-                  fontSize: '13px', fontWeight: 500,
-                }}
-              >
-                <span style={{ flex: 1, minWidth: 0 }}>{item.label}</span>
-                <span aria-hidden="true" style={{ opacity: 0.7 }}>›</span>
-              </button>
-            ))}
-            {look.length > 3 && (
-              <button style={{ ...linkStyle, justifySelf: 'start', marginTop: '2px' }} onClick={openFull}>
-                {look.length - 3} more →
-              </button>
-            )}
-          </div>
-        )}
-      </Card>
-
-      {/* ── last 24 hours — activity counts + the quiet-location absence signal ── */}
-      <Card>
-        <SectionLabel>Last 24 hours</SectionLabel>
-        {a ? (
-          <>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))', gap: '8px', marginTop: '12px' }}>
-              <Stat value={a.leadsIn} label="leads in" />
-              <Stat value={a.requests} label="requests" />
-              <Stat value={a.quotesSent} label="quotes sent" />
-              <Stat value={a.jobsBooked} label="jobs booked" />
-              <Stat value={a.invoicesPaid} label="invoices paid" />
-              <Stat value={a.wonCount != null ? fmtMoney(a.wonValue) : null} label={`won${a.wonCount ? ` · ${a.wonCount}` : ''}`} />
+      {/* ── needs a look + last 24 hours, side by side (half width each) ── */}
+      <div style={{ ...twoCol, gap: '10px', alignItems: 'start' }}>
+        {/* needs a look — self-clearing tier, 3 rows max, each taps through */}
+        <Card>
+          <SectionLabel count={look.length}>Needs a look</SectionLabel>
+          {look.length === 0 ? (
+            <p style={{ fontSize: '13px', color: T.ink.quiet, margin: '9px 0 1px' }}>Nothing needs a look.</p>
+          ) : (
+            <div style={{ display: 'grid', gap: '5px', marginTop: '9px' }}>
+              {look.slice(0, 3).map((item, i) => (
+                <button
+                  key={`${item.key}-${i}`}
+                  onClick={openFull}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '8px', textAlign: 'left', width: '100%',
+                    background: T.family.amber.bg, color: T.family.amber.text, border: 'none', cursor: 'pointer',
+                    borderRadius: T.radius.control, padding: '7px 10px', fontFamily: 'inherit',
+                    fontSize: '12px', fontWeight: 500,
+                  }}
+                >
+                  <span style={{ flex: 1, minWidth: 0 }}>{item.label}</span>
+                  <span aria-hidden="true" style={{ opacity: 0.7 }}>›</span>
+                </button>
+              ))}
+              {look.length > 3 && (
+                <button style={{ ...linkStyle, justifySelf: 'start', marginTop: '1px' }} onClick={openFull}>
+                  {look.length - 3} more →
+                </button>
+              )}
             </div>
-            <p style={{ fontSize: '12px', color: quietCount > 0 ? T.state.warning.fg : T.ink.quiet, marginTop: '10px' }}>
-              {quietCount > 0
-                ? `${quietCount} location${quietCount === 1 ? '' : 's'} quiet — no new leads in 7 days`
-                : 'Every active location saw a lead in the last 7 days.'}
-            </p>
-          </>
-        ) : (
-          <p style={{ fontSize: '13px', color: T.ink.quiet, margin: '10px 0 2px' }}>Couldn’t read activity.</p>
-        )}
-      </Card>
+          )}
+        </Card>
 
-      {/* ── feedback — open items, surfaced from the same payload ── */}
+        {/* last 24 hours — six counts in a 3×2 grid; quiet line at the bottom */}
+        <Card>
+          <SectionLabel>Last 24 hours</SectionLabel>
+          {a ? (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', marginTop: '9px' }}>
+                <Stat value={a.leadsIn} label="leads in" />
+                <Stat value={a.requests} label="requests" />
+                <Stat value={a.quotesSent} label="quotes sent" />
+                <Stat value={a.jobsBooked} label="jobs booked" />
+                <Stat value={a.invoicesPaid} label="invoices paid" />
+                <Stat value={a.wonCount != null ? fmtMoney(a.wonValue) : null} label={`won${a.wonCount ? ` · ${a.wonCount}` : ''}`} />
+              </div>
+              <p style={{ fontSize: '12px', color: quietCount > 0 ? T.state.warning.fg : T.ink.quiet, marginTop: '9px', paddingTop: '8px', borderTop: T.border.divider }}>
+                {quietCount > 0
+                  ? `${quietCount} location${quietCount === 1 ? '' : 's'} quiet — no new leads in 7 days`
+                  : 'Every active location saw a lead in the last 7 days.'}
+              </p>
+            </>
+          ) : (
+            <p style={{ fontSize: '13px', color: T.ink.quiet, margin: '9px 0 1px' }}>Couldn’t read activity.</p>
+          )}
+        </Card>
+      </div>
+
+      {/* ── feedback — full width, split internally into two columns so three
+          items take two rows; "N more →" rides the fourth cell ── */}
       <Card>
-        <SectionLabel count={data.feedback?.open ?? null}>Feedback</SectionLabel>
-        {fbItems.length === 0 ? (
-          <p style={{ fontSize: '13px', color: T.ink.quiet, margin: '10px 0 2px' }}>No open reports.</p>
+        <SectionLabel
+          count={data.feedback?.open ?? null}
+          right={fbShown.length > 0 ? <button style={linkStyle} onClick={openFull}>View all →</button> : null}
+        >
+          Feedback
+        </SectionLabel>
+        {fbShown.length === 0 ? (
+          <p style={{ fontSize: '13px', color: T.ink.quiet, margin: '9px 0 1px' }}>No open reports.</p>
         ) : (
-          <div style={{ display: 'grid', gap: '2px', marginTop: '8px' }}>
-            {fbItems.slice(0, 3).map((item) => (
-              <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '7px 0', borderTop: T.border.divider, fontSize: '13px', color: T.ink.primary }}>
+          <div style={{ ...twoCol, gap: '6px 16px', marginTop: '9px' }}>
+            {fbShown.map((item) => (
+              <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, fontSize: '13px', color: T.ink.primary }}>
                 <StatusChip label={item.type === 'bug' ? 'bug' : 'feature'} styleKey={item.type === 'bug' ? 'red' : 'blue'} />
                 <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</span>
                 <span style={{ ...SECTION_COUNT, whiteSpace: 'nowrap' }}>
@@ -312,6 +340,11 @@ export default function HomeSystemHealth({ onOpenFull = null }) {
                 </span>
               </div>
             ))}
+            {fbMore > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <button style={linkStyle} onClick={openFull}>{fbMore} more →</button>
+              </div>
+            )}
           </div>
         )}
       </Card>

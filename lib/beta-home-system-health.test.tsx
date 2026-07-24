@@ -24,7 +24,7 @@
 //      color literal of its own — this file sweeps its source.
 //
 //   D) THE HONESTY RULE. Unknowns render as explicit gaps, never fake zeros.
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -245,6 +245,91 @@ describe('HomeSystemHealth panel', () => {
     expect(link).toBeTruthy()
     await act(async () => { link!.dispatchEvent(new Event('click', { bubbles: true })) })
     expect(onOpenFull).toHaveBeenCalled()
+    await unmount()
+  })
+})
+
+// ── E) two-column dashboard layout (presentation) ──────────────────
+// useIsMobile seeds from __BEE_TEST_WIDTH__ for the initial render, then its
+// mount effect reads window.innerWidth — so a mount test must set BOTH to a
+// consistent width. Breakpoint is the app-standard 768px.
+const setViewport = (w: number) => {
+  ;(globalThis as any).__BEE_TEST_WIDTH__ = w
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: w })
+}
+const gridCols = (host: HTMLElement) =>
+  Array.from(host.querySelectorAll<HTMLElement>('div')).map(d => d.style.gridTemplateColumns)
+
+describe('two-column dashboard layout', () => {
+  // A payload with both a look-list AND feedback so both half/split grids render.
+  const rich = () => health({
+    verdict: { level: 'amber', problems: [], cautions: [], attention: 2 },
+    needsALook: [
+      { key: 'unrouted', label: '4 unrouted leads waiting at Corporate' },
+      { key: 'rate', label: 'Boise — emails held: no rate set' },
+    ],
+    feedback: { open: 5, newest: [
+      { id: 'f1', type: 'bug', title: 'CSV export cuts off', createdAt: '2026-07-24T11:00:00.000Z', locationName: 'Portland' },
+      { id: 'f2', type: 'feature', title: 'Dark mode please', createdAt: '2026-07-24T09:00:00.000Z', locationName: 'Boise' },
+      { id: 'f3', type: 'bug', title: 'Timezone off by one', createdAt: '2026-07-24T08:00:00.000Z', locationName: null },
+    ] },
+  })
+
+  afterEach(() => { delete (globalThis as any).__BEE_TEST_WIDTH__; setViewport(1024) })
+
+  it('renders two columns on desktop (≥768) — half-width row + split feedback', async () => {
+    setViewport(1200)
+    stubFetch(rich())
+    const { host, unmount } = await mount(<HomeSystemHealth />)
+    // The "needs a look / last 24h" row AND the internal feedback grid are both
+    // '1fr 1fr' on desktop → at least two two-column grids present.
+    expect(gridCols(host).filter(c => c === '1fr 1fr').length).toBeGreaterThanOrEqual(2)
+    await unmount()
+  })
+
+  it('collapses to a single column on mobile (<768)', async () => {
+    setViewport(480)
+    stubFetch(rich())
+    const { host, unmount } = await mount(<HomeSystemHealth />)
+    const cols = gridCols(host)
+    expect(cols.filter(c => c === '1fr 1fr').length).toBe(0)     // none stay two-up
+    expect(cols.filter(c => c === '1fr').length).toBeGreaterThanOrEqual(2)  // row + feedback collapsed
+    await unmount()
+  })
+
+  it('the verdict banner is one row — no full-width-wrap child forcing a second line', async () => {
+    setViewport(1200)
+    stubFetch(rich())
+    const { host, unmount } = await mount(<HomeSystemHealth />)
+    // The old three-line banner used flexBasis:'100%' to break the reason onto
+    // its own row; the one-line banner must not.
+    const wraps = Array.from(host.querySelectorAll<HTMLElement>('*')).some(e => e.style.flexBasis === '100%')
+    expect(wraps).toBe(false)
+    // Title, reason, and digest heartbeat all still present (same content).
+    expect(host.textContent).toMatch(/A few things to look at/i)
+    expect(host.textContent).toMatch(/2 things need a look/i)
+    expect(host.textContent).toMatch(/Digest ran/i)
+    await unmount()
+  })
+
+  it('the status tiles stay four across (their own rhythm, not the two-column grid)', async () => {
+    setViewport(1200)
+    stubFetch(rich())
+    const { host, unmount } = await mount(<HomeSystemHealth />)
+    // The tile grid keeps its auto-fit four-up track — it is NOT collapsed into
+    // the 1fr 1fr dashboard columns.
+    expect(gridCols(host).some(c => /minmax\(150px/.test(c))).toBe(true)
+    await unmount()
+  })
+
+  it('feedback splits into two columns with the overflow link in a cell, and "View all" in the header', async () => {
+    setViewport(1200)
+    stubFetch(rich())   // open:5, 3 shown → 2 more
+    const { host, unmount } = await mount(<HomeSystemHealth />)
+    expect(host.textContent).toContain('CSV export cuts off')
+    expect(host.textContent).toContain('2 more →')     // overflow rides the fourth cell
+    const viewAll = Array.from(host.querySelectorAll('button')).find(b => /View all →/i.test(b.textContent || ''))
+    expect(viewAll).toBeTruthy()
     await unmount()
   })
 })
