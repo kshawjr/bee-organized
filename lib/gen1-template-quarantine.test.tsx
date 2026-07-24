@@ -116,7 +116,7 @@ describe('onboarding preview reads the DB masters', () => {
 
   it('the ▼ Emails preview lists MASTER subjects, and 👁 Preview shows the master body', async () => {
     await mount()
-    await clickText("Let's pick my paths →")
+    await clickText('Start with 📦 Moving →')
     await clickText('▼ Emails')   // first path card
 
     // Step rows are labelled with the master's own subject lines.
@@ -130,7 +130,7 @@ describe('onboarding preview reads the DB masters', () => {
 
   it('never renders Gen 1 prototype copy', async () => {
     await mount()
-    await clickText("Let's pick my paths →")
+    await clickText('Start with 📦 Moving →')
     await clickText('▼ Emails')
     for (const s of GEN1_STRINGS) {
       expect(container.textContent, `Gen 1 string "${s}" leaked into onboarding`).not.toContain(s)
@@ -141,9 +141,9 @@ describe('onboarding preview reads the DB masters', () => {
     routes = {}
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })))
     await mount()
-    await clickText("Let's pick my paths →")
+    await clickText('Start with 📦 Moving →')
     await clickText('▼ Emails')
-    expect(container.textContent).toContain("Couldn't load this path's emails")
+    expect(container.textContent).toContain("Couldn't load these emails")
     for (const s of GEN1_STRINGS) {
       expect(container.textContent).not.toContain(s)
     }
@@ -178,7 +178,7 @@ describe('onboarding intro describes the real cadence', () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
-describe('Settings → Paths customization clones the master', () => {
+describe('Settings → Communications customization clones the master', () => {
   const selectedLoc = {
     id: LOC_UUID, name: 'Testville', address: '1 Main', phone: '', bookingLink: '',
     reviewsLink: '', ratePerHour: '', serviceRadius: '', timezone: 'America/Chicago',
@@ -192,8 +192,8 @@ describe('Settings → Paths customization clones the master', () => {
       root.render(<SettingsScreen selectedLoc={selectedLoc} initialSection="paths" />)
     })
     await act(async () => {})
-    await clickText('Moving')          // open the move sequence
-    await clickText('Path D')          // expand the moving-d row
+    await clickText('Moving projects')   // open the move sequence
+    await clickText('Booking link · rate on the call')  // expand the moving-d row
   }
 
   it('a first-time save CLONES from the master — never POSTs a bare path row', async () => {
@@ -202,7 +202,7 @@ describe('Settings → Paths customization clones the master', () => {
       [`POST /api/locations/${LOC_UUID}/drip-paths/clone`]: { path: { id: 'new-copy-id', name: 'Move d', is_default: false } },
     }
     await mountPaths()
-    await clickText('Save path to DB')
+    await clickText('Save to my location')
 
     const clone = calls.find(c => c.method === 'POST' && c.url.includes('/drip-paths/clone'))
     expect(clone, 'the clone call').toBeTruthy()
@@ -221,7 +221,7 @@ describe('Settings → Paths customization clones the master', () => {
       [`POST /api/locations/${LOC_UUID}/drip-paths/clone`]: { path: { id: 'new-copy-id', name: 'Move d', is_default: false } },
     }
     await mountPaths()
-    await clickText('Save path to DB')
+    await clickText('Save to my location')
 
     const patch = calls.find(c => c.method === 'PATCH' && c.url.includes('/steps'))
     expect(patch, 'the steps PATCH').toBeTruthy()

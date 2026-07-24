@@ -84,7 +84,7 @@ export async function POST(
 
     if (error) {
       console.error(`[/api/locations/${locId}/paths POST] error:`, error.message)
-      return NextResponse.json({ error: 'Failed to save paths' }, { status: 500 })
+      return NextResponse.json({ error: 'Failed to save your new lead emails' }, { status: 500 })
     }
     return NextResponse.json({ ok: true, location: data })
   } catch (err: any) {

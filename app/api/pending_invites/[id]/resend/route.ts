@@ -89,7 +89,7 @@ function buildResendEmail(args: {
             <ol style="margin:0 0 18px;padding-left:22px;font-size:15px;line-height:1.6;color:#1a2e2b;">
               <li>Set up your business details (name, phone, address)</li>
               <li>Connect your Jobber account to sync existing clients</li>
-              <li>Configure drip paths for nurturing new leads</li>
+              <li>Set up the emails new leads receive automatically</li>
               <li>Set your email and notification preferences</li>
               <li>Invite any team members</li>
             </ol>
@@ -147,7 +147,7 @@ function buildResendEmail(args: {
         'Once you accept the invitation, we\'ll walk you through 5 quick steps:',
         '  1. Set up your business details (name, phone, address)',
         '  2. Connect your Jobber account to sync existing clients',
-        '  3. Configure drip paths for nurturing new leads',
+        '  3. Set up the emails new leads receive automatically',
         '  4. Set your email and notification preferences',
         '  5. Invite any team members',
         '',

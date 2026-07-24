@@ -207,9 +207,9 @@ const TOUCH_CONFIG = {
 }
 
 const PATHS = [
-  { id:'email-nurture',  name:'New Client Path · Email Nurture',  icon:'📧', firstTouch:'email' },
-  { id:'quick-connect',  name:'New Client Path · Quick Connect',  icon:'⚡', firstTouch:'sms' },
-  { id:'personal-touch', name:'New Client Path · Personal Touch', icon:'🤝', firstTouch:'call_prompt' },
+  { id:'email-nurture',  name:'New lead emails · Email Nurture',  icon:'📧', firstTouch:'email' },
+  { id:'quick-connect',  name:'New lead emails · Quick Connect',  icon:'⚡', firstTouch:'sms' },
+  { id:'personal-touch', name:'New lead emails · Personal Touch', icon:'🤝', firstTouch:'call_prompt' },
 ]
 
 const ADDRESS_TYPES = ['Service','Billing','Moving From','Moving To','Storage Unit','Mailing','Other']
@@ -1115,7 +1115,7 @@ let _partnerTiers = null
 function getPartnerTiers() { return _partnerTiers || PARTNER_TIERS }
 function setAdminPartnerTiers(list) { _partnerTiers = list }
 
-// Location default drip path - set by Settings → Paths tab.
+// Location default drip path - set by Settings → Communications tab.
 // Defaults are null until the owner picks during onboarding (the
 // 8 master paths are the choices); see migrations/cleanup_legacy_drip_paths.sql.
 let _defaultPathId = null
@@ -1379,14 +1379,14 @@ function ProcessLeadSheet({ person, onSave, onClose }) {
         {cur?.key==='path'&&(
           <div style={{ display:'grid', gap:'10px' }}>
             <div>
-              <h3 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'2px' }}>Which New Client Drip?</h3>
-              <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{project?`${project} → ${defCat==='move'?'Move':'Organizing'} paths`:'Organizing paths'}</p>
+              <h3 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'2px' }}>Which new lead emails?</h3>
+              <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{project?`${project} → ${defCat==='move'?'Moving':'Organizing'} projects`:'Organizing projects'}</p>
             </div>
             {/* No drip option */}
             <div onClick={()=>setPathId('none')} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'11px 12px', background:pathId==='none'?'rgba(239,68,68,0.05)':'white', border:`1.5px solid ${pathId==='none'?'rgba(239,68,68,0.3)':'rgba(0,0,0,0.08)'}`, borderRadius:'9px', cursor:'pointer' }}>
               <span style={{ fontSize:'18px' }}>🚫</span>
               <div style={{ flex:1 }}>
-                <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>No New Client Drip</p>
+                <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>No emails</p>
                 <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Create without automated outreach</p>
               </div>
               {pathId==='none'&&<span style={{ color:'#ef4444' }}>✓</span>}
@@ -1405,7 +1405,7 @@ function ProcessLeadSheet({ person, onSave, onClose }) {
               </div>
             )}
             <button onClick={()=>setShowMorePaths(s=>!s)} style={{ padding:'8px', background:'none', border:'1px dashed rgba(0,0,0,0.1)', borderRadius:'9px', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', color:'#8a9e9a' }}>
-              {showMorePaths?'▲ Hide':'▼ Other paths'}
+              {showMorePaths?'▲ Hide':'▼ Other options'}
             </button>
             {showMorePaths&&others.map(p=>(
               <div key={p.id} onClick={()=>setPathId(p.id)} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 12px', background:pathId===p.id?'rgba(168,201,196,0.12)':'white', border:`1.5px solid ${pathId===p.id?'#a8c9c4':'rgba(0,0,0,0.08)'}`, borderRadius:'9px', cursor:'pointer' }}>
@@ -1432,7 +1432,7 @@ function ProcessLeadSheet({ person, onSave, onClose }) {
               {[
                 { label:'Client', val:person.name },
                 { label:'Project', val:project||person.project||'—' },
-                { label:'Drip path', val:(pathId==='none'?'No drip emails':(()=>{ const id=pathId||defPathId; return DRIP_PATHS_CONFIG.find(p=>p.id===id)?.name||id })()) },
+                { label:'New lead emails', val:(pathId==='none'?'None — don\'t email them':(()=>{ const id=pathId||defPathId; return DRIP_PATHS_CONFIG.find(p=>p.id===id)?.name||id })()) },
                 { label:'New stage', val:'Attempting to Contact' },
               ].map(r=>(
                 <div key={r.label} style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
@@ -2944,7 +2944,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
             <textarea style={{...inp, height:'52px', resize:'none', width:'100%'}} placeholder='Met at home show, interested in kitchen…' value={form.desc} onChange={e=>set('desc',e.target.value)} /></div>
           <label style={{ display:'flex', alignItems:'center', gap:'8px', padding:'9px 12px', background:'rgba(168,201,196,0.07)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'9px', cursor:'pointer', fontSize:'13px', color:'#1a2e2b' }}>
             <input type='checkbox' checked={startDrip} onChange={e=>setStartDrip(e.target.checked)} style={{ width:'16px', height:'16px', accentColor:'#1a2e2b' }} />
-            <span>Start drip path automatically</span>
+            <span>Send new lead emails automatically</span>
           </label>
           {errorMsg&&(
             <div style={{ padding:'8px 11px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'9px' }}>
@@ -3099,7 +3099,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
           </div>
           <label style={{ display:'flex', alignItems:'center', gap:'8px', padding:'9px 12px', background:'rgba(168,201,196,0.07)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'9px', cursor:'pointer', fontSize:'13px', color:'#1a2e2b' }}>
             <input type='checkbox' checked={startDrip} onChange={e=>setStartDrip(e.target.checked)} style={{ width:'16px', height:'16px', accentColor:'#1a2e2b' }} />
-            <span>Start drip path automatically</span>
+            <span>Send new lead emails automatically</span>
           </label>
           {errorMsg&&(
             <div style={{ padding:'8px 11px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'9px' }}>
@@ -3199,7 +3199,7 @@ function NewLeadModal({ onClose, onCreate, onOpenRecord, existingPeople=[], curr
               server-side so no drip auto-fires. */}
           <label style={{ display:'flex', alignItems:'center', gap:'8px', padding:'9px 12px', background:'rgba(168,201,196,0.07)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'9px', cursor:'pointer', fontSize:'13px', color:'#1a2e2b' }}>
             <input type='checkbox' checked={startDrip} onChange={e=>setStartDrip(e.target.checked)} style={{ width:'16px', height:'16px', accentColor:'#1a2e2b' }} />
-            <span>Start drip path automatically</span>
+            <span>Send new lead emails automatically</span>
           </label>
           {errorMsg&&(
             <div style={{ padding:'8px 11px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'9px' }}>
@@ -8255,15 +8255,15 @@ function PersonPanel({
                             const p = DRIP_PATHS_CONFIG.find((d) => d.id === person.path);
                             if (p) return p.name;
                             const m = {
-                              "email-nurture": "General · New Client Path A",
-                              "quick-connect": "General · New Client Path C",
-                              "personal-touch": "General · New Client Path D",
-                              "general-a": "General · New Client Path A",
-                              "general-b": "General · New Client Path B",
-                              "move-a": "Move · New Client Path A",
-                              "move-b": "Move · New Client Path B",
+                              "email-nurture": "Organizing · Reply to schedule, rate included",
+                              "quick-connect": "Organizing · Reply to schedule, rate on the call",
+                              "personal-touch": "Organizing · Booking link, rate on the call",
+                              "general-a": "Organizing · Reply to schedule, rate included",
+                              "general-b": "Organizing · Booking link, rate included",
+                              "move-a": "Moving · Reply to schedule, rate included",
+                              "move-b": "Moving · Booking link, rate included",
                             };
-                            return m[person.path] || person.path || "No path assigned";
+                            return m[person.path] || person.path || "No emails assigned";
                           })(),
                         ),
                         React.createElement(
@@ -10810,7 +10810,7 @@ function WelcomeStep({ ownerName, ownerEmail, topOffset, onContinue }) {
     { label:'Location' },
     { label:'Jobber' },
     { label:'Import' },
-    { label:'Drip Paths' },
+    { label:'New Lead Emails' },
     { label:'Team' },
   ]
   const [isDesktop, setIsDesktop] = useState(false)
@@ -10992,7 +10992,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   const [savingStep, setSavingStep] = useState(null)
   const [stepError, setStepError]   = useState({})
 
-  const LAUNCH_STEPS = ['Saving your profile…', 'Setting up your paths…', 'Configuring your location…', 'Launching your Hub…']
+  const LAUNCH_STEPS = ['Saving your profile…', 'Setting up your new lead emails…', 'Configuring your location…', 'Launching your Hub…']
 
   // Pass 2 — async per-step writes. Each follows the same pattern:
   //   1. Guard against double-save (savingStep already set)
@@ -11104,7 +11104,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
           }),
         })
         const json = await res.json().catch(() => ({}))
-        if (!res.ok) throw new Error(json.error || 'Failed to save paths')
+        if (!res.ok) throw new Error(json.error || 'Failed to save your new lead emails')
       }
       setSavedPaths(prefs)
       // Module-level state for in-session client creation flows. DB read on
@@ -11426,7 +11426,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     { id:'location',  icon:'📍', label:'Set location details',    desc:'Address, send-from email, notifications' },
     { id:'jobber',    icon:'⚡', label:'Connect Jobber',          desc:'Link your field service account' },
     { id:'import',    icon:'📋', label:'Import your clients',     desc:'Bring existing clients from Jobber into Bee Hub' },
-    { id:'paths',     icon:'📧', label:'Review drip paths',       desc:'Choose your default follow-up sequences' },
+    { id:'paths',     icon:'📧', label:'New lead emails',        desc:'Choose what a new lead hears from you first' },
     { id:'invite',    icon:'👥', label:'Invite your team',        desc:'Add managers and users to your location' },
   ]
   // Lightweight onboarding for invited team members (lite_user role). Two
@@ -11765,7 +11765,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   }
 
   // ── Owner: sequential checklist (after payment) ─────────────────────────────
-  const LAUNCH_STEPS_LABELS = ['Saving your profile…', 'Setting up your paths…', 'Configuring your location…', 'Launching your Hub…']
+  const LAUNCH_STEPS_LABELS = ['Saving your profile…', 'Setting up your new lead emails…', 'Configuring your location…', 'Launching your Hub…']
 
   if (launching) return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#1a2e2b', minHeight:'100vh', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'2rem', paddingTop:`${topOffset}px` }}>
@@ -12744,22 +12744,26 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
   return null
 }
 
-function PathChooser({ title, emoji, current, onSelect, previewPath, setPreviewPath, PLAIN, pathOptions, getSteps }) {
+function PathChooser({ projectLabel, stepIndex, emoji, current, onSelect, previewPath, setPreviewPath, PLAIN, pathOptions, getSteps, sectionKey: sectionKeyProp }) {
   // sectionKey is the path_key prefix matching the master drip_paths
-  // ('moving-a' / 'organizing-a' / ...). title carries enough signal to
-  // disambiguate without threading another prop through.
-  const sectionKey = title.toLowerCase().includes('mov') ? 'moving' : 'organizing'
+  // ('moving-a' / 'organizing-a' / ...). Passed explicitly so the copy above
+  // is free to change without silently re-pointing which masters we read.
+  const sectionKey = sectionKeyProp || (String(projectLabel).toLowerCase().includes('mov') ? 'moving' : 'organizing')
   const allOptions = pathOptions
   // Template being peeked at in the centered preview modal (full subject +
-  // body). Mirrors Settings → Paths: the inline expand lists the steps, and
-  // each step's 👁 Preview opens TemplateQuickPeekModal. Null = closed.
+  // body). Mirrors Settings → Communications: the inline expand lists the
+  // steps, and each step's 👁 Preview opens TemplateQuickPeekModal.
   const [peekTemplate, setPeekTemplate] = useState(null)
 
   return (
     <div style={{ display:'grid', gap:'8px' }}>
-      <div style={{ background:'rgba(26,46,43,0.05)', borderRadius:'10px', padding:'12px 14px' }}>
-        <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'3px' }}>{emoji} {title}</p>
-        <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Select one, then tap Preview to see the emails.</p>
+      {/* Persistent project-type header. Kevin: during onboarding the two
+          project types blended together and you couldn't tell which one you
+          were on — so this is a solid banner, not a subtle label. */}
+      <div style={{ background:'#1a2e2b', borderRadius:'10px', padding:'13px 15px' }}>
+        <p style={{ fontSize:'10px', fontWeight:700, color:'#a8c9c4', textTransform:'uppercase', letterSpacing:'0.8px', marginBottom:'5px' }}>Step {stepIndex} of 2 · You're setting up</p>
+        <p style={{ fontSize:'17px', fontWeight:700, color:'white', fontFamily:'Georgia,serif', marginBottom:'3px' }}>{emoji} {projectLabel} projects</p>
+        <p style={{ fontSize:'12px', color:'rgba(255,255,255,0.72)', lineHeight:1.5 }}>Pick the first email a new <strong style={{ color:'white' }}>{projectLabel.toLowerCase()}</strong> lead receives. Select one, then tap Emails to read it.</p>
       </div>
 
       {allOptions.map(style=>{
@@ -12809,7 +12813,7 @@ function PathChooser({ title, emoji, current, onSelect, previewPath, setPreviewP
                 </div>
                 <div style={{ padding:'0 10px 10px', display:'grid', gap:'6px' }}>
                   {steps.length===0 && (
-                    <p style={{ fontSize:'11px', color:'#8a9e9a', textAlign:'center', padding:'8px' }}>Couldn't load this path's emails — you can review them in Settings → Paths.</p>
+                    <p style={{ fontSize:'11px', color:'#8a9e9a', textAlign:'center', padding:'8px' }}>Couldn't load these emails — you can review them in Settings → Communications.</p>
                   )}
                   {steps.map(step=>{
                     const icon = {email:'📧',sms:'💬',call:'📞'}[step.type]||'📧'
@@ -12826,15 +12830,15 @@ function PathChooser({ title, emoji, current, onSelect, previewPath, setPreviewP
                       </div>
                     )
                   })}
-                  <p style={{ fontSize:'11px', color:'#a8c9c4', fontStyle:'italic', textAlign:'center' }}>✏️ Edit these anytime in Settings → Paths</p>
+                  <p style={{ fontSize:'11px', color:'#a8c9c4', fontStyle:'italic', textAlign:'center' }}>✏️ Edit these anytime in Settings → Communications</p>
                 </div>
               </div>
             )}
             {isPreview&&isCustom&&(
               <div style={{ borderTop:'1px solid rgba(0,0,0,0.06)', background:'#f7f5f0', padding:'10px 14px' }}>
-                <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'8px' }}>Build your own sequence step-by-step in <strong>Settings → Paths</strong> right after setup. Set timing, email content, and SMS messages however you like.</p>
+                <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'8px' }}>Build your own sequence step-by-step in <strong>Settings → Communications</strong> right after setup. Set timing, email content, and SMS messages however you like.</p>
                 <div style={{ background:'rgba(168,201,196,0.1)', borderRadius:'8px', padding:'8px 10px' }}>
-                  <p style={{ fontSize:'11px', color:'#4a5e5a' }}>📌 A placeholder welcome sequence runs until your custom path is ready.</p>
+                  <p style={{ fontSize:'11px', color:'#4a5e5a' }}>📌 A placeholder welcome sequence runs until your own emails are ready.</p>
                 </div>
               </div>
             )}
@@ -12842,9 +12846,9 @@ function PathChooser({ title, emoji, current, onSelect, previewPath, setPreviewP
         )
       })}
 
-      {/* Full subject + body preview — matches Settings → Paths. No select
-          button here: onboarding just previews, the path is committed via the
-          radio selection above. */}
+      {/* Full subject + body preview — matches Settings → Communications. No
+          select button here: onboarding just previews, the choice is committed
+          via the radio selection above. */}
       <TemplateQuickPeekModal template={peekTemplate} showSelectButton={false} onClose={()=>setPeekTemplate(null)} />
     </div>
   )
@@ -12855,7 +12859,7 @@ export function OnboardingPathsEditor({ onComplete }) {
   // (/api/drip-paths/masters) rather than per-location rows: with the
   // master/copy model introduced by seed_master_drip_paths.sql, new
   // locations don't have their own drip_paths until an owner clicks
-  // "Customize" in Settings → Paths.
+  // "Customize" in Settings → Communications.
   const currentLocationCtx = useContext(CurrentLocationContext)
 
   const [wizardStep, setWizardStep] = useState('intro')
@@ -12904,9 +12908,9 @@ export function OnboardingPathsEditor({ onComplete }) {
       } catch (err) {
         if (cancelled) return
         console.error('[OnboardingPathsEditor] masters fetch failed:', err)
-        setPathsLoadError(err?.message || 'Failed to load paths')
+        setPathsLoadError(err?.message || 'Failed to load your new lead emails')
         // Defensive fallback: assume all four styles are available — the
-        // user can still finish onboarding and adjust in Settings → Paths.
+        // user can still finish onboarding and adjust in Settings → Communications.
         const all = PATH_STYLES.filter(s => s.id !== 'custom').map(s => s.id)
         setAvailableMoveStyleIds(all)
         setAvailableGeneralStyleIds(all)
@@ -12916,7 +12920,7 @@ export function OnboardingPathsEditor({ onComplete }) {
   }, [])
 
   // Per-section options: show every master style + always include 'custom'
-  // so owners can defer the choice ("Configure in Settings → Paths later").
+  // so owners can defer the choice ("Configure in Settings → Communications later").
   const customStyle = PATH_STYLES.find(s => s.id === 'custom')
   const movePathOptions = [
     ...PATH_STYLES.filter(s => s.id !== 'custom' && (availableMoveStyleIds || []).includes(s.id)),
@@ -12930,10 +12934,10 @@ export function OnboardingPathsEditor({ onComplete }) {
 
   const needsCalendar = PATH_STYLES.find(p=>p.id===selectedMove)?.tags?.includes('calendar')
                      || PATH_STYLES.find(p=>p.id===selectedGeneral)?.tags?.includes('calendar')
-  // Paths A/B quote {{rate_per_hour}} verbatim in their follow-up email
-  // (the 'rates' tag) — picking one is choosing to send a sentence that
-  // needs this value, so the wizard asks for it the same way B/D ask for
-  // the calendar link. C/D move pricing to the call and never ask.
+  // The rate-included styles quote {{rate_per_hour}} verbatim (the 'rates'
+  // tag) — picking one is choosing to send a sentence that needs this value,
+  // so the wizard asks for it the same way the booking-link styles ask for
+  // the calendar link. Rate-on-the-call styles never ask.
   const needsRate = PATH_STYLES.find(p=>p.id===selectedMove)?.tags?.includes('rates')
                  || PATH_STYLES.find(p=>p.id===selectedGeneral)?.tags?.includes('rates')
   const calendarReady = !needsCalendar || calendarLink.trim().startsWith('http')
@@ -12946,11 +12950,11 @@ export function OnboardingPathsEditor({ onComplete }) {
   function getSteps(pathId) { return masterSteps[pathId] || [] }
 
   const PLAIN = {
-    'path-a': { emoji:'📅', tagline:"Ask if they're free this week + share your rates", explain:"Your first email asks \"Do you have availability this week?\" and shows your hourly rates. Simple and direct." },
-    'path-b': { emoji:'🔗', tagline:'Send a calendar link + share your rates', explain:"Your first email shares a booking link so they can pick a time themselves, plus your rates. Great if you prefer self-scheduling." },
-    'path-c': { emoji:'📲', tagline:"Just ask if they're free - keep it casual", explain:"Your first email is a casual \"hey, are you free this week?\" No rates, no links. Friendly and low pressure." },
-    'path-d': { emoji:'🤝', tagline:'Ask + calendar link + phone number', explain:"Your first email gives them three ways to connect - reply, book online, or call. Best for people who like options." },
-    'path-e': { emoji:'💛', tagline:'Availability check + warm referral follow-up', explain:"Similar to Path A but with a warmer, referral-focused tone. Great for word-of-mouth clients who already trust you." },
+    'path-a': { emoji:'📅', tagline:"They reply with their availability · your rate is in the email", explain:"Your first email asks \"Do you have availability this week?\" and shows your hourly rate. Simple and direct." },
+    'path-b': { emoji:'🔗', tagline:'They book a call themselves · your rate is in the email', explain:"Your first email shares a booking link so they can pick a time themselves, plus your rate. Great if you prefer self-scheduling." },
+    'path-c': { emoji:'📲', tagline:"They reply with their availability · pricing waits for the call", explain:"Your first email is a casual \"hey, are you free this week?\" No rate, no links. Friendly and low pressure." },
+    'path-d': { emoji:'🤝', tagline:'They book online or phone you · pricing waits for the call', explain:"Your first email gives them three ways to connect — reply, book online, or call — and leaves pricing for that conversation. Best for people who like options." },
+    'path-e': { emoji:'💛', tagline:'They reply with their availability · warm referral tone', explain:"Same as \"Reply to schedule\" but with a warmer, referral-focused tone. Great for word-of-mouth clients who already trust you." },
   }
 
 
@@ -12958,26 +12962,26 @@ export function OnboardingPathsEditor({ onComplete }) {
   if (wizardStep==='intro') return (
     <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
       <div style={{ background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'12px', padding:'16px' }}>
-        <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'8px' }}>📬 What is a New Client Drip?</p>
+        <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'8px' }}>📬 What are new lead emails?</p>
         <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'10px' }}>
-          When someone fills out your form, Bee Hub automatically sends them emails to follow up. A <strong>New Client Drip</strong> is just the plan - which emails go out, and when.
+          When someone fills out your form, Bee Hub automatically emails them for you. Your <strong>new lead emails</strong> are just the plan — which emails go out, and when.
         </p>
         <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'10px' }}>
           Think of it like a friendly robot that follows up for you while you're busy with a job. 🐝
         </p>
         <div style={{ background:'white', borderRadius:'9px', padding:'10px 12px', border:'1px solid rgba(0,0,0,0.07)', marginBottom:'10px' }}>
-          <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', marginBottom:'6px' }}>Every path is the same 3 emails, on the same schedule:</p>
-          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.8 }}>1️⃣ <strong>Right away</strong> - your pitch, asking for the next step. <strong>This is what changes between paths.</strong></p>
+          <p style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', marginBottom:'6px' }}>Every option is the same 3 emails, on the same schedule:</p>
+          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.8 }}>1️⃣ <strong>Right away</strong> - your pitch, asking for the next step. <strong>This is the one that changes.</strong></p>
           <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.8 }}>2️⃣ <strong>5 days later</strong> - a nudge if you haven't heard back</p>
           <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.8 }}>3️⃣ <strong>30 days later</strong> - one last check-in</p>
-          <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.6, marginTop:'8px', paddingTop:'8px', borderTop:'1px solid rgba(0,0,0,0.06)' }}>🐝 Separately, a <strong>Welcome Email</strong> from Bee Organized HQ goes out 24 hours after that first email. It's the same on every path and sends automatically.</p>
+          <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.6, marginTop:'8px', paddingTop:'8px', borderTop:'1px solid rgba(0,0,0,0.06)' }}>🐝 Separately, a <strong>Welcome Email</strong> from Bee Organized HQ goes out 24 hours after that first email. It's the same whichever option you pick, and sends automatically.</p>
         </div>
         <p style={{ fontSize:'12px', color:'#8a9e9a', fontStyle:'italic' }}>💡 Don't stress - you can change the emails and timing anytime in Settings. This just gets you started.</p>
       </div>
-      <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.5 }}>You'll pick one path for <strong>move jobs</strong> and one for <strong>everything else</strong> (kitchens, closets, full homes, etc.).</p>
+      <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.5 }}>You'll choose twice — once for <strong>📦 Moving projects</strong>, then once for <strong>🏠 Organizing projects</strong> (kitchens, closets, full homes, etc.). Each one gets its own emails.</p>
       <button onClick={()=>setWizardStep('move')}
         style={{ width:'100%', padding:'12px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
-        Let's pick my paths →
+        Start with 📦 Moving →
       </button>
     </div>
   )
@@ -12985,20 +12989,20 @@ export function OnboardingPathsEditor({ onComplete }) {
   if (wizardStep==='move') return (
     <div style={{ paddingTop:'12px', display:'grid', gap:'12px' }}>
       {pathsLoading ? (
-        <BeeLoader label="Gathering your paths…" />
+        <BeeLoader label="Gathering your emails…" />
       ) : movePathOptions.length === 0 ? (
         <div style={{ padding:'14px', background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'10px', fontSize:'12px', color:'#7f1d1d', lineHeight:1.5 }}>
-          No master Moving paths found. Contact support — at least one <code>moving-*</code> master drip path must be seeded (see migrations/seed_master_drip_paths.sql).
+          No master Moving emails found. Contact support — at least one <code>moving-*</code> master must be seeded (see migrations/seed_master_drip_paths.sql).
         </div>
       ) : (
-        <PathChooser title="For Moving projects, use this path" emoji="📦" current={selectedMove} onSelect={setSelectedMove} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={movePathOptions} getSteps={getSteps} />
+        <PathChooser projectLabel="Moving" stepIndex={1} sectionKey="moving" emoji="📦" current={selectedMove} onSelect={setSelectedMove} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={movePathOptions} getSteps={getSteps} />
       )}
       <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center' }}>Templates and timing can be customized anytime in Settings → Templates</p>
       <div style={{ display:'flex', gap:'8px' }}>
         <button onClick={()=>setWizardStep('intro')} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>← Back</button>
         <button onClick={()=>{ if(selectedMove){ setPreviewPath(null); setWizardStep('general') } }} disabled={!selectedMove}
           style={{ flex:1, padding:'11px', background:selectedMove?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:selectedMove?'white':'#9ca3af', cursor:selectedMove?'pointer':'not-allowed' }}>
-          {selectedMove?'Next: Organizing Projects →':'Select a path first'}
+          {selectedMove?'Next: 🏠 Organizing projects →':'Choose one to continue'}
         </button>
       </div>
     </div>
@@ -13007,20 +13011,20 @@ export function OnboardingPathsEditor({ onComplete }) {
   if (wizardStep==='general') return (
     <div style={{ paddingTop:'12px', display:'grid', gap:'12px' }}>
       {pathsLoading ? (
-        <BeeLoader label="Gathering your paths…" />
+        <BeeLoader label="Gathering your emails…" />
       ) : generalPathOptions.length === 0 ? (
         <div style={{ padding:'14px', background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'10px', fontSize:'12px', color:'#7f1d1d', lineHeight:1.5 }}>
-          No master Organizing paths found. Contact support — at least one <code>organizing-*</code> master drip path must be seeded (see migrations/seed_master_drip_paths.sql).
+          No master Organizing emails found. Contact support — at least one <code>organizing-*</code> master must be seeded (see migrations/seed_master_drip_paths.sql).
         </div>
       ) : (
-        <PathChooser title="For Organizing projects, use this path" emoji="🏠" current={selectedGeneral} onSelect={setSelectedGeneral} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={generalPathOptions} getSteps={getSteps} />
+        <PathChooser projectLabel="Organizing" stepIndex={2} sectionKey="organizing" emoji="🏠" current={selectedGeneral} onSelect={setSelectedGeneral} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={generalPathOptions} getSteps={getSteps} />
       )}
       <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center' }}>Templates and timing can be customized anytime in Settings → Templates</p>
       <div style={{ display:'flex', gap:'8px' }}>
-        <button onClick={()=>{ setPreviewPath(null); setWizardStep('move') }} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>← Back</button>
+        <button onClick={()=>{ setPreviewPath(null); setWizardStep('move') }} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>← Back to 📦 Moving</button>
         <button onClick={()=>selectedGeneral&&setWizardStep('confirm')} disabled={!selectedGeneral}
           style={{ flex:1, padding:'11px', background:selectedGeneral?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:selectedGeneral?'white':'#9ca3af', cursor:selectedGeneral?'pointer':'not-allowed' }}>
-          {selectedGeneral?'Review my choices →':'Select a path first'}
+          {selectedGeneral?'Review my choices →':'Choose one to continue'}
         </button>
       </div>
     </div>
@@ -13032,8 +13036,8 @@ export function OnboardingPathsEditor({ onComplete }) {
       <div style={{ background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:'12px', padding:'16px' }}>
         <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'12px' }}>🎉 Here\'s what you picked:</p>
         {[
-          { label:'📦 Move Jobs',    val:selectedMove==='custom'?'Custom Path':selectedMove    ? PATH_STYLES.find(p=>p.id===selectedMove)?.label    : '—', explain: selectedMove==='custom'?'Build this in Settings → Paths after setup':selectedMove    ? PLAIN[selectedMove]?.tagline    : '' },
-          { label:'🏠 Organizing Jobs', val:selectedGeneral==='custom'?'Custom Path':selectedGeneral ? PATH_STYLES.find(p=>p.id===selectedGeneral)?.label : '—', explain: selectedGeneral==='custom'?'Build this in Settings → Paths after setup':selectedGeneral ? PLAIN[selectedGeneral]?.tagline : '' },
+          { label:'📦 Moving projects',    val:selectedMove==='custom'?'Build your own':selectedMove    ? PATH_STYLES.find(p=>p.id===selectedMove)?.label    : '—', explain: selectedMove==='custom'?'Build this in Settings → Communications after setup':selectedMove    ? PLAIN[selectedMove]?.tagline    : '' },
+          { label:'🏠 Organizing projects', val:selectedGeneral==='custom'?'Build your own':selectedGeneral ? PATH_STYLES.find(p=>p.id===selectedGeneral)?.label : '—', explain: selectedGeneral==='custom'?'Build this in Settings → Communications after setup':selectedGeneral ? PLAIN[selectedGeneral]?.tagline : '' },
         ].map(r=>(
           <div key={r.label} style={{ padding:'8px 0', borderBottom:'1px solid rgba(34,197,94,0.1)' }}>
             <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'2px' }}>
@@ -13043,7 +13047,7 @@ export function OnboardingPathsEditor({ onComplete }) {
             <p style={{ fontSize:'11px', color:'#4a5e5a' }}>{r.explain}</p>
           </div>
         ))}
-        <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'10px', fontStyle:'italic' }}>✏️ Edit emails anytime in Settings → Paths</p>
+        <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'10px', fontStyle:'italic' }}>✏️ Edit emails anytime in Settings → Communications</p>
       </div>
 
       {needsCalendar&&(
@@ -13052,7 +13056,7 @@ export function OnboardingPathsEditor({ onComplete }) {
             <span style={{ fontSize:'18px' }}>📅</span>
             <div>
               <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Calendar link required</p>
-              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Your selected path sends a booking link to clients.</p>
+              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Your choice sends a booking link to clients.</p>
             </div>
           </div>
           <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5, marginBottom:'10px' }}>Add your Calendly, Acuity, or other booking page URL. Clients will use this to schedule directly from your follow-up email.</p>
@@ -13070,7 +13074,7 @@ export function OnboardingPathsEditor({ onComplete }) {
             <span style={{ fontSize:'18px' }}>💰</span>
             <div>
               <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Hourly rate required</p>
-              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Your selected path quotes your rate to clients.</p>
+              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Your choice quotes your rate to clients.</p>
             </div>
           </div>
           <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5, marginBottom:'10px' }}>This goes into the follow-up email word-for-word: &ldquo;Our rate starts at <strong>{ratePerHour.trim()||'___'}</strong> per hour per Bee.&rdquo; Write it exactly as it should read — e.g. $95. You can change it anytime in Settings.</p>
@@ -13086,7 +13090,7 @@ export function OnboardingPathsEditor({ onComplete }) {
         <button onClick={()=>confirmReady&&onComplete({ moveDefault:selectedMove, generalDefault:selectedGeneral, calendarLink:calendarLink||'', ratePerHour:ratePerHour.trim()||'' })}
           disabled={!confirmReady}
           style={{ flex:1, padding:'11px', background:confirmReady?'#22c55e':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:confirmReady?'white':'#9ca3af', cursor:confirmReady?'pointer':'not-allowed' }}>
-          {confirmReady?'✓ Save & Complete':(needsCalendar&&!calendarReady)?'Add your calendar link to continue':(needsRate&&!rateReady)?'Add your hourly rate to continue':'Select paths first'}
+          {confirmReady?'✓ Save & Complete':(needsCalendar&&!calendarReady)?'Add your calendar link to continue':(needsRate&&!rateReady)?'Add your hourly rate to continue':'Make your choices first'}
         </button>
       </div>
     </div>
@@ -15249,7 +15253,7 @@ const TEMPLATE_VARIABLES = [
 
 // ─── Master drip content helpers ──────────────────────────────────────────────
 // The 8 corp master paths in drip_paths (seed_master_drip_paths.sql) are the
-// ONLY source of drip copy. Onboarding and Settings → Paths both read them via
+// ONLY source of drip copy. Onboarding and Settings → Communications both read them via
 // GET /api/drip-paths/masters, which returns each master's steps with their
 // inline subject/body.
 //
@@ -15360,7 +15364,7 @@ function CustomPathBuilder({ templates, onSave, onClose, smsEnabled=true }) {
         {/* Header */}
         <div style={{ padding:'0.75rem 1.25rem', borderBottom:'1px solid rgba(0,0,0,0.06)', flexShrink:0 }}>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-            <h3 style={{ fontSize:'16px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>Custom Path Builder</h3>
+            <h3 style={{ fontSize:'16px', fontFamily:'Georgia,serif', color:'#1a2e2b' }}>Build your own sequence</h3>
             <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
           </div>
         </div>
@@ -15369,7 +15373,7 @@ function CustomPathBuilder({ templates, onSave, onClose, smsEnabled=true }) {
 
           {/* Path name */}
           <div>
-            <label style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.5px', display:'block', marginBottom:'5px' }}>Path Name</label>
+            <label style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.5px', display:'block', marginBottom:'5px' }}>Sequence name</label>
             <input
               autoFocus value={pathName} onChange={e=>setPathName(e.target.value)}
               placeholder='e.g. VIP Concierge, Referral Fast-Track...'
@@ -15661,7 +15665,7 @@ function TemplateEditorPopup({ template, isNew=false, isMasterEdit=false, defaul
 // subject + body without committing a selection. Merge fields stay as literal
 // {{placeholders}} since there's no lead context here. Used by both the
 // StepTemplatePicker (showSelectButton=true, so the peek can commit a choice)
-// and the Settings → Paths overview (showSelectButton=false, Close-only).
+// and the Settings → Communications overview (showSelectButton=false, Close-only).
 // Pass template=null to keep it closed.
 function TemplateQuickPeekModal({ template, showSelectButton=false, onSelect, onClose }) {
   if (!template) return null
@@ -15928,36 +15932,39 @@ const DEFAULT_SETTINGS = {
   },
 }
 
-// Path CTA styles - apply to either Move or General leads
+// The four styles of first email, on two dimensions: how the lead books
+// (reply to you vs. click your booking link) and whether your rate is
+// quoted in writing. The `path-*` ids are DB path_key values — the labels
+// below are the only thing an owner reads.
 const PATH_STYLES = [
   {
-    id:'path-a', label:'Path A', icon:'📅',
-    cta:'Availability check + rates',
-    desc:'Asks "do you have availability this week?" and shares hourly rates',
+    id:'path-a', label:'Reply to schedule · rate included', icon:'📅',
+    cta:'They reply with their availability, and your rate is in the email',
+    desc:'Asks "do you have availability this week?" and quotes your hourly rate',
     tags:['availability','rates'],
   },
   {
-    id:'path-b', label:'Path B', icon:'🔗',
-    cta:'Calendar link + rates',
-    desc:'Sends booking link for a discovery call and shares hourly rates',
+    id:'path-b', label:'Booking link · rate included', icon:'🔗',
+    cta:'They book a discovery call themselves, and your rate is in the email',
+    desc:'Sends a link to book a discovery call and quotes your hourly rate',
     tags:['calendar','rates'],
   },
   {
-    id:'path-c', label:'Path C', icon:'📲',
-    cta:'Availability check only',
-    desc:'Simply asks "do you have availability this week?" - no rates or links',
+    id:'path-c', label:'Reply to schedule · rate on the call', icon:'📲',
+    cta:'They reply with their availability, and pricing waits for the call',
+    desc:'Simply asks "do you have availability this week?" — no rate, no link',
     tags:['availability'],
   },
   {
-    id:'path-d', label:'Path D', icon:'🤝',
-    cta:'Availability + calendar + phone',
-    desc:'Asks about availability, sends calendar link, and shares location phone number',
+    id:'path-d', label:'Booking link · rate on the call', icon:'🤝',
+    cta:'They book online or phone you, and pricing waits for the call',
+    desc:'Sends a booking link plus your phone number — no rate quoted in writing',
     tags:['availability','calendar','phone'],
   },
   {
-    id:'custom', label:'Custom', icon:'✏️',
-    cta:'Build your own sequence',
-    desc:'Create a fully custom drip sequence with any templates you choose',
+    id:'custom', label:'Build your own', icon:'✏️',
+    cta:'Write your own sequence from scratch',
+    desc:'Create a fully custom sequence with any templates you choose',
     tags:['custom'],
   },
 ]
@@ -15968,16 +15975,30 @@ const PATH_STYLES = [
 // existing project_types.attrs.drip_category lookups) and surfaces as
 // "Organizing" in all UI labels.
 const DRIP_PATHS_CONFIG = [
-  { id:'moving-a',     name:'Moving — Path A',     icon:'📦', projectType:'move',    styleId:'path-a', desc:'Moving clients — availability check + rates' },
-  { id:'moving-b',     name:'Moving — Path B',     icon:'📦', projectType:'move',    styleId:'path-b', desc:'Moving clients — calendar link + rates' },
-  { id:'moving-c',     name:'Moving — Path C',     icon:'📦', projectType:'move',    styleId:'path-c', desc:'Moving clients — availability check only' },
-  { id:'moving-d',     name:'Moving — Path D',     icon:'📦', projectType:'move',    styleId:'path-d', desc:'Moving clients — availability + calendar + phone' },
-  { id:'organizing-a', name:'Organizing — Path A', icon:'🏠', projectType:'general', styleId:'path-a', desc:'Organizing clients — availability check + rates' },
-  { id:'organizing-b', name:'Organizing — Path B', icon:'🏠', projectType:'general', styleId:'path-b', desc:'Organizing clients — calendar link + rates' },
-  { id:'organizing-c', name:'Organizing — Path C', icon:'🏠', projectType:'general', styleId:'path-c', desc:'Organizing clients — availability check only' },
-  { id:'organizing-d', name:'Organizing — Path D', icon:'🏠', projectType:'general', styleId:'path-d', desc:'Organizing clients — availability + calendar + phone' },
-  { id:'custom',       name:'Custom',              icon:'✏️', projectType:'any',     styleId:'custom', desc:'Configure in Settings → Paths later' },
+  { id:'moving-a',     name:'Moving · Reply to schedule, rate included',      icon:'📦', projectType:'move',    styleId:'path-a', desc:'Moving leads — they reply with availability, rate is in the email' },
+  { id:'moving-b',     name:'Moving · Booking link, rate included',           icon:'📦', projectType:'move',    styleId:'path-b', desc:'Moving leads — they book online, rate is in the email' },
+  { id:'moving-c',     name:'Moving · Reply to schedule, rate on the call',   icon:'📦', projectType:'move',    styleId:'path-c', desc:'Moving leads — they reply with availability, pricing waits for the call' },
+  { id:'moving-d',     name:'Moving · Booking link, rate on the call',        icon:'📦', projectType:'move',    styleId:'path-d', desc:'Moving leads — they book online or phone you, pricing waits for the call' },
+  { id:'organizing-a', name:'Organizing · Reply to schedule, rate included',    icon:'🏠', projectType:'general', styleId:'path-a', desc:'Organizing leads — they reply with availability, rate is in the email' },
+  { id:'organizing-b', name:'Organizing · Booking link, rate included',         icon:'🏠', projectType:'general', styleId:'path-b', desc:'Organizing leads — they book online, rate is in the email' },
+  { id:'organizing-c', name:'Organizing · Reply to schedule, rate on the call', icon:'🏠', projectType:'general', styleId:'path-c', desc:'Organizing leads — they reply with availability, pricing waits for the call' },
+  { id:'organizing-d', name:'Organizing · Booking link, rate on the call',      icon:'🏠', projectType:'general', styleId:'path-d', desc:'Organizing leads — they book online or phone you, pricing waits for the call' },
+  { id:'custom',       name:'Build your own',      icon:'✏️', projectType:'any',     styleId:'custom', desc:'Set this up in Settings → Communications later' },
 ]
+
+// drip_paths.name in the DB still reads "Organizing — Path A" (data is
+// deliberately untouched — path_key and every column keep saying "path").
+// Anywhere we surface that stored name to a person, run it through here so
+// the reader sees the plain-language name instead. Falls back to the raw
+// value for custom, location-authored sequences.
+function prettyPathName(name, pathKey) {
+  const byKey = pathKey && DRIP_PATHS_CONFIG.find(p => p.id === pathKey)
+  if (byKey) return byKey.name
+  const m = /^(Organizing|Moving)\s*[—-]\s*Path\s*([A-D])$/i.exec(String(name || '').trim())
+  if (!m) return name
+  const hit = DRIP_PATHS_CONFIG.find(p => p.id === `${m[1].toLowerCase()}-${m[2].toLowerCase()}`)
+  return hit ? hit.name : name
+}
 
 // ─── Add Step Inline ──────────────────────────────────────────────────────────
 const DELAY_OPTIONS_SHORT = ['Immediately','1 day later','2 days later','3 days later','4 days later','5 days later','7 days later','10 days later','14 days later']
@@ -17515,7 +17536,7 @@ function SmsAddonCard({ settings, updateLocation }) {
                 </div>
               ))}
             </div>
-            <p style={{ fontSize:'11px', color:'#8a9e9a', marginBottom:'10px', lineHeight:1.4 }}>SMS steps in paths and templates are locked until activated. Prorated to your March 1 renewal.</p>
+            <p style={{ fontSize:'11px', color:'#8a9e9a', marginBottom:'10px', lineHeight:1.4 }}>SMS steps in sequences and templates are locked until activated. Prorated to your March 1 renewal.</p>
             <button onClick={()=>setShowPayModal(true)} style={{ width:'100%', padding:'11px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
               Activate SMS · ${proration.prorated} today →
             </button>
@@ -17988,7 +18009,7 @@ function SmsVoiceInfoModal({ onClose }) {
       icon:'💬', name:'SMS Basic', pop:false,
       tag:'Automated outbound texting',
       desc:'Send pre-written text sequences automatically when a client hits a new stage. Set it once - Bee Hub handles the follow-up so nothing slips through the cracks.',
-      features:['Stage-triggered SMS drips','Pre-written message templates','Opt-out handled automatically','Works alongside your email drip paths'],
+      features:['Stage-triggered SMS drips','Pre-written message templates','Opt-out handled automatically','Works alongside your new lead emails'],
     },
     {
       icon:'↔️', name:'SMS Pro', pop:true,
@@ -19709,7 +19730,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
       await loadLocationPaths()
     } catch (e) {
-      alert('Could not customize path: ' + (e?.message || e))
+      alert('Could not customize these emails: ' + (e?.message || e))
     } finally {
       setPathsSaving(null)
     }
@@ -19721,7 +19742,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     if (!realLocId) return
     const copy = dbPaths[pathId]
     if (!copy) return
-    if (!confirm('Reset this path to the master template? Any customizations made here will be lost.')) return
+    if (!confirm('Reset these emails to the Bee Organized HQ version? Any changes you made here will be lost.')) return
     setPathsSaving(pathId)
     try {
       const res = await fetch(`/api/locations/${realLocId}/drip-paths/${copy.id}`, {
@@ -19747,7 +19768,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         return next
       })
     } catch (e) {
-      alert('Could not reset path: ' + (e?.message || e))
+      alert('Could not reset these emails: ' + (e?.message || e))
     } finally {
       setPathsSaving(null)
     }
@@ -19821,7 +19842,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       setPathsErr(null)
     } catch (e) {
       setPathsErr(String(e?.message || e))
-      alert('Could not save path: ' + (e?.message || e))
+      alert('Could not save these emails: ' + (e?.message || e))
     } finally {
       setPathsSaving(null)
     }
@@ -20445,8 +20466,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           // only on true pills, tight padding, flat fills, and soft shadow
           // reserved for CARD elevation only (never on a button/pill/badge).
           const SEQUENCES = [
-            { key:'moveDefault',    label:'Moving',     sub:'Move-in & move-out',           filter:'moving',     projectType:'move',    icon:'box',  accent:'#4f46e5', tint:'rgba(99,102,241,0.10)' },
-            { key:'generalDefault', label:'Organizing', sub:'Closets, kitchens, whole home', filter:'organizing', projectType:'general', icon:'home', accent:'#0f8f6f', tint:'rgba(16,185,129,0.12)' },
+            { key:'moveDefault',    label:'Moving projects',     sub:'Move-in & move-out',           filter:'moving',     projectType:'move',    icon:'box',  accent:'#4f46e5', tint:'rgba(99,102,241,0.10)' },
+            { key:'generalDefault', label:'Organizing projects', sub:'Closets, kitchens, whole home', filter:'organizing', projectType:'general', icon:'home', accent:'#0f8f6f', tint:'rgba(16,185,129,0.12)' },
           ]
           const verified = !!settings.location.sendFromEmail
           const openSeq = SEQUENCES.find(s=>s.key===openSequence) || null
@@ -20504,8 +20525,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               <SlackCard settings={settings} updateLocation={updateLocation} />
             </div>
 
-            {/* ── TIER 3 · PAIRED — automatic follow-up sequences (2-col) ──── */}
-            <CommsLabel>Automatic follow-up</CommsLabel>
+            {/* ── TIER 3 · PAIRED — new lead emails, one set per project type ── */}
+            <CommsLabel>New lead emails</CommsLabel>
+            <p style={{ fontSize:'11px', color:'#8a9e9a', margin:'-4px 16px 9px', lineHeight:1.5 }}>What a lead automatically receives when they come in. Each project type has its own set — pick the one you want below.</p>
             <div style={{ margin:'0 12px', display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
               {SEQUENCES.map(seq=>{
                 const defId = settings.paths[seq.key]
@@ -20546,7 +20568,12 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               <div style={{ margin:'12px 12px 0', borderRadius:'14px', overflow:'hidden', border:`0.5px solid ${openSeq.accent}`, background:'white', boxShadow:'0 1px 5px rgba(26,46,43,0.05)' }}>
                 <div style={{ padding:'11px 14px', display:'flex', alignItems:'center', gap:'8px', background:openSeq.tint, borderBottom:'0.5px solid rgba(26,46,43,0.07)' }}>
                   <CommsIcon name={openSeq.icon} size={16} color={openSeq.accent} />
-                  <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>{openSeq.label} follow-up — pick the default sequence</p>
+                  <div>
+                    {/* The open project type has to be unmistakable — this is
+                        the same "which one am I on?" problem as onboarding. */}
+                    <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>You're editing: {openSeq.label}</p>
+                    <p style={{ fontSize:'11px', color:'#4a5e5a' }}>Pick what a new {openSeq.label.replace(' projects','').toLowerCase()} lead receives first.</p>
+                  </div>
                 </div>
                 <div>
                   {PATH_STYLES.map((style,i)=>{
@@ -20585,7 +20612,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                               dbPaths[pathId] ? (
                                 <div style={{ padding:'8px 10px', background:'rgba(245,158,11,0.08)', border:'0.5px solid rgba(245,158,11,0.30)', borderRadius:'8px', marginBottom:'8px' }}>
                                   <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-                                    <span style={{ fontSize:'12px', color:'#7a5d24', flex:1 }}>This path is <strong>customized</strong> for your location. Resetting will restore the corp master content.</span>
+                                    <span style={{ fontSize:'12px', color:'#7a5d24', flex:1 }}>This set is <strong>customized</strong> for your location. Resetting will restore the corp master content.</span>
                                     <button onClick={()=>resetPathToMaster(pathId)} disabled={pathsSaving===pathId}
                                       style={{ padding:'5px 10px', background:'transparent', border:'0.5px solid rgba(180,83,9,0.5)', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#7a5d24', cursor: pathsSaving===pathId ? 'wait' : 'pointer', flexShrink:0 }}>
                                       {pathsSaving===pathId ? 'Resetting…' : 'Reset to master'}
@@ -20595,7 +20622,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                                       moment it was made. Owners should not have to discover that
                                       HQ revisions stop reaching them once they customize. */}
                                   <p style={{ fontSize:'11px', color:'#8a6a2e', lineHeight:1.5, marginTop:'6px' }}>
-                                    📌 Your copy is a <strong>snapshot</strong>. If Bee Organized HQ updates this path later, those changes <strong>won't</strong> reach your version — reset to pick up the newest master content.
+                                    📌 Your copy is a <strong>snapshot</strong>. If Bee Organized HQ updates this set later, those changes <strong>won't</strong> reach your version — reset to pick up the newest master content.
                                   </p>
                                 </div>
                               ) : (
@@ -20616,7 +20643,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                             {style.id==='custom' ? (
                               <div style={{ padding:'10px', textAlign:'center' }}>
                                 <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'8px' }}>Build a fully custom sequence</p>
-                                <button onClick={()=>setShowCustomBuilder(true)} style={{ padding:'7px 14px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'white', cursor:'pointer' }}>+ Build Custom Path</button>
+                                <button onClick={()=>setShowCustomBuilder(true)} style={{ padding:'7px 14px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'white', cursor:'pointer' }}>+ Build your own sequence</button>
                               </div>
                             ) : steps.length>0 ? (
                               <div style={{ display:'grid', gap:'5px' }}>
@@ -20689,7 +20716,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                                 disabled={pathsSaving===pathId}
                                 style={{ width:'100%', padding:'9px', background: pathsSaving===pathId ? '#9ca3af' : '#1a2e2b', border:'none', borderRadius:'8px', cursor: pathsSaving===pathId ? 'wait' : 'pointer', fontFamily:'inherit', fontSize:'12px', color:'white', fontWeight:600, marginTop:'6px' }}
                               >
-                                {pathsSaving===pathId ? 'Saving…' : dbPaths[pathId] ? 'Save changes' : 'Save path to DB'}
+                                {pathsSaving===pathId ? 'Saving…' : dbPaths[pathId] ? 'Save changes' : 'Save to my location'}
                               </button>
                             )}
                           </div>
@@ -20860,7 +20887,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                               <>
                                 <div style={{ padding:'8px 4px 4px' }}>
                                   <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b' }}>💛 Welcome Email</p>
-                                  <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>Auto-fires 24h after Email 1 of any new lead drip path.</p>
+                                  <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>Auto-fires 24h after Email 1 of any new lead sequence.</p>
                                 </div>
                                 {renderRowsCard(wWelcome, masterActions)}
                               </>
@@ -20878,7 +20905,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                               <>
                                 <div style={{ padding:'10px 4px 4px' }}>
                                   <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b' }}>📨 Other Templates</p>
-                                  <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>General-purpose templates referenced by custom drip paths.</p>
+                                  <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'1px' }}>General-purpose templates referenced by custom sequences.</p>
                                 </div>
                                 {renderRowsCard(wOther, masterActions)}
                               </>
@@ -20918,8 +20945,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                 color:'#6366f1',
                 bg:'rgba(99,102,241,0.06)',
                 steps:[
-                  { icon:'✨', label:'New client arrives', detail:'Drip path starts within 24 hours automatically. No action needed.' },
-                  { icon:'📲', label:'No reply? Follow-ups continue', detail:'System keeps sending on your path schedule. Client moves to Attempting to Contact.' },
+                  { icon:'✨', label:'New client arrives', detail:'New lead emails start within 24 hours automatically. No action needed.' },
+                  { icon:'📲', label:'No reply? Follow-ups continue', detail:'The rest of your new lead emails keep going out on schedule. Client moves to Attempting to Contact.' },
                 ]
               },
               {
@@ -21096,7 +21123,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                   <span style={{ fontSize:'20px', marginTop:'2px' }}>💬</span>
                   <div style={{ flex:1 }}>
                     <p style={{ fontSize:'13px', fontWeight:600, color:'#b07a20', marginBottom:'3px' }}>SMS is an add-on</p>
-                    <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>Enable it in <strong>My Location → Add-ons</strong> to unlock text alerts and SMS steps in your drip paths.</p>
+                    <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>Enable it in <strong>My Location → Add-ons</strong> to unlock text alerts and SMS steps in your new lead emails.</p>
                   </div>
                 </div>
               ) : (
@@ -22531,7 +22558,7 @@ function TierPlansInline() {
       ['Add or edit partners & contacts','Build the relationship database',['y','y','n']],
     ]},
     { title:'📧 Drip Campaigns', rows:[
-      ['Edit drip paths & email templates','Strategic outreach configuration',['y','n','n']],
+      ['Edit new lead emails & templates','Strategic outreach configuration',['y','n','n']],
       ['Pause / resume drips for a client','Per-client drip control',['y','y','n']],
     ]},
     { title:'📊 Reports & Financials', rows:[
@@ -28681,15 +28708,15 @@ function MasterTemplatesEditor({ locations = [] }) {
                 onClick={()=>toggleUsage(tpl.id)}
                 style={{ marginTop:'5px', padding:'2px 9px', background:'rgba(15,118,110,0.07)', border:'1px solid rgba(15,118,110,0.2)', borderRadius:'20px', fontSize:'10px', fontFamily:'inherit', fontWeight:600, color:MASTER.color, cursor:'pointer' }}
               >
-                {expanded ? '▾' : '▸'} Used in {usageCount} {usageCount === 1 ? 'path' : 'paths'}
+                {expanded ? '▾' : '▸'} Used in {usageCount} {usageCount === 1 ? 'sequence' : 'sequences'}
               </button>
             ) : (
-              <p style={{ fontSize:'10px', color:'#b6c2bf', marginTop:'5px' }}>Not used in any path</p>
+              <p style={{ fontSize:'10px', color:'#b6c2bf', marginTop:'5px' }}>Not used in any sequence</p>
             ))}
             {isMaster && expanded && usage.length > 0 && (
               <div style={{ marginTop:'6px', display:'flex', flexDirection:'column', gap:'2px', paddingLeft:'2px' }}>
                 {usage.map((u, ui) => (
-                  <p key={ui} style={{ fontSize:'10px', color:'#8a9e9a' }}>• {u.path} · Step {u.step}</p>
+                  <p key={ui} style={{ fontSize:'10px', color:'#8a9e9a' }}>• {prettyPathName(u.path)} · Step {u.step}</p>
                 ))}
               </div>
             )}
@@ -28872,18 +28899,18 @@ function MasterDripPathsEditor() {
   return (
     <div style={{ padding:'14px 1.25rem 32px' }}>
       <div style={{ marginBottom:'10px' }}>
-        <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>📨 New Lead Drip Paths (Master)</p>
+        <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>📨 New Lead Emails (Master)</p>
         <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'2px', lineHeight:1.5 }}>
           Eight master paths × 3 emails = 24 templates total. Edits propagate live to every location using a master (no per-location copy). Locations that have already customized are unaffected. Use the <strong>🧩 Variable Reference</strong> tab to see what <code>{'{{first_name}}'}</code>, <code>{'{{owner_name}}'}</code>, etc. render to.
         </p>
       </div>
 
-      {loading && <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Loading master paths…</p>}
+      {loading && <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Loading masters…</p>}
       {err && <p style={{ fontSize:'12px', color:'#ef4444' }}>Could not load masters: {err}</p>}
 
       {!loading && !err && masters.length === 0 && (
         <div style={{ background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'10px', padding:'14px', fontSize:'12px', color:'#7f1d1d' }}>
-          No master drip paths found. Run <code>migrations/seed_master_drip_paths.sql</code> in Supabase.
+          No master new lead emails found. Run <code>migrations/seed_master_drip_paths.sql</code> in Supabase.
         </div>
       )}
 
@@ -28898,7 +28925,7 @@ function MasterDripPathsEditor() {
                      style={{ padding:'12px 14px', display:'flex', alignItems:'center', gap:'10px', cursor:'pointer' }}>
                   <span style={{ fontSize:'18px' }}>{path.path_key.startsWith('moving') ? '📦' : '🏠'}</span>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{path.name}</p>
+                    <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{prettyPathName(path.name, path.path_key)}</p>
                     <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{path.path_key} · {stepsSorted.length} email{stepsSorted.length===1?'':'s'}</p>
                   </div>
                   <span style={{ fontSize:'12px', color:'#c8d8d4' }}>{isOpen ? '▲' : '▼'}</span>
@@ -28938,7 +28965,7 @@ function MasterDripPathsEditor() {
 }
 
 // Edit modal for a single drip_path_steps row. Subject / body / delay_days.
-// Used by both Admin → Content (master steps) and Settings → Paths (the
+// Used by both Admin → Content (master steps) and Settings → Communications (the
 // owner's customized copies). Server-side auth in /api/drip-path-steps/[id]
 // handles the master-vs-location-copy permission split.
 function DripPathStepEditor({ step, onSave, onClose }) {
@@ -28987,10 +29014,10 @@ function DripPathStepEditor({ step, onSave, onClose }) {
               style={{ width:'100%', padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', lineHeight:1.5, resize:'vertical' }} />
           </label>
           <label style={{ display:'block' }}>
-            <span style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', display:'block', marginBottom:'4px' }}>Delay (days after lead enters drip)</span>
+            <span style={{ fontSize:'12px', fontWeight:600, color:'#1a2e2b', display:'block', marginBottom:'4px' }}>Delay (days after the lead comes in)</span>
             <input type="number" min="0" value={delayDays} onChange={e=>setDelayDays(e.target.value)}
               style={{ width:'120px', padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-            <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'4px' }}>Step 1 is usually 0 (fires immediately on new lead). Master paths default to 0 / 5 / 30 days.</p>
+            <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'4px' }}>Step 1 is usually 0 (fires immediately on new lead). Masters default to 0 / 5 / 30 days.</p>
           </label>
           {localErr && <p style={{ fontSize:'12px', color:'#ef4444' }}>{localErr}</p>}
         </div>
@@ -29049,7 +29076,7 @@ function VariableReference() {
 
       <div style={{ marginTop:'14px', padding:'12px 14px', background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'10px' }}>
         <p style={{ fontSize:'12px', color:'#1a2e2b', lineHeight:1.5 }}>
-          <strong>Master vs. location copy.</strong> Edits to a master here propagate live to every location that hasn&rsquo;t customized that template. Locations that have clicked <strong>&ldquo;Customize&rdquo;</strong> in Settings &rarr; Paths or Templates have an independent copy — they keep their own version until they hit <strong>&ldquo;Reset to master.&rdquo;</strong>
+          <strong>Master vs. location copy.</strong> Edits to a master here propagate live to every location that hasn&rsquo;t customized that template. Locations that have clicked <strong>&ldquo;Customize&rdquo;</strong> in Settings &rarr; Communications or Templates have an independent copy — they keep their own version until they hit <strong>&ldquo;Reset to master.&rdquo;</strong>
         </p>
       </div>
     </div>

@@ -52,7 +52,7 @@ async function attachUsage(rows: any[]) {
   const byTemplate = new Map<string, { path: string; step: number }[]>()
   for (const s of steps ?? []) {
     const list = byTemplate.get(s.master_template_id) ?? []
-    list.push({ path: pathName.get(s.drip_path_id) ?? 'Unknown path', step: s.step_order })
+    list.push({ path: pathName.get(s.drip_path_id) ?? 'Unknown sequence', step: s.step_order })
     byTemplate.set(s.master_template_id, list)
   }
 

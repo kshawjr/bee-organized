@@ -2,17 +2,24 @@
 //
 // Onboarding rate ask — MOUNT test of OnboardingPathsEditor.
 //
-// Paths A/B quote {{rate_per_hour}} in their follow-up email (the 'rates'
-// tag on PATH_STYLES); B/D send a booking link (the 'calendar' tag). The
-// wizard has always demanded the calendar link for B/D — this suite pins
-// the new symmetric demand: picking A or B demands the hourly rate, and
-// picking C/D never asks. The Save payload carries ratePerHour so
-// savePaths can persist it (empty for C/D, which the API ignores).
+// The rate-included styles quote {{rate_per_hour}} in their follow-up email (the 'rates'
+// tag on PATH_STYLES); the booking-link styles send a link (the 'calendar' tag). The
+// wizard has always demanded the calendar link for those — this suite pins
+// the symmetric demand: a rate-included style demands the hourly rate, and
+// a rate-on-the-call style never asks. The Save payload carries ratePerHour so
+// savePaths can persist it (empty when no rate is quoted, which the API ignores).
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { OnboardingPathsEditor } from '@/components/BeeHub'
+
+// The four styles are named by what they DO now — no more "Path A/B/C/D".
+// (The DB path_key values are untouched; these are labels only.)
+const PATH_A = 'Reply to schedule · rate included'
+const PATH_B = 'Booking link · rate included'
+const PATH_C = 'Reply to schedule · rate on the call'
+const PATH_D = 'Booking link · rate on the call'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -65,17 +72,17 @@ const setNativeValue = (el: HTMLInputElement, value: string) => {
 async function driveToConfirm(onComplete: (p: any) => void, moveLabel: string, generalLabel: string) {
   await act(async () => { root.render(<OnboardingPathsEditor onComplete={onComplete} />) })
   await act(async () => {})   // let the masters fetch resolve
-  await clickText("Let's pick my paths →")
+  await clickText('Start with 📦 Moving →')
   await clickText(moveLabel)
-  await clickText('Next: Organizing Projects →')
+  await clickText('Next: 🏠 Organizing projects →')
   await clickText(generalLabel)
   await clickText('Review my choices →')
 }
 
 describe('onboarding wizard — rate ask on rate-quoting paths', () => {
-  it('Path A (move) + Path C (general) → asks for the rate, blocks Save until entered, payload carries it', async () => {
+  it('rate-included (move) + rate-on-the-call (general) → asks for the rate, blocks Save until entered, payload carries it', async () => {
     const onComplete = vi.fn()
-    await driveToConfirm(onComplete, 'Path A', 'Path C')
+    await driveToConfirm(onComplete, PATH_A, PATH_C)
 
     // The rate block renders; the calendar block does not (A/C have no 'calendar' tag).
     expect(textEls('Hourly rate required').length).toBe(1)
@@ -96,9 +103,9 @@ describe('onboarding wizard — rate ask on rate-quoting paths', () => {
     )
   })
 
-  it('Path B → demands BOTH the calendar link and the rate', async () => {
+  it('booking-link + rate-included → demands BOTH the calendar link and the rate', async () => {
     const onComplete = vi.fn()
-    await driveToConfirm(onComplete, 'Path B', 'Path B')
+    await driveToConfirm(onComplete, PATH_B, PATH_B)
 
     expect(textEls('Calendar link required').length).toBe(1)
     expect(textEls('Hourly rate required').length).toBe(1)
@@ -117,12 +124,12 @@ describe('onboarding wizard — rate ask on rate-quoting paths', () => {
     )
   })
 
-  it('Path C + Path D → NO rate ask, NO rate gate; payload rate is empty (API ignores it)', async () => {
+  it('both rate-on-the-call styles → NO rate ask, NO rate gate; payload rate is empty (API ignores it)', async () => {
     const onComplete = vi.fn()
-    await driveToConfirm(onComplete, 'Path C', 'Path D')
+    await driveToConfirm(onComplete, PATH_C, PATH_D)
 
     expect(textEls('Hourly rate required').length).toBe(0)
-    // D still wants its calendar link — the existing gate is untouched.
+    // The booking-link style still wants its calendar link — the existing gate is untouched.
     expect(textEls('Calendar link required').length).toBe(1)
     const calInput = container.querySelector('input[placeholder="https://calendly.com/your-name"]') as HTMLInputElement
     await act(async () => { setNativeValue(calInput, 'https://calendly.com/bee') })
