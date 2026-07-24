@@ -321,6 +321,9 @@ export async function foundEngagement(params: {
     return { error: `founding child link failed: ${foundingChildTable}/${foundingChildId}` }
   }
 
+  // Carry the lead-level assignment onto the work. Never fatal.
+  await seedEngagementAssigneesFromLead(created.id, clientId)
+
   await logFounding({
     locationSlug: lead.location_id,
     engagementId: created.id,
@@ -376,6 +379,9 @@ export async function foundManualEngagement(params: {
     .single()
   if (insErr || !created) return { error: `engagement insert: ${insErr?.message || 'no row'}` }
 
+  // Carry the lead-level assignment onto the work. Never fatal.
+  await seedEngagementAssigneesFromLead(created.id, clientId)
+
   await logFounding({
     locationSlug: lead.location_id,
     engagementId: created.id,
@@ -383,6 +389,67 @@ export async function foundManualEngagement(params: {
     note: params.note || `manual founding for lead "${lead.name || clientId}" at stage ${OPENING_STAGE.manual}`,
   })
   return { engagement: created, created: true }
+}
+
+// ── assignment carry-forward ──────────────────────────────────────
+//
+// Seed engagement_assignees from the LEAD's assignees at founding time.
+//
+// Assignment is decided when the lead lands (lib/lead-assignment.ts — the
+// location's project-type recipient config, or the location owner), but at that
+// moment there is no engagement to hang it on: work is founded later, by a
+// request / quote / job, or by hand. This is the carry-forward — the same
+// decision, moved onto the work the instant the work exists. Without it the
+// EngagementPanel masthead would open empty on every engagement founded from an
+// assigned lead, and the Jobber TEAM/CREW push would have nothing to send.
+//
+// IDEMPOTENT + NON-DESTRUCTIVE:
+//   · Only ever seeds an engagement whose junction is EMPTY. A re-found or a
+//     retry can't stomp a set someone has since edited in the masthead.
+//   · The upsert ignores duplicates, so a concurrent seed is a no-op.
+//   · Deliberately does NOT push to Jobber. Founding runs inside the import and
+//     webhook paths, where a synchronous Jobber mutation per founded engagement
+//     would be both slow and echo-prone; the first masthead edit pushes the set,
+//     and lib/engagement-assignee-sync is idempotent on Jobber's side anyway.
+//
+// NEVER FATAL: founding has already committed and its caller's happy path must
+// not depend on this. Every failure — including "lead_assignees does not exist
+// yet" before migrations/lead_assignees.sql is applied — logs and returns 0.
+export async function seedEngagementAssigneesFromLead(
+  engagementId: string,
+  leadId: string,
+): Promise<number> {
+  try {
+    const { data: already, error: alreadyErr } = await supabaseService
+      .from('engagement_assignees')
+      .select('hub_user_id')
+      .eq('engagement_id', engagementId)
+      .limit(1)
+    if (alreadyErr) throw new Error(alreadyErr.message)
+    if ((already || []).length > 0) return 0
+
+    const { data: leadRows, error: leadErr } = await supabaseService
+      .from('lead_assignees')
+      .select('hub_user_id, created_at')
+      .eq('lead_id', leadId)
+      .order('created_at', { ascending: true })
+    if (leadErr) throw new Error(leadErr.message)
+
+    const ids = (leadRows || []).map((r: any) => r.hub_user_id).filter(Boolean)
+    if (ids.length === 0) return 0
+
+    const { error: insErr } = await supabaseService.from('engagement_assignees').upsert(
+      ids.map((hub_user_id: string) => ({ engagement_id: engagementId, hub_user_id })),
+      { onConflict: 'engagement_id,hub_user_id', ignoreDuplicates: true },
+    )
+    if (insErr) throw new Error(insErr.message)
+    return ids.length
+  } catch (err: any) {
+    console.warn(
+      `[engagements] assignee carry-forward skipped for engagement ${engagementId} / lead ${leadId} — ${err?.message || err}`,
+    )
+    return 0
+  }
 }
 
 // ── attachment ────────────────────────────────────────────────────

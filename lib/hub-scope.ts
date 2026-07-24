@@ -329,6 +329,11 @@ export const CHILD_LOCATION_SCOPE: Record<string, { column: string; form: ChildL
   // scopes them (not a location column they don't have).
   lead_contacts: null,
   lead_tags:     null,
+  // Same shape and same reasoning: lead_assignees carries no location column by
+  // design (migrations/lead_assignees.sql), it is scoped through its parent
+  // lead. One row per (lead, assignee) — at most a handful per lead — so the
+  // whole-table read stays cheap however it grows.
+  lead_assignees: null,
 }
 
 // Build the `.eq(column, value)` pair for a child table, or null when the table

@@ -51,7 +51,7 @@ const LOC = { uuid: KC_UUID, slug: KC_SLUG }
 // derived from the module it would agree with any swap and prove nothing.
 const SLUG_TABLES = ['quotes', 'jobs', 'invoices', 'assessments', 'service_requests']
 const UUID_TABLES = ['touchpoints', 'lead_notes']
-const NO_COLUMN_TABLES = ['lead_contacts', 'lead_tags']
+const NO_COLUMN_TABLES = ['lead_contacts', 'lead_tags', 'lead_assignees']
 
 describe('hub-scope — the slug/uuid vocabulary', () => {
   it.each(SLUG_TABLES)('%s filters location_id on the SLUG, never the uuid', (table) => {

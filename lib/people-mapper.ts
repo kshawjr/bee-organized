@@ -59,6 +59,10 @@ type JoinedData = {
   touchpoints?: any[]
   lead_contacts?: any[]
   lead_tags?: any[]
+  // Plural lead-level assignment (migrations/lead_assignees.sql). When present
+  // it is authoritative for `assignedTo`; absent/empty falls back to the legacy
+  // singular leads.assigned_to. See the mapping below.
+  lead_assignees?: any[]
   assessments?: any[]
   service_requests?: any[]
   quotes?: any[]
@@ -263,9 +267,26 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     dueDate: null, // not imported from Jobber
   }))
 
+  // Assignment — ARRAY of hub_user ids, oldest first (the junction row order),
+  // so "primary" is stable = the first person assigned.
+  //
+  // The junction (lead_assignees) is the truth. The fallback to the legacy
+  // singular leads.assigned_to is COMPAT, not a second source: it keeps the
+  // ~7,129 import blanket-stamped rows and any pre-migration load rendering
+  // exactly as they do today instead of blanking. A lead that HAS junction
+  // rows never consults the column.
+  const assigneeRows = (joined.lead_assignees || [])
+    .slice()
+    .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))
+  const assignedTo = assigneeRows.length > 0
+    ? assigneeRows.map(r => r.hub_user_id).filter(Boolean)
+    : row.assigned_to
+      ? [row.assigned_to]
+      : []
+
   return {
     id: row.id,
-    assignedTo: row.assigned_to,
+    assignedTo,
     locationId: row.location_uuid || row.location_id, // UUID matches BeeHub's locFilter
     // Global-form leads that landed outside any service area sit at the
     // 'loc_other' holding pen (a real location, slug 'loc_other'). The Inbox

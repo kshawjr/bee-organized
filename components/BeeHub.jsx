@@ -1238,6 +1238,26 @@ async function deleteLeadTag(leadId, tagLookupId) {
   return _fetchJSON(`/api/lead-tags?${qs}`, { method: 'DELETE' })
 }
 
+// Person.assignedTo is an ARRAY of hub_user ids (people-mapper reads the
+// lead_assignees junction, oldest first — index 0 is the primary). It can still
+// arrive as a bare string from an older cached payload or an optimistic local
+// patch, so every reader normalizes through here rather than assuming a shape.
+function asAssigneeIds(v) {
+  if (Array.isArray(v)) return v.filter(Boolean)
+  return v ? [v] : []
+}
+
+// Plural lead assignment. PUT replaces the whole set (an empty array unassigns
+// everyone), which is what a multi-select picker naturally hands back. The
+// route keeps leads.assigned_to in step with the first id for legacy readers.
+async function putLeadAssignees(leadId, hubUserIds) {
+  return _fetchJSON(`/api/leads/${encodeURIComponent(leadId)}/assignees`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hub_user_ids: Array.isArray(hubUserIds) ? hubUserIds : [] }),
+  })
+}
+
 async function postLeadContact(leadId, contact) {
   return _fetchJSON('/api/lead-contacts', {
     method: 'POST',
@@ -4752,11 +4772,7 @@ function PersonPanel({
   const hasInvoices = person.invoices?.length > 0;
   const total = person.invoices?.reduce((s, i) => s + i.amount, 0) || 0;
   const unpaid = person.invoices?.filter((i) => i.status === "Awaiting Payment").length || 0;
-  const assignedIds = Array.isArray(person.assignedTo)
-    ? person.assignedTo
-    : person.assignedTo
-      ? [person.assignedTo]
-      : [];
+  const assignedIds = asAssigneeIds(person.assignedTo);
   const allUsers = useContext(LocationUsersContext) || USERS_DATA;
   const assignedUsers = assignedIds
     .map((id) => allUsers.find((u) => u.id === id))
@@ -4879,6 +4895,23 @@ function PersonPanel({
       if (failed) {
         onUpdate({ ...person, tags: oldTags });
         showError("Could not update tags");
+      }
+    });
+  }
+  // Assignment is PLURAL and lives in its own junction (lead_assignees), so it
+  // does NOT ride the generic lead PATCH — `assignedTo` is deliberately absent
+  // from PERSON_TO_API_FIELD. Same optimistic-then-rollback shape as handleTags:
+  // the picker closes immediately, and a failed write restores the previous set
+  // rather than leaving the UI claiming an assignment the server never took.
+  function handleAssignees(ids) {
+    const next = Array.isArray(ids) ? ids.filter(Boolean) : [];
+    const prev = asAssigneeIds(person.assignedTo).slice();
+    update({ assignedTo: next });
+    setShowAssignPicker(false);
+    putLeadAssignees(person.id, next).then((r) => {
+      if (!r.ok) {
+        onUpdate({ ...person, assignedTo: prev });
+        showError("Could not update assignment");
       }
     });
   }
@@ -8556,7 +8589,7 @@ function PersonPanel({
       React.createElement(AssignUserPicker, {
         locationId: person.locationId,
         currentUserIds: assignedIds,
-        onSelect: (ids) => update({ assignedTo: ids[0] || null }),
+        onSelect: handleAssignees,
         onClose: () => setShowAssignPicker(false),
       }),
     popup === "job-detail" &&
@@ -9557,7 +9590,20 @@ function StageGroup({ stage, stageConf: s, records, selectedIds, setSelectedIds,
           </div>
         </div>
         <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:'4px', flexShrink:0 }}>
-          {(()=>{ const u=allUsers.find(u=>u.id===person.assignedTo); return u?<div style={{ width:'20px', height:'20px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'8px', fontWeight:700, color:'white' }} title={u.name}>{u.initials}</div>:null })()}
+          {(()=>{
+            // Assignment is plural. The row is tight, so show the PRIMARY (the
+            // first person assigned) and title-tag the rest rather than
+            // stacking avatars — the panel is where the full set is shown.
+            const ids=asAssigneeIds(person.assignedTo);
+            const us=ids.map(id=>allUsers.find(u=>u.id===id)).filter(Boolean);
+            if(!us.length) return null;
+            const u=us[0];
+            const label=us.map(x=>x.name).join(', ');
+            return <div style={{ position:'relative', width:'20px', height:'20px' }} title={label}>
+              <div style={{ width:'20px', height:'20px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'8px', fontWeight:700, color:'white' }}>{u.initials}</div>
+              {us.length>1&&<span style={{ position:'absolute', right:'-6px', bottom:'-2px', fontSize:'8px', fontWeight:700, color:'#5a6e6a', background:'white', borderRadius:'6px', padding:'0 2px', lineHeight:1.4 }}>+{us.length-1}</span>}
+            </div>;
+          })()}
           <span style={{ fontSize:'11px', color:'#8a9e9a' }}>{fmtCreated(person.created, person.id)}</span>
         </div>
       </div>
@@ -9640,7 +9686,12 @@ const PERSON_TO_API_FIELD = {
   project: 'project_type',
   dripPath: 'drip_path',
   moveDripPath: 'move_drip_path',
-  assignedTo: 'assigned_to',
+  // assignedTo is DELIBERATELY NOT HERE. Assignment is plural and lives in the
+  // lead_assignees junction, written by PUT /api/leads/:id/assignees
+  // (putLeadAssignees below). Mapping it here would send an ARRAY to the
+  // singular leads.assigned_to column. Dropping it from this map means a stray
+  // `update({ assignedTo })` is silently ignored by the generic PATCH instead
+  // of corrupting the column — the only writer is handleAssignees.
   closedLostReason: 'closed_lost_reason',
   closedLostNote: 'closed_lost_note',
   referredByKind: 'referred_by_kind',
@@ -9895,7 +9946,8 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], location
     const matchSearch   = !search||p.name.toLowerCase().includes(q)||p.email.toLowerCase().includes(q)||p.phone.includes(search)
     const matchStage    = stageFilters.length===0||stageFilters.includes(p.stage)
     const matchSource   = sourceFilters.length===0||sourceFilters.includes(p.source)
-    const matchAssignee = assigneeFilters.length===0||assigneeFilters.includes(p.assignedTo)
+    // Plural: a lead matches if ANY of its assignees is in the filter.
+    const matchAssignee = assigneeFilters.length===0||asAssigneeIds(p.assignedTo).some(id=>assigneeFilters.includes(id))
     const matchTag      = tagFilters.length===0||tagFilters.some(t=>p.tags?.includes(t))
     // p.created is an ISO timestamp (set from created_at). Real date math —
     // same bug class as the home tab newThisWeek fix (c137c96).
@@ -10607,20 +10659,23 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], location
           count={selectedIds.length}
           locationId={people.find(p=>p.id===selectedIds[0])?.locationId}
           onApply={async (userId)=>{
-            // Persist each reassignment via the shared lead PATCH helper
-            // (maps assignedTo → assigned_to, returns { ok, error }). Only
-            // commit successful rows to local state so a failed PATCH doesn't
-            // show a change that won't survive refresh.
+            // Persist each reassignment through the plural assignees route
+            // (assignment no longer rides the generic lead PATCH — see
+            // PERSON_TO_API_FIELD). This modal picks ONE user, so the new set
+            // is a single-element array: bulk reassign REPLACES, it does not
+            // add to whatever each row already had. Only commit successful rows
+            // to local state so a failure doesn't show a change that won't
+            // survive refresh.
             const ids = [...selectedIds]
             const results = await Promise.all(
-              ids.map(id => patchLeadAPI(id, { assignedTo: userId }))
+              ids.map(id => putLeadAssignees(id, userId ? [userId] : []))
             )
             const okIds = new Set(ids.filter((id,i)=>results[i]?.ok))
             const failed = ids.length - okIds.size
             if (failed > 0) {
               setToast({ kind:'error', msg:`${failed} of ${ids.length} reassignment${ids.length!==1?'s':''} failed — please try again` })
             }
-            setPeople(prev=>prev.map(p=>okIds.has(p.id)?{...p,assignedTo:userId}:p))
+            setPeople(prev=>prev.map(p=>okIds.has(p.id)?{...p,assignedTo:userId?[userId]:[]}:p))
             setSelectedIds([])
             setShowMassUpdate(false)
           }}

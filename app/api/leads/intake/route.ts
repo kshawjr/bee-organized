@@ -39,6 +39,7 @@ import { writeSyncLog } from '@/lib/sync-log'
 import { applyDripSideEffects, startDripForLead } from '@/lib/drip-lifecycle'
 import { sendDripStep } from '@/lib/drip-send'
 import { notifyNewLead } from '@/lib/lead-notification-email'
+import { assignIncomingLead, getLeadAssigneeIds } from '@/lib/lead-assignment'
 import { notifyNewLeadSlack } from '@/lib/slack-bot'
 import { logSlackNotification } from '@/lib/notification-log'
 import {
@@ -400,6 +401,37 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ─── Assignment (CREATE path) ─────────────────────────────────
+  // Until now this route wrote NO assignment at all — every webform lead
+  // landed with assigned_to NULL and no junction row, which is the blank
+  // Kevin was seeing (106 leads, 100% of them from this door). Resolve the
+  // owner(s) from the location's project-type notification config and write
+  // both the lead_assignees junction (plural truth) and leads.assigned_to
+  // (first assignee, legacy compat). See lib/lead-assignment.ts for the rule.
+  //
+  // Non-fatal, like every other side effect here: the lead row is already
+  // committed and a lost assignment must never cost us the lead. A missing
+  // lead_assignees table (migration not yet applied) degrades to the
+  // assigned_to write alone, which still clears the blank.
+  let assignedCount = 0
+  let assignmentBasis: string | null = null
+  try {
+    const assignment = await assignIncomingLead({
+      leadId: lead.id,
+      locationUuid: location.id,
+      projectType: project_type || null,
+    })
+    assignedCount = assignment.hubUserIds.length
+    assignmentBasis = assignment.basis
+    warnings.push(...assignment.warnings)
+    if (assignment.basis === 'none') {
+      warnings.push('assignment_no_owner: location has no resolvable owner')
+    }
+  } catch (err: any) {
+    console.error('[intake] assignIncomingLead threw', err)
+    warnings.push(`assignment_failed: ${err?.message || String(err)}`)
+  }
+
   // Drip enrollment is gated on the location having completed onboarding.
   // lifecycle_status flips 'onboarding' → 'active' on the launch endpoint;
   // strict === 'active' is fail-closed (null / any other state skips). A
@@ -577,6 +609,11 @@ export async function POST(req: NextRequest) {
     detail:
       `lead=${lead.id} source=${source || 'web_form'} dedup=${dedupTier}` +
       ` drip_enrolled=${dripEnrolled} notified=${notifiedCount}` +
+      // Assignment observability. `assigned=0` is the alarm state (rule 5 —
+      // never nobody); the basis token says WHICH tier decided it, so a
+      // "why did the owner get this?" question is answerable off the row.
+      ` assigned=${assignedCount}` +
+      (assignmentBasis ? ` assigned_via=${assignmentBasis}` : '') +
       // Description observability: absent-under-any-key is flagged, and a
       // non-contract alias winning names the drifted key. Both tokens are
       // presence-signals — a normal `message` lead carries neither.
@@ -600,6 +637,8 @@ export async function POST(req: NextRequest) {
       lifecycle_status: location.lifecycle_status ?? null,
     },
     drip_enrolled: dripEnrolled,
+    assigned_count: assignedCount,
+    ...(assignmentBasis ? { assigned_via: assignmentBasis } : {}),
     ...(dripSkippedReason ? { drip_skipped_reason: dripSkippedReason } : {}),
     ...(possibleDuplicateIds.length
       ? { possible_duplicate_of: possibleDuplicateIds }
@@ -717,6 +756,43 @@ async function mergeResubmission(args: {
     warnings.push(`touchpoint_insert_failed: ${err?.message || String(err)}`)
   }
 
+  // ─── Assignment on merge: FILL-EMPTY, never overwrite ─────────
+  // Same rule as the fill loop above, applied to ownership. A resubmission of
+  // a lead that already has an assignee must NOT reassign it — that would take
+  // work away from whoever picked it up. But a lead that is still blank (any of
+  // the 106 that came through this door before assignment existed) gets the
+  // rule applied now, which is what "never nobody" means for a returning
+  // submission. Non-fatal; the merge has already committed.
+  //
+  // Reads the junction, not leads.assigned_to: the legacy column carries
+  // ~7,129 import blanket-stamps and is not evidence that a human chose anyone.
+  let mergeAssignedCount = 0
+  let mergeAssignmentBasis: string | null = null
+  try {
+    const existing = await getLeadAssigneeIds(matched.id)
+    if (existing.length === 0) {
+      // The project type the lead has AFTER the merge fills.
+      const effectiveProjectType =
+        (matched.project_type || '').trim() ||
+        (!fillUpdateFailed && typeof fills.project_type === 'string' ? fills.project_type : '') ||
+        null
+      const assignment = await assignIncomingLead({
+        leadId: matched.id,
+        locationUuid: location.id,
+        projectType: effectiveProjectType,
+      })
+      mergeAssignedCount = assignment.hubUserIds.length
+      mergeAssignmentBasis = assignment.basis
+      warnings.push(...assignment.warnings)
+    } else {
+      mergeAssignedCount = existing.length
+      mergeAssignmentBasis = 'existing'
+    }
+  } catch (err: any) {
+    console.error('[intake] merge assignIncomingLead threw', err)
+    warnings.push(`assignment_failed: ${err?.message || String(err)}`)
+  }
+
   // Drip: only if never enrolled (ANY progress row — active, completed,
   // or stopped — means the lead already had its shot; a resubmission
   // must not restart a finished sequence or double-send step 1). Same
@@ -769,6 +845,9 @@ async function mergeResubmission(args: {
     detail:
       `lead=${matched.id} source=${source} merged (matched on ${matchedOn})` +
       ` drip_enrolled=${dripEnrolled}` +
+      // assigned_via=existing means the merge left a human's choice alone.
+      ` assigned=${mergeAssignedCount}` +
+      (mergeAssignmentBasis ? ` assigned_via=${mergeAssignmentBasis}` : '') +
       // submission.message is the alias-resolved description (see POST) —
       // same presence-signal as the create path.
       (!submission.message?.trim() ? ' no_description=true' : '') +
@@ -788,6 +867,8 @@ async function mergeResubmission(args: {
       lifecycle_status: location.lifecycle_status ?? null,
     },
     drip_enrolled: dripEnrolled,
+    assigned_count: mergeAssignedCount,
+    ...(mergeAssignmentBasis ? { assigned_via: mergeAssignmentBasis } : {}),
     ...(dripSkippedReason ? { drip_skipped_reason: dripSkippedReason } : {}),
     ...(warnings.length ? { warnings } : {}),
   })

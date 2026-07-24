@@ -1078,6 +1078,7 @@ export default async function HubPage({
         quotesRaw,
         jobsRaw,
         invoicesRaw,
+        leadAssigneesRaw,
       ] = await Promise.all([
         fetchChildRows('lead_notes', leadIds, 'created_at'),
         fetchChildRows('touchpoints', leadIds, 'occurred_at'),
@@ -1088,6 +1089,11 @@ export default async function HubPage({
         fetchChildRows('quotes', leadIds, 'sent_at'),
         fetchChildRows('jobs', leadIds, 'scheduled_start'),
         fetchChildRows('invoices', leadIds, 'issued_at'),
+        // Plural lead assignment. Composite PK (lead_id, hub_user_id) — no `id`
+        // column, so keyCols must name both, exactly like lead_tags. Ordered
+        // created_at ASCENDING: the first row assigned is the primary, and
+        // people-mapper preserves that order.
+        fetchChildRows('lead_assignees', leadIds, 'created_at', true, ['lead_id', 'hub_user_id']),
       ])
 
       const tagLookupIds = Array.from(new Set((leadTagsRaw || []).map((lt: any) => lt.tag_lookup_id)))
@@ -1120,6 +1126,7 @@ export default async function HubPage({
       const quotesByLead      = groupBy(quotesRaw)
       const jobsByLead        = groupBy(jobsRaw)
       const invoicesByLead    = groupBy(invoicesRaw)
+      const assigneesByLead   = groupBy(leadAssigneesRaw)
 
       // ── ONE paginated sweep over ALL engagements (open + closed): repeat
       // counts for the board chips + the per-client Closed Won roll-up that
@@ -1167,6 +1174,7 @@ export default async function HubPage({
           quotes:           quotesByLead[row.id]      || [],
           jobs:             jobsByLead[row.id]        || [],
           invoices:         invoicesByLead[row.id]    || [],
+          lead_assignees:   assigneesByLead[row.id]   || [],
           tag_lookups,
           won_summary:      wonByClient[row.id]       || null,
         })
@@ -1479,9 +1487,12 @@ export default async function HubPage({
         // Bounded at TRANSFER_QUEUE_MAX ids, so this is one chunk per table.
         const fetchTransferChildRows = createChildRowFetcher(supabaseService, { unscoped: false })
         const transferIds = transferRaw.map((r: any) => r.id)
-        const [transferNotes, transferTouches] = await Promise.all([
+        const [transferNotes, transferTouches, transferAssignees] = await Promise.all([
           fetchTransferChildRows('lead_notes', transferIds, 'created_at'),
           fetchTransferChildRows('touchpoints', transferIds, 'occurred_at'),
+          // Unrouted, but NOT unassigned: intake assigns at loc_other like
+          // anywhere else, so these rows carry junction data the panel shows.
+          fetchTransferChildRows('lead_assignees', transferIds, 'created_at', true, ['lead_id', 'hub_user_id']),
         ])
         const byLead = (rows: any[]) => {
           const out: Record<string, any[]> = {}
@@ -1490,12 +1501,14 @@ export default async function HubPage({
         }
         const notesByLead = byLead(transferNotes)
         const touchByLead = byLead(transferTouches)
+        const assigneesByLead = byLead(transferAssignees)
 
         const { mapLeadToPerson } = await import('@/lib/people-mapper')
         initialTransferPeople = transferRaw.map((row: any) =>
           mapLeadToPerson(row, {
             lead_notes: notesByLead[row.id] || [],
             touchpoints: touchByLead[row.id] || [],
+            lead_assignees: assigneesByLead[row.id] || [],
           })
         )
       }

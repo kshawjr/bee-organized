@@ -25,9 +25,17 @@ const LEAD_COL_TO_PERSON_FIELD = {
   // only, exactly like the column: deriveClientStatus stays blind to it, so
   // the person keeps their true status everywhere else.
   inbox_dismissed_at: 'inboxDismissedAt',
-  // Build-3 preference/assignment writes (PreferencesBlock + AssignedToField)
+  // Build-3 preference writes (PreferencesBlock)
   marketing_opt_out: 'marketingOptOut',
   paused: 'paused',
+  // LEGACY / effectively dead: AssignedToField was removed from ClientProfile
+  // when assignment went plural, and no card PATCHes assigned_to any more —
+  // assignment is written through PUT /api/leads/:id/assignees and read from
+  // the lead_assignees junction. Kept because the map is defensive, not because
+  // anything fires it. NOTE THE SHAPE MISMATCH if you ever revive a caller:
+  // Person.assignedTo is an ARRAY, this maps a single column value. Every
+  // reader normalizes via asAssigneeIds(), so a stray singular is tolerated —
+  // but a new writer should target the assignees route, not this seam.
   assigned_to: 'assignedTo',
   phone: 'phone',               // ContactField inline edit → Inbox tel:/filters live
   email: 'email',

@@ -27,6 +27,7 @@ import { sendDripStep } from '@/lib/drip-send'
 import { notifyNewLead } from '@/lib/lead-notification-email'
 import { notifyNewLeadSlack } from '@/lib/slack-bot'
 import { logSlackNotification } from '@/lib/notification-log'
+import { writeLeadAssignment } from '@/lib/lead-assignment'
 
 export const runtime = 'nodejs'
 
@@ -203,6 +204,37 @@ export async function POST(req: NextRequest) {
       { error: 'insert_failed', detail: insertErr?.message },
       { status: 500 },
     )
+  }
+
+  // ─── Mirror the assignment into the plural junction ──────────
+  // This route takes a SINGLE assigned_to from the create form (which defaults
+  // to the creating user), and that column is written above. Mirror it into
+  // lead_assignees so the lead's assignment lives where every other path reads
+  // it — without this, a hand-created lead would found its engagement with an
+  // EMPTY assignee set (seedEngagementAssigneesFromLead reads the junction, not
+  // the legacy column).
+  //
+  // Fail-soft by construction (writeLeadAssignment never throws); the redundant
+  // assigned_to write it performs is a harmless no-op against the value already
+  // inserted. Nothing here can cost us the lead row.
+  if (assignedTo) {
+    const mirrored = await writeLeadAssignment({
+      leadId: lead.id,
+      assignedVia: 'manual', // a human picked this; not an auto-resolution
+      resolved: {
+        hubUserIds: [assignedTo],
+        basis: 'location_owner',
+        splitEnabled: false,
+        resolvedProjectType: null,
+        projectTypeUnrecognized: false,
+        externalClaimants: [],
+      },
+    })
+    if (!mirrored.junctionWritten) {
+      console.warn(
+        `[leads] lead ${lead.id} created with assigned_to but no lead_assignees row — ${mirrored.warnings.join('; ')}`,
+      )
+    }
   }
 
   // ─── Seed creation touchpoint ────────────────────────────────
