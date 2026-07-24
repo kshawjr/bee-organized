@@ -11484,7 +11484,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     { id:'location',  icon:'📍', label:'Set location details',    desc:'Address, send-from email, notifications' },
     { id:'jobber',    icon:'⚡', label:'Connect Jobber',          desc:'Link your field service account' },
     { id:'import',    icon:'📋', label:'Import your clients',     desc:'Bring existing clients from Jobber into Bee Hub' },
-    { id:'paths',     icon:'📧', label:'New lead emails',        desc:'Choose what a new lead hears from you first' },
+    { id:'paths',     icon:'📧', label:'New lead emails',        desc:'See what a new lead hears from you first' },
     { id:'invite',    icon:'👥', label:'Invite your team',        desc:'Add managers and users to your location' },
   ]
   // Lightweight onboarding for invited team members (lite_user role). Two
@@ -12820,121 +12820,187 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
   return null
 }
 
-function PathChooser({ projectLabel, stepIndex, emoji, current, onSelect, previewPath, setPreviewPath, PLAIN, pathOptions, getSteps, sectionKey: sectionKeyProp, previewSettings = null }) {
-  // sectionKey is the path_key prefix matching the master drip_paths
-  // ('moving-a' / 'organizing-a' / ...). Passed explicitly so the copy above
-  // is free to change without silently re-pointing which masters we read.
-  const sectionKey = sectionKeyProp || (String(projectLabel).toLowerCase().includes('mov') ? 'moving' : 'organizing')
-  const allOptions = pathOptions
-  // Template being peeked at in the centered preview modal (full subject +
-  // body). Mirrors Settings → Communications: the inline expand lists the
-  // steps, and each step's 👁 Preview opens TemplateQuickPeekModal.
-  const [peekTemplate, setPeekTemplate] = useState(null)
+// Lead-phrased style copy for the onboarding confirm screen ONLY. Settings
+// keeps the c9b46c0 owner-phrased names (PATH_STYLES.label, e.g. "Reply to
+// schedule · rate on the call") — the divergence is deliberate: on this
+// screen the owner is reading what their LEAD experiences, plus what the
+// style costs THEM to set up. Order is cheapest-first, matching the default.
+const CONFIRM_STYLES = [
+  { id:'path-c', lead:'They reply to schedule · price on the call',          cost:'Nothing to set up' },
+  { id:'path-d', lead:'They book on your calendar · price on the call',      cost:'Needs your booking link' },
+  { id:'path-a', lead:'They reply to schedule · your rate in the email',     cost:'Needs your hourly rate' },
+  { id:'path-b', lead:'They book on your calendar · your rate in the email', cost:'Needs both' },
+]
+
+const HOW_IT_WORKS = {
+  'path-c': 'How this works: your leads reply to you directly to schedule, and pricing comes up on the call — not in the email. Most owners start here.',
+  'path-d': 'How this works: your leads book time on your calendar (or phone you), and pricing comes up on the call — not in the email.',
+  'path-a': 'How this works: your leads reply to you directly to schedule, and your hourly rate is right there in the email.',
+  'path-b': 'How this works: your leads book time on your calendar, and your hourly rate is right there in the email.',
+}
+
+const COUNT_WORDS = ['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten']
+const countWord = n => COUNT_WORDS[n] || String(n)
+
+// The confirm-not-choose screen: one per project type. The owner CONFIRMS a
+// pre-selected style by reading the real emails (email 1 open, rest collapsed)
+// — the four-card decision only appears behind "Change how this works".
+// Kevin: the original complaint was "people don't really understand what they
+// are selecting"; four options with no explanation is where they freeze or
+// guess, so the decision is removed from the default path entirely.
+function OnboardingLeadEmailsConfirm({
+  projectLabel, emoji, stepKicker, sectionKey,
+  selected, onSelect, styleOptions, getSteps, previewSettings,
+  needsCalendar, needsRate, calendarLink, setCalendarLink, ratePerHour, setRatePerHour,
+  continueLabel, onContinue, onBack, backLabel,
+}) {
+  // Which step is expanded: master step_order values start at 1, so email 1
+  // is open on entry — the "real email text visible" half of confirm-not-choose.
+  const [openOrder, setOpenOrder] = useState(1)
+  const [chooserOpen, setChooserOpen] = useState(false)
+
+  const pathId = `${sectionKey}-${String(selected).replace('path-','')}`
+  const steps  = getSteps(pathId)
   // Shared 14-variable preview pipeline (lib/preview-vars) — one build per
-  // render backs every step row's substituted subject line.
+  // render backs every collapsed row's substituted subject line; the expanded
+  // card mounts the same RenderedTemplatePreview as Settings → Communications.
   const previewVars = previewSettings ? buildPreviewVars(previewSettings) : null
 
+  const calendarReady = !needsCalendar || calendarLink.trim().startsWith('http')
+  const rateReady     = !needsRate || ratePerHour.trim() !== ''
+  const ready         = calendarReady && rateReady
+  const gateLabel     = !calendarReady ? 'Add your calendar link to continue'
+                      : !rateReady     ? 'Add your hourly rate to continue'
+                      : continueLabel
+  const noun = steps.length && steps.every(s => s.type === 'email') ? 'email' : 'message'
+
   return (
-    <div style={{ display:'grid', gap:'8px' }}>
-      {/* Persistent project-type header. Kevin: during onboarding the two
-          project types blended together and you couldn't tell which one you
-          were on — so this is a solid banner, not a subtle label. */}
+    <div style={{ display:'grid', gap:'10px' }}>
+      {/* Persistent project-type header (c9b46c0). Kevin: during onboarding
+          the two project types blended together — solid banner, not a subtle
+          label. The kicker now also says what's coming next. */}
       <div style={{ background:'#1a2e2b', borderRadius:'10px', padding:'13px 15px' }}>
-        <p style={{ fontSize:'10px', fontWeight:700, color:'#a8c9c4', textTransform:'uppercase', letterSpacing:'0.8px', marginBottom:'5px' }}>Step {stepIndex} of 2 · You're setting up</p>
-        <p style={{ fontSize:'17px', fontWeight:700, color:'white', fontFamily:'Georgia,serif', marginBottom:'3px' }}>{emoji} {projectLabel} projects</p>
-        <p style={{ fontSize:'12px', color:'rgba(255,255,255,0.72)', lineHeight:1.5 }}>Pick the first email a new <strong style={{ color:'white' }}>{projectLabel.toLowerCase()}</strong> lead receives. Select one, then tap Emails to read it.</p>
+        <p style={{ fontSize:'10px', fontWeight:700, color:'#a8c9c4', textTransform:'uppercase', letterSpacing:'0.8px', marginBottom:'5px' }}>{stepKicker}</p>
+        <p style={{ fontSize:'17px', fontWeight:700, color:'white', fontFamily:'Georgia,serif' }}>{emoji} {projectLabel} projects</p>
       </div>
 
-      {allOptions.map(style=>{
-        const pd        = PLAIN[style.id]||{}
-        const isCustom  = style.id==='custom'
-        const isSelected = current===style.id
-        const isPreview  = previewPath===style.id
-        const pathId    = isCustom ? null : `${sectionKey}-${style.id.replace('path-','')}`
-        const steps     = pathId ? getSteps(pathId) : []
+      <div>
+        <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'3px' }}>Here's what a new {projectLabel} lead receives</p>
+        {steps.length > 0 && (
+          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5 }}>{countWord(steps.length)} {noun}{steps.length===1?'':'s'}, sent automatically. You can change any of this later.</p>
+        )}
+      </div>
 
+      {steps.length===0 && (
+        <p style={{ fontSize:'11px', color:'#8a9e9a', textAlign:'center', padding:'8px' }}>Couldn't load these emails — you can review them in Settings → Communications.</p>
+      )}
+      {steps.map(step=>{
+        const icon   = {email:'📧',sms:'💬',call:'📞'}[step.type]||'📧'
+        const isOpen = openOrder===step.order
+        // Collapsed row title is the subject line, run through the shared
+        // pipeline so {{location_name}}-style subjects read as they'll send.
+        const rowName = previewVars
+          ? (applyPreviewVars(step.name, previewVars) || step.name)
+          : step.name
         return (
-          <div key={style.id} style={{ background:'white', borderRadius:'12px', border:`2px solid ${isSelected?'#1a2e2b':isCustom?'rgba(168,201,196,0.35)':'rgba(0,0,0,0.08)'}`, overflow:'hidden' }}>
-            {/* Selection row */}
-            <div style={{ padding:'12px 14px', display:'flex', alignItems:'center', gap:'10px' }}>
-              {/* Radio - tap to SELECT */}
-              <div onClick={()=>onSelect(style.id)}
-                style={{ width:'34px', height:'34px', borderRadius:'50%', border:`2px solid ${isSelected?'#1a2e2b':'rgba(0,0,0,0.15)'}`, background:isSelected?'#1a2e2b':'white', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, cursor:'pointer' }}>
-                {isSelected
-                  ? <div style={{ width:'11px', height:'11px', borderRadius:'50%', background:'white' }} />
-                  : <span style={{ fontSize:'13px' }}>{pd.emoji||style.icon}</span>}
+          <div key={step.id} style={{ background:'white', borderRadius:'12px', border:`1px solid ${isOpen?'rgba(26,46,43,0.35)':'rgba(0,0,0,0.08)'}`, overflow:'hidden' }}>
+            <div onClick={()=>setOpenOrder(isOpen?null:step.order)} style={{ padding:'10px 14px', display:'flex', alignItems:'center', gap:'10px', cursor:'pointer' }}>
+              <span style={{ fontSize:'14px', flexShrink:0 }}>{icon}</span>
+              <div style={{ flex:1, minWidth:0 }}>
+                <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'1px' }}>{step.type==='sms'?'Text':'Email'} {step.order} · {step.delay}</p>
+                <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{rowName}</p>
               </div>
-              {/* Label - tap to SELECT */}
-              <div style={{ flex:1, cursor:'pointer' }} onClick={()=>onSelect(style.id)}>
-                <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{style.label}</p>
-                <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>{pd.tagline||style.cta}</p>
-              </div>
-              {/* Preview toggle - SEPARATE from selection */}
-              {!isCustom&&(
-                <button onClick={()=>setPreviewPath(isPreview?null:style.id)}
-                  style={{ padding:'4px 10px', background:'rgba(0,0,0,0.04)', border:'1px solid rgba(0,0,0,0.08)', borderRadius:'20px', fontSize:'11px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer', flexShrink:0, whiteSpace:'nowrap' }}>
-                  {isPreview?'▲ Hide':'▼ Emails'}
-                </button>
-              )}
-              {isCustom&&(
-                <button onClick={()=>setPreviewPath(isPreview?null:'custom')}
-                  style={{ padding:'4px 10px', background:'rgba(0,0,0,0.04)', border:'1px solid rgba(0,0,0,0.08)', borderRadius:'20px', fontSize:'11px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer', flexShrink:0 }}>
-                  {isPreview?'▲ Hide':'▼ More'}
-                </button>
-              )}
+              <span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{isOpen?'▲ Hide':'▼ Read it'}</span>
             </div>
-
-            {/* Preview panel */}
-            {isPreview&&!isCustom&&(
-              <div style={{ borderTop:'1px solid rgba(0,0,0,0.06)', background:'#f7f5f0' }}>
-                <div style={{ padding:'8px 14px 6px' }}>
-                  <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>💡 {pd.explain}</p>
-                </div>
-                <div style={{ padding:'0 10px 10px', display:'grid', gap:'6px' }}>
-                  {steps.length===0 && (
-                    <p style={{ fontSize:'11px', color:'#8a9e9a', textAlign:'center', padding:'8px' }}>Couldn't load these emails — you can review them in Settings → Communications.</p>
-                  )}
-                  {steps.map(step=>{
-                    const icon = {email:'📧',sms:'💬',call:'📞'}[step.type]||'📧'
-                    // Row title is the subject line — render it through the
-                    // shared preview pipeline so {{location_name}}-style
-                    // subjects read as they'll send, matching the peek modal.
-                    const rowName = previewVars
-                      ? (applyPreviewVars(step.name, previewVars) || step.name)
-                      : step.name
-                    return (
-                      <div key={step.id} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 12px', background:'white', borderRadius:'9px', border:'1px solid rgba(0,0,0,0.07)' }}>
-                        <span style={{ fontSize:'12px', flexShrink:0 }}>{icon}</span>
-                        <div style={{ flex:1, minWidth:0 }}>
-                          <p style={{ fontSize:'11px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>Step {step.order}: {rowName}</p>
-                          <p style={{ fontSize:'10px', color:'#8a9e9a' }}>{step.delay}</p>
-                        </div>
-                        {step.body
-                          ? <button onClick={()=>setPeekTemplate({ type:step.type, name:`Step ${step.order} · ${step.delay}`, subject:step.subject, body:step.body })} title="Preview this email" style={{ display:'flex', alignItems:'center', gap:'4px', fontSize:'10px', fontWeight:600, color:'#6366f1', background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'5px', padding:'3px 8px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>👁 Preview</button>
-                          : <span style={{ fontSize:'10px', color:'#e5a0a0', flexShrink:0 }}>No content</span>}
-                      </div>
-                    )
-                  })}
-                  <p style={{ fontSize:'11px', color:'#a8c9c4', fontStyle:'italic', textAlign:'center' }}>✏️ Edit these anytime in Settings → Communications</p>
-                </div>
-              </div>
-            )}
-            {isPreview&&isCustom&&(
-              <div style={{ borderTop:'1px solid rgba(0,0,0,0.06)', background:'#f7f5f0', padding:'10px 14px' }}>
-                <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'8px' }}>Build your own sequence step-by-step in <strong>Settings → Communications</strong> right after setup. Set timing, email content, and SMS messages however you like.</p>
-                <div style={{ background:'rgba(168,201,196,0.1)', borderRadius:'8px', padding:'8px 10px' }}>
-                  <p style={{ fontSize:'11px', color:'#4a5e5a' }}>📌 A placeholder welcome sequence runs until your own emails are ready.</p>
-                </div>
+            {isOpen && (
+              <div style={{ borderTop:'1px solid rgba(0,0,0,0.06)', background:'#f7f5f0', padding:'10px' }}>
+                {step.body ? (
+                  <div style={{ background:'white', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.07)' }}>
+                    {/* THE shared rendered-preview body (stage 2 pipeline) —
+                        onboarding preview and send can't drift. */}
+                    <RenderedTemplatePreview type={step.type} subject={step.subject} body={step.body} settings={previewSettings} />
+                  </div>
+                ) : (
+                  <p style={{ fontSize:'11px', color:'#e5a0a0', textAlign:'center', padding:'6px' }}>No content</p>
+                )}
               </div>
             )}
           </div>
         )
       })}
 
-      {/* Full subject + body preview — matches Settings → Communications. No
-          select button here: onboarding just previews, the choice is committed
-          via the radio selection above. */}
-      <TemplateQuickPeekModal template={peekTemplate} showSelectButton={false} settings={previewSettings} onClose={()=>setPeekTemplate(null)} />
+      <div style={{ background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'10px', padding:'11px 13px' }}>
+        <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>💡 {HOW_IT_WORKS[selected] || 'How this works: these emails go out automatically — you can change them anytime in Settings.'}</p>
+      </div>
+
+      {chooserOpen && (
+        <div style={{ display:'grid', gap:'8px', paddingTop:'2px' }}>
+          <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>What should a new {projectLabel.toLowerCase()} lead do?</p>
+          {styleOptions.map(row=>{
+            const isSelected = selected===row.id
+            return (
+              <div key={row.id} onClick={()=>{ onSelect(row.id); setOpenOrder(1) }}
+                style={{ background:'white', borderRadius:'12px', border:`2px solid ${isSelected?'#1a2e2b':'rgba(0,0,0,0.08)'}`, padding:'11px 14px', display:'flex', alignItems:'center', gap:'10px', cursor:'pointer' }}>
+                <div style={{ width:'20px', height:'20px', borderRadius:'50%', border:`2px solid ${isSelected?'#1a2e2b':'rgba(0,0,0,0.2)'}`, background:'white', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                  {isSelected && <div style={{ width:'10px', height:'10px', borderRadius:'50%', background:'#1a2e2b' }} />}
+                </div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{row.lead}</p>
+                  <p style={{ fontSize:'11px', color:row.cost==='Nothing to set up'?'#22c55e':'#8a9e9a' }}>{row.cost}</p>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {needsCalendar&&(
+        <div style={{ background:'rgba(99,102,241,0.05)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'12px', padding:'14px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}>
+            <span style={{ fontSize:'18px' }}>📅</span>
+            <div>
+              <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Calendar link required</p>
+              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Your choice sends a booking link to clients.</p>
+            </div>
+          </div>
+          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5, marginBottom:'10px' }}>Add your Calendly, Acuity, or other booking page URL. Clients will use this to schedule directly from your follow-up email.</p>
+          <input type="url" value={calendarLink} onChange={e=>setCalendarLink(e.target.value)}
+            placeholder="https://calendly.com/your-name"
+            style={{ width:'100%', padding:'10px 12px', border:`1.5px solid ${calendarLink&&!calendarLink.startsWith('http')?'rgba(239,68,68,0.4)':'rgba(99,102,241,0.3)'}`, borderRadius:'9px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', background:'white' }} />
+          {calendarLink&&!calendarLink.startsWith('http')&&<p style={{ fontSize:'11px', color:'#ef4444', marginTop:'4px' }}>Enter a full URL starting with https://</p>}
+          {calendarLink&&calendarLink.startsWith('http')&&<p style={{ fontSize:'11px', color:'#22c55e', marginTop:'4px' }}>✓ Looks good</p>}
+        </div>
+      )}
+
+      {needsRate&&(
+        <div style={{ background:'rgba(245,158,11,0.05)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'12px', padding:'14px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}>
+            <span style={{ fontSize:'18px' }}>💰</span>
+            <div>
+              <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Hourly rate required</p>
+              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Your choice quotes your rate to clients.</p>
+            </div>
+          </div>
+          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5, marginBottom:'10px' }}>This goes into the follow-up email word-for-word: &ldquo;Our rate starts at <strong>{ratePerHour.trim()||'___'}</strong> per hour per Bee.&rdquo; Write it exactly as it should read — e.g. $95. You can change it anytime in Settings.</p>
+          <input type="text" value={ratePerHour} onChange={e=>setRatePerHour(e.target.value)}
+            placeholder="$95"
+            style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(245,158,11,0.35)', borderRadius:'9px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', background:'white' }} />
+          {ratePerHour.trim()&&<p style={{ fontSize:'11px', color:'#22c55e', marginTop:'4px' }}>✓ Looks good</p>}
+        </div>
+      )}
+
+      <div style={{ display:'flex', gap:'8px' }}>
+        <button onClick={onBack} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>{backLabel}</button>
+        <button onClick={()=>ready&&onContinue()} disabled={!ready}
+          style={{ flex:1, padding:'11px', background:ready?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:ready?'white':'#9ca3af', cursor:ready?'pointer':'not-allowed' }}>
+          {gateLabel}
+        </button>
+      </div>
+      <button onClick={()=>setChooserOpen(o=>!o)}
+        style={{ width:'100%', padding:'8px', background:'transparent', border:'none', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer', textDecoration:'underline' }}>
+        {chooserOpen?'Hide these options':'Change how this works'}
+      </button>
+      <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center' }}>Templates and timing can be customized anytime in Settings → Communications</p>
     </div>
   )
 }
@@ -12949,9 +13015,14 @@ export function OnboardingPathsEditor({ onComplete, profileForm = null, location
   const currentUserCtx     = useContext(CurrentUserContext)
 
   const [wizardStep, setWizardStep] = useState('intro')
-  const [selectedMove, setSelectedMove]       = useState(null)
-  const [selectedGeneral, setSelectedGeneral] = useState(null)
-  const [previewPath, setPreviewPath]         = useState(null)
+  // Confirm-not-choose: both types land PRE-SELECTED on the -c style ("reply
+  // to schedule · rate on the call") — 7 of 9 live locations quote no rate,
+  // and it's the only style needing nothing from a new owner (no rate, no
+  // booking link). A re-run keeps the stored location default instead, so
+  // confirming never silently reverts an earlier choice.
+  const storedStyle = key => { const m = /^(?:moving|organizing)-([a-d])$/.exec(String(key||'')); return m ? 'path-'+m[1] : null }
+  const [selectedMove, setSelectedMove]       = useState(() => storedStyle(currentLocationCtx?.default_move_drip_path) || 'path-c')
+  const [selectedGeneral, setSelectedGeneral] = useState(() => storedStyle(currentLocationCtx?.default_drip_path) || 'path-c')
   // Pre-seed both value asks from the location so re-running the wizard
   // doesn't demand a re-type of something that's already saved.
   const [calendarLink, setCalendarLink]       = useState(currentLocationCtx?.calendar_link || '')
@@ -13005,33 +13076,15 @@ export function OnboardingPathsEditor({ onComplete, profileForm = null, location
     return () => { cancelled = true }
   }, [])
 
-  // Per-section options: show every master style + always include 'custom'
-  // so owners can defer the choice ("Configure in Settings → Communications later").
-  const customStyle = PATH_STYLES.find(s => s.id === 'custom')
-  const movePathOptions = [
-    ...PATH_STYLES.filter(s => s.id !== 'custom' && (availableMoveStyleIds || []).includes(s.id)),
-    ...(customStyle ? [customStyle] : []),
-  ]
-  const generalPathOptions = [
-    ...PATH_STYLES.filter(s => s.id !== 'custom' && (availableGeneralStyleIds || []).includes(s.id)),
-    ...(customStyle ? [customStyle] : []),
-  ]
+  // Per-section chooser rows: only styles backed by a master drip_paths row.
+  // "Build your own" is CUT from onboarding: the Settings builder it pointed
+  // at was removed (e2adea3), and picking it configured ZERO automatic emails
+  // — the Welcome included — while the card claimed a placeholder sequence
+  // ran. An owner who wants a custom sequence builds it in Settings →
+  // Communications, where the editing tools actually live.
+  const moveStyleOptions    = CONFIRM_STYLES.filter(s => (availableMoveStyleIds    || []).includes(s.id))
+  const generalStyleOptions = CONFIRM_STYLES.filter(s => (availableGeneralStyleIds || []).includes(s.id))
   const pathsLoading = availableMoveStyleIds === null || availableGeneralStyleIds === null
-
-  // Preview open by default: entering a chooser screen expands the emails of
-  // the current selection (or the first style) instead of a wall of closed
-  // cards — the owner reads real copy without hunting for the ▼ toggle. This
-  // is the "real email text visible" half of confirm-not-choose; pre-selected
-  // corporate defaults complete it later with just a default flip. Runs on
-  // screen entry only, so ▲ Hide still sticks within a screen.
-  React.useEffect(() => {
-    if (pathsLoading) return
-    if (wizardStep === 'move' && movePathOptions.length) {
-      setPreviewPath(p => p ?? (selectedMove || movePathOptions[0].id))
-    } else if (wizardStep === 'general' && generalPathOptions.length) {
-      setPreviewPath(p => p ?? (selectedGeneral || generalPathOptions[0].id))
-    }
-  }, [wizardStep, pathsLoading])
 
   // Intro cadence, read from the masters that actually send (fix for the
   // hardcoded "3 emails / 5 days / 30 days" claim — the copy now can't drift
@@ -13076,31 +13129,22 @@ export function OnboardingPathsEditor({ onComplete, profileForm = null, location
     },
   }), [currentLocationCtx, currentUserCtx, profileForm, locationForm, ratePerHour, calendarLink])
 
-  const needsCalendar = PATH_STYLES.find(p=>p.id===selectedMove)?.tags?.includes('calendar')
-                     || PATH_STYLES.find(p=>p.id===selectedGeneral)?.tags?.includes('calendar')
-  // The rate-included styles quote {{rate_per_hour}} verbatim (the 'rates'
-  // tag) — picking one is choosing to send a sentence that needs this value,
-  // so the wizard asks for it the same way the booking-link styles ask for
-  // the calendar link. Rate-on-the-call styles never ask.
-  const needsRate = PATH_STYLES.find(p=>p.id===selectedMove)?.tags?.includes('rates')
-                 || PATH_STYLES.find(p=>p.id===selectedGeneral)?.tags?.includes('rates')
-  const calendarReady = !needsCalendar || calendarLink.trim().startsWith('http')
-  const rateReady     = !needsRate || ratePerHour.trim() !== ''
-  const confirmReady  = calendarReady && rateReady
+  // Value asks are per-screen: Moving's confirm gates on Moving's selection
+  // alone; the final (Organizing) confirm gates on the union of both, as the
+  // last stop before Save. The rate-included styles quote {{rate_per_hour}}
+  // verbatim (the 'rates' tag) — picking one is choosing to send a sentence
+  // that needs this value, so the screen asks for it the same way the
+  // booking-link styles ask for the calendar link. -c styles never ask.
+  const styleTags = id => PATH_STYLES.find(p=>p.id===id)?.tags || []
+  const moveNeedsCalendar = styleTags(selectedMove).includes('calendar')
+  const moveNeedsRate     = styleTags(selectedMove).includes('rates')
+  const allNeedsCalendar  = moveNeedsCalendar || styleTags(selectedGeneral).includes('calendar')
+  const allNeedsRate      = moveNeedsRate     || styleTags(selectedGeneral).includes('rates')
 
   // Steps come from the master rows fetched above — the content that actually
   // sends. No local fallback: if masters didn't load, the preview shows the
   // "couldn't load" note rather than inventing copy.
   function getSteps(pathId) { return masterSteps[pathId] || [] }
-
-  const PLAIN = {
-    'path-a': { emoji:'📅', tagline:"They reply with their availability · your rate is in the email", explain:"Your first email asks \"Do you have availability this week?\" and shows your hourly rate. Simple and direct." },
-    'path-b': { emoji:'🔗', tagline:'They book a call themselves · your rate is in the email', explain:"Your first email shares a booking link so they can pick a time themselves, plus your rate. Great if you prefer self-scheduling." },
-    'path-c': { emoji:'📲', tagline:"They reply with their availability · pricing waits for the call", explain:"Your first email is a casual \"hey, are you free this week?\" No rate, no links. Friendly and low pressure." },
-    'path-d': { emoji:'🤝', tagline:'They book online or phone you · pricing waits for the call', explain:"Your first email gives them three ways to connect — reply, book online, or call — and leaves pricing for that conversation. Best for people who like options." },
-  }
-
-
 
   if (wizardStep==='intro') return (
     <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
@@ -13141,7 +13185,7 @@ export function OnboardingPathsEditor({ onComplete, profileForm = null, location
         </div>
         <p style={{ fontSize:'12px', color:'#8a9e9a', fontStyle:'italic' }}>💡 Don't stress - you can change the emails and timing anytime in Settings. This just gets you started.</p>
       </div>
-      <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.5 }}>You'll choose twice — once for <strong>📦 Moving projects</strong>, then once for <strong>🏠 Organizing projects</strong> (kitchens, closets, full homes, etc.). Each one gets its own emails.</p>
+      <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.5 }}>Both are <strong>already set up for you</strong> — you'll just look them over: first <strong>📦 Moving projects</strong>, then <strong>🏠 Organizing projects</strong> (kitchens, closets, full homes, etc.). Each one gets its own emails.</p>
       <button onClick={()=>setWizardStep('move')}
         style={{ width:'100%', padding:'12px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
         Start with 📦 Moving →
@@ -13153,109 +13197,39 @@ export function OnboardingPathsEditor({ onComplete, profileForm = null, location
     <div style={{ paddingTop:'12px', display:'grid', gap:'12px' }}>
       {pathsLoading ? (
         <BeeLoader label="Gathering your emails…" />
-      ) : movePathOptions.length === 0 ? (
+      ) : moveStyleOptions.length === 0 ? (
         <div style={{ padding:'14px', background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'10px', fontSize:'12px', color:'#7f1d1d', lineHeight:1.5 }}>
           No master Moving emails found. Contact support — at least one <code>moving-*</code> master must be seeded (see migrations/seed_master_drip_paths.sql).
         </div>
       ) : (
-        <PathChooser projectLabel="Moving" stepIndex={1} sectionKey="moving" emoji="📦" current={selectedMove} onSelect={id=>{ setSelectedMove(id); setPreviewPath(id) }} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={movePathOptions} getSteps={getSteps} previewSettings={previewSettings} />
+        <OnboardingLeadEmailsConfirm key="moving" projectLabel="Moving" emoji="📦" stepKicker="Step 1 of 2 · Organizing is next" sectionKey="moving"
+          selected={selectedMove} onSelect={setSelectedMove} styleOptions={moveStyleOptions} getSteps={getSteps} previewSettings={previewSettings}
+          needsCalendar={moveNeedsCalendar} needsRate={moveNeedsRate}
+          calendarLink={calendarLink} setCalendarLink={setCalendarLink} ratePerHour={ratePerHour} setRatePerHour={setRatePerHour}
+          continueLabel="Looks good — continue" onContinue={()=>setWizardStep('general')}
+          onBack={()=>setWizardStep('intro')} backLabel="← Back" />
       )}
-      <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center' }}>Templates and timing can be customized anytime in Settings → Communications</p>
-      <div style={{ display:'flex', gap:'8px' }}>
-        <button onClick={()=>setWizardStep('intro')} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>← Back</button>
-        <button onClick={()=>{ if(selectedMove){ setPreviewPath(null); setWizardStep('general') } }} disabled={!selectedMove}
-          style={{ flex:1, padding:'11px', background:selectedMove?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:selectedMove?'white':'#9ca3af', cursor:selectedMove?'pointer':'not-allowed' }}>
-          {selectedMove?'Next: 🏠 Organizing projects →':'Choose one to continue'}
-        </button>
-      </div>
     </div>
   )
 
-  if (wizardStep==='general') return (
+  // final screen — Organizing confirm doubles as the Save gate.
+  return (
     <div style={{ paddingTop:'12px', display:'grid', gap:'12px' }}>
       {pathsLoading ? (
         <BeeLoader label="Gathering your emails…" />
-      ) : generalPathOptions.length === 0 ? (
+      ) : generalStyleOptions.length === 0 ? (
         <div style={{ padding:'14px', background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'10px', fontSize:'12px', color:'#7f1d1d', lineHeight:1.5 }}>
           No master Organizing emails found. Contact support — at least one <code>organizing-*</code> master must be seeded (see migrations/seed_master_drip_paths.sql).
         </div>
       ) : (
-        <PathChooser projectLabel="Organizing" stepIndex={2} sectionKey="organizing" emoji="🏠" current={selectedGeneral} onSelect={id=>{ setSelectedGeneral(id); setPreviewPath(id) }} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={generalPathOptions} getSteps={getSteps} previewSettings={previewSettings} />
+        <OnboardingLeadEmailsConfirm key="organizing" projectLabel="Organizing" emoji="🏠" stepKicker="Step 2 of 2 · Last one" sectionKey="organizing"
+          selected={selectedGeneral} onSelect={setSelectedGeneral} styleOptions={generalStyleOptions} getSteps={getSteps} previewSettings={previewSettings}
+          needsCalendar={allNeedsCalendar} needsRate={allNeedsRate}
+          calendarLink={calendarLink} setCalendarLink={setCalendarLink} ratePerHour={ratePerHour} setRatePerHour={setRatePerHour}
+          continueLabel="✓ Looks good — finish setup"
+          onContinue={()=>onComplete({ moveDefault:selectedMove, generalDefault:selectedGeneral, calendarLink:calendarLink||'', ratePerHour:ratePerHour.trim()||'' })}
+          onBack={()=>setWizardStep('move')} backLabel="← Back to 📦 Moving" />
       )}
-      <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center' }}>Templates and timing can be customized anytime in Settings → Communications</p>
-      <div style={{ display:'flex', gap:'8px' }}>
-        <button onClick={()=>{ setPreviewPath(null); setWizardStep('move') }} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>← Back to 📦 Moving</button>
-        <button onClick={()=>selectedGeneral&&setWizardStep('confirm')} disabled={!selectedGeneral}
-          style={{ flex:1, padding:'11px', background:selectedGeneral?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:selectedGeneral?'white':'#9ca3af', cursor:selectedGeneral?'pointer':'not-allowed' }}>
-          {selectedGeneral?'Review my choices →':'Choose one to continue'}
-        </button>
-      </div>
-    </div>
-  )
-
-  // confirm step
-  return (
-    <div style={{ paddingTop:'12px', display:'grid', gap:'12px' }}>
-      <div style={{ background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:'12px', padding:'16px' }}>
-        <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'12px' }}>🎉 Here\'s what you picked:</p>
-        {[
-          { label:'📦 Moving projects',    val:selectedMove==='custom'?'Build your own':selectedMove    ? PATH_STYLES.find(p=>p.id===selectedMove)?.label    : '—', explain: selectedMove==='custom'?'Build this in Settings → Communications after setup':selectedMove    ? PLAIN[selectedMove]?.tagline    : '' },
-          { label:'🏠 Organizing projects', val:selectedGeneral==='custom'?'Build your own':selectedGeneral ? PATH_STYLES.find(p=>p.id===selectedGeneral)?.label : '—', explain: selectedGeneral==='custom'?'Build this in Settings → Communications after setup':selectedGeneral ? PLAIN[selectedGeneral]?.tagline : '' },
-        ].map(r=>(
-          <div key={r.label} style={{ padding:'8px 0', borderBottom:'1px solid rgba(34,197,94,0.1)' }}>
-            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'2px' }}>
-              <span style={{ fontSize:'13px', color:'#8a9e9a' }}>{r.label}</span>
-              <span style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{r.val}</span>
-            </div>
-            <p style={{ fontSize:'11px', color:'#4a5e5a' }}>{r.explain}</p>
-          </div>
-        ))}
-        <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'10px', fontStyle:'italic' }}>✏️ Edit emails anytime in Settings → Communications</p>
-      </div>
-
-      {needsCalendar&&(
-        <div style={{ background:'rgba(99,102,241,0.05)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'12px', padding:'14px' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}>
-            <span style={{ fontSize:'18px' }}>📅</span>
-            <div>
-              <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Calendar link required</p>
-              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Your choice sends a booking link to clients.</p>
-            </div>
-          </div>
-          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5, marginBottom:'10px' }}>Add your Calendly, Acuity, or other booking page URL. Clients will use this to schedule directly from your follow-up email.</p>
-          <input type="url" value={calendarLink} onChange={e=>setCalendarLink(e.target.value)}
-            placeholder="https://calendly.com/your-name"
-            style={{ width:'100%', padding:'10px 12px', border:`1.5px solid ${calendarLink&&!calendarLink.startsWith('http')?'rgba(239,68,68,0.4)':'rgba(99,102,241,0.3)'}`, borderRadius:'9px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', background:'white' }} />
-          {calendarLink&&!calendarLink.startsWith('http')&&<p style={{ fontSize:'11px', color:'#ef4444', marginTop:'4px' }}>Enter a full URL starting with https://</p>}
-          {calendarLink&&calendarLink.startsWith('http')&&<p style={{ fontSize:'11px', color:'#22c55e', marginTop:'4px' }}>✓ Looks good</p>}
-        </div>
-      )}
-
-      {needsRate&&(
-        <div style={{ background:'rgba(245,158,11,0.05)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'12px', padding:'14px' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}>
-            <span style={{ fontSize:'18px' }}>💰</span>
-            <div>
-              <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Hourly rate required</p>
-              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Your choice quotes your rate to clients.</p>
-            </div>
-          </div>
-          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5, marginBottom:'10px' }}>This goes into the follow-up email word-for-word: &ldquo;Our rate starts at <strong>{ratePerHour.trim()||'___'}</strong> per hour per Bee.&rdquo; Write it exactly as it should read — e.g. $95. You can change it anytime in Settings.</p>
-          <input type="text" value={ratePerHour} onChange={e=>setRatePerHour(e.target.value)}
-            placeholder="$95"
-            style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(245,158,11,0.35)', borderRadius:'9px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', background:'white' }} />
-          {ratePerHour.trim()&&<p style={{ fontSize:'11px', color:'#22c55e', marginTop:'4px' }}>✓ Looks good</p>}
-        </div>
-      )}
-
-      <div style={{ display:'flex', gap:'8px' }}>
-        <button onClick={()=>{ setPreviewPath(null); setWizardStep('general') }} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>← Change</button>
-        <button onClick={()=>confirmReady&&onComplete({ moveDefault:selectedMove, generalDefault:selectedGeneral, calendarLink:calendarLink||'', ratePerHour:ratePerHour.trim()||'' })}
-          disabled={!confirmReady}
-          style={{ flex:1, padding:'11px', background:confirmReady?'#22c55e':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:confirmReady?'white':'#9ca3af', cursor:confirmReady?'pointer':'not-allowed' }}>
-          {confirmReady?'✓ Save & Complete':(needsCalendar&&!calendarReady)?'Add your calendar link to continue':(needsRate&&!rateReady)?'Add your hourly rate to continue':'Make your choices first'}
-        </button>
-      </div>
     </div>
   )
 }

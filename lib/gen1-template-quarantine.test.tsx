@@ -114,24 +114,20 @@ describe('onboarding preview reads the DB masters', () => {
     await act(async () => {})   // masters fetch
   }
 
-  it('the ▼ Emails preview lists MASTER subjects, and 👁 Preview shows the master body', async () => {
+  it('the confirm screen opens on MASTER content: email 1 body inline, later subjects as row summaries — zero clicks', async () => {
     await mount()
     await clickText('Start with 📦 Moving →')
-    await clickText('▼ Emails')   // first path card
 
-    // Step rows are labelled with the master's own subject lines.
+    // Email 1 is open by default: subject AND body render from the master.
     expect(container.textContent).toContain(MASTER_SUBJECT_1)
-    expect(container.textContent).toContain(MASTER_SUBJECT_2)
-
-    // And the peek modal renders the body that will actually send.
-    await clickText('👁 Preview')
     expect(container.textContent).toContain(MASTER_BODY_1)
+    // Collapsed rows are labelled with the master's own subject lines.
+    expect(container.textContent).toContain(MASTER_SUBJECT_2)
   })
 
   it('never renders Gen 1 prototype copy', async () => {
     await mount()
     await clickText('Start with 📦 Moving →')
-    await clickText('▼ Emails')
     for (const s of GEN1_STRINGS) {
       expect(container.textContent, `Gen 1 string "${s}" leaked into onboarding`).not.toContain(s)
     }
@@ -142,7 +138,6 @@ describe('onboarding preview reads the DB masters', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })))
     await mount()
     await clickText('Start with 📦 Moving →')
-    await clickText('▼ Emails')
     expect(container.textContent).toContain("Couldn't load these emails")
     for (const s of GEN1_STRINGS) {
       expect(container.textContent).not.toContain(s)
