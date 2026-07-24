@@ -113,18 +113,38 @@ async function mountApp(props: any) {
 }
 
 describe('Home mounts without unbound identifiers', () => {
-  it("renders on the 'all' path (server overview present)", async () => {
-    // THE regression: this threw ReferenceError: allOverview is not defined.
+  it("an elevated user on the 'all' path gets SYSTEM HEALTH, not the operational hero", async () => {
+    // THE original regression: this threw ReferenceError: allOverview is not
+    // defined. It still guards that — `allOverview` is consumed in the homeDerived
+    // memo (executed every render) AND passed as a JSX prop at App's mount, both
+    // evaluated regardless of which branch returns.
+    //
+    // NEW behavior (this build): super_admin + 'all' now renders the Home-sized
+    // system-health summary in place of the operational Home. The overview's
+    // hero numbers must NOT appear — the split is the whole point.
     const host = await mountApp(baseProps({
       initialLocFilter: 'all',
       initialScopeLocationId: null,
       initialAllOverview: OVERVIEW,
     }))
     expect(host.textContent).toBeTruthy()
-    // The overview's numbers reached the hero, so the prop is genuinely wired
-    // through — not merely defined.
-    expect(host.textContent).toContain('4 new leads not contacted')
-    expect(host.textContent).toContain('2 estimates awaiting follow-up')
+    expect(host.textContent).toMatch(/System health/i)
+    // The operational hero + metric strip are gone on this scope.
+    expect(host.textContent).not.toContain('4 new leads not contacted')
+    expect(host.textContent).not.toContain('New this week')
+  })
+
+  it('an elevated user SCOPED into a location gets the operational Home', async () => {
+    // The other half of the split: scope in and Home is the existing operational
+    // view (greeting, Needs-attention hero, metric strip) — never health.
+    const host = await mountApp(baseProps({
+      initialLocFilter: KC,
+      initialScopeLocationId: KC,
+      initialAllOverview: null,
+    }))
+    expect(host.textContent).toBeTruthy()
+    expect(host.textContent).toContain('New this week')      // operational metric tile
+    expect(host.textContent).not.toMatch(/System health/i)
   })
 
   it('renders on a SCOPED path (no overview)', async () => {
@@ -136,6 +156,26 @@ describe('Home mounts without unbound identifiers', () => {
       initialAllOverview: null,
     }))
     expect(host.textContent).toBeTruthy()
+  })
+
+  it("a NON-ELEVATED role at 'all' gets the operational Home, NOT health (the view-as trap)", async () => {
+    // The hard requirement: under view-as the server session stays super_admin,
+    // so the health panel would leak into an impersonated owner's Home without a
+    // CLIENT-SIDE gate. The gate is `isElevated && locFilter==='all'`, and
+    // isElevated reads the EFFECTIVE role — franchise here. Even handed an 'all'
+    // overview payload (defense in depth: the gate is role-based, not payload-
+    // based), a franchise role sees the operational Home and no health surface.
+    const host = await mountApp(baseProps({
+      initialRole: 'franchise',
+      initialFranchiseRole: 'owner',
+      initialLocFilter: 'all',
+      initialScopeLocationId: null,
+      initialAllOverview: OVERVIEW,
+      currentUser: { id: 'u2', email: 'owner@x.com', name: 'Owner', role: 'owner', locationId: KC },
+    }))
+    expect(host.textContent).toBeTruthy()
+    expect(host.textContent).not.toMatch(/System health/i)
+    expect(host.textContent).toContain('4 new leads not contacted')   // operational hero
   })
 
   it('renders for a NON-ELEVATED user', async () => {

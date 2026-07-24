@@ -50,6 +50,10 @@ import AskBeeHubPanel from "@/components/hive/AskBeeHubPanel"
 import { IconBug, IconBulb, IconPlus, IconPaperclip, IconMessage } from "@/components/ui/icons"
 import AdminNotificationsScreen from "@/components/admin/AdminNotificationsScreen"
 import SystemHealthScreen from "@/components/admin/SystemHealthScreen"
+// The compact, Home-sized cut of System Health — stands in for the operational
+// Home when an elevated user is viewing 'All Locations'. Reads the SAME
+// /api/admin/system-health endpoint as SystemHealthScreen (one verdict source).
+import HomeSystemHealth from "@/components/hive/HomeSystemHealth"
 // Phase 1 beta surfaces are DYNAMIC imports only (ssr:false) — separate
 // chunk, loaded when the toggle flips. A crash in beta code must never
 // reach the main bundle (two all-user incident scares on 2026-07-03).
@@ -21745,7 +21749,7 @@ function HomeGreeting({ ownerName, ownerEmail }) {
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, transferPeople=[], allOverview=null, leadsTruncated=false, networkTruncated=false, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false }) {
+function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, transferPeople=[], allOverview=null, leadsTruncated=false, networkTruncated=false, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, onOpenSystemHealth=()=>{} }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
@@ -22256,6 +22260,55 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
         locationId='loc1'
       />
       <BottomNav />
+    </div>
+  )
+
+  // ═══ Elevated + 'All Locations' → SYSTEM HEALTH (stands in for the Home) ═══
+  // Home shows the state of whatever you're looking at: the whole system when
+  // viewing everything, one territory's work when scoped in. `isElevated` is
+  // the CLIENT-SIDE gate — the same isElevatedRole prop that gates the loc_other
+  // transfer queue (lib/view-as-identity). Under view-as the server session
+  // stays super_admin, but this prop reflects the IMPERSONATED role, so an owner
+  // under view-as reads isElevated=false and falls through to the operational
+  // Home below; scoped-in (locFilter!=='all') does the same. HomeSystemHealth
+  // only MOUNTS on this branch, so its /api/admin/system-health fetch never
+  // fires for anyone who shouldn't see it. The operational Home return below is
+  // left byte-identical — this is a new branch, not an edit to it.
+  if (isElevated && locFilter==='all') return (
+    <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'5rem' }}>
+      <PastDueBar />
+      {/* Same dark header as Home — greeting + the location switcher (the only
+          way back to a scoped view), with a scope-only subline. */}
+      <div style={{ background:BRAND.dark, padding:'1.5rem 1.25rem 2rem', position:'relative', overflow:'hidden' }}>
+        <div style={{ position:'absolute', right:'-20px', top:'-20px', opacity:0.06 }}>
+          <svg width="140" height="140" viewBox="0 0 140 140">
+            {[[35,20],[70,20],[105,20],[17,52],[52,52],[87,52],[122,52],[35,84],[70,84],[105,84],[17,116],[52,116],[87,116],[122,116]].map(([x,y],i)=>(
+              <polygon key={i} points={`${x},${y-16} ${x+14},${y-8} ${x+14},${y+8} ${x},${y+16} ${x-14},${y+8} ${x-14},${y-8}`} fill="white" />
+            ))}
+          </svg>
+        </div>
+        <HomeGreeting ownerName={ownerName} ownerEmail={ownerEmail} />
+        <button
+          onClick={()=>{ if (onClickLocation) onClickLocation() }}
+          onMouseEnter={()=>setLocIndicatorHover(true)}
+          onMouseLeave={()=>setLocIndicatorHover(false)}
+          style={{
+            display:'flex', alignItems:'center', gap:'4px',
+            background:'none', border:'none', padding:0, marginBottom:'4px',
+            fontFamily:'inherit', fontSize:'12px', textAlign:'left', cursor:'pointer',
+            color: locIndicatorHover ? BRAND.teal : 'rgba(168,201,196,0.7)',
+            textDecoration: locIndicatorHover ? 'underline' : 'none',
+          }}
+        >
+          📍 All Locations
+        </button>
+        <p style={{ fontSize:'13px', color:'rgba(168,201,196,0.85)', marginBottom:'0' }}>
+          System health · All locations
+        </p>
+      </div>
+      <div style={{ padding:'1.25rem' }}>
+        <HomeSystemHealth onOpenFull={onOpenSystemHealth} />
+      </div>
     </div>
   )
 
@@ -34703,6 +34756,14 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
               if (window.location.pathname !== '/clients') window.history.pushState({}, '', '/clients')
               window.scrollTo(0, 0)
             }
+          }}
+          onOpenSystemHealth={()=>{
+            // The Home health panel's "View full system health →" (and its
+            // look-list rows) jump to Admin → System Health, the deep view.
+            // Same deep-link the Slack digest uses (?section=health) — set the
+            // section, then switch to the admin tab.
+            setAdminDeepLinkSection('health')
+            nav('admin')
           }}
           followUps={followUps}
           engagements={Array.isArray(initialEngagements)?initialEngagements:[]}
