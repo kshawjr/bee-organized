@@ -21038,7 +21038,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                                           // Own customs open the editor ({master, tpl} is the shape
                                           // TemplateEditorPopup + saveTemplate expect). Masters and
                                           // legacy unflagged rows are not owner-editable — preview.
-                                          <button onClick={()=>{ if (tmpl.isOwnCustom) setEditingTemplate({ master: tmpl, tpl }); else setPreviewTemplate(tmpl) }} style={{ display:'flex', alignItems:'center', gap:'4px', padding:'3px 8px', background:'rgba(99,102,241,0.07)', border:'0.5px solid rgba(99,102,241,0.25)', borderRadius:'6px', cursor:'pointer', fontFamily:'inherit', overflow:'hidden' }}>
+                                          <button onClick={()=>{ if (tmpl.isOwnCustom) setEditingTemplate({ master: tmpl, tpl: tmpl }); else setPreviewTemplate(tmpl) }} style={{ display:'flex', alignItems:'center', gap:'4px', padding:'3px 8px', background:'rgba(99,102,241,0.07)', border:'0.5px solid rgba(99,102,241,0.25)', borderRadius:'6px', cursor:'pointer', fontFamily:'inherit', overflow:'hidden' }}>
                                             <span style={{ fontSize:'10px', fontWeight:600, color:'#4f46e5', whiteSpace:'nowrap' }}>{tmpl.name}</span>
                                             {tmpl.type==='email'&&tmpl.subject&&<span style={{ fontSize:'10px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>— {tmpl.subject}</span>}
                                             {tmpl.type!=='email'&&<span style={{ fontSize:'10px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{tmpl.body.slice(0,40)}…</span>}
@@ -22391,13 +22391,17 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   if (activeNav==='settings') return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
       <PastDueBar />
+      {/* No onStatusChange / onPaymentResolved here: crmStatus is a PROP of
+          DashboardScreen (no setter exists — `setCrmStatus` was unbound since
+          the 703db73 prototype and would have thrown if ever called). This
+          branch is unreachable in production anyway: App intercepts
+          activeNav==='settings' and mounts its own SettingsScreen. Both
+          callbacks are optional in their consumers. */}
       <SettingsScreen
-        onStatusChange={s=>setCrmStatus(s)}
         initialSection={isPastDue?'profile':null}
         isPastDue={isPastDue}
         graceDaysLeft={graceDaysLeft}
         locationId='loc1'
-        onPaymentResolved={()=>setCrmStatus('active')}
       />
       <BottomNav />
     </div>
@@ -23886,9 +23890,9 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
   const canInviteOwner = role==='super_admin' || role==='corporate'
   // Two flavors deliberately:
   //   - locUsers : the legacy mock-USERS_DATA filter, preserved as-is for
-  //     the demo Team list further down (which references render helpers
-  //     that aren't in scope here and only "works" because real
-  //     deployments hit locUsers.length === 0 for mock ids).
+  //     the demo Team list further down (real deployments hit
+  //     locUsers.length === 0 for mock ids, so that list renders only in
+  //     demo contexts; its pricing helpers are bound below).
   //   - realLocUserCount : Supabase-backed count of hub_users at this
   //     location, used by the subtitle and quick-info row so super_admin
   //     sees the truthful count, not "0 users" for every real location.
@@ -23907,6 +23911,12 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
   const [ownerStatusLoading, setOwnerStatusLoading] = useState(false)
   // Seat roster for the location — used in Team tab to show scheduled removals.
   const [locationSeats, setLocationSeats]   = useState([])
+  // Live tier prices — same context + fallbacks as every other pricing site.
+  // The restored demo Team list (36c2183) referenced these without bindings
+  // and would throw if it ever rendered (mock-id demo contexts only).
+  const tierPricesCtx = useContext(TierPricesContext)
+  const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
+  const livePrices = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
   const [showInviteOwner, setShowInviteOwner]   = useState(false)
   const [pendingActionId, setPendingActionId]   = useState('') // resend | revoke
   const [pendingActionError, setPendingActionError] = useState('')
@@ -27256,7 +27266,10 @@ function RecycleBinTab({ binPeople=[], setBinPeople=()=>{}, setPeople=()=>{}, pa
 }
 
 // ─── Location Drilldown ───────────────────────────────────────────────────────
-function LocationDrilldown({ loc, people, users, partners, onClose }) {
+// Exported for lib/beta-admin-location-mounts.test.tsx — the drilldown has no
+// live UI trigger today (LocationCard ignores onDrilldown), so the mount test
+// is the only thing executing this render path.
+export function LocationDrilldown({ loc, people, users, partners, onClose }) {
   const [tab, setTab] = useState('overview')
 
   React.useEffect(()=>{
@@ -27285,6 +27298,20 @@ function LocationDrilldown({ loc, people, users, partners, onClose }) {
       .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
       .then(d => { if (!cancelled) setSummary(d) })
       .catch(() => { if (!cancelled) setSummaryErr(true) })
+    return () => { cancelled = true }
+  }, [loc?.id])
+
+  // Seat roster — Team tab's "scheduled for removal" block (5c71295) referenced
+  // locationSeats without ever binding it here; the state + fetch lived only in
+  // LocationDetailSheet. Same endpoint, same shape.
+  const [locationSeats, setLocationSeats] = useState([])
+  React.useEffect(() => {
+    if (!loc?.id) return
+    let cancelled = false
+    fetch(`/api/seats?location_id=${encodeURIComponent(loc.id)}`)
+      .then(r => r.json().catch(() => []))
+      .then(data => { if (!cancelled && Array.isArray(data)) setLocationSeats(data) })
+      .catch(() => {})
     return () => { cancelled = true }
   }, [loc?.id])
 
