@@ -129,6 +129,7 @@ for (const lp of plan.locations) {
   const notes = []
   if (lp.already) notes.push(`${lp.already} already in Bee Hub`)
   if (lp.unusable) notes.push(`${lp.unusable} opted-out/no-email`)
+  if (lp.userOwned) notes.push(`${lp.userOwned} hub_user-owned (never seeded)`)
   console.log(`\n${head}${notes.length ? `  (${notes.join(', ')})` : ''}`)
   if (!lp.rows.length) {
     console.log('  — nothing to add')

@@ -252,6 +252,38 @@ describe('planLocationRows — Zoho contact → external row', () => {
     const { rows } = planLocationRows('u1', [contact(), contact()], [])
     expect(rows).toHaveLength(1)
   })
+
+  // ── Cross-table dedupe: hub_user-owned addresses are never seeded ────────
+  // The 2026-07-19 seed put 39 owner emails into lead_notification_externals
+  // that also belong to a hub_user at the location — a duplication no single-
+  // table constraint can catch. The plan itself must refuse them.
+  it('SKIPS an address that belongs to a hub_user at this location', () => {
+    const { rows, userOwned } = planLocationRows(
+      'u1', [contact()], [], ['jamie@beeorganized.com'],
+    )
+    expect(rows).toEqual([])
+    expect(userOwned).toBe(1)
+  })
+
+  it('the hub_user exclusion is case-insensitive, both directions', () => {
+    const a = planLocationRows('u1', [contact({ email: 'Jamie@BeeOrganized.com' })], [], ['jamie@beeorganized.com'])
+    const b = planLocationRows('u1', [contact()], [], ['JAMIE@beeorganized.com'])
+    expect(a.rows).toEqual([])
+    expect(a.userOwned).toBe(1)
+    expect(b.rows).toEqual([])
+    expect(b.userOwned).toBe(1)
+  })
+
+  it('a non-hub_user address still seeds alongside an excluded one', () => {
+    const { rows, userOwned } = planLocationRows(
+      'u1',
+      [contact(), contact({ email: 'outside@example.com', first_name: 'Out' })],
+      [],
+      ['jamie@beeorganized.com'],
+    )
+    expect(rows.map((r) => r.email)).toEqual(['outside@example.com'])
+    expect(userOwned).toBe(1)
+  })
 })
 
 // ── Plan writes nothing ────────────────────────────────────────────────────
@@ -319,6 +351,34 @@ describe('buildTopUpPlan — the dry-run gate', () => {
       fetchZohoContacts: zoho({ loc_westdenver: [contact()] }),
     })
     expect(plan.rows).toEqual([])
+  })
+
+  it('diffs against hub_user emails too — ANY role, case-insensitively, without shrinking scope', async () => {
+    // A lite_user does NOT take a location out of scope (scope keys on
+    // owner/manager only), but their address must still never be seeded as an
+    // external — that is the cross-table duplication.
+    const plan = await buildTopUpPlan({
+      supabase: fakeSupabase(
+        {
+          locations: LOCATIONS,
+          hub_users: [
+            ...HUB_USERS,
+            { location_id: 'uuid-westdenver', role: 'lite_user', email: 'Jamie@BeeOrganized.com' },
+          ],
+          lead_notification_externals: [],
+        },
+        [],
+      ),
+      fetchZohoContacts: zoho({
+        loc_westdenver: [contact(), contact({ email: 'new@b.com', first_name: 'New' })],
+      }),
+    })
+    // Still in scope — the lite_user is not an owner/manager…
+    const wd = plan.locations.find((l) => l.location.slug === 'loc_westdenver')!
+    expect(wd).toBeTruthy()
+    // …but their address is refused while the rest of the batch seeds.
+    expect(plan.rows.map((r) => r.email)).toEqual(['new@b.com'])
+    expect(wd.userOwned).toBe(1)
   })
 
   it('a Zoho failure for ONE location does not deny the others', async () => {

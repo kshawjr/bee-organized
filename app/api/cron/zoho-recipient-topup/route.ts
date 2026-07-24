@@ -87,6 +87,9 @@ export async function GET(req: NextRequest) {
     locations_with_additions: plan.locations.filter((l) => l.rows.length > 0).length,
     planned: plan.rows.length,
     inserted,
+    // Addresses skipped because they already belong to a hub_user at their
+    // location — the cross-table dedupe. Nonzero is normal, not an error.
+    skipped_hub_user_owned: plan.locations.reduce((n, l) => n + l.userOwned, 0),
     errors: [...zohoErrors, ...errors].slice(0, 20),
   })
 }

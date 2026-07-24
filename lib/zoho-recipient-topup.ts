@@ -88,6 +88,7 @@ export type LocationPlan = {
   rows: PlannedRow[] // what we'd insert
   already: number // Zoho contacts Bee Hub already has (skipped)
   unusable: number // opted out / no email (skipped)
+  userOwned: number // address belongs to a hub_user at this location (skipped)
   error: string | null // Zoho fetch failed — this location is untouched
 }
 
@@ -127,7 +128,18 @@ export function selectTargetLocations(
 // ── Zoho contact → planned row ─────────────────────────────────────────────
 // Skips a contact that is opted out or has no email (an external row has no
 // opt-out concept — every row is unconditionally a recipient — so an opted-out
-// contact must never become one), and skips any email the location already has.
+// contact must never become one), skips any email the location already has,
+// and skips any email that belongs to a hub_user AT THIS LOCATION (any role).
+//
+// The hub_user exclusion is the CROSS-TABLE dedupe: a hub_user owner/manager
+// is already auto-notified by the resolver, so seeding their address as an
+// external would make them exist twice — once per table — which no single-
+// table constraint can catch (that is exactly how the 2026-07-19 seed
+// duplicated 39 owners). All roles, not just owner/manager: a location in
+// top-up scope has no owner/manager by definition, so an interface-roles-only
+// check would never fire; and an address that IS a hub_user login should never
+// double as a seeded external row regardless of role. Case-insensitive, same
+// lowercased-email key as every other comparison in this file.
 //
 // Phone is NOT fetched by the notification-contact selection, so it lands null;
 // only 3 of 71 live contacts carry one and the field is optional in the UI.
@@ -135,15 +147,21 @@ export function planLocationRows(
   locationUuid: string,
   contacts: ZohoNotificationContact[],
   existingEmails: readonly string[],
-): { rows: PlannedRow[]; already: number; unusable: number } {
+  hubUserEmails: readonly string[] = [],
+): { rows: PlannedRow[]; already: number; unusable: number; userOwned: number } {
   const seen = new Set<string>()
   for (const e of existingEmails) {
     if (typeof e === 'string' && e.trim()) seen.add(e.trim().toLowerCase())
+  }
+  const userSet = new Set<string>()
+  for (const e of hubUserEmails) {
+    if (typeof e === 'string' && e.trim()) userSet.add(e.trim().toLowerCase())
   }
 
   const rows: PlannedRow[] = []
   let already = 0
   let unusable = 0
+  let userOwned = 0
 
   for (const c of contacts) {
     const email = typeof c.email === 'string' ? c.email.trim() : ''
@@ -158,6 +176,10 @@ export function planLocationRows(
     // hold, so it's enforced here rather than assumed.
     if (seen.has(key)) {
       already++
+      continue
+    }
+    if (userSet.has(key)) {
+      userOwned++
       continue
     }
     seen.add(key)
@@ -191,7 +213,7 @@ export function planLocationRows(
     })
   }
 
-  return { rows, already, unusable }
+  return { rows, already, unusable, userOwned }
 }
 
 // ── Plan ───────────────────────────────────────────────────────────────────
@@ -210,13 +232,31 @@ export async function buildTopUpPlan(deps: TopUpDeps): Promise<TopUpPlan> {
   const locRes = await supabase.from('locations').select('id, name, location_id')
   if (locRes.error) throw new Error(`locations read failed: ${locRes.error.message}`)
 
+  // ALL hub_users, not just interface roles: scope keys on owner/manager (the
+  // interface-role subset below, unchanged), but the per-email exclusion must
+  // see every role — see planLocationRows' hub-user-exclusion note.
   const userRes = await supabase
     .from('hub_users')
-    .select('location_id, role')
-    .in('role', INTERFACE_ROLES as unknown as string[])
+    .select('location_id, role, email')
   if (userRes.error) throw new Error(`hub_users read failed: ${userRes.error.message}`)
 
-  const targets = selectTargetLocations(locRes.data || [], userRes.data || [])
+  const allUsers = (userRes.data || []) as Array<{
+    location_id: string | null
+    role: string | null
+    email: string | null
+  }>
+  const interfaceUsers = allUsers.filter((u) =>
+    (INTERFACE_ROLES as readonly string[]).includes(u.role || ''),
+  )
+  const hubEmailsByLoc = new Map<string, string[]>()
+  for (const u of allUsers) {
+    if (!u.location_id || typeof u.email !== 'string' || !u.email.trim()) continue
+    const list = hubEmailsByLoc.get(u.location_id) || []
+    list.push(u.email)
+    hubEmailsByLoc.set(u.location_id, list)
+  }
+
+  const targets = selectTargetLocations(locRes.data || [], interfaceUsers)
   if (targets.length === 0) return { locations: [], rows: [] }
 
   // One read for every target's existing emails, then grouped in memory —
@@ -252,16 +292,18 @@ export async function buildTopUpPlan(deps: TopUpDeps): Promise<TopUpPlan> {
         rows: [],
         already: 0,
         unusable: 0,
+        userOwned: 0,
         error: err?.message || 'zoho_fetch_failed',
       })
       continue
     }
-    const { rows, already, unusable } = planLocationRows(
+    const { rows, already, unusable, userOwned } = planLocationRows(
       location.id,
       contacts,
       existingByLoc.get(location.id) || [],
+      hubEmailsByLoc.get(location.id) || [],
     )
-    locations.push({ location, rows, already, unusable, error: null })
+    locations.push({ location, rows, already, unusable, userOwned, error: null })
   }
 
   return { locations, rows: locations.flatMap((l) => l.rows) }

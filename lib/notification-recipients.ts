@@ -253,12 +253,39 @@ export function filterRecipientsByProjectType(
   leadProjectType: string | null,
   leadDripCategory: 'move' | 'general',
 ): EffectiveRecipient[] {
-  const matched = base.filter((r) =>
+  // TWIN COLLAPSE — one person, one entry, BEFORE any routing decision. The
+  // Zoho seed/top-up put owner emails into lead_notification_externals that
+  // also belong to a hub_user at the location, so `base` can carry the same
+  // person twice: once as source 'user' (with the category the owner actually
+  // configured) and once as source 'external' (seeded category 'all'). Left
+  // in, the 'all' twin matches EVERY lead — so a person whose hub_user row
+  // claims specific types could never be routed away from anything, defeating
+  // the split. Collapse by lowercased email; the hub_user entry WINS over the
+  // external (a real app user and their configured preference outrank a seeded
+  // address). Rows with no email are kept as-is — they can't collide.
+  const at = new Map<string, number>()
+  const people: EffectiveRecipient[] = []
+  for (const r of base) {
+    const key = r.email?.trim().toLowerCase()
+    if (!key) {
+      people.push(r)
+      continue
+    }
+    const i = at.get(key)
+    if (i === undefined) {
+      at.set(key, people.length)
+      people.push(r)
+    } else if (people[i].source !== 'user' && r.source === 'user') {
+      people[i] = r
+    }
+  }
+
+  const matched = people.filter((r) =>
     categoryMatchesLead(r.category, leadProjectType, leadDripCategory),
   )
   // The type is "claimed" iff a SPECIFIC (type-set) recipient matched it.
   const claimed = matched.some((r) => isSpecificSelection(r.category))
-  const team = base.filter((r) => r.source === 'user')
+  const team = people.filter((r) => r.source === 'user')
 
   let result: EffectiveRecipient[]
   if (claimed) {
@@ -276,7 +303,7 @@ export function filterRecipientsByProjectType(
   }
 
   // NEVER-DROP backstop.
-  if (result.length === 0) result = team.length ? team : base
+  if (result.length === 0) result = team.length ? team : people
   return result
 }
 

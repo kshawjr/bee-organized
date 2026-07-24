@@ -145,6 +145,49 @@ describe('filterRecipientsByProjectType', () => {
   })
 })
 
+// ── Cross-table twin collapse ───────────────────────────────────────────────
+// The Zoho seed/top-up put owner emails into lead_notification_externals that
+// also belong to a hub_user at the location (39 rows in prod, 2026-07-19). The
+// twin arrives with category 'all', so left in the array it matches every lead
+// — the person could never be routed away from anything. One person, one
+// entry: hub_user wins, their configured claim survives.
+describe('filterRecipientsByProjectType — duplicated owner (hub_user + external twin)', () => {
+  it('a duplicated owner resolves to ONE recipient — source user, claim intact', () => {
+    const out = filterRecipientsByProjectType(
+      [U('angie@x.com', '["Moving"]'), E('angie@x.com', 'all')],
+      'Moving', 'move',
+    )
+    expect(out).toHaveLength(1)
+    expect(out[0].source).toBe('user')
+    expect(out[0].hub_user_id).toBe('id-angie@x.com')
+    expect(out[0].category).toBe('["Moving"]')
+  })
+  it("the 'all' twin cannot leak them into a type someone ELSE claims", () => {
+    const base = [
+      U('angie@x.com', '["Moving"]'),
+      U('bob@x.com', '["Organizing"]'),
+      E('angie@x.com', 'all'), // the seeded twin — without collapse it matches everything
+    ]
+    const out = filterRecipientsByProjectType(base, 'Organizing', 'general').map(r => r.email)
+    expect(out).toEqual(['bob@x.com'])
+  })
+  it('collapse is case-insensitive and order-independent — external listed first still loses', () => {
+    const out = filterRecipientsByProjectType(
+      [E('Angie@X.com', 'all'), U('angie@x.com', '["Moving"]')],
+      'Moving', 'move',
+    )
+    expect(out).toHaveLength(1)
+    expect(out[0].source).toBe('user')
+  })
+  it('a genuine external with no hub_user twin is untouched', () => {
+    const out = filterRecipientsByProjectType(
+      [U('owner@x.com', '["Moving"]'), E('outside@x.com', 'all')],
+      'Moving', 'move',
+    ).map(r => r.email).sort()
+    expect(out).toEqual(['outside@x.com', 'owner@x.com'])
+  })
+})
+
 // ── resolveLeadRecipients: toggle gating (integration via mock) ──────────────
 function seed(splitEnabled: boolean) {
   tableData.current = {
@@ -205,6 +248,35 @@ describe('resolveLeadRecipients — split toggle gating', () => {
     const eff = await resolveLeadRecipients('loc1', { project_type: 'Closet' })
     // Closet unclaimed → whole team (both users).
     expect(eff.map(r => r.email).sort()).toEqual(['manny@x.com', 'olivia@x.com'])
+  })
+  it('split ON + duplicated owner: one entry, hub_user wins, claim survives', async () => {
+    seed(true)
+    // Olivia (owner, claims Moving) also exists as a seeded external twin —
+    // different casing, category 'all', exactly what the top-up wrote.
+    tableData.current.lead_notification_externals.push({
+      id: 'e-twin', location_id: 'loc1', first_name: 'Olivia', last_name: 'O',
+      email: 'OLIVIA@x.com', phone: null, category: 'all', created_at: '2026-07-19',
+    })
+    const eff = await resolveLeadRecipients('loc1', { project_type: 'Moving' })
+    const olivias = eff.filter(r => r.email.toLowerCase() === 'olivia@x.com')
+    expect(olivias).toHaveLength(1)
+    expect(olivias[0].source).toBe('user')
+    expect(olivias[0].hub_user_id).toBe('u-owner')
+    expect(olivias[0].category).toBe('["Moving"]')
+  })
+  it("split ON + duplicated owner: the twin does not leak them into another claimant's type", async () => {
+    seed(true)
+    tableData.current.lead_notification_prefs = [
+      { location_id: 'loc1', hub_user_id: 'u-owner', category: '["Moving"]', subscribed: true },
+      { location_id: 'loc1', hub_user_id: 'u-mgr', category: '["Closet"]', subscribed: true },
+    ]
+    tableData.current.lead_notification_externals = [
+      { id: 'e-twin', location_id: 'loc1', first_name: 'Olivia', last_name: 'O',
+        email: 'olivia@x.com', phone: null, category: 'all', created_at: '2026-07-19' },
+    ]
+    const eff = await resolveLeadRecipients('loc1', { project_type: 'Closet' })
+    // Closet is Manny's claim. Olivia's 'all' twin must not pull her back in.
+    expect(eff.map(r => r.email)).toEqual(['manny@x.com'])
   })
   it('legacy moving row still resolves under split ON', async () => {
     seed(true)

@@ -250,6 +250,23 @@ describe('rule 4 — externals are notified, never assigned', () => {
     expect(r.hubUserIds).toEqual(['u1'])
     expect(r.basis).toBe('project_type')
   })
+
+  it("a seeded external TWIN of the claimant (same email, category 'all') does not cancel their claim", async () => {
+    // The Zoho top-up duplicated owner emails into lead_notification_externals
+    // (39 rows in prod, seeded 2026-07-19). The twin carries 'all' and claims
+    // nothing — it must be invisible to assignment: the owner's hub_user claim
+    // stands, assigned exactly once.
+    splitMock.mockResolvedValue(true)
+    queueVocabulary()
+    recipientsMock.mockResolvedValue({
+      users: [user('u1', '["Moving/Relocation"]')],
+      externals: [external('u1@bee.com', 'all')], // same address as user('u1')
+    })
+    const r = await resolveLeadAssignees({ locationUuid: LOC, projectType: 'Moving/Relocation' })
+    expect(r.hubUserIds).toEqual(['u1'])
+    expect(r.basis).toBe('project_type')
+    expect(ownerMock).not.toHaveBeenCalled()
+  })
 })
 
 describe('rule 5 — never nobody', () => {
