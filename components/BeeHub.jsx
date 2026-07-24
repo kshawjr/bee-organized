@@ -17273,7 +17273,7 @@ function RecipientTypePicker({ category, projectTypes, readOnly, onChange }) {
   )
 }
 
-function NewLeadNotifications({ realLocId, readOnly=false }) {
+export function NewLeadNotifications({ realLocId, readOnly=false }) {
   const [users, setUsers] = useState([])
   const [externals, setExternals] = useState([])
   const [projectTypes, setProjectTypes] = useState([])
@@ -17401,7 +17401,7 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
         <div style={{ flex:1, minWidth:0 }}>
           <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Notify different people by project type</p>
           <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>
-            {advanced ? 'Assign project types to specific people; unassigned types go to the whole team.' : 'Off — everyone below is notified for every new lead.'}
+            {advanced ? 'Assign project types to specific people; unassigned types notify the whole team and are assigned to the location owner.' : 'Off — everyone below is notified for every new lead.'}
           </p>
         </div>
         <button
@@ -17413,6 +17413,20 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
           <span style={{ position:'absolute', top:'2px', left: advanced ? '17px' : '2px', width:'15px', height:'15px', borderRadius:'50%', background:'white', transition:'left 0.15s', boxShadow:'0 1px 2px rgba(0,0,0,0.2)' }} />
         </button>
       </div>
+
+      {/* INERT-SPLIT notice: split is ON but no recipient claims any project
+          type, so the toggle currently changes nothing — every lead still
+          notifies everyone and (since assignment reads this same config) is
+          assigned to the location owner. Informational, so it renders in
+          readOnly too; only the tap instruction is owner-only. */}
+      {advanced && !loading && !error && claimed.size === 0 && (
+        <div style={{ background:'#fbf1de', borderBottom:'1px solid rgba(0,0,0,0.06)', padding:'8px 14px' }}>
+          <p style={{ fontSize:'11px', color:'#b07d3a', lineHeight:1.5 }}>
+            Split is on, but no one is assigned to a project type yet — every lead still notifies everyone and is assigned to the location owner.
+            {!readOnly && ' Tap project types on a person below to assign them.'}
+          </p>
+        </div>
+      )}
 
       {/* Team members */}
       <div style={{ background:'white' }}>
@@ -17493,6 +17507,10 @@ function NewLeadNotifications({ realLocId, readOnly=false }) {
             <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Every project type is assigned to someone specific.</p>
           ) : (
             <>
+              {/* Ownership half — this config also drives lead ASSIGNMENT
+                  (lib/lead-assignment.ts): unclaimed types notify the whole team
+                  but the lead itself is assigned to the location owner. */}
+              <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4, marginBottom:'6px' }}>Leads of these types notify the whole team and are assigned to the location owner.</p>
               <div style={{ display:'flex', flexWrap:'wrap', gap:'5px', marginBottom:'8px' }}>
                 {leftoverTypes.map(t => (
                   <span key={t} style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'8px', background:'rgba(0,0,0,0.05)', color:'#8a9e9a', fontWeight:600 }}>{t}</span>
