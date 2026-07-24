@@ -50,6 +50,27 @@ export const pillStyle = ({ dashed = false, leading = false } = {}) => ({
   fontFamily: 'inherit', whiteSpace: 'nowrap',
 })
 
+// The trailing ROW-VERB — a preference/state row's inline action (Opt
+// out…, Snooze…, Activate, Pause, Un-snooze, Re-subscribe). A solid
+// hairline rectangle: DELIBERATELY a different shape from the dashed "+
+// add" pill above (pill = "add a new thing"; rect = "act on this row"),
+// but the SAME height (T.badge.height) so the two families sit on one
+// guaranteed baseline instead of a coincidental one. Was a private helper
+// inside PreferencesBlock until 7/24 — promoted here so height/radius/
+// border can't drift from the shared scale. `danger` tints the ink for
+// the destructive direction only (Kevin's rule: friction one-sided).
+// marginLeft:auto is the default (pushes the verb to the row's right);
+// stacked call sites override with marginLeft:0.
+export const rowActionBtn = (danger = false) => ({
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  marginLeft: 'auto', flexShrink: 0, boxSizing: 'border-box',
+  height: T.badge.height, padding: `0 ${T.badge.padX}`, borderRadius: T.radius.control,
+  border: T.border.control, background: T.surface.raised,
+  fontSize: T.badge.font, fontWeight: T.badge.weight,
+  color: danger ? T.state.danger.fg : T.ink.primary,
+  cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+})
+
 // A quiet, BORDERLESS editable meta VALUE — the masthead Type cell (and
 // any future meta value): value in primary ink with the inline-edit ✎,
 // no input box. Sits under a MicroLabel, mirroring the profile's cells.

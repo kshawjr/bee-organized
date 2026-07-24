@@ -23,6 +23,7 @@ import PreferencesBlock from '@/components/hive/shared/PreferencesBlock'
 import ContactsBlock from '@/components/hive/shared/ContactsBlock'
 import TagsRow from '@/components/hive/shared/TagsRow'
 import { leadColsToPersonFields } from '@/components/hive/shared/leadPatchMap'
+import { T } from '@/components/hive/shared/tokens'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -571,5 +572,42 @@ describe('introspection-gated verdicts (live schema 2026-07-11)', () => {
     expect(panel).not.toContain('invoiceClose')
     expect(panel).toContain('Collect in Jobber')
     expect(panel).toContain('Send in Jobber')
+  })
+})
+
+// ═══ D) small-action sizing — one shared baseline ══════════════════
+// #59: the "+ add" pills and the Preferences row-verbs must render at the
+// SAME height, driven by the shared token — so a future drift (someone
+// hardcoding a px height on one family) fails the suite. Mount tests, not
+// source pins: assert the rendered control carries T.badge.height.
+describe('small-action control sizing (#59 — one shared baseline)', () => {
+  it('+Add contact, +Tag, and the Preferences row-verb all render at T.badge.height', async () => {
+    const contacts = await mount(
+      <ContactsBlock leadId="lead-9" contacts={[]} onChange={() => {}} setToast={() => {}} />
+    )
+    const addContact = btn(contacts.host, '+ Add contact')!
+    expect(addContact, '+ Add contact should render').toBeTruthy()
+    expect(addContact.style.height).toBe(T.badge.height)
+
+    const tags = await mount(
+      <TagsRow leadId="lead-9" tags={[]} options={[]} onChange={() => {}} setToast={() => {}} />
+    )
+    const addTag = btn(tags.host, '+ Tag')!
+    expect(addTag, '+ Tag should render').toBeTruthy()
+    expect(addTag.style.height).toBe(T.badge.height)
+
+    const prefs = await mount(
+      <PreferencesBlock client={CLIENT() as any} openCount={0} onPatched={() => {}} setToast={() => {}} nowMs={now} />
+    )
+    const optOut = btn(prefs.host, 'Opt out…')!
+    expect(optOut, 'Opt out… should render').toBeTruthy()
+    expect(optOut.style.height).toBe(T.badge.height)
+
+    // The two families share the ONE token — not just each equal to a
+    // literal, but equal to each other via the token.
+    expect(addContact.style.height).toBe(optOut.style.height)
+    expect(addTag.style.height).toBe(optOut.style.height)
+
+    await contacts.unmount(); await tags.unmount(); await prefs.unmount()
   })
 })

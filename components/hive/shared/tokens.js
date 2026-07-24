@@ -147,7 +147,14 @@ export const T = {
   badge: {
     font: '11px',      // chip + pill text (StatusChip references this too)
     weight: 500,
-    height: '22px',    // shared pill / + add control height (chips read level)
+    height: '20px',    // shared small-control height — pillStyle (tags, assignee
+                       // pills, the dashed "+ add" affordances) AND cardKit.rowActionBtn
+                       // (the Preferences row verbs) both read THIS one value, so a
+                       // column of mixed pills + row-verbs sits on one guaranteed
+                       // baseline. Stepped down from 22px (7/24): the small actions
+                       // read too large; 20px also lands level with StatusChip's
+                       // ~20px natural height (padding 2px + 11px/1.5 lh), so "chips
+                       // read level" holds without the chips changing.
     padX: '10px',      // pill / + add horizontal inset
     padAvatarL: '4px', // tighter left inset when a leading avatar rides
     gap: '6px',

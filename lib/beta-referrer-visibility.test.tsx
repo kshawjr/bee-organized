@@ -349,7 +349,11 @@ describe('meta-row rhythm — Source and Referrer match their neighbors', () => 
         locationUuid={LOC} people={[]} />
     )
     const value = editBtn(host)!
-    const labelSpan = value.querySelector('span') as HTMLElement
+    // The label is the muted leading span inside the value — the edit button
+    // now wraps the value in a truncating span and trails a shared EditPencil
+    // (matching Source/Contact/Address), so find the label by its text.
+    const labelSpan = [...value.querySelectorAll('span')].find(s => s.textContent === 'Referred by ') as HTMLElement
+    expect(labelSpan, 'the "Referred by " muted label span').toBeTruthy()
     expect(labelSpan.textContent).toBe('Referred by ')
     // Muted label vs the row's own (primary) ink — the same two-tone
     // split "Source: Referral" renders.

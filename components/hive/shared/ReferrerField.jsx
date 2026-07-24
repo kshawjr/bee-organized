@@ -53,6 +53,7 @@ import React, { useMemo, useState } from 'react'
 import ReferrerPicker from '../ReferrerPicker'
 import { IconUserCheck } from '@/components/ui/icons'
 import { T } from './tokens'
+import { EditPencil } from './inlineEdit'
 import { metaRowStyle, metaIconStyle, metaLabelStyle, metaValueStyle, metaAddStyle, META_ICON } from './metaRow'
 
 // The display gate. Exported so a surface can ask the same question
@@ -155,9 +156,15 @@ export default function ReferrerField({
             </span>
           ) : (
             <>
+              {/* Filled value: click-to-edit with the shared EditPencil —
+                  the same view-mode affordance the sibling meta rows wear
+                  (ContactField / SourceField / AddressField). It opens the
+                  inline ReferrerPicker (an EDIT, not a link), so no dashed
+                  underline. */}
               <button type="button" aria-label="Edit referrer" onClick={() => setPicking(v => !v)}
-                style={{ ...metaValueStyle, border: 'none', background: 'transparent', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer', borderBottom: T.border.underline }}>
-                <span style={metaLabelStyle}>Referred by </span>{referrerName}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', minWidth: 0, border: 'none', background: 'transparent', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer' }}>
+                <span style={metaValueStyle}><span style={metaLabelStyle}>Referred by </span>{referrerName}</span>
+                <EditPencil />
               </button>
               <button type="button" aria-label="Clear referrer" onClick={clear}
                 style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', color: T.ink.quiet, fontSize: '13px', lineHeight: 1, flexShrink: 0 }}>

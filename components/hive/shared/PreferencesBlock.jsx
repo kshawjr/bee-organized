@@ -28,18 +28,14 @@
 import React, { useState } from 'react'
 import { IconPlayerPause } from '@/components/ui/icons'
 import { T } from './tokens'
-import { MicroLabel } from './cardKit'
+import { MicroLabel, rowActionBtn } from './cardKit'
 import { fmtShort } from './engagementStatus'
 
 const QUIET = T.surface.sunken
 
-// Quiet inline action — the row's trailing verb.
-const rowBtn = (danger = false) => ({
-  marginLeft: 'auto', padding: '3px 10px', borderRadius: T.radius.control, flexShrink: 0,
-  border: T.border.control, background: T.surface.raised,
-  fontSize: '11px', fontWeight: 500, color: danger ? T.state.danger.fg : T.ink.primary,
-  cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
-})
+// The row's trailing verb — the shared kit control (height single-homed in
+// T.badge.height so it sits level with the +Add / +Tag pills above).
+const rowBtn = rowActionBtn
 
 const SNOOZE_PRESETS = [
   { key: '1w', label: '1 week', days: 7 },

@@ -293,7 +293,7 @@ describe('milestone rail — continuous line node-to-node', () => {
 
 describe('one chip / pill / avatar token scale — both cards reach for it', () => {
   it('T.badge + T.avatar carry the shared anatomy (font/weight/height + avatar sizes)', () => {
-    expect(T.badge).toMatchObject({ font: '11px', weight: 500, height: '22px' })
+    expect(T.badge).toMatchObject({ font: '11px', weight: 500, height: '20px' })
     expect(T.avatar).toMatchObject({ identity: '32px', inline: '18px' })
   })
 
@@ -306,6 +306,21 @@ describe('one chip / pill / avatar token scale — both cards reach for it', () 
     for (const f of ['EngagementAssignees.jsx', 'TagsRow.jsx', 'ContactsBlock.jsx']) {
       expect(readFileSync(join('components/hive/shared', f), 'utf8'), f).toContain('pillStyle')
     }
+  })
+
+  it('cardKit.rowActionBtn is the ONE row-verb home, sharing pillStyle’s height token — PreferencesBlock composes it, no private helper', () => {
+    const kit = readFileSync('components/hive/shared/cardKit.jsx', 'utf8')
+    // Promoted out of PreferencesBlock (7/24): the row verbs and the pills
+    // now read the SAME height token, so the baseline is guaranteed.
+    expect(kit).toContain('export const rowActionBtn')
+    const rowActionSrc = kit.slice(kit.indexOf('export const rowActionBtn'))
+    expect(rowActionSrc).toContain('T.badge.height')
+    // PreferencesBlock composes the shared kit, not a bespoke rect button.
+    const prefs = readFileSync('components/hive/shared/PreferencesBlock.jsx', 'utf8')
+    expect(prefs).toContain('rowActionBtn')
+    // The old private helper carried its own px height/padding — it must not
+    // resurrect as a standalone style object with a hardcoded height.
+    expect(prefs).not.toMatch(/const rowBtn = \(.*\) => \(\{/)
   })
 
   it('StatusChip reads its type from T.badge; InitialsAvatar + the inline avatar read T.avatar (no per-component drift)', () => {
