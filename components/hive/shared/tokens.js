@@ -157,6 +157,8 @@ export const T = {
     identityFont: '11px',
     inline: '18px',       // inline assignee / secondary-contact minis
     inlineFont: '9px',
+    corner: '24px',       // in-record top-right assignee cluster (AssigneeCorner) — a step down from the 32px identity disc, a step up from the 18px inline mini and the 22px inbox-row stack
+    cornerFont: '10px',
   },
 
   // ── THE action accent (brand teal — ui/tokens GREEN_FILL) ─────

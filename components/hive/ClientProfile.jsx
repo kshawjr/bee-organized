@@ -62,7 +62,7 @@ import SourceField from './shared/SourceField'
 import ReferrerField from './shared/ReferrerField'
 import ContactsBlock from './shared/ContactsBlock'
 import TagsRow from './shared/TagsRow'
-import LeadAssignees from './shared/LeadAssignees'
+import AssigneeCorner from './shared/AssigneeCorner'
 import PreferencesBlock from './shared/PreferencesBlock'
 import { jobberClientUrl } from './shared/jobberLinks'
 import Timeline from './shared/Timeline'
@@ -481,12 +481,12 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         readOnly={readOnly}
       />
 
-      {/* Assigned to — restored (Kevin 7/24). The engagement carries its
-          OWN plural assignees once work is founded, but a pre-engagement
-          Inbox lead has no engagement, so its owner was invisible. Reads
-          the lead_assignees junction (display-only; intake decides it,
-          the engagement edits it). */}
-      <LeadAssignees assignees={assignees} />
+      {/* Assignees no longer live in this column — they moved to the
+          record's top-right corner (Kevin 7/24), where the avatar cluster
+          is also the click-to-assign affordance (AssigneeCorner in the
+          header below). The left column is the person's contact stack;
+          ownership reads as identity chrome in the corner, not a labelled
+          row here. */}
 
       {/* Preferences — LIVE toggles (build 3): marketing opt-out
           (confirmed), snooze set/unset, drip pause/activate; the
@@ -779,6 +779,24 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             )}
           </p>
         </div>
+        {/* Assignee corner — faces only, top-right (Kevin 7/24). The
+            avatar cluster IS the click-to-assign door: it opens a multi-
+            select picker of this location's team writing the lead_assignees
+            junction (PUT — set-based), updating in place with no reload.
+            Empty → a dashed ghost disc that reads "click to assign". Gated
+            on the client load so it never flashes a ghost before the
+            assignees fetch settles. */}
+        {c && (
+          <AssigneeCorner
+            assignees={assignees}
+            users={locationUsers.filter(u => !c.location_uuid || u.locationId === c.location_uuid)}
+            endpoint={`/api/leads/${c.id}/assignees`}
+            mode="put"
+            onChange={setAssignees}
+            setToast={setToast}
+            readOnly={readOnly}
+          />
+        )}
         {siblings && siblings.length > 1 && (
           <span style={{ display: 'inline-flex', gap: '2px', flexShrink: 0 }}>
             <button aria-label="Previous client" disabled={!prevId} onClick={() => prevId && onNavigate(prevId)}

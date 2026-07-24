@@ -67,7 +67,7 @@ import MetaSelect from './MetaSelect'
 import Timeline from './shared/Timeline'
 import CardTabs from './shared/CardTabs'
 import InitialsAvatar from './shared/InitialsAvatar'
-import EngagementAssignees from './shared/EngagementAssignees'
+import AssigneeCorner from './shared/AssigneeCorner'
 import { MicroLabel, ActionRow, actionBtn, metaValueBtn } from './shared/cardKit'
 import { EditPencil } from './shared/inlineEdit'
 import RecordMenu from './shared/RecordMenu'
@@ -789,6 +789,25 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                 {fmtMoney(dealValue)}
               </p>
             )}
+            {/* Assignee corner — SAME treatment as the lead card (Kevin
+                7/24): faces only, top-right, the cluster IS the click-to-
+                assign door. Engagement assignees are the crew who DO the
+                work (engagement_assignees, PLURAL) — the toggle route also
+                drives the Jobber crew sync, so unmapped-to-Jobber users are
+                marked in the picker. Empty → a dashed ghost. Gated on the
+                fetch so it doesn't flash a ghost before assignees load. */}
+            {data && (
+              <AssigneeCorner
+                assignees={assignees}
+                users={locationUsers.filter(u => !eng.location_uuid || u.locationId === eng.location_uuid)}
+                endpoint={`/api/engagements/${engagementId}/assignees`}
+                mode="toggle"
+                jobberConnected={!!client?.jobber_connected}
+                onChange={next => setData(d => d ? { ...d, assignees: next } : d)}
+                setToast={setToast}
+                readOnly={readOnly}
+              />
+            )}
             {/* Masthead ··· overflow menu (Part 1) — portal-rendered so
                 the overlay card's rounding/overflow can't clip it. Houses
                 the close-out actions today (Lost wizard, Reopen — Close
@@ -814,29 +833,17 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
               </span>
             )}
           </div>
-          {/* Meta cells — Type + Assigned as ALIGNED metadata under
-              matching uppercase MicroLabels (the ClientProfile treatment,
-              so both cards read as one system), wrapping gracefully when
-              the modal is narrow.
+          {/* Deal meta band — Type only now. Assigned moved OUT of this
+              row and up to the masthead's top-right corner (AssigneeCorner,
+              the SAME faces-only click-to-assign door the lead card wears —
+              Kevin 7/24), so the band no longer has to balance two cells.
               · Type — DEAL-scoped (Kevin's person-vs-deal split); its one
                 home, the profile never shows it. A QUIET editable value
                 (project_type, engagement-level PATCH) with the shared
-                inline-edit pencil — NOT a bordered input box.
-              · Assigned to — ENGAGEMENT-level, PLURAL (multi-user build):
-                the engagement_assignees junction; picker = the
-                engagement's LOCATION hub_users; unmapped-to-Jobber users
-                are selectable but marked. */}
-          {/* Deal metadata — Type + Assigned To as ONE quiet aligned row
-              under matching uppercase MicroLabels (the ClientProfile meta
-              idiom, so both cards read as one system). A hairline top rule
-              groups them as the deal's meta band and gives the row a
-              defined edge. NEITHER cell grows: the old `flex: 1 1 220px`
-              on the Assigned cell made its wrapper eat ALL remaining
-              masthead width (~500px) while its content stayed small and
-              left-aligned — the "dead band to the right" scrunch. Both
-              cells now size to content (`flex: 0 1 auto`) and shrink/wrap
-              gracefully, so a lone "Add type" + "+ Assign" sits naturally
-              with no phantom stretch column. */}
+                inline-edit pencil — NOT a bordered input box. The hairline
+                top rule keeps the band's defined edge; the cell sizes to
+                content (`flex: 0 1 auto`) so a lone "Add type" doesn't
+                stretch across a phantom column. */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 32px', alignItems: 'flex-start', marginTop: '2px', paddingTop: '12px', borderTop: T.border.divider }}>
             <div style={{ flex: '0 1 auto', minWidth: 0 }}>
               <MicroLabel>Type</MicroLabel>
@@ -852,19 +859,6 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                 )}
               />
             </div>
-            {data && (
-              <div style={{ flex: '0 1 auto', minWidth: 0 }}>
-                <EngagementAssignees
-                  engagementId={engagementId}
-                  assignees={assignees}
-                  users={locationUsers.filter(u => !eng.location_uuid || u.locationId === eng.location_uuid)}
-                  jobberConnected={!!client?.jobber_connected}
-                  onChange={next => setData(d => d ? { ...d, assignees: next } : d)}
-                  setToast={setToast}
-                  readOnly={readOnly}
-                />
-              </div>
-            )}
           </div>
         </div>
       )}

@@ -577,8 +577,13 @@ describe('lead-level assigned-to removed', () => {
   it('the AssignedToField component file is deleted', () => {
     expect(existsSync('components/hive/shared/AssignedToField.jsx')).toBe(false)
   })
-  it('the EngagementPanel masthead mounts the plural EngagementAssignees', () => {
+  it('the EngagementPanel masthead mounts the shared AssigneeCorner (toggle mode), not the old chip-row', () => {
     const panel = readFileSync('components/hive/EngagementPanel.jsx', 'utf8')
-    expect(panel).toContain('EngagementAssignees')
+    // Assignees moved to the top-right corner (Kevin 7/24) — the same
+    // faces-only click-to-assign door the lead card wears. The old
+    // masthead chip-row (EngagementAssignees) is no longer mounted here.
+    expect(panel).toContain('AssigneeCorner')
+    expect(panel).toContain('mode="toggle"')
+    expect(panel).not.toContain('<EngagementAssignees')
   })
 })
