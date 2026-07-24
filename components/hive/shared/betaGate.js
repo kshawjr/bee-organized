@@ -39,7 +39,16 @@ export function canSeeBetaBoard(role) {
 // pass the mapRole vocabulary + crmStatus and thread the boolean into
 // the beta tree; the server enforces the same shape independently
 // (lib/read-only-access).
-const READ_ONLY_FRANCHISE_ROLES = ['viewer', 'light', 'readonly']
+// Exported as the ONE definition of "read-only franchiseRole". Every
+// consumer must call isReadOnlyFranchiseRole() rather than hand-writing a
+// literal subset — a hand-written ['light','readonly'] silently missed
+// 'viewer' (the value mapRole actually emits for a real lite_user session)
+// and let lite_user past the Settings nav lockout.
+export const READ_ONLY_FRANCHISE_ROLES = ['viewer', 'light', 'readonly']
+
+export function isReadOnlyFranchiseRole(franchiseRole) {
+  return READ_ONLY_FRANCHISE_ROLES.includes(franchiseRole)
+}
 
 export function resolveBetaReadOnly({ role, franchiseRole, crmStatus }) {
   // Elevated roles are never read-only via this gate (they write on

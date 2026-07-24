@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { useLeadsRealtime } from "@/lib/use-leads-realtime"
 import { upsertRealtimePerson, removeRealtimePerson } from "@/components/hive/shared/leadsRealtime"
 import dynamic from "next/dynamic"
-import { canSeeBetaBoard, defaultHiveView, hydrateHiveView, resolveBetaReadOnly } from "@/components/hive/shared/betaGate"
+import { canSeeBetaBoard, defaultHiveView, hydrateHiveView, resolveBetaReadOnly, isReadOnlyFranchiseRole } from "@/components/hive/shared/betaGate"
 import { ROUTE_TO_NAV, NAV_TO_URL, parseHubUrl, clientPath, engagementPath } from "@/components/hive/shared/hubUrl"
 // Home redesign — read the SAME derivation/tokens the Clients surface uses so
 // Home can't drift from the views. Pure leaves (§8.5), imported statically.
@@ -20143,23 +20143,31 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // Manager is an operational lead and explicitly CANNOT manage the team.
   const canManageTeam = franchiseRole === 'owner'
   const canViewBilling = franchiseRole === 'owner'
-  // Manager is an operational lead: they get Settings ONLY to edit their own
-  // Profile (name/phone — a self-edit on hub_users). Every other Settings
-  // section (Location/Team/Billing/Communication/Templates/Automation/Alerts)
-  // is owner-only config and stays hidden for manager. Readonly never reaches
-  // SettingsScreen at all (nav-level lockout).
-  const isManager = franchiseRole === 'manager'
+  // Every section except Profile is owner-only config. Profile is a SELF-edit
+  // (name/phone/booking link on the caller's own hub_users row — the server
+  // route /api/hub_users/me is open to any hub user by design), so every
+  // franchise role gets it: manager, and lite_user (franchiseRole 'viewer',
+  // or 'light'/'readonly' under view-as) — a lite_user can be assigned a
+  // lead, so their booking link is real. Elevated mounts pass
+  // franchiseRole='owner' and see everything.
+  //
+  // ALLOWLIST on 'owner', deliberately NOT a denylist of the other roles: the
+  // old `isManager ? [] : [...]` shape silently showed the full config list to
+  // franchiseRole='viewer' (a string the denylist never named), which is how
+  // lite_user saw My Location/Communication/Templates/Automation/Alerts. An
+  // unknown or future franchiseRole now fails CLOSED to Profile-only.
+  const ownerConfig = franchiseRole === 'owner'
   const sections = [
     { key:'profile',   label:'Profile',    icon:'👤' },
-    ...(isManager ? [] : [{ key:'location',  label:'My Location',icon:'📍' }]),
+    ...(ownerConfig ? [{ key:'location',  label:'My Location',icon:'📍' }] : []),
     ...(canManageTeam ? [{ key:'team', label:'Team', icon:'👥' }] : []),
     ...(canViewBilling ? [{ key:'billing', label:'Billing', icon:'💳' }] : []),
-    ...(isManager ? [] : [
+    ...(ownerConfig ? [
       { key:'paths',     label:'Communication', icon:'📧' },
       { key:'templates', label:'Templates',  icon:'📝' },
       { key:'automation',label:'Automation', icon:'⚡' },
       { key:'notifs',    label:'Alerts',     icon:'🔔' },
-    ]),
+    ] : []),
   ]
   // Deep-link / stale-state safety: if activeSection isn't one this role can
   // see (e.g. manager hits ?section=billing), show a polite no-access notice
@@ -21611,7 +21619,9 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   const needsCoOwnerSlim =
     isCoOwner && crmStatus === 'active' && !slimDone && !(currentUserProfile?.phone)
   const isReadOnly   = crmStatus === 'inactive'
-  const isLiteUser   = franchiseRole === 'light' || franchiseRole === 'readonly'
+  // Shared predicate (betaGate) — a hand-written 'light'/'readonly' pair here
+  // missed 'viewer', the value mapRole actually emits for a real lite_user.
+  const isLiteUser   = isReadOnlyFranchiseRole(franchiseRole)
   // Money figures (Revenue card, royalty tile) — owner-or-corporate only.
   // Manager (operational lead) and lite_user are excluded. Shared predicate
   // with ReportsScreen (lib/financial-access) so the two can't drift.
@@ -31920,7 +31930,6 @@ function ReportsComingSoonPlaceholder() {
 // ─── Reports Screen ───────────────────────────────────────────────────────────
 function ReportsScreen({ role, franchiseRole='owner', people=[], locFilter='all' }) {
   const isElevated = role==='super_admin' || role==='corporate'
-  const isLight = ['light','readonly'].includes(role==='franchise'?'franchise':role)
   // Money figures gate — shared with the Home Revenue tile (lib/financial-access).
   // Owner/elevated see revenue; manager sees operational reports only.
   const canSeeFinancials = financialsVisible(role, franchiseRole)
@@ -33596,14 +33605,15 @@ if (Array.isArray(initialPeople)) return
           {/* Nav items */}
           <div style={{ flex:1, padding:'10px 10px 16px', display:'flex', flexDirection:'column', gap:'4px' }}>
             {navItems.map(item=>{
-              const fr = franchiseRole
+              const fr = franchiseRole // owner|manager|viewer (+ 'light'/'readonly' under view-as)
               const isReports  = item.key==='reports'  && !['super_admin','corporate'].includes(role) && !['owner','manager'].includes(fr)
-              // Settings nav: manager gets it back so they can edit their own
-              // Profile (name/phone). SettingsScreen gates every other section
-              // (Location/Team/Billing/Communication/Templates/Jobber) owner-only,
-              // so manager sees ONLY Profile. Readonly stays fully locked out.
-              const isSettings = item.key==='settings' && ['readonly'].includes(fr)
-              const isLocked = (isOnboardingState && !isElevated && item.key!=='home') || isReports || isSettings
+              // Settings nav is open to EVERY role — SettingsScreen itself
+              // allowlists the sections (owner: everything; manager and
+              // lite_user: Profile only, a self-edit). The old nav lockout here
+              // checked `['readonly'].includes(fr)`, a string mapRole never
+              // emits for a real lite_user ('viewer'), so it silently never
+              // fired — don't reintroduce a nav-level role denylist.
+              const isLocked = (isOnboardingState && !isElevated && item.key!=='home') || isReports
               const isActive = activeNav===item.key
               return (
                 <button
@@ -33858,7 +33868,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         {/* locationRequired mirrors HiveScreen above: server truth
             (!!initialAllOverview), so Network prompts on 'all' exactly when
             the record lenses do — never for a franchise user. */}
-        <PartnersScreen onNavigate={nav} partners={partners} setPartners={setPartners} companies={companies} setCompanies={setCompanies} locFilter={locFilter} isElevated={isElevated} people={people} initialSelected={globalSelectedPartner} onInitialSelectedConsumed={()=>setGlobalSelectedPartner(null)} onAddToHive={(partner)=>{ addPersonFromPartner(partner); nav('hive') }} readOnly={role==='franchise' && ['light','readonly'].includes(franchiseRole)} setToast={setToast} locationRequired={!!initialAllOverview} onOpenLocationPicker={()=>setShowLocPicker(true)} networkTruncated={!!initialNetworkTruncated} />
+        <PartnersScreen onNavigate={nav} partners={partners} setPartners={setPartners} companies={companies} setCompanies={setCompanies} locFilter={locFilter} isElevated={isElevated} people={people} initialSelected={globalSelectedPartner} onInitialSelectedConsumed={()=>setGlobalSelectedPartner(null)} onAddToHive={(partner)=>{ addPersonFromPartner(partner); nav('hive') }} readOnly={role==='franchise' && isReadOnlyFranchiseRole(franchiseRole)} setToast={setToast} locationRequired={!!initialAllOverview} onOpenLocationPicker={()=>setShowLocPicker(true)} networkTruncated={!!initialNetworkTruncated} />
         {toast && <InlineToast {...toast} />}
       </div>
     )
@@ -34075,16 +34085,17 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           {navItems.map(item=>{
             const isOnboardingState = effectiveCrmStatus==='onboarding'
             // Franchise sub-role gating
-            const fr = franchiseRole // owner|manager|light|readonly
+            const fr = franchiseRole // owner|manager|viewer (+ 'light'/'readonly' under view-as)
             const isReports  = item.key==='reports'  && !['super_admin','corporate'].includes(role) && !['owner','manager'].includes(fr)
-            // Settings nav: manager gets it back so they can edit their own
-            // Profile (name/phone). SettingsScreen gates every other section
-            // (Location/Team/Billing/Communication/Templates/Jobber) owner-only,
-            // so manager sees ONLY Profile. Readonly stays fully locked out.
-            const isSettings = item.key==='settings' && ['readonly'].includes(fr)
+            // Settings nav is open to EVERY role — SettingsScreen itself
+            // allowlists the sections (owner: everything; manager and
+            // lite_user: Profile only, a self-edit). The old nav lockout here
+            // checked `['readonly'].includes(fr)`, a string mapRole never
+            // emits for a real lite_user ('viewer'), so it silently never
+            // fired — don't reintroduce a nav-level role denylist.
             // Onboarding lockdown only applies to franchise users mid-setup —
             // super_admin / corporate are always elevated and never "onboarding."
-            const isLocked = (isOnboardingState && !isElevated && item.key!=='home') || isReports || isSettings
+            const isLocked = (isOnboardingState && !isElevated && item.key!=='home') || isReports
             const isActive = activeNav===item.key
             return (
               <button key={item.key} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ width:'100%', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left', background:isActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>

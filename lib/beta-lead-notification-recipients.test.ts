@@ -295,11 +295,14 @@ describe('UI — placement in the owner+super_admin-only Communication tab', () 
     expect(beehub).toContain('Who hears about new leads')
     expect(beehub).toContain('Sending identity')
   })
-  it('the Communication tab is HIDDEN from managers (isManager excluded)', () => {
-    // Both the tab list and the notifications live behind the same non-manager
-    // gate → owner + super_admin/corporate only.
+  it('the Communication tab is OWNER-allowlisted (hidden from manager AND lite_user)', () => {
+    // The section list is an allowlist on franchiseRole==='owner' — the old
+    // manager DENYLIST silently showed Communication to lite_user
+    // (franchiseRole 'viewer', a string the denylist never named). Behavior
+    // is mount-pinned in lib/beta-settings-access.test.tsx; this pin just
+    // keeps the tab behind the allowlist const.
     expect(beehub).toContain("label:'Communication'")
-    expect(beehub).toContain("const isManager = franchiseRole === 'manager'")
+    expect(beehub).toContain("const ownerConfig = franchiseRole === 'owner'")
   })
   it('the placeholder card is gone (no competing notifications UI)', () => {
     expect(beehub).not.toContain('function LeadNotificationsCard(')
