@@ -79,7 +79,7 @@ import { mergePartnerRow } from "@/lib/crm"
 
 // Reviews-link URL validation. Used by onboarding location step + Settings
 // "Google Reviews" row. Required field — owners must enter a real review URL
-// so the New Client Drip "request a review" template renders correctly.
+// so the new-lead-emails "request a review" template renders correctly.
 // Returns null when valid, otherwise an error message ready to render inline.
 // Uses the URL constructor (try-catch) instead of regex: it catches edge
 // cases like "https:google.com" (missing //) or "https://" (no host) that
@@ -199,19 +199,6 @@ const INVOICE_STATUS = {
   'Bad Debt':         { color:'#ef4444', bg:'rgba(239,68,68,0.1)',   icon:'❌' },
   'Void':             { color:'#d1d5db', bg:'rgba(209,213,219,0.2)', icon:'🚫' },
 }
-
-const TOUCH_CONFIG = {
-  email:       { label:'Email',       icon:'📧', color:'#6366f1', bg:'rgba(99,102,241,0.1)' },
-  sms:         { label:'Text',        icon:'💬', color:'#10b981', bg:'rgba(16,185,129,0.1)' },
-  call_prompt: { label:'Call Prompt', icon:'📞', color:'#f59e0b', bg:'rgba(245,158,11,0.1)' },
-  link:        { label:'Booking Link',icon:'🔗', color:'#0ea5e9', bg:'rgba(14,165,233,0.1)' },
-}
-
-const PATHS = [
-  { id:'email-nurture',  name:'New lead emails · Email Nurture',  icon:'📧', firstTouch:'email' },
-  { id:'quick-connect',  name:'New lead emails · Quick Connect',  icon:'⚡', firstTouch:'sms' },
-  { id:'personal-touch', name:'New lead emails · Personal Touch', icon:'🤝', firstTouch:'call_prompt' },
-]
 
 const ADDRESS_TYPES = ['Service','Billing','Moving From','Moving To','Storage Unit','Mailing','Other']
 
@@ -11039,7 +11026,6 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     replyToEmail:    currentLocationCtx?.reply_to_email   || '',
     timezone:        currentLocationCtx?.timezone         || '',
     reviewsLink:     currentLocationCtx?.reviews_link     || '',
-    calendarLink:    currentLocationCtx?.calendar_link    || '',
   })
   const [jobberKey, setJobberKey]       = useState('')
   const [showSkipModal, setShowSkipModal]           = useState(false)
@@ -11122,7 +11108,10 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
             send_from_email: locationForm.sendFromEmail,
             reply_to_email:  locationForm.replyToEmail,
             reviews_link:    locationForm.reviewsLink,
-            calendar_link:   locationForm.calendarLink,
+            // calendar_link is deliberately absent: the location step has no
+            // input for it, and the route clears on '' — sending a stale form
+            // value could wipe the link the paths step saved. The booking
+            // link is owned by the New lead emails step + Settings.
           }),
         })
         const json = await res.json().catch(() => ({}))
@@ -11980,7 +11969,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
             <div style={{ background:'rgba(168,201,196,0.08)', borderRadius:'10px', padding:'12px', marginBottom:'20px', textAlign:'left' }}>
               <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>
                 ✅ Your subscription is active<br/>
-                ✅ Your New Client Drip is set<br/>
+                ✅ Your new lead emails are set<br/>
                 ✅ Clients can start coming in<br/>
                 👥 Team invites whenever you're ready
               </p>
@@ -12719,7 +12708,7 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
             <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>📧 Send-From Email</p>
             {locationForm.sendFromEmail && locationForm.sendFromEmail===profileForm.email && <span style={{ fontSize:'10px', color:'#a8c9c4', fontStyle:'italic' }}>Prefilled from your profile</span>}
           </div>
-          <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'6px' }}>The "from" address your clients see on all New Client Drip emails and welcome messages. Change it to a business address if you prefer. Editable anytime in Settings.</p>
+          <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'6px' }}>The "from" address your clients see on all new lead emails and welcome messages. Change it to a business address if you prefer. Editable anytime in Settings.</p>
           <input type="email" value={locationForm.sendFromEmail}
             onChange={e=>setLocationForm(f=>({...f,sendFromEmail:e.target.value}))}
             placeholder="you@yourbusiness.com"
@@ -12749,7 +12738,7 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
         {/* Timezone */}
         <div>
           <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'4px' }}>🕐 Timezone</p>
-          <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'6px' }}>Used for scheduling your New Client Drip emails at the right local time.</p>
+          <p style={{ fontSize:'11px', color:'#a8c9c4', marginBottom:'6px' }}>Used for scheduling your new lead emails at the right local time.</p>
           <select value={locationForm.timezone} onChange={e=>setLocationForm(f=>({...f,timezone:e.target.value}))}
             style={{ ...inp, background:'white', cursor:'pointer', color:locationForm.timezone?'#1a2e2b':'#8a9e9a' }}>
             <option value="">Select your timezone…</option>
@@ -12762,8 +12751,9 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
           </select>
         </div>
 
-        {/* Google Review link — required, validated. Surfaces in New Client Drip
-           "request a review" template; bad/missing URL = broken email. */}
+        {/* Google Review link — required, validated. Surfaces in the
+           new-lead-emails "request a review" template; bad/missing URL =
+           broken email. */}
         <div>
           <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:'4px' }}>
             <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>⭐ Google Review Link <span style={{ color:'#ef4444' }}>*</span></p>
@@ -13108,7 +13098,6 @@ export function OnboardingPathsEditor({ onComplete, profileForm = null, location
     'path-b': { emoji:'🔗', tagline:'They book a call themselves · your rate is in the email', explain:"Your first email shares a booking link so they can pick a time themselves, plus your rate. Great if you prefer self-scheduling." },
     'path-c': { emoji:'📲', tagline:"They reply with their availability · pricing waits for the call", explain:"Your first email is a casual \"hey, are you free this week?\" No rate, no links. Friendly and low pressure." },
     'path-d': { emoji:'🤝', tagline:'They book online or phone you · pricing waits for the call', explain:"Your first email gives them three ways to connect — reply, book online, or call — and leaves pricing for that conversation. Best for people who like options." },
-    'path-e': { emoji:'💛', tagline:'They reply with their availability · warm referral tone', explain:"Same as \"Reply to schedule\" but with a warmer, referral-focused tone. Great for word-of-mouth clients who already trust you." },
   }
 
 
@@ -20524,7 +20513,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
 
             <SectionHeader title="Online Presence" />
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-              <SettingsEditRow label="Booking Link"     value={settings.location.bookingLink}  onSave={v=>updateLocation('bookingLink',v)}  hint="Shared in New Client Drip emails" />
+              <SettingsEditRow label="Booking Link"     value={settings.location.bookingLink}  onSave={v=>updateLocation('bookingLink',v)}  hint="Shared in your new lead emails" />
               <SettingsEditRow label="Google Reviews"   value={settings.location.reviewsLink}  onSave={v=>updateLocation('reviewsLink',v)}  hint="Sent to completed clients" required validate={validateReviewsLink} />
             </div>
 
@@ -20743,7 +20732,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           )
         })()}
 
-        {/* ── New Client Drip ── */}
+        {/* ── New lead emails ── */}
         {activeSection==='paths'&&(()=>{
           // Communication tab — a COMPOSITION in distinct tiers (hero → medium
           // → paired → dense list → tiles), each visually sized to its weight.
@@ -25866,7 +25855,7 @@ function ProjectTypeEditModal({ items, onClose, onSave }) {
         <div style={{ padding:'18px 20px 14px', borderBottom:'1px solid rgba(0,0,0,0.07)', display:'flex', alignItems:'flex-start', justifyContent:'space-between', flexShrink:0 }}>
           <div>
             <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'2px' }}>Project Types</p>
-            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Set each type as Move or Organizing - determines the New Client Drip used</p>
+            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Set each type as Move or Organizing - determines which new lead emails they get</p>
           </div>
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer' }}>×</button>
         </div>
@@ -26122,7 +26111,7 @@ const LOOKUP_CATEGORIES_CONFIG = {
   },
   project_types: {
     label: 'Project Types',
-    desc: 'Each tagged Move or Organizing — determines New Client Drip used',
+    desc: 'Each tagged Move or Organizing — determines which new lead emails they get',
     section: 'CLIENTS',
     fields: ['label', 'drip_category'],
     defaultColor: '#8a9e9a',

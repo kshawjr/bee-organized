@@ -3,22 +3,26 @@ import { requireAuth, getHubUser } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
 
 // POST /api/locations/[id]/paths
-// Body: { default_drip_path?, default_move_drip_path?, calendar_link? }
+// Body: { default_drip_path?, default_move_drip_path?, calendar_link?,
+//         rate_per_hour? }
 //
-// Persists the onboarding paths-step selections to the location. Currently
-// the onboarding wizard only lets users PICK from preset drip paths (path-a
-// through path-e). Future Settings → Paths tab will let them build custom
-// paths; that's a separate feature.
+// Persists the onboarding "New lead emails" selections to the location. The
+// wizard picks from the four seeded master styles per project type (path_key
+// 'organizing-a'..'-d' / 'moving-a'..'-d', seeded by
+// migrations/seed_master_drip_paths.sql) or defers with 'custom', which the
+// client maps to null — content customization lives in Settings →
+// Communications (clone-and-edit of the masters; there is no from-scratch
+// builder).
 //
-// calendar_link is also stored here (not just on the location step) because
-// some drip paths embed it in their templates. It's the SAME column as the
-// location step's calendarLink — whichever step the user completes first
-// pre-fills the other.
+// calendar_link lives on the locations row and is owned by this step +
+// Settings — the onboarding location step collects no calendar input. The
+// wizard pre-seeds from the stored value and sends write-only-when-provided,
+// so a re-run can never wipe a saved link; the clear-on-'' below exists for
+// Settings-style callers that DO mean "remove it".
 //
-// NOTE: the path_key values written here ('general-a', 'move-a', etc.)
-// correspond to real drip_paths rows seeded for the 4 launch locations by
-// migrations/drips_infrastructure.sql. Session 2 will resolve this text key
-// into a drip_paths.id when a lead enters "New" to start their drip.
+// lib/drip-lifecycle.startDrip resolves the stored path_key into a
+// drip_paths row (location copy first, corp master fallback) when a lead
+// enrolls.
 
 export async function POST(
   req: NextRequest,
