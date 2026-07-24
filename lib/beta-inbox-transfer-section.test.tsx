@@ -212,7 +212,11 @@ describe('Inbox — Needs transfer section', () => {
     await unmount()
   })
 
-  it('renders the pill as the ONLY action — no log-call / Send-to-Jobber / ··· on a transfer row', async () => {
+  it('renders the two corporate dispositions and ONLY those — no log-call / Send-to-Jobber / ··· on a transfer row', async () => {
+    // The section used to render ONE action per row (Route). "No coverage" is a
+    // deliberate SECOND disposition beside it — the exception to routing. The
+    // normal cluster stays absent: a lead no location owns still isn't ours to
+    // call or push to Jobber.
     const { host, unmount } = await mount(
       <InboxScreen people={[]} transferPeople={[locOtherLead()]} engagements={[]} locFilter="all" />,
     )
@@ -220,7 +224,7 @@ describe('Inbox — Needs transfer section', () => {
       .find(r => (r.textContent || '').includes('Global Lead'))
     expect(row).toBeTruthy()
     const labels = Array.from(row!.querySelectorAll('button')).map(b => b.getAttribute('aria-label'))
-    expect(labels).toEqual(['Route'])
+    expect(labels).toEqual(['No coverage', 'Route'])
     expect(labels).not.toContain('Log call')
     expect(labels).not.toContain('Send to Jobber')
     expect(labels).not.toContain('More')
@@ -238,6 +242,9 @@ describe('Inbox — Needs transfer section', () => {
     expect(labels).toContain('Send to Jobber')
     expect(labels).toContain('More')
     expect(labels).not.toContain('Route')
+    // The corporate dispositions are transfer-row only — a normal lead the
+    // location owns is never offered "No coverage".
+    expect(labels).not.toContain('No coverage')
     await unmount()
   })
 

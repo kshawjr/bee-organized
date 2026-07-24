@@ -58,10 +58,11 @@ import { formatInboxAgeParts } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
 import { TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY } from '@/components/ui/tokens'
 import { T } from './shared/tokens'
-import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock, IconDots, IconMapPin, IconArrowRight, IconUsers } from '@/components/ui/icons'
+import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock, IconDots, IconMapPin, IconArrowRight, IconUsers, IconMail } from '@/components/ui/icons'
 import InitialsAvatar from './shared/InitialsAvatar'
 import TouchpointModal, { METHODS } from './TouchpointModal'
 import TransferLeadModal from './TransferLeadModal'
+import NoCoverageModal from './NoCoverageModal'
 import NetworkConvertSheet from './NetworkConvertSheet'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
@@ -147,6 +148,31 @@ function RoutePill({ disabled, onClick }) {
       }}>
       Route
       <IconArrowRight size={13} />
+    </button>
+  )
+}
+
+// The SECOND disposition beside Route: "nobody covers them". An OUTLINE sand
+// control rather than a second filled pill — two filled corporate pills side by
+// side would read as equal-weight primaries and make the row a fork with no
+// default. Route is the expected outcome (assign an owner); No coverage is the
+// deliberate exception (we can't). Same sand family so it still reads as a
+// corporate disposition, not a location action. The click opens NoCoverageModal
+// against /api/leads/:id/no-coverage.
+function NoCoveragePill({ disabled, onClick }) {
+  return (
+    <button className="bee-no-coverage-pill" aria-label="No coverage" title="Not available in their area — email + mailing-list invite"
+      disabled={disabled} onClick={onClick}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: '5px',
+        padding: '7px 13px', borderRadius: T.radius.pill,
+        border: `1px solid ${T.corp.border}`, background: 'transparent', color: T.corp.fg,
+        fontSize: '13px', fontWeight: 600, lineHeight: 1, whiteSpace: 'nowrap',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+      }}>
+      <IconMail size={13} />
+      No coverage
     </button>
   )
 }
@@ -294,6 +320,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   // Held as the person so the modal's origin subline survives the row
   // re-deriving out of the section the instant the move lands.
   const [transferFor, setTransferFor] = useState(null)
+  const [noCoverageFor, setNoCoverageFor] = useState(null)
   // The lead whose "Add to Network" sheet is open. Held as the person for the
   // same reason as the two above: a Move re-derives the row out of its section
   // the instant it lands, and the sheet must survive its own success.
@@ -697,6 +724,24 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     setToast({ kind: 'success', msg: `${p.name} transferred to ${dest?.name || 'location'}` })
   }
 
+  // "No coverage" landed. The endpoint sent the email and — per Kevin's rule —
+  // dismissed the lead ON SEND. Reuse transferredIds (the "left the routing
+  // queue this session" set) so the row optimistically leaves, EXACTLY like a
+  // transfer. But ONLY when the endpoint actually dismissed it: if the send
+  // succeeded and the dismiss write did not (result.dismissed === false), the
+  // email is out yet the row is still live in the DB — leave it on screen so the
+  // surface matches the database, and say so, rather than hiding a row the
+  // Realtime refetch would then bounce back ~1s later.
+  function onNoCoverage(p, result) {
+    setNoCoverageFor(null)
+    if (result?.dismissed) {
+      addTo(setTransferredIds, p.id)
+      setToast({ kind: 'success', msg: `${p.name} emailed — removed from the routing queue` })
+    } else {
+      setToast({ kind: 'success', msg: `${p.name} emailed — but couldn't clear the queue, still showing` })
+    }
+  }
+
   function Row({ p, family, pill }) {
     const isTransfer = pill === 'Transfer'
     const sent = freshlySent(p)
@@ -716,13 +761,19 @@ export default function InboxScreen({ people = [], transferPeople = [], location
         <IconCheck size={13} /> Sent — engagement will appear on the board
       </span>
     ) : readOnly ? null : isTransfer ? (
-      /* Needs-transfer row: ONE action — the filled Transfer pill. The
-         normal cluster (log call, Send to Jobber, ···) is deliberately
-         absent: a lead being routed away isn't ours to call or push to
-         Jobber, so those doors would be dead ends. The card keeps the
-         fuller action set; the row is a single decision. */
-      <RoutePill disabled={busyId === p.id}
-        onClick={(ev) => { ev.stopPropagation(); setTransferFor(p) }} />
+      /* Needs-transfer row: TWO corporate dispositions, and ONLY these — the
+         normal cluster (log call, Send to Jobber, ···) stays absent because a
+         lead no location owns isn't ours to call or push to Jobber. Route
+         assigns an owner (the expected outcome, filled pill); No coverage tells
+         the person we can't serve them and offers the mailing list (the
+         deliberate exception, outline). Both are corporate-sand, distinct from
+         the teal controls that act on a lead the current location owns. */
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+        <NoCoveragePill disabled={busyId === p.id}
+          onClick={(ev) => { ev.stopPropagation(); setNoCoverageFor(p) }} />
+        <RoutePill disabled={busyId === p.id}
+          onClick={(ev) => { ev.stopPropagation(); setTransferFor(p) }} />
+      </span>
     ) : (
       <>
         {/* Ghost cluster — Log call RECORDS a touchpoint (the tel: link
@@ -1129,6 +1180,22 @@ export default function InboxScreen({ people = [], transferPeople = [], location
           subline={transferOriginLine(transferFor)}
           onClose={() => setTransferFor(null)}
           onDone={(dest) => onTransferred(transferFor, dest)}
+        />
+      )}
+
+      {noCoverageFor && !readOnly && (
+        <NoCoverageModal
+          person={{
+            id: noCoverageFor.id,
+            name: noCoverageFor.name,
+            email: noCoverageFor.email,
+            firstName: noCoverageFor.firstName || null,
+            city: noCoverageFor.originCity || null,
+            state: noCoverageFor.originState || null,
+          }}
+          subline={transferOriginLine(noCoverageFor)}
+          onClose={() => setNoCoverageFor(null)}
+          onDone={(result) => onNoCoverage(noCoverageFor, result)}
         />
       )}
 
