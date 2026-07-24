@@ -28,6 +28,10 @@ const ALLOWED_FIELDS = [
   'reply_to_email',
   'reviews_link',
   'calendar_link',
+  // Free-form TEXT ("$95") rendered verbatim into drip emails as
+  // {{rate_per_hour}}. Empty string clears to null (standard sparse-patch
+  // semantics here — the send guard then HOLDS rate-quoting sends).
+  'rate_per_hour',
 ] as const
 
 export async function PATCH(
@@ -77,7 +81,7 @@ export async function PATCH(
       .update(patch)
       .eq('id', locId)
       .select(
-        'id, name, address, city, state, zip, phone, email, timezone, sender_name, send_from_email, reply_to_email, reviews_link, calendar_link'
+        'id, name, address, city, state, zip, phone, email, timezone, sender_name, send_from_email, reply_to_email, reviews_link, calendar_link, rate_per_hour'
       )
       .single()
 

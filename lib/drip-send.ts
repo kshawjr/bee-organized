@@ -12,6 +12,7 @@
 
 import { supabaseService } from './supabase-service'
 import { sendEmail, renderTemplate, type RenderContext } from './resend'
+import { blockedOnMissingRate } from './rate-guard'
 import { nextSendAt } from './drip-time'
 import { scheduleWelcomeEmail } from './welcome-email'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
@@ -196,6 +197,24 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
 
   if (!bodySource) {
     return { sent: false, error: 'no_body_source' }
+  }
+
+  // RATE GUARD: this template quotes {{rate_per_hour}} but the location has
+  // no rate set. HOLD — row untouched, retried next tick, so the drip resumes
+  // by itself once the rate is entered in Settings. The gap is visible three
+  // ways (lead drip status below, cron held_missing_rate counter, digest
+  // blank-rate section); what never happens is the client reading
+  // "Our rate starts at  per hour per Bee."
+  if (blockedOnMissingRate({ subject: subjectSource, body: bodySource }, loc.rate_per_hour)) {
+    console.warn('[drip-send] held: template quotes {{rate_per_hour}} but location rate is blank', {
+      leadId: row.lead_id, locationId: loc.id, step: row.current_step,
+    })
+    await recordDripSendStatus(row.lead_id, {
+      status: 'failed',
+      step: row.current_step,
+      error: 'Hourly rate not set for this location — email quotes {{rate_per_hour}}; send held until the rate is entered in Settings',
+    })
+    return { sent: false, error: 'missing_rate' }
   }
 
   // First-name fallback: lead.first_name, else first word of lead.name

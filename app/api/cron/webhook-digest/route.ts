@@ -34,6 +34,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { fetchWebhookLogEvents } from '@/lib/webhook-observability'
 import { buildWebhookDigest } from '@/lib/webhook-digest'
 import { fetchImportHealth } from '@/lib/import-health'
+import { fetchRateHealth } from '@/lib/rate-health'
 import { resolveInternalOrigin, probeInternalOriginGated } from '@/lib/internal-origin'
 import { postSlackMessage } from '@/lib/slack'
 
@@ -85,10 +86,16 @@ export async function GET(req: NextRequest) {
       console.error(`[cron webhook-digest] internal re-poke origin is SSO-GATED (${internalOrigin}) — imports cannot self-resume`)
     }
 
+    // Blank-rate hold rollup: active locations on rate-quoting default
+    // paths (-a/-b) with no rate_per_hour — their sends are HELD by
+    // lib/rate-guard. fetchRateHealth never throws (degrades to empty).
+    const rateHealth = await fetchRateHealth()
+
     digest = buildWebhookDigest({
       events,
       appUrl,
       windowLabel: 'last 3h',
+      rateHealth,
       importHealth: {
         failed: importJobs.failed,
         stalled: importJobs.stalled,
@@ -129,6 +136,7 @@ export async function GET(req: NextRequest) {
       `leadsIn=${digest.leadsLanded} leadsFailed=${digest.leadsFailed} ` +
       `jobberLanded=${digest.jobberLanded} jobberDidntLand=${digest.jobberDidntLand} ` +
       `importFailed=${digest.importFailed} importStalled=${digest.importStalled} importOriginGated=${digest.importOriginGated} ` +
+      `rateMissing=${digest.rateMissing} ` +
       `selfHeals=${digest.selfHeals}${post.skipped ? ` skipped=${post.skipped}` : ''}`,
   )
   return NextResponse.json({
@@ -144,6 +152,7 @@ export async function GET(req: NextRequest) {
     importFailed: digest.importFailed,
     importStalled: digest.importStalled,
     importOriginGated: digest.importOriginGated,
+    rateMissing: digest.rateMissing,
     selfHeals: digest.selfHeals,
   })
 }

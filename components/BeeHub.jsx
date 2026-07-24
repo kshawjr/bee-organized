@@ -11094,6 +11094,9 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
             default_drip_path:      dripGeneral,
             default_move_drip_path: dripMove,
             calendar_link:          prefs?.calendarLink || '',
+            // Only present when a rate-quoting path (A/B) was picked; the
+            // API ignores empty strings so C/D never wipe a saved rate.
+            rate_per_hour:          prefs?.ratePerHour || '',
           }),
         })
         const json = await res.json().catch(() => ({}))
@@ -12841,7 +12844,7 @@ function PathChooser({ title, emoji, current, onSelect, previewPath, setPreviewP
   )
 }
 
-function OnboardingPathsEditor({ onComplete }) {
+export function OnboardingPathsEditor({ onComplete }) {
   // Onboarding picker reads from the corp master drip_paths
   // (/api/drip-paths/masters) rather than per-location rows: with the
   // master/copy model introduced by seed_master_drip_paths.sql, new
@@ -12854,6 +12857,9 @@ function OnboardingPathsEditor({ onComplete }) {
   const [selectedGeneral, setSelectedGeneral] = useState(null)
   const [previewPath, setPreviewPath]         = useState(null)
   const [calendarLink, setCalendarLink]       = useState('')
+  // Pre-seed from the location so re-running the wizard doesn't demand a
+  // re-type of a rate that's already saved.
+  const [ratePerHour, setRatePerHour]         = useState(currentLocationCtx?.rate_per_hour || '')
 
   // Which PATH_STYLES are backed by a master drip_paths row. `null` while
   // loading. Keyed by PATH_STYLES.id (e.g. 'path-a'). With the 8 seeded
@@ -12913,7 +12919,15 @@ function OnboardingPathsEditor({ onComplete }) {
 
   const needsCalendar = PATH_STYLES.find(p=>p.id===selectedMove)?.tags?.includes('calendar')
                      || PATH_STYLES.find(p=>p.id===selectedGeneral)?.tags?.includes('calendar')
-  const confirmReady  = !needsCalendar || calendarLink.trim().startsWith('http')
+  // Paths A/B quote {{rate_per_hour}} verbatim in their follow-up email
+  // (the 'rates' tag) — picking one is choosing to send a sentence that
+  // needs this value, so the wizard asks for it the same way B/D ask for
+  // the calendar link. C/D move pricing to the call and never ask.
+  const needsRate = PATH_STYLES.find(p=>p.id===selectedMove)?.tags?.includes('rates')
+                 || PATH_STYLES.find(p=>p.id===selectedGeneral)?.tags?.includes('rates')
+  const calendarReady = !needsCalendar || calendarLink.trim().startsWith('http')
+  const rateReady     = !needsRate || ratePerHour.trim() !== ''
+  const confirmReady  = calendarReady && rateReady
 
   function getSteps(pathId) { return DEFAULT_PATH_STEPS[pathId]||[] }
   function getTemplate(templateId) { return DEFAULT_TEMPLATES.find(t=>t.id===templateId) }
@@ -13035,12 +13049,29 @@ function OnboardingPathsEditor({ onComplete }) {
         </div>
       )}
 
+      {needsRate&&(
+        <div style={{ background:'rgba(245,158,11,0.05)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'12px', padding:'14px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}>
+            <span style={{ fontSize:'18px' }}>💰</span>
+            <div>
+              <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Hourly rate required</p>
+              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Your selected path quotes your rate to clients.</p>
+            </div>
+          </div>
+          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5, marginBottom:'10px' }}>This goes into the follow-up email word-for-word: &ldquo;Our rate starts at <strong>{ratePerHour.trim()||'___'}</strong> per hour per Bee.&rdquo; Write it exactly as it should read — e.g. $95. You can change it anytime in Settings.</p>
+          <input type="text" value={ratePerHour} onChange={e=>setRatePerHour(e.target.value)}
+            placeholder="$95"
+            style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(245,158,11,0.35)', borderRadius:'9px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', background:'white' }} />
+          {ratePerHour.trim()&&<p style={{ fontSize:'11px', color:'#22c55e', marginTop:'4px' }}>✓ Looks good</p>}
+        </div>
+      )}
+
       <div style={{ display:'flex', gap:'8px' }}>
         <button onClick={()=>{ setPreviewPath(null); setWizardStep('general') }} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>← Change</button>
-        <button onClick={()=>confirmReady&&onComplete({ moveDefault:selectedMove, generalDefault:selectedGeneral, calendarLink:calendarLink||'' })}
+        <button onClick={()=>confirmReady&&onComplete({ moveDefault:selectedMove, generalDefault:selectedGeneral, calendarLink:calendarLink||'', ratePerHour:ratePerHour.trim()||'' })}
           disabled={!confirmReady}
           style={{ flex:1, padding:'11px', background:confirmReady?'#22c55e':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:confirmReady?'white':'#9ca3af', cursor:confirmReady?'pointer':'not-allowed' }}>
-          {confirmReady?'✓ Save & Complete':needsCalendar?'Add your calendar link to continue':'Select paths first'}
+          {confirmReady?'✓ Save & Complete':(needsCalendar&&!calendarReady)?'Add your calendar link to continue':(needsRate&&!rateReady)?'Add your hourly rate to continue':'Select paths first'}
         </button>
       </div>
     </div>
@@ -16100,6 +16131,7 @@ const DEFAULT_SETTINGS = {
     phone:          '',
     bookingLink:    '',
     reviewsLink:    '',
+    ratePerHour:    '',
     serviceRadius:  '25 miles',
     assessmentType: 'in-person',
     timezone:       '',
@@ -19482,7 +19514,7 @@ function CommsTemplatesModal({ type, templates, settings, onPreview, onOpenEdito
   )
 }
 
-function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null, isPastDue=false, graceDaysLeft=14, locationId='loc1', onPaymentResolved, people=[], franchiseRole='owner', isSuperAdmin=false, onOpenManual=null }) {
+export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null, isPastDue=false, graceDaysLeft=14, locationId='loc1', onPaymentResolved, people=[], franchiseRole='owner', isSuperAdmin=false, onOpenManual=null }) {
   // Real franchise owner sign-ins get currentLocation/currentUser from context
   // (populated by App from page.tsx's Supabase fetch). These are the
   // highest-priority source: signed-in franchise user → use their real DB row.
@@ -19559,6 +19591,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
       timezone:        currentLocationCtx.timezone || '',
       reviewsLink:     currentLocationCtx.reviews_link || '',
       bookingLink:     currentLocationCtx.calendar_link || '',
+      ratePerHour:     currentLocationCtx.rate_per_hour || '',
       jobberStatus:    deriveJobberStatus({
                          connected:      currentLocationCtx.jobber_connected,
                          tokenExpiry:    currentLocationCtx.token_expiry,
@@ -19592,6 +19625,7 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     phone:          selectedLoc.phone,
     bookingLink:    selectedLoc.bookingLink,
     reviewsLink:    selectedLoc.reviewsLink,
+    ratePerHour:    selectedLoc.ratePerHour || '',
     serviceRadius:  selectedLoc.serviceRadius,
     timezone:       selectedLoc.timezone,
     assessmentType: selectedLoc.assessmentType,
@@ -20002,6 +20036,31 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
     }
   }
 
+  // Persist the hourly rate to locations.rate_per_hour. Unlike the legacy
+  // local-only SettingsEditRows, this one MUST reach the DB: a blank rate
+  // actively HOLDS every rate-quoting drip send (lib/rate-guard.ts), so a
+  // rate saved only into this session's state would leave emails held
+  // forever. Empty string clears to null (the API's sparse-patch semantic).
+  async function persistRatePerHour(v) {
+    updateLocation('ratePerHour', v)
+    if (!realLocId) return
+    try {
+      const res = await fetch(`/api/locations/${realLocId}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rate_per_hour: v }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(()=>({}))
+        throw new Error(j?.error || `HTTP ${res.status}`)
+      }
+    } catch (e) {
+      console.error('[settings] rate_per_hour save failed', e)
+      alert('Could not save your hourly rate: ' + (e?.message || e))
+    }
+  }
+
   function saveCustomPath({ pathId, pathName, projectType, steps }) {
     setPathSteps(prev=>({...prev,[pathId]:steps}))
     setSettings(s=>({...s, paths:{...s.paths, active:[...s.paths.active, pathId]}}))
@@ -20310,6 +20369,12 @@ function SettingsScreen({ onStatusChange, selectedLoc=null, initialSection=null,
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
               <SettingsEditRow label="Booking Link"     value={settings.location.bookingLink}  onSave={v=>updateLocation('bookingLink',v)}  hint="Shared in New Client Drip emails" />
               <SettingsEditRow label="Google Reviews"   value={settings.location.reviewsLink}  onSave={v=>updateLocation('reviewsLink',v)}  hint="Sent to completed clients" required validate={validateReviewsLink} />
+            </div>
+
+            <SectionHeader title="Pricing" desc="Quoted to clients in your follow-up emails" />
+            <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
+              <SettingsEditRow label="Hourly Rate" value={settings.location.ratePerHour||''} onSave={persistRatePerHour}
+                hint={'Appears word-for-word in client emails: "Our rate starts at ___ per hour per Bee." Write it exactly as it should read — e.g. $95, or $85/hr (3-hour minimum). Leave blank and rate-quoting emails are held until it’s set.'} />
             </div>
 
             <SectionHeader title="Assessment Default" desc="Used when scheduling - can be overridden per client" />

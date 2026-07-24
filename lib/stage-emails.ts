@@ -22,6 +22,7 @@
 
 import { supabaseService } from './supabase-service'
 import { sendEmail, renderTemplate, type RenderContext } from './resend'
+import { blockedOnMissingRate } from './rate-guard'
 import { bodyToHtml } from './drip-send'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
 
@@ -279,6 +280,16 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
     location_phone: loc.phone,
     book_assessment_link: loc.calendar_link,
     reviews_link: loc.reviews_link,
+  }
+
+  // RATE GUARD: template quotes {{rate_per_hour}} but the location has no
+  // rate. HOLD — send_at stays intact so the cron retries every tick and
+  // the email goes out on the first tick after the rate is entered.
+  if (blockedOnMissingRate(tpl, loc.rate_per_hour)) {
+    console.warn('[stage-emails] held: template quotes {{rate_per_hour}} but location rate is blank', {
+      rowId: row.id, leadId: lead.id, locationId: loc.id,
+    })
+    return { sent: false, error: 'missing_rate' }
   }
 
   const rendered = renderTemplate({ subject: tpl.subject, body: tpl.body }, ctx)

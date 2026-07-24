@@ -75,12 +75,18 @@ export async function GET(req: NextRequest) {
   let sent = 0
   let skipped = 0
   let failed = 0
+  // Sends HELD because the template quotes {{rate_per_hour}} and the
+  // location's rate is blank. Counted apart from `skipped` so the gap is
+  // countable in cron logs; the digest carries the per-location rollup.
+  let heldMissingRate = 0
   const errors: Array<{ kind: string; id: string; reason: string }> = []
 
   for (const row of dueRows ?? []) {
     const result = await sendDripStepForRow(row as any)
     if (result.sent) {
       sent++
+    } else if (result.error === 'missing_rate') {
+      heldMissingRate++
     } else if (
       result.error === 'no_email' ||
       result.error === 'non_email_channel' ||
@@ -126,6 +132,8 @@ export async function GET(req: NextRequest) {
       const result = await sendWelcomeEmail(lead.id)
       if (result.sent) {
         welcomeSent++
+      } else if (result.error === 'missing_rate') {
+        heldMissingRate++
       } else if (
         result.error === 'no_email' ||
         result.error === 'already_sent' ||
@@ -163,6 +171,8 @@ export async function GET(req: NextRequest) {
       const result = await sendStageEmail(row.id)
       if (result.sent) {
         stageSent++
+      } else if (result.error === 'missing_rate') {
+        heldMissingRate++
       } else if (
         result.error === 'no_email' ||
         result.error === 'already_sent' ||
@@ -179,7 +189,12 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  if (heldMissingRate > 0) {
+    console.warn(`[cron] ${heldMissingRate} send(s) held: template quotes {{rate_per_hour}} but the location rate is blank`)
+  }
+
   return NextResponse.json({
+    held_missing_rate: heldMissingRate,
     drips:   { sent, skipped, failed, considered: dueRows?.length ?? 0 },
     welcome: { sent: welcomeSent, skipped: welcomeSkipped, failed: welcomeFailed, considered: welcomeDue?.length ?? 0 },
     stage:   { sent: stageSent,   skipped: stageSkipped,   failed: stageFailed,   considered: stageDue?.length ?? 0 },

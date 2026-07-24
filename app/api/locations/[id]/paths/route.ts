@@ -46,11 +46,12 @@ export async function POST(
     }
 
     const body = await req.json().catch(() => ({}))
-    const { default_drip_path, default_move_drip_path, calendar_link } =
+    const { default_drip_path, default_move_drip_path, calendar_link, rate_per_hour } =
       (body || {}) as {
         default_drip_path?: string
         default_move_drip_path?: string
         calendar_link?: string
+        rate_per_hour?: string
       }
 
     const patch: Record<string, any> = { updated_at: new Date().toISOString() }
@@ -66,12 +67,19 @@ export async function POST(
     if (typeof calendar_link === 'string') {
       patch.calendar_link = calendar_link.trim() || null
     }
+    // rate_per_hour: free-form TEXT ("$95"), rendered verbatim into drip
+    // emails as {{rate_per_hour}}. Write-only-when-provided — the wizard
+    // sends '' for paths C/D (no rate ask), and that must never wipe a rate
+    // an owner already entered. Clearing happens in Settings, not here.
+    if (typeof rate_per_hour === 'string' && rate_per_hour.trim()) {
+      patch.rate_per_hour = rate_per_hour.trim()
+    }
 
     const { error, data } = await supabaseService
       .from('locations')
       .update(patch)
       .eq('id', locId)
-      .select('id, default_drip_path, default_move_drip_path, calendar_link')
+      .select('id, default_drip_path, default_move_drip_path, calendar_link, rate_per_hour')
       .single()
 
     if (error) {

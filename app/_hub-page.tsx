@@ -666,7 +666,7 @@ export default async function HubPage({
         // NOTE: slack_bot_token is intentionally NOT selected — display fields
         // only (slack_connected / slack_team_name / slack_channel_name). The
         // token is server-read-only (lib/slack-bot + intake route).
-        'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, token_expiry, onboarding_state, default_drip_path, default_move_drip_path, address, city, state, zip, phone, email, timezone, sender_name, send_from_email, reply_to_email, reviews_link, calendar_link, activated_at, lifecycle_status, slack_connected, slack_team_name, slack_channel_name'
+        'id, name, subscription_status, subscription_plan, payment_source, paid_through_date, deferred_until, billing_notes, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, token_expiry, onboarding_state, default_drip_path, default_move_drip_path, address, city, state, zip, phone, email, timezone, sender_name, send_from_email, reply_to_email, reviews_link, calendar_link, rate_per_hour, activated_at, lifecycle_status, slack_connected, slack_team_name, slack_channel_name'
       )
       .eq('id', hubUser.location_id)
       .single()
@@ -734,6 +734,7 @@ export default async function HubPage({
         reply_to_email: locRow.reply_to_email || '',
         reviews_link: locRow.reviews_link || '',
         calendar_link: locRow.calendar_link || '',
+        rate_per_hour: locRow.rate_per_hour || '',
         activated_at: locRow.activated_at || null,
       }
     }
@@ -772,7 +773,7 @@ export default async function HubPage({
       .from('locations')
       .select(
         // slack_bot_token intentionally omitted — display fields only.
-        'id, name, address, city, state, zip, phone, email, timezone, reviews_link, calendar_link, sender_name, send_from_email, reply_to_email, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, token_expiry, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at, corporate_sponsorship_started_at, corporate_sponsorship_ends_at, slack_connected, slack_team_name, slack_channel_name'
+        'id, name, address, city, state, zip, phone, email, timezone, reviews_link, calendar_link, rate_per_hour, sender_name, send_from_email, reply_to_email, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, token_expiry, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at, corporate_sponsorship_started_at, corporate_sponsorship_ends_at, slack_connected, slack_team_name, slack_channel_name'
       )
       .order('name', { ascending: true })
 
@@ -899,6 +900,7 @@ export default async function HubPage({
         website: '',
         reviewsLink: row.reviews_link || '',
         bookingLink: row.calendar_link || '',
+        ratePerHour: row.rate_per_hour || '',
         email: row.email || '',
         timezone: row.timezone || '',
         sendFromName: row.sender_name || '',

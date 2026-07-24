@@ -13,6 +13,7 @@
 
 import { supabaseService } from './supabase-service'
 import { sendEmail, renderTemplate, type RenderContext } from './resend'
+import { blockedOnMissingRate } from './rate-guard'
 import { bodyToHtml } from './drip-send'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
 
@@ -167,6 +168,16 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
 
   if (tplErr || !tpl) {
     return { sent: false, error: `template_lookup: ${tplErr?.message ?? 'missing'}` }
+  }
+
+  // RATE GUARD: template quotes {{rate_per_hour}} but the location has no
+  // rate. HOLD — scheduled_at stays intact so the cron retries every tick
+  // and the welcome goes out on the first tick after the rate is entered.
+  if (blockedOnMissingRate(tpl, loc.rate_per_hour)) {
+    console.warn('[welcome] held: template quotes {{rate_per_hour}} but location rate is blank', {
+      leadId, locationId: loc.id,
+    })
+    return { sent: false, error: 'missing_rate' }
   }
 
   // Owners (location owner + assigned-to user). Location owner resolves to the

@@ -71,6 +71,9 @@ export type WebhookDigest = {
   importFailed: number
   importStalled: number
   importOriginGated: boolean
+  // active locations on rate-quoting default paths (-a/-b) with a blank
+  // rate_per_hour — their rate-quoting sends are HELD by lib/rate-guard
+  rateMissing: number
   text: string
 }
 
@@ -189,6 +192,35 @@ export function buildImportHealthSection(
   }
 
   return { lines, failedCount, stalledCount, originGated, hasProblems: true }
+}
+
+// ── blank-rate section ───────────────────────────────────────────
+// Standing condition, not a per-window event: an active location whose
+// default path quotes {{rate_per_hour}} with no rate set has its
+// rate-quoting sends HELD (lib/rate-guard.ts). It stays in the digest
+// every window until the rate is entered or the path changes — that
+// pressure is the point; the alternative was a silent hole in client
+// emails. Healthy (empty) input produces no lines and no un-suppress.
+export type RateHealthDigestInput = {
+  missingRate: Array<{
+    location_id?: string | null
+    name?: string | null
+    paths?: string[]
+  }>
+}
+
+export function buildRateHealthSection(
+  input: RateHealthDigestInput | undefined,
+): { lines: string[]; missingCount: number; hasProblems: boolean } {
+  const rows = input?.missingRate ?? []
+  if (rows.length === 0) return { lines: [], missingCount: 0, hasProblems: false }
+  const lines: string[] = [`*:moneybag: Hourly rate missing* (sends held until set)`]
+  for (const r of rows) {
+    const loc = r.name || r.location_id || 'unknown'
+    const paths = (r.paths ?? []).join(', ')
+    lines.push(`    • ${loc}${paths ? ` — ${paths}` : ''} — rate-quoting drips are held; enter the rate in Settings → Pricing`)
+  }
+  return { lines, missingCount: rows.length, hasProblems: true }
 }
 
 // ── classification ────────────────────────────────────────────
@@ -329,6 +361,7 @@ export function buildWebhookDigest(opts: {
   appUrl: string          // e.g. https://app.example.com (no trailing slash)
   windowLabel?: string    // human label for the query window
   importHealth?: ImportHealthInput   // import pipeline health (item 2/3)
+  rateHealth?: RateHealthDigestInput // blank-rate hold rollup (lib/rate-health)
 }): WebhookDigest {
   const { appUrl } = opts
   const windowLabel = opts.windowLabel || 'last 3h'
@@ -338,8 +371,9 @@ export function buildWebhookDigest(opts: {
   const jobberDidntLand = c.jobberProblems.length
 
   const imp = buildImportHealthSection(opts.importHealth, windowLabel)
+  const rate = buildRateHealthSection(opts.rateHealth)
 
-  const realProblems = leadsFailed + jobberDidntLand + (imp.hasProblems ? 1 : 0)
+  const realProblems = leadsFailed + jobberDidntLand + (imp.hasProblems ? 1 : 0) + (rate.hasProblems ? 1 : 0)
   const allClear = realProblems === 0
 
   // Suppress a quiet window OR a self-heal-only window: nothing landed and
@@ -352,7 +386,8 @@ export function buildWebhookDigest(opts: {
     leadsFailed === 0 &&
     c.jobberLanded === 0 &&
     jobberDidntLand === 0 &&
-    !imp.hasProblems
+    !imp.hasProblems &&
+    !rate.hasProblems
 
   // ── headline (real problems only) ──────────────────────────
   let headline: string
@@ -367,6 +402,7 @@ export function buildWebhookDigest(opts: {
     if (imp.originGated) parts.push(`import origin SSO-GATED`)
     if (imp.failedCount > 0) parts.push(`${plural(imp.failedCount, 'import')} FAILED`)
     if (imp.stalledCount > 0) parts.push(`${plural(imp.stalledCount, 'import')} STALLED`)
+    if (rate.missingCount > 0) parts.push(`${plural(rate.missingCount, 'location')} on rate-quoting paths with NO RATE (sends held)`)
     headline = `:warning: ${parts.join(' + ')} — check`
   }
 
@@ -429,12 +465,15 @@ export function buildWebhookDigest(opts: {
 
   // Import section only appears when there's an import problem to act on.
   const importBlock = imp.lines.length ? `${imp.lines.join('\n')}\n\n` : ''
+  // Same rule for the blank-rate section: healthy → invisible.
+  const rateBlock = rate.lines.length ? `${rate.lines.join('\n')}\n\n` : ''
 
   const text =
     `${headline}\n\n` +
     `${leadLines.join('\n')}\n\n` +
     `${jobberLines.join('\n')}\n\n` +
     importBlock +
+    rateBlock +
     `<${link}|Open the webhook dashboard>`
 
   return {
@@ -451,6 +490,7 @@ export function buildWebhookDigest(opts: {
     importFailed: imp.failedCount,
     importStalled: imp.stalledCount,
     importOriginGated: imp.originGated,
+    rateMissing: rate.missingCount,
     text,
   }
 }
