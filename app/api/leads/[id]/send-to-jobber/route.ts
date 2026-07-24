@@ -702,13 +702,14 @@ export async function POST(
 
     let reqCreate = await createRequest(requestInput)
 
-    // requestDetails is NON-FATAL, same philosophy as salespersonId and for
-    // the same reason: it is the one field on this mutation whose exact input
-    // shape we could not confirm by live introspection at ship time (every
-    // location's Jobber token was expired). If Jobber rejects it, strip the
-    // form and re-run the whole ladder — the send degrades to exactly today's
-    // behavior (request created, form data stays in Bee Hub) instead of
-    // failing, and the breadcrumb makes the rejection loud rather than silent.
+    // requestDetails is NON-FATAL, same philosophy as salespersonId: if Jobber
+    // rejects it, strip the form and re-run the whole ladder, so the send
+    // degrades to the pre-2026-07-24 behavior (request created, form data
+    // stays in Bee Hub) instead of failing, with a loud breadcrumb.
+    // The input SHAPE is confirmed against the live schema (see the type dump
+    // in lib/jobber-request-form.ts), so this rung should never fire for
+    // shape reasons — it stays as cheap insurance against a schema change,
+    // which is exactly what bit the string-valued requestDetails in May.
     if (reqCreate.userErrors?.length && requestInput.requestDetails) {
       console.warn('[send-to-jobber] requestCreate with requestDetails failed — retrying without the form', {
         leadId, userErrors: JSON.stringify(reqCreate.userErrors),

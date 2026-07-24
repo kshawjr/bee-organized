@@ -16,6 +16,20 @@
 // RequestDetailsInput — and removed it with an "until we wire form sync"
 // comment. This module is that wiring.
 //
+// VERIFIED against the live schema 2026-07-24 03:08 UTC
+// (scripts/introspect-jobber-schema.mjs, token loc_kc):
+//   RequestCreateInput.requestDetails: RequestDetailsInput
+//   RequestDetailsInput.form:          FormInput!
+//   FormInput.sections:                [FormSectionInput!]!
+//   FormSectionInput.label:            String!
+//   FormSectionInput.items:            [FormItemInput!]!
+//   FormItemInput.label:               String!
+//   FormItemInput.answerText:          String        ← nullable
+// Note `answerText` being nullable means an empty answer WOULD have been
+// legal; omitting the item is a product choice, not a schema constraint.
+// RequestCreateInput has no `source` field at all — the form item was the
+// only route for it, and we deliberately don't take it.
+//
 // What we deliberately DON'T send: `source`. leads.source holds three
 // disjoint vocabularies (MAKE scenario slugs like "seattle_assessment",
 // human labels, and ~7,000 nulls) with no display mapping, so pushing it

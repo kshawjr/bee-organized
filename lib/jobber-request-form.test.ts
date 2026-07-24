@@ -109,6 +109,84 @@ describe('buildRequestDetails', () => {
   })
 })
 
+// ── introspection verdict — live schema 2026-07-24 03:08 UTC ────────────────
+//
+// scripts/introspect-jobber-schema.mjs (token loc_kc) returned:
+//   RequestCreateInput.requestDetails: RequestDetailsInput
+//   RequestDetailsInput.form:          FormInput!
+//   FormInput.sections:                [FormSectionInput!]!
+//   FormSectionInput.label:            String!
+//   FormSectionInput.items:            [FormItemInput!]!
+//   FormItemInput.label:               String!
+//   FormItemInput.answerText:          String       (nullable)
+// RequestCreateInput exposes NO `source` field — pushing source was never
+// possible except as a form item, which we deliberately don't do.
+//
+// This validator mirrors those types, so if the builder ever drifts from the
+// confirmed shape the suite fails instead of a Jobber round trip.
+function violationsAgainstLiveSchema(v: any): string[] {
+  const bad: string[] = []
+  const str = (x: any) => typeof x === 'string'
+  if (v === null || typeof v !== 'object') return ['requestDetails is not an object']
+  if (Object.keys(v).join() !== 'form') bad.push('RequestDetailsInput accepts exactly one field: form')
+  if (!v.form || typeof v.form !== 'object') bad.push('form is required (FormInput!)')
+  else {
+    if (Object.keys(v.form).join() !== 'sections') bad.push('FormInput accepts exactly one field: sections')
+    if (!Array.isArray(v.form.sections)) bad.push('sections is required ([FormSectionInput!]!)')
+    else for (const s of v.form.sections) {
+      if (s === null) bad.push('section is null (list is non-null)')
+      else {
+        if (!str(s.label)) bad.push('FormSectionInput.label is String! (non-null)')
+        if (!Array.isArray(s.items)) bad.push('FormSectionInput.items is [FormItemInput!]! (non-null)')
+        else for (const it of s.items) {
+          if (it === null) { bad.push('item is null (list is non-null)'); continue }
+          if (!str(it.label)) bad.push('FormItemInput.label is String! (non-null)')
+          // answerText is nullable — a string or absent, never a number/object
+          if (it.answerText !== undefined && it.answerText !== null && !str(it.answerText)) {
+            bad.push('FormItemInput.answerText must be a String when present')
+          }
+          const extra = Object.keys(it).filter(k => k !== 'label' && k !== 'answerText')
+          if (extra.length) bad.push(`FormItemInput has no field(s): ${extra.join(', ')}`)
+        }
+        const extra = Object.keys(s).filter(k => k !== 'label' && k !== 'items')
+        if (extra.length) bad.push(`FormSectionInput has no field(s): ${extra.join(', ')}`)
+      }
+    }
+  }
+  return bad
+}
+
+describe('introspection verdict (live schema 2026-07-24)', () => {
+  it('the built payload validates against the confirmed RequestDetailsInput chain', () => {
+    const out = buildRequestDetails({
+      project_type: 'Garage Organization',
+      request_details: 'Two-car garage.',
+    })
+    expect(violationsAgainstLiveSchema(out)).toEqual([])
+  })
+
+  it('every non-null shape the builder can emit is schema-valid', () => {
+    const leads = [
+      { project_type: 'Closet', request_details: null },
+      { project_type: null, request_details: 'notes only' },
+      { project_type: 'Pantry', request_details: 'both' },
+    ]
+    for (const lead of leads) {
+      const out = buildRequestDetails(lead)
+      expect(out).not.toBeNull()
+      expect(violationsAgainstLiveSchema(out)).toEqual([])
+    }
+  })
+
+  it('answerText is always a real string — the builder never emits null/undefined answers', () => {
+    const out = buildRequestDetails({ project_type: 'Office', request_details: 'x' })
+    for (const item of out!.form.sections[0].items) {
+      expect(typeof item.answerText).toBe('string')
+      expect(item.answerText.length).toBeGreaterThan(0)
+    }
+  })
+})
+
 // ── source pins: how the route wires it ─────────────────────────────────────
 
 describe('send-to-jobber route wiring', () => {
