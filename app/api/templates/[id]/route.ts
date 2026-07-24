@@ -161,6 +161,26 @@ export async function DELETE(
     return NextResponse.json({ error: 'forbidden_cannot_delete_master' }, { status: 403 })
   }
 
+  // In-use guard: drip_path_steps.master_template_id is ON DELETE SET NULL,
+  // so deleting a referenced template would silently strand those steps with
+  // no content source. Refuse instead; the caller re-points the steps first.
+  const { count: refCount, error: refErr } = await supabaseService
+    .from('drip_path_steps')
+    .select('id', { count: 'exact', head: true })
+    .eq('master_template_id', tpl.id)
+
+  if (refErr) {
+    console.error('[/api/templates/[id] DELETE] ref check error:', refErr.message)
+    return NextResponse.json({ error: 'ref_check_failed', detail: refErr.message }, { status: 500 })
+  }
+  if ((refCount ?? 0) > 0) {
+    return NextResponse.json({
+      error: 'template_in_use',
+      detail: `This template is used by ${refCount} email step${refCount === 1 ? '' : 's'} in your new lead emails. Point ${refCount === 1 ? 'that step' : 'those steps'} at a different template first, then delete it.`,
+      steps_referencing: refCount,
+    }, { status: 409 })
+  }
+
   const { error } = await supabaseService
     .from('templates')
     .delete()

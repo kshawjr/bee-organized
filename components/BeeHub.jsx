@@ -13052,7 +13052,7 @@ export function OnboardingPathsEditor({ onComplete }) {
       ) : (
         <PathChooser projectLabel="Moving" stepIndex={1} sectionKey="moving" emoji="📦" current={selectedMove} onSelect={setSelectedMove} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={movePathOptions} getSteps={getSteps} />
       )}
-      <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center' }}>Templates and timing can be customized anytime in Settings → Templates</p>
+      <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center' }}>Templates and timing can be customized anytime in Settings → Communications</p>
       <div style={{ display:'flex', gap:'8px' }}>
         <button onClick={()=>setWizardStep('intro')} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>← Back</button>
         <button onClick={()=>{ if(selectedMove){ setPreviewPath(null); setWizardStep('general') } }} disabled={!selectedMove}
@@ -13074,7 +13074,7 @@ export function OnboardingPathsEditor({ onComplete }) {
       ) : (
         <PathChooser projectLabel="Organizing" stepIndex={2} sectionKey="organizing" emoji="🏠" current={selectedGeneral} onSelect={setSelectedGeneral} previewPath={previewPath} setPreviewPath={setPreviewPath} PLAIN={PLAIN} pathOptions={generalPathOptions} getSteps={getSteps} />
       )}
-      <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center' }}>Templates and timing can be customized anytime in Settings → Templates</p>
+      <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center' }}>Templates and timing can be customized anytime in Settings → Communications</p>
       <div style={{ display:'flex', gap:'8px' }}>
         <button onClick={()=>{ setPreviewPath(null); setWizardStep('move') }} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>← Back to 📦 Moving</button>
         <button onClick={()=>selectedGeneral&&setWizardStep('confirm')} disabled={!selectedGeneral}
@@ -16059,7 +16059,6 @@ function prettyPathName(name, pathKey) {
 const DELAY_OPTIONS_SHORT = ['Immediately','1 day later','2 days later','3 days later','4 days later','5 days later','7 days later','10 days later','14 days later']
 
 function AddStepInline({ pathId, order, templates, onSave, onCancel, smsEnabled }) {
-  const [name, setName]               = useState('')
   const [type, setType]               = useState('email')
   const [delay, setDelay]             = useState('Immediately')
   const [templateId, setTemplateId]   = useState(null)
@@ -16067,26 +16066,19 @@ function AddStepInline({ pathId, order, templates, onSave, onCancel, smsEnabled 
 
   const tmpl = templates.find(t=>t.id===templateId)
   const tc = { email:{icon:'📧',color:'#6366f1'}, sms:{icon:'💬',color:'#10b981'}, call:{icon:'📞',color:'#f59e0b'} }
-  const canSave = name.trim()
+  // A template is REQUIRED: a step without one saves with no content at all
+  // (subject/body null, no linked row), and the old free-typed name was
+  // discarded on reload anyway (reload derives it from the template/subject).
+  const canSave = !!tmpl
 
   function save() {
     if (!canSave) return
-    onSave({ id:`s${Date.now()}`, order, name:name.trim(), type, delay, templateId })
+    onSave({ id:`s${Date.now()}`, order, name:tmpl.name, type, delay, templateId })
   }
 
   return (
     <>
       <div style={{ marginTop:'4px', padding:'10px 12px', background:'rgba(168,201,196,0.06)', border:'1.5px dashed rgba(168,201,196,0.4)', borderRadius:'10px', display:'grid', gap:'8px' }}>
-        {/* Step name */}
-        <input
-          autoFocus
-          value={name}
-          onChange={e=>setName(e.target.value)}
-          onKeyDown={e=>{ if(e.key==='Enter') save(); if(e.key==='Escape') onCancel() }}
-          placeholder={`Step ${order} name...`}
-          style={{ width:'100%', padding:'7px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'12px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', background:'white' }}
-        />
-
         {/* Type + Delay row */}
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px' }}>
           {/* Type picker */}
@@ -19660,8 +19652,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   const [tplTypeHover, setTplTypeHover]       = useState(null)
   const [addingStepToPath, setAddingStepToPath] = useState(null)
 
-  const [showCustomBuilder, setShowCustomBuilder] = useState(false)
-
   // Real franchise location? settings.location.locId will be a Supabase UUID.
   // Demo / view-as paths get string ids like 'loc_kc' — skip DB writes there.
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -19973,11 +19963,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     }
   }
 
-  function saveCustomPath({ pathId, pathName, projectType, steps }) {
-    setPathSteps(prev=>({...prev,[pathId]:steps}))
-    setSettings(s=>({...s, paths:{...s.paths, active:[...s.paths.active, pathId]}}))
-    setShowCustomBuilder(false)
-  }
+  // "Build your own" (CustomPathBuilder) was cut from this panel: its save
+  // only ever wrote local state (savePathToDb early-returns for 'custom'),
+  // so the flow looked real but never persisted. The component is retained
+  // unmounted below in this file.
 
   // Persist template changes to /api/templates. Super admins edit masters or
   // their own customs; owners edit only their location's customs (the API
@@ -20077,7 +20066,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         credentials: 'include',
       })
       const j = await res.json().catch(()=>({}))
-      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      // 409 template_in_use carries a human sentence in detail — prefer it.
+      if (!res.ok) throw new Error(j?.detail || j?.error || `HTTP ${res.status}`)
       setTemplates(prev => prev.filter(t => t.id !== tpl.id))
     } catch (e) {
       alert('Could not delete template: ' + (e?.message || e))
@@ -20631,12 +20621,16 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                   </div>
                 </div>
                 <div>
-                  {PATH_STYLES.map((style,i)=>{
-                    const pathId = style.id==='custom' ? 'custom' : `${openSeq.filter}-${style.id.replace('path-','')}`
+                  {/* "Build your own" (custom) is cut: its builder never persisted
+                      (savePathToDb early-returns for 'custom'), so the row was a
+                      dead end that looked real. PATH_STYLES keeps the entry for
+                      onboarding's "decide later" option. */}
+                  {PATH_STYLES.filter(s=>s.id!=='custom').map((style,i,styleRows)=>{
+                    const pathId = `${openSeq.filter}-${style.id.replace('path-','')}`
                     const isDefault = settings.paths[openSeq.key]===pathId
                     const steps = pathSteps[pathId]||[]
                     return (
-                      <div key={style.id} style={{ background:isDefault?'rgba(168,201,196,0.15)':'white', boxShadow:isDefault?'inset 3px 0 0 '+openSeq.accent:'none', borderBottom:i<PATH_STYLES.length-1?'0.5px solid rgba(26,46,43,0.06)':'none' }}>
+                      <div key={style.id} style={{ background:isDefault?'rgba(168,201,196,0.15)':'white', boxShadow:isDefault?'inset 3px 0 0 '+openSeq.accent:'none', borderBottom:i<styleRows.length-1?'0.5px solid rgba(26,46,43,0.06)':'none' }}>
                         <div style={{ padding:'12px 16px', display:'flex', alignItems:'center', gap:'12px', cursor:'pointer' }}
                           onClick={()=>setExpandedPath(expandedPath===pathId?null:pathId)}>
                           {/* Radio */}
@@ -20649,10 +20643,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                             <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'2px', flexWrap:'wrap' }}>
                               <p style={{ fontSize:'13px', fontWeight:isDefault?700:600, color:'#1a2e2b' }}>{style.label}</p>
                               {isDefault&&<span style={{ fontSize:'10px', color:'#3a5e58', background:'rgba(168,201,196,0.22)', padding:'2px 8px', borderRadius:'6px', fontWeight:600 }}>Default</span>}
-                              {style.id!=='custom' && (dbPaths[pathId]
+                              {dbPaths[pathId]
                                 ? <span style={{ fontSize:'10px', color:'#b45309', background:'rgba(245,158,11,0.14)', padding:'2px 8px', borderRadius:'6px', fontWeight:600 }}>Customized</span>
                                 : dbMasters[pathId] && <span style={{ fontSize:'10px', color:'#6b7c79', background:'rgba(26,46,43,0.05)', padding:'2px 8px', borderRadius:'6px', fontWeight:600 }}>Master template</span>
-                              )}
+                              }
                             </div>
                             <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{style.cta}</p>
                           </div>
@@ -20662,8 +20656,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                         {/* Steps preview */}
                         {expandedPath===pathId&&(
                           <div style={{ background:'rgba(0,0,0,0.02)', borderTop:'0.5px solid rgba(26,46,43,0.06)', padding:'8px 12px' }}>
-                            {/* Customize / Reset banner — only for master-backed paths (i.e. not 'custom') when a real location is loaded */}
-                            {realLocId && style.id!=='custom' && dbMasters[pathId] && (
+                            {/* Customize / Reset banner — only for master-backed paths when a real location is loaded */}
+                            {realLocId && dbMasters[pathId] && (
                               dbPaths[pathId] ? (
                                 <div style={{ padding:'8px 10px', background:'rgba(245,158,11,0.08)', border:'0.5px solid rgba(245,158,11,0.30)', borderRadius:'8px', marginBottom:'8px' }}>
                                   <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
@@ -20695,12 +20689,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                                 </div>
                               )
                             )}
-                            {style.id==='custom' ? (
-                              <div style={{ padding:'10px', textAlign:'center' }}>
-                                <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'8px' }}>Build a fully custom sequence</p>
-                                <button onClick={()=>setShowCustomBuilder(true)} style={{ padding:'7px 14px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'white', cursor:'pointer' }}>+ Build your own sequence</button>
-                              </div>
-                            ) : steps.length>0 ? (
+                            {steps.length>0 ? (
                               <div style={{ display:'grid', gap:'5px' }}>
                                 {steps.map(step=>{
                                   const tmpl = templates.find(t=>t.id===step.templateId)
@@ -20721,7 +20710,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                                         <p style={{ fontSize:'11px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>Step {step.order} · {step.name}</p>
                                         <EditableDelay step={step} pathId={pathId} setPathSteps={setPathSteps} />
                                         {tmpl&&(
-                                          <button onClick={()=>setEditingTemplate(tmpl)} style={{ display:'flex', alignItems:'center', gap:'4px', padding:'3px 8px', background:'rgba(99,102,241,0.07)', border:'0.5px solid rgba(99,102,241,0.25)', borderRadius:'6px', cursor:'pointer', fontFamily:'inherit', overflow:'hidden' }}>
+                                          // Own customs open the editor ({master, tpl} is the shape
+                                          // TemplateEditorPopup + saveTemplate expect). Masters and
+                                          // legacy unflagged rows are not owner-editable — preview.
+                                          <button onClick={()=>{ if (tmpl.isOwnCustom) setEditingTemplate({ master: tmpl, tpl }); else setPreviewTemplate(tmpl) }} style={{ display:'flex', alignItems:'center', gap:'4px', padding:'3px 8px', background:'rgba(99,102,241,0.07)', border:'0.5px solid rgba(99,102,241,0.25)', borderRadius:'6px', cursor:'pointer', fontFamily:'inherit', overflow:'hidden' }}>
                                             <span style={{ fontSize:'10px', fontWeight:600, color:'#4f46e5', whiteSpace:'nowrap' }}>{tmpl.name}</span>
                                             {tmpl.type==='email'&&tmpl.subject&&<span style={{ fontSize:'10px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>— {tmpl.subject}</span>}
                                             {tmpl.type!=='email'&&<span style={{ fontSize:'10px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{tmpl.body.slice(0,40)}…</span>}
@@ -20765,7 +20757,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                                 + Add step
                               </button>
                             )}
-                            {realLocId && style.id !== 'custom' && (
+                            {realLocId && (
                               <button
                                 onClick={()=>savePathToDb(pathId)}
                                 disabled={pathsSaving===pathId}
@@ -21213,15 +21205,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         </>)}
 
       </div>
-
-      {showCustomBuilder&&(
-        <CustomPathBuilder
-          templates={templates}
-          smsEnabled={settings.location.smsEnabled}
-          onSave={saveCustomPath}
-          onClose={()=>setShowCustomBuilder(false)}
-        />
-      )}
 
       {/* Template editor popup */}
       {previewTemplate&&<TemplatePreviewModal template={previewTemplate} settings={settings} onClose={()=>setPreviewTemplate(null)} />}
