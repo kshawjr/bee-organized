@@ -35,6 +35,28 @@
 //   3. split ON, nobody assignable claims it  → location owner
 //   4. externals are never assigned
 //   5. never nobody — a lead we cannot resolve is REPORTED, not silently left
+//
+// ── EXECUTION RECORD — 2026-07-24 ──────────────────────────────────────────
+// EXECUTED against prod 2026-07-24. Dry run matched the plan exactly: 104 in
+// scope, 2 project_type (both loc_test, via the 'organizing' legacy alias →
+// "Home or Office Organizing", kshawjr), 23 location_owner, 79 unwritable
+// (locations with ZERO hub_users — nobody to assign to until onboarded). All
+// 25 writable junction rows landed; final state verified 25/25 with
+// leads.assigned_to === earliest junction hub_user_id, 0 disagreements, and
+// leads assigned_to-NULL non-junk down to the expected 79.
+//
+// ⚠ PARTIAL WRITE on that run, since FIXED below. The post() helper called
+// r.json() on PostgREST's 201 EMPTY body (Prefer: return=minimal returns 201,
+// not 204), which threw "Unexpected end of JSON input" AFTER each lead_assignees
+// insert had already committed but BEFORE the paired leads.assigned_to PATCH ran.
+// Net effect: all 25 junction rows written correctly, but assigned_to left NULL
+// on all 25, and the run mis-reported 0/25 success. The helper now reads the raw
+// text and parses only when non-empty, so a 201-empty-body is a success, not a
+// crash. The assigned_to gap was closed FORWARD-ONLY (no deletes): assigned_to
+// was reconciled from the junction (earliest created_at = primary = exactly what
+// this script's patch() writes), which is idempotent. A clean re-run of THIS
+// fixed script is a no-op — every target already has a junction row and is
+// skipped, and assigned_to already agrees.
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { readFileSync, existsSync } from 'node:fs'
@@ -75,7 +97,12 @@ async function post(path, body, prefer = 'return=minimal') {
     body: JSON.stringify(body),
   })
   if (!r.ok) throw new Error(`${r.status} ${await r.text()} for POST ${path}`)
-  return r.status === 204 ? null : r.json()
+  // Prefer: return=minimal returns 201 with an EMPTY body (not 204), so a blind
+  // r.json() throws "Unexpected end of JSON input" AFTER the insert already
+  // landed — reporting failure on a successful write. Read the raw text and
+  // parse only when there's something to parse.
+  const text = await r.text()
+  return text ? JSON.parse(text) : null
 }
 async function patch(path, body) {
   const r = await fetch(`${URL}/rest/v1/${path}`, {
