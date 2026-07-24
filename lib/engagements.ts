@@ -203,6 +203,18 @@ async function logFounding(params: {
 // location_uuid is ALWAYS sourced from leads.location_uuid — never from
 // slugs (the locations FK on engagements rejects garbage loudly, by
 // design). A caller-supplied locationUuid is used only as a cross-check.
+//
+// created_at / stage_entered_at carry the FOUNDING CHILD's own date (SR
+// requested_at, else the child row's created_at — both hold Jobber's
+// createdAt, which every upsert carries across), falling back to now only
+// when the child has no date. The bulk import founds engagements for
+// years-old requests; stamping now there made every imported engagement
+// read "came in today" on the board while the Inbox (leads.created_at)
+// aged correctly, and pushed the 21-day pre-nurture cue out by the import
+// offset. Live webhook foundings are unaffected in practice (child date ≈
+// now) — and late foundings (a quote webhook founding for a pre-dual-write
+// SR) now get the request's true date instead of the founding moment.
+// params.openedAt overrides when a caller already knows the opening date.
 export async function foundEngagement(params: {
   clientId: string
   locationUuid?: string | null
@@ -212,6 +224,7 @@ export async function foundEngagement(params: {
   foundingChildTable: EngagementChildTable
   foundingChildId: string
   note?: string
+  openedAt?: string | null
 }): Promise<{ id: string; created: boolean } | { error: string }> {
   const { clientId, foundedBy, foundingChildTable, foundingChildId } = params
 
@@ -220,13 +233,15 @@ export async function foundEngagement(params: {
   // description from the founding request's text (see below).
   // (plain-string select: the ternary defeats supabase-js's literal-type
   // parser, so the row comes back untyped — accessed via `any` below.)
-  const childSelect: string = foundingChildTable === 'service_requests' ? 'id, engagement_id, notes' : 'id, engagement_id'
+  const childSelect: string = foundingChildTable === 'service_requests'
+    ? 'id, engagement_id, notes, requested_at, created_at'
+    : 'id, engagement_id, created_at'
   const { data: childRowRaw, error: childErr } = await supabaseService
     .from(foundingChildTable)
     .select(childSelect)
     .eq('id', foundingChildId)
     .maybeSingle()
-  const childRow = childRowRaw as { id: string; engagement_id: string | null; notes?: string | null } | null
+  const childRow = childRowRaw as { id: string; engagement_id: string | null; notes?: string | null; requested_at?: string | null; created_at?: string | null } | null
   if (childErr) return { error: `founding child read: ${childErr.message}` }
   if (!childRow) return { error: `founding child not found: ${foundingChildTable}/${foundingChildId}` }
   if (childRow.engagement_id) return { id: childRow.engagement_id, created: false }
@@ -245,6 +260,12 @@ export async function foundEngagement(params: {
   }
 
   const nowIso = new Date().toISOString()
+  // Opening date: explicit override, else SR requested_at, else the child
+  // row's created_at; now only when the child carries no date at all. ts()
+  // guards a malformed string (NaN never becomes a stored date).
+  const openedMs =
+    ts(params.openedAt) || ts(childRow.requested_at) || ts(childRow.created_at)
+  const openedIso = openedMs ? new Date(openedMs).toISOString() : nowIso
   const stage = params.stage ?? OPENING_STAGE[foundedBy]
   // Request foundings arrive pre-described: the founding SR's own notes,
   // else the lead's webform text (leads.request_details — temporally
@@ -263,11 +284,11 @@ export async function foundEngagement(params: {
       location_uuid: lead.location_uuid,
       stage,
       founded_by: foundedBy,
-      title: params.title?.trim() || fallbackTitle(),
+      title: params.title?.trim() || fallbackTitle(openedMs || undefined),
       ...(description ? { description } : {}),
       ...(projectType ? { project_type: projectType } : {}),
-      stage_entered_at: nowIso,
-      created_at: nowIso,
+      stage_entered_at: openedIso,
+      created_at: openedIso,
       updated_at: nowIso,
     })
     .select('id')
