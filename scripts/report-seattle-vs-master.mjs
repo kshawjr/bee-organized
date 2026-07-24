@@ -5,6 +5,12 @@
 // anything) to offer them. NO WRITES, and none intended: Seattle's copy is
 // theirs. Their steps are derived from Gen 1 but were rewritten by the owner.
 //
+// The Gen 1 lineage flags are TIERED — byte-equality is the only signal allowed
+// to say "identical", and the shared-line probe is reported separately as weak
+// scaffold reuse. Read those labels literally before acting on them: an earlier
+// version conflated the two and produced a false "verbatim td2" that nearly
+// drove an overwrite of live owner-authored copy.
+//
 // Usage: node scripts/report-seattle-vs-master.mjs [--full]
 //   --full prints whole bodies instead of the first 3 lines.
 
@@ -81,20 +87,50 @@ for (const p of paths ?? []) {
     out(`│   subject: ${theirSubject ?? '—'}`)
     for (const l of snip(theirBody).split('\n')) out(`│   ${l}`)
 
-    // Gen 1 lineage, reported precisely: SUBJECT match is exact-string; BODY
-    // match needs a substantial shared opening paragraph (the "Hi {{first_name}},"
-    // greeting is common to every template and proves nothing).
+    // ── Gen 1 lineage ────────────────────────────────────────────────────────
+    // Tiered, never conflated. The previous version called a body "identical"
+    // when Seattle's body merely CONTAINED the first >60-char line of the
+    // prototype's. That fires on a body genuinely rewritten around a kept emoji
+    // bullet — and it did: "Seattle Organizing · Avail + Calendar + Phone" was
+    // reported as a verbatim td2 when only its subject and one calendar bullet
+    // matched. Acting on that would have overwritten an owner's live copy.
+    //
+    // Only byte equality may say "identical". The substring probe survives —
+    // it is the one signal that catches a partial rewrite — but it is reported
+    // separately, as scaffold reuse, and never as a copy.
+    const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim()
     const echoes = []
     for (const g of gen1) {
-      const subjectSame = g.subject && theirSubject && g.subject.trim() === theirSubject.trim()
-      const gPara = String(g.body ?? '').split('\n').filter(Boolean).find(l => l.trim().length > 60)
-      const bodySame = gPara && theirBody && String(theirBody).includes(gPara.trim())
-      if (subjectSame || bodySame) {
-        echoes.push({ g, what: [subjectSame && 'subject', bodySame && 'body'].filter(Boolean).join(' + ') })
-      }
+      // Byte-exact, no trim. NULL is not a match for NULL — two empty fields
+      // are not evidence of anything.
+      const subjectExact = g.subject != null && theirSubject != null && g.subject === theirSubject
+      const bodyExact = g.body != null && theirBody != null && g.body === theirBody
+      // Middle tier: same text, reformatted.
+      const bodyNorm = !bodyExact && g.body != null && theirBody != null
+        && norm(g.body) === norm(theirBody)
+      // WEAK: how much of the prototype's long-line scaffold survives verbatim.
+      const longLines = String(g.body ?? '').split('\n')
+        .map(l => l.trim()).filter(l => l.length > 60)
+      const shared = longLines.filter(l => String(theirBody ?? '').includes(l)).length
+
+      if (!subjectExact && !bodyExact && !bodyNorm && !shared) continue
+      echoes.push({ g, subjectExact, bodyExact, bodyNorm, shared, ofLines: longLines.length })
     }
     for (const e of echoes) {
-      out(`│   ⚠ GEN 1 LINEAGE: ${e.what} identical to ${e.g.legacy_id} "${e.g.name}"`)
+      const tag = `${e.g.legacy_id} "${e.g.name}"`
+      if (e.subjectExact && e.bodyExact) {
+        out(`│   ⛔ VERBATIM GEN 1: subject AND body byte-identical to ${tag}`)
+        out(`│      → prototype copy wearing a local name. Nothing was rewritten.`)
+        continue
+      }
+      if (e.subjectExact) out(`│   ⚠ SUBJECT byte-identical to ${tag} (body is NOT)`)
+      if (e.bodyExact) out(`│   ⚠ BODY byte-identical to ${tag} (subject is NOT)`)
+      if (e.bodyNorm) out(`│   ⚠ BODY identical to ${tag} except whitespace`)
+      // Suppress the weak signal when a strong body verdict already covered it.
+      if (e.shared && !e.bodyExact && !e.bodyNorm) {
+        out(`│   · weak echo: ${e.shared}/${e.ofLines} long line(s) shared with ${tag}`)
+        out(`│     scaffold reuse only — the body DIFFERS. Not grounds for a rewrite.`)
+      }
     }
 
     out(`│`)
@@ -116,7 +152,12 @@ out('READING THIS')
 out('═'.repeat(78))
 out(`  · Seattle's steps resolve through their OWN location-owned templates.`)
 out(`    Nothing of Kevin's is being displaced — this is not the Portland bug.`)
-out(`  · "GEN 1 LINEAGE" flags where their text still matches a prototype row`)
-out(`    verbatim, i.e. the parts they kept rather than rewrote.`)
+out(`  · Gen 1 lineage is reported in tiers. Treat them as different claims:`)
+out(`      ⛔ VERBATIM      subject AND body byte-identical — a prototype row,`)
+out(`                      only renamed. The only tier that justifies a replace.`)
+out(`      ⚠ byte-identical on ONE field, or identical but for whitespace.`)
+out(`      · weak echo     shared long lines. Scaffold reuse. The body DIFFERS;`)
+out(`                      this is what a partial rewrite looks like, and it is`)
+out(`                      NOT grounds to overwrite anything.`)
 out(`  · Recommendation stands: leave it. Their content, their defaults.`)
 out(`    Offer the master side-by-side; let them cherry-pick. No writes here.`)
