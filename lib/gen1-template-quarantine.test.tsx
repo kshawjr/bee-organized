@@ -196,13 +196,25 @@ describe('Settings → Communications customization clones the master', () => {
     await clickText('Booking link · rate on the call')  // expand the moving-d row
   }
 
+  // Stage 2: the batch Save button is gone — every mutation auto-commits
+  // through commitSteps. The clone-on-first-customize semantics these suites
+  // pin are unchanged; the trigger is now the first edit itself (here, a
+  // delay tweak confirmed through the fork-on-edit dialog).
+  const firstMutation = async () => {
+    await clickText('🕐 Immediately')                    // open step 1's delay editor
+    await clickText('✓')                                 // save → fork confirm
+    await clickText('Create my copy & edit')             // confirm the fork
+    await act(async () => {})                            // clone + reload + commit
+    await act(async () => {})
+  }
+
   it('a first-time save CLONES from the master — never POSTs a bare path row', async () => {
     routes = {
       [`GET /api/locations/${LOC_UUID}/drip-paths`]: { paths: [], default_drip_path: null, default_move_drip_path: null },
       [`POST /api/locations/${LOC_UUID}/drip-paths/clone`]: { path: { id: 'new-copy-id', name: 'Move d', is_default: false } },
     }
     await mountPaths()
-    await clickText('Save to my location')
+    await firstMutation()
 
     const clone = calls.find(c => c.method === 'POST' && c.url.includes('/drip-paths/clone'))
     expect(clone, 'the clone call').toBeTruthy()
@@ -221,7 +233,7 @@ describe('Settings → Communications customization clones the master', () => {
       [`POST /api/locations/${LOC_UUID}/drip-paths/clone`]: { path: { id: 'new-copy-id', name: 'Move d', is_default: false } },
     }
     await mountPaths()
-    await clickText('Save to my location')
+    await firstMutation()
 
     const patch = calls.find(c => c.method === 'PATCH' && c.url.includes('/steps'))
     expect(patch, 'the steps PATCH').toBeTruthy()
@@ -256,7 +268,11 @@ describe('Settings → Communications customization clones the master', () => {
       },
     }
     await mountPaths()
-    await clickText('Save changes')
+    // Already-customized path: a delay tweak commits directly — no fork
+    // confirm, no clone.
+    await clickText('🕐 Immediately')
+    await clickText('✓')
+    await act(async () => {})
 
     // No clone — the copy already exists.
     expect(calls.find(c => c.url.includes('/drip-paths/clone'))).toBeFalsy()

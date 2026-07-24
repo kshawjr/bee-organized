@@ -22,6 +22,7 @@ import BeeLoader from "@/components/hive/shared/BeeLoader"
 import { scopeCookieString, SCOPE_ALL, SCOPE_COOKIE_NAME } from "@/lib/hub-scope"
 import { ESTIMATE_FOLLOWUP_DAYS, INVOICE_AGING_DAYS, ASSESSMENT_HORIZON_DAYS } from "@/components/hive/shared/attentionThresholds"
 import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
+import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { financialsVisible } from "@/lib/financial-access"
 import { splitNameForPrefill } from "@/lib/name-prefill"
 import { captureViewAsSnapshot, revertViewAsCancel, viewAsIdentityFor, isElevatedRole, visibleTransferQueue } from "@/lib/view-as-identity"
@@ -3791,7 +3792,7 @@ function JobberIcon({ size=16, style={} }) {
 
 
 // ─── Editable Delay ───────────────────────────────────────────────────────────
-function EditableDelay({ step, pathId, setPathSteps }) {
+function EditableDelay({ step, pathId, setPathSteps, onCommit=null }) {
   const [editing, setEditing] = React.useState(false)
   // Parse the delay number from strings like "1 day later", "3 days later", "Immediately"
   const parseDelay = (s) => {
@@ -3803,10 +3804,17 @@ function EditableDelay({ step, pathId, setPathSteps }) {
 
   function save() {
     const label = days === 0 ? 'Immediately' : `${days} day${days !== 1 ? 's' : ''} after sign-up`
-    setPathSteps(prev => ({
-      ...prev,
-      [pathId]: (prev[pathId] || []).map(s => s.id === step.id ? { ...s, delay: label } : s)
-    }))
+    if (onCommit) {
+      // Settings → Communications: the parent owns persistence (fork-gate +
+      // commitSteps auto-commit). No local write here — a failed commit must
+      // leave the row exactly as it was.
+      onCommit(step, days, label)
+    } else {
+      setPathSteps(prev => ({
+        ...prev,
+        [pathId]: (prev[pathId] || []).map(s => s.id === step.id ? { ...s, delay: label } : s)
+      }))
+    }
     setEditing(false)
   }
 
@@ -15537,7 +15545,7 @@ function CustomPathBuilder({ templates, onSave, onClose, smsEnabled=true }) {
 }
 
 // ─── Template Editor Popup ────────────────────────────────────────────────────
-function TemplateEditorPopup({ template, isNew=false, isMasterEdit=false, defaultName='', defaultType=null, onSave, onClose }) {
+function TemplateEditorPopup({ template, isNew=false, isMasterEdit=false, defaultName='', defaultType=null, settings=null, onSave, onClose }) {
   // defaultName/defaultType pre-fill a brand-new template (e.g. the step
   // picker's inline "+ Create" affordance, which knows the typed name and the
   // step's type). Existing callers pass neither, so behavior is unchanged.
@@ -15557,16 +15565,10 @@ function TemplateEditorPopup({ template, isNew=false, isMasterEdit=false, defaul
     setTimeout(()=>{ el.focus(); el.setSelectionRange(start+key.length, start+key.length) }, 0)
   }
 
-  function preview(text) {
-    return text
-      .replace(/\{\{first_name\}\}/g, 'Sarah')
-      .replace(/\{\{last_name\}\}/g, 'Mitchell')
-      .replace(/\{\{organizer_name\}\}/g, 'Kevin Shaw')
-      .replace(/\{\{location_name\}\}/g, 'Denver')
-      .replace(/\{\{booking_link\}\}/g, 'https://beehub.io/book/denver')
-      .replace(/\{\{phone\}\}/g, '(303) 555-0200')
-      .replace(/\{\{service_area\}\}/g, 'Denver Metro')
-  }
+  // ONE substitution pipeline for every preview surface: the full 14-variable
+  // send-time context from lib/preview-vars — never a hand-rolled subset.
+  // Rendering itself is delegated to RenderedTemplatePreview below.
+  const previewVars = buildPreviewVars(settings)
 
   const typeConf = { email:{icon:'📧',color:'#6366f1'}, sms:{icon:'💬',color:'#10b981'}, call:{icon:'📞',color:'#f59e0b'} }
   const tc = typeConf[type]
@@ -15659,45 +15661,11 @@ function TemplateEditorPopup({ template, isNew=false, isMasterEdit=false, defaul
           {tab==='preview'&&(
             <div>
               <div style={{ padding:'8px 12px', background:'rgba(99,102,241,0.06)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:'8px', marginBottom:'12px', fontSize:'11px', color:'#6366f1' }}>
-                Previewing with: <strong>Sarah Mitchell</strong> · Denver location
+                Previewing with sample values — <strong>{previewVars.first_name}</strong> · {previewVars.location_name}. Every variable renders the way a real send fills it.
               </div>
-              {type==='email'&&(
-                <div style={{ background:'white', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.08)' }}>
-                  <div style={{ background:'#1a2e2b', padding:'12px 16px', textAlign:'center' }}>
-                    <p style={{ color:'rgba(168,201,196,0.6)', fontSize:'10px', letterSpacing:'1px', textTransform:'uppercase', marginBottom:'2px' }}>Bee Organized</p>
-                    <p style={{ color:'white', fontSize:'16px' }}>🐝</p>
-                  </div>
-                  {subject&&(
-                    <div style={{ padding:'14px 16px 0' }}>
-                      <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{preview(subject)}</p>
-                    </div>
-                  )}
-                  <div style={{ padding:'14px 16px' }}>
-                    <p style={{ fontSize:'13px', color:'#374151', lineHeight:1.8, whiteSpace:'pre-wrap' }}>{preview(body)||<span style={{ color:'#c8d8d4' }}>Write your email body above</span>}</p>
-                  </div>
-                  <div style={{ background:'#f7f5f0', padding:'12px 16px', borderTop:'1px solid #e5e7eb', textAlign:'center' }}>
-                    <p style={{ fontSize:'10px', color:'#8a9e9a' }}>Bee Organized Denver · hello@beeorganized.com</p>
-                    <p style={{ fontSize:'10px', color:'#b0c0bc', marginTop:'2px' }}>Unsubscribe · View in browser</p>
-                  </div>
-                </div>
-              )}
-              {type==='sms'&&(
-                <div style={{ maxWidth:'280px' }}>
-                  <div style={{ background:'#1a2e2b', borderRadius:'14px', padding:'10px 14px', marginLeft:'15%' }}>
-                    <p style={{ fontSize:'14px', color:'white', lineHeight:1.6, whiteSpace:'pre-wrap' }}>{preview(body)||'...'}</p>
-                  </div>
-                  <p style={{ fontSize:'10px', color:'#8a9e9a', textAlign:'right', marginTop:'4px' }}>Delivered · Bee Organized</p>
-                </div>
-              )}
-              {type==='call'&&(
-                <div style={{ background:'white', borderRadius:'10px', padding:'16px', border:'1px solid rgba(0,0,0,0.08)' }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'12px', paddingBottom:'10px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
-                    <span style={{ fontSize:'20px' }}>📞</span>
-                    <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Call Script · {name||'Untitled'}</p>
-                  </div>
-                  <p style={{ fontSize:'13px', color:'#374151', lineHeight:1.8, whiteSpace:'pre-wrap' }}>{preview(body)||'Write your script above'}</p>
-                </div>
-              )}
+              <div style={{ background:'white', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.08)' }}>
+                <RenderedTemplatePreview type={type} subject={subject} body={body} settings={settings} />
+              </div>
             </div>
           )}
         </div>
@@ -15716,13 +15684,74 @@ function TemplateEditorPopup({ template, isNew=false, isMasterEdit=false, defaul
 
 // ─── Template Editor Popup ────────────────────────────────────────────────────
 
+// ─── Rendered preview (shared) ────────────────────────────────────────────────
+// THE one rendered-preview body. Every surface that shows an owner what an
+// email/text/script will look like mounts this — TemplatePreviewModal, the
+// TemplateEditorPopup preview tab, and TemplateQuickPeekModal — so the
+// substitution pipeline (lib/preview-vars, all 14 send-time variables) can
+// never drift between preview surfaces, or between preview and send.
+function RenderedTemplatePreview({ type='email', subject, body, settings=null, viewMode='desktop' }) {
+  const vars = buildPreviewVars(settings)
+  const subj = applyPreviewVars(subject || '', vars)
+  const rendered = applyPreviewVars(body || '', vars)
+  const locName = vars.location_name
+  const fromName = settings?.location?.sendFromName || `Bee Organized ${locName}`
+  const fromEmail = settings?.location?.sendFromEmail || 'hello@beeorganized.com'
+
+  if (type === 'sms') return (
+    <div style={{ maxWidth:'320px', margin:'0 auto' }}>
+      <div style={{ background:'#1a2e2b', borderRadius:'12px', padding:'10px 14px', marginLeft:'20%' }}>
+        <p style={{ fontSize:'14px', color:'white', lineHeight:1.6, whiteSpace:'pre-wrap' }}>{rendered || '...'}</p>
+      </div>
+      <p style={{ fontSize:'10px', color:'#8a9e9a', textAlign:'right', marginTop:'4px' }}>Delivered · {fromName}</p>
+    </div>
+  )
+
+  if (type === 'call') return (
+    <div style={{ background:'white', borderRadius:'12px', padding:'12px', maxWidth:'480px', margin:'0 auto', border:'1px solid rgba(0,0,0,0.06)' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'12px', paddingBottom:'10px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
+        <span style={{ fontSize:'20px' }}>📞</span>
+        <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>Call Script</p>
+      </div>
+      <p style={{ fontSize:'13px', color:'#374151', lineHeight:1.8, whiteSpace:'pre-wrap' }}>{rendered || ''}</p>
+    </div>
+  )
+
+  if (viewMode === 'text') return (
+    <div style={{ background:'white', borderRadius:'12px', padding:'12px', maxWidth:'480px', margin:'0 auto' }}>
+      {subj && <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'12px', paddingBottom:'10px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>Subject: {subj}</p>}
+      <p style={{ fontSize:'13px', color:'#374151', lineHeight:1.8, whiteSpace:'pre-wrap', fontFamily:'monospace' }}>{rendered}</p>
+    </div>
+  )
+
+  // Email frame — desktop/mobile width is the caller's container concern.
+  return (
+    <div style={{ fontFamily:'Georgia,serif', maxWidth:'520px', margin:'0 auto', background:'white' }}>
+      <div style={{ background:'#1a2e2b', padding:'20px 24px', textAlign:'center' }}>
+        <p style={{ color:'rgba(168,201,196,0.7)', fontSize:'11px', letterSpacing:'1px', textTransform:'uppercase', marginBottom:'4px' }}>Bee Organized</p>
+        <p style={{ color:'white', fontSize:'18px', margin:0 }}>🐝</p>
+      </div>
+      <div style={{ padding:'28px 24px' }}>
+        {subj && <p style={{ fontSize:'20px', fontWeight:700, color:'#1a2e2b', marginBottom:'18px' }}>{subj}</p>}
+        <p style={{ fontSize:'14px', lineHeight:1.7, color:'#374151', whiteSpace:'pre-wrap' }}>{rendered}</p>
+      </div>
+      <div style={{ background:'#f7f5f0', padding:'16px 24px', borderTop:'1px solid #e5e7eb', textAlign:'center' }}>
+        <p style={{ fontSize:'11px', color:'#8a9e9a', marginBottom:'4px' }}>{fromName} · {locName}</p>
+        <p style={{ fontSize:'10px', color:'#b0c0bc' }}>This email was sent from {fromEmail}</p>
+        <p style={{ fontSize:'10px', color:'#b0c0bc', marginTop:'4px' }}>Unsubscribe · View in browser</p>
+      </div>
+    </div>
+  )
+}
+
 // Shared quick-peek preview — like a macOS file thumbnail. Shows a template's
-// subject + body without committing a selection. Merge fields stay as literal
-// {{placeholders}} since there's no lead context here. Used by both the
+// subject + body without committing a selection, rendered through the shared
+// RenderedTemplatePreview (all 14 send-time variables filled with the
+// location's real values / labelled samples). Used by both the
 // StepTemplatePicker (showSelectButton=true, so the peek can commit a choice)
 // and the Settings → Communications overview (showSelectButton=false, Close-only).
 // Pass template=null to keep it closed.
-function TemplateQuickPeekModal({ template, showSelectButton=false, onSelect, onClose }) {
+function TemplateQuickPeekModal({ template, settings=null, showSelectButton=false, onSelect, onClose }) {
   if (!template) return null
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10006, display:'flex', alignItems:'center', justifyContent:'center', padding:'14px' }}>
@@ -15732,19 +15761,14 @@ function TemplateQuickPeekModal({ template, showSelectButton=false, onSelect, on
           <span style={{ fontSize:'16px' }}>{template.type==='email'?'📧':template.type==='sms'?'💬':'📞'}</span>
           <div style={{ flex:1, minWidth:0 }}>
             <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{template.name}</p>
-            <p style={{ fontSize:'10px', color:'#8a9e9a' }}>Preview · merge fields show as {'{{placeholders}}'}</p>
+            <p style={{ fontSize:'10px', color:'#8a9e9a' }}>Preview · variables filled the way a real send fills them</p>
           </div>
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>×</button>
         </div>
-        <div style={{ padding:'16px', overflowY:'auto', flex:1 }}>
-          {template.type==='email' && (
-            <div style={{ marginBottom:'12px', paddingBottom:'10px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
-              <span style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>Subject</span>
-              <p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b', marginTop:'2px' }}>{template.subject || <span style={{ color:'#c8d8d4', fontWeight:400 }}>(no subject)</span>}</p>
-            </div>
-          )}
-          <span style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>{template.type==='email'?'Body':'Message'}</span>
-          <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.6, whiteSpace:'pre-wrap', marginTop:'4px' }}>{template.body || ''}</p>
+        <div style={{ padding:'16px', overflowY:'auto', flex:1, background:'#f3f4f6' }}>
+          <div style={{ background:'white', borderRadius:'12px', overflow:'hidden', boxShadow:'0 2px 12px rgba(0,0,0,0.08)' }}>
+            <RenderedTemplatePreview type={template.type} subject={template.subject} body={template.body} settings={settings} />
+          </div>
         </div>
         <div style={{ padding:'12px 16px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px', justifyContent:'flex-end', flexShrink:0 }}>
           <button onClick={onClose} style={{ padding:'8px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>Close</button>
@@ -19142,53 +19166,16 @@ function TemplatePreviewModal({ template, settings, onClose }) {
   const locName   = settings?.location?.name  || 'Bee Organized'
   const fromName  = settings?.location?.sendFromName  || `Bee Organized ${locName}`
   const fromEmail = settings?.location?.sendFromEmail || 'hello@beeorganized.com'
-  const recipientName = 'John'
 
-  // Build the variable map mirroring lib/resend.ts RenderContext, with
-  // sensible fallbacks so an unset location field doesn't render as a
-  // literal "{{phone}}" in the preview.
-  const previewVars = {
-    first_name:     recipientName,
-    organizer_name: settings?.location?.sendFromName || settings?.profile?.firstName || 'Sarah',
-    location_name:  locName,
-    phone:          settings?.location?.phone || '(555) 123-4567',
-    booking_link:   settings?.location?.bookingLink || 'https://example.com/book',
-    // Mirrors the live chain: the signed-in user's own link first, then the
-    // location's. At send time an assigned lead resolves the ASSIGNEE's link
-    // here, which the preview can't know.
-    owner_booking_link: settings?.profile?.bookingLink || settings?.location?.bookingLink || 'https://example.com/book',
-    service_area:   [settings?.location?.city, settings?.location?.state].filter(Boolean).join(', ') || locName,
-  }
-  function applyPreviewVars(text) {
-    if (!text) return ''
-    return String(text).replace(/\{\{(\w+)\}\}/g, (_, key) => {
-      const v = previewVars[key]
-      return v === undefined || v === null ? '' : String(v)
-    })
-  }
-  const body = applyPreviewVars(template.body)
-  const subjectPreview = applyPreviewVars(template.subject || '')
+  // ONE substitution + rendering pipeline: RenderedTemplatePreview /
+  // lib/preview-vars carries the FULL 14-variable send-time context. This
+  // modal used to hold its own 7-variable map, which previewed
+  // {{rate_per_hour}} / {{owner_name}} / {{book_assessment_link}} as holes.
+  const previewVars = buildPreviewVars(settings)
+  const recipientName = previewVars.first_name
 
   const isSMS = template.type === 'sms'
   const isCall = template.type === 'call'
-
-  const emailHtml = `
-    <div style="font-family:Georgia,serif;max-width:520px;margin:0 auto;background:white;">
-      <div style="background:#1a2e2b;padding:20px 24px;text-align:center;">
-        <p style="color:rgba(168,201,196,0.7);font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px">Bee Organized</p>
-        <p style="color:white;font-size:18px;margin:0">🐝</p>
-      </div>
-      <div style="padding:28px 24px;">
-        ${subjectPreview ? `<p style="font-size:20px;font-weight:700;color:#1a2e2b;margin-bottom:18px;">${subjectPreview}</p>` : ''}
-        <p style="font-size:14px;line-height:1.7;color:#374151;white-space:pre-wrap">${body}</p>
-      </div>
-      <div style="background:#f7f5f0;padding:16px 24px;border-top:1px solid #e5e7eb;text-align:center;">
-        <p style="font-size:11px;color:#8a9e9a;margin-bottom:4px">${fromName} · ${locName}</p>
-        <p style="font-size:10px;color:#b0c0bc">This email was sent from ${fromEmail}</p>
-        <p style="font-size:10px;color:#b0c0bc;margin-top:4px"><a href="#" style="color:#a8c9c4">Unsubscribe</a> · <a href="#" style="color:#a8c9c4">View in browser</a></p>
-      </div>
-    </div>
-  `
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10010, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
@@ -19216,34 +19203,14 @@ function TemplatePreviewModal({ template, settings, onClose }) {
           </div>
         )}
 
-        {/* Preview content */}
+        {/* Preview content — shared renderer; this modal only supplies the
+            device-width container. */}
         <div style={{ overflowY:'auto', flex:1, background:'#f3f4f6', padding:'16px' }}>
-          {isSMS ? (
-            <div style={{ maxWidth:'320px', margin:'0 auto' }}>
-              <div style={{ background:'#1a2e2b', borderRadius:'12px', padding:'10px 14px', marginLeft:'20%' }}>
-                <p style={{ fontSize:'14px', color:'white', lineHeight:1.6, whiteSpace:'pre-wrap' }}>{body}</p>
-              </div>
-              <p style={{ fontSize:'10px', color:'#8a9e9a', textAlign:'right', marginTop:'4px' }}>Delivered · {fromName}</p>
-            </div>
-          ) : isCall ? (
-            <div style={{ background:'white', borderRadius:'12px', padding:'12px', maxWidth:'480px', margin:'0 auto', boxShadow:'0 2px 8px rgba(0,0,0,0.08)' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'16px', paddingBottom:'12px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
-                <span style={{ fontSize:'24px' }}>📞</span>
-                <div>
-                  <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b' }}>Call Script</p>
-                  <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{template.name}</p>
-                </div>
-              </div>
-              <p style={{ fontSize:'13px', color:'#374151', lineHeight:1.8, whiteSpace:'pre-wrap' }}>{body}</p>
-            </div>
-          ) : viewMode==='text' ? (
-            <div style={{ background:'white', borderRadius:'12px', padding:'12px', maxWidth:'480px', margin:'0 auto' }}>
-              {subjectPreview&&<p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'12px', paddingBottom:'10px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>Subject: {subjectPreview}</p>}
-              <p style={{ fontSize:'13px', color:'#374151', lineHeight:1.8, whiteSpace:'pre-wrap', fontFamily:'monospace' }}>{body}</p>
-            </div>
+          {isSMS || isCall || viewMode==='text' ? (
+            <RenderedTemplatePreview type={template.type} subject={template.subject} body={template.body} settings={settings} viewMode={viewMode} />
           ) : (
             <div style={{ maxWidth: viewMode==='mobile'?'375px':'100%', margin:'0 auto', background:'white', borderRadius:'12px', overflow:'hidden', boxShadow:'0 2px 12px rgba(0,0,0,0.1)' }}>
-              <div dangerouslySetInnerHTML={{ __html: emailHtml }} />
+              <RenderedTemplatePreview type="email" subject={template.subject} body={template.body} settings={settings} viewMode="desktop" />
             </div>
           )}
         </div>
@@ -19659,6 +19626,11 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // (no selection) shared with StepTemplatePicker. null = closed.
   const [peekTemplate, setPeekTemplate] = useState(null)
   const [editingStep, setEditingStep]         = useState(null) // { pathId, step }
+  // Edit-in-place: the step whose subject/body is open in DripPathStepEditor.
+  const [stepContentEditor, setStepContentEditor] = useState(null) // { pathId, step }
+  // Fork-on-edit confirm for master-backed paths: { pathId, proceed } where
+  // proceed(steps) continues the pending mutation on the freshly-cloned copy.
+  const [forkConfirm, setForkConfirm] = useState(null)
   const [expandedPath, setExpandedPath]       = useState(null)
   // Communication tab — which follow-up sequence's step editor is open (null = none).
   const [openSequence, setOpenSequence]       = useState(null)
@@ -19694,9 +19666,11 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // Load DB drip paths + their steps. Merges into pathSteps using path_key
   // as the UI's pathId. Path_keys with no location copy keep the master
   // preview loaded by the masters effect below, so what an owner reads is
-  // always what would actually send.
+  // always what would actually send. Returns the fresh maps so callers that
+  // just forked (confirmFork) can continue on the cloned rows without racing
+  // React state.
   async function loadLocationPaths() {
-    if (!realLocId) return
+    if (!realLocId) return null
     try {
       const r = await fetch(`/api/locations/${realLocId}/drip-paths`, { credentials: 'include' })
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -19710,7 +19684,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           id: `db_${s.id}`,
           dbId: s.id,
           order: s.step_order,
-          name: s.template_name || `Step ${s.step_order}`,
+          // Inline-edited steps have no template row behind them — their own
+          // subject is the honest label (mirrors masterStepsToUi).
+          name: s.template_name || s.subject || `Step ${s.step_order}`,
           type: s.channel,
           delay: daysToDelayLabel(s.delay_days),
           subject: s.subject,
@@ -19729,8 +19705,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         setSettings(s => ({ ...s, paths: { ...s.paths, moveDefault: j.default_move_drip_path } }))
       }
       setPathsErr(null)
+      return { dbPaths: newDbPaths, steps: newSteps }
     } catch (e) {
       setPathsErr(String(e?.message || e))
+      return null
     }
   }
 
@@ -19837,25 +19815,38 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     }
   }
 
-  // Save a path's current steps to DB.
+  // commitSteps — THE single write seam for the owner's step edits.
+  //
+  // Every mutation on this panel (content edit, delay tweak, add step,
+  // template re-point) funnels through here and auto-commits via the bulk
+  // PATCH /api/drip-paths/:id/steps (a full replace whose payload carries
+  // subject/body/delay/template pointer per step). One request expresses the
+  // whole sequence atomically, so a failure is a whole-action failure —
+  // there is deliberately NO per-step immediate save through
+  // /api/drip-path-steps/:id from this surface, and no batch Save button:
+  // either seam would let content persist through one route while a delay
+  // sits unsaved in local state, or let a later batch replay clobber it.
   //
   // A location with no copy of this path yet is CLONED from the corp master
   // (subject + body copied verbatim by the clone route) before its steps are
-  // written. It used to POST a bare, empty drip_paths row instead, then PATCH
-  // steps that carried no content at all — which left every step with
-  // subject/body NULL pointing at the legacy t1/td1/t9 template rows, so the
-  // owner's first delay tweak silently swapped their live drip over to the
-  // Gen 1 prototype copy. That is how Portland/moving-d broke on 7/13.
+  // written — normally confirmFork() already did this, but the clone route is
+  // idempotent so the safety net here is free. It used to POST a bare, empty
+  // drip_paths row instead, which is how Portland/moving-d silently swapped
+  // to Gen 1 prototype copy on 7/13.
   //
-  // The step payload now carries subject/body, so re-saving an already-
-  // customized path preserves its content instead of nulling it.
-  async function savePathToDb(pathId) {
+  // Optimistic apply + rollback: nextSteps paint immediately, and a failed
+  // commit restores the previous steps verbatim — the sequence is never left
+  // half-applied. Throws on failure so modal callers (DripPathStepEditor) can
+  // surface the error in place; fire-and-forget callers catch + alert.
+  async function commitSteps(pathId, nextSteps) {
+    if (pathId === 'custom') return
     if (!realLocId) {
-      alert('Pick a real location first.')
+      // Demo / view-as sessions have nothing to commit to — local paint only.
+      setPathSteps(prev => ({ ...prev, [pathId]: nextSteps }))
       return
     }
-    if (pathId === 'custom') return
-    const steps = pathSteps[pathId] || []
+    const prevSteps = pathSteps[pathId] || []
+    setPathSteps(prev => ({ ...prev, [pathId]: nextSteps }))
     setPathsSaving(pathId)
     try {
       let dbPath = dbPaths[pathId]
@@ -19877,7 +19868,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         dbPath = { id: j.path.id, name: j.path.name, is_default: !!j.path.is_default, location_uuid: realLocId }
         setDbPaths(prev => ({ ...prev, [pathId]: dbPath }))
       }
-      const payload = steps.map((s, i) => {
+      const payload = nextSteps.map((s, i) => {
         const tmpl = templates.find(t => t.id === s.templateId)
         return {
           step_order: s.order ?? (i + 1),
@@ -19904,11 +19895,121 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       await loadLocationPaths()
       setPathsErr(null)
     } catch (e) {
+      // Whole-action failure: restore the sequence exactly as it was.
+      setPathSteps(prev => ({ ...prev, [pathId]: prevSteps }))
       setPathsErr(String(e?.message || e))
-      alert('Could not save these emails: ' + (e?.message || e))
+      throw e
     } finally {
       setPathsSaving(null)
     }
+  }
+
+  // Fork-on-edit gate. A master-backed path (no location copy yet) must fork
+  // before any mutation, and the snapshot consequence belongs AT the decision
+  // point — so the confirm modal states it, not just the standing banner.
+  // proceed(steps) receives the steps the mutation should build on: the
+  // location's own rows when they exist, else the freshly-cloned copy.
+  function ensureOwnedThen(pathId, proceed) {
+    if (!realLocId) {
+      // Demo session: no DB, no fork — mutate the local preview directly.
+      proceed(pathSteps[pathId] || [])
+      return
+    }
+    if (dbPaths[pathId]) {
+      proceed(pathSteps[pathId] || [])
+      return
+    }
+    setForkConfirm({ pathId, proceed })
+  }
+
+  // Confirmed fork: clone the master, re-read the location's paths, then hand
+  // the pending mutation the CLONED steps (fresh from the re-read; falls back
+  // to the master-derived rows on a stale read — the clone copies them
+  // verbatim, and commitSteps' clone-if-needed net catches the rest).
+  async function confirmFork() {
+    const pending = forkConfirm
+    if (!pending) return
+    setForkConfirm(null)
+    const { pathId, proceed } = pending
+    const master = dbMasters[pathId]
+    if (!master) {
+      alert(`No master found for ${pathId}.`)
+      return
+    }
+    setPathsSaving(pathId)
+    try {
+      const res = await fetch(`/api/locations/${realLocId}/drip-paths/clone`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ master_id: master.id }),
+      })
+      const j = await res.json().catch(()=>({}))
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
+      const fresh = await loadLocationPaths()
+      const clonedSteps = fresh?.steps?.[pathId]
+      setPathsSaving(null)
+      proceed(clonedSteps && clonedSteps.length ? clonedSteps : (pathSteps[pathId] || []))
+    } catch (e) {
+      setPathsSaving(null)
+      alert('Could not customize these emails: ' + (e?.message || e))
+    }
+  }
+
+  // Edit action on a step row. On a master-backed path this forks first (via
+  // the confirm above), then opens the editor on the CLONED step — matched by
+  // step_order, the stable identity across the fork. Never opens an editor
+  // that would write to a master.
+  function openStepEditor(pathId, step) {
+    ensureOwnedThen(pathId, (steps) => {
+      const target = steps.find(s => s.order === step.order) || step
+      setStepContentEditor({ pathId, step: target })
+    })
+  }
+
+  // DripPathStepEditor save → apply subject/body/delay to the step and
+  // auto-commit. Inline content is now the step's truth, so the template
+  // pointer is DROPPED — keeping it would display a template chip the step no
+  // longer uses (inline wins at send time). Throws through commitSteps so the
+  // editor surfaces a failed commit in place and the sequence stays unchanged.
+  async function saveStepContent(patch) {
+    const { pathId, step } = stepContentEditor
+    const nextSteps = (pathSteps[pathId] || []).map(s => s.order === step.order
+      ? {
+          ...s,
+          subject: patch.subject,
+          body: patch.body,
+          delay: daysToDelayLabel(patch.delay_days),
+          delay_days: patch.delay_days,
+          name: patch.subject || s.name,
+          templateId: null,
+          masterTemplateId: null,
+        }
+      : s)
+    await commitSteps(pathId, nextSteps)
+    setStepContentEditor(null)
+  }
+
+  // Delay tweak from the step row — same gate + commit seam.
+  function commitDelayChange(pathId, step, days, label) {
+    ensureOwnedThen(pathId, (steps) => {
+      const nextSteps = steps.map(s => s.order === step.order
+        ? { ...s, delay: label, delay_days: days }
+        : s)
+      commitSteps(pathId, nextSteps).catch(e => {
+        alert('Could not save this delay: ' + (e?.message || e))
+      })
+    })
+  }
+
+  // + Add step — appends then commits through the same seam.
+  function commitAddStep(pathId, newStep) {
+    ensureOwnedThen(pathId, (steps) => {
+      const order = steps.length + 1
+      commitSteps(pathId, [...steps, { ...newStep, order }]).catch(e => {
+        alert('Could not add this step: ' + (e?.message || e))
+      })
+    })
   }
 
   // Persist a default selection to the location row in DB.
@@ -19982,7 +20083,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   }
 
   // "Build your own" (CustomPathBuilder) was cut from this panel: its save
-  // only ever wrote local state (savePathToDb early-returns for 'custom'),
+  // only ever wrote local state (commitSteps early-returns for 'custom'),
   // so the flow looked real but never persisted. The component is retained
   // unmounted below in this file.
 
@@ -20127,16 +20228,19 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // any inline subject/body the step was carrying (e.g. copied from the master)
   // is cleared — otherwise the inline copy would keep winning at send time
   // (drip-send.ts: step.subject ?? linkedTpl.subject) and the owner's pick
-  // would appear to do nothing.
-  function assignTemplate(pathId, stepId, templateId) {
+  // would appear to do nothing. Routed through the fork gate + commitSteps
+  // like every other step mutation on this panel.
+  function assignTemplate(pathId, step, templateId) {
     const tmpl = templates.find(t => t.id === templateId)
-    setPathSteps(prev=>({
-      ...prev,
-      [pathId]: prev[pathId].map(s=>s.id===stepId
+    setEditingStep(null)
+    ensureOwnedThen(pathId, (steps) => {
+      const nextSteps = steps.map(s => s.order === step.order
         ? { ...s, templateId, masterTemplateId: tmpl?.dbId ?? null, subject: null, body: null, name: tmpl?.name || s.name }
         : s)
-    }))
-    setEditingStep(null)
+      commitSteps(pathId, nextSteps).catch(e => {
+        alert('Could not save this template choice: ' + (e?.message || e))
+      })
+    })
   }
 
   // Team management (invite/remove/role change → billable seats) is owner-only.
@@ -20648,7 +20752,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                 </div>
                 <div>
                   {/* "Build your own" (custom) is cut: its builder never persisted
-                      (savePathToDb early-returns for 'custom'), so the row was a
+                      (commitSteps early-returns for 'custom'), so the row was a
                       dead end that looked real. PATH_STYLES keeps the entry for
                       onboarding's "decide later" option. */}
                   {PATH_STYLES.filter(s=>s.id!=='custom').map((style,i,styleRows)=>{
@@ -20730,11 +20834,11 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                                   const stepColor = {email:'#4f46e5',sms:'#0a7d5f',call:'#b45309'}[step.type] || '#4f46e5'
                                   if (step.type==='sms'&&!settings.location.smsEnabled) return null
                                   return (
-                                    <div key={step.id} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 10px', background:'white', borderRadius:'8px', border:'0.5px solid rgba(26,46,43,0.09)' }}>
+                                    <div key={step.id} style={{ display:'flex', alignItems:'center', flexWrap:'wrap', gap:'8px', padding:'8px 10px', background:'white', borderRadius:'8px', border:'0.5px solid rgba(26,46,43,0.09)' }}>
                                       <CommsIcon name={stepIcon} size={14} color={stepColor} />
                                       <div style={{ flex:1, minWidth:0 }}>
                                         <p style={{ fontSize:'11px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>Step {step.order} · {step.name}</p>
-                                        <EditableDelay step={step} pathId={pathId} setPathSteps={setPathSteps} />
+                                        <EditableDelay step={step} pathId={pathId} setPathSteps={setPathSteps} onCommit={(s,days,label)=>commitDelayChange(pathId, s, days, label)} />
                                         {tmpl&&(
                                           // Own customs open the editor ({master, tpl} is the shape
                                           // TemplateEditorPopup + saveTemplate expect). Masters and
@@ -20753,6 +20857,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                                       {peek&&(
                                         <button onClick={()=>setPeekTemplate(peek)} title="Preview this email" style={{ fontSize:'10px', fontWeight:600, color:'#4f46e5', background:'rgba(99,102,241,0.08)', border:'0.5px solid rgba(99,102,241,0.30)', borderRadius:'6px', padding:'3px 8px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>Preview</button>
                                       )}
+                                      {/* Edit-in-place: subject/body editor. On a master-backed
+                                          path this forks first (confirm carries the snapshot
+                                          warning) and edits the CLONE — never the master. */}
+                                      <button onClick={()=>openStepEditor(pathId, step)} title="Edit this email's wording" style={{ fontSize:'10px', fontWeight:600, color:'white', background:'#1a2e2b', border:'none', borderRadius:'6px', padding:'3px 10px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>Edit</button>
                                       <button onClick={()=>setEditingStep({pathId,step})} style={{ fontSize:'10px', color:'#3a5e58', background:'rgba(168,201,196,0.14)', border:'0.5px solid rgba(168,201,196,0.4)', borderRadius:'6px', padding:'3px 8px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>Change</button>
                                     </div>
                                   )
@@ -20770,7 +20878,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                                 templates={templates}
                                 smsEnabled={settings.location.smsEnabled}
                                 onSave={(step)=>{
-                                  setPathSteps(prev=>({ ...prev, [pathId]:[...(prev[pathId]||[]), step] }))
+                                  commitAddStep(pathId, step)
                                   setAddingStepToPath(null)
                                 }}
                                 onCancel={()=>setAddingStepToPath(null)}
@@ -20783,14 +20891,11 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                                 + Add step
                               </button>
                             )}
-                            {realLocId && (
-                              <button
-                                onClick={()=>savePathToDb(pathId)}
-                                disabled={pathsSaving===pathId}
-                                style={{ width:'100%', padding:'9px', background: pathsSaving===pathId ? '#9ca3af' : '#1a2e2b', border:'none', borderRadius:'8px', cursor: pathsSaving===pathId ? 'wait' : 'pointer', fontFamily:'inherit', fontSize:'12px', color:'white', fontWeight:600, marginTop:'6px' }}
-                              >
-                                {pathsSaving===pathId ? 'Saving…' : dbPaths[pathId] ? 'Save changes' : 'Save to my location'}
-                              </button>
+                            {/* No batch Save button: every change commits itself through
+                                commitSteps the moment it's made. A visible saving state +
+                                the alert on failure are the whole feedback loop. */}
+                            {pathsSaving===pathId && (
+                              <p style={{ fontSize:'11px', color:'#8a9e9a', textAlign:'center', marginTop:'6px' }}>Saving…</p>
                             )}
                           </div>
                         )}
@@ -20800,7 +20905,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                 </div>
               </div>
             )}
-            <p style={{ fontSize:'11px', color:'#b0c0bc', margin:'9px 16px 0', lineHeight:1.5 }}>Pick a sequence above to review its steps. Tap a step's delay to change timing; tap the radio to set the default.</p>
+            <p style={{ fontSize:'11px', color:'#b0c0bc', margin:'9px 16px 0', lineHeight:1.5 }}>Pick a sequence above to review its steps. Edit a step's wording, tap its delay to change timing, tap the radio to set the default — changes save automatically.</p>
 
             {/* Client Alerts tier removed (needs product planning before it's
                 built). Automatic follow-up (above) + Templates (below) stay. */}
@@ -21246,14 +21351,38 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         />
       )}
       {/* Quick-peek from the Paths overview step rows — Close-only, no selection. */}
-      <TemplateQuickPeekModal template={peekTemplate} onClose={()=>setPeekTemplate(null)} />
+      <TemplateQuickPeekModal template={peekTemplate} settings={settings} onClose={()=>setPeekTemplate(null)} />
       {editingTemplate&&(
         <TemplateEditorPopup
           template={editingTemplate==='new' ? null : editingTemplate.tpl}
           isNew={editingTemplate==='new'}
           isMasterEdit={isSuperAdmin && editingTemplate!=='new'}
+          settings={settings}
           onSave={saveTemplate}
           onClose={()=>setEditingTemplate(null)}
+        />
+      )}
+      {/* Fork-on-edit confirm — a master-backed path forks (clones) before any
+          edit, and the snapshot consequence is stated HERE, at the decision. */}
+      {forkConfirm&&(
+        <ForkConfirmModal
+          pathName={(PATH_STYLES.find(st => forkConfirm.pathId.endsWith(st.id.replace('path-',''))) || {}).label || 'these emails'}
+          onConfirm={confirmFork}
+          onCancel={()=>setForkConfirm(null)}
+        />
+      )}
+      {/* Edit-in-place editor for a step's subject/body/delay. Saves commit
+          through commitSteps (the bulk replace) — never a per-step PATCH. */}
+      {stepContentEditor&&(
+        <DripPathStepEditor
+          step={{
+            step_order: stepContentEditor.step.order,
+            subject: stepContentEditor.step.subject || '',
+            body: stepContentEditor.step.body || '',
+            delay_days: stepContentEditor.step.delay_days ?? delayToDays(stepContentEditor.step.delay),
+          }}
+          onSave={saveStepContent}
+          onClose={()=>setStepContentEditor(null)}
         />
       )}
       {editingStep&&(
@@ -21261,7 +21390,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           step={editingStep.step}
           templates={templates}
           smsEnabled={settings.location.smsEnabled}
-          onSelect={tid=>assignTemplate(editingStep.pathId, editingStep.step.id, tid)}
+          onSelect={tid=>assignTemplate(editingStep.pathId, editingStep.step, tid)}
           onCreateTemplate={createTemplateFromPicker}
           onClose={()=>setEditingStep(null)}
         />
@@ -29033,10 +29162,40 @@ function MasterDripPathsEditor() {
   )
 }
 
+// Fork-on-edit confirm. Shown when an owner is about to make their FIRST edit
+// to a master-backed set of new lead emails. The snapshot consequence — once
+// you customize, later HQ master revisions never reach your copy (seeds are
+// insert-only) — belongs at this decision point, not only in a standing
+// banner nobody reads. Confirm proceeds to clone-then-edit; cancel changes
+// nothing.
+function ForkConfirmModal({ pathName='these emails', onConfirm, onCancel }) {
+  return (
+    <div onClick={onCancel} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:10008, padding:'16px' }}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:'white', borderRadius:'14px', maxWidth:'440px', width:'100%', boxShadow:'0 8px 32px rgba(0,0,0,0.2)', overflow:'hidden' }}>
+        <div style={{ padding:'18px 20px 14px' }}>
+          <p style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'8px' }}>Customize these emails for your location?</p>
+          <p style={{ fontSize:'12.5px', color:'#4a5e5a', lineHeight:1.6 }}>
+            “{pathName}” currently uses the Bee Organized HQ master. Editing creates your location's own copy, and your changes apply only to your location.
+          </p>
+          <div style={{ marginTop:'10px', padding:'9px 12px', background:'rgba(245,158,11,0.08)', border:'0.5px solid rgba(245,158,11,0.30)', borderRadius:'8px' }}>
+            <p style={{ fontSize:'12px', color:'#7a5d24', lineHeight:1.55 }}>
+              📌 Your copy is a <strong>snapshot</strong> of today's content. If HQ updates these emails later, those changes <strong>won't reach your version</strong>. You can Reset to master anytime to pick the newest HQ content back up — that discards your edits.
+            </p>
+          </div>
+        </div>
+        <div style={{ padding:'12px 20px 16px', display:'flex', gap:'8px', justifyContent:'flex-end' }}>
+          <button onClick={onCancel} style={{ padding:'9px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
+          <button onClick={onConfirm} style={{ padding:'9px 16px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Create my copy &amp; edit</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Edit modal for a single drip_path_steps row. Subject / body / delay_days.
-// Used by both Admin → Content (master steps) and Settings → Communications (the
-// owner's customized copies). Server-side auth in /api/drip-path-steps/[id]
-// handles the master-vs-location-copy permission split.
+// Used by both Admin → Content (master steps, saved via the per-step PATCH)
+// and Settings → Communications (the owner's customized copies, saved via
+// commitSteps' bulk replace — the owner surface never writes per-step).
 function DripPathStepEditor({ step, onSave, onClose }) {
   const [subject, setSubject] = useState(step.subject || '')
   const [body, setBody] = useState(step.body || '')
@@ -29048,6 +29207,12 @@ function DripPathStepEditor({ step, onSave, onClose }) {
     setLocalErr(null)
     if (delayDays < 0 || !Number.isFinite(Number(delayDays))) {
       setLocalErr('Delay must be a non-negative number of days.')
+      return
+    }
+    if (!body || !body.trim()) {
+      // An empty body would commit, then hold at send time (no_body_source) —
+      // refuse here where the owner can see why.
+      setLocalErr('The email body can’t be empty.')
       return
     }
     setSaving(true)
