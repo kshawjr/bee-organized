@@ -158,6 +158,10 @@ export async function POST(request: NextRequest) {
       .eq('tier', invite.tier)
       .eq('status', 'active')
       .is('user_id', null)
+      // Never claim a seat scheduled for removal — the invite gate excluded
+      // it from availability, and claiming it would strand the new member on
+      // the removal date. Keep the two filters in lockstep.
+      .is('scheduled_removal_at', null)
       .order('added_at', { ascending: true })
       .limit(1)
     if (seatsErr) {

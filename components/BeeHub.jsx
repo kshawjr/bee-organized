@@ -11603,6 +11603,23 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
             </div>
           )
         })}
+        {/* Completion CTA. Employees have no location-level launch call — their
+            step progress is already persisted via markDone — so finishing is
+            purely dismissal: onSkipOnboarding clears the bee.employeeOnboarding
+            session flag and drops them into the hub. Without this button the
+            checklist was a dead end (the only "Go to Bee Hub" lived in the
+            owner branch) and both nav items snapped back here. */}
+        {allDone&&(
+          <div style={{ padding:'12px', background:'linear-gradient(135deg,rgba(168,201,196,0.12),rgba(212,160,70,0.06))', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'14px', textAlign:'center' }}>
+            <p style={{ fontSize:'28px', marginBottom:'8px' }}>🎉</p>
+            <p style={{ fontSize:'17px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'4px' }}>You're all set!</p>
+            <p style={{ fontSize:'13px', color:'#8a9e9a', marginBottom:'16px' }}>Your profile is ready — welcome to the team.</p>
+            <button onClick={()=>{ if (onSkipOnboarding) onSkipOnboarding() }}
+              style={{ width:'100%', padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+              Go to Bee Hub →
+            </button>
+          </div>
+        )}
       </div>
       {toast && <InlineToast {...toast} />}
     </div>
@@ -11812,7 +11829,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                     title="Confirm payment"
                     lineItems={confirmLineItems}
                     total={confirmTotal}
-                    confirmLabel="Pay & Activate"
+                    confirmLabel="Confirm & Activate"
                     onConfirm={() => { setActivateError(''); processPayment() }}
                     onCancel={() => setPayStep('pricing')}
                     isProcessing={false}
@@ -20530,7 +20547,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                               {c.total} {meta.name}{c.total !== 1 ? 's' : ''}
                             </p>
                             <p style={{ fontSize:'10.5px', color:'#8a9e9a' }}>
-                              {c.assigned} assigned · {c.available} available
+                              {c.assigned} assigned · {c.available} available{c.scheduled ? <span style={{ color:'#d97706' }}> · {c.scheduled} ending at removal date</span> : ''}
                             </p>
                           </div>
                         </div>
@@ -32160,7 +32177,7 @@ function PaymentConfirmStep({
   title = 'Confirm payment',
   lineItems = [],
   total = 0,
-  confirmLabel = 'Pay',
+  confirmLabel = 'Confirm',
   onConfirm,
   onCancel,
   isProcessing = false,
@@ -32196,7 +32213,7 @@ function PaymentConfirmStep({
             </div>
           )}
           <div style={{ borderTop:'1px solid rgba(0,0,0,0.08)', marginTop:'10px', paddingTop:'10px', display:'flex', justifyContent:'space-between', alignItems:'baseline' }}>
-            <span style={{ fontSize:'13px', color:'#1a2e2b', fontWeight:700 }}>Total due today</span>
+            <span style={{ fontSize:'13px', color:'#1a2e2b', fontWeight:700 }}>Order total</span>
             <span style={{ fontSize:'19px', fontWeight:700, color:'#d4a046', fontFamily:'Georgia,serif' }}>
               {formatCurrency(total, { showCents:'auto' })}
             </span>
@@ -32204,25 +32221,19 @@ function PaymentConfirmStep({
         </div>
       </div>
 
-      {/* Payment method placeholder — visual stub. Real Stripe Elements
-         drop in here post-demo. */}
-      <div style={{ borderRadius:'12px', border:'1.5px solid rgba(168,201,196,0.45)', background:'linear-gradient(135deg, rgba(168,201,196,0.10), rgba(26,46,43,0.04))', padding:'12px 14px' }}>
+      {/* No-charge notice. Online payment isn't wired up yet (real Stripe
+         Elements drop in here later) — say so plainly instead of rendering a
+         fake card. Confirming records the purchase; billing happens offline. */}
+      <div style={{ borderRadius:'12px', border:'1.5px solid rgba(212,160,70,0.45)', background:'rgba(212,160,70,0.07)', padding:'12px 14px' }}>
         <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px' }}>
           <span style={{ fontSize:'18px' }}>💳</span>
           <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b', textTransform:'uppercase', letterSpacing:'0.6px' }}>
-            Payment method
+            No charge today
           </p>
         </div>
-        <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'4px' }}>
-          <div style={{ width:'38px', height:'24px', borderRadius:'4px', background:'linear-gradient(135deg,#1a2e2b,#2a4a40)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-            <span style={{ fontSize:'9px', fontWeight:700, color:'#d4a046', letterSpacing:'0.4px' }}>VISA</span>
-          </div>
-          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
-            Card on file: •••• 4242
-          </p>
-        </div>
-        <p style={{ fontSize:'10.5px', color:'#8a9e9a', lineHeight:1.45, marginTop:'4px' }}>
-          Stripe integration coming soon — for now this is a confirmation step only.
+        <p style={{ fontSize:'12.5px', color:'#4a5e5a', lineHeight:1.5 }}>
+          Online payment isn't set up yet, so <strong>no card will be charged</strong>.
+          Confirming records this purchase and Bee Organized will invoice you for it separately.
         </p>
       </div>
 
@@ -32461,7 +32472,7 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
               <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
                 {step === 'paymentConfirm'
                   ? `Adds ${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'} to your pool. Invite people later from Settings → Team.`
-                  : 'Pay annually, prorated to next March 1. Once paid, you can invite team members anytime.'}
+                  : 'Billed annually, prorated to next March 1. Once added, you can invite team members anytime.'}
               </p>
             </div>
             <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', lineHeight:1, padding:'0 0 0 8px' }}>×</button>
@@ -32477,7 +32488,7 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
                 amount: totalProrated,
               }]}
               total={totalProrated}
-              confirmLabel="Pay & Add Seats"
+              confirmLabel="Confirm & Add Seats"
               onConfirm={runAddSeats}
               onCancel={() => { setError(''); setStep('form') }}
               isProcessing={submitting}
@@ -32543,7 +32554,7 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
             <button onClick={onClose} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
             <button onClick={handleProceedToConfirm}
               style={{ flex:2, padding:'11px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
-              {`Review payment — ${formatCurrency(totalProrated, { showCents:'auto' })} →`}
+              {`Review order — ${formatCurrency(totalProrated, { showCents:'auto' })} →`}
             </button>
           </div>
         )}
@@ -32723,7 +32734,7 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated }) {
               </h2>
               <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
                 {step === 'success'
-                  ? 'Share this link with the invitee. It expires in 7 days.'
+                  ? 'The link below expires in 7 days.'
                   : step === 'paymentConfirm'
                     ? `Buys 1 ${tierMeta?.name || tier} seat and sends the invite to ${email}.`
                     : 'They’ll sign in with Google to claim their seat.'}
@@ -32828,7 +32839,7 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated }) {
                 amount: proratedDollars,
               }]}
               total={proratedDollars}
-              confirmLabel="Pay & Send Invite"
+              confirmLabel="Confirm & Send Invite"
               onConfirm={runBuyAndInvite}
               onCancel={() => { setError(''); setStep('form') }}
               isProcessing={submitting}
@@ -32838,6 +32849,25 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated }) {
 
           {step === 'success' && createdInvite && (
             <>
+              {/* Email delivery outcome — both invite endpoints return
+                  email_sent. Green = delivered, amber = the owner must share
+                  the link themselves or the invite silently goes nowhere. */}
+              {createdInvite.email_sent ? (
+                <div style={{ marginBottom:'14px', padding:'9px 12px', background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.18)', borderRadius:'9px' }}>
+                  <p style={{ fontSize:'12px', color:'#15803d', fontWeight:500 }}>
+                    ✓ Invitation email sent to {createdInvite.invite?.email}
+                  </p>
+                </div>
+              ) : (
+                <div style={{ marginBottom:'14px', padding:'9px 12px', background:'rgba(245,158,11,0.07)', border:'1px solid rgba(245,158,11,0.22)', borderRadius:'9px' }}>
+                  <p style={{ fontSize:'12px', color:'#92400e', fontWeight:600, marginBottom:'2px' }}>
+                    ⚠️ Invitation email could not be sent
+                  </p>
+                  <p style={{ fontSize:'11.5px', color:'#92400e', lineHeight:1.5 }}>
+                    The invite was created, but no email went out — share the link below with them directly.
+                  </p>
+                </div>
+              )}
               <div style={{ marginBottom:'14px' }}>
                 <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'4px' }}>Share with</p>
                 <p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b', wordBreak:'break-all' }}>{createdInvite.invite?.email}</p>
@@ -33088,22 +33118,28 @@ export default function App({
   const [pendingInvites, setPendingInvites] = useState(
     Array.isArray(initialPendingInvites) ? initialPendingInvites : []
   )
+  // Seats with scheduled_removal_at are still active and billable, but they
+  // are NOT available for invite — a new member seated there would lose
+  // access on the removal date. They count toward total (and `scheduled`),
+  // never toward available. Mirrors the server gates in /api/hub_users/invite
+  // and /api/hub_users/accept.
   function seatCountsByTier() {
     return seats.reduce((acc, s) => {
       if (s.status && s.status !== 'active') return acc
-      acc[s.tier] = acc[s.tier] || { total: 0, assigned: 0, available: 0 }
+      acc[s.tier] = acc[s.tier] || { total: 0, assigned: 0, available: 0, scheduled: 0 }
       acc[s.tier].total++
+      if (s.scheduled_removal_at) acc[s.tier].scheduled++
       if (s.user_id) acc[s.tier].assigned++
-      else acc[s.tier].available++
+      else if (!s.scheduled_removal_at) acc[s.tier].available++
       return acc
     }, {})
   }
   function availableSeatsByTier() {
-    return seats.filter(s => !s.user_id && (s.status === 'active' || !s.status))
+    return seats.filter(s => !s.user_id && !s.scheduled_removal_at && (s.status === 'active' || !s.status))
   }
   function availableSeatsByTierWithPending(tier) {
     const total = seats.filter(
-      s => s.tier === tier && !s.user_id && (s.status === 'active' || !s.status)
+      s => s.tier === tier && !s.user_id && !s.scheduled_removal_at && (s.status === 'active' || !s.status)
     ).length
     const pending = pendingInvites.filter(p => p.tier === tier && !p.accepted_at).length
     return Math.max(0, total - pending)

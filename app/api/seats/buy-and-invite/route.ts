@@ -17,6 +17,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'node:crypto'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
+import { sendEmailDirect } from '@/lib/resend'
+import {
+  buildInviteEmail,
+  INVITE_FROM_EMAIL,
+  INVITE_FROM_NAME,
+  INVITE_REPLY_TO_EMAIL,
+} from '@/lib/invite-email'
 
 export const runtime = 'nodejs'
 
@@ -191,8 +198,78 @@ export async function POST(request: NextRequest) {
     request.nextUrl.origin
   const invite_url = `${origin}/auth/invite/${inviteToken}`
 
+  // Send the invite email — same system sender and template as
+  // /api/hub_users/invite, so the invitee's experience doesn't depend on
+  // which path the owner's click took. Failure doesn't roll back the seat
+  // or invite (both are real and the owner can share the link manually);
+  // email_sent / email_error surface the outcome so the client can adjust
+  // messaging instead of implying delivery.
+  let email_sent = false
+  let email_error: string | undefined
+  try {
+    const [{ data: location }, { data: inviter }] = await Promise.all([
+      supabaseService
+        .from('locations')
+        .select('name')
+        .eq('id', location_id)
+        .single(),
+      supabaseService
+        .from('hub_users')
+        .select('full_name, first_name, email')
+        .eq('id', caller.id)
+        .single(),
+    ])
+
+    const locationName = location?.name ?? null
+    const inviterName =
+      inviter?.full_name?.trim() ||
+      inviter?.first_name?.trim() ||
+      inviter?.email ||
+      'Your team'
+    const inviteeName =
+      typeof full_name === 'string' && full_name.trim()
+        ? full_name.trim().split(/\s+/)[0]
+        : null
+
+    const { html, text } = buildInviteEmail({
+      inviteUrl: invite_url,
+      locationName,
+      inviterName,
+      expiresAt,
+      inviteeName,
+    })
+
+    const result = await sendEmailDirect({
+      from: INVITE_FROM_EMAIL,
+      fromName: INVITE_FROM_NAME,
+      replyTo: INVITE_REPLY_TO_EMAIL,
+      to: normalizedEmail,
+      subject: locationName
+        ? `You've been invited to join ${locationName} on Bee Hub`
+        : `You've been invited to join Bee Hub`,
+      html,
+      text,
+    })
+
+    if (result.success) {
+      email_sent = true
+    } else {
+      email_error = result.error
+      console.error('[buy-and-invite email send]', email_error)
+    }
+  } catch (err) {
+    email_error = err instanceof Error ? err.message : String(err)
+    console.error('[buy-and-invite email send] unexpected error', err)
+  }
+
   return NextResponse.json(
-    { seat: insertedSeat, invite, invite_url },
+    {
+      seat: insertedSeat,
+      invite,
+      invite_url,
+      email_sent,
+      ...(email_error ? { email_error } : {}),
+    },
     { status: 201 }
   )
 }
