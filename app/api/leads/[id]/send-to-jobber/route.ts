@@ -50,6 +50,7 @@ import {
   type ContactWriteback,
 } from '@/lib/jobber-contact-writeback'
 import { getEngagementAssignees, resolveJobberAssignment } from '@/lib/engagement-assignee-sync'
+import { buildRequestDetails } from '@/lib/jobber-request-form'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -649,11 +650,15 @@ export async function POST(
     const requestInput: Record<string, any> = {
       clientId: jobberClientGlobalId,
       title:    requestTitle,
-      // `requestDetails` on RequestCreateInput is now a RequestDetailsInput
-      // object wrapping a FormInput, not a free-form string. We don't have a
-      // form mapping today, so the field is omitted; lead.request_details
-      // continues to live on the Bee Hub side until we wire form sync.
     }
+    // `requestDetails` is a RequestDetailsInput wrapping a form of free-form
+    // sections/items — NOT a string (the May audit removed the string form as
+    // schema-invalid) and NOT custom fields (CustomFieldAppliesTo has no
+    // `request` value). One section, two items, no per-account ids:
+    // lib/jobber-request-form.ts. Blank project_type / request_details drop
+    // their item; both blank drops the key entirely — never a placeholder.
+    const requestDetails = buildRequestDetails(lead)
+    if (requestDetails) requestInput.requestDetails = requestDetails
     // Only include propertyId when we actually have one — Deluge mirrored
     // this with two requestCreate variants. Omitting the key lets Jobber
     // accept the request without a property attached.
@@ -665,29 +670,58 @@ export async function POST(
     // link, deactivated user), retry once WITHOUT it rather than killing
     // the whole send.
     if (salesPersonJobberId) requestInput.salespersonId = salesPersonJobberId
-    let reqCreate = await jobberMutation(
-      locationSlug,
-      REQUEST_CREATE_MUTATION,
-      { input: requestInput },
-    )
-    if (reqCreate.userErrors?.length && requestInput.salespersonId) {
-      console.warn('[send-to-jobber] requestCreate with salespersonId failed — retrying unassigned', {
-        leadId, salespersonId: requestInput.salespersonId,
-        userErrors: JSON.stringify(reqCreate.userErrors),
+    // The salespersonId rung, unchanged: if Jobber rejects the id (stale
+    // roster link, deactivated user), retry once WITHOUT it.
+    const createRequest = async (input: Record<string, any>) => {
+      let res = await jobberMutation(
+        locationSlug,
+        REQUEST_CREATE_MUTATION,
+        { input },
+      )
+      if (res.userErrors?.length && input.salespersonId) {
+        console.warn('[send-to-jobber] requestCreate with salespersonId failed — retrying unassigned', {
+          leadId, salespersonId: input.salespersonId,
+          userErrors: JSON.stringify(res.userErrors),
+        })
+        await writeSyncLog({
+          location_id: locationSlug,
+          entity_id: leadId,
+          entity_type: 'client',
+          status: 'success',
+          message: `[send-to-jobber] topic=REQUEST_ASSIGN_RETRY salespersonId=${input.salespersonId} rejected (${res.userErrors[0]?.message ?? 'unknown'}) — request created unassigned`,
+        })
+        const { salespersonId: _dropped, ...unassigned } = input
+        res = await jobberMutation(
+          locationSlug,
+          REQUEST_CREATE_MUTATION,
+          { input: unassigned },
+        )
+      }
+      return res
+    }
+
+    let reqCreate = await createRequest(requestInput)
+
+    // requestDetails is NON-FATAL, same philosophy as salespersonId and for
+    // the same reason: it is the one field on this mutation whose exact input
+    // shape we could not confirm by live introspection at ship time (every
+    // location's Jobber token was expired). If Jobber rejects it, strip the
+    // form and re-run the whole ladder — the send degrades to exactly today's
+    // behavior (request created, form data stays in Bee Hub) instead of
+    // failing, and the breadcrumb makes the rejection loud rather than silent.
+    if (reqCreate.userErrors?.length && requestInput.requestDetails) {
+      console.warn('[send-to-jobber] requestCreate with requestDetails failed — retrying without the form', {
+        leadId, userErrors: JSON.stringify(reqCreate.userErrors),
       })
       await writeSyncLog({
         location_id: locationSlug,
         entity_id: leadId,
         entity_type: 'client',
         status: 'success',
-        message: `[send-to-jobber] topic=REQUEST_ASSIGN_RETRY salespersonId=${requestInput.salespersonId} rejected (${reqCreate.userErrors[0]?.message ?? 'unknown'}) — request created unassigned`,
+        message: `[send-to-jobber] topic=REQUEST_FORM_RETRY requestDetails rejected (${reqCreate.userErrors[0]?.message ?? 'unknown'}) — request created without the interface-details form`,
       })
-      delete requestInput.salespersonId
-      reqCreate = await jobberMutation(
-        locationSlug,
-        REQUEST_CREATE_MUTATION,
-        { input: requestInput },
-      )
+      const { requestDetails: _form, ...withoutForm } = requestInput
+      reqCreate = await createRequest(withoutForm)
     }
     if (reqCreate.userErrors?.length) {
       return fail('request_create', reqCreate.userErrors[0].message)
