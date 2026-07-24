@@ -728,6 +728,7 @@ export default function HiveShell({
           engagements={patched}
           locFilter={locFilter}
           locations={locations}
+          locationUsers={locationUsers}
           onOpenPerson={openPerson}
           onSendToJobber={onSendToJobber}
           onCallLogged={applyTouchpoint}

@@ -62,6 +62,7 @@ import SourceField from './shared/SourceField'
 import ReferrerField from './shared/ReferrerField'
 import ContactsBlock from './shared/ContactsBlock'
 import TagsRow from './shared/TagsRow'
+import LeadAssignees from './shared/LeadAssignees'
 import PreferencesBlock from './shared/PreferencesBlock'
 import { jobberClientUrl } from './shared/jobberLinks'
 import Timeline from './shared/Timeline'
@@ -135,6 +136,22 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
       // Not load-bearing: a failed lookup just leaves the door open, and the
       // conversion route re-checks the link server-side before it writes.
       .catch(() => { if (!dead) setNetworkTwin(false) })
+    return () => { dead = true }
+  }, [clientId])
+
+  // ── Assignees (plural) ──
+  // Who owns this lead — the lead_assignees junction (the real model since
+  // the project-type multi-assign build), resolved to names by the route.
+  // Its own fetch, like the network twin: the profile payload's legacy
+  // assigned_to/assigned_to_name is singular and doesn't see the junction.
+  const [assignees, setAssignees] = useState([])
+  useEffect(() => {
+    let dead = false
+    setAssignees([])
+    fetch(`/api/leads/${clientId}/assignees`)
+      .then(r => r.ok ? r.json() : { assignees: [] })
+      .then(j => { if (!dead) setAssignees(Array.isArray(j.assignees) ? j.assignees : []) })
+      .catch(() => { if (!dead) setAssignees([]) })
     return () => { dead = true }
   }, [clientId])
 
@@ -464,10 +481,12 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         readOnly={readOnly}
       />
 
-      {/* Assigned-to moved to the ENGAGEMENT (engagement-assigned-to-multi
-          build): assignment is a deal concept now, plural + Jobber-mapped,
-          and lives on the EngagementPanel masthead. leads.assigned_to is
-          legacy-unused. The lead-level row here was removed. */}
+      {/* Assigned to — restored (Kevin 7/24). The engagement carries its
+          OWN plural assignees once work is founded, but a pre-engagement
+          Inbox lead has no engagement, so its owner was invisible. Reads
+          the lead_assignees junction (display-only; intake decides it,
+          the engagement edits it). */}
+      <LeadAssignees assignees={assignees} />
 
       {/* Preferences — LIVE toggles (build 3): marketing opt-out
           (confirmed), snooze set/unset, drip pause/activate; the

@@ -60,6 +60,7 @@ import { TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY } from '@/components/ui/tokens
 import { T } from './shared/tokens'
 import { IconSparkles, IconPhoneOutgoing, IconPhone, IconSend, IconCheck, IconClock, IconDots, IconMapPin, IconArrowRight, IconUsers, IconMail } from '@/components/ui/icons'
 import InitialsAvatar from './shared/InitialsAvatar'
+import MiniAvatar from './shared/MiniAvatar'
 import TouchpointModal, { METHODS } from './TouchpointModal'
 import TransferLeadModal from './TransferLeadModal'
 import NoCoverageModal from './NoCoverageModal'
@@ -284,7 +285,7 @@ function RowMenu({ anchorId, isMobile, onClose, children }) {
   )
 }
 
-export default function InboxScreen({ people = [], transferPeople = [], locationRequired = false, onOpenLocationPicker = null, engagements = [], locFilter = 'all', locations = [], onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, specialties = [], setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
+export default function InboxScreen({ people = [], transferPeople = [], locationRequired = false, onOpenLocationPicker = null, engagements = [], locFilter = 'all', locations = [], locationUsers = [], onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, specialties = [], setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
   // The selected location's NAME, for the New section's header. Half of why
   // the unrouted queue read as this location's leads is that the location's
   // own section wasn't labelled either — both just read as "the inbox". Null
@@ -356,6 +357,16 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   const nowMs = Date.now()
 
   const isMobile = useIsMobile()
+
+  // Assignee roster: id → display name, for the row's avatar-stack initials.
+  // The sweep ships assignees as ids (person.assignedTo); the location team
+  // roster resolves the name. An id the roster doesn't cover (a cross-location
+  // owner on an 'all' view) degrades to a '?' disc, still counted in the stack.
+  const assigneeRoster = useMemo(() => {
+    const m = new Map()
+    for (const u of (locationUsers || [])) m.set(u.id, u.name || u.email || null)
+    return m
+  }, [locationUsers])
 
   // Any click that bubbles to the document closes the open ··· menu.
   // The trigger + menu items stopPropagation; the target check covers
@@ -756,6 +767,27 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     // formatted `phone` stays the visible label.
     const phoneLabel = (p.phone || '').trim()
     const phoneDigits = p.phoneNormalized || phoneLabel.replace(/\D/g, '')
+    // What they want — the webform request snippet (restored 7/24, Kevin). The
+    // mapper carries leads.request_details as jobDetail; one muted line under
+    // the contact line, truncated. Transfer rows keep their origin line instead.
+    const jobDetail = (p.jobDetail || '').trim()
+    // Assignee stack — who owns this lead (lead_assignees, plural). ids from the
+    // sweep, initials from the roster. Up to 3 discs + '+N'; the whole set is the
+    // hover title so no name is lost.
+    const assigneeIds = Array.isArray(p.assignedTo) ? p.assignedTo : (p.assignedTo ? [p.assignedTo] : [])
+    const assigneeStack = assigneeIds.length > 0 ? (
+      <span title={assigneeIds.map(id => assigneeRoster.get(id) || 'Assigned').join(', ')}
+        style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
+        {assigneeIds.slice(0, 3).map((id, i) => (
+          <span key={id} style={{ display: 'inline-flex', marginLeft: i ? '-8px' : 0 }}>
+            <MiniAvatar id={id} name={assigneeRoster.get(id) || '?'} size="22px" font="10px" ring />
+          </span>
+        ))}
+        {assigneeIds.length > 3 && (
+          <span style={{ marginLeft: '4px', fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})` }}>+{assigneeIds.length - 3}</span>
+        )}
+      </span>
+    ) : null
     const actions = sent ? (
       <span style={{ fontSize: '12px', color: T.accent.fg, fontWeight: 500, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
         <IconCheck size={13} /> Sent — engagement will appear on the board
@@ -901,7 +933,14 @@ export default function InboxScreen({ people = [], transferPeople = [], location
                 </a>
               )}
               {isMobile && <AgeInline created={p.created} nowMs={nowMs} style={{ marginLeft: 'auto', minWidth: 0 }} />}
+              {isMobile && assigneeStack}
             </div>
+            {/* What they want — restored webform snippet (see jobDetail above). */}
+            {!isTransfer && jobDetail && (
+              <p style={{ fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '3px' }}>
+                {jobDetail}
+              </p>
+            )}
           </div>
           {!isMobile && (
             /* Alignment fix (direction C): date/relative + icons share
@@ -910,6 +949,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
                sub-cluster swallows clicks; the age text still bubbles
                to the row like any other text. */
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+              {assigneeStack}
               <AgeInline created={p.created} nowMs={nowMs} />
               {/* Selection mode swaps the action cluster for checkboxes —
                   no per-row writes while a batch is being composed. */}

@@ -92,7 +92,10 @@ export async function GET(
     supabaseService.from('leads').select('id, name, created_at', { count: 'exact' }).eq('referred_by_kind', 'lead').eq('referred_by_id', id).not('is_junk', 'is', true).order('created_at', { ascending: false }).range(0, REFERRED_US_CAP - 1),
     // Tag junction rows — resolved to lookup LABELS below (the v4 tags
     // row renders labels, not the classic attrs.key ids).
-    supabaseService.from('lead_tags').select('id, tag_lookup_id').eq('lead_id', id),
+    // lead_tags is a (lead_id, tag_lookup_id) junction with no `id` column —
+    // selecting one 42703'd and silently blanked every tag on the card. Only
+    // tag_lookup_id is read below (resolved to lookups.label).
+    supabaseService.from('lead_tags').select('tag_lookup_id').eq('lead_id', id),
   ])
 
   // touchpoints carry user_id but no user_label — resolve author names
