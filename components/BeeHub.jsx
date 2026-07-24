@@ -15240,6 +15240,9 @@ const TEMPLATE_VARIABLES = [
   { key:'{{organizer_name}}', label:'Your Name'      },
   { key:'{{location_name}}',  label:'Location'       },
   { key:'{{booking_link}}',   label:'Booking Link'   },
+  // Per-assignee: resolves to the assigned person's own calendar, falling
+  // back to the location owner's and then to the location Booking Link.
+  { key:'{{owner_booking_link}}', label:'Assignee Booking Link' },
   { key:'{{phone}}',          label:'Your Phone'     },
   { key:'{{service_area}}',   label:'Service Area'   },
 ]
@@ -15874,6 +15877,7 @@ const DEFAULT_SETTINGS = {
     lastName:  '',
     email:     '',
     phone:     '',
+    bookingLink: '',
     role:      'Franchise Owner',
     plan:      'owner',
     subStatus: 'active',
@@ -19063,6 +19067,10 @@ function TemplatePreviewModal({ template, settings, onClose }) {
     location_name:  locName,
     phone:          settings?.location?.phone || '(555) 123-4567',
     booking_link:   settings?.location?.bookingLink || 'https://example.com/book',
+    // Mirrors the live chain: the signed-in user's own link first, then the
+    // location's. At send time an assigned lead resolves the ASSIGNEE's link
+    // here, which the preview can't know.
+    owner_booking_link: settings?.profile?.bookingLink || settings?.location?.bookingLink || 'https://example.com/book',
     service_area:   [settings?.location?.city, settings?.location?.state].filter(Boolean).join(', ') || locName,
   }
   function applyPreviewVars(text) {
@@ -19299,6 +19307,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     lastName:  currentUserCtx.last_name  || (currentUserCtx.name||'').split(' ').slice(1).join(' ') || '',
     email:     currentUserCtx.email      || '',
     phone:     currentUserCtx.phone      || '',
+    bookingLink: currentUserCtx.booking_link || '',
     nextAmount: calcProration(getTierPrice('owner')).prorated,
   } : selectedLoc ? {
     firstName: (selectedLoc.owner||'').split(' ')[0],
@@ -19863,6 +19872,31 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     }
   }
 
+  // Persist the caller's OWN booking link to hub_users.booking_link. Unlike
+  // the other Profile rows (First/Last/Email/Phone, which are local-only in
+  // this screen), this one MUST reach the DB: it is what {{owner_booking_link}}
+  // renders into client emails, and a link saved only into session state would
+  // leave booking sends held forever. Empty string clears to null — which
+  // means "fall back to the location link", not "no link".
+  async function persistBookingLink(v) {
+    updateProfile('bookingLink', v)
+    try {
+      const res = await fetch('/api/hub_users/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ booking_link: v }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(()=>({}))
+        throw new Error(j?.error || `HTTP ${res.status}`)
+      }
+    } catch (e) {
+      console.error('[settings] booking_link save failed', e)
+      alert('Could not save your booking link: ' + (e?.message || e))
+    }
+  }
+
   function saveCustomPath({ pathId, pathName, projectType, steps }) {
     setPathSteps(prev=>({...prev,[pathId]:steps}))
     setSettings(s=>({...s, paths:{...s.paths, active:[...s.paths.active, pathId]}}))
@@ -20113,6 +20147,12 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               <SettingsEditRow label="Email"      value={settings.profile.email}     onSave={v=>updateProfile('email',v)} type="email" />
               <SettingsEditRow label="Phone"      value={settings.profile.phone}     onSave={v=>updateProfile('phone',v)} type="tel" />
               <SettingsEditRow label="Role"       value={settings.profile.role}      readOnly hint="Contact your franchisor to change your role" />
+            </div>
+
+            <SectionHeader title="Scheduling" desc="Your own calendar — used when a lead is assigned to you" />
+            <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
+              <SettingsEditRow label="Booking Link" value={settings.profile.bookingLink||''} onSave={persistBookingLink}
+                hint={'This link goes into CLIENT emails. When a lead is assigned to you, "click here to select a day and time" points at YOUR calendar instead of the location’s. Leave blank to keep using the location Booking Link — booking emails are held rather than sent link-less if neither is set.'} />
             </div>
 
             {isPastDue && (

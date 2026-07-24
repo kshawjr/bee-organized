@@ -13,6 +13,11 @@
 import { supabaseService } from './supabase-service'
 import { sendEmail, renderTemplate, type RenderContext } from './resend'
 import { blockedOnMissingRate } from './rate-guard'
+import {
+  resolveOwnerBookingLink,
+  blockedOnMissingBookingLink,
+  MISSING_BOOKING_LINK_MESSAGE,
+} from './booking-link'
 import { nextSendAt } from './drip-time'
 import { scheduleWelcomeEmail } from './welcome-email'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
@@ -187,6 +192,16 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   }
   const ownerFirstName = ownerName ? ownerName.trim().split(/\s+/)[0] || null : null
 
+  // {{owner_booking_link}} — the assignee's own scheduling link, falling
+  // through to the location owner's and finally to calendar_link. Its own
+  // reads (never a widened select) so a pre-migration hub_users table just
+  // yields calendar_link, exactly as today.
+  const ownerBookingLink = await resolveOwnerBookingLink({
+    assignedToUserId: lead.assigned_to,
+    locationOwnerUserId: locOwner?.id ?? null,
+    locationCalendarLink: loc.calendar_link,
+  })
+
   // Subject/body: step override > linked template
   const linkedTpl = (Array.isArray((step as any).templates)
     ? (step as any).templates[0]
@@ -217,6 +232,29 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     return { sent: false, error: 'missing_rate' }
   }
 
+  // BOOKING-LINK GUARD: this template asks the client to click a scheduling
+  // link, and nothing in the chain resolves one. Same hold as the rate guard
+  // — row untouched, retried next tick, resumes by itself the moment anyone
+  // sets a link. Visible the same three ways (lead drip status below, cron
+  // held_missing_booking_link counter, digest section); what never happens is
+  // the client reading "Please click here () to select a day and time."
+  if (
+    blockedOnMissingBookingLink(
+      { subject: subjectSource, body: bodySource },
+      { ownerBookingLink, locationCalendarLink: loc.calendar_link },
+    )
+  ) {
+    console.warn('[drip-send] held: template quotes a booking tag but no link resolves', {
+      leadId: row.lead_id, locationId: loc.id, step: row.current_step,
+    })
+    await recordDripSendStatus(row.lead_id, {
+      status: 'failed',
+      step: row.current_step,
+      error: MISSING_BOOKING_LINK_MESSAGE,
+    })
+    return { sent: false, error: 'missing_booking_link' }
+  }
+
   // First-name fallback: lead.first_name, else first word of lead.name
   const firstName =
     lead.first_name && lead.first_name.trim()
@@ -237,6 +275,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     service_area: serviceArea,
     owner_name: ownerName,
     owner_first_name: ownerFirstName,
+    owner_booking_link: ownerBookingLink,
     location_owner_name: locationOwnerName,
     rate_per_hour: loc.rate_per_hour,
     location_phone: loc.phone,

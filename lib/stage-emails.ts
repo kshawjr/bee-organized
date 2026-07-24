@@ -23,6 +23,7 @@
 import { supabaseService } from './supabase-service'
 import { sendEmail, renderTemplate, type RenderContext } from './resend'
 import { blockedOnMissingRate } from './rate-guard'
+import { resolveOwnerBookingLink, blockedOnMissingBookingLink } from './booking-link'
 import { bodyToHtml } from './drip-send'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
 
@@ -258,6 +259,13 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
   }
   const ownerFirstName = ownerName ? ownerName.trim().split(/\s+/)[0] || null : null
 
+  // {{owner_booking_link}} — assignee's link → location owner's → calendar_link.
+  const ownerBookingLink = await resolveOwnerBookingLink({
+    assignedToUserId: lead.assigned_to,
+    locationOwnerUserId: locOwner?.id ?? null,
+    locationCalendarLink: loc.calendar_link,
+  })
+
   const firstName =
     lead.first_name && lead.first_name.trim()
       ? lead.first_name.trim()
@@ -275,6 +283,7 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
     service_area: serviceArea,
     owner_name: ownerName,
     owner_first_name: ownerFirstName,
+    owner_booking_link: ownerBookingLink,
     location_owner_name: locationOwnerName,
     rate_per_hour: loc.rate_per_hour,
     location_phone: loc.phone,
@@ -290,6 +299,18 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
       rowId: row.id, leadId: lead.id, locationId: loc.id,
     })
     return { sent: false, error: 'missing_rate' }
+  }
+
+  // BOOKING-LINK GUARD: the template asks the client to click a scheduling
+  // link and none resolves. HOLD — send_at stays intact so the cron retries
+  // every tick and it goes out on the first tick after a link is set.
+  if (
+    blockedOnMissingBookingLink(tpl, { ownerBookingLink, locationCalendarLink: loc.calendar_link })
+  ) {
+    console.warn('[stage-emails] held: template quotes a booking tag but no link resolves', {
+      rowId: row.id, leadId: lead.id, locationId: loc.id,
+    })
+    return { sent: false, error: 'missing_booking_link' }
   }
 
   const rendered = renderTemplate({ subject: tpl.subject, body: tpl.body }, ctx)

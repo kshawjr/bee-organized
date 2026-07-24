@@ -14,6 +14,7 @@
 import { supabaseService } from './supabase-service'
 import { sendEmail, renderTemplate, type RenderContext } from './resend'
 import { blockedOnMissingRate } from './rate-guard'
+import { resolveOwnerBookingLink, blockedOnMissingBookingLink } from './booking-link'
 import { bodyToHtml } from './drip-send'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
 
@@ -197,6 +198,28 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
   }
   const ownerFirstName = ownerName ? ownerName.trim().split(/\s+/)[0] || null : null
 
+  // {{owner_booking_link}} — assignee's link → location owner's → calendar_link.
+  const ownerBookingLink = await resolveOwnerBookingLink({
+    assignedToUserId: lead.assigned_to,
+    locationOwnerUserId: locOwner?.id ?? null,
+    locationCalendarLink: loc.calendar_link,
+  })
+
+  // BOOKING-LINK GUARD: the welcome asks the client to click a scheduling
+  // link and none resolves. HOLD — scheduled_at intact so the cron retries
+  // every tick and it goes out on the first tick after a link is set.
+  if (
+    blockedOnMissingBookingLink(
+      { subject: tpl.subject, body: tpl.body },
+      { ownerBookingLink, locationCalendarLink: loc.calendar_link },
+    )
+  ) {
+    console.warn('[welcome] held: template quotes a booking tag but no link resolves', {
+      leadId, locationId: loc.id,
+    })
+    return { sent: false, error: 'missing_booking_link' }
+  }
+
   const firstName =
     lead.first_name && lead.first_name.trim()
       ? lead.first_name.trim()
@@ -214,6 +237,7 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
     service_area: serviceArea,
     owner_name: ownerName,
     owner_first_name: ownerFirstName,
+    owner_booking_link: ownerBookingLink,
     location_owner_name: locationOwnerName,
     rate_per_hour: loc.rate_per_hour,
     location_phone: loc.phone,

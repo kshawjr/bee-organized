@@ -160,6 +160,10 @@ interface BeeHubProps {
     first_name?: string | null
     last_name?: string | null
     phone?: string | null
+    // This user's OWN scheduling link — seeds Settings → Profile → Booking
+    // Link and backs {{owner_booking_link}}. null until they set one, or
+    // whenever migrations/hub_users_booking_link.sql hasn't been run.
+    booking_link?: string | null
     // Phase 2 — is this owner the DESIGNATED primary owner of their location?
     // false routes a co-owner into the slim onboarding flow. Defaults true for
     // non-owners / legacy owners with no seat row.

@@ -596,6 +596,21 @@ export default async function HubPage({
     if (profileRow) profileFields = profileRow as any
   }
 
+  // The caller's own booking link ({{owner_booking_link}} tier 1), read
+  // SEPARATELY on purpose: hub_users.booking_link does not exist until
+  // migrations/hub_users_booking_link.sql runs, and folding it into the
+  // select above would error that query and silently lose the name/phone
+  // prefill. Column absent → null → the Settings row just shows "Not set".
+  let bookingLink: string | null = null
+  {
+    const { data: linkRow } = await supabaseService
+      .from('hub_users')
+      .select('booking_link')
+      .eq('id', hubUser.id)
+      .maybeSingle()
+    bookingLink = ((linkRow as any)?.booking_link as string | null) ?? null
+  }
+
   // Order by slot only. The editor writes `slot` as a single global sequence
   // (array index across all chapters), so slot alone reflects the user's
   // arranged order. Sorting by chapter first would force chapters into
@@ -1679,6 +1694,7 @@ export default async function HubPage({
         first_name: profileFields.first_name,
         last_name: profileFields.last_name,
         phone: profileFields.phone,
+        booking_link: bookingLink,
         isPrimaryOwner,
       }}
     />

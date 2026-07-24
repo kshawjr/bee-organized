@@ -22,6 +22,7 @@ to Bee Hub format per the variable mapping section below.
 | `${Lookup:Location.Rate Per Hour}` | `{{rate_per_hour}}` | locations.rate_per_hour |
 | `${Lookup:Location.Phone Number}` | `{{location_phone}}` | locations.phone |
 | `${Lookup:Location.Book Assessment Link}` | `{{book_assessment_link}}` | locations.calendar_link |
+| _(no Zoho equivalent)_ | `{{owner_booking_link}}` | assigned_to.booking_link → location owner's booking_link → locations.calendar_link |
 | `${Lookup:Location.Google Reviews}` | `{{reviews_link}}` | locations.reviews_link |
 | `{Partner}` | `{{partner_name}}` | (Partner Drip — Phase 2) |
 

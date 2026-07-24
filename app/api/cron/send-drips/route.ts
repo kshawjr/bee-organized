@@ -79,6 +79,11 @@ export async function GET(req: NextRequest) {
   // location's rate is blank. Counted apart from `skipped` so the gap is
   // countable in cron logs; the digest carries the per-location rollup.
   let heldMissingRate = 0
+  // Sends HELD because the template asks the client to click a scheduling
+  // link and nothing in the assignee → owner → calendar_link chain resolves
+  // one. Own counter for the same reason as the rate hold: an expected,
+  // self-clearing skip that must never read as a silent drop.
+  let heldMissingBookingLink = 0
   const errors: Array<{ kind: string; id: string; reason: string }> = []
 
   for (const row of dueRows ?? []) {
@@ -87,6 +92,8 @@ export async function GET(req: NextRequest) {
       sent++
     } else if (result.error === 'missing_rate') {
       heldMissingRate++
+    } else if (result.error === 'missing_booking_link') {
+      heldMissingBookingLink++
     } else if (
       result.error === 'no_email' ||
       result.error === 'non_email_channel' ||
@@ -134,6 +141,8 @@ export async function GET(req: NextRequest) {
         welcomeSent++
       } else if (result.error === 'missing_rate') {
         heldMissingRate++
+      } else if (result.error === 'missing_booking_link') {
+        heldMissingBookingLink++
       } else if (
         result.error === 'no_email' ||
         result.error === 'already_sent' ||
@@ -173,6 +182,8 @@ export async function GET(req: NextRequest) {
         stageSent++
       } else if (result.error === 'missing_rate') {
         heldMissingRate++
+      } else if (result.error === 'missing_booking_link') {
+        heldMissingBookingLink++
       } else if (
         result.error === 'no_email' ||
         result.error === 'already_sent' ||
@@ -192,9 +203,13 @@ export async function GET(req: NextRequest) {
   if (heldMissingRate > 0) {
     console.warn(`[cron] ${heldMissingRate} send(s) held: template quotes {{rate_per_hour}} but the location rate is blank`)
   }
+  if (heldMissingBookingLink > 0) {
+    console.warn(`[cron] ${heldMissingBookingLink} send(s) held: template quotes a booking link but none resolves for the assignee, the location owner, or the location`)
+  }
 
   return NextResponse.json({
     held_missing_rate: heldMissingRate,
+    held_missing_booking_link: heldMissingBookingLink,
     drips:   { sent, skipped, failed, considered: dueRows?.length ?? 0 },
     welcome: { sent: welcomeSent, skipped: welcomeSkipped, failed: welcomeFailed, considered: welcomeDue?.length ?? 0 },
     stage:   { sent: stageSent,   skipped: stageSkipped,   failed: stageFailed,   considered: stageDue?.length ?? 0 },

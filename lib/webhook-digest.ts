@@ -74,6 +74,9 @@ export type WebhookDigest = {
   // active locations on rate-quoting default paths (-a/-b) with a blank
   // rate_per_hour — their rate-quoting sends are HELD by lib/rate-guard
   rateMissing: number
+  // active locations on booking default paths (-b/-d) with a blank
+  // calendar_link — their booking sends are HELD by lib/booking-link
+  bookingLinkMissing: number
   text: string
 }
 
@@ -223,6 +226,34 @@ export function buildRateHealthSection(
   return { lines, missingCount: rows.length, hasProblems: true }
 }
 
+// ── missing-booking-link section ─────────────────────────────────
+// Standing condition, exactly like the blank-rate section above: an active
+// location whose default path tells the client to click a scheduling link
+// with no calendar_link set has those sends HELD (lib/booking-link). It
+// stays in the digest every window until a link is set or the path changes.
+// Healthy (empty) input produces no lines and no un-suppress.
+export type BookingLinkHealthDigestInput = {
+  missingLink: Array<{
+    location_id?: string | null
+    name?: string | null
+    paths?: string[]
+  }>
+}
+
+export function buildBookingLinkHealthSection(
+  input: BookingLinkHealthDigestInput | undefined,
+): { lines: string[]; missingCount: number; hasProblems: boolean } {
+  const rows = input?.missingLink ?? []
+  if (rows.length === 0) return { lines: [], missingCount: 0, hasProblems: false }
+  const lines: string[] = [`*:calendar: Booking link missing* (sends held until set)`]
+  for (const r of rows) {
+    const loc = r.name || r.location_id || 'unknown'
+    const paths = (r.paths ?? []).join(', ')
+    lines.push(`    • ${loc}${paths ? ` — ${paths}` : ''} — booking drips are held; set the link in Settings → My Location, or per person in Settings → Profile`)
+  }
+  return { lines, missingCount: rows.length, hasProblems: true }
+}
+
 // ── classification ────────────────────────────────────────────
 
 type LeadFailure = { slug: string; reason: string }
@@ -362,6 +393,7 @@ export function buildWebhookDigest(opts: {
   windowLabel?: string    // human label for the query window
   importHealth?: ImportHealthInput   // import pipeline health (item 2/3)
   rateHealth?: RateHealthDigestInput // blank-rate hold rollup (lib/rate-health)
+  bookingLinkHealth?: BookingLinkHealthDigestInput // missing-link hold rollup (lib/booking-link-health)
 }): WebhookDigest {
   const { appUrl } = opts
   const windowLabel = opts.windowLabel || 'last 3h'
@@ -372,8 +404,11 @@ export function buildWebhookDigest(opts: {
 
   const imp = buildImportHealthSection(opts.importHealth, windowLabel)
   const rate = buildRateHealthSection(opts.rateHealth)
+  const booking = buildBookingLinkHealthSection(opts.bookingLinkHealth)
 
-  const realProblems = leadsFailed + jobberDidntLand + (imp.hasProblems ? 1 : 0) + (rate.hasProblems ? 1 : 0)
+  const realProblems =
+    leadsFailed + jobberDidntLand +
+    (imp.hasProblems ? 1 : 0) + (rate.hasProblems ? 1 : 0) + (booking.hasProblems ? 1 : 0)
   const allClear = realProblems === 0
 
   // Suppress a quiet window OR a self-heal-only window: nothing landed and
@@ -387,7 +422,8 @@ export function buildWebhookDigest(opts: {
     c.jobberLanded === 0 &&
     jobberDidntLand === 0 &&
     !imp.hasProblems &&
-    !rate.hasProblems
+    !rate.hasProblems &&
+    !booking.hasProblems
 
   // ── headline (real problems only) ──────────────────────────
   let headline: string
@@ -403,6 +439,7 @@ export function buildWebhookDigest(opts: {
     if (imp.failedCount > 0) parts.push(`${plural(imp.failedCount, 'import')} FAILED`)
     if (imp.stalledCount > 0) parts.push(`${plural(imp.stalledCount, 'import')} STALLED`)
     if (rate.missingCount > 0) parts.push(`${plural(rate.missingCount, 'location')} on rate-quoting paths with NO RATE (sends held)`)
+    if (booking.missingCount > 0) parts.push(`${plural(booking.missingCount, 'location')} on booking paths with NO LINK (sends held)`)
     headline = `:warning: ${parts.join(' + ')} — check`
   }
 
@@ -467,6 +504,8 @@ export function buildWebhookDigest(opts: {
   const importBlock = imp.lines.length ? `${imp.lines.join('\n')}\n\n` : ''
   // Same rule for the blank-rate section: healthy → invisible.
   const rateBlock = rate.lines.length ? `${rate.lines.join('\n')}\n\n` : ''
+  // Same rule for the missing-booking-link section: healthy → invisible.
+  const bookingBlock = booking.lines.length ? `${booking.lines.join('\n')}\n\n` : ''
 
   const text =
     `${headline}\n\n` +
@@ -474,6 +513,7 @@ export function buildWebhookDigest(opts: {
     `${jobberLines.join('\n')}\n\n` +
     importBlock +
     rateBlock +
+    bookingBlock +
     `<${link}|Open the webhook dashboard>`
 
   return {
@@ -491,6 +531,7 @@ export function buildWebhookDigest(opts: {
     importStalled: imp.stalledCount,
     importOriginGated: imp.originGated,
     rateMissing: rate.missingCount,
+    bookingLinkMissing: booking.missingCount,
     text,
   }
 }

@@ -71,6 +71,7 @@ interface SendEmailDirectArgs extends NotificationContext {
 //   service_area         "City, State" from location  (legacy)
 //   owner_name           lead.assigned_to hub_user.full_name
 //   owner_first_name     first word of owner_name
+//   owner_booking_link   assignee's booking_link → location owner's → calendar_link
 //   location_owner_name  location's owner-role hub_user.full_name
 //   rate_per_hour        location.rate_per_hour
 //   location_phone       location.phone (no fallback — alias used by new templates)
@@ -86,6 +87,10 @@ export interface RenderContext {
   service_area?: string | null
   owner_name?: string | null
   owner_first_name?: string | null
+  // Per-assignee scheduling link (lib/booking-link). Resolves through
+  // assignee → location primary owner → locations.calendar_link, so it is
+  // never worse than the location-level aliases below.
+  owner_booking_link?: string | null
   location_owner_name?: string | null
   rate_per_hour?: string | null
   location_phone?: string | null
