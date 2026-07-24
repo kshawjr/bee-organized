@@ -49,6 +49,7 @@ import AskBeeHubPanel from "@/components/hive/AskBeeHubPanel"
 // statically like betaGate; it pulls no beta-chunk surface code with it.
 import { IconBug, IconBulb, IconPlus, IconPaperclip, IconMessage } from "@/components/ui/icons"
 import AdminNotificationsScreen from "@/components/admin/AdminNotificationsScreen"
+import SystemHealthScreen from "@/components/admin/SystemHealthScreen"
 // Phase 1 beta surfaces are DYNAMIC imports only (ssr:false) — separate
 // chunk, loaded when the toggle flips. A crash in beta code must never
 // reach the main bundle (two all-user incident scares on 2026-07-03).
@@ -31049,6 +31050,10 @@ function SuperAdminLayout({
     {
       header: 'Operations',
       items: [
+        // System Health — verdict-first cross-location health + activity
+        // summary. Same gate as Feedback (super_admin + corporate + admin);
+        // the /api/admin/system-health route re-checks it server-side.
+        ...(showFeedback ? [{ key:'health', label:'System Health', icon:'🩺' }] : []),
         { key:'locations', label:'Locations', icon:'🏢' },
         ...(showFeedback ? [{ key:'feedback', label:'Feedback', icon:'🐛', badge:feedbackPending }] : []),
         { key:'users', label:'Users', icon:'👥' },
@@ -31093,6 +31098,7 @@ function SuperAdminLayout({
 
   const SECTION_META = {
     dashboard:   { label:'Dashboard',      cluster:null           },
+    health:      { label:'System Health',  cluster:'Operations'   },
     locations:   { label:'Locations',      cluster:'Operations'   },
     users:       { label:'Users',          cluster:'Operations'   },
     feedback:    { label:'Feedback',       cluster:'Operations'   },
@@ -31336,6 +31342,16 @@ function SuperAdminLayout({
           // header, so no serif h1 here.
           <div style={{ padding:'14px 8px 48px' }}>
             <AdminNotificationsScreen locations={locations} />
+          </div>
+        )
+
+      case 'health':
+        return (
+          // Same wrapper as Notifications — the screen carries its own header.
+          // onNavigate lets its deep-dive links jump to Jobber Health /
+          // Feedback; role gates the super_admin-only Jobber link.
+          <div style={{ padding:'14px 8px 48px' }}>
+            <SystemHealthScreen onNavigate={navigateTo} role={role} />
           </div>
         )
 
@@ -33555,6 +33571,9 @@ export default function App({
       // Feedback is a broader surface than webhooks — both elevated roles,
       // mirroring the legacy AdminScreen showFeedbackTab gate.
       else if (t === 'feedback' && (role === 'super_admin' || role === 'corporate')) setAdminDeepLinkSection('feedback')
+      // System Health — same elevated gate as Feedback (super_admin + admin/
+      // corporate). The digest's Slack liveness link can land here.
+      else if (t === 'health' && (role === 'super_admin' || role === 'corporate')) setAdminDeepLinkSection('health')
     } catch {}
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [viewAsTarget, setViewAsTarget]     = useState(null)

@@ -38,6 +38,7 @@ import { fetchRateHealth } from '@/lib/rate-health'
 import { fetchBookingLinkHealth } from '@/lib/booking-link-health'
 import { resolveInternalOrigin, probeInternalOriginGated } from '@/lib/internal-origin'
 import { postSlackMessage } from '@/lib/slack'
+import { recordDigestRun } from '@/lib/digest-runs'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -124,11 +125,18 @@ export async function GET(req: NextRequest) {
     console.log(
       `[cron webhook-digest] window=3h suppressed (quiet window) self_heals=${digest.selfHeals}`,
     )
+    // Persist the heartbeat even when nothing is posted — a quiet window is
+    // still proof the cron is alive. Fail-soft (never throws, no-ops
+    // pre-migration).
+    await recordDigestRun(digest, { ok: false })
     return NextResponse.json({ ok: true, posted: false, suppressed: true })
   }
 
   // ─── Post ──────────────────────────────────────────────────────
   const post = await postSlackMessage(digest.text)
+  // Record the run regardless of the Slack outcome — the row is the liveness
+  // proof, and a post failure is itself worth capturing (posted:false).
+  await recordDigestRun(digest, { ok: post.ok, skipped: post.skipped })
   if (!post.ok && post.error) {
     // Slack itself errored (bad URL, 4xx/5xx) — surface as a failure so
     // it shows up in Vercel's cron logs.
