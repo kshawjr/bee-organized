@@ -90,6 +90,13 @@ select{-webkit-appearance:none}
  * — the beta-hive-tokens small-action-type test fails if they drift. */
 .bee-small-action { font-size: 12px !important }
 
+/* bee-chip-action — the MID release stop (#79 Ask Bee Hub). The panel's
+ * suggestion chips are buttons carrying question COPY for a 45-65
+ * audience: the 16px floor renders them oversized, but the 12px
+ * small-action release is chrome-sized — too small for content. 13.5px
+ * sits between body copy and chrome. */
+.bee-chip-action { font-size: 13.5px !important }
+
 /* ── BeeLoader (components/hive/shared/BeeLoader.jsx) ───────────────────────
    These live HERE rather than in shared/motion.jsx's effect-injected block for
    one reason: app/loading.tsx is streamed as HTML before any JavaScript has
