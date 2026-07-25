@@ -71,9 +71,12 @@ export type ManageableRecipients = {
 
 // A flat, send-ready recipient (what B2 fans out over). 'zoho' recipients come
 // from a location's Zoho Contacts related list — the fallback for locations
-// with no in-interface recipients (see resolveLeadRecipients).
+// with no in-interface recipients (see resolveLeadRecipients). 'global_cc'
+// recipients come from the tenant-wide oversight list (resolveGlobalCcRecipients)
+// and are merged by notifyNewLead AFTER routing — they never flow through
+// resolveLeadRecipients.
 export type EffectiveRecipient = {
-  source: 'user' | 'external' | 'zoho'
+  source: 'user' | 'external' | 'zoho' | 'global_cc'
   hub_user_id: string | null
   name: string
   email: string
@@ -429,4 +432,77 @@ async function resolveZohoRecipients(
     )
   }
   return out
+}
+
+// ── Global CC (corporate oversight) ─────────────────────────────────────────
+// Addresses that receive EVERY lead notification at EVERY live location —
+// lead_notification_global_cc (migrations/lead_notification_global_cc.sql,
+// HELD until Kevin runs it). Distinct from lead_notification_externals
+// (location-keyed): this list is tenant-wide, carries NO category, and is
+// IMMUNE to split-notification routing by definition. That immunity is WHY it
+// lives here as its own resolver instead of joining resolveBaseLeadRecipients:
+// anything in the base list flows through filterRecipientsByProjectType when a
+// location's split toggle is ON (and participates in the Zoho-fallback and
+// never-drop decisions), exactly where a global observer must not participate.
+// notifyNewLead merges this list AFTER resolveLeadRecipients has finished
+// routing — and after the notifications_live gate, so a muted location sends
+// nothing to anyone, global CC included.
+//
+// hub_user match: a global CC whose address belongs to an ACTIVE hub_user
+// (disabled_at null) gets hub_user_id set. notifyNewLead reads that to hand
+// them the with-button variant — they can open the record; an account-less or
+// disabled address would only hit a login it can never pass.
+//
+// FAIL-SOFT BY CONTRACT: any failure — table not yet migrated, read error,
+// thrown client — returns []. Losing corporate visibility must never cost a
+// location owner their lead alert. Pre-migration this warns once per send;
+// the noise disappears the day the DDL runs.
+export async function resolveGlobalCcRecipients(): Promise<EffectiveRecipient[]> {
+  try {
+    const res = await supabaseService
+      .from('lead_notification_global_cc')
+      .select('email, name, active')
+      .eq('active', true)
+    if ((res as any)?.error) {
+      console.warn(
+        `[notification-recipients] global CC read failed (${(res as any).error.message}) — continuing without global CC`,
+      )
+      return []
+    }
+    const rows = (res.data || []).filter((r: any) => r.email && String(r.email).trim())
+    if (rows.length === 0) return []
+
+    // Active-account match, in JS by lowercased email — hub_users is tiny and
+    // a SQL .in() would be case-sensitive. A failed lookup degrades to "treat
+    // as account-less" (details, no dead-end button) — never a lost send.
+    const hubByEmail = new Map<string, string>()
+    try {
+      const hub = await supabaseService
+        .from('hub_users')
+        .select('id, email, disabled_at')
+      for (const u of hub.data || []) {
+        if (u.email && !u.disabled_at) {
+          hubByEmail.set(String(u.email).trim().toLowerCase(), u.id)
+        }
+      }
+    } catch {
+      // Swallowed: match failure must not cost the CC their email.
+    }
+
+    return rows.map((r: any) => {
+      const email = String(r.email).trim()
+      return {
+        source: 'global_cc' as const,
+        hub_user_id: hubByEmail.get(email.toLowerCase()) ?? null,
+        name: r.name || email,
+        email,
+        category: DEFAULT_CATEGORY,
+      }
+    })
+  } catch (err: any) {
+    console.warn(
+      `[notification-recipients] global CC resolution threw (${err?.message}) — continuing without global CC`,
+    )
+    return []
+  }
 }

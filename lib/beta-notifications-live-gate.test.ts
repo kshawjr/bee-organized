@@ -26,12 +26,14 @@ const sendEmailDirectMock = vi.hoisted(() =>
   vi.fn(async () => ({ success: true, id: 'email-abc' })),
 )
 const resolveRecipientsMock = vi.hoisted(() => vi.fn(async () => [] as any[]))
+const resolveGlobalCcMock = vi.hoisted(() => vi.fn(async () => [] as any[]))
 const logNotificationMock = vi.hoisted(() => vi.fn(async () => {}))
 const gateMock = vi.hoisted(() => vi.fn(async () => ({ live: true }) as any))
 
 vi.mock('@/lib/resend', () => ({ sendEmailDirect: sendEmailDirectMock }))
 vi.mock('@/lib/notification-recipients', () => ({
   resolveLeadRecipients: resolveRecipientsMock,
+  resolveGlobalCcRecipients: resolveGlobalCcMock,
 }))
 vi.mock('@/lib/notifications-live', () => ({ resolveNotificationsLive: gateMock }))
 // Mocked to observe the muted row — and for the same hard reason the other node
@@ -85,7 +87,9 @@ describe('notifyNewLead — notifications_live gate', () => {
     const res = await notifyNewLead({
       location: LOCATION, lead: LEAD, locationSlug: 'loc_portland',
     })
-    expect(sendEmailDirectMock).toHaveBeenCalledTimes(1)
+    // SEEDED is one hub_user + one external → since #72, one send PER VARIANT
+    // (with-button to the user, no-access to the external).
+    expect(sendEmailDirectMock).toHaveBeenCalledTimes(2)
     expect(res).toMatchObject({ sent: true, recipientCount: 2 })
     expect(res.muted).toBeUndefined()
   })
@@ -122,10 +126,13 @@ describe('notifyNewLead — notifications_live gate', () => {
   // Ordering, not just outcome: resolveLeadRecipients falls through to Zoho for
   // all 44 onboarding locations (none have hub_users owners). Gating after it
   // would fire that API call per lead to build a list we've already discarded.
-  it('a muted location never resolves recipients — no Zoho lookup', async () => {
+  it('a muted location never resolves recipients — no Zoho lookup, no global CC', async () => {
     gateMock.mockResolvedValue({ live: false, reason: 'muted' })
     await notifyNewLead({ location: LOCATION, lead: LEAD })
     expect(resolveRecipientsMock).not.toHaveBeenCalled()
+    // A muted location sends NOTHING to anyone — global CC included, or Bee Hub
+    // double-notifies corporate alongside Zoho at every muted location.
+    expect(resolveGlobalCcMock).not.toHaveBeenCalled()
   })
 
   it('a fail-closed read records WHY, so a missing column is not mistaken for a mute', async () => {
