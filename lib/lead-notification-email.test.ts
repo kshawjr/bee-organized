@@ -1,26 +1,21 @@
 // @vitest-environment node
 // B2 — new-lead notification email (lib/lead-notification-email.ts).
 //
-// Pins:
-//   • TWO VARIANTS, up to two sendEmailDirect calls per lead — the with-button
-//     email (email_kind 'lead_notification') to hub-account recipients, the
-//     no-button email + notice line ('lead_notification_no_access') to
-//     everyone else. Each variant is ONE message to its whole partition, never
-//     a per-recipient loop, and the partitions are address-disjoint.
-//   • Global CC rides a visible CC on the matching variant (button iff the
-//     address has an active account), is dropped by the mute gate like everyone
-//     else, and its resolution failing never blocks the location send.
+// Pins (#82 collapsed the #72 two-variant split back to a single send):
+//   • ONE sendEmailDirect call per lead (email_kind 'lead_notification'),
+//     addressed to every recipient — never a per-recipient loop. Everyone gets
+//     the "Open this lead in Bee Hub" button, account or not.
+//   • Global CC rides a visible CC (#81), dropped by the mute gate like everyone
+//     else, its resolution failing never blocks the location send.
 //   • The email body (html + text) includes the captured lead fields:
 //     name, contact (email/phone), project type, request_details,
 //     preferred_contact.
-//   • Zero recipients across BOTH variants → NO send, no throw,
-//     sent:false / recipientCount:0. ONE empty partition is normal and mints
-//     no zero_recipients row.
+//   • Zero recipients (none at all) → NO send, no throw, sent:false /
+//     recipientCount:0, and exactly one zero_recipients row.
 //   • Category is NOT used to filter — a 'moving'/'organizing' recipient is
 //     notified the same as an 'all' recipient (this send goes to everyone
 //     subscribed).
-//   • Duplicate emails collapse to ONE recipient on ONE send, the with-button
-//     one when any colliding identity can open the record.
+//   • Duplicate emails collapse to ONE recipient on ONE send.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const sendEmailDirectMock = vi.hoisted(() =>
@@ -106,7 +101,7 @@ beforeEach(() => {
 })
 
 describe('notifyNewLead', () => {
-  it('splits mixed sources into TWO sends — button variant to hub accounts, no-access to the rest', async () => {
+  it('mixed sources → ONE send, everyone on to:, button for all (accounts AND account-less)', async () => {
     resolveMock.mockResolvedValue([
       recip('owner@biz.com'),
       recip('manager@biz.com', { category: 'moving' }),
@@ -119,26 +114,25 @@ describe('notifyNewLead', () => {
       baseUrl: 'https://hub.example.com',
     })
 
-    // One message PER VARIANT, never a per-recipient loop.
-    expect(sendEmailDirectMock).toHaveBeenCalledTimes(2)
-    const [buttonSend, plainSend] = sendEmailDirectMock.mock.calls.map((c: any) => c[0])
+    // ONE message to everyone — the collapse (#82). A test that sees two sends
+    // means the split didn't come out.
+    expect(sendEmailDirectMock).toHaveBeenCalledTimes(1)
+    const arg = sendEmailDirectMock.mock.calls[0][0]
 
-    expect(buttonSend.email_kind).toBe('lead_notification')
-    // Both users regardless of category (no category filtering here).
-    expect(buttonSend.to).toEqual(
-      expect.arrayContaining(['owner@biz.com', 'manager@biz.com']),
+    expect(arg.email_kind).toBe('lead_notification')
+    // Hub users AND the account-less external, all on the same to: line,
+    // regardless of category (no category filtering here).
+    expect(arg.to).toEqual(
+      expect.arrayContaining(['owner@biz.com', 'manager@biz.com', 'extra@biz.com']),
     )
-    expect(buttonSend.to).toHaveLength(2)
-    expect(buttonSend.html).toContain('Open this lead in Bee Hub')
+    expect(arg.to).toHaveLength(3)
+    expect(arg.cc).toBeUndefined()
+    // The button reaches everyone, including the account-less external.
+    expect(arg.html).toContain('Open this lead in Bee Hub')
 
-    expect(plainSend.email_kind).toBe('lead_notification_no_access')
-    expect(plainSend.to).toEqual(['extra@biz.com'])
-    expect(plainSend.html).not.toContain('Open this lead in Bee Hub')
-
-    // Address-disjoint partitions — the notification_log grain (one row per
-    // address per send, written in sendEmailDirect) depends on this.
-    const all = [...buttonSend.to, ...plainSend.to]
-    expect(new Set(all).size).toBe(all.length)
+    // Each address once — the notification_log grain (one row per address per
+    // send, written in sendEmailDirect) depends on this.
+    expect(new Set(arg.to).size).toBe(arg.to.length)
 
     expect(res.sent).toBe(true)
     expect(res.recipientCount).toBe(3)
@@ -268,7 +262,7 @@ describe('notifyNewLead', () => {
     })
   })
 
-  it('a person in BOTH hub_users and externals gets exactly ONE email — the with-button one', async () => {
+  it('a person in BOTH hub_users and externals gets exactly ONE email — one log row', async () => {
     resolveMock.mockResolvedValue([
       recip('shared@biz.com'),
       ext('shared@biz.com'),
@@ -281,8 +275,8 @@ describe('notifyNewLead', () => {
       baseUrl: 'https://hub.example.com',
     })
 
-    // The external twin collapsed into the user entry → the no-access
-    // partition emptied → ONE send, the button variant.
+    // The external twin collapsed into the user entry → the address appears
+    // once on the single send, so sendEmailDirect logs one row for it.
     expect(sendEmailDirectMock).toHaveBeenCalledTimes(1)
     const arg = sendEmailDirectMock.mock.calls[0][0]
     expect(arg.email_kind).toBe('lead_notification')
@@ -308,9 +302,9 @@ describe('notifyNewLead', () => {
   })
 })
 
-// ── #72: the no-access variant + global CC ──────────────────────────────────
-describe('notifyNewLead — two variants', () => {
-  it('an account-less-only location gets ONE no-access send: no button, notice line present', async () => {
+// ── #82: single send + identical footer line ────────────────────────────────
+describe('notifyNewLead — single send + footer', () => {
+  it('an account-less-only location still gets the button — plus the footer line, not the old #72 notice', async () => {
     resolveMock.mockResolvedValue([
       ext('ext@biz.com'),
       recip('zoho@biz.com', { source: 'zoho', hub_user_id: null }),
@@ -324,23 +318,23 @@ describe('notifyNewLead — two variants', () => {
 
     expect(sendEmailDirectMock).toHaveBeenCalledTimes(1)
     const arg = sendEmailDirectMock.mock.calls[0][0]
-    expect(arg.email_kind).toBe('lead_notification_no_access')
+    expect(arg.email_kind).toBe('lead_notification')
     expect(arg.to).toEqual(expect.arrayContaining(['ext@biz.com', 'zoho@biz.com']))
-    // No button, no deep link — even though a baseUrl WAS available. The
-    // target sits behind requireAuth; for these recipients it is a dead end.
-    expect(arg.html).not.toContain('Open this lead in Bee Hub')
-    expect(arg.html).not.toContain('/clients/lead-1')
-    expect(arg.text).not.toContain('/clients/lead-1')
-    // The added line, html + text. (The html assertion avoids apostrophes —
-    // escapeHtml renders them as &#39;.)
-    expect(arg.html).toContain('manage follow-up from Bee Hub')
-    expect(arg.text).toContain("don't yet have a Bee Hub account")
-    // The with-button variant's copy stays notice-free — pinned from the other
-    // side by the body test above (it asserts specific fields, and this line
-    // never appears there).
+    // The button reaches account-less recipients too — they hit a login they
+    // can't pass, and that's accepted (#82). The deep link IS present.
+    expect(arg.html).toContain('Open this lead in Bee Hub')
+    expect(arg.html).toContain('/clients/lead-1')
+    expect(arg.text).toContain('/clients/lead-1')
+    // The identical footer line, html + text. (The html assertion avoids the
+    // apostrophe — escapeHtml renders it as &#39;.)
+    expect(arg.html).toContain('Contact the corporate office to get set up')
+    expect(arg.text).toContain("Don't have Bee Hub access yet?")
+    // The old #72 no-access notice is GONE.
+    expect(arg.html).not.toContain('manage follow-up from Bee Hub')
+    expect(arg.text).not.toContain("don't yet have a Bee Hub account")
   })
 
-  it('the with-button variant carries NO notice line', async () => {
+  it('the footer line is IDENTICAL for a hub_user recipient — no per-account conditional', async () => {
     resolveMock.mockResolvedValue([recip('owner@biz.com')])
 
     await notifyNewLead({
@@ -351,27 +345,18 @@ describe('notifyNewLead — two variants', () => {
 
     const arg = sendEmailDirectMock.mock.calls[0][0]
     expect(arg.email_kind).toBe('lead_notification')
+    // Same footer line as the account-less case above — it does not vary by
+    // whether the recipient has an account. That sameness is what keeps this a
+    // single send.
+    expect(arg.html).toContain('Contact the corporate office to get set up')
+    expect(arg.text).toContain("Don't have Bee Hub access yet?")
+    // …and never the old #72 notice.
     expect(arg.html).not.toContain('manage follow-up from Bee Hub')
-    expect(arg.text).not.toContain('Bee Hub account')
-  })
-
-  it('one variant failing still reports the other as sent — with the error attached', async () => {
-    resolveMock.mockResolvedValue([recip('owner@biz.com'), ext('ext@biz.com')])
-    sendEmailDirectMock
-      .mockResolvedValueOnce({ success: true, id: 'email-1' })
-      .mockResolvedValueOnce({ success: false, error: 'resend down' })
-
-    const res = await notifyNewLead({ location: LOCATION, lead: LEAD })
-
-    expect(res.sent).toBe(true)
-    expect(res.emailId).toBe('email-1')
-    expect(res.error).toBe('resend down')
-    expect(res.recipientCount).toBe(2)
   })
 })
 
 describe('notifyNewLead — global CC', () => {
-  it('an account-less global CC rides a visible CC on the no-access send', async () => {
+  it('global CC rides a visible CC on the ONE send — location recipients on to, never bcc', async () => {
     resolveMock.mockResolvedValue([recip('owner@biz.com'), ext('ext@biz.com')])
     resolveGlobalCcMock.mockResolvedValue([cc('hq@bmave.com')])
 
@@ -381,18 +366,17 @@ describe('notifyNewLead — global CC', () => {
       baseUrl: 'https://hub.example.com',
     })
 
-    expect(sendEmailDirectMock).toHaveBeenCalledTimes(2)
-    const [buttonSend, plainSend] = sendEmailDirectMock.mock.calls.map((c: any) => c[0])
-    // On the CC line of the matching (no-account) variant, never bcc.
-    expect(buttonSend.to).toEqual(['owner@biz.com'])
-    expect(buttonSend.cc).toBeUndefined()
-    expect(buttonSend.bcc).toBeUndefined()
-    expect(plainSend.to).toEqual(['ext@biz.com'])
-    expect(plainSend.cc).toEqual(['hq@bmave.com'])
-    expect(plainSend.bcc).toBeUndefined()
+    // ONE send now (#82) — both location recipients on to, global CC on cc.
+    expect(sendEmailDirectMock).toHaveBeenCalledTimes(1)
+    const arg = sendEmailDirectMock.mock.calls[0][0]
+    expect(arg.email_kind).toBe('lead_notification')
+    expect(arg.to).toEqual(expect.arrayContaining(['owner@biz.com', 'ext@biz.com']))
+    expect(arg.to).toHaveLength(2)
+    expect(arg.cc).toEqual(['hq@bmave.com'])
+    expect(arg.bcc).toBeUndefined()
   })
 
-  it('a global CC who IS an active hub_user rides a visible CC on the BUTTON send — still one email', async () => {
+  it('a global CC who IS an active hub_user still rides CC — one email, one row', async () => {
     resolveMock.mockResolvedValue([recip('owner@biz.com')])
     resolveGlobalCcMock.mockResolvedValue([cc('hq@bmave.com', { hub_user_id: 'hu-1' })])
 
@@ -406,16 +390,17 @@ describe('notifyNewLead — global CC', () => {
     const arg = sendEmailDirectMock.mock.calls[0][0]
     expect(arg.email_kind).toBe('lead_notification')
     expect(arg.to).toEqual(['owner@biz.com'])
+    // global_cc always rides cc, account or not — the address is not ALSO a
+    // location recipient here, so it stays on cc.
     expect(arg.cc).toEqual(['hq@bmave.com'])
     expect(arg.bcc).toBeUndefined()
     expect(arg.html).toContain('Open this lead in Bee Hub')
   })
 
-  it('with BOTH variants firing, the cc rides each — one address per cc line', async () => {
-    // A hub_user (button/To) + an external (no-account/To) make both variants
-    // fire; a global CC with an account (button/CC) and one without
-    // (no-account/CC) put a visible cc on EACH send. One message per variant —
-    // never a per-recipient loop — so sendEmailDirect logs one row per address.
+  it('both types at one location → ONE send, both addresses on to:, global CC on cc', async () => {
+    // A hub_user + an external both ride the To line; two global CCs ride the
+    // CC line. This is the both-types case: a test that sees two sends means
+    // the collapse didn't land. One message → sendEmailDirect logs one row each.
     resolveMock.mockResolvedValue([recip('owner@biz.com'), ext('ext@biz.com')])
     resolveGlobalCcMock.mockResolvedValue([
       cc('hq-user@bmave.com', { hub_user_id: 'hu-1' }),
@@ -428,24 +413,20 @@ describe('notifyNewLead — global CC', () => {
       baseUrl: 'https://hub.example.com',
     })
 
-    expect(sendEmailDirectMock).toHaveBeenCalledTimes(2)
-    const [buttonSend, plainSend] = sendEmailDirectMock.mock.calls.map((c: any) => c[0])
+    expect(sendEmailDirectMock).toHaveBeenCalledTimes(1)
+    const arg = sendEmailDirectMock.mock.calls[0][0]
+    expect(arg.email_kind).toBe('lead_notification')
+    expect(arg.to).toEqual(expect.arrayContaining(['owner@biz.com', 'ext@biz.com']))
+    expect(arg.to).toHaveLength(2)
+    expect(arg.cc).toEqual(expect.arrayContaining(['hq-user@bmave.com', 'hq-plain@bmave.com']))
+    expect(arg.cc).toHaveLength(2)
+    expect(arg.bcc).toBeUndefined()
 
-    expect(buttonSend.email_kind).toBe('lead_notification')
-    expect(buttonSend.to).toEqual(['owner@biz.com'])
-    expect(buttonSend.cc).toEqual(['hq-user@bmave.com'])
-    expect(buttonSend.bcc).toBeUndefined()
-
-    expect(plainSend.email_kind).toBe('lead_notification_no_access')
-    expect(plainSend.to).toEqual(['ext@biz.com'])
-    expect(plainSend.cc).toEqual(['hq-plain@bmave.com'])
-    expect(plainSend.bcc).toBeUndefined()
-
-    // Every address counted once, across both variants' to + cc.
+    // Every address counted once, across to + cc.
     expect(res.recipientCount).toBe(4)
   })
 
-  it('a global CC who is ALSO a location external collapses to ONE entry, upgraded by their account', async () => {
+  it('a global CC who is ALSO a location external collapses to ONE entry, addressed on to', async () => {
     resolveMock.mockResolvedValue([ext('hq@bmave.com')])
     resolveGlobalCcMock.mockResolvedValue([cc('hq@bmave.com', { hub_user_id: 'hu-1' })])
 
@@ -455,9 +436,8 @@ describe('notifyNewLead — global CC', () => {
       baseUrl: 'https://hub.example.com',
     })
 
-    // One person, one email — the with-button one (their account wins), and
-    // with no franchise To line, the CC-only list is promoted onto To (Resend
-    // requires a non-empty `to`).
+    // One person, one email. The location entry outranks the global CC, so the
+    // address is addressed once — on To, never duplicated onto CC.
     expect(sendEmailDirectMock).toHaveBeenCalledTimes(1)
     const arg = sendEmailDirectMock.mock.calls[0][0]
     expect(arg.email_kind).toBe('lead_notification')
@@ -467,7 +447,7 @@ describe('notifyNewLead — global CC', () => {
     expect(res.recipientCount).toBe(1)
   })
 
-  it('a location with ZERO recipients of its own still sends to global CC — and logs no zero_recipients row', async () => {
+  it('ONLY global CC → promoted onto to, cc undefined; no zero_recipients row', async () => {
     resolveMock.mockResolvedValue([])
     resolveGlobalCcMock.mockResolvedValue([cc('hq@bmave.com')])
 
@@ -475,9 +455,9 @@ describe('notifyNewLead — global CC', () => {
 
     expect(sendEmailDirectMock).toHaveBeenCalledTimes(1)
     const arg = sendEmailDirectMock.mock.calls[0][0]
-    expect(arg.email_kind).toBe('lead_notification_no_access')
-    // ONLY global CC → no franchise To line, so the cc list is promoted onto
-    // To (Resend rejects an empty `to`). Nothing is left on cc.
+    expect(arg.email_kind).toBe('lead_notification')
+    // ONLY global CC → no location To line, so the cc list is promoted onto To
+    // (Resend rejects an empty `to`). Nothing is left on cc.
     expect(arg.to).toEqual(['hq@bmave.com'])
     expect(arg.cc).toBeUndefined()
     expect(arg.bcc).toBeUndefined()

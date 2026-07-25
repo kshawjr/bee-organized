@@ -87,9 +87,9 @@ describe('notifyNewLead — notifications_live gate', () => {
     const res = await notifyNewLead({
       location: LOCATION, lead: LEAD, locationSlug: 'loc_portland',
     })
-    // SEEDED is one hub_user + one external → since #72, one send PER VARIANT
-    // (with-button to the user, no-access to the external).
-    expect(sendEmailDirectMock).toHaveBeenCalledTimes(2)
+    // SEEDED is one hub_user + one external → since #82 collapsed the variant
+    // split, that is ONE send to both (everyone gets the button).
+    expect(sendEmailDirectMock).toHaveBeenCalledTimes(1)
     expect(res).toMatchObject({ sent: true, recipientCount: 2 })
     expect(res.muted).toBeUndefined()
   })

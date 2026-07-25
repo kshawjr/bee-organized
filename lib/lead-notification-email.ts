@@ -8,14 +8,14 @@
 // subscribed interface users + all externals, unsubscribed users excluded,
 // no-pref users defaulting to subscribed/'all'.
 //
-// TWO VARIANTS, up to two Resend messages per lead — never a per-recipient
-// loop. Hub-account recipients get the "Open this lead in Bee Hub" deep-link
-// button; account-less recipients (externals, Zoho contacts, account-less
-// global CC) get the same information with the button omitted and a one-line
-// notice instead — the deep link sits behind requireAuth, so for them the
-// button is a login they can never pass. Project-type routing (when the
-// location's split-notifications toggle is ON) is applied inside
-// resolveLeadRecipients, which is handed the lead below.
+// ONE email per lead — a single Resend message addressed to every recipient,
+// never a per-recipient loop. Everyone gets the same "Open this lead in Bee
+// Hub" deep-link button; account-less recipients (externals, Zoho contacts,
+// account-less global CC) land on a login they can't pass, and that is
+// accepted — a footer line points them at the corporate office to get set up.
+// (#82 collapsed the #72 two-variant split back to this single send.)
+// Project-type routing (when the location's split-notifications toggle is ON)
+// is applied inside resolveLeadRecipients, which is handed the lead below.
 //
 // GLOBAL CC (corporate oversight) — resolveGlobalCcRecipients() — is merged
 // here, AFTER the gate and AFTER routing, and rides a visible CC so recipients
@@ -52,12 +52,10 @@ import { resolveNotificationsLive } from './notifications-live'
 // than passed by callers: this function IS the lead notification, so deriving
 // the label here means all three call sites (intake / leads / transfer) are
 // correct by construction and a new caller can't mislabel its rows.
-// The no-access variant gets its own kind so the notebook can answer "did the
-// account-less people get it" with one filter. Per-lead rows that precede the
-// variant split (muted / zero_recipients / resolution failure) keep the base
-// kind — they describe the lead's notification as a whole, not one variant.
+// #82 collapsed the two variants back to a single send, so there is again ONE
+// kind. The historical 'lead_notification_no_access' rows #72 wrote stay in
+// notification_log untouched — they are not migrated or deleted.
 const LEAD_NOTIFICATION_KIND = 'lead_notification'
-const LEAD_NOTIFICATION_NO_ACCESS_KIND = 'lead_notification_no_access'
 
 // System sender for lead notifications. notifications@beeorganized.com sends
 // on the same verified domain (beeorganized.com) that admin@ already uses for
@@ -112,29 +110,24 @@ function escapeHtml(s: string): string {
 const dash = (v: string | null | undefined): string =>
   v && v.trim() ? v.trim() : '—'
 
-// The one line the no-access variant adds. Operational in tone, no onboarding
-// pitch — copy is Kevin's, verbatim from #72.
-const NO_ACCESS_NOTICE =
-  "You're receiving the details here because you don't yet have a Bee Hub " +
-  "account. Once you're set up, you'll be able to open the lead, log calls, " +
-  'and manage follow-up from Bee Hub.'
+// One line in the footer block, IDENTICAL for every recipient — no conditional
+// on whether they have an account. That sameness is exactly what keeps this a
+// single send (#82): the email can't diverge by audience, so there's nothing to
+// split on. Copy is Kevin's, verbatim.
+const NO_ACCESS_FOOTER =
+  "Don't have Bee Hub access yet? Contact the corporate office to get set up."
 
 function buildLeadNotificationEmail(args: {
   lead: NewLeadForNotification
   locationName: string
   // Absolute deep-link to the lead in Bee Hub (/clients/<id>). Null when no
   // base URL is available (e.g. a caller without a request origin) — the
-  // button is simply omitted, the rest of the email is unchanged.
+  // button is simply omitted, the rest of the email is unchanged. Everyone who
+  // gets the email gets the button; account-less recipients hit a login they
+  // can't pass, which the footer line addresses.
   leadUrl: string | null
-  // 'account' — today's email, deep-link button included (when leadUrl exists).
-  // 'no_account' — button omitted REGARDLESS of leadUrl (the target is behind
-  // requireAuth, a dead end for these recipients) and the NO_ACCESS_NOTICE
-  // rendered in the footer block. One flag drives both so the two can never be
-  // mis-combined into a buttonless-but-noticeless (or button-AND-notice) email.
-  variant: 'account' | 'no_account'
 }): { subject: string; html: string; text: string } {
-  const { lead, locationName, variant } = args
-  const leadUrl = variant === 'account' ? args.leadUrl : null
+  const { lead, locationName, leadUrl } = args
   const leadName = dash(lead.name)
 
   const subject = `New lead: ${leadName} — ${locationName}`
@@ -197,12 +190,8 @@ function buildLeadNotificationEmail(args: {
             </tr>
             <tr>
               <td style="padding:16px 32px 24px;border-top:1px solid rgba(0,0,0,0.06);">
-                ${
-                  variant === 'no_account'
-                    ? `<p style="margin:0 0 10px;font-size:12px;line-height:1.55;color:#4a5e5a;">${escapeHtml(NO_ACCESS_NOTICE)}</p>
-                `
-                    : ''
-                }<p style="margin:0;font-size:11px;color:#8a9e9a;">Sent by Bee Organized · You're receiving this because you're set to get new-lead notifications for ${escapeHtml(locationName)}.</p>
+                <p style="margin:0 0 10px;font-size:12px;line-height:1.55;color:#4a5e5a;">${escapeHtml(NO_ACCESS_FOOTER)}</p>
+                <p style="margin:0;font-size:11px;color:#8a9e9a;">Sent by Bee Organized · You're receiving this because you're set to get new-lead notifications for ${escapeHtml(locationName)}.</p>
               </td>
             </tr>
           </table>
@@ -225,10 +214,9 @@ function buildLeadNotificationEmail(args: {
   if (leadUrl) {
     textLines.push('', `Open this lead in Bee Hub: ${leadUrl}`)
   }
-  if (variant === 'no_account') {
-    textLines.push('', NO_ACCESS_NOTICE)
-  }
   textLines.push(
+    '',
+    NO_ACCESS_FOOTER,
     '',
     '—',
     `Bee Organized · new-lead notifications for ${locationName}`,
@@ -237,11 +225,10 @@ function buildLeadNotificationEmail(args: {
   return { subject, html, text: textLines.join('\n') }
 }
 
-// Resolve the location's recipients (+ global CC), partition by whether each
-// address can open the record, and send up to TWO emails — the with-button
-// variant to hub accounts, the no-button variant to everyone else. Non-
-// throwing: returns a result object the caller can log/collect as a warning.
-// Zero recipients across BOTH variants is a normal outcome (sent:false,
+// Resolve the location's recipients (+ global CC), dedupe, and send ONE email
+// with the button to everyone. Location recipients ride the To line; global CC
+// rides a visible CC. Non-throwing: returns a result object the caller can
+// log/collect as a warning. Zero recipients is a normal outcome (sent:false,
 // recipientCount:0) — logged quietly, never an error.
 export async function notifyNewLead(args: {
   location: NotifyLocation
@@ -345,27 +332,28 @@ export async function notifyNewLead(args: {
     )
   }
 
-  // ── Collapse + partition ──────────────────────────────────────────────────
-  // One person, ONE email, best variant — decided before anything is
-  // addressed. Same twin-collapse rule as filterRecipientsByProjectType (a
-  // hub_user entry outranks an external for a shared address), extended across
-  // the global CC list and ranked by what the address receives and where it
-  // rides:
+  // ── Collapse + place ──────────────────────────────────────────────────────
+  // One person, ONE address, ONE email. Same twin-collapse rule as
+  // filterRecipientsByProjectType (a hub_user entry outranks an external for a
+  // shared address), extended across the global CC list. Rank decides only WHO
+  // wins a collision; placement (To vs CC) is decided afterwards from the
+  // surviving entry's source:
   //
-  //   3  location hub_user            → with-button, To
-  //   2  global CC w/ active account  → with-button, CC
-  //   1  location external / zoho     → no-button,  To
-  //   0  global CC, no account        → no-button,  CC
+  //   3  location hub_user        → To
+  //   2  location external / zoho → To
+  //   1  global CC                → CC
   //
+  // A location recipient always outranks a global CC, so an address that is
+  // both is addressed once, on the To line — never duplicated onto CC.
   // Case-INSENSITIVE on the lowercased address; the higher rank wins a
-  // collision (ties keep first-seen, preserving the first-seen casing). The
-  // four buckets are address-disjoint by construction, which is what keeps the
-  // notification_log — one row per address per send, written in
-  // sendEmailDirect — from ever double-logging a person reachable two ways.
+  // collision (ties keep first-seen, preserving the first-seen casing). Because
+  // every address survives exactly once, the notification_log grain — one row
+  // per address per send, written in sendEmailDirect — never double-logs a
+  // person reachable two ways.
   const rank = (r: EffectiveRecipient): number => {
     if (r.source === 'user') return 3
-    if (r.source === 'global_cc') return r.hub_user_id ? 2 : 0
-    return 1 // 'external' | 'zoho'
+    if (r.source === 'global_cc') return 1
+    return 2 // 'external' | 'zoho'
   }
   const at = new Map<string, number>()
   const people: EffectiveRecipient[] = []
@@ -382,16 +370,12 @@ export async function notifyNewLead(args: {
     }
   }
 
-  const buttonTo: string[] = []
-  const buttonCc: string[] = []
-  const plainTo: string[] = []
-  const plainCc: string[] = []
+  // Location recipients on To, global CC on a visible CC.
+  const to: string[] = []
+  const cc: string[] = []
   for (const p of people) {
-    const rk = rank(p)
-    if (rk === 3) buttonTo.push(p.email)
-    else if (rk === 2) buttonCc.push(p.email)
-    else if (rk === 1) plainTo.push(p.email)
-    else plainCc.push(p.email)
+    if (p.source === 'global_cc') cc.push(p.email)
+    else to.push(p.email)
   }
 
   if (people.length === 0) {
@@ -401,14 +385,13 @@ export async function notifyNewLead(args: {
       `[lead-notify] location ${location.id} (${locationName}) has zero lead-notification recipients — no email sent for lead ${lead.id}`,
     )
     // THE reason 'zero_recipients' exists as a distinct send_status, and it
-    // means NOBODY — both variants empty AND no global CC. One empty partition
-    // is a normal state (a location with only hub_users, or only externals)
-    // and must never mint a phantom zero-row. This path returns before
-    // sendEmailDirect, so it is the only place that can record it. Without
-    // this row, "nobody is subscribed at this location" would be
-    // indistinguishable in the notebook from "no lead came in" — and that is
-    // exactly the silent failure the log is meant to expose. recipient stays
-    // null: there was nobody to address.
+    // means NOBODY — no location recipients AND no global CC. Logged exactly
+    // ONCE here: this path returns before sendEmailDirect, so it is the only
+    // place that can record it, and there is a single send below so it can't
+    // race a resend-layer row. Without this row, "nobody is subscribed at this
+    // location" would be indistinguishable in the notebook from "no lead came
+    // in" — exactly the silent failure the log is meant to expose. recipient
+    // stays null: there was nobody to address.
     await logNotification({
       ...logContext,
       channel: 'email',
@@ -417,91 +400,49 @@ export async function notifyNewLead(args: {
     return { sent: false, recipientCount: 0 }
   }
 
-  // ── Up to TWO messages per lead, one per variant ──────────────────────────
-  // Each is a single Resend message addressed to its whole partition — never a
-  // per-recipient loop. Global CC rides a visible CC so recipients can see who
-  // else received the lead; when a variant has ONLY global CC recipients there
-  // is no franchise To line and Resend requires a non-empty `to`, so the CC
-  // list is promoted onto To (corporate is the only audience either way, so
-  // there is nothing on the To line that the CC placement was protecting).
+  // ── ONE message per lead ──────────────────────────────────────────────────
+  // A single Resend message addressed to the whole To line, with the global CC
+  // on a visible CC — never a per-recipient loop. When the ONLY recipients are
+  // global CC there is no location To line and Resend rejects an empty `to`, so
+  // the CC list is promoted onto To (corporate is the only audience either way,
+  // so there's nothing on the To line the CC placement was protecting). The CC
+  // key is passed only when non-empty, mirroring bcc, so a global-CC-less send
+  // is byte-identical to a plain to-only send.
   //
   // Reply-To is the prospect's email when captured so a recipient can reply
   // straight to them; otherwise the system inbox. The context rides along so
-  // the resend-layer hook writes one RICH row per recipient — with email_kind
-  // per VARIANT, so the notebook can answer "did the no-access people get it".
-  // sendEmailDirect does the actual logging; this module logs only the paths
-  // that never reach it.
-  const planned: {
-    kind: string
-    variant: 'account' | 'no_account'
-    to: string[]
-    cc: string[]
-  }[] = []
-  if (buttonTo.length || buttonCc.length) {
-    planned.push({
-      kind: LEAD_NOTIFICATION_KIND,
-      variant: 'account',
-      to: buttonTo.length ? buttonTo : buttonCc,
-      cc: buttonTo.length ? buttonCc : [],
-    })
-  }
-  if (plainTo.length || plainCc.length) {
-    planned.push({
-      kind: LEAD_NOTIFICATION_NO_ACCESS_KIND,
-      variant: 'no_account',
-      to: plainTo.length ? plainTo : plainCc,
-      cc: plainTo.length ? plainCc : [],
-    })
-  }
+  // the resend-layer hook writes one RICH row per recipient. sendEmailDirect
+  // does the actual logging; this module logs only the paths that never reach
+  // it (muted / zero_recipients / resolution failure).
+  const finalTo = to.length ? to : cc
+  const finalCc = to.length ? cc : []
 
-  const errors: string[] = []
-  let emailId: string | undefined
-  for (const send of planned) {
-    const { subject, html, text } = buildLeadNotificationEmail({
-      lead,
-      locationName,
-      leadUrl,
-      variant: send.variant,
-    })
-    const result = await sendEmailDirect({
-      from: NOTIFY_FROM_EMAIL,
-      fromName: NOTIFY_FROM_NAME,
-      replyTo: lead.email?.trim() || NOTIFY_REPLY_TO_EMAIL,
-      to: send.to,
-      ...(send.cc.length ? { cc: send.cc } : {}),
-      subject,
-      html,
-      text,
-      ...logContext,
-      email_kind: send.kind,
-    })
-    if (result.success) {
-      // First accepted id — NotifyResult keeps its single-emailId shape so the
-      // three call sites need no changes.
-      if (emailId === undefined) emailId = result.id
-    } else {
-      console.error(
-        `[lead-notify] ${send.kind} send failed for lead ${lead.id} (${send.to.length + send.cc.length} recipients): ${result.error}`,
-      )
-      errors.push(result.error)
-    }
-  }
+  const { subject, html, text } = buildLeadNotificationEmail({
+    lead,
+    locationName,
+    leadUrl,
+  })
+  const result = await sendEmailDirect({
+    from: NOTIFY_FROM_EMAIL,
+    fromName: NOTIFY_FROM_NAME,
+    replyTo: lead.email?.trim() || NOTIFY_REPLY_TO_EMAIL,
+    to: finalTo,
+    ...(finalCc.length ? { cc: finalCc } : {}),
+    subject,
+    html,
+    text,
+    ...logContext,
+  })
 
-  // recipientCount is everyone ADDRESSED (both variants, To + CC), same
-  // semantics as before the split. Partial failure — one variant accepted, one
-  // failed — reports sent:true WITH an error, so callers that warn on `error`
-  // surface it without any of them changing.
-  const error = errors.length ? errors.join('; ') : undefined
-  if (emailId === undefined) {
-    return { sent: false, recipientCount: people.length, error }
+  // recipientCount is everyone ADDRESSED (To + CC).
+  if (!result.success) {
+    console.error(
+      `[lead-notify] send failed for lead ${lead.id} (${people.length} recipients): ${result.error}`,
+    )
+    return { sent: false, recipientCount: people.length, error: result.error }
   }
   console.log(
-    `[lead-notify] sent lead ${lead.id} notification to ${people.length} recipient(s) across ${planned.length} message(s) for location ${location.id}`,
+    `[lead-notify] sent lead ${lead.id} notification to ${people.length} recipient(s) for location ${location.id}`,
   )
-  return {
-    sent: true,
-    recipientCount: people.length,
-    emailId,
-    ...(error ? { error } : {}),
-  }
+  return { sent: true, recipientCount: people.length, emailId: result.id }
 }
