@@ -18,9 +18,9 @@
 // resolveLeadRecipients, which is handed the lead below.
 //
 // GLOBAL CC (corporate oversight) — resolveGlobalCcRecipients() — is merged
-// here, AFTER the gate and AFTER routing, and rides BCC so the oversight list
-// never shows on a franchise recipient's To line. It is fail-soft end to end:
-// losing corporate visibility must never cost the owner their lead alert.
+// here, AFTER the gate and AFTER routing, and rides a visible CC so recipients
+// can see who else received the lead. It is fail-soft end to end: losing
+// corporate visibility must never cost the owner their lead alert.
 //
 // Sends via the SYSTEM sender (sendEmailDirect), mirroring team-invite /
 // magic-link emails — a pre-launch location may not have its per-location
@@ -353,9 +353,9 @@ export async function notifyNewLead(args: {
   // rides:
   //
   //   3  location hub_user            → with-button, To
-  //   2  global CC w/ active account  → with-button, BCC
+  //   2  global CC w/ active account  → with-button, CC
   //   1  location external / zoho     → no-button,  To
-  //   0  global CC, no account        → no-button,  BCC
+  //   0  global CC, no account        → no-button,  CC
   //
   // Case-INSENSITIVE on the lowercased address; the higher rank wins a
   // collision (ties keep first-seen, preserving the first-seen casing). The
@@ -383,15 +383,15 @@ export async function notifyNewLead(args: {
   }
 
   const buttonTo: string[] = []
-  const buttonBcc: string[] = []
+  const buttonCc: string[] = []
   const plainTo: string[] = []
-  const plainBcc: string[] = []
+  const plainCc: string[] = []
   for (const p of people) {
     const rk = rank(p)
     if (rk === 3) buttonTo.push(p.email)
-    else if (rk === 2) buttonBcc.push(p.email)
+    else if (rk === 2) buttonCc.push(p.email)
     else if (rk === 1) plainTo.push(p.email)
-    else plainBcc.push(p.email)
+    else plainCc.push(p.email)
   }
 
   if (people.length === 0) {
@@ -419,11 +419,11 @@ export async function notifyNewLead(args: {
 
   // ── Up to TWO messages per lead, one per variant ──────────────────────────
   // Each is a single Resend message addressed to its whole partition — never a
-  // per-recipient loop. Global CC rides BCC so the oversight list is invisible
-  // on the franchise To line; when a variant has ONLY global CC recipients
-  // there is no franchise To line to protect and Resend requires a non-empty
-  // `to`, so the BCC list is promoted onto To (corporate seeing corporate is
-  // not the exposure the BCC rule exists to prevent).
+  // per-recipient loop. Global CC rides a visible CC so recipients can see who
+  // else received the lead; when a variant has ONLY global CC recipients there
+  // is no franchise To line and Resend requires a non-empty `to`, so the CC
+  // list is promoted onto To (corporate is the only audience either way, so
+  // there is nothing on the To line that the CC placement was protecting).
   //
   // Reply-To is the prospect's email when captured so a recipient can reply
   // straight to them; otherwise the system inbox. The context rides along so
@@ -435,22 +435,22 @@ export async function notifyNewLead(args: {
     kind: string
     variant: 'account' | 'no_account'
     to: string[]
-    bcc: string[]
+    cc: string[]
   }[] = []
-  if (buttonTo.length || buttonBcc.length) {
+  if (buttonTo.length || buttonCc.length) {
     planned.push({
       kind: LEAD_NOTIFICATION_KIND,
       variant: 'account',
-      to: buttonTo.length ? buttonTo : buttonBcc,
-      bcc: buttonTo.length ? buttonBcc : [],
+      to: buttonTo.length ? buttonTo : buttonCc,
+      cc: buttonTo.length ? buttonCc : [],
     })
   }
-  if (plainTo.length || plainBcc.length) {
+  if (plainTo.length || plainCc.length) {
     planned.push({
       kind: LEAD_NOTIFICATION_NO_ACCESS_KIND,
       variant: 'no_account',
-      to: plainTo.length ? plainTo : plainBcc,
-      bcc: plainTo.length ? plainBcc : [],
+      to: plainTo.length ? plainTo : plainCc,
+      cc: plainTo.length ? plainCc : [],
     })
   }
 
@@ -468,7 +468,7 @@ export async function notifyNewLead(args: {
       fromName: NOTIFY_FROM_NAME,
       replyTo: lead.email?.trim() || NOTIFY_REPLY_TO_EMAIL,
       to: send.to,
-      ...(send.bcc.length ? { bcc: send.bcc } : {}),
+      ...(send.cc.length ? { cc: send.cc } : {}),
       subject,
       html,
       text,
@@ -481,13 +481,13 @@ export async function notifyNewLead(args: {
       if (emailId === undefined) emailId = result.id
     } else {
       console.error(
-        `[lead-notify] ${send.kind} send failed for lead ${lead.id} (${send.to.length + send.bcc.length} recipients): ${result.error}`,
+        `[lead-notify] ${send.kind} send failed for lead ${lead.id} (${send.to.length + send.cc.length} recipients): ${result.error}`,
       )
       errors.push(result.error)
     }
   }
 
-  // recipientCount is everyone ADDRESSED (both variants, To + BCC), same
+  // recipientCount is everyone ADDRESSED (both variants, To + CC), same
   // semantics as before the split. Partial failure — one variant accepted, one
   // failed — reports sent:true WITH an error, so callers that warn on `error`
   // surface it without any of them changing.

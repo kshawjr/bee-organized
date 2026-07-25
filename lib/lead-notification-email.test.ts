@@ -7,9 +7,9 @@
 //     no-button email + notice line ('lead_notification_no_access') to
 //     everyone else. Each variant is ONE message to its whole partition, never
 //     a per-recipient loop, and the partitions are address-disjoint.
-//   • Global CC rides BCC on the matching variant (button iff the address has
-//     an active account), is dropped by the mute gate like everyone else, and
-//     its resolution failing never blocks the location send.
+//   • Global CC rides a visible CC on the matching variant (button iff the
+//     address has an active account), is dropped by the mute gate like everyone
+//     else, and its resolution failing never blocks the location send.
 //   • The email body (html + text) includes the captured lead fields:
 //     name, contact (email/phone), project type, request_details,
 //     preferred_contact.
@@ -371,7 +371,7 @@ describe('notifyNewLead — two variants', () => {
 })
 
 describe('notifyNewLead — global CC', () => {
-  it('an account-less global CC rides BCC on the no-access send', async () => {
+  it('an account-less global CC rides a visible CC on the no-access send', async () => {
     resolveMock.mockResolvedValue([recip('owner@biz.com'), ext('ext@biz.com')])
     resolveGlobalCcMock.mockResolvedValue([cc('hq@bmave.com')])
 
@@ -383,14 +383,16 @@ describe('notifyNewLead — global CC', () => {
 
     expect(sendEmailDirectMock).toHaveBeenCalledTimes(2)
     const [buttonSend, plainSend] = sendEmailDirectMock.mock.calls.map((c: any) => c[0])
-    // Never on the franchise To line.
+    // On the CC line of the matching (no-account) variant, never bcc.
     expect(buttonSend.to).toEqual(['owner@biz.com'])
+    expect(buttonSend.cc).toBeUndefined()
     expect(buttonSend.bcc).toBeUndefined()
     expect(plainSend.to).toEqual(['ext@biz.com'])
-    expect(plainSend.bcc).toEqual(['hq@bmave.com'])
+    expect(plainSend.cc).toEqual(['hq@bmave.com'])
+    expect(plainSend.bcc).toBeUndefined()
   })
 
-  it('a global CC who IS an active hub_user rides BCC on the BUTTON send — still one email', async () => {
+  it('a global CC who IS an active hub_user rides a visible CC on the BUTTON send — still one email', async () => {
     resolveMock.mockResolvedValue([recip('owner@biz.com')])
     resolveGlobalCcMock.mockResolvedValue([cc('hq@bmave.com', { hub_user_id: 'hu-1' })])
 
@@ -404,8 +406,43 @@ describe('notifyNewLead — global CC', () => {
     const arg = sendEmailDirectMock.mock.calls[0][0]
     expect(arg.email_kind).toBe('lead_notification')
     expect(arg.to).toEqual(['owner@biz.com'])
-    expect(arg.bcc).toEqual(['hq@bmave.com'])
+    expect(arg.cc).toEqual(['hq@bmave.com'])
+    expect(arg.bcc).toBeUndefined()
     expect(arg.html).toContain('Open this lead in Bee Hub')
+  })
+
+  it('with BOTH variants firing, the cc rides each — one address per cc line', async () => {
+    // A hub_user (button/To) + an external (no-account/To) make both variants
+    // fire; a global CC with an account (button/CC) and one without
+    // (no-account/CC) put a visible cc on EACH send. One message per variant —
+    // never a per-recipient loop — so sendEmailDirect logs one row per address.
+    resolveMock.mockResolvedValue([recip('owner@biz.com'), ext('ext@biz.com')])
+    resolveGlobalCcMock.mockResolvedValue([
+      cc('hq-user@bmave.com', { hub_user_id: 'hu-1' }),
+      cc('hq-plain@bmave.com'),
+    ])
+
+    const res = await notifyNewLead({
+      location: LOCATION,
+      lead: LEAD,
+      baseUrl: 'https://hub.example.com',
+    })
+
+    expect(sendEmailDirectMock).toHaveBeenCalledTimes(2)
+    const [buttonSend, plainSend] = sendEmailDirectMock.mock.calls.map((c: any) => c[0])
+
+    expect(buttonSend.email_kind).toBe('lead_notification')
+    expect(buttonSend.to).toEqual(['owner@biz.com'])
+    expect(buttonSend.cc).toEqual(['hq-user@bmave.com'])
+    expect(buttonSend.bcc).toBeUndefined()
+
+    expect(plainSend.email_kind).toBe('lead_notification_no_access')
+    expect(plainSend.to).toEqual(['ext@biz.com'])
+    expect(plainSend.cc).toEqual(['hq-plain@bmave.com'])
+    expect(plainSend.bcc).toBeUndefined()
+
+    // Every address counted once, across both variants' to + cc.
+    expect(res.recipientCount).toBe(4)
   })
 
   it('a global CC who is ALSO a location external collapses to ONE entry, upgraded by their account', async () => {
@@ -419,12 +456,13 @@ describe('notifyNewLead — global CC', () => {
     })
 
     // One person, one email — the with-button one (their account wins), and
-    // with no franchise To line left to protect, the BCC-only list is promoted
-    // onto To (Resend requires a non-empty `to`).
+    // with no franchise To line, the CC-only list is promoted onto To (Resend
+    // requires a non-empty `to`).
     expect(sendEmailDirectMock).toHaveBeenCalledTimes(1)
     const arg = sendEmailDirectMock.mock.calls[0][0]
     expect(arg.email_kind).toBe('lead_notification')
     expect(arg.to).toEqual(['hq@bmave.com'])
+    expect(arg.cc).toBeUndefined()
     expect(arg.bcc).toBeUndefined()
     expect(res.recipientCount).toBe(1)
   })
@@ -438,7 +476,11 @@ describe('notifyNewLead — global CC', () => {
     expect(sendEmailDirectMock).toHaveBeenCalledTimes(1)
     const arg = sendEmailDirectMock.mock.calls[0][0]
     expect(arg.email_kind).toBe('lead_notification_no_access')
+    // ONLY global CC → no franchise To line, so the cc list is promoted onto
+    // To (Resend rejects an empty `to`). Nothing is left on cc.
     expect(arg.to).toEqual(['hq@bmave.com'])
+    expect(arg.cc).toBeUndefined()
+    expect(arg.bcc).toBeUndefined()
     expect(res.sent).toBe(true)
     expect(logNotificationMock).not.toHaveBeenCalled()
   })

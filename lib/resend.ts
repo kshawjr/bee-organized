@@ -48,12 +48,17 @@ interface SendEmailDirectArgs extends NotificationContext {
   fromName: string
   replyTo: string
   to: string | string[]
-  // Blind-carbon recipients. Used by the lead-notification global CC list so
-  // corporate oversight addresses never appear on a franchise recipient's To
-  // line. Logged exactly like To recipients — one notification_log row per
-  // address, sharing the message id — because a BCC'd address received the
-  // email just as really as an addressed one.
+  // Blind-carbon recipients. A general-purpose rail (no current caller after
+  // the lead-notification global CC moved to a visible cc — see below). Logged
+  // exactly like To recipients — one notification_log row per address, sharing
+  // the message id — because a BCC'd address received the email just as really
+  // as an addressed one.
   bcc?: string[]
+  // Visible carbon-copy recipients. Used by the lead-notification global CC
+  // list so corporate oversight addresses appear ON each recipient's copy —
+  // everyone can see who else received the lead. Logged exactly like To and BCC
+  // recipients — one notification_log row per address, sharing the message id.
+  cc?: string[]
   subject: string
   html: string
   text?: string
@@ -233,7 +238,7 @@ async function resolveProjectTypeSenderOverride(
 }
 
 export async function sendEmailDirect(args: SendEmailDirectArgs): Promise<SendResult> {
-  const { from, fromName, replyTo, to, bcc, subject, html, text } = args
+  const { from, fromName, replyTo, to, bcc, cc, subject, html, text } = args
 
   // THE hook point for the outbound-mail notebook (migrations/
   // notification_log.sql). Logging lives here rather than in any one feature so
@@ -250,11 +255,12 @@ export async function sendEmailDirect(args: SendEmailDirectArgs): Promise<SendRe
     location_slug: args.location_slug,
     email_kind: args.email_kind,
   }
-  // The notebook's grain covers EVERYONE the message reaches: To + BCC. A
-  // bcc-only view of a send would under-report it; a To-only view would hide
-  // the global CC rail entirely.
+  // The notebook's grain covers EVERYONE the message reaches: To + CC + BCC. A
+  // to-only view of a send would under-report it, hiding the global CC rail
+  // entirely; a cc/bcc-omitting view would do the same.
   const bccList = (bcc || []).filter(Boolean)
-  const recipients = [...(Array.isArray(to) ? to : [to]), ...bccList].filter(Boolean)
+  const ccList = (cc || []).filter(Boolean)
+  const recipients = [...(Array.isArray(to) ? to : [to]), ...ccList, ...bccList].filter(Boolean)
 
   // BELT AND BRACES. logNotification already swallows everything, so this
   // .catch() should be dead code — but the success-path log call below sits
@@ -300,6 +306,7 @@ export async function sendEmailDirect(args: SendEmailDirectArgs): Promise<SendRe
       from: `${fromName} <${from}>`,
       replyTo,
       to,
+      ...(ccList.length ? { cc: ccList } : {}),
       ...(bccList.length ? { bcc: bccList } : {}),
       subject,
       html,
