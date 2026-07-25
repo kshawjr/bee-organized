@@ -513,15 +513,17 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
           links here (View profile) rather than duplicating it. */}
       <PinnedBuzz notes={buzz} onPost={addBuzzNote} emptyLabel="Add a note about this client" nowMs={nowMs} readOnly={readOnly} />
 
-      {/* Request details — pre-Jobber people whose request hasn't founded
-          an engagement yet (the SAME field the Inbox edits and
-          foundEngagement seeds from). */}
-      {!jobberLinked && (
-        <div>
-          <MicroLabel>Request details</MicroLabel>
-          <EditableDesc text={c.request_details} showEmpty onSave={saveReqDetails} readOnly={readOnly} />
-        </div>
-      )}
+      {/* Request details — the SAME field the Inbox edits and
+          foundEngagement seeds from. ALL clients, Jobber-linked included
+          (#69): the old !jobberLinked gate was a pre-Jobber provenance
+          framing, but the field is first-class — Jobber never reads or
+          writes it (the import excludes it on both branches), so a manual
+          entry here is safe from sync, and PersonCard already edits it on
+          linked records. Empty → EditableDesc's dashed add-slot. */}
+      <div>
+        <MicroLabel>Request details</MicroLabel>
+        <EditableDesc text={c.request_details} showEmpty onSave={saveReqDetails} readOnly={readOnly} />
+      </div>
 
       {/* Engagements */}
       <div>
