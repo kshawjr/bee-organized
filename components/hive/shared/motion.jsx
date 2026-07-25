@@ -43,6 +43,8 @@ export function useReducedMotion() {
 
 // One-time keyframes injection (idempotent across mounts). Color-free —
 // transforms + opacity only, so no literal ever lands outside tokens.
+// Also home to the Ask Bee Hub companion-panel frames (beePanelRise /
+// beeSheetUp / beeMsgIn / beeCellPulse / beeBob) — same gate, same rules.
 //
 // NOTE: BeeLoader's orbit keyframes deliberately do NOT live here. They are in
 // app/globals.css because app/loading.tsx streams as HTML before any JS runs,
@@ -73,6 +75,26 @@ export function useMotionKeyframes() {
         0%   { opacity: 0; transform: translateY(-7px) scale(0.94); }
         60%  { opacity: 1; transform: translateY(0) scale(1.04); }
         100% { opacity: 1; transform: translateY(0) scale(1); }
+      }
+      @keyframes beePanelRise {
+        0%   { opacity: 0; transform: translateY(20px) scale(0.98); }
+        100% { opacity: 1; transform: none; }
+      }
+      @keyframes beeSheetUp {
+        0%   { transform: translateY(100%); }
+        100% { transform: translateY(0); }
+      }
+      @keyframes beeMsgIn {
+        0%   { opacity: 0; transform: translateY(8px); }
+        100% { opacity: 1; transform: none; }
+      }
+      @keyframes beeCellPulse {
+        0%, 60%, 100% { opacity: 0.35; transform: none; }
+        30%           { opacity: 1; transform: translateY(-2px); }
+      }
+      @keyframes beeBob {
+        0%   { transform: none; }
+        100% { transform: translateY(-2.5px); }
       }
     `
     document.head.appendChild(el)
