@@ -355,6 +355,21 @@ async function resolveBaseLeadRecipients(
   const isInterfaceLocation = users.length > 0 || externals.length > 0
 
   if (isInterfaceLocation) {
+    // An external row that shares an interface user's address (the seeded
+    // "twin") is SUPPRESSED here so the user's pref fully governs. Externals
+    // have no subscribe flag, so left in, a twin keeps a person on the send
+    // list after they unsubscribe or lose access (/api/hub_users/[id]/access
+    // flips subscribed=false — the twin would silently defeat it). Keyed on
+    // ALL interface users, not just subscribed ones, and case-insensitively —
+    // same lowercased-email key as the send-time dedupe and the twin collapse
+    // in filterRecipientsByProjectType. A lite_user's address never matches
+    // (they aren't in `users`), so an external row carrying a lite_user keeps
+    // notifying them.
+    const interfaceEmails = new Set(
+      users
+        .map((u) => u.email?.trim().toLowerCase())
+        .filter((e): e is string => !!e),
+    )
     const out: EffectiveRecipient[] = []
     for (const u of users) {
       if (!u.subscribed) continue
@@ -367,6 +382,7 @@ async function resolveBaseLeadRecipients(
       })
     }
     for (const e of externals) {
+      if (e.email && interfaceEmails.has(e.email.trim().toLowerCase())) continue
       out.push({
         source: 'external',
         hub_user_id: null,
@@ -380,6 +396,62 @@ async function resolveBaseLeadRecipients(
 
   // No in-interface recipients — resolve from Zoho.
   return resolveZohoRecipients(locationId)
+}
+
+// Delete any external row that duplicates a hub_user's address at ONE location
+// — the cross-table twin cleanup, invoked when a person becomes an interface
+// user there (invite accept). Location-scoped: the same address at another
+// location is a different list and must survive. Case-insensitive: the
+// 2026-07-19 seed predates the lowercased-storage rule, so stored casing can't
+// be trusted; rows are matched in code on the lowercased email, then deleted
+// by id (an ilike would treat % and _ in an address as wildcards).
+//
+// ONLY for interface roles (owner/manager). A lite_user is NOT auto-included
+// by the resolver, so for them the external row is the only thing carrying
+// their notifications — deleting it would silence them, not dedupe them (same
+// rule scripts/cleanup-owner-duplicate-externals.mjs enforces). A non-interface
+// role is a no-op, not an error.
+//
+// NON-THROWING by contract: the callers are user-facing actions (accepting an
+// invite) where this is bookkeeping — a cleanup failure is logged loudly and
+// reported in the result, never propagated. Idempotent: zero matches deletes
+// nothing and succeeds.
+export async function removeExternalTwinsForHubUser(args: {
+  locationId: string
+  email: string
+  role: string
+}): Promise<{ removed: number; skipped?: 'non_interface_role'; error?: string }> {
+  const { locationId, role } = args
+  const key = args.email?.trim().toLowerCase()
+  if (!key) return { removed: 0 }
+  if (!(RECIPIENT_INTERFACE_ROLES as readonly string[]).includes(role)) {
+    return { removed: 0, skipped: 'non_interface_role' }
+  }
+  try {
+    const { data, error } = await supabaseService
+      .from('lead_notification_externals')
+      .select('id, email')
+      .eq('location_id', locationId)
+    if (error) throw new Error(error.message)
+
+    const ids = (data || [])
+      .filter((r: any) => typeof r.email === 'string' && r.email.trim().toLowerCase() === key)
+      .map((r: any) => r.id)
+    if (ids.length === 0) return { removed: 0 }
+
+    const { error: delErr } = await supabaseService
+      .from('lead_notification_externals')
+      .delete()
+      .in('id', ids)
+    if (delErr) throw new Error(delErr.message)
+    return { removed: ids.length }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn(
+      `[notification-recipients] external twin cleanup failed for location ${locationId}: ${message}`,
+    )
+    return { removed: 0, error: message }
+  }
 }
 
 // Fallback resolver: a non-interface location's notification contacts live in

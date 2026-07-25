@@ -28,6 +28,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { matchHubUserFromCachedRoster } from '@/lib/jobber-team-roster'
+import { removeExternalTwinsForHubUser } from '@/lib/notification-recipients'
 
 export const runtime = 'nodejs'
 
@@ -143,6 +144,32 @@ export async function POST(request: NextRequest) {
       } catch (matchErr) {
         console.warn('[accept jobber match]', matchErr)
       }
+    }
+  }
+
+  // The person is now an interface user, so any lead_notification_externals
+  // row the Zoho seed/top-up left under their address at THIS location is a
+  // twin — the resolver auto-includes them and the twin only duplicates the
+  // Settings list and defeats unsubscribe. Runs on the idempotent re-accept
+  // path too (existingHubUser), so a retry after a transient failure still
+  // tidies. Non-interface roles are a no-op inside the helper (a lite_user's
+  // external row is the only thing notifying them — see its header). Fail-soft
+  // both inside the helper and here: accepting the invite is the user-facing
+  // action, list bookkeeping must never fail it.
+  if (invite.tier !== 'admin' && invite.location_id) {
+    try {
+      const cleanup = await removeExternalTwinsForHubUser({
+        locationId: invite.location_id,
+        email: authEmail,
+        role: existingHubUser?.role ? String(existingHubUser.role) : String(invite.role),
+      })
+      if (cleanup.removed > 0) {
+        console.log(
+          `[accept externals cleanup] removed ${cleanup.removed} twin external(s) for ${authEmail} at ${invite.location_id}`,
+        )
+      }
+    } catch (cleanupErr) {
+      console.warn('[accept externals cleanup]', cleanupErr)
     }
   }
 
