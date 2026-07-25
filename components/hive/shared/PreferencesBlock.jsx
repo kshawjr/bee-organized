@@ -131,15 +131,15 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
           {c.marketing_opt_out ? 'Opted out of marketing' : 'Marketing emails OK'}
         </p>
         {readOnly ? null : c.marketing_opt_out ? (
-          <button style={rowBtn()} disabled={busy} onClick={() => setMarketing(false)}>Re-subscribe</button>
+          <button className="bee-small-action" style={rowBtn()} disabled={busy} onClick={() => setMarketing(false)}>Re-subscribe</button>
         ) : confirmOptOut ? (
           <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: '6px', alignItems: 'center', flexShrink: 0 }}>
             <span style={{ fontSize: '11px', color: T.state.danger.fg }}>Stop all marketing email?</span>
-            <button style={{ ...rowBtn(true), marginLeft: 0 }} disabled={busy} onClick={() => setMarketing(true)}>Confirm opt-out</button>
-            <button aria-label="Cancel opt-out" style={{ ...rowBtn(), marginLeft: 0 }} disabled={busy} onClick={() => setConfirmOptOut(false)}>✗</button>
+            <button className="bee-small-action" style={{ ...rowBtn(true), marginLeft: 0 }} disabled={busy} onClick={() => setMarketing(true)}>Confirm opt-out</button>
+            <button className="bee-small-action" aria-label="Cancel opt-out" style={{ ...rowBtn(), marginLeft: 0 }} disabled={busy} onClick={() => setConfirmOptOut(false)}>✗</button>
           </span>
         ) : (
-          <button style={rowBtn(true)} disabled={busy} onClick={() => setConfirmOptOut(true)}>Opt out…</button>
+          <button className="bee-small-action" style={rowBtn(true)} disabled={busy} onClick={() => setConfirmOptOut(true)}>Opt out…</button>
         )}
       </div>
 
@@ -150,9 +150,9 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
             {snoozed ? `Snoozed until ${fmtShort(c.snoozed_until)}` : 'Not snoozed'}
           </p>
           {readOnly ? null : snoozed ? (
-            <button style={rowBtn()} disabled={busy} onClick={unSnooze}>Un-snooze</button>
+            <button className="bee-small-action" style={rowBtn()} disabled={busy} onClick={unSnooze}>Un-snooze</button>
           ) : !snoozeOpen && (
-            <button style={rowBtn()} disabled={busy} onClick={() => setSnoozeOpen(true)}>Snooze…</button>
+            <button className="bee-small-action" style={rowBtn()} disabled={busy} onClick={() => setSnoozeOpen(true)}>Snooze…</button>
           )}
         </div>
         {snoozed && (c.snoozed_note || '').trim() && (
@@ -173,8 +173,8 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
             </div>
             <input value={snoozeNote} onChange={e => setSnoozeNote(e.target.value)} placeholder="Note (optional)…" aria-label="Snooze note" style={inputStyle} />
             <div style={{ display: 'flex', gap: '6px' }}>
-              <button style={{ ...rowBtn(), marginLeft: 0 }} disabled={busy} onClick={saveSnooze}>Snooze</button>
-              <button style={{ ...rowBtn(), marginLeft: 0, color: T.ink.muted }} disabled={busy} onClick={() => setSnoozeOpen(false)}>Cancel</button>
+              <button className="bee-small-action" style={{ ...rowBtn(), marginLeft: 0 }} disabled={busy} onClick={saveSnooze}>Snooze</button>
+              <button className="bee-small-action" style={{ ...rowBtn(), marginLeft: 0, color: T.ink.muted }} disabled={busy} onClick={() => setSnoozeOpen(false)}>Cancel</button>
             </div>
           </div>
         )}
@@ -187,9 +187,9 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
             <IconPlayerPause size={13} /> {c.paused ? 'Nurture drips paused' : 'Nurture drips active'}
           </p>
           {readOnly ? null : c.paused ? (
-            <button style={rowBtn()} disabled={busy} onClick={() => setDrip(false)}>Activate</button>
+            <button className="bee-small-action" style={rowBtn()} disabled={busy} onClick={() => setDrip(false)}>Activate</button>
           ) : (
-            <button style={rowBtn()} disabled={busy} onClick={() => setDrip(true)}>Pause</button>
+            <button className="bee-small-action" style={rowBtn()} disabled={busy} onClick={() => setDrip(true)}>Pause</button>
           )}
         </div>
       )}

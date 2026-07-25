@@ -24,10 +24,20 @@
 
 import { supabaseService } from './supabase-service'
 import { resolveNotificationsLive } from './notifications-live'
+import { disconnectSlackFromLocation } from './slack-disconnect'
 
 const supabase = supabaseService
 
 export const SLACK_POST_MESSAGE_URL = 'https://slack.com/api/chat.postMessage'
+
+// Slack errors that mean the TOKEN IS DEAD — the app was uninstalled, the token
+// revoked, or the workspace/bot deactivated. None of them can be fixed by
+// retrying: the only cure is a fresh install.
+//
+// Deliberately NOT here: channel_not_found / not_in_channel / is_archived. Those
+// mean the CHANNEL is wrong while the token is fine, and clearing a working
+// connection over a channel problem would make the owner reinstall for nothing.
+const DEAD_TOKEN_ERRORS = new Set(['invalid_auth', 'token_revoked', 'account_inactive'])
 
 // The lead fields the notification renders — the same shape the email builder
 // consumes (lib/lead-notification-email.ts NewLeadForNotification), so both
@@ -74,6 +84,34 @@ async function getSlackLocation(locationId: string): Promise<{
     .maybeSingle()
   if (error || !data) return null
   return data as any
+}
+
+// ── Connection honesty ────────────────────────────────────────
+// A revoked token or an uninstalled app used to leave slack_connected=true
+// forever: the SlackCard kept showing a green "Connected · #leads" while every
+// post failed, so the one person who could fix it had no signal that anything
+// was wrong. When Slack tells us the token is dead, tear the connection down
+// through the SAME helper the in-app Disconnect button uses, so the card falls
+// back to "Add to Slack" and the owner can reconnect.
+//
+// FAIL-SOFT, like everything else on this rail: wrapped in its own try/catch and
+// never surfaced to the caller. The post already failed; failing to record that
+// must not change what postToSlack returns, and must never touch the email send
+// or the API response.
+async function clearDeadSlackConnection(locationId: string, slackError: string): Promise<void> {
+  try {
+    const { error } = await disconnectSlackFromLocation(locationId)
+    if (error) {
+      console.error('[slack-bot] could not clear dead connection for', locationId, '—', error)
+      return
+    }
+    console.warn(
+      `[slack-bot] Slack reported ${slackError} for location ${locationId} — ` +
+        'connection cleared; the location must reinstall the app to resume posts',
+    )
+  } catch (err: any) {
+    console.error('[slack-bot] clearing dead connection threw for', locationId, '—', err?.message || err)
+  }
 }
 
 // ── mrkdwn escaping ───────────────────────────────────────────
@@ -310,6 +348,12 @@ export async function postToSlack(
       // channel_not_found / not_in_channel / invalid_auth are the actionable
       // ones (bad channel, bot not invited, uninstalled) — logged distinctly.
       console.error('[slack-bot] chat.postMessage not ok for', locationId, '—', err)
+      // A dead token additionally clears the connection so the UI stops lying
+      // about being connected. Awaited (not fire-and-forget) so the write can't
+      // be cut short by the serverless instance freezing after the response.
+      if (DEAD_TOKEN_ERRORS.has(err)) {
+        await clearDeadSlackConnection(locationId, err)
+      }
       return { ok: false, error: err }
     }
 

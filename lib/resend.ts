@@ -48,6 +48,12 @@ interface SendEmailDirectArgs extends NotificationContext {
   fromName: string
   replyTo: string
   to: string | string[]
+  // Blind-carbon recipients. Used by the lead-notification global CC list so
+  // corporate oversight addresses never appear on a franchise recipient's To
+  // line. Logged exactly like To recipients — one notification_log row per
+  // address, sharing the message id — because a BCC'd address received the
+  // email just as really as an addressed one.
+  bcc?: string[]
   subject: string
   html: string
   text?: string
@@ -227,7 +233,7 @@ async function resolveProjectTypeSenderOverride(
 }
 
 export async function sendEmailDirect(args: SendEmailDirectArgs): Promise<SendResult> {
-  const { from, fromName, replyTo, to, subject, html, text } = args
+  const { from, fromName, replyTo, to, bcc, subject, html, text } = args
 
   // THE hook point for the outbound-mail notebook (migrations/
   // notification_log.sql). Logging lives here rather than in any one feature so
@@ -244,7 +250,11 @@ export async function sendEmailDirect(args: SendEmailDirectArgs): Promise<SendRe
     location_slug: args.location_slug,
     email_kind: args.email_kind,
   }
-  const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean)
+  // The notebook's grain covers EVERYONE the message reaches: To + BCC. A
+  // bcc-only view of a send would under-report it; a To-only view would hide
+  // the global CC rail entirely.
+  const bccList = (bcc || []).filter(Boolean)
+  const recipients = [...(Array.isArray(to) ? to : [to]), ...bccList].filter(Boolean)
 
   // BELT AND BRACES. logNotification already swallows everything, so this
   // .catch() should be dead code — but the success-path log call below sits
@@ -290,6 +300,7 @@ export async function sendEmailDirect(args: SendEmailDirectArgs): Promise<SendRe
       from: `${fromName} <${from}>`,
       replyTo,
       to,
+      ...(bccList.length ? { bcc: bccList } : {}),
       subject,
       html,
       text,

@@ -770,6 +770,9 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     // What they want — the webform request snippet (restored 7/24, Kevin). The
     // mapper carries leads.request_details as jobDetail; one muted line under
     // the contact line, truncated. Transfer rows keep their origin line instead.
+    // ALWAYS rendered on non-transfer rows (#68): empty gets a quieter
+    // placeholder in the same slot, so every row keeps the same height —
+    // today's blanks are a legacy intake gap, not the steady state.
     const jobDetail = (p.jobDetail || '').trim()
     // Assignee stack — who owns this lead (lead_assignees, plural). ids from the
     // sweep, initials from the roster. Up to 3 discs + '+N'; the whole set is the
@@ -935,12 +938,25 @@ export default function InboxScreen({ people = [], transferPeople = [], location
               {isMobile && <AgeInline created={p.created} nowMs={nowMs} style={{ marginLeft: 'auto', minWidth: 0 }} />}
               {isMobile && assigneeStack}
             </div>
-            {/* What they want — restored webform snippet (see jobDetail above). */}
-            {!isTransfer && jobDetail && (
-              <p style={{ fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '3px' }}>
+            {/* What they want — webform snippet (see jobDetail above), always
+                present so the row rhythm stays even. Populated: title carries
+                the FULL value — the one-line ellipsis is lossy and the row has
+                no other way to read a long message. Empty: a quieter absence
+                line (same muted token, softened + italic — must not read as
+                content), deliberately NOT the record surfaces' add-affordance;
+                this is a triage list. No title on the placeholder — a tooltip
+                saying "no details" is noise. */}
+            {!isTransfer && (jobDetail ? (
+              <p className="bee-inbox-detail" title={jobDetail}
+                style={{ fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '3px' }}>
                 {jobDetail}
               </p>
-            )}
+            ) : (
+              <p className="bee-inbox-detail"
+                style={{ fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`, opacity: 0.55, fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '3px' }}>
+                No request details yet
+              </p>
+            ))}
           </div>
           {!isMobile && (
             /* Alignment fix (direction C): date/relative + icons share

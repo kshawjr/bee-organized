@@ -232,6 +232,41 @@ describe('sendEmailDirect — one row per recipient, sharing the message id', ()
     }
   })
 
+  it('BCC recipients are passed to Resend and logged exactly like To recipients', async () => {
+    vi.resetModules()
+    const { sendEmailDirect } = await import('@/lib/resend')
+
+    const res = await sendEmailDirect({
+      ...DIRECT,
+      to: ['a@b.com'],
+      bcc: ['hq@bmave.com'],
+      email_kind: 'lead_notification',
+    })
+
+    expect(res).toEqual({ success: true, id: 're-1' })
+    // bcc reaches the Resend payload — this is what keeps the global CC list
+    // off the franchise To line.
+    expect(sendSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ to: ['a@b.com'], bcc: ['hq@bmave.com'] }),
+    )
+    // …and the notebook's grain covers everyone the message reached: a BCC'd
+    // address received the email just as really as an addressed one.
+    expect(h.state.inserts).toHaveLength(2)
+    expect(h.state.inserts.map(i => i.row.recipient)).toEqual(['a@b.com', 'hq@bmave.com'])
+    for (const { row } of h.state.inserts) {
+      expect(row).toMatchObject({ send_status: 'accepted', resend_message_id: 're-1' })
+    }
+  })
+
+  it('a bcc-less send passes NO bcc key to Resend (payload unchanged for every existing caller)', async () => {
+    vi.resetModules()
+    const { sendEmailDirect } = await import('@/lib/resend')
+
+    await sendEmailDirect({ ...DIRECT, to: ['a@b.com'] })
+
+    expect('bcc' in sendSpy.mock.calls[0][0]).toBe(false)
+  })
+
   it('a Resend error writes failed rows carrying the error, and no message id', async () => {
     vi.resetModules()
     const { sendEmailDirect } = await import('@/lib/resend')

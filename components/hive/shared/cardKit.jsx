@@ -38,6 +38,10 @@ export function MicroLabel({ children }) {
 // profile) so the two surfaces can't drift chip-vs-pill-vs-button.
 //   leading — tighten the left inset for a pill that carries an avatar
 //   dashed  — the "+ add" affordance (transparent, dashed hairline)
+// TYPE rides T.badge.actionFont (#59 round 2). A <button> wearing this
+// style must ALSO wear className="bee-small-action": globals.css floors
+// every button at 16px!important (iOS zoom guard), so on buttons only
+// the release class — not this inline fontSize — reaches the screen.
 export const pillStyle = ({ dashed = false, leading = false } = {}) => ({
   display: 'inline-flex', alignItems: 'center', gap: T.badge.gap,
   height: T.badge.height, boxSizing: 'border-box',
@@ -45,7 +49,7 @@ export const pillStyle = ({ dashed = false, leading = false } = {}) => ({
   borderRadius: T.radius.pill,
   border: dashed ? T.border.dashed : T.border.thin,
   background: dashed ? 'transparent' : T.surface.raised,
-  fontSize: T.badge.font, fontWeight: T.badge.weight, lineHeight: 1,
+  fontSize: T.badge.actionFont, fontWeight: T.badge.weight, lineHeight: 1,
   color: dashed ? T.ink.muted : T.ink.primary,
   fontFamily: 'inherit', whiteSpace: 'nowrap',
 })
@@ -61,12 +65,16 @@ export const pillStyle = ({ dashed = false, leading = false } = {}) => ({
 // the destructive direction only (Kevin's rule: friction one-sided).
 // marginLeft:auto is the default (pushes the verb to the row's right);
 // stacked call sites override with marginLeft:0.
+// These are always <button>s, so the inline fontSize below never
+// reaches the screen on its own — globals.css floors buttons at
+// 16px!important. Every call site must wear className="bee-small-action"
+// (the release, lockstep with T.badge.actionFont).
 export const rowActionBtn = (danger = false) => ({
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
   marginLeft: 'auto', flexShrink: 0, boxSizing: 'border-box',
   height: T.badge.height, padding: `0 ${T.badge.padX}`, borderRadius: T.radius.control,
   border: T.border.control, background: T.surface.raised,
-  fontSize: T.badge.font, fontWeight: T.badge.weight,
+  fontSize: T.badge.actionFont, fontWeight: T.badge.weight,
   color: danger ? T.state.danger.fg : T.ink.primary,
   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
 })

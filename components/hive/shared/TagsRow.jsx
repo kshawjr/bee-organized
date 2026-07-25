@@ -65,9 +65,9 @@ export default function TagsRow({ leadId, tags = [], options = [], onChange = ()
           <span key={t.id} style={pillStyle()}>
             {t.label}
             {!readOnly && (
-              <button aria-label={`Remove tag ${t.label}`} disabled={busyId === t.id}
+              <button className="bee-small-action" aria-label={`Remove tag ${t.label}`} disabled={busyId === t.id}
                 onClick={() => toggle(t)}
-                style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '11px', lineHeight: 1, color: T.ink.quiet, cursor: 'pointer', fontFamily: 'inherit' }}>
+                style={{ border: 'none', background: 'transparent', padding: 0, fontSize: T.badge.actionFont, lineHeight: 1, color: T.ink.quiet, cursor: 'pointer', fontFamily: 'inherit' }}>
                 ✗
               </button>
             )}
@@ -76,7 +76,7 @@ export default function TagsRow({ leadId, tags = [], options = [], onChange = ()
         {tags.length === 0 && <span style={{ fontSize: '11px', color: T.ink.quiet }}>No tags</span>}
         {!readOnly && (
         <span style={{ position: 'relative', display: 'inline-block' }}>
-          <button onClick={() => setOpen(v => !v)} aria-label="Add tag"
+          <button className="bee-small-action" onClick={() => setOpen(v => !v)} aria-label="Add tag"
             style={{ ...pillStyle({ dashed: true }), cursor: 'pointer' }}>
             + Tag
           </button>
