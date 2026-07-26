@@ -20060,8 +20060,16 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // rate saved only into this session's state would leave emails held
   // forever. Empty string clears to null (the API's sparse-patch semantic).
   async function persistRatePerHour(v) {
+    // View-as / preview sessions carry a non-UUID locId, so there is no real
+    // location to write to. Fail LOUD *before* touching local state — the old
+    // code painted the field first and then silently returned, which made the
+    // rate read as saved while nothing persisted and every rate-quoting drip
+    // stayed held (#85). Do not paint, do not pretend; tell the user plainly.
+    if (!realLocId) {
+      alert("You're viewing this location, not signed in to it — open the real location to change the rate.")
+      return
+    }
     updateLocation('ratePerHour', v)
-    if (!realLocId) return
     try {
       const res = await fetch(`/api/locations/${realLocId}`, {
         method: 'PATCH',
