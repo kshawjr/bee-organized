@@ -9,11 +9,22 @@
 // no-pref users defaulting to subscribed/'all'.
 //
 // ONE email per lead — a single Resend message addressed to every recipient,
-// never a per-recipient loop. Everyone gets the same "Open this lead in Bee
-// Hub" deep-link button; account-less recipients (externals, Zoho contacts,
-// account-less global CC) land on a login they can't pass, and that is
-// accepted — a footer line points them at the corporate office to get set up.
-// (#82 collapsed the #72 two-variant split back to this single send.)
+// never a per-recipient loop. The email has TWO location-scoped variants (#91),
+// chosen by whether the LOCATION is on Bee Hub — NOT per recipient (that was
+// #72's mistake, which produced two sends per lead):
+//   • Location has ≥1 active hub_user → the Bee Hub email: "Open this lead in
+//     Bee Hub" deep-link button, Bee Hub branding, the #82 "get set up" footer.
+//     Account-less recipients (externals, Zoho contacts, account-less global CC)
+//     land on a login they can't pass, and that is accepted — the footer points
+//     them at the corporate office.
+//   • Location has NONE → a clean notification with ZERO Bee Hub references: no
+//     button, no product name in subject or body, signed as Bee Organized. The
+//     recipients at these offices don't use Bee Hub, so the dead button and the
+//     footer only confused them.
+// Because the branch is on the LOCATION, everyone at one office gets the SAME
+// email and each lead still produces exactly ONE send. (#82 had already
+// collapsed the #72 two-variant split to a single send; #91 keeps it single and
+// moves the branch from recipient to location.)
 // Project-type routing (when the location's split-notifications toggle is ON)
 // is applied inside resolveLeadRecipients, which is handed the lead below.
 //
@@ -43,6 +54,7 @@ import { sendEmailDirect } from './resend'
 import {
   resolveLeadRecipients,
   resolveGlobalCcRecipients,
+  locationHasActiveHubUser,
   type EffectiveRecipient,
 } from './notification-recipients'
 import { logNotification } from './notification-log'
@@ -52,10 +64,19 @@ import { resolveNotificationsLive } from './notifications-live'
 // than passed by callers: this function IS the lead notification, so deriving
 // the label here means all three call sites (intake / leads / transfer) are
 // correct by construction and a new caller can't mislabel its rows.
-// #82 collapsed the two variants back to a single send, so there is again ONE
-// kind. The historical 'lead_notification_no_access' rows #72 wrote stay in
-// notification_log untouched — they are not migrated or deleted.
+//
+// TWO kinds now (#91), chosen by whether the location is on Bee Hub:
+//   • 'lead_notification'          → the Bee Hub email (button + branding).
+//   • 'lead_notification_non_hub'  → the clean, Bee-Hub-free email.
+// 'lead_notification_non_hub' is a DELIBERATELY FRESH value: it does NOT reuse
+// #72's historical 'lead_notification_no_access' (those rows were RECIPIENT-
+// scoped — an account-less person at a Bee Hub location — a different thing
+// from #91's LOCATION-scoped branch). So it does not collide with either
+// 'lead_notification' or the untouched 'lead_notification_no_access' rows, and
+// the notebook can tell all three apart. email_kind carries no CHECK
+// constraint, so the new value needs no migration.
 const LEAD_NOTIFICATION_KIND = 'lead_notification'
+const LEAD_NOTIFICATION_NON_HUB_KIND = 'lead_notification_non_hub'
 
 // System sender for lead notifications. notifications@beeorganized.com sends
 // on the same verified domain (beeorganized.com) that admin@ already uses for
@@ -66,6 +87,12 @@ const NOTIFY_FROM_EMAIL =
   process.env.LEAD_NOTIFY_FROM_EMAIL || 'notifications@beeorganized.com'
 const NOTIFY_FROM_NAME =
   process.env.LEAD_NOTIFY_FROM_NAME || 'Bee Hub'
+// No-access variant (#91) signs as "Bee Organized" — the From display name is
+// visible to the recipient, so a non-hub location can't be allowed to see
+// "Bee Hub" there any more than in the subject or body. Same verified sender
+// address (NOTIFY_FROM_EMAIL); only the display name changes.
+const NOTIFY_FROM_NAME_NON_HUB =
+  process.env.LEAD_NOTIFY_FROM_NAME_NON_HUB || 'Bee Organized'
 const NOTIFY_REPLY_TO_EMAIL =
   process.env.LEAD_NOTIFY_REPLY_TO_EMAIL || 'admin@beeorganized.com'
 
@@ -110,10 +137,12 @@ function escapeHtml(s: string): string {
 const dash = (v: string | null | undefined): string =>
   v && v.trim() ? v.trim() : '—'
 
-// One line in the footer block, IDENTICAL for every recipient — no conditional
-// on whether they have an account. That sameness is exactly what keeps this a
-// single send (#82): the email can't diverge by audience, so there's nothing to
-// split on. Copy is Kevin's, verbatim.
+// One line in the footer block of the BEE HUB variant, IDENTICAL for every
+// recipient on that send — no conditional on whether an individual has an
+// account. That sameness is what keeps each variant a single send (#82): the
+// body can't diverge by audience within a location. The NON-HUB variant (#91)
+// drops this line entirely — it names the product, and its recipients don't use
+// Bee Hub. Copy is Kevin's, verbatim.
 const NO_ACCESS_FOOTER =
   "Don't have Bee Hub access yet? Contact the corporate office to get set up."
 
@@ -126,8 +155,14 @@ function buildLeadNotificationEmail(args: {
   // gets the email gets the button; account-less recipients hit a login they
   // can't pass, which the footer line addresses.
   leadUrl: string | null
+  // #91 — is this LOCATION on Bee Hub? Drives the WHOLE Bee Hub layer: the
+  // deep-link button, the "get set up" footer, and every "Bee Hub" string. When
+  // false, none of them render and nothing in subject or body names the product
+  // — the recipients don't use Bee Hub. The subject already carries no product
+  // name, so it is identical in both variants.
+  hasHubAccess: boolean
 }): { subject: string; html: string; text: string } {
-  const { lead, locationName, leadUrl } = args
+  const { lead, locationName, leadUrl, hasHubAccess } = args
   const leadName = dash(lead.name)
 
   const subject = `New lead: ${leadName} — ${locationName}`
@@ -159,7 +194,9 @@ function buildLeadNotificationEmail(args: {
   // Recipients must be signed-in Hub users with location access; a logged-out
   // click routes through login and lands back on the lead (?next threading).
   // escapeHtml the URL too so a stray quote can't break out of the href.
-  const buttonHtml = leadUrl
+  // ONLY on the Bee Hub variant (#91): a non-hub location's recipients can't
+  // pass the login, so the button is dead noise — omitted entirely there.
+  const buttonHtml = hasHubAccess && leadUrl
     ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 4px;">
                   <tr>
                     <td style="border-radius:10px;background:#1a2e2b;">
@@ -190,7 +227,7 @@ function buildLeadNotificationEmail(args: {
             </tr>
             <tr>
               <td style="padding:16px 32px 24px;border-top:1px solid rgba(0,0,0,0.06);">
-                <p style="margin:0 0 10px;font-size:12px;line-height:1.55;color:#4a5e5a;">${escapeHtml(NO_ACCESS_FOOTER)}</p>
+                ${hasHubAccess ? `<p style="margin:0 0 10px;font-size:12px;line-height:1.55;color:#4a5e5a;">${escapeHtml(NO_ACCESS_FOOTER)}</p>` : ''}
                 <p style="margin:0;font-size:11px;color:#8a9e9a;">Sent by Bee Organized · You're receiving this because you're set to get new-lead notifications for ${escapeHtml(locationName)}.</p>
               </td>
             </tr>
@@ -211,12 +248,14 @@ function buildLeadNotificationEmail(args: {
   if (lead.request_details?.trim()) {
     textLines.push('', 'What they told us:', lead.request_details.trim())
   }
-  if (leadUrl) {
+  // Bee Hub deep-link + "get set up" footer only on the Bee Hub variant (#91).
+  if (hasHubAccess && leadUrl) {
     textLines.push('', `Open this lead in Bee Hub: ${leadUrl}`)
   }
+  if (hasHubAccess) {
+    textLines.push('', NO_ACCESS_FOOTER)
+  }
   textLines.push(
-    '',
-    NO_ACCESS_FOOTER,
     '',
     '—',
     `Bee Organized · new-lead notifications for ${locationName}`,
@@ -417,21 +456,40 @@ export async function notifyNewLead(args: {
   const finalTo = to.length ? to : cc
   const finalCc = to.length ? cc : []
 
+  // ── Which variant? (#91) ──────────────────────────────────────────────────
+  // Location-scoped, resolved HERE (after the gate, after we know there IS
+  // someone to send to — a muted / zero-recipient location skips the lookup
+  // entirely). Everyone on this one send — To and CC, hub_user and global CC
+  // alike — gets the SAME body: the global CC is corporate and knows Bee Hub,
+  // but they're cc'd on a location-scoped email and get whatever that location's
+  // email is. Special-casing them would mean two sends again. Fail-soft inside
+  // the resolver: a read error yields NO-access (the clean email), never the
+  // Bee Hub one — a failed lookup must not resurrect the confusing message.
+  const hasHubAccess = await locationHasActiveHubUser(location.id)
+  const emailKind = hasHubAccess
+    ? LEAD_NOTIFICATION_KIND
+    : LEAD_NOTIFICATION_NON_HUB_KIND
+  const fromName = hasHubAccess ? NOTIFY_FROM_NAME : NOTIFY_FROM_NAME_NON_HUB
+
   const { subject, html, text } = buildLeadNotificationEmail({
     lead,
     locationName,
     leadUrl,
+    hasHubAccess,
   })
   const result = await sendEmailDirect({
     from: NOTIFY_FROM_EMAIL,
-    fromName: NOTIFY_FROM_NAME,
+    fromName,
     replyTo: lead.email?.trim() || NOTIFY_REPLY_TO_EMAIL,
     to: finalTo,
     ...(finalCc.length ? { cc: finalCc } : {}),
     subject,
     html,
     text,
+    // logContext carries the base kind; #91 overrides it with the variant
+    // actually sent so the resend-layer rows land under the right email_kind.
     ...logContext,
+    email_kind: emailKind,
   })
 
   // recipientCount is everyone ADDRESSED (To + CC).

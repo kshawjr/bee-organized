@@ -27,6 +27,9 @@ const sendEmailDirectMock = vi.hoisted(() =>
 )
 const resolveRecipientsMock = vi.hoisted(() => vi.fn(async () => [] as any[]))
 const resolveGlobalCcMock = vi.hoisted(() => vi.fn(async () => [] as any[]))
+// #91 — defaults to true so this gate-focused suite keeps sending the Bee Hub
+// variant; the branch itself is pinned in the email + recipients suites.
+const hasHubAccessMock = vi.hoisted(() => vi.fn(async () => true))
 const logNotificationMock = vi.hoisted(() => vi.fn(async () => {}))
 const gateMock = vi.hoisted(() => vi.fn(async () => ({ live: true }) as any))
 
@@ -34,6 +37,7 @@ vi.mock('@/lib/resend', () => ({ sendEmailDirect: sendEmailDirectMock }))
 vi.mock('@/lib/notification-recipients', () => ({
   resolveLeadRecipients: resolveRecipientsMock,
   resolveGlobalCcRecipients: resolveGlobalCcMock,
+  locationHasActiveHubUser: hasHubAccessMock,
 }))
 vi.mock('@/lib/notifications-live', () => ({ resolveNotificationsLive: gateMock }))
 // Mocked to observe the muted row — and for the same hard reason the other node

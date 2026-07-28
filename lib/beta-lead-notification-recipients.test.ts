@@ -15,11 +15,15 @@ const tableData = vi.hoisted(() => ({ current: {} as Record<string, any[]> }))
 vi.mock('@/lib/supabase-service', () => {
   const makeBuilder = (table: string) => {
     const filters: any[] = []
+    let limitN: number | null = null
     const b: any = {}
     b.select = () => b
     b.order = () => b
     b.eq = (col: string, val: any) => { filters.push(['eq', col, val]); return b }
     b.in = (col: string, vals: any[]) => { filters.push(['in', col, vals]); return b }
+    // .is(col, null) — used by locationHasActiveHubUser for `disabled_at IS NULL`.
+    b.is = (col: string, val: any) => { filters.push(['is', col, val]); return b }
+    b.limit = (n: number) => { limitN = n; return b }
     const resolve = () => {
       let data = tableData.current[table] || []
       for (const [op, col, val] of filters) {
@@ -27,6 +31,7 @@ vi.mock('@/lib/supabase-service', () => {
           ? data.filter((r: any) => val.includes(r[col]))
           : data.filter((r: any) => r[col] === val)
       }
+      if (limitN != null) data = data.slice(0, limitN)
       return { data, error: null }
     }
     b.then = (res: any, rej: any) => Promise.resolve(resolve()).then(res, rej)
@@ -56,9 +61,11 @@ import {
 import {
   getManageableRecipients,
   resolveLeadRecipients,
+  locationHasActiveHubUser,
   DEFAULT_CATEGORY,
   RECIPIENT_CATEGORIES,
 } from '@/lib/notification-recipients'
+import { supabaseService } from '@/lib/supabase-service'
 
 // ── Permission predicates ──────────────────────────────────────────────────
 describe('notificationRecipientsManageable — CLIENT gate (UI show/hide)', () => {
@@ -429,5 +436,65 @@ describe('API — duplicate-recipient prevention (the structural-hole fix)', () 
     expect(extRoute).toContain('.trim().toLowerCase()')
     expect(extRoute).toContain("'23505'")
     expect(extRoute).toContain('duplicate_recipient')
+  })
+})
+
+// ── #91: is this location ON Bee Hub? (locationHasActiveHubUser) ─────────────
+// The location-scoped branch behind the two email variants. "Active" == the
+// same definition access-removal and the global CC resolver use:
+// is_active = true AND disabled_at IS NULL. ANY role counts (an active
+// lite_user still means the office is on Bee Hub).
+describe('locationHasActiveHubUser — #91 location Bee Hub branch', () => {
+  const setHub = (rows: any[]) => {
+    tableData.current.hub_users = rows
+  }
+
+  it('true when the location has an active hub_user (any role, incl. lite_user)', async () => {
+    setHub([
+      { id: 'u1', role: 'lite_user', location_id: 'locA', is_active: true, disabled_at: null },
+    ])
+    expect(await locationHasActiveHubUser('locA')).toBe(true)
+  })
+
+  it('false when the location has NO hub_users at all', async () => {
+    setHub([
+      { id: 'u1', role: 'owner', location_id: 'locB', is_active: true, disabled_at: null },
+    ])
+    expect(await locationHasActiveHubUser('locA')).toBe(false)
+  })
+
+  it('false when the only hub_user is is_active = false', async () => {
+    setHub([
+      { id: 'u1', role: 'owner', location_id: 'locA', is_active: false, disabled_at: null },
+    ])
+    expect(await locationHasActiveHubUser('locA')).toBe(false)
+  })
+
+  it('false when the only hub_user is disabled (disabled_at set)', async () => {
+    setHub([
+      { id: 'u1', role: 'owner', location_id: 'locA', is_active: true, disabled_at: '2026-07-01T00:00:00Z' },
+    ])
+    expect(await locationHasActiveHubUser('locA')).toBe(false)
+  })
+
+  it('ignores active users at OTHER locations (location-scoped)', async () => {
+    setHub([
+      { id: 'u1', role: 'owner', location_id: 'locA', is_active: false, disabled_at: null },
+      { id: 'u2', role: 'owner', location_id: 'locOther', is_active: true, disabled_at: null },
+    ])
+    expect(await locationHasActiveHubUser('locA')).toBe(false)
+  })
+
+  it('fails SOFT to NO-access (false) when the read throws', async () => {
+    // A lookup failure must NOT default to the Bee Hub email — that would send
+    // the dead-button/"get set up" message this branch exists to prevent. The
+    // resolver swallows and returns false; the caller sends the clean variant.
+    const spy = vi
+      .spyOn(supabaseService, 'from')
+      .mockImplementationOnce(() => {
+        throw new Error('hub_users read exploded')
+      })
+    expect(await locationHasActiveHubUser('locA')).toBe(false)
+    spy.mockRestore()
   })
 })

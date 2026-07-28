@@ -506,6 +506,59 @@ async function resolveZohoRecipients(
   return out
 }
 
+// ── Is this LOCATION on Bee Hub? (#91) ──────────────────────────────────────
+// The lead notification branches by LOCATION, not by recipient (that was #72's
+// mistake — it split per recipient and produced two sends per lead). A location
+// with at least one ACTIVE hub_user (is_active = true AND disabled_at IS NULL)
+// gets the Bee Hub email — button, branding, the #82 footer. A location with
+// NONE gets a clean notification carrying zero Bee Hub references, because its
+// recipients (Zoho contacts, hand-added externals) don't use Bee Hub and the
+// dead button + "get set up" footer only confused them.
+//
+// ANY role counts. An active lite_user still means someone at that office holds
+// a Bee Hub account and recognizes the product, so the question is "does anyone
+// here have access", not "is anyone here an owner/manager". Both columns are
+// required: is_active gates the seat, disabled_at gates the reversible offboard
+// — a removed user (disabled_at set) is not access, matching how the global CC
+// resolver and access-removal treat "active".
+//
+// FAIL-SOFT to NO-ACCESS: on a read error we return false, so the location gets
+// the clean, Bee-Hub-free email. A lookup failure must NOT default to the Bee
+// Hub email — that would produce the exact dead-button/"get set up" message
+// this branch exists to prevent, aimed at recipients who don't use Bee Hub. The
+// worst case on error is a real hub location losing its button for one send;
+// the worst case the other way is a non-hub office getting the confusing email,
+// which is strictly worse. The miss is logged loudly, and the email sends
+// either way — this only ever picks WHICH body, never whether to send.
+export async function locationHasActiveHubUser(
+  locationId: string,
+): Promise<boolean> {
+  try {
+    // limit(1) — existence check, not a count. PostgREST head:true count is the
+    // only aggregate that works here, but we don't even need the number: one
+    // active row is enough to answer the question.
+    const res = await supabaseService
+      .from('hub_users')
+      .select('id')
+      .eq('location_id', locationId)
+      .eq('is_active', true)
+      .is('disabled_at', null)
+      .limit(1)
+    if ((res as any)?.error) {
+      console.warn(
+        `[notification-recipients] hub-access check failed for location ${locationId} (${(res as any).error.message}) — treating as NOT on Bee Hub`,
+      )
+      return false
+    }
+    return ((res.data as any[]) || []).length > 0
+  } catch (err: any) {
+    console.warn(
+      `[notification-recipients] hub-access check threw for location ${locationId} (${err?.message}) — treating as NOT on Bee Hub`,
+    )
+    return false
+  }
+}
+
 // ── Global CC (corporate oversight) ─────────────────────────────────────────
 // Addresses that receive EVERY lead notification at EVERY live location —
 // lead_notification_global_cc (migrations/lead_notification_global_cc.sql,

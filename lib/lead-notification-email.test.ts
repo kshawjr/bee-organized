@@ -23,6 +23,10 @@ const sendEmailDirectMock = vi.hoisted(() =>
 )
 const resolveMock = vi.hoisted(() => vi.fn(async () => [] as any[]))
 const resolveGlobalCcMock = vi.hoisted(() => vi.fn(async () => [] as any[]))
+// #91 — location-scoped Bee Hub branch. Defaults to true (location IS on Bee
+// Hub) so every pre-#91 test keeps seeing the button/branding unchanged; the
+// no-access suite flips it to false.
+const hasHubAccessMock = vi.hoisted(() => vi.fn(async () => true))
 const logNotificationMock = vi.hoisted(() => vi.fn(async () => {}))
 // Every test in THIS file is about a location that is cleared to send, so the
 // gate defaults to live and stays out of the way. Mocked for the same hard
@@ -50,6 +54,7 @@ vi.mock('@/lib/notification-log', () => ({
 vi.mock('@/lib/notification-recipients', () => ({
   resolveLeadRecipients: resolveMock,
   resolveGlobalCcRecipients: resolveGlobalCcMock,
+  locationHasActiveHubUser: hasHubAccessMock,
 }))
 vi.mock('@/lib/notifications-live', () => ({
   resolveNotificationsLive: notificationsLiveMock,
@@ -98,6 +103,8 @@ beforeEach(() => {
   logNotificationMock.mockClear()
   notificationsLiveMock.mockClear()
   notificationsLiveMock.mockResolvedValue({ live: true })
+  hasHubAccessMock.mockReset()
+  hasHubAccessMock.mockResolvedValue(true)
 })
 
 describe('notifyNewLead', () => {
@@ -352,6 +359,159 @@ describe('notifyNewLead — single send + footer', () => {
     expect(arg.text).toContain("Don't have Bee Hub access yet?")
     // …and never the old #72 notice.
     expect(arg.html).not.toContain('manage follow-up from Bee Hub')
+  })
+})
+
+// ── #91: location-scoped Bee Hub vs non-hub variant ─────────────────────────
+// The branch is on the LOCATION, not the recipient — so each lead is still ONE
+// send, and everyone at one office gets the same email. Every test here asserts
+// exactly one sendEmailDirect call.
+describe('notifyNewLead — #91 location-scoped no-Bee-Hub variant', () => {
+  // The #82 footer line and the product name — both must be ABSENT from the
+  // non-hub variant, in html AND text.
+  const FOOTER_LINE = 'Contact the corporate office to get set up'
+
+  it('location WITH an active hub_user → Bee Hub email: button present, ONE send', async () => {
+    hasHubAccessMock.mockResolvedValue(true)
+    resolveMock.mockResolvedValue([recip('owner@biz.com')])
+
+    const res = await notifyNewLead({
+      location: LOCATION,
+      lead: LEAD,
+      baseUrl: 'https://hub.example.com',
+    })
+
+    expect(sendEmailDirectMock).toHaveBeenCalledTimes(1)
+    const arg = sendEmailDirectMock.mock.calls[0][0]
+    expect(arg.email_kind).toBe('lead_notification')
+    expect(arg.fromName).toBe('Bee Hub')
+    expect(arg.html).toContain('Open this lead in Bee Hub')
+    expect(arg.html).toContain(FOOTER_LINE)
+    expect(res.sent).toBe(true)
+  })
+
+  it('location with NONE → clean email: no button, and NO "Bee Hub" / footer line in html OR text, ONE send', async () => {
+    hasHubAccessMock.mockResolvedValue(false)
+    resolveMock.mockResolvedValue([
+      ext('ext@biz.com'),
+      recip('zoho@biz.com', { source: 'zoho', hub_user_id: null }),
+    ])
+
+    const res = await notifyNewLead({
+      location: LOCATION,
+      lead: LEAD,
+      baseUrl: 'https://hub.example.com',
+    })
+
+    // ONE send — the branch is location-level, not two sends.
+    expect(sendEmailDirectMock).toHaveBeenCalledTimes(1)
+    const arg = sendEmailDirectMock.mock.calls[0][0]
+
+    // Distinct email_kind so the notebook can tell the variants apart.
+    expect(arg.email_kind).toBe('lead_notification_non_hub')
+    // Signed as Bee Organized, not Bee Hub — including the visible From name.
+    expect(arg.fromName).toBe('Bee Organized')
+
+    for (const body of [arg.html, arg.text]) {
+      // ZERO Bee Hub references anywhere.
+      expect(body).not.toContain('Bee Hub')
+      // No dead button, no deep link.
+      expect(body).not.toContain('Open this lead')
+      expect(body).not.toContain('/clients/lead-1')
+      // The #82 footer line is gone.
+      expect(body).not.toContain(FOOTER_LINE)
+      // …but the lead details still made it through.
+      expect(body).toContain('Jane Prospect')
+    }
+    // Subject carries no product name in either variant.
+    expect(arg.subject).not.toContain('Bee Hub')
+    // Still addressed and sent normally.
+    expect(arg.to).toEqual(expect.arrayContaining(['ext@biz.com', 'zoho@biz.com']))
+    expect(res.sent).toBe(true)
+  })
+
+  it('a location whose ONLY hub_user is inactive/disabled is treated as no-access', async () => {
+    // The resolver (locationHasActiveHubUser) collapses is_active=false /
+    // disabled_at-set to "no access" — its filter is pinned in
+    // beta-lead-notification-recipients.test.ts. Here we assert notifyNewLead
+    // honors a false result: the clean variant, one send.
+    hasHubAccessMock.mockResolvedValue(false)
+    resolveMock.mockResolvedValue([ext('ext@biz.com')])
+
+    await notifyNewLead({
+      location: LOCATION,
+      lead: LEAD,
+      baseUrl: 'https://hub.example.com',
+    })
+
+    expect(sendEmailDirectMock).toHaveBeenCalledTimes(1)
+    const arg = sendEmailDirectMock.mock.calls[0][0]
+    expect(arg.email_kind).toBe('lead_notification_non_hub')
+    expect(arg.html).not.toContain('Bee Hub')
+  })
+
+  it('global CC at a no-access location → on cc, SAME (clean) body, ONE send', async () => {
+    hasHubAccessMock.mockResolvedValue(false)
+    resolveMock.mockResolvedValue([ext('ext@biz.com')])
+    resolveGlobalCcMock.mockResolvedValue([cc('hq@bmave.com')])
+
+    const res = await notifyNewLead({
+      location: LOCATION,
+      lead: LEAD,
+      baseUrl: 'https://hub.example.com',
+    })
+
+    // Corporate CC does NOT get a second, Bee-Hub-branded send — that would be
+    // two sends again. They ride cc on the ONE clean email.
+    expect(sendEmailDirectMock).toHaveBeenCalledTimes(1)
+    const arg = sendEmailDirectMock.mock.calls[0][0]
+    expect(arg.email_kind).toBe('lead_notification_non_hub')
+    expect(arg.to).toEqual(['ext@biz.com'])
+    expect(arg.cc).toEqual(['hq@bmave.com'])
+    expect(arg.html).not.toContain('Bee Hub')
+    expect(res.recipientCount).toBe(2)
+  })
+
+  it('a hub-access read error falls SOFT to the clean variant (resolver returns false), send still succeeds', async () => {
+    // locationHasActiveHubUser swallows internally and returns FALSE on error
+    // (pinned in beta-lead-notification-recipients.test.ts). notifyNewLead then
+    // sends the clean, Bee-Hub-free email — a failed lookup must not resurrect
+    // the confusing message. The send still happens.
+    hasHubAccessMock.mockResolvedValue(false)
+    resolveMock.mockResolvedValue([recip('owner@biz.com')])
+
+    const res = await notifyNewLead({ location: LOCATION, lead: LEAD, baseUrl: 'https://hub.example.com' })
+
+    expect(sendEmailDirectMock).toHaveBeenCalledTimes(1)
+    const arg = sendEmailDirectMock.mock.calls[0][0]
+    expect(arg.email_kind).toBe('lead_notification_non_hub')
+    expect(arg.html).not.toContain('Bee Hub')
+    expect(res.sent).toBe(true)
+  })
+
+  it('a muted no-access location sends nothing — the hub-access lookup is never run', async () => {
+    notificationsLiveMock.mockResolvedValue({ live: false, reason: 'muted' })
+
+    const res = await notifyNewLead({ location: LOCATION, lead: LEAD })
+
+    expect(sendEmailDirectMock).not.toHaveBeenCalled()
+    // Gated FIRST — a muted location must not pay for the hub-access read.
+    expect(hasHubAccessMock).not.toHaveBeenCalled()
+    expect(res.muted).toBe(true)
+  })
+
+  it('zero recipients at a no-access location logs zero_recipients once, never sends', async () => {
+    hasHubAccessMock.mockResolvedValue(false)
+    resolveMock.mockResolvedValue([])
+
+    const res = await notifyNewLead({ location: LOCATION, lead: LEAD })
+
+    expect(sendEmailDirectMock).not.toHaveBeenCalled()
+    expect(logNotificationMock).toHaveBeenCalledTimes(1)
+    expect(logNotificationMock.mock.calls[0][0]).toMatchObject({
+      send_status: 'zero_recipients',
+    })
+    expect(res.recipientCount).toBe(0)
   })
 })
 
