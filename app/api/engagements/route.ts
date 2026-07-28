@@ -38,6 +38,7 @@ import { foundManualEngagement } from '@/lib/engagements'
 // PURE zero-import module (§8.5) — safe from the server route; ONE
 // source for the terminal stage strings ('Closed Won' / 'Closed Lost').
 import { CLOSED_STAGE_FILTERS } from '@/components/hive/shared/stageConfig'
+import { originalEngagementIds } from '@/components/hive/shared/engagementStatus'
 
 // Ceiling on ?ids= — the realtime coalescer only ever names cards already on
 // one board, so this is a guard against a hand-crafted URL, not a real limit.
@@ -65,14 +66,20 @@ async function enrichBoardRows(baseRows: any[]): Promise<any[]> {
   // repeat_count: ALL engagements per client (closed included), the same
   // count _hub-page's all-engagements sweep produces.
   const repeatCounts: Record<string, number> = {}
+  const sweptForReturn: Array<{ id: string; client_id: string; created_at: string | null }> = []
   if (clientIds.length > 0) {
     for (let i = 0; i < clientIds.length; i += 200) {
       const chunk = clientIds.slice(i, i + 200)
       const { data } = await supabaseService
-        .from('engagements').select('id, client_id').in('client_id', chunk)
-      for (const r of data ?? []) repeatCounts[r.client_id] = (repeatCounts[r.client_id] || 0) + 1
+        .from('engagements').select('id, client_id, created_at').in('client_id', chunk)
+      for (const r of data ?? []) {
+        repeatCounts[r.client_id] = (repeatCounts[r.client_id] || 0) + 1
+        sweptForReturn.push({ id: r.id, client_id: r.client_id, created_at: r.created_at })
+      }
     }
   }
+  // Debut set for the "Returning client" chip — mirrors _hub-page.tsx.
+  const debutEngIds = originalEngagementIds(sweptForReturn)
 
   // Child rows by engagement_id — same projection _hub-page ships for the
   // board chips (value/status derivation + linked-vs-local gate).
@@ -116,6 +123,7 @@ async function enrichBoardRows(baseRows: any[]): Promise<any[]> {
     client_phone: infoById[e.client_id]?.phone ?? null,
     client_email: infoById[e.client_id]?.email ?? null,
     repeat_count: repeatCounts[e.client_id] || 1,
+    is_returning: !debutEngIds.has(e.id),
     quotes: (quotesByEng[e.id] || []).map((q: any) => ({
       id: q.id, status: q.status, total: q.total, sent_at: q.sent_at, approved_at: q.approved_at,
     })),
@@ -347,6 +355,9 @@ export async function POST(req: Request) {
       client_phone: lead.phone || null,
       client_email: lead.email || null,
       repeat_count: repeatCount ?? 1,
+      // Freshly founded = the client's newest engagement, so it is a return
+      // iff they already had at least one (repeat_count > 1). Never the debut.
+      is_returning: (repeatCount ?? 1) > 1,
       quotes: [],
       jobs: [],
       invoices: [],

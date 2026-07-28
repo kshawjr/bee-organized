@@ -92,7 +92,7 @@ function EngagementRow({ e, nowMs, muted = false, onOpen, isMobile }) {
           {closed
             ? <StatusChip label={stageDisplayLabel(e.stage)} styleKey={e.stage} />
             : (chip && <StatusChip label={chip.label} styleKey={chip.styleKey} icon={statusIconFor(chip.styleKey)} />)}
-          {e.repeat_count > 1 && <StatusChip label={`repeat · ${e.repeat_count - 1} prior`} styleKey="repeat" />}
+          {e.is_returning && <StatusChip label="Returning client" styleKey="repeat" />}
           {isNew && !closed && <StatusChip label="new" styleKey="teal" />}
         </div>
       </div>

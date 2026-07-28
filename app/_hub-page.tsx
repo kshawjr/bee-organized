@@ -28,6 +28,7 @@ import {
   transferQueueSource,
 } from '@/lib/hub-scope'
 import { buildAllOverview } from '@/lib/hub-all-overview'
+import { originalEngagementIds } from '@/components/hive/shared/engagementStatus'
 import BeeHub from '@/components/BeeHub'
 
 function mapRole(dbRole: string | null | undefined): {
@@ -1149,10 +1150,13 @@ export default async function HubPage({
       // fetch below AND of the stored leads.client_status column.
       const repeatCounts: Record<string, number> = {}
       const wonByClient: Record<string, { count: number; value: number; lastClosedAt: string | null }> = {}
+      // Debut detection for the "Returning client" chip: the earliest
+      // engagement per client is their debut, every later one is a return.
+      const sweptForReturn: Array<{ id: string; client_id: string; created_at: string | null }> = []
       for (let from = 0; ; from += PAGE) {
         let q = supabaseService
           .from('engagements')
-          .select('id, client_id, stage, total_paid, total_invoiced, closed_at')
+          .select('id, client_id, stage, total_paid, total_invoiced, closed_at, created_at')
           .order('id', { ascending: true })
           .range(from, from + PAGE - 1)
         if (scopeLocationUuid) {
@@ -1165,6 +1169,7 @@ export default async function HubPage({
         }
         for (const r of data || []) {
           repeatCounts[r.client_id] = (repeatCounts[r.client_id] || 0) + 1
+          sweptForReturn.push({ id: r.id, client_id: r.client_id, created_at: r.created_at })
           if (r.stage === 'Closed Won') {
             const w = wonByClient[r.client_id] || (wonByClient[r.client_id] = { count: 0, value: 0, lastClosedAt: null })
             w.count += 1
@@ -1174,6 +1179,7 @@ export default async function HubPage({
         }
         if ((data || []).length < PAGE) break
       }
+      const debutEngIds = originalEngagementIds(sweptForReturn)
 
       const { mapLeadToPerson } = await import('@/lib/people-mapper')
       initialPeople = leadsRaw.map((row: any) =>
@@ -1247,6 +1253,7 @@ export default async function HubPage({
             client_phone: leadInfoById[e.client_id]?.phone ?? null,
             client_email: leadInfoById[e.client_id]?.email ?? null,
             repeat_count: repeatCounts[e.client_id] || 1,
+            is_returning: !debutEngIds.has(e.id),
             quotes: (quotesByEng[e.id] || []).map((q: any) => ({
               id: q.id, status: q.status, total: q.total,
               sent_at: q.sent_at, approved_at: q.approved_at,

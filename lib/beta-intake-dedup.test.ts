@@ -59,6 +59,12 @@ vi.mock('@/lib/drip-send', () => ({
 vi.mock('@/lib/sync-log', () => ({
   writeSyncLog: vi.fn(async () => {}),
 }))
+// #94 — the merge path founds/surfaces an engagement; mocked here so dedup pins
+// stay isolated (wiring pinned in beta-resubmission-engagement.test.ts).
+vi.mock('@/lib/engagements', () => ({
+  findOpenEngagementForClient: vi.fn(async () => null),
+  foundManualEngagement: vi.fn(async () => ({ engagement: { id: 'eng-resub' }, created: true })),
+}))
 
 import { POST } from '@/app/api/leads/intake/route'
 import { startDripForLead } from '@/lib/drip-lifecycle'

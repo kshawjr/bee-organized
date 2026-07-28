@@ -68,7 +68,7 @@ function ClientCell({ e, nowMs }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
       <span style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.client_name}</span>
-      {e.repeat_count > 1 && <StatusChip label="repeat" styleKey="repeat" />}
+      {e.is_returning && <StatusChip label="Returning client" styleKey="repeat" />}
       {isNew && <StatusChip label="new" styleKey="teal" />}
     </div>
   )

@@ -194,6 +194,8 @@ describe('foundEngagement carries the founding child date', () => {
   it('ensureEngagementForServiceRequest (the import + webhook door) carries the date through', async () => {
     // readEngagementIdOf: SR has no engagement yet.
     h.enqueue('service_requests', { engagement_id: null })
+    // #67 adoption probe: no open engagement for this client → founds as before.
+    h.enqueue('engagements', [])
     enqueueFounding('service_requests', {
       id: 'sr1', notes: '', requested_at: '2021-09-01T08:00:00Z', created_at: '2026-07-23T02:00:00Z',
     })

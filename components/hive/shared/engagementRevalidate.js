@@ -30,7 +30,7 @@ export function boardSignature(e) {
   const child = (arr, keys) => (arr || []).map(r => keys.map(k => r?.[k]).join('')).join('')
   return JSON.stringify([
     e.stage, e.client_name, e.client_phone, e.client_email, e.title,
-    e.total_invoiced, e.total_paid, e.balance_owing, e.repeat_count,
+    e.total_invoiced, e.total_paid, e.balance_owing, e.repeat_count, e.is_returning,
     e.nurture_started_at, e.closed_at, e.stage_entered_at, e.founded_by,
     child(e.quotes, ['status', 'total', 'sent_at', 'approved_at']),
     child(e.jobs, ['status', 'scheduled_start', 'completed_at']),

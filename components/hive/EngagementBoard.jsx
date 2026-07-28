@@ -100,8 +100,8 @@ function EngagementCard({ e, onOpen, draggable, onDragStart, onDragEnd, accent =
         </p>
         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
           {chip && <StatusChip label={chip.label} styleKey={chip.styleKey} icon={statusIconFor(chip.styleKey)} />}
-          {e.repeat_count > 1 && (
-            <StatusChip label={`repeat · ${e.repeat_count - 1} prior`} styleKey="repeat" />
+          {e.is_returning && (
+            <StatusChip label="Returning client" styleKey="repeat" />
           )}
         </div>
       </Card>

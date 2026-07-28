@@ -59,6 +59,12 @@ vi.mock('@/lib/drip-lifecycle', () => ({
 vi.mock('@/lib/drip-send', () => ({
   sendDripStep: vi.fn(async () => ({ sent: true })),
 }))
+// #94 — merge founds/surfaces an engagement; mocked so observability pins stay
+// isolated (wiring pinned in beta-resubmission-engagement.test.ts).
+vi.mock('@/lib/engagements', () => ({
+  findOpenEngagementForClient: vi.fn(async () => null),
+  foundManualEngagement: vi.fn(async () => ({ engagement: { id: 'eng-resub' }, created: true })),
+}))
 
 import { POST } from '@/app/api/leads/intake/route'
 import { applyDripSideEffects, startDripForLead } from '@/lib/drip-lifecycle'

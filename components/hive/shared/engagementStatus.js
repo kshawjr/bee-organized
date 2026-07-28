@@ -295,6 +295,32 @@ export function passesEngagementFilters(e, f, nowMs = Date.now(), { ignoreStages
   return true
 }
 
+// ── returning-client marker (the "Returning client" chip) ──────────
+// repeat_count is a FLAT per-client count stamped on every one of a client's
+// engagements — so keying the chip on repeat_count>1 lights it on ALL of a
+// three-engagement client's cards, which reads as noise. The chip should mark
+// only the RETURNS: an engagement founded when the client already had one. So
+// the client's EARLIEST engagement (their debut) is excluded; every later one
+// is a return. This computes, from a flat list of {id, client_id, created_at},
+// the set of debut (earliest-per-client) engagement ids — is_returning is the
+// complement. Ties on created_at break by id so exactly one debut per client is
+// chosen deterministically. PURE: producers (SSR sweep + /api/engagements)
+// stamp e.is_returning from this; the cards render on that boolean, not the count.
+export function originalEngagementIds(rows) {
+  const earliest = new Map() // client_id -> { id, ms }
+  for (const r of rows || []) {
+    if (!r || !r.client_id || !r.id) continue
+    const ms = new Date(r.created_at || 0).getTime() || 0
+    const cur = earliest.get(r.client_id)
+    // Earliest wins; on a created_at tie, the smaller id wins — deterministic
+    // so exactly one debut per client, stable across the two producers.
+    if (!cur || ms < cur.ms || (ms === cur.ms && r.id < cur.id)) {
+      earliest.set(r.client_id, { id: r.id, ms })
+    }
+  }
+  return new Set([...earliest.values()].map(v => v.id))
+}
+
 // Within-stage status chip (THE derivation — board cards + list rows):
 //   Request          → request age (teal; amber at day >= 21 as pre-nurture cue)
 //   Estimate         → latest quote state; 'sent' is the neutral default

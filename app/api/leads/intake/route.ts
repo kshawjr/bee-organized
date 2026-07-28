@@ -46,6 +46,7 @@ import {
   queryLeadMatches,
   classifyLeadMatches,
 } from '@/components/hive/shared/clientMatch'
+import { findOpenEngagementForClient, foundManualEngagement } from '@/lib/engagements'
 import { normalizeLeadSource, DEFAULT_LEAD_SOURCE } from '@/lib/lead-source'
 
 export const runtime = 'nodejs'
@@ -764,10 +765,55 @@ async function mergeResubmission(args: {
       ? fills.email
       : null
 
+  // ─── #94: found or update a visibly-returning engagement ──────
+  // The resubmission is actionable work, not just a notification. If the client
+  // has an OPEN engagement, surface the new request onto it — never a second
+  // card (David's same-apartment case: two submissions, one job). If none is
+  // open, found a fresh manual engagement at Request (Samantha's genuine next
+  // job: her prior engagement is Closed Won = terminal = not open, so a new
+  // card is correct). "Open" is the one shared predicate everywhere — stage not
+  // in the two terminals — via findOpenEngagementForClient, the same resolver
+  // #67's SR path uses.
+  //
+  // The lead's own stage is deliberately left UNTOUCHED. leads.stage is not a
+  // rollup of engagement state and founding never writes it; Nurturing and Won
+  // are both drip-STOP stages, so only an explicit write to 'New' could re-
+  // enroll a past customer in a nurture drip — which we never do. The
+  // directory's client-status chip flips to Active on its own (it is derived
+  // from the presence of an open engagement, not stored).
+  //
+  // NON-FATAL: the merge already committed; a founding failure only warns.
+  let engagementId: string | null = null
+  let engagementFounded = false
+  try {
+    const open = await findOpenEngagementForClient(matched.id)
+    if (open) {
+      engagementId = open.id
+    } else {
+      const founded = await foundManualEngagement({
+        clientId: matched.id,
+        note: `founded from webform resubmission (matched on ${matchedOn})`,
+      })
+      if ('engagement' in founded) {
+        engagementId = founded.engagement.id
+        engagementFounded = true
+      } else {
+        warnings.push(`engagement_found_failed: ${founded.error}`)
+      }
+    }
+  } catch (err: any) {
+    console.error('[intake] resubmission engagement found/surface failed', err)
+    warnings.push(`engagement_found_failed: ${err?.message || String(err)}`)
+  }
+
+  // The resubmission touchpoint is anchored to that engagement (engagement_id),
+  // so it lands on the engagement's timeline — the "new request arrived" trace
+  // on the returning card (Kevin's option 1). Founded-or-existing both carry it.
   try {
     const { error: tpErr } = await supabaseService.from('touchpoints').insert({
       lead_id:       matched.id,
       location_uuid: location.id,
+      engagement_id: engagementId,
       kind:          'system',
       method:        'system',
       label:         'Webform resubmission',
@@ -782,6 +828,17 @@ async function mergeResubmission(args: {
   } catch (err: any) {
     console.error('[intake] resubmission touchpoint insert failed', err)
     warnings.push(`touchpoint_insert_failed: ${err?.message || String(err)}`)
+  }
+
+  // Surfacing onto an EXISTING engagement bumps its updated_at so the card
+  // reads as freshly touched (a founded engagement is already fresh). No
+  // transient chip — #86's notification is the signal that something happened.
+  if (engagementId && !engagementFounded) {
+    const { error: bumpErr } = await supabaseService
+      .from('engagements')
+      .update({ updated_at: now })
+      .eq('id', engagementId)
+    if (bumpErr) warnings.push(`engagement_bump_failed: ${bumpErr.message}`)
   }
 
   // ─── Assignment on merge: FILL-EMPTY, never overwrite ─────────
@@ -970,6 +1027,12 @@ async function mergeResubmission(args: {
     entityId: matched.id,
     detail:
       `lead=${matched.id} source=${source} merged (matched on ${matchedOn})` +
+      // #94 — resubmissions now produce an engagement: founded a new one, or
+      // surfaced onto the client's open one. Absent only if the found/surface
+      // failed (a warning carries the reason).
+      (engagementId
+        ? ` engagement=${engagementFounded ? 'founded' : 'updated'}:${engagementId}`
+        : '') +
       ` drip_enrolled=${dripEnrolled}` +
       // assigned_via=existing means the merge left a human's choice alone.
       ` assigned=${mergeAssignedCount}` +
@@ -998,6 +1061,10 @@ async function mergeResubmission(args: {
     },
     drip_enrolled: dripEnrolled,
     assigned_count: mergeAssignedCount,
+    // #94 — the engagement the resubmission founded or surfaced onto.
+    ...(engagementId
+      ? { engagement_id: engagementId, engagement_action: engagementFounded ? 'founded' : 'updated' }
+      : {}),
     // #86 — resubmissions notify now; expose the count + mute like the create path.
     notified_count: notifiedCount,
     ...(notificationsMuted ? { notifications_muted: true } : {}),

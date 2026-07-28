@@ -501,6 +501,44 @@ async function readEngagementIdOf(
   return data?.engagement_id ?? null
 }
 
+// ── the ONE "is there an open engagement?" resolver (rule 5 / #67 / #94) ──
+//
+// Most-recent OPEN engagement for a client, or null. "Open" is the canonical
+// predicate everywhere: stage NOT IN the two terminals (Closed Won/Lost share
+// the top rank). This is the single shared policy behind three callers:
+//   · resolveEngagementForChild rule-5 fallback (ambiguous quote/job)
+//   · ensureEngagementForServiceRequest adoption guard (#67 — Send-to-Jobber /
+//     webhook request adopting an empty manual container instead of duplicating)
+//   · mergeResubmission (#94 — a returning webform client surfacing onto an
+//     open engagement instead of founding a second card)
+// One rule, not three drifting copies. founded_by rides along so the SR-
+// adoption caller can require an empty *manual* container without a re-read.
+export async function findOpenEngagementForClient(
+  clientId: string,
+): Promise<{ id: string; stage: EngagementStage; created_at: string | null; founded_by: FoundedBy | null } | null> {
+  const { data } = await supabaseService
+    .from('engagements')
+    .select('id, stage, created_at, founded_by')
+    .eq('client_id', clientId)
+    .not('stage', 'in', '("Closed Won","Closed Lost")')
+    .order('created_at', { ascending: false })
+    .limit(1)
+  return (data?.[0] as any) ?? null
+}
+
+// True when the engagement already owns a service_request row. The 1-SR-per-
+// engagement invariant (rule 1) is what makes the #67 adoption safe for bulk
+// import: an SR-founded engagement always HAS its SR, so it is never adopted
+// by a second SR — only an empty manual container (no SR) can be.
+async function engagementHasServiceRequest(engagementId: string): Promise<boolean> {
+  const { data } = await supabaseService
+    .from('service_requests')
+    .select('id')
+    .eq('engagement_id', engagementId)
+    .limit(1)
+  return (data?.length ?? 0) > 0
+}
+
 // Resolve which engagement a quote/job/invoice belongs to, founding
 // implicitly when the doc's fallback rules call for it. Returns the
 // engagement id (attaching is the caller's move), or null when nothing
@@ -558,29 +596,23 @@ export async function resolveEngagementForChild(params: {
     if (viaJob) return viaJob
   }
 
-  // 4. Fallback (rule 5): most-recent-open engagement for this client.
-  const { data: openEngs } = await supabaseService
-    .from('engagements')
-    .select('id, stage, created_at')
-    .eq('client_id', leadId)
-    .not('stage', 'in', '("Closed Won","Closed Lost")')
-    .order('created_at', { ascending: false })
-    .limit(1)
+  // 4. Fallback (rule 5): most-recent-open engagement for this client — the
+  //    ONE shared resolver (findOpenEngagementForClient).
+  const openEng = await findOpenEngagementForClient(leadId)
   const priorCountRes = await supabaseService
     .from('engagements')
     .select('id', { count: 'exact', head: true })
     .eq('client_id', leadId)
   const priorCount = priorCountRes.count ?? 0
 
-  if (openEngs && openEngs.length > 0) {
-    const target = openEngs[0]
+  if (openEng) {
     await logFounding({
       locationSlug: params.locationSlug ?? null,
-      engagementId: target.id,
+      engagementId: openEng.id,
       foundedBy: childTable === 'quotes' ? 'quote' : 'job',
       note: `ambiguous ${childTable}/${childId}: no resolvable parent — attached to most-recent-open engagement (rule 5)`,
     })
-    return target.id
+    return openEng.id
   }
 
   // 5. No open engagement → implicit founding (quotes/jobs only; the
@@ -787,6 +819,32 @@ export async function ensureEngagementForServiceRequest(
 ): Promise<{ id: string; created: boolean } | null> {
   const existing = await readEngagementIdOf('service_requests', serviceRequestId)
   if (existing) return { id: existing, created: false }
+
+  // #67: before founding a fresh engagement, adopt an existing OPEN engagement
+  // that is an EMPTY MANUAL CONTAINER — founded_by='manual' with no SR of its
+  // own. That is precisely the "Start new engagement" / resubmission-founded
+  // (#94) card awaiting its first Jobber request; a bare lead Send-to-Jobber
+  // (no engagement_id passed) used to found a SECOND engagement beside it (the
+  // duplicate Kevin found). Guarded tight so it never collapses the 1-SR-per-
+  // engagement invariant bulk import relies on: an SR-founded engagement always
+  // HAS its SR (engagementHasServiceRequest), so it is never adoptable, and a
+  // second bare send after the container already adopted an SR founds anew. The
+  // same shared resolver mergeResubmission (#94) uses — one policy, both paths.
+  const open = await findOpenEngagementForClient(leadId)
+  if (open && open.founded_by === 'manual' && !(await engagementHasServiceRequest(open.id))) {
+    const { attached } = await attachToEngagement('service_requests', serviceRequestId, open.id)
+    if (attached) {
+      await logFounding({
+        locationSlug: null,
+        engagementId: open.id,
+        foundedBy: 'request',
+        note: `adopted SR ${serviceRequestId} into open manual engagement (no duplicate founded — #67)`,
+      })
+      return { id: open.id, created: false }
+    }
+    // attach lost a race / conflict — fall through to a clean founding.
+  }
+
   const founded = await foundEngagement({
     clientId: leadId,
     foundedBy: 'request',

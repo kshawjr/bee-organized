@@ -79,6 +79,14 @@ vi.mock('@/lib/slack-bot', () => ({
 vi.mock('@/lib/notification-log', () => ({
   logSlackNotification: vi.fn(async () => {}),
 }))
+// #94 — the merge path now founds/surfaces an engagement. The wiring is pinned
+// in beta-resubmission-engagement.test.ts; here the module is mocked so these
+// notification pins stay isolated to the notify wiring (founding "succeeds"
+// silently, no supabase calls, no warnings).
+vi.mock('@/lib/engagements', () => ({
+  findOpenEngagementForClient: vi.fn(async () => null),
+  foundManualEngagement: vi.fn(async () => ({ engagement: { id: 'eng-resub' }, created: true })),
+}))
 
 import { POST } from '@/app/api/leads/intake/route'
 
