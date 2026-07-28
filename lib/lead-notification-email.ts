@@ -78,6 +78,20 @@ import { resolveNotificationsLive } from './notifications-live'
 const LEAD_NOTIFICATION_KIND = 'lead_notification'
 const LEAD_NOTIFICATION_NON_HUB_KIND = 'lead_notification_non_hub'
 
+// #86 — RESUBMISSION kinds. A returning client re-submitted the website form:
+// the SAME notification path as a new lead (gate, #91 hub/non-hub branch, global
+// CC, dedupe), but distinguishable in the notebook and worded as a returning
+// client, not a new lead. Two values, mirroring the #91 hub/non-hub split, so
+// the notebook can tell a returning-client alert from a new-lead one AND tell
+// which office variant went out. Both are DELIBERATELY FRESH values that reuse
+// nothing above; email_kind carries no CHECK constraint, so neither needs a
+// migration. Chosen HERE, never by callers, for the same by-construction reason
+// the new-lead kinds are: the resubmission flag flips the copy AND the label
+// together, so a caller can't ship a "returning client" email logged as a new
+// lead.
+const LEAD_RESUBMISSION_KIND = 'lead_resubmission'
+const LEAD_RESUBMISSION_NON_HUB_KIND = 'lead_resubmission_non_hub'
+
 // System sender for lead notifications. notifications@beeorganized.com sends
 // on the same verified domain (beeorganized.com) that admin@ already uses for
 // invites/drips — Resend verification is domain-scoped, so any mailbox on a
@@ -161,11 +175,25 @@ function buildLeadNotificationEmail(args: {
   // — the recipients don't use Bee Hub. The subject already carries no product
   // name, so it is identical in both variants.
   hasHubAccess: boolean
+  // #86 — is this a returning client re-submitting the website form (vs a
+  // genuinely new lead)? Flips ONLY the wording — subject, heading, intro, and
+  // the details-block label — so an owner reading it instantly knows this person
+  // is already in their list. Everything else (field grid, the #91 hub button/
+  // branding vs clean non-hub layer, global CC, footer) is identical, because a
+  // resubmission alert IS a lead alert; only its framing differs. Default false
+  // keeps the new-lead email byte-identical.
+  resubmission: boolean
 }): { subject: string; html: string; text: string } {
-  const { lead, locationName, leadUrl, hasHubAccess } = args
+  const { lead, locationName, leadUrl, hasHubAccess, resubmission } = args
   const leadName = dash(lead.name)
 
-  const subject = `New lead: ${leadName} — ${locationName}`
+  // Subject is name-first for both variants (mobile clients truncate ~35–40
+  // chars and the name is what makes an owner open it). The resubmission subject
+  // leads with "Returning client:" so the framing survives even when the tail is
+  // clipped; the new-lead subject is unchanged.
+  const subject = resubmission
+    ? `Returning client: ${leadName} — ${locationName}`
+    : `New lead: ${leadName} — ${locationName}`
 
   const rows: [string, string][] = [
     ['Name', dash(lead.name)],
@@ -185,8 +213,19 @@ function buildLeadNotificationEmail(args: {
     )
     .join('')
 
+  // Wording — the ONLY thing #86's resubmission flag changes. Heading, intro,
+  // and the details-block label reframe a returning client; a new lead keeps the
+  // original copy exactly.
+  const heading = resubmission
+    ? `Returning client — new request for ${locationName}`
+    : `New lead for ${locationName}`
+  const intro = resubmission
+    ? "A client already in your list just submitted the website form again. Here's their new request:"
+    : "A new inquiry just came in through your website. Here's what they shared:"
+  const detailsLabel = resubmission ? 'What they told us this time' : 'What they told us'
+
   const detailsHtml = lead.request_details?.trim()
-    ? `<p style="margin:18px 0 6px;font-size:14px;font-weight:600;color:#1a2e2b;">What they told us</p>
+    ? `<p style="margin:18px 0 6px;font-size:14px;font-weight:600;color:#1a2e2b;">${escapeHtml(detailsLabel)}</p>
                 <p style="margin:0 0 8px;font-size:14px;line-height:1.55;color:#1a2e2b;white-space:pre-wrap;">${escapeHtml(lead.request_details.trim())}</p>`
     : ''
 
@@ -216,8 +255,8 @@ function buildLeadNotificationEmail(args: {
             <tr>
               <td style="padding:32px 32px 24px;">
                 <div style="font-size:32px;margin-bottom:8px;">🐝</div>
-                <h1 style="margin:0 0 6px;font-family:Georgia,serif;font-size:22px;color:#1a2e2b;">New lead for ${escapeHtml(locationName)}</h1>
-                <p style="margin:0 0 18px;font-size:15px;line-height:1.55;color:#4a5e5a;">A new inquiry just came in through your website. Here's what they shared:</p>
+                <h1 style="margin:0 0 6px;font-family:Georgia,serif;font-size:22px;color:#1a2e2b;">${escapeHtml(heading)}</h1>
+                <p style="margin:0 0 18px;font-size:15px;line-height:1.55;color:#4a5e5a;">${escapeHtml(intro)}</p>
                 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;">
                   ${rowsHtml}
                 </table>
@@ -238,15 +277,18 @@ function buildLeadNotificationEmail(args: {
   </body>
 </html>`
 
+  const textIntro = resubmission
+    ? 'A client already in your list just submitted the website form again:'
+    : 'A new inquiry just came in through your website:'
   const textLines = [
-    `New lead for ${locationName}`,
+    heading,
     '',
-    'A new inquiry just came in through your website:',
+    textIntro,
     '',
     ...rows.map(([label, value]) => `${label}: ${value}`),
   ]
   if (lead.request_details?.trim()) {
-    textLines.push('', 'What they told us:', lead.request_details.trim())
+    textLines.push('', `${detailsLabel}:`, lead.request_details.trim())
   }
   // Bee Hub deep-link + "get set up" footer only on the Bee Hub variant (#91).
   if (hasHubAccess && leadUrl) {
@@ -282,16 +324,28 @@ export async function notifyNewLead(args: {
   // "boulder-01" without joining. Sits beside `location` rather than inside it
   // so the caller-side shape of `location` stays exactly as it was.
   locationSlug?: string | null
+  // #86 — this lead is a returning client re-submitting the website form (the
+  // intake SOLID-merge path), not a genuinely new lead. Flips the copy AND the
+  // email_kind together (see LEAD_RESUBMISSION_KIND). Everything else — the gate,
+  // recipient resolution, the #91 hub/non-hub branch, global CC, dedupe — is
+  // identical, because a resubmission alert IS a lead alert. Defaults false so
+  // every existing caller (new-lead create path, /api/leads POST, transfer) is
+  // unchanged.
+  resubmission?: boolean
 }): Promise<NotifyResult> {
   const { location, lead, baseUrl, locationSlug } = args
+  const resubmission = args.resubmission === true
   // Context for the outbound-mail notebook. Derived here from what this
-  // function already knows, so callers can't get it wrong.
+  // function already knows, so callers can't get it wrong. The base email_kind
+  // (used for the muted / zero-recipient / resolution-failure rows, which return
+  // before the #91 hub lookup) is the hub-variant name for this send TYPE —
+  // resubmission or new lead — mirroring how the new-lead base is the hub name.
   const logContext = {
     lead_id: lead.id,
     lead_name: lead.name,
     location_id: location.id,
     location_slug: locationSlug ?? null,
-    email_kind: LEAD_NOTIFICATION_KIND,
+    email_kind: resubmission ? LEAD_RESUBMISSION_KIND : LEAD_NOTIFICATION_KIND,
   }
   const locationName = location.name?.trim() || 'your location'
   const leadUrl = baseUrl
@@ -466,9 +520,13 @@ export async function notifyNewLead(args: {
   // the resolver: a read error yields NO-access (the clean email), never the
   // Bee Hub one — a failed lookup must not resurrect the confusing message.
   const hasHubAccess = await locationHasActiveHubUser(location.id)
-  const emailKind = hasHubAccess
-    ? LEAD_NOTIFICATION_KIND
-    : LEAD_NOTIFICATION_NON_HUB_KIND
+  // #86 crosses #91: four possible kinds now, one per (resubmission × hub) cell.
+  // The resubmission flag picks the row (returning-client vs new-lead), hasHubAccess
+  // picks the column (Bee Hub vs clean non-hub) — same two-variant split #91 built,
+  // duplicated across the two send types.
+  const emailKind = resubmission
+    ? (hasHubAccess ? LEAD_RESUBMISSION_KIND : LEAD_RESUBMISSION_NON_HUB_KIND)
+    : (hasHubAccess ? LEAD_NOTIFICATION_KIND : LEAD_NOTIFICATION_NON_HUB_KIND)
   const fromName = hasHubAccess ? NOTIFY_FROM_NAME : NOTIFY_FROM_NAME_NON_HUB
 
   const { subject, html, text } = buildLeadNotificationEmail({
@@ -476,6 +534,7 @@ export async function notifyNewLead(args: {
     locationName,
     leadUrl,
     hasHubAccess,
+    resubmission,
   })
   const result = await sendEmailDirect({
     from: NOTIFY_FROM_EMAIL,

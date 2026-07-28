@@ -648,3 +648,115 @@ describe('notifyNewLead — global CC', () => {
     expect(res.muted).toBe(true)
   })
 })
+
+// ── #86: resubmission variant (returning client) ────────────────────────────
+// resubmission:true reframes the copy (subject / heading / intro / details
+// label) and swaps the email_kind, but inherits EVERYTHING else — the gate, the
+// #91 hub/non-hub branch, global CC placement, dedupe. These pins assert the new
+// framing AND that each inherited behavior still holds on the resubmission path.
+describe('notifyNewLead — #86 resubmission variant', () => {
+  it('hub location → subject leads "Returning client:", heading/intro reframed, email_kind lead_resubmission', async () => {
+    hasHubAccessMock.mockResolvedValue(true)
+    resolveMock.mockResolvedValue([recip('owner@biz.com')])
+
+    await notifyNewLead({
+      location: LOCATION,
+      lead: LEAD,
+      baseUrl: 'https://hub.example.com',
+      resubmission: true,
+    })
+
+    const arg = sendEmailDirectMock.mock.calls[0][0]
+    // Name-first subject, "Returning client:" prefix so the framing survives
+    // mobile truncation; still carries the name + location.
+    expect(arg.subject).toBe('Returning client: Jane Prospect — Boulder')
+    // Distinct kind so the notebook tells a returning-client alert from a new one.
+    expect(arg.email_kind).toBe('lead_resubmission')
+    for (const body of [arg.html, arg.text]) {
+      expect(body).toContain('Returning client — new request for Boulder')
+      expect(body).toContain('already in your list just submitted the website form again')
+      expect(body).toContain('What they told us this time')
+      // The submitted request is carried.
+      expect(body).toContain('medically complex condition')
+    }
+    // Hub layer intact: button + Bee Hub branding still present on a hub location.
+    expect(arg.html).toContain('Open this lead in Bee Hub')
+    expect(arg.fromName).toBe('Bee Hub')
+  })
+
+  it('non-hub location → clean resubmission email: email_kind lead_resubmission_non_hub, ZERO Bee Hub refs, still reframed', async () => {
+    hasHubAccessMock.mockResolvedValue(false)
+    resolveMock.mockResolvedValue([recip('owner@biz.com')])
+
+    await notifyNewLead({
+      location: LOCATION,
+      lead: LEAD,
+      baseUrl: 'https://hub.example.com',
+      resubmission: true,
+    })
+
+    const arg = sendEmailDirectMock.mock.calls[0][0]
+    expect(arg.email_kind).toBe('lead_resubmission_non_hub')
+    expect(arg.fromName).toBe('Bee Organized')
+    expect(arg.subject).toBe('Returning client: Jane Prospect — Boulder')
+    for (const body of [arg.html, arg.text]) {
+      expect(body).not.toContain('Bee Hub')
+      // Reframed copy is present even in the clean variant.
+      expect(body).toContain('Returning client — new request for Boulder')
+      expect(body).toContain('What they told us this time')
+    }
+    expect(arg.subject).not.toContain('Bee Hub')
+  })
+
+  it('a muted location on the resubmission path logs the muted row under lead_resubmission and never sends', async () => {
+    notificationsLiveMock.mockResolvedValue({ live: false, reason: 'muted' })
+
+    const res = await notifyNewLead({
+      location: LOCATION,
+      lead: LEAD,
+      locationSlug: 'boulder-01',
+      resubmission: true,
+    })
+
+    expect(sendEmailDirectMock).not.toHaveBeenCalled()
+    expect(hasHubAccessMock).not.toHaveBeenCalled()
+    expect(res.muted).toBe(true)
+    // The muted row carries the resubmission base kind, so a muted resubmission
+    // is distinguishable from a muted new-lead in the notebook.
+    expect(logNotificationMock.mock.calls[0][0]).toMatchObject({
+      channel: 'email',
+      send_status: 'muted',
+      email_kind: 'lead_resubmission',
+    })
+  })
+
+  it('global CC still rides a visible CC on the resubmission send', async () => {
+    resolveMock.mockResolvedValue([recip('owner@biz.com')])
+    resolveGlobalCcMock.mockResolvedValue([cc('hq@bmave.com')])
+
+    await notifyNewLead({
+      location: LOCATION,
+      lead: LEAD,
+      baseUrl: 'https://hub.example.com',
+      resubmission: true,
+    })
+
+    const arg = sendEmailDirectMock.mock.calls[0][0]
+    expect(arg.email_kind).toBe('lead_resubmission')
+    expect(arg.to).toEqual(['owner@biz.com'])
+    expect(arg.cc).toEqual(['hq@bmave.com'])
+    expect(arg.bcc).toBeUndefined()
+  })
+
+  it('the new-lead path is unchanged — default (no resubmission flag) keeps subject "New lead:" and email_kind lead_notification', async () => {
+    resolveMock.mockResolvedValue([recip('owner@biz.com')])
+
+    await notifyNewLead({ location: LOCATION, lead: LEAD, baseUrl: 'https://hub.example.com' })
+
+    const arg = sendEmailDirectMock.mock.calls[0][0]
+    expect(arg.subject).toBe('New lead: Jane Prospect — Boulder')
+    expect(arg.email_kind).toBe('lead_notification')
+    expect(arg.html).toContain('New lead for Boulder')
+    expect(arg.html).not.toContain('Returning client')
+  })
+})

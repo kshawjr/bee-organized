@@ -309,3 +309,71 @@ describe('notifyNewLeadSlack', () => {
     expect(openBtn.url).toBe('https://app.example.com/clients/lead-1')
   })
 })
+
+// ── #86: resubmission card (returning client) ───────────────────────────────
+// resubmission:true reframes the card — the preview summary, a "Returning
+// client" eyebrow above the headline, and the details label — but keeps every
+// field, button, and the colour stripe. Bee Hub references stay: Slack only
+// posts where the office installed the app.
+describe('buildLeadSlackMessage — #86 resubmission card', () => {
+  const flat = (blocks: any[]) => JSON.stringify(blocks)
+
+  it('summary leads with "🔁 Returning client (<location>)" and mirrors to fallback', () => {
+    const msg = buildLeadSlackMessage({
+      lead: LEAD,
+      locationName: 'Boulder',
+      leadUrl: null,
+      resubmission: true,
+    })
+    expect(msg.text).toBe('🔁 Returning client (Boulder)')
+    expect(msg.attachments[0].fallback).toBe('🔁 Returning client (Boulder)')
+  })
+
+  it('adds a "Returning client" eyebrow ABOVE the headline and reframes the details label', () => {
+    const msg = buildLeadSlackMessage({
+      lead: LEAD,
+      locationName: 'Boulder',
+      leadUrl: 'https://app.example.com/clients/lead-1',
+      resubmission: true,
+    })
+    const blocks = msg.attachments[0].blocks
+    // First block is the context eyebrow; the headline follows it.
+    expect(blocks[0]).toEqual({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: '🔁 *Returning client* — submitted the website form again' }],
+    })
+    expect(blocks[1]).toEqual({ type: 'section', text: { type: 'mrkdwn', text: '*Jane Prospect*' } })
+    expect(flat(blocks)).toContain('What they told us this time')
+    // The Open button + fields still render — nothing lost.
+    expect(flat(blocks)).toContain('Open in Bee Hub')
+  })
+
+  it('a NEW lead card (default) has NO eyebrow and keeps the original labels', () => {
+    const msg = buildLeadSlackMessage({ lead: LEAD, locationName: 'Boulder', leadUrl: null })
+    const blocks = msg.attachments[0].blocks
+    expect(blocks[0]).toEqual({ type: 'section', text: { type: 'mrkdwn', text: '*Jane Prospect*' } })
+    expect(flat(blocks)).not.toContain('Returning client')
+    expect(flat(blocks)).toContain('What they told us')
+    expect(flat(blocks)).not.toContain('What they told us this time')
+  })
+
+  it('notifyNewLeadSlack forwards resubmission:true into the posted card', async () => {
+    LOC_ROW = { slack_connected: true, slack_bot_token: 'xoxb-1', slack_channel_id: 'C1' }
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true, status: 200, json: async () => ({ ok: true }),
+    } as any)
+
+    const res = await notifyNewLeadSlack({
+      locationId: 'loc-uuid-1',
+      locationName: 'Boulder',
+      baseUrl: 'https://app.example.com',
+      resubmission: true,
+      lead: LEAD,
+    })
+
+    expect(res).toEqual({ ok: true })
+    const body = JSON.parse((fetchSpy.mock.calls[0] as any[])[1].body)
+    expect(body.text).toBe('🔁 Returning client (Boulder)')
+    expect(JSON.stringify(body.attachments)).toContain('Returning client')
+  })
+})

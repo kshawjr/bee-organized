@@ -202,8 +202,16 @@ export function buildLeadSlackMessage(args: {
   // Absolute Hub origin (no trailing slash) → `${baseUrl}/clients/${lead.id}`.
   // Null when no base URL is available — the Open button/link is omitted.
   leadUrl: string | null
+  // #86 — returning client re-submitting the website form (intake SOLID-merge
+  // path), not a genuinely new lead. Reframes the card: the notification-preview
+  // summary, a "returning client" eyebrow, and the details label. Everything else
+  // (field grid, Log call / Open buttons, colour stripe) is identical. Bee Hub
+  // references stay — Slack only posts where the office INSTALLED the Bee Hub app,
+  // so the #91 non-hub concern is email-only. Defaults false.
+  resubmission?: boolean
 }): { text: string; attachments: any[] } {
   const { lead, locationName, leadUrl } = args
+  const resubmission = args.resubmission === true
   const name = dash(lead.name)
 
   // ── Top-level text = single-line summary (NOT the full detail) ─────────
@@ -216,7 +224,9 @@ export function buildLeadSlackMessage(args: {
   // The lead NAME is intentionally NOT in the summary/notification line — it is
   // the card's headline. Graceful: a missing location omits its parens cleanly.
   const locPart = locationName?.trim() ? ` (${escapeMrkdwn(locationName.trim())})` : ''
-  const summary = `🐝 New lead${locPart}`
+  // #86 — the notification-preview line leads with the framing so a returning
+  // client reads as one in the push/preview, not "New lead".
+  const summary = resubmission ? `🔁 Returning client${locPart}` : `🐝 New lead${locPart}`
   const text = summary
 
   // ── Resolved, display-ready soft fields (null = omit) ──────
@@ -230,6 +240,17 @@ export function buildLeadSlackMessage(args: {
   const hasEmail = !!lead.email?.trim()
 
   const blocks: any[] = []
+
+  // 1. Returning-client eyebrow (#86) — a small context line ABOVE the headline
+  //    on the resubmission card only, so someone reading the card body (not just
+  //    the preview) sees this person is already in their list. A new lead omits
+  //    it entirely, keeping that card byte-identical.
+  if (resubmission) {
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: '🔁 *Returning client* — submitted the website form again' }],
+    })
+  }
 
   // 2. Headline — the bold name and the "from <source>" meta on TWO LINES of a
   //    SINGLE section block, so Slack renders them tight together (not spaced as
@@ -258,9 +279,10 @@ export function buildLeadSlackMessage(args: {
   if (lead.request_details?.trim()) {
     const details = lead.request_details.trim()
     const shown = details.length > 140 ? `${details.slice(0, 140)}…` : details
+    const detailsLabel = resubmission ? 'What they told us this time' : 'What they told us'
     blocks.push({
       type: 'section',
-      text: { type: 'mrkdwn', text: `*What they told us:*\n>${escapeMrkdwn(shown)}` },
+      text: { type: 'mrkdwn', text: `*${detailsLabel}:*\n>${escapeMrkdwn(shown)}` },
     })
   }
 
@@ -378,6 +400,9 @@ export async function notifyNewLeadSlack(args: {
   locationName: string | null
   lead: SlackLead
   baseUrl?: string | null
+  // #86 — returning client re-submitting (intake SOLID-merge path). Forwarded to
+  // the card builder for the reframed copy; the gate/transport are unchanged.
+  resubmission?: boolean
 }): Promise<SlackPostResult> {
   const { locationId, lead, baseUrl } = args
 
@@ -399,7 +424,12 @@ export async function notifyNewLeadSlack(args: {
 
   const locationName = args.locationName?.trim() || 'your location'
   const leadUrl = baseUrl ? `${baseUrl.replace(/\/$/, '')}/clients/${lead.id}` : null
-  const message = buildLeadSlackMessage({ lead, locationName, leadUrl })
+  const message = buildLeadSlackMessage({
+    lead,
+    locationName,
+    leadUrl,
+    resubmission: args.resubmission === true,
+  })
   return postToSlack(locationId, message)
 }
 

@@ -1,14 +1,18 @@
 // @vitest-environment node
 // /api/leads/intake — new-lead notification gate (B2).
 //
-// The internal "a lead came in" email is wired to the CREATE path ONLY:
+// The internal "a lead came in" notification is wired to BOTH intake outcomes:
 //   • NO MATCH → new leads row → notifyNewLead is called with the captured
 //     fields (name / email / phone / project_type / request_details /
 //     preferred_contact) and the lead's location.
-//   • SOLID merge / resubmission of an existing lead → notifyNewLead is
-//     NEVER called (a returning client must not re-notify).
-//   • A notification failure is non-fatal: the lead still lands (200) and
-//     the failure surfaces as a warning, never a 500.
+//   • SOLID merge / resubmission of an existing lead (#86) → notifyNewLead AND
+//     the Slack rail are called with resubmission:true, carrying the newly
+//     submitted message. (Reverses the original "returning client must not
+//     re-notify" rule — a returning client with a fresh request was a silent
+//     revenue leak.) No stage change; the Webform resubmission touchpoint is
+//     still written.
+//   • A notification failure is non-fatal on either path: the lead still lands
+//     (200) and the failure surfaces as a warning, never a 500.
 // notifyNewLead itself (recipient fan-out, one-email-to-all, zero-recipient
 // quiet no-send) is unit-tested in lead-notification-email.test.ts; here it
 // is mocked so we pin only the CREATE-vs-MERGE wiring.
@@ -47,6 +51,13 @@ const h = vi.hoisted(() => {
 const notifyMock = vi.hoisted(() =>
   vi.fn(async () => ({ sent: true, recipientCount: 3 })),
 )
+// #86 — the merge/resubmission path now ALSO fires the Slack rail (create-path
+// parity). Mocked here to pin the wiring; the card copy is unit-tested in
+// slack-bot.test.ts. logSlackNotification is mocked to a no-op — the route calls
+// it after every Slack attempt and its own behavior is pinned in notification-log.
+const slackMock = vi.hoisted(() =>
+  vi.fn(async () => ({ ok: true }) as any),
+)
 
 vi.mock('@/lib/supabase-service', () => ({
   supabaseService: { from: (t: string) => h.makeBuilder(t) },
@@ -61,6 +72,12 @@ vi.mock('@/lib/drip-send', () => ({
 }))
 vi.mock('@/lib/lead-notification-email', () => ({
   notifyNewLead: notifyMock,
+}))
+vi.mock('@/lib/slack-bot', () => ({
+  notifyNewLeadSlack: slackMock,
+}))
+vi.mock('@/lib/notification-log', () => ({
+  logSlackNotification: vi.fn(async () => {}),
 }))
 
 import { POST } from '@/app/api/leads/intake/route'
@@ -108,6 +125,7 @@ beforeEach(() => {
   h.reset()
   vi.clearAllMocks()
   notifyMock.mockResolvedValue({ sent: true, recipientCount: 3 })
+  slackMock.mockResolvedValue({ ok: true })
   process.env.LEAD_INTAKE_API_KEY = 'test-key'
   h.enqueue('locations', LOC)
 })
@@ -172,8 +190,12 @@ describe('intake notification — CREATE path', () => {
   })
 })
 
-describe('intake notification — MERGE path never notifies', () => {
-  it('a SOLID resubmission of an existing lead does NOT call notifyNewLead', async () => {
+// #86 — the merge/resubmission path used to be silent (a returning client was
+// invisible to the owner: no email, no Slack, no notification_log row — a live
+// revenue leak). It now notifies via the SAME path as a new lead, marked
+// resubmission:true. These pins invert the old "MERGE never notifies" contract.
+describe('intake notification — MERGE/resubmission path (#86) NOW notifies', () => {
+  it('a SOLID resubmission calls notifyNewLead with resubmission:true, the matched id, and the submitted message', async () => {
     // strong-key match query returns exactly one existing lead → SOLID merge
     h.enqueue('leads', [storedLead()])
 
@@ -184,6 +206,94 @@ describe('intake notification — MERGE path never notifies', () => {
     expect(body.merged).toBe(true)
     expect(body.lead_id).toBe('lead-A')
 
-    expect(notifyMock).not.toHaveBeenCalled()
+    expect(notifyMock).toHaveBeenCalledTimes(1)
+    const arg = notifyMock.mock.calls[0][0]
+    expect(arg.resubmission).toBe(true)
+    expect(arg.location).toEqual({ id: 'loc-uuid-1', name: 'Boulder' })
+    expect(arg.lead).toMatchObject({
+      id: 'lead-A',
+      name: 'Jane Prospect',
+      // The alert carries what they JUST submitted, not the stored request_details.
+      request_details: 'Back again, add the garage.',
+    })
+  })
+
+  it('a SOLID resubmission ALSO fires the Slack rail with resubmission:true', async () => {
+    h.enqueue('leads', [storedLead()])
+
+    await POST(makeReq(submission({ message: 'Back again, add the garage.' })))
+
+    expect(slackMock).toHaveBeenCalledTimes(1)
+    const arg = slackMock.mock.calls[0][0]
+    expect(arg.resubmission).toBe(true)
+    expect(arg.locationId).toBe('loc-uuid-1')
+    expect(arg.lead).toMatchObject({
+      id: 'lead-A',
+      request_details: 'Back again, add the garage.',
+    })
+  })
+
+  it('the resubmission notification is non-fatal — a send failure warns but the merge still lands (200)', async () => {
+    h.enqueue('leads', [storedLead()])
+    notifyMock.mockResolvedValue({ sent: false, recipientCount: 0, error: 'resend down' })
+
+    const res = await POST(makeReq(submission()))
+    const body = await res.json()
+
+    expect(body.success).toBe(true)
+    expect(body.merged).toBe(true)
+    expect(body.warnings).toEqual(
+      expect.arrayContaining([expect.stringContaining('lead_notification_failed: resend down')]),
+    )
+  })
+
+  it('a muted location sends nothing and never flips the merge (notified_count 0, muted flagged, no warning)', async () => {
+    h.enqueue('leads', [storedLead()])
+    notifyMock.mockResolvedValue({ sent: false, recipientCount: 0, muted: true })
+    slackMock.mockResolvedValue({ ok: false, skipped: 'notifications_off', mutedReason: 'muted' })
+
+    const res = await POST(makeReq(submission()))
+    const body = await res.json()
+
+    expect(body.success).toBe(true)
+    expect(body.merged).toBe(true)
+    expect(body.notified_count).toBe(0)
+    expect(body.notifications_muted).toBe(true)
+    // A mute is not a failure — it must not surface as a warning.
+    expect(body.warnings ?? []).not.toEqual(
+      expect.arrayContaining([expect.stringContaining('lead_notification_failed')]),
+    )
+  })
+
+  it('the Webform resubmission touchpoint is STILL written — the existing dedupe behavior is preserved', async () => {
+    h.enqueue('leads', [storedLead()])
+
+    await POST(makeReq(submission({ message: 'Please add the garage.' })))
+
+    const tpInsert = h.state.calls.find(
+      (c) =>
+        c.table === 'touchpoints' &&
+        c.ops.some(([m, a]: any) => m === 'insert' && a[0]?.label === 'Webform resubmission'),
+    )
+    expect(tpInsert).toBeTruthy()
+    const inserted = tpInsert!.ops.find(([m]: any) => m === 'insert')![1][0]
+    expect(inserted.notes).toContain('Please add the garage.')
+  })
+
+  it('a resubmission NEVER changes the lead stage (no leads.update carries a stage key)', async () => {
+    // A Nurturing client resubmitting must NOT be reset to New — moving stage is
+    // Kevin's separate call (#86). The fill-empty update may still write contact
+    // fields; it must never include stage.
+    h.enqueue('leads', [storedLead({ stage: 'Nurturing' })])
+
+    await POST(makeReq(submission()))
+
+    const leadUpdates = h.state.calls.filter(
+      (c) => c.table === 'leads' && c.ops.some(([m]: any) => m === 'update'),
+    )
+    for (const c of leadUpdates) {
+      const payload = c.ops.find(([m]: any) => m === 'update')![1][0]
+      expect(payload).not.toHaveProperty('stage')
+    }
   })
 })

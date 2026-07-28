@@ -278,12 +278,18 @@ export async function POST(req: NextRequest) {
         matched: verdict.match,
         matchedOn: verdict.matchedOn ?? 'email',
         location,
+        // The name the returning client just typed on the form — the freshest
+        // spelling, and what the resubmission notification is addressed with.
+        submittedName: full_name.trim(),
         // message carries the alias-resolved description so a non-contract
         // key still backfills + reaches the resubmission touchpoint note.
         submission: { email: validEmail, phone, address, city, state, zip, project_type, message: requestDetails, preferred_contact },
         source: leadSource,
         baseWarnings: dedupWarnings,
         now,
+        // #86 — the resubmission notification builds the same /clients/<id>
+        // deep-link the create path does, from the same origin source.
+        reqOrigin: req.nextUrl?.origin ?? null,
       })
     }
 
@@ -681,6 +687,9 @@ async function mergeResubmission(args: {
   }
   matchedOn: string
   location: { id: string; name: string; location_id: string; lifecycle_status: string | null }
+  // The name the returning client typed on the resubmission (freshest spelling);
+  // what the #86 resubmission notification is addressed with.
+  submittedName: string
   submission: {
     email: string | null
     phone?: string | null
@@ -695,8 +704,11 @@ async function mergeResubmission(args: {
   source: string
   baseWarnings: string[]
   now: string
+  // Request origin for the notification deep-link (#86). Null degrades to a
+  // button-less email / link-less Slack card, exactly like the create path.
+  reqOrigin: string | null
 }): Promise<NextResponse> {
-  const { matched, matchedOn, location, submission, source, now } = args
+  const { matched, matchedOn, location, submittedName, submission, source, now, reqOrigin } = args
   const warnings: string[] = [...args.baseWarnings]
 
   const incoming: Record<string, string | null> = {
@@ -847,6 +859,95 @@ async function mergeResubmission(args: {
     }
   }
 
+  // ─── Resubmission notification (#86) ──────────────────────────
+  // THE fix for #86: a returning client who re-submitted the website form must
+  // be notified, using the SAME path as a new lead — notifyNewLead (email) + the
+  // Slack rail — with resubmission:true so the copy reads "returning client" and
+  // the rows log under the resubmission email_kind. Everything else is inherited
+  // by construction from notifyNewLead / notifyNewLeadSlack: the notifications_live
+  // gate, the #91 hub/non-hub email branch, global CC on a visible CC, and the
+  // recipient dedupe. Deliberately NOT a stage change — moving a Nurturing client
+  // has drip/engagement knock-ons Kevin decides separately (#86).
+  //
+  // The notification carries what they JUST submitted: the freshest name, the new
+  // message (submission.message → request_details), and the contact fields on
+  // record after the fill (submitted value, else what the matched lead already
+  // had). Non-fatal end to end, exactly like the create path — the merge has
+  // already committed and a send failure must never flip it. The touchpoint above
+  // is untouched: the existing dedupe behavior is preserved.
+  const notifyLead = {
+    id: matched.id,
+    name: submittedName,
+    email: submission.email || matched.email || null,
+    phone: submission.phone || matched.phone || null,
+    project_type: submission.project_type || matched.project_type || null,
+    // The new request is the point of the alert — the message they just sent,
+    // NOT the older stored request_details.
+    request_details: submission.message?.trim() || null,
+    preferred_contact: submission.preferred_contact || matched.preferred_contact || null,
+  }
+
+  let notifiedCount = 0
+  let notificationsMuted = false
+  try {
+    const baseUrl =
+      process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') || reqOrigin || null
+    const notify = await notifyNewLead({
+      location: { id: location.id, name: location.name },
+      locationSlug: location.location_id,
+      baseUrl,
+      resubmission: true,
+      lead: notifyLead,
+    })
+    notifiedCount = notify.sent ? notify.recipientCount : 0
+    notificationsMuted = notify.muted === true
+    if (notify.error) {
+      warnings.push(`lead_notification_failed: ${notify.error}`)
+    }
+  } catch (err: any) {
+    console.error('[intake] resubmission notifyNewLead threw', err)
+    warnings.push(`lead_notification_failed: ${err?.message || String(err)}`)
+  }
+
+  // Slack (ADDITIVE) — same double-wrapped, never-throws contract as the create
+  // path. Bee Hub references are fine here: Slack only posts where the office
+  // installed the app (the #91 non-hub concern is email-only).
+  try {
+    const baseUrl =
+      process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ||
+      process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
+      reqOrigin ||
+      null
+    const slackRes = await notifyNewLeadSlack({
+      locationId: location.id,
+      locationName: location.name,
+      baseUrl,
+      resubmission: true,
+      lead: { ...notifyLead, source },
+    })
+    if (slackRes.error) {
+      warnings.push(`slack_notification_failed: ${slackRes.error}`)
+    }
+    await logSlackNotification(slackRes, {
+      lead_id: matched.id,
+      lead_name: submittedName,
+      location_id: location.id,
+      location_slug: location.location_id,
+    })
+  } catch (err: any) {
+    console.error('[intake] resubmission notifyNewLeadSlack threw', err)
+    warnings.push(`slack_notification_failed: ${err?.message || String(err)}`)
+    await logSlackNotification(
+      { ok: false, error: err?.message || String(err) },
+      {
+        lead_id: matched.id,
+        lead_name: submittedName,
+        location_id: location.id,
+        location_slug: location.location_id,
+      },
+    )
+  }
+
   await logIntake({
     status: 'success', landed: 'landed', locationSlug: location.location_id,
     entityId: matched.id,
@@ -855,6 +956,10 @@ async function mergeResubmission(args: {
       ` drip_enrolled=${dripEnrolled}` +
       // assigned_via=existing means the merge left a human's choice alone.
       ` assigned=${mergeAssignedCount}` +
+      // #86 — resubmissions now notify; surface the count + mute state the same
+      // way the create path does so a silent resubmission is visible on the row.
+      ` notified=${notifiedCount}` +
+      (notificationsMuted ? ' notifications_muted=true' : '') +
       (mergeAssignmentBasis ? ` assigned_via=${mergeAssignmentBasis}` : '') +
       // submission.message is the alias-resolved description (see POST) —
       // same presence-signal as the create path.
@@ -876,6 +981,9 @@ async function mergeResubmission(args: {
     },
     drip_enrolled: dripEnrolled,
     assigned_count: mergeAssignedCount,
+    // #86 — resubmissions notify now; expose the count + mute like the create path.
+    notified_count: notifiedCount,
+    ...(notificationsMuted ? { notifications_muted: true } : {}),
     ...(mergeAssignmentBasis ? { assigned_via: mergeAssignmentBasis } : {}),
     ...(dripSkippedReason ? { drip_skipped_reason: dripSkippedReason } : {}),
     ...(warnings.length ? { warnings } : {}),
