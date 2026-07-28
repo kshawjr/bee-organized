@@ -760,3 +760,54 @@ describe('notifyNewLead — #86 resubmission variant', () => {
     expect(arg.html).not.toContain('Returning client')
   })
 })
+
+// ── #92: the captured address renders as one adaptive row ────────────────────
+// The form collects a full address but zip-alone is the common case, so the row
+// LABEL adapts (Zip / Location / Address) and OMITS entirely when nothing was
+// collected. Asserted in BOTH html and text — the original #92 bug was that the
+// address never reached either.
+describe('notifyNewLead — #92 adaptive address row', () => {
+  const bodies = () => {
+    const arg = sendEmailDirectMock.mock.calls[0][0]
+    return [arg.html as string, arg.text as string]
+  }
+
+  it('zip only → a "Zip: <zip>" row, no "Address"/"Location" label (html + text)', async () => {
+    resolveMock.mockResolvedValue([recip('owner@biz.com')])
+    await notifyNewLead({ location: LOCATION, lead: { ...LEAD, zip: '98101' } })
+    for (const body of bodies()) {
+      expect(body).toContain('Zip')
+      expect(body).toContain('98101')
+      expect(body).not.toContain('Location')
+    }
+    // Plain-text row reads exactly "Zip: 98101".
+    expect(sendEmailDirectMock.mock.calls[0][0].text).toContain('Zip: 98101')
+  })
+
+  it('city + state + zip, no street → a "Location: City, ST zip" row', async () => {
+    resolveMock.mockResolvedValue([recip('owner@biz.com')])
+    await notifyNewLead({ location: LOCATION, lead: { ...LEAD, city: 'Seattle', state: 'WA', zip: '98101' } })
+    expect(sendEmailDirectMock.mock.calls[0][0].text).toContain('Location: Seattle, WA 98101')
+    for (const body of bodies()) expect(body).toContain('Seattle, WA 98101')
+  })
+
+  it('street + city + state + zip → an "Address: 123 Main St, City, ST zip" row', async () => {
+    resolveMock.mockResolvedValue([recip('owner@biz.com')])
+    await notifyNewLead({
+      location: LOCATION,
+      lead: { ...LEAD, address: '123 Main St', city: 'Seattle', state: 'WA', zip: '98101' },
+    })
+    expect(sendEmailDirectMock.mock.calls[0][0].text).toContain('Address: 123 Main St, Seattle, WA 98101')
+  })
+
+  it('no address fields → NO address row at all (not a dashed row)', async () => {
+    resolveMock.mockResolvedValue([recip('owner@biz.com')])
+    await notifyNewLead({ location: LOCATION, lead: LEAD })
+    for (const body of bodies()) {
+      expect(body).not.toContain('Zip:')
+      expect(body).not.toContain('Location:')
+      // No bare "Address" label leaked in (the "Email"/"Phone" rows still render).
+      expect(body).not.toMatch(/\bAddress\b/)
+    }
+  })
+})

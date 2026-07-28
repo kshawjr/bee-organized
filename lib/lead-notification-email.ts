@@ -59,6 +59,7 @@ import {
 } from './notification-recipients'
 import { logNotification } from './notification-log'
 import { resolveNotificationsLive } from './notifications-live'
+import { formatLeadAddressLabeled } from './lead-address'
 
 // The email_kind stamped on every row this module produces. Hardcoded rather
 // than passed by callers: this function IS the lead notification, so deriving
@@ -118,6 +119,15 @@ export type NewLeadForNotification = {
   project_type: string | null
   request_details: string | null
   preferred_contact: string | null
+  // The captured address, rendered as a single adaptive row (see
+  // formatLeadAddressLabeled). Optional so the in-app/transfer callers that don't
+  // forward it still typecheck; the row simply omits when nothing was collected.
+  // zip alone is the common website-lead case, so the row's LABEL adapts (Zip vs
+  // Location vs Address) rather than always saying "Address" over a bare zip.
+  address?: string | null
+  city?: string | null
+  state?: string | null
+  zip?: string | null
 }
 
 export type NotifyLocation = {
@@ -195,10 +205,16 @@ function buildLeadNotificationEmail(args: {
     ? `Returning client: ${leadName} — ${locationName}`
     : `New lead: ${leadName} — ${locationName}`
 
+  // Adaptive address row — spliced in CONDITIONALLY (not a fixed row) so it is
+  // OMITTED entirely when the form collected nothing, rather than showing a dash.
+  // The label + value both come from formatLeadAddressLabeled; it sits with the
+  // other contact fields, after Phone. Both html and text pick it up from `rows`.
+  const addr = formatLeadAddressLabeled(lead)
   const rows: [string, string][] = [
     ['Name', dash(lead.name)],
     ['Email', dash(lead.email)],
     ['Phone', dash(lead.phone)],
+    ...(addr ? [[addr.label, addr.value] as [string, string]] : []),
     ['Project type', dash(lead.project_type)],
     ['Preferred contact', dash(lead.preferred_contact)],
   ]

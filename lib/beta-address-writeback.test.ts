@@ -30,6 +30,7 @@ import {
   deriveStreet,
   diffAddressPatch,
   formatLeadAddress,
+  formatLeadAddressLabeled,
 } from '@/lib/lead-address'
 import {
   buildBillingAddressInput,
@@ -70,6 +71,62 @@ describe('formatLeadAddress', () => {
   it('partially-embedded parts: only the missing ones are appended', () => {
     expect(formatLeadAddress({ address: '123 Main St, Denver', city: 'Denver', state: 'CO', zip: '80202' }))
       .toBe('123 Main St, Denver, CO 80202')
+  })
+})
+
+// ── unit: labeled variant for the lead NOTIFICATIONS (email row + Slack card) ──
+// The label adapts to what the form actually collected — zip-alone is the
+// dominant website-lead case, so a fixed "Address:" over a bare zip reads wrong.
+// The VALUE reuses formatLeadAddress, so the de-dup (Wendy Blanch) still holds.
+describe('formatLeadAddressLabeled', () => {
+  it('street + city + state + zip → Address', () => {
+    expect(formatLeadAddressLabeled({ address: '123 Main St', city: 'Seattle', state: 'WA', zip: '98101' }))
+      .toEqual({ label: 'Address', value: '123 Main St, Seattle, WA 98101' })
+  })
+
+  it('city + state + zip, no street → Location', () => {
+    expect(formatLeadAddressLabeled({ address: null, city: 'Seattle', state: 'WA', zip: '98101' }))
+      .toEqual({ label: 'Location', value: 'Seattle, WA 98101' })
+  })
+
+  it('zip only → Zip (the dominant website-lead case)', () => {
+    expect(formatLeadAddressLabeled({ zip: '98101' }))
+      .toEqual({ label: 'Zip', value: '98101' })
+  })
+
+  it('nothing collected → null (caller omits the row)', () => {
+    expect(formatLeadAddressLabeled({})).toBeNull()
+    expect(formatLeadAddressLabeled(null)).toBeNull()
+    expect(formatLeadAddressLabeled({ address: '', city: '  ', state: null, zip: undefined })).toBeNull()
+  })
+
+  it('no stray comma on any partial combination', () => {
+    // state + zip, no city
+    expect(formatLeadAddressLabeled({ state: 'WA', zip: '98101' }))
+      .toEqual({ label: 'Location', value: 'WA 98101' })
+    // city only
+    expect(formatLeadAddressLabeled({ city: 'Seattle' }))
+      .toEqual({ label: 'Location', value: 'Seattle' })
+    // street + zip, no city/state
+    expect(formatLeadAddressLabeled({ address: '123 Main St', zip: '98101' }))
+      .toEqual({ label: 'Address', value: '123 Main St, 98101' })
+    // no value should ever end or contain a dangling ", " next to nothing
+    for (const parts of [
+      { state: 'WA', zip: '98101' },
+      { city: 'Seattle' },
+      { address: '123 Main St', zip: '98101' },
+      { zip: '98101' },
+    ]) {
+      const out = formatLeadAddressLabeled(parts)!
+      expect(out.value).not.toMatch(/,\s*$/)
+      expect(out.value).not.toMatch(/,\s*,/)
+      expect(out.value).not.toMatch(/^\s*,/)
+    }
+  })
+
+  it('full-joined address column (import convention) is NOT double-rendered, labeled Address', () => {
+    expect(formatLeadAddressLabeled(WENDY))
+      .toEqual({ label: 'Address', value: '29659 Calle Violeta, Temecula, California, 92592' })
   })
 })
 

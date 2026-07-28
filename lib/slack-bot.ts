@@ -25,6 +25,7 @@
 import { supabaseService } from './supabase-service'
 import { resolveNotificationsLive } from './notifications-live'
 import { disconnectSlackFromLocation } from './slack-disconnect'
+import { formatLeadAddressLabeled } from './lead-address'
 
 const supabase = supabaseService
 
@@ -54,6 +55,13 @@ export type SlackLead = {
   // 'Instagram', …); the webform slug 'web_form' is humanized in the card.
   // Optional so the two callers that omit it typecheck + the line omits cleanly.
   source?: string | null
+  // Captured address — rendered as a single adaptive full-width section (see
+  // formatLeadAddressLabeled). Optional + omitted when nothing was collected; the
+  // LABEL adapts (Zip / Location / Address) so a zip-only lead reads correctly.
+  address?: string | null
+  city?: string | null
+  state?: string | null
+  zip?: string | null
 }
 
 export type SlackPostResult = {
@@ -270,6 +278,19 @@ export function buildLeadSlackMessage(args: {
   if (projectLabel) fields.push({ type: 'mrkdwn', text: `*Project:*\n${projectLabel}` })
   fields.push({ type: 'mrkdwn', text: `*Preferred contact:*\n${prefValue}` })
   blocks.push({ type: 'section', fields })
+
+  // 4b. Address — a FULL-WIDTH section (not a 2-col grid cell): the value can be
+  //    a whole street line and would wrap awkwardly in a column. Adaptive label
+  //    (Zip / Location / Address) via the same helper the email uses, and omitted
+  //    entirely when nothing was collected. escapeMrkdwn the value like every
+  //    other interpolated field.
+  const addr = formatLeadAddressLabeled(lead)
+  if (addr) {
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: `*${addr.label}:*\n${escapeMrkdwn(addr.value)}` },
+    })
+  }
 
   // 5. What they told us — labeled quote, only when present. This is the card's
   //    tallest variable-height element, so the shown text is capped at 140 chars

@@ -233,6 +233,33 @@ describe('buildLeadSlackMessage — card (attachments + blocks)', () => {
       expect(flat(blocksOf(card({ request_details: null })))).not.toContain('What they told us')
     })
   })
+
+  // ── #92: adaptive address as a full-width section ─────────────────────────
+  describe('adaptive address section', () => {
+    it('zip only → "*Zip:*\\n<zip>" full-width section, no Location/Address label', () => {
+      const s = flat(blocksOf(card({ zip: '98101' } as any)))
+      expect(s).toContain('*Zip:*\\n98101')
+      expect(s).not.toContain('*Location:*')
+      expect(s).not.toContain('*Address:*')
+    })
+
+    it('city + state + zip, no street → "*Location:*\\nCity, ST zip"', () => {
+      const s = flat(blocksOf(card({ city: 'Seattle', state: 'WA', zip: '98101' } as any)))
+      expect(s).toContain('*Location:*\\nSeattle, WA 98101')
+    })
+
+    it('street + city + state + zip → "*Address:*\\n123 Main St, City, ST zip"', () => {
+      const s = flat(blocksOf(card({ address: '123 Main St', city: 'Seattle', state: 'WA', zip: '98101' } as any)))
+      expect(s).toContain('*Address:*\\n123 Main St, Seattle, WA 98101')
+    })
+
+    it('no address fields → NO address section at all', () => {
+      const s = flat(blocksOf(card()))
+      expect(s).not.toContain('*Zip:*')
+      expect(s).not.toContain('*Location:*')
+      expect(s).not.toContain('*Address:*')
+    })
+  })
 })
 
 describe('postToSlack', () => {

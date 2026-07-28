@@ -289,6 +289,10 @@ export async function POST(req: NextRequest) {
           project_type: lead.project_type,
           request_details: lead.request_details,
           preferred_contact: lead.preferred_contact ?? null,
+          address: lead.address ?? null,
+          city: lead.city ?? null,
+          state: lead.state ?? null,
+          zip: lead.zip ?? null,
         },
       })
       if (notify.error) warnings.push(`lead_notification_failed: ${notify.error}`)
@@ -326,6 +330,10 @@ export async function POST(req: NextRequest) {
           request_details: lead.request_details,
           preferred_contact: lead.preferred_contact ?? null,
           source: lead.source ?? null,
+          address: lead.address ?? null,
+          city: lead.city ?? null,
+          state: lead.state ?? null,
+          zip: lead.zip ?? null,
         },
       })
       if (slackRes.error) warnings.push(`slack_notification_failed: ${slackRes.error}`)

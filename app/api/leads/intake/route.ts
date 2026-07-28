@@ -538,6 +538,10 @@ export async function POST(req: NextRequest) {
         project_type: project_type || null,
         request_details: requestDetails,
         preferred_contact: preferredContact,
+        address: address || null,
+        city: city || null,
+        state: state || null,
+        zip: zip || null,
       },
     })
     notifiedCount = notify.sent ? notify.recipientCount : 0
@@ -585,6 +589,10 @@ export async function POST(req: NextRequest) {
         request_details: requestDetails,
         preferred_contact: preferredContact,
         source: leadSource,
+        address: address || null,
+        city: city || null,
+        state: state || null,
+        zip: zip || null,
       },
     })
     // Only a real send failure warns; a quiet skip (not connected / not yet
@@ -885,6 +893,15 @@ async function mergeResubmission(args: {
     // NOT the older stored request_details.
     request_details: submission.message?.trim() || null,
     preferred_contact: submission.preferred_contact || matched.preferred_contact || null,
+    // Address on record after the fill: the submitted value, else what the
+    // matched lead already had — same submitted-else-stored rule as the contact
+    // fields above. formatLeadAddressLabeled de-dupes a full-joined `address`
+    // column (an imported client the resubmission matched) so the row never
+    // double-renders the parts. Feeds BOTH the email and the Slack card below.
+    address: submission.address || matched.address || null,
+    city: submission.city || matched.city || null,
+    state: submission.state || matched.state || null,
+    zip: submission.zip || matched.zip || null,
   }
 
   let notifiedCount = 0

@@ -158,6 +158,31 @@ describe('intake notification — CREATE path', () => {
     })
   })
 
+  it('a NEW lead forwards the submitted address to BOTH the email and the Slack rail (#92)', async () => {
+    h.enqueue('leads', [])
+    h.enqueue('leads', [])
+    h.enqueue('leads', { id: 'lead-new' })
+
+    await POST(makeReq(submission({ address: '123 Main St', city: 'Seattle', state: 'WA', zip: '98101' })))
+
+    expect(notifyMock.mock.calls[0][0].lead).toMatchObject({
+      address: '123 Main St', city: 'Seattle', state: 'WA', zip: '98101',
+    })
+    expect(slackMock.mock.calls[0][0].lead).toMatchObject({
+      address: '123 Main St', city: 'Seattle', state: 'WA', zip: '98101',
+    })
+  })
+
+  it('a zip-only new lead still forwards the zip (the dominant website case, #92)', async () => {
+    h.enqueue('leads', [])
+    h.enqueue('leads', [])
+    h.enqueue('leads', { id: 'lead-new' })
+
+    await POST(makeReq(submission({ zip: '98101' })))
+
+    expect(notifyMock.mock.calls[0][0].lead).toMatchObject({ zip: '98101', address: null, city: null, state: null })
+  })
+
   it('a notification failure is non-fatal — lead still lands (200) with a warning', async () => {
     h.enqueue('leads', [])
     h.enqueue('leads', [])
@@ -215,6 +240,37 @@ describe('intake notification — MERGE/resubmission path (#86) NOW notifies', (
       name: 'Jane Prospect',
       // The alert carries what they JUST submitted, not the stored request_details.
       request_details: 'Back again, add the garage.',
+    })
+  })
+
+  it('a SOLID resubmission carries the address to BOTH email and Slack — submitted value wins (#92)', async () => {
+    // The returning client typed a fresh address on this submission — the alert
+    // must carry what they JUST submitted, on both rails.
+    h.enqueue('leads', [storedLead({ address: 'OLD 1 St', city: 'Denver', state: 'CO', zip: '80202' })])
+
+    await POST(makeReq(submission({ address: '999 New Ave', city: 'Seattle', state: 'WA', zip: '98101' })))
+
+    expect(notifyMock.mock.calls[0][0].resubmission).toBe(true)
+    expect(notifyMock.mock.calls[0][0].lead).toMatchObject({
+      address: '999 New Ave', city: 'Seattle', state: 'WA', zip: '98101',
+    })
+    expect(slackMock.mock.calls[0][0].lead).toMatchObject({
+      address: '999 New Ave', city: 'Seattle', state: 'WA', zip: '98101',
+    })
+  })
+
+  it('a SOLID resubmission with NO submitted address falls back to the matched lead\'s stored address (#92)', async () => {
+    // Submission carries no address fields → the notification uses what the
+    // matched lead already had on record (submitted-else-stored, mirroring the
+    // other contact fields). A Jobber-imported match may carry a full-joined
+    // address string; formatLeadAddressLabeled de-dupes it downstream.
+    h.enqueue('leads', [storedLead({ address: '29659 Calle Violeta, Temecula, California, 92592', city: 'Temecula', state: 'California', zip: '92592' })])
+
+    await POST(makeReq(submission({ address: undefined, city: undefined, state: undefined, zip: undefined })))
+
+    expect(notifyMock.mock.calls[0][0].lead).toMatchObject({
+      address: '29659 Calle Violeta, Temecula, California, 92592',
+      city: 'Temecula', state: 'California', zip: '92592',
     })
   })
 

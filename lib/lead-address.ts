@@ -56,6 +56,32 @@ export function formatLeadAddress(lead: LeadAddressParts | null | undefined): st
   return [address, cityPart, stateZip].filter(Boolean).join(', ')
 }
 
+// Labeled variant for the lead NOTIFICATIONS (email row + Slack card). Reuses
+// formatLeadAddress for the de-duped value string — so a full-joined `address`
+// column (the Jobber-import convention) never re-renders its own parts (the
+// Wendy Blanch bug) — then adapts the LABEL to what's present. zip-alone is the
+// DOMINANT case for website leads (157 of 166 in a recent 30-day window carried
+// a zip; only 17 had a street or city), so a fixed "Address:" over a bare postal
+// code reads wrong:
+//   street present  → "Address"   (the address column carries a street line)
+//   city/state only → "Location"
+//   zip only        → "Zip"
+//   nothing         → null        (the caller omits the row entirely)
+// Street-presence is approximated by a non-empty `address` column, matching this
+// module's storage convention (the column holds the street line, or the full
+// joined string on imported rows — both of which lead with a street).
+export function formatLeadAddressLabeled(
+  lead: LeadAddressParts | null | undefined,
+): { label: string; value: string } | null {
+  const value = formatLeadAddress(lead ?? {})
+  if (!value) return null
+  const hasStreet = !!String(lead?.address ?? '').trim()
+  const hasCityOrState =
+    !!String(lead?.city ?? '').trim() || !!String(lead?.state ?? '').trim()
+  const label = hasStreet ? 'Address' : hasCityOrState ? 'Location' : 'Zip'
+  return { label, value }
+}
+
 // Strip trailing comma-segments that merely repeat the part columns —
 // what's left is the street line(s). "29659 Calle Violeta, Temecula,
 // California, 92592" with {Temecula, California, 92592} → "29659 Calle

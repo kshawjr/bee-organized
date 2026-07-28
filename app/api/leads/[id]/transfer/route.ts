@@ -85,7 +85,7 @@ export async function POST(
   // move writes with the service role, never an RLS-scoped client) ─
   const { data: existing, error: loadError } = await supabaseService
     .from('leads')
-    .select('id, name, email, phone, project_type, request_details, preferred_contact, location_id, location_uuid, jobber_client_id')
+    .select('id, name, email, phone, project_type, request_details, preferred_contact, address, city, state, zip, location_id, location_uuid, jobber_client_id')
     .eq('id', id)
     .single()
   if (loadError || !existing) {
@@ -194,6 +194,10 @@ export async function POST(
         project_type:      existing.project_type,
         request_details:   existing.request_details,
         preferred_contact: existing.preferred_contact,
+        address:           existing.address ?? null,
+        city:              existing.city ?? null,
+        state:             existing.state ?? null,
+        zip:               existing.zip ?? null,
       },
     })
     notifiedCount = notify.sent ? notify.recipientCount : 0
