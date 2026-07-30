@@ -42,6 +42,16 @@ import { recordDigestRun } from '@/lib/digest-runs'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+// force-no-store on EVERY fetch in this route. supabase-js reads go through the
+// Next-patched global fetch as un-annotated GETs (no cache option — see
+// @supabase/postgrest-js), so Next's Data Cache caches them. Time-windowed reads
+// (webhook events, created_at>=now-3h) dodge it — their URL changes each run — but
+// the STATIC reads (rate-health, booking-link-health: `locations` on a constant
+// predicate) hit a stable URL and were served frozen for days, across redeploys,
+// with no revalidate to expire them: the digest kept naming locations whose rate
+// was long since set (#95). `dynamic='force-dynamic'` recomputes the route but did
+// not propagate no-store to these nested library GETs in 14.2.3; fetchCache does.
+export const fetchCache = 'force-no-store'
 export const maxDuration = 60
 
 export async function GET(req: NextRequest) {
