@@ -20,8 +20,11 @@
 //   QUOTE_UPDATE       → quotes row exists (row actually written)
 //   QUOTE_APPROVED     → quotes row exists + engagement attached +
 //                        approved (approved_at or status ~ approved)
-//   JOB_CREATE         → jobs row exists + engagement attached +
-//                        engagement stage rank ≥ 'Job in Progress'
+//   JOB_CREATE         → jobs row exists + engagement attached + engagement
+//                        stage rank ≥ 'Job in Progress' for BOOKED jobs;
+//                        an unbooked job (isUnbookedJobStatus) rests at
+//                        'Estimate' by design, so ≥ 'Estimate' is landed —
+//                        mirrors handleJobCore's unbooked carve-out (#97)
 //   JOB_UPDATE         → jobs row exists
 //   JOB_COMPLETE       → jobs row done (engagementJobDone) + engagement
 //                        attached + rank ≥ 'Job in Progress'. NOT
@@ -50,7 +53,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { supabaseService } from './supabase-service'
-import { extractJobberId } from './jobber-import'
+import { extractJobberId, isUnbookedJobStatus } from './jobber-import'
 import {
   ENGAGEMENT_STAGE_RANK,
   engagementJobDone,
@@ -175,10 +178,21 @@ export async function checkLanded(
       }
       case 'JOB_CREATE': {
         const j = await fetchSubRow(
-          'jobs', 'jobber_job_id', 'id, engagement_id', numeric, loc,
+          'jobs', 'jobber_job_id', 'id, engagement_id, status', numeric, loc,
         )
         if (!j?.engagement_id) return 'not_landed'
-        return (await fetchEngagementRank(j.engagement_id)) >= rankOf('Job in Progress')
+        // Mirror handleJobCore's unbooked carve-out: an unbooked job
+        // (unscheduled / action_required / on_hold) intentionally does NOT
+        // promote the engagement to 'Job in Progress' — it rests at
+        // 'Estimate' (deriveEngagementStage classifies it with the quotes).
+        // Requiring rank ≥ 'Job in Progress' here would flag every
+        // correctly-handled unbooked JOB_CREATE as not_landed. Use the SAME
+        // predicate the handler uses (imported, never re-listed) so the two
+        // can't drift. Booked jobs keep the ≥ 'Job in Progress' bar.
+        const requiredStage = isUnbookedJobStatus(j.status)
+          ? 'Estimate'
+          : 'Job in Progress'
+        return (await fetchEngagementRank(j.engagement_id)) >= rankOf(requiredStage)
           ? 'landed'
           : 'not_landed'
       }

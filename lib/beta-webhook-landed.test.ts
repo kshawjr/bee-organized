@@ -61,8 +61,10 @@ vi.mock('@/lib/jobber-disconnect', () => ({
 }))
 vi.mock('@/lib/jobber', () => ({ jobberGraphQL: vi.fn() }))
 
+import { readFileSync } from 'node:fs'
 import { checkLanded } from '@/lib/webhook-landed'
 import { DESTROY_SPECS } from '@/lib/jobber-webhook-handlers'
+import { isUnbookedJobStatus } from '@/lib/jobber-import'
 
 const ctx = (topic: string, itemId = '555') => ({
   topic,
@@ -113,6 +115,74 @@ describe('checkLanded — JOB_COMPLETE (the key silent-stuck case)', () => {
   it('jobs row missing entirely (upsert never wrote) → not_landed', async () => {
     // queue empty → maybeSingle resolves { data: null }
     expect(await checkLanded(ctx('JOB_COMPLETE'), ok())).toBe('not_landed')
+  })
+})
+
+describe('checkLanded — JOB_CREATE (unbooked carve-out mirrors the handler)', () => {
+  // handleJobCore deliberately does NOT promote an unbooked job
+  // (unscheduled / action_required / on_hold) to 'Job in Progress' — the
+  // engagement rests at 'Estimate'. The landed check must accept that as
+  // landed, or every correctly-handled unbooked JOB_CREATE reads not_landed
+  // (Susan Garrity / #97). Booked jobs keep the ≥ 'Job in Progress' bar.
+
+  it('unbooked job (unscheduled) + engagement at Estimate → landed', async () => {
+    h.enqueue('jobs', { id: 'j1', engagement_id: 'e1', status: 'unscheduled' })
+    h.enqueue('engagements', { stage: 'Estimate' })
+    expect(await checkLanded(ctx('JOB_CREATE'), ok())).toBe('landed')
+  })
+
+  it('booked job + engagement stuck at Estimate → not_landed (rank rule still bites)', async () => {
+    h.enqueue('jobs', { id: 'j1', engagement_id: 'e1', status: 'in_progress' })
+    h.enqueue('engagements', { stage: 'Estimate' })
+    expect(await checkLanded(ctx('JOB_CREATE'), ok())).toBe('not_landed')
+  })
+
+  it('booked job + engagement advanced to Job in Progress → landed', async () => {
+    h.enqueue('jobs', { id: 'j1', engagement_id: 'e1', status: 'in_progress' })
+    h.enqueue('engagements', { stage: 'Job in Progress' })
+    expect(await checkLanded(ctx('JOB_CREATE'), ok())).toBe('landed')
+  })
+
+  it('jobs row missing entirely (upsert never wrote) → not_landed', async () => {
+    // queue empty → maybeSingle resolves { data: null }
+    expect(await checkLanded(ctx('JOB_CREATE'), ok())).toBe('not_landed')
+  })
+
+  it('jobs row present but engagement_id null → not_landed', async () => {
+    h.enqueue('jobs', { id: 'j1', engagement_id: null, status: 'unscheduled' })
+    expect(await checkLanded(ctx('JOB_CREATE'), ok())).toBe('not_landed')
+  })
+
+  // Drift guard: the unbooked branch must be driven by the SAME predicate
+  // the handler uses (isUnbookedJobStatus, imported from jobber-import), not
+  // a re-listed status set. For each status at engagement='Estimate', the
+  // verdict must equal isUnbookedJobStatus(status) — so a divergent local
+  // list would fail here.
+  it('unbooked/booked decision tracks the imported isUnbookedJobStatus predicate', async () => {
+    const statuses = [
+      'unscheduled', 'action_required', 'on_hold',   // unbooked
+      'in_progress', 'today', 'upcoming', 'completed', 'unknown', // booked/other
+    ]
+    for (const status of statuses) {
+      h.reset()
+      h.enqueue('jobs', { id: 'j1', engagement_id: 'e1', status })
+      h.enqueue('engagements', { stage: 'Estimate' })
+      const landed = await checkLanded(ctx('JOB_CREATE'), ok())
+      expect(landed, `status=${status}`).toBe(
+        isUnbookedJobStatus(status) ? 'landed' : 'not_landed',
+      )
+    }
+  })
+
+  it('imports the predicate instead of re-listing the unbooked statuses', () => {
+    const src = readFileSync(new URL('./webhook-landed.ts', import.meta.url), 'utf8')
+    expect(src).toMatch(
+      /import\s*\{[^}]*isUnbookedJobStatus[^}]*\}\s*from\s*'\.\/jobber-import'/,
+    )
+    // No duplicated status Set — quoted literals of the unbooked values
+    // would mean the list was copied instead of imported.
+    expect(src).not.toMatch(/['"]on_hold['"]/)
+    expect(src).not.toMatch(/['"]action_required['"]/)
   })
 })
 
