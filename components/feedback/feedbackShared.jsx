@@ -1,7 +1,8 @@
 // components/feedback/feedbackShared.jsx
 // Shared feedback presentation + helpers, extracted verbatim from BeeHub.jsx so
-// FeedbackModal can live in its own (mount-testable) module. AdminFeedbackScreen in
-// BeeHub.jsx re-imports the status maps + FeedbackStatusBadge/AttachmentList/timeAgo.
+// FeedbackModal can live in its own (mount-testable) module. The triage screen
+// (components/admin/AdminFeedbackScreen) re-imports the status maps +
+// FeedbackStatusBadge/AttachmentList/timeAgo; BeeHub.jsx keeps only timeAgo.
 'use client'
 import React, { useState } from 'react'
 

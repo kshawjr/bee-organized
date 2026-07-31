@@ -1,52 +1,89 @@
+// @vitest-environment happy-dom
+//
 // Feedback screen: composer affordance + view-as location parity.
 //
-// Two contracts pinned here (AdminFeedbackScreen is a BeeHub.jsx internal,
-// so these are source pins — the established pattern for BeeHub internals,
-// same as beta-go-live / beta-identity-scope):
+// Two contracts held here (the screen is its own module now — issue 128 —
+// so the old BeeHub source pins became real mounts):
 //
-//   1) COMPOSER: AdminFeedbackScreen renders a "report a bug / suggest a
-//      feature" button ONLY when the onReportFeedback prop is passed. The
+//   1) COMPOSER: AdminFeedbackScreen renders a "report a bug / share an
+//      idea" button ONLY when the onReportFeedback prop is passed. The
 //      FRANCHISE feedback mount passes it (opens the existing FeedbackModal
 //      via setShowFeedback — reuse, no second composer); the two ELEVATED
 //      admin mounts pass nothing → no button there.
 //
 //   2) VIEW-AS SCOPE: "view as" swaps display only — API calls ride the
 //      REAL session, so an impersonated owner's feedback view used to take
-//      the route's elevated branch (org-wide). The franchise mount now
-//      passes the impersonated locationId and the screen appends
-//      ?location_id= (which /api/admin/feedback honors for elevated
-//      callers). REAL sessions are untouched: owner/manager stay
-//      hard-scoped server-side (the param is ignored for them), users list
-//      only their own items, super_admin without view-as stays org-wide
-//      (locationId null → no param).
-import { describe, it, expect } from 'vitest'
+//      the route's elevated branch (org-wide). The franchise mount passes
+//      the impersonated locationId and the screen appends ?location_id=
+//      (which /api/admin/feedback honors for elevated callers). REAL
+//      sessions are untouched: owner/manager stay hard-scoped server-side
+//      (the param is ignored for them), users list only their own items,
+//      super_admin without view-as stays org-wide (locationId null → no
+//      param).
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import { act } from 'react-dom/test-utils'
+
+;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
+
+import AdminFeedbackScreen from '@/components/admin/AdminFeedbackScreen'
+import { CurrentUserContext } from '@/components/hive/shared/currentUserContext'
 
 const beehub = readFileSync(join(process.cwd(), 'components/BeeHub.jsx'), 'utf8')
+const screenSrc = readFileSync(join(process.cwd(), 'components/admin/AdminFeedbackScreen.jsx'), 'utf8')
 const adminRoute = readFileSync(join(process.cwd(), 'app/api/admin/feedback/route.ts'), 'utf8')
 const userRoute = readFileSync(join(process.cwd(), 'app/api/feedback/route.ts'), 'utf8')
 
-// The AdminFeedbackScreen function body (up to the next top-level function).
-const screenSrc = beehub.slice(
-  beehub.indexOf('function AdminFeedbackScreen('),
-  beehub.indexOf('const US_TIMEZONES')
-)
 // The franchise feedback mount (the activeNav==='feedback' branch inside screen()).
 const franchiseMount = beehub.slice(
   beehub.indexOf("if (activeNav==='feedback') return ("),
   beehub.indexOf("if (activeNav==='feedback') return (") + 600
 )
 
+const stubFetch = () => {
+  const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ items: [] }) }))
+  vi.stubGlobal('fetch', f)
+  return f
+}
+
+const mount = async (ui: React.ReactElement) => {
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const root = createRoot(host)
+  const render = (next: React.ReactElement) => act(async () => { root.render(next) })
+  await render(ui)
+  await act(async () => {}) // flush the mount effect's async fetch → setState
+  return { host, render, unmount: async () => { await act(async () => root.unmount()); host.remove() } }
+}
+
+const withUser = (ui: React.ReactElement) => (
+  <CurrentUserContext.Provider value={{ id: 'u1', email: 'amy@biz.com' } as any}>{ui}</CurrentUserContext.Provider>
+)
+
+const composerBtn = (host: Element) =>
+  host.querySelector('button[aria-label="Report a bug or share an idea"]')
+
+beforeEach(() => { document.body.innerHTML = ''; vi.unstubAllGlobals() })
+
 describe('feedback composer affordance (franchise mount only)', () => {
-  it('AdminFeedbackScreen gates the report button on the onReportFeedback prop', () => {
-    expect(screenSrc).toContain('onReportFeedback = null')
-    // Button renders only when the prop is passed…
-    expect(screenSrc).toMatch(/\{onReportFeedback && \(\s*<button/)
-    // …fires the callback, and is labeled for both actions ("idea" is the
-    // owner-facing word for a feature request now — issue 126).
-    expect(screenSrc).toContain('onClick={onReportFeedback}')
-    expect(screenSrc).toContain('Report a bug or share an idea')
+  it('renders the report button ONLY when onReportFeedback is passed, and it fires the callback', async () => {
+    stubFetch()
+    const onReport = vi.fn()
+    const { host, unmount } = await mount(withUser(<AdminFeedbackScreen onReportFeedback={onReport} />))
+    const btn = composerBtn(host)!
+    expect(btn).toBeTruthy()
+    expect(btn.textContent).toContain('Report a bug or share an idea')
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(onReport).toHaveBeenCalledTimes(1)
+    await unmount()
+
+    stubFetch()
+    const { host: h2, unmount: un2 } = await mount(withUser(<AdminFeedbackScreen onPendingCountChange={() => {}} />))
+    expect(composerBtn(h2)).toBeNull()
+    await un2()
   })
 
   it('the franchise feedback mount passes onReportFeedback → the EXISTING FeedbackModal (setShowFeedback), landing on the Submit tab', () => {
@@ -72,11 +109,17 @@ describe('view-as feedback scope parity', () => {
     expect(franchiseMount).toContain('locationId={viewAsUser?.locationId || null}')
   })
 
-  it('AdminFeedbackScreen appends ?location_id= only when scoped, and refetches when it changes', () => {
-    expect(screenSrc).toContain('locationId = null')
-    expect(screenSrc).toMatch(/locationId\s*\?\s*`\/api\/admin\/feedback\?location_id=\$\{encodeURIComponent\(locationId\)\}`/)
-    expect(screenSrc).toMatch(/`\/api\/admin\/feedback\?location_id=[^`]*`\s*:\s*'\/api\/admin\/feedback'/)
-    expect(screenSrc).toMatch(/useEffect\(\(\) => \{ load\(\) \}, \[locationId\]\)/)
+  it('appends ?location_id= only when scoped, and refetches when the scope changes', async () => {
+    const f = stubFetch()
+    const { render, unmount } = await mount(withUser(<AdminFeedbackScreen onReportFeedback={() => {}} locationId="loc-9" />))
+    expect(String(f.mock.calls[0][0])).toBe('/api/admin/feedback?location_id=loc-9')
+
+    // Scope change (view-as flips) → the effect refires with the new key.
+    await render(withUser(<AdminFeedbackScreen onReportFeedback={() => {}} locationId={null} />))
+    await act(async () => {})
+    expect(f.mock.calls.length).toBe(2)
+    expect(String(f.mock.calls[1][0])).toBe('/api/admin/feedback')
+    await unmount()
   })
 
   it('documents that view-as data scoping is per-surface (no global fix)', () => {

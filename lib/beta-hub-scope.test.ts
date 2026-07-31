@@ -548,10 +548,11 @@ describe('BeeHub wiring — scope switch + prop sync', () => {
     // A raw setLocFilter would move the client without moving the server —
     // the two would disagree and intersect to an empty screen.
     const raw = src.match(/(?<!set)\bsetLocFilter\(/g) || []
-    // Only the two declarations (App + the two admin sub-screens' own local
-    // state) and applyLocScope's own body may call it.
+    // Only the declarations (App + the webhook-log screen's own local state)
+    // and applyLocScope's own body may call it. Was 3 until issue 128 moved
+    // AdminFeedbackScreen (and its private locFilter) to components/admin/.
     const decls = src.match(/\[locFilter, setLocFilter\]/g) || []
-    expect(decls.length).toBe(3)
+    expect(decls.length).toBe(2)
     expect(src).toContain('const applyLocScope = React.useCallback((next) => {')
     expect(src).toContain('document.cookie = scopeCookieString(')
     expect(src).toContain('router.refresh()')

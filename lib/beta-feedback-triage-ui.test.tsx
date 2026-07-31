@@ -1,155 +1,271 @@
-// Feedback triage screen — card-redesign modernization + submit-tab default.
+// @vitest-environment happy-dom
 //
-// Source pins (AdminFeedbackScreen / FeedbackModal are BeeHub.jsx internals —
-// same pattern as beta-feedback-viewas / beta-go-live):
+// AdminFeedbackScreen — extracted module (issue 128), MOUNT tests.
 //
-//   1) SUBMIT-TAB DEFAULT: the Feedback screen's composer button opens the
-//      one existing FeedbackModal ON THE SUBMIT TAB (showFeedback='submit' →
-//      initialTab='submit'). The Help "?" menu path is UNCHANGED — it sets
-//      true and the modal keeps its 'mine' (My Items) default.
+// This file used to source-pin the screen inside BeeHub.jsx because the
+// component wasn't its own module. It is now
+// components/admin/AdminFeedbackScreen.jsx, so the pins became real mounts —
+// that was most of the point of extracting it. What stays source-matched:
 //
-//   2) MODERN LAYOUT: header (19px/500 headline + muted count subtitle,
-//      composer as a soft-tinted accent action), single-choice FilterChips
-//      for the type + status axes (issue 126 — was gray-fill pills; behavior
-//      is mount-tested in beta-feedback-filters), hairline-divided rows inside
-//      ONE rounded container (no per-row boxes, no table header row),
-//      soft-tinted type tiles (bug → red family / feature → accent blue),
-//      locked-anatomy status chips over the REAL 6-status vocabulary, closed
-//      rows (shipped/declined) dimmed to 0.72.
+//   A) TOKEN SWEEP — the extracted file carries NO hex/rgba literal of its
+//      own (the AdminNotificationsScreen rule; comments included, so issue
+//      numbers are written "issue 128", never with a hash prefix the sweep
+//      would read as hex).
+//   B) THE THREE MOUNT SITES in BeeHub.jsx — two elevated admin tabs plus
+//      the franchise owner mount. Those stay in BeeHub, so the prop shapes
+//      each site passes are pinned there, and every shape is then MOUNTED
+//      here and asserted on real DOM.
 //
-//   3) PER-MOUNT LOCATION: the franchise mount (the one that passes
-//      onReportFeedback) drops the location filter and the row meta's
-//      location segment — it's always the caller's own location. Elevated
-//      admin mounts keep both.
-import { describe, it, expect } from 'vitest'
+// Behavior contract (issue 126 redesign, unchanged by the extraction):
+//   - header = light headline + live "N items · M open" subtitle
+//   - composer button on the FRANCHISE mount only (onReportFeedback prop)
+//   - franchise mount hides the location filter + row-meta location segment;
+//     the two elevated mounts show both
+//   - hairline rows in one container; closed rows dim; row click opens the
+//     triage detail modal whose Save PATCHes /api/admin/feedback/:id
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import { act } from 'react-dom/test-utils'
 
-const beehub = readFileSync(join(process.cwd(), 'components/BeeHub.jsx'), 'utf8')
-const icons = readFileSync(join(process.cwd(), 'components/ui/icons.jsx'), 'utf8')
+;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
-const screenSrc = beehub.slice(
-  beehub.indexOf('function AdminFeedbackScreen('),
-  beehub.indexOf('const US_TIMEZONES')
+import AdminFeedbackScreen from '@/components/admin/AdminFeedbackScreen'
+import { CurrentUserContext } from '@/components/hive/shared/currentUserContext'
+
+const SCREEN_SRC = readFileSync('components/admin/AdminFeedbackScreen.jsx', 'utf8')
+const BEEHUB_SRC = readFileSync('components/BeeHub.jsx', 'utf8')
+
+// ── fixtures ───────────────────────────────────────────────────────
+// Two locations, two submitters, a closed (shipped) row and an attachment —
+// enough surface for every mount-context assertion below.
+const ITEMS = [
+  { id: 'i1', title: 'Login button broken', type: 'bug',     status: 'submitted', user_id: 'u1', submitter_name: 'Amy Owner',   submitter_email: 'amy@biz.com', location_id: 'loc-1', location_name: 'Boulder',  created_at: '2026-07-01T00:00:00Z', attachments: [] },
+  { id: 'i2', title: 'Export to CSV',       type: 'feature', status: 'shipped',   user_id: 'u2', submitter_name: 'Bob Manager', submitter_email: 'bob@biz.com', location_id: 'loc-2', location_name: 'Portland', created_at: '2026-07-02T00:00:00Z', attachments: [{ path: 'a/b.png', name: 'b.png', size: 100, type: 'image/png' }] },
+  { id: 'i3', title: 'Typo on invoice',     type: 'bug',     status: 'submitted', user_id: 'u1', submitter_name: 'Amy Owner',   submitter_email: 'amy@biz.com', location_id: 'loc-1', location_name: 'Boulder',  created_at: '2026-07-03T00:00:00Z', attachments: [] },
+]
+
+const stubFetch = (items = ITEMS) => {
+  const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ items }) }))
+  vi.stubGlobal('fetch', f)
+  return f
+}
+
+const mount = async (ui: React.ReactElement) => {
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const root = createRoot(host)
+  await act(async () => { root.render(ui) })
+  await act(async () => {}) // flush the mount effect's async fetch → setState
+  return { host, root, unmount: async () => { await act(async () => root.unmount()); host.remove() } }
+}
+
+const click = (el: Element) => act(async () => {
+  el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+})
+
+const withUser = (ui: React.ReactElement, user: any = { id: 'u1', email: 'amy@biz.com' }) => (
+  <CurrentUserContext.Provider value={user}>{ui}</CurrentUserContext.Provider>
 )
-// FeedbackModal now lives in its own module (extracted from BeeHub.jsx so it
-// is mount-testable — see lib/beta-client-report-problem.test.tsx). The shared
-// status maps + FeedbackStatusBadge moved alongside it into feedbackShared.
-const modalSrc = readFileSync(join(process.cwd(), 'components/feedback/FeedbackModal.jsx'), 'utf8')
-const sharedSrc = readFileSync(join(process.cwd(), 'components/feedback/feedbackShared.jsx'), 'utf8')
 
-describe('submit-tab default (Feedback-screen button only)', () => {
-  it('FeedbackModal takes initialTab, defaulting to mine (Help-menu behavior unchanged)', () => {
-    expect(modalSrc).toContain("function FeedbackModal({ onClose, initialTab = 'mine', viewAsUserId = null, seed = null })")
-    expect(modalSrc).toContain('useState(initialTab)')
+// The three REAL prop shapes (pinned against BeeHub source below).
+const franchiseProps = { locationId: null as string | null, onReportFeedback: () => {} }
+const elevatedProps = { onPendingCountChange: () => {} }
+
+const rowButton = (host: Element, title: string) =>
+  [...host.querySelectorAll('button')].find(b => (b.textContent || '').trim().startsWith(title))
+const locationSelect = (host: Element) =>
+  [...host.querySelectorAll('select')].find(s => (s.textContent || '').includes('All locations'))
+
+beforeEach(() => { document.body.innerHTML = ''; vi.unstubAllGlobals() })
+
+// ── A) the token sweep — no literal color in the extracted file ────
+describe('token sweep — the extracted screen carries no color literal of its own', () => {
+  const HEX = /#[0-9a-fA-F]{3,8}\b/
+  const RGBA = /rgba?\(/
+
+  it('no hex/rgba literal anywhere in the file (comments included — reword, don’t cite hexes)', () => {
+    expect(HEX.test(SCREEN_SRC)).toBe(false)
+    expect(RGBA.test(SCREEN_SRC)).toBe(false)
   })
 
-  it("the Feedback screen's composer button opens on the SUBMIT tab", () => {
-    expect(beehub).toContain("onReportFeedback={() => setShowFeedback('submit')}")
-    expect(beehub).toContain(
-      "{showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} viewAsUserId={viewAsUser?.id || null} seed={feedbackSeed} onClose={() => { setShowFeedback(false); setFeedbackSeed(null) }} />}"
-    )
-  })
-
-  it('the Ask Bee Hub help path still sets plain true → the My Items default', () => {
-    // The old "? Help" dropdown is gone; the bug-report entry now lives in the
-    // Ask Bee Hub chat panel footer. It still opens the modal on plain `true`
-    // (My Items default), never 'submit'.
-    expect(beehub).toContain("onOpenFeedback={() => { setShowHelpChat(false); setShowFeedback(true) }}")
-  })
-})
-
-describe('modern layout — header + pills', () => {
-  it('light headline + muted count subtitle using real counts', () => {
-    expect(screenSrc).toMatch(/fontSize:'19px', fontWeight:500/)
-    expect(screenSrc).toContain("`${items.length} item${items.length !== 1 ? 's' : ''} · ${openCount} open`")
-    // "open" derives from the REAL terminal statuses, not an invented flag.
-    expect(screenSrc).toContain("const isClosedStatus = s => s === 'shipped' || s === 'declined'")
-  })
-
-  it('composer button is a soft-tinted accent action with a plus icon (franchise mount only)', () => {
-    expect(screenSrc).toMatch(/\{onReportFeedback && \(\s*<button/)
-    // "feature" is the owner's word "idea" now (issue 126) — stored value
-    // unchanged, UI copy softened for a non-technical audience. Slice to the
-    // IconPlus (the aria-label now shares the visible string, so stop at the
-    // icon to keep the style chrome inside the window).
-    const btn = screenSrc.slice(screenSrc.indexOf('{onReportFeedback && ('), screenSrc.indexOf('<IconPlus size={13} />'))
-    expect(btn).toContain("background:'rgba(55,138,221,0.10)'")
-    expect(btn).toContain("color:'#2b6aad'")
-    expect(btn).toContain('aria-label="Report a bug or share an idea"')
-    expect(btn).not.toContain('🐛')
-  })
-
-  // FILTER BEHAVIOR is covered by mount tests in beta-feedback-filters — this
-  // source pin only guards the design CALL: single-choice FilterChips over the
-  // real axes, not the old gray-fill pills (issue 126).
-  it('type + status are single-choice FilterChips, not multi-select pills', () => {
-    expect(screenSrc).toContain('<FilterChips items={typeItems} active={typeFilter} onChange={setTypeFilter}')
-    expect(screenSrc).toContain('<FilterChips items={statusItems} active={statusFilter} onChange={setStatusFilter}')
-    // The old pill machinery is gone — assert against a slice bounded to
-    // AdminFeedbackScreen alone (the broad screenSrc runs into the Webhooks
-    // tab, which legitimately keeps its own pillStyle).
-    const fbOnly = beehub.slice(
-      beehub.indexOf('function AdminFeedbackScreen('),
-      beehub.indexOf('const WEBHOOK_WINDOWS')
-    )
-    expect(fbOnly).not.toContain('pillStyle')
-    expect(fbOnly).not.toContain('typePills')
-    expect(fbOnly).not.toContain('statusPills')
-    // Type vocab is the owner-facing set; status pulls plain words, not raw db.
-    expect(screenSrc).toMatch(/key:'feature', label:'Ideas'/)
-    expect(screenSrc).toContain('label: FEEDBACK_STATUS_PLAIN[s]')
+  it('composes the SHARED primitives rather than re-rolling them', () => {
+    expect(SCREEN_SRC).toContain("from '@/components/ui/FilterChips'")
+    expect(SCREEN_SRC).toContain("from '@/components/hive/shared/tokens'")
+    // The feedback chip anatomy + status maps stay single-homed in
+    // feedbackShared (the surface's own StatusChip-equivalent).
+    expect(SCREEN_SRC).toContain("from '@/components/feedback/feedbackShared'")
+    expect(SCREEN_SRC).toMatch(/T\.ink\./)
+    expect(SCREEN_SRC).toMatch(/T\.border\./)
   })
 })
 
-describe('modern layout — rows', () => {
-  it('hairline-divided rows inside ONE rounded container; the old table header is gone', () => {
-    expect(screenSrc).toContain("border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:'12px', overflow:'hidden'")
-    expect(screenSrc).toContain("borderTop: idx === 0 ? 'none' : '0.5px solid rgba(0,0,0,0.08)'")
-    expect(screenSrc).not.toContain('bee-fb-head')
-    expect(screenSrc).not.toContain('gridTemplateColumns')
+// ── B) the three mount sites stay wired in BeeHub ──────────────────
+describe('the three BeeHub mount sites pass the shapes mounted in this file', () => {
+  it('BeeHub imports the extracted module and defines no local copy', () => {
+    expect(BEEHUB_SRC).toContain('import AdminFeedbackScreen from "@/components/admin/AdminFeedbackScreen"')
+    expect(BEEHUB_SRC).not.toContain('function AdminFeedbackScreen(')
+    expect(BEEHUB_SRC).not.toContain('function AdminFeedbackDetailModal(')
   })
 
-  it('soft-tinted type tiles use the real type field: bug → red family, feature → accent blue', () => {
-    expect(screenSrc).toContain("background: bug ? '#FCEBEB' : 'rgba(55,138,221,0.10)'")
-    expect(screenSrc).toContain("color: bug ? '#791F1F' : '#2b6aad'")
-    expect(screenSrc).toContain('{bug ? <IconBug size={15} /> : <IconBulb size={15} />}')
-    expect(icons).toContain('export const IconBug')
-    expect(icons).toContain('export const IconBulb')
+  it('TWO elevated admin mounts: onPendingCountChange only — no composer, no location override', () => {
+    const mounts = BEEHUB_SRC.match(/<AdminFeedbackScreen[^/]*\/>/g) || []
+    const withPending = mounts.filter(m => m.includes('onPendingCountChange'))
+    expect(withPending.length).toBe(2) // SuperAdminLayout tab + legacy AdminScreen tab
+    for (const m of withPending) {
+      expect(m).not.toContain('onReportFeedback')
+      expect(m).not.toContain('locationId')
+    }
   })
 
-  it('status chips cover the real 6-status vocabulary in locked chip anatomy + families', () => {
-    // Anatomy: 11px/500, 2px 8px, radius 10 — the StatusChip spec.
-    expect(sharedSrc).toMatch(/FeedbackStatusBadge\(\{ status \}\) \{[\s\S]*?padding:'2px 8px', borderRadius:'10px', fontSize:'11px', fontWeight:500/)
-    // Families (spot-check the ramp ends + the in-flight amber).
-    expect(sharedSrc).toContain("submitted:    { label:'Submitted',    color:'#085041', bg:'#E1F5EE' }")
-    expect(sharedSrc).toContain("in_progress:  { label:'In Progress',  color:'#633806', bg:'#FAEEDA' }")
-    expect(sharedSrc).toContain("declined:     { label:'Declined',     color:'#444441', bg:'#F1EFE8' }")
-    // Rows render the shared badge.
-    expect(screenSrc).toContain('<FeedbackStatusBadge status={it.status} />')
-  })
-
-  it('closed rows (shipped/declined) dim to 0.72', () => {
-    expect(screenSrc).toContain('const closed = isClosedStatus(it.status)')
-    expect(screenSrc).toContain('opacity: closed ? 0.72 : 1')
-  })
-
-  it('row click still opens the existing detail modal; PATCH status path untouched', () => {
-    expect(screenSrc).toContain('onClick={() => setSelected(it)}')
-    expect(screenSrc).toContain('<AdminFeedbackDetailModal')
-    const detailSrc = beehub.slice(
-      beehub.indexOf('function AdminFeedbackDetailModal('),
-      beehub.indexOf('function ProcessRemovalsCard(')
-    )
-    expect(detailSrc).toContain('/api/admin/feedback/${item.id}')
-    expect(detailSrc).toContain("method: 'PATCH'")
+  it('ONE franchise mount: locationId (view-as parity) + the composer callback', () => {
+    expect(BEEHUB_SRC).toContain('locationId={viewAsUser?.locationId || null}')
+    expect(BEEHUB_SRC).toContain("onReportFeedback={() => setShowFeedback('submit')}")
   })
 })
 
-describe('per-mount location handling', () => {
-  it('the franchise mount (composer prop) drops the location filter and row-meta location', () => {
-    expect(screenSrc).toContain('const franchiseMount = !!onReportFeedback')
-    expect(screenSrc).toMatch(/\{!franchiseMount && \(\s*<select value=\{locFilter\}/)
-    expect(screenSrc).toContain("{!franchiseMount && it.location_name ? ` · ${it.location_name}` : ''}")
+// ── header ─────────────────────────────────────────────────────────
+describe('header — light headline + live count subtitle', () => {
+  it('renders "N items · M open" from the real data (open excludes shipped/declined)', async () => {
+    stubFetch()
+    const { host, unmount } = await mount(withUser(<AdminFeedbackScreen {...franchiseProps} />))
+    expect(host.textContent).toContain('3 items · 2 open') // i2 is shipped → closed
+    await unmount()
+  })
+})
+
+// ── mount context 1: franchise owner/manager ───────────────────────
+describe('franchise mount (onReportFeedback + locationId)', () => {
+  it('shows the composer button, and clicking it fires the callback', async () => {
+    stubFetch()
+    const onReport = vi.fn()
+    const { host, unmount } = await mount(withUser(<AdminFeedbackScreen locationId={null} onReportFeedback={onReport} />))
+    const btn = host.querySelector('button[aria-label="Report a bug or share an idea"]')!
+    expect(btn).toBeTruthy()
+    await click(btn)
+    expect(onReport).toHaveBeenCalledTimes(1)
+    await unmount()
+  })
+
+  it('HIDES the location filter and the row-meta location segment (every row is the caller’s own location)', async () => {
+    stubFetch()
+    const { host, unmount } = await mount(withUser(<AdminFeedbackScreen {...franchiseProps} />))
+    expect(locationSelect(host)).toBeUndefined()
+    const row = rowButton(host, 'Login button broken')!
+    expect(row.textContent).toContain('Amy Owner')
+    expect(row.textContent).not.toContain('Boulder')
+    await unmount()
+  })
+
+  it('appends ?location_id= to the fetch when a view-as location is passed, plain URL when null', async () => {
+    const f = stubFetch()
+    const { unmount } = await mount(withUser(<AdminFeedbackScreen locationId="loc-9" onReportFeedback={() => {}} />))
+    expect(String(f.mock.calls[0][0])).toBe('/api/admin/feedback?location_id=loc-9')
+    await unmount()
+    const f2 = stubFetch()
+    const { unmount: un2 } = await mount(withUser(<AdminFeedbackScreen {...franchiseProps} />))
+    expect(String(f2.mock.calls[0][0])).toBe('/api/admin/feedback')
+    await un2()
+  })
+})
+
+// ── mount contexts 2 + 3: the elevated admin tabs ──────────────────
+// Both elevated sites pass the identical shape (pinned above), so one mount
+// exercises both — the point is that the shape they pass keeps the location
+// filter, keeps the row-meta location, and never grows a composer.
+describe('elevated admin mounts (onPendingCountChange only)', () => {
+  it('SHOWS the location filter with the locations present in the data', async () => {
+    stubFetch()
+    const { host, unmount } = await mount(withUser(<AdminFeedbackScreen {...elevatedProps} />))
+    const sel = locationSelect(host)!
+    expect(sel).toBeTruthy()
+    const options = [...sel.querySelectorAll('option')].map(o => o.textContent)
+    expect(options).toEqual(['All locations', 'Boulder', 'Portland'])
+    await unmount()
+  })
+
+  it('row meta carries the location segment; there is NO composer button', async () => {
+    stubFetch()
+    const { host, unmount } = await mount(withUser(<AdminFeedbackScreen {...elevatedProps} />))
+    expect(rowButton(host, 'Login button broken')!.textContent).toContain('Boulder')
+    expect(host.querySelector('button[aria-label="Report a bug or share an idea"]')).toBeNull()
+    await unmount()
+  })
+
+  it('selecting a location narrows the list client-side', async () => {
+    stubFetch()
+    const { host, unmount } = await mount(withUser(<AdminFeedbackScreen {...elevatedProps} />))
+    const sel = locationSelect(host)!
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!
+      setter.call(sel, 'loc-2')
+      sel.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(rowButton(host, 'Export to CSV')).toBeTruthy()
+    expect(rowButton(host, 'Login button broken')).toBeUndefined()
+    await unmount()
+  })
+
+  it('reports the pending (status=submitted) count for the tab badge', async () => {
+    stubFetch()
+    const onPending = vi.fn()
+    const { unmount } = await mount(withUser(<AdminFeedbackScreen onPendingCountChange={onPending} />))
+    expect(onPending).toHaveBeenLastCalledWith(2) // i1 + i3 are 'submitted'
+    await unmount()
+  })
+})
+
+// ── rows + the triage detail modal ─────────────────────────────────
+describe('rows and the detail modal', () => {
+  it('closed rows (shipped/declined) dim to 0.72; open rows do not', async () => {
+    stubFetch()
+    const { host, unmount } = await mount(withUser(<AdminFeedbackScreen {...elevatedProps} />))
+    expect((rowButton(host, 'Export to CSV') as HTMLElement).style.opacity).toBe('0.72')
+    expect((rowButton(host, 'Login button broken') as HTMLElement).style.opacity).toBe('1')
+    await unmount()
+  })
+
+  it('a row with attachments shows the paperclip count', async () => {
+    stubFetch()
+    const { host, unmount } = await mount(withUser(<AdminFeedbackScreen {...elevatedProps} />))
+    const row = rowButton(host, 'Export to CSV')!
+    expect(row.querySelector('svg')).toBeTruthy() // type tile icon + paperclip render
+    expect(row.textContent).toContain('1') // attachment count
+    await unmount()
+  })
+
+  it('clicking a row opens the detail modal; Save PATCHes /api/admin/feedback/:id and updates the list', async () => {
+    const f = vi.fn(async (url: any, init?: any) => {
+      if (init?.method === 'PATCH') {
+        return { ok: true, status: 200, json: async () => ({ id: 'i1', status: 'in_progress', admin_response: 'On it' }) }
+      }
+      return { ok: true, status: 200, json: async () => ({ items: ITEMS }) }
+    })
+    vi.stubGlobal('fetch', f)
+    const { host, unmount } = await mount(withUser(<AdminFeedbackScreen {...elevatedProps} />))
+
+    await click(rowButton(host, 'Login button broken')!)
+    // Modal open: description label + the plain-word status vocabulary in the select.
+    expect(host.textContent).toContain('Description')
+    const select = [...host.querySelectorAll('select')].find(s => (s.textContent || '').includes('Looking at it'))!
+    expect(select).toBeTruthy()
+    expect(select.textContent).not.toContain('under_review') // plain words, not db values
+
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!
+      setter.call(select, 'in_progress')
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    const save = [...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'Save')!
+    await click(save)
+
+    const patch = f.mock.calls.find(c => c[1]?.method === 'PATCH')!
+    expect(String(patch[0])).toBe('/api/admin/feedback/i1')
+    expect(JSON.parse(patch[1].body)).toEqual({ status: 'in_progress', admin_response: null })
+    // onSaved merged the update back into the list and closed the modal.
+    expect(host.textContent).not.toContain('Description')
+    expect(rowButton(host, 'Login button broken')!.textContent).toContain('In progress')
+    await unmount()
   })
 })

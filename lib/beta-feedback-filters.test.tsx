@@ -27,11 +27,10 @@ import { act } from 'react-dom/test-utils'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
-}))
-
-import { AdminFeedbackScreen, CurrentUserContext } from '@/components/BeeHub'
+// The screen is its own module now (issue 128) — no BeeHub import, so no
+// next/navigation mock needed.
+import AdminFeedbackScreen from '@/components/admin/AdminFeedbackScreen'
+import { CurrentUserContext } from '@/components/hive/shared/currentUserContext'
 
 // Five items, authored across two users, covering three real statuses. The
 // counts below are hand-derived from THIS fixture so the assertions are exact.
