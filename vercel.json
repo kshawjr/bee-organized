@@ -4,7 +4,8 @@
     { "path": "/api/cron/send-drips",     "schedule": "0 * * * *" },
     { "path": "/api/cron/import-sweeper", "schedule": "* * * * *" },
     { "path": "/api/cron/webhook-digest", "schedule": "0 */3 * * *" },
-    { "path": "/api/cron/zoho-recipient-topup", "schedule": "0 5 * * *" }
+    { "path": "/api/cron/zoho-recipient-topup", "schedule": "0 5 * * *" },
+    { "path": "/api/cron/sync-log-purge", "schedule": "0 8 * * *" }
   ],
   "functions": {
     "app/api/import/jobber-clients/route.ts": {
