@@ -21,9 +21,12 @@
 -- Apply via Supabase SQL editor. Idempotent: re-running only touches rows still
 -- at accepted_at IS NULL.
 
+-- Note: hub_users.location_id is text while pending_invites.location_id is
+-- uuid, so the location match casts pi.location_id to text (uuid = text has no
+-- operator in Postgres).
 UPDATE public.pending_invites pi
 SET accepted_at = COALESCE(hu.invite_accepted_at, now())
 FROM public.hub_users hu
 WHERE pi.accepted_at IS NULL
   AND lower(hu.email) = lower(pi.email)
-  AND (pi.location_id = hu.location_id OR pi.tier = 'admin');
+  AND (pi.location_id::text = hu.location_id OR pi.tier = 'admin');
