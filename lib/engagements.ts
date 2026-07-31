@@ -21,6 +21,7 @@
 import { supabaseService } from './supabase-service'
 import { writeSyncLog } from './sync-log'
 import { isUnbookedJobStatus } from './jobber-import'
+import { resolveLeadAssignees } from './lead-assignment'
 import { ENGAGEMENT_STAGE_RANK as RAW_ENGAGEMENT_STAGE_RANK } from '@/components/hive/shared/stageRank'
 import { invoicesFullyPaid } from '@/components/hive/shared/engagementStatus'
 
@@ -355,8 +356,13 @@ export async function foundEngagement(params: {
     return { error: `founding child link failed: ${foundingChildTable}/${foundingChildId}` }
   }
 
-  // Carry the lead-level assignment onto the work. Never fatal.
-  await seedEngagementAssigneesFromLead(created.id, clientId)
+  // Carry the lead-level assignment onto the work. Never fatal. issue 149 —
+  // when the lead never carried assignees, resolve against the CURRENT config
+  // (same inputs intake used: the lead's project_type) instead of opening blank.
+  await seedEngagementAssigneesFromLead(created.id, clientId, {
+    locationUuid: lead.location_uuid,
+    projectType: (lead.project_type || '').trim() || null,
+  })
 
   await logFounding({
     locationSlug: lead.location_id,
@@ -413,8 +419,17 @@ export async function foundManualEngagement(params: {
     .single()
   if (insErr || !created) return { error: `engagement insert: ${insErr?.message || 'no row'}` }
 
-  // Carry the lead-level assignment onto the work. Never fatal.
-  await seedEngagementAssigneesFromLead(created.id, clientId)
+  // Carry the lead-level assignment onto the work. Never fatal. issue 149 —
+  // same empty-lead fallback as foundEngagement, but projectType is null on
+  // purpose: a manual engagement declares no type of its own, and the lead's
+  // stale project_type may describe earlier work (same reasoning the founding
+  // notes give for skipping it on quote/job). With null the resolver lands on
+  // the location owner (rule 1 or 3) — the right owner-of-record for hand-
+  // started work — rather than routing new work to a past-type claimer.
+  await seedEngagementAssigneesFromLead(created.id, clientId, {
+    locationUuid: lead.location_uuid,
+    projectType: null,
+  })
 
   await logFounding({
     locationSlug: lead.location_id,
@@ -446,12 +461,28 @@ export async function foundManualEngagement(params: {
 //     would be both slow and echo-prone; the first masthead edit pushes the set,
 //     and lib/engagement-assignee-sync is idempotent on Jobber's side anyway.
 //
+// issue 149 — RESOLVE AT FOUNDING, not just at intake. The lead's assignment is
+// decided at intake (lib/lead-assignment.ts), but leads that predate the resolver
+// — or that resolved to nobody then — carry an EMPTY lead_assignees junction, so
+// the verbatim carry-forward above would open the work with NOBODY and nothing
+// would ever re-resolve against the location's current config. When the lead
+// junction is empty AND a `fallback` is supplied, we run the SAME resolver intake
+// would (owner, or the project-type claimers) and seed that instead of blank.
+// This stays strictly EMPTY-ONLY: the engagement junction was already confirmed
+// empty above and the lead junction is empty here, so a manual masthead edit can
+// never be overwritten. A resolved user with a null jobber_user_id is a valid
+// INTERNAL assignee — resolveJobberAssignment (lib/engagement-assignee-sync)
+// already filters those out of the Jobber push, so this never reads as "assigned
+// in Jobber." The resolver's own owner-fallback (rule 5) still returns [] loudly
+// for a location with no resolvable owner, which lands us back at return 0.
+//
 // NEVER FATAL: founding has already committed and its caller's happy path must
 // not depend on this. Every failure — including "lead_assignees does not exist
 // yet" before migrations/lead_assignees.sql is applied — logs and returns 0.
 export async function seedEngagementAssigneesFromLead(
   engagementId: string,
   leadId: string,
+  fallback?: { locationUuid: string; projectType: string | null },
 ): Promise<number> {
   try {
     const { data: already, error: alreadyErr } = await supabaseService
@@ -469,7 +500,18 @@ export async function seedEngagementAssigneesFromLead(
       .order('created_at', { ascending: true })
     if (leadErr) throw new Error(leadErr.message)
 
-    const ids = (leadRows || []).map((r: any) => r.hub_user_id).filter(Boolean)
+    let ids = (leadRows || []).map((r: any) => r.hub_user_id).filter(Boolean)
+
+    // issue 149 — empty lead junction: re-resolve against the current config
+    // rather than open unassigned. Empty-only (both junctions confirmed empty).
+    if (ids.length === 0 && fallback) {
+      const resolved = await resolveLeadAssignees({
+        locationUuid: fallback.locationUuid,
+        projectType: fallback.projectType,
+      })
+      ids = resolved.hubUserIds.filter(Boolean)
+    }
+
     if (ids.length === 0) return 0
 
     const { error: insErr } = await supabaseService.from('engagement_assignees').upsert(

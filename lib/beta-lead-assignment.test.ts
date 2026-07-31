@@ -494,8 +494,10 @@ describe('the generic lead PATCH must never carry assignment', () => {
 describe('engagement carry-forward is wired into BOTH founding paths', () => {
   const src = readFileSync('lib/engagements.ts', 'utf8')
 
-  it('foundEngagement and foundManualEngagement both seed the junction', () => {
-    const calls = src.match(/seedEngagementAssigneesFromLead\(created\.id, clientId\)/g) || []
+  it('foundEngagement and foundManualEngagement both seed the junction with a fallback (issue 149)', () => {
+    // Both now pass a { locationUuid, projectType } fallback so an empty lead
+    // junction re-resolves against the current config instead of opening blank.
+    const calls = src.match(/seedEngagementAssigneesFromLead\(created\.id, clientId, \{/g) || []
     expect(calls.length).toBe(2)
   })
 
@@ -504,5 +506,12 @@ describe('engagement carry-forward is wired into BOTH founding paths', () => {
     const fn = src.slice(src.indexOf('export async function seedEngagementAssigneesFromLead'))
     expect(fn).toContain("from('engagement_assignees')")
     expect(fn).toMatch(/if \(\(already \|\| \[\]\)\.length > 0\) return 0/)
+  })
+
+  it('the empty-lead fallback re-resolves via resolveLeadAssignees, guarded on an empty junction (issue 149)', () => {
+    const fn = src.slice(src.indexOf('export async function seedEngagementAssigneesFromLead'))
+    // Only reached when the lead junction is empty AND a fallback was supplied.
+    expect(fn).toMatch(/if \(ids\.length === 0 && fallback\)/)
+    expect(fn).toContain('resolveLeadAssignees(')
   })
 })
