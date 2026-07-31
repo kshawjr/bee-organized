@@ -167,23 +167,23 @@ function footerSegments(ctx: BrandedEmailContext): {
   }
 }
 
-// ── HTML ──────────────────────────────────────────────────────────────────
-export function buildBrandedDripHtml(renderedBody: string, ctx: BrandedEmailContext): string {
+// ── Shared branded shell ────────────────────────────────────────────────────
+// The Bee Organized chrome — dark-mode guard, single 600px card, gold bee logo
+// + wordmark + tagline header, and the teal footer band — with two slots the
+// caller fills:
+//   • cardContentHtml   → the white card body (drip paragraphs, OR a lead-
+//                          notification field grid + button — structured HTML)
+//   • footerBandHtml    → the white-on-teal footer band content
+//
+// Extracted from buildBrandedDripHtml so a second caller (the #113 lead
+// notification) reuses the exact same chrome instead of copying it. The drip
+// body is plain text run through bodyParagraphsHtml; the notification body is a
+// table-based field grid — those DON'T share a body model, but they DO share
+// this shell, so the shell takes already-built inner HTML and stays agnostic
+// about what's inside. Both slots are inserted verbatim: the caller is
+// responsible for escaping its own content.
+export function buildBrandedShellHtml(cardContentHtml: string, footerBandHtml: string): string {
   const logoUrl = resolveDripLogoUrl()
-  const reviewsLink = ctx.reviews_link?.trim() || null
-  const addReviewsLine = reviewsLink && !bodyHasReviewsLink(renderedBody, reviewsLink)
-
-  const reviewsHtml = addReviewsLine
-    ? `<p style="margin:20px 0 0;font-size:16px;line-height:1.7;color:#2b2b28;"><a href="${escAttr(
-        reviewsLink!,
-      )}" style="${LINK_STYLE}">${escHtml(REVIEWS_LINE_TEXT)}</a></p>`
-    : ''
-
-  const { brand, phone } = footerSegments(ctx)
-  const websiteCell = `<a href="${DRIP_WEBSITE_URL}" style="color:#ffffff;text-decoration:underline;">${DRIP_WEBSITE_LABEL}</a>`
-  const footerInner = [escHtml(brand), websiteCell, phone ? escHtml(phone) : null]
-    .filter(Boolean)
-    .join('&nbsp;&nbsp;|&nbsp;&nbsp;')
 
   return `<!doctype html>
 <html lang="en">
@@ -216,8 +216,7 @@ export function buildBrandedDripHtml(renderedBody: string, ctx: BrandedEmailCont
           </tr>
           <tr>
             <td style="padding:28px 40px 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
-              ${bodyParagraphsHtml(renderedBody)}
-              ${reviewsHtml}
+              ${cardContentHtml}
             </td>
           </tr>
           <tr>
@@ -225,7 +224,7 @@ export function buildBrandedDripHtml(renderedBody: string, ctx: BrandedEmailCont
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
                   <td align="center" bgcolor="${DRIP_BRAND_TEAL}" style="background:${DRIP_BRAND_TEAL};padding:18px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;line-height:1.6;color:#ffffff;">
-                    ${footerInner}
+                    ${footerBandHtml}
                   </td>
                 </tr>
               </table>
@@ -237,6 +236,27 @@ export function buildBrandedDripHtml(renderedBody: string, ctx: BrandedEmailCont
   </table>
 </body>
 </html>`
+}
+
+// ── HTML ──────────────────────────────────────────────────────────────────
+export function buildBrandedDripHtml(renderedBody: string, ctx: BrandedEmailContext): string {
+  const reviewsLink = ctx.reviews_link?.trim() || null
+  const addReviewsLine = reviewsLink && !bodyHasReviewsLink(renderedBody, reviewsLink)
+
+  const reviewsHtml = addReviewsLine
+    ? `<p style="margin:20px 0 0;font-size:16px;line-height:1.7;color:#2b2b28;"><a href="${escAttr(
+        reviewsLink!,
+      )}" style="${LINK_STYLE}">${escHtml(REVIEWS_LINE_TEXT)}</a></p>`
+    : ''
+
+  const { brand, phone } = footerSegments(ctx)
+  const websiteCell = `<a href="${DRIP_WEBSITE_URL}" style="color:#ffffff;text-decoration:underline;">${DRIP_WEBSITE_LABEL}</a>`
+  const footerInner = [escHtml(brand), websiteCell, phone ? escHtml(phone) : null]
+    .filter(Boolean)
+    .join('&nbsp;&nbsp;|&nbsp;&nbsp;')
+
+  return buildBrandedShellHtml(`${bodyParagraphsHtml(renderedBody)}
+              ${reviewsHtml}`, footerInner)
 }
 
 // ── Plain text ────────────────────────────────────────────────────────────

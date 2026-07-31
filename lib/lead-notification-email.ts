@@ -60,6 +60,15 @@ import {
 import { logNotification } from './notification-log'
 import { resolveNotificationsLive } from './notifications-live'
 import { formatLeadAddressLabeled } from './lead-address'
+import { buildBrandedShellHtml } from './drip-email-layout'
+
+// The plain-text wordmark line — the text alternative's echo of the shell's
+// gold-logo + wordmark header. Same string buildBrandedDripText uses, so a
+// branded drip and a branded lead notification read identically in a text-only
+// client. It is a WORDMARK, not the logo: the text alternative must NOT gain an
+// image (#113), but it must stay in step with the html, which now leads with the
+// brand chrome. Contains no "Bee Hub", so it is safe on the non-hub variant.
+const BRAND_WORDMARK_TEXT = 'BEE ORGANIZED — Simplify Your Hive'
 
 // The email_kind stamped on every row this module produces. Hardcoded rather
 // than passed by callers: this function IS the lead notification, so deriving
@@ -261,42 +270,42 @@ function buildLeadNotificationEmail(args: {
                 </table>`
     : ''
 
-  const html = `<!doctype html>
-<html>
-  <body style="margin:0;padding:0;background:#f7f5f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1a2e2b;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f5f0;padding:32px 16px;">
-      <tr>
-        <td align="center">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;box-shadow:0 4px 24px rgba(26,46,43,0.08);overflow:hidden;">
-            <tr>
-              <td style="padding:32px 32px 24px;">
-                <div style="font-size:32px;margin-bottom:8px;">🐝</div>
-                <h1 style="margin:0 0 6px;font-family:Georgia,serif;font-size:22px;color:#1a2e2b;">${escapeHtml(heading)}</h1>
-                <p style="margin:0 0 18px;font-size:15px;line-height:1.55;color:#4a5e5a;">${escapeHtml(intro)}</p>
-                <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;">
-                  ${rowsHtml}
-                </table>
-                ${detailsHtml}
-                ${buttonHtml}
-              </td>
-            </tr>
-            <tr>
-              <td style="padding:16px 32px 24px;border-top:1px solid rgba(0,0,0,0.06);">
-                ${hasHubAccess ? `<p style="margin:0 0 10px;font-size:12px;line-height:1.55;color:#4a5e5a;">${escapeHtml(NO_ACCESS_FOOTER)}</p>` : ''}
-                <p style="margin:0;font-size:11px;color:#8a9e9a;">Sent by Bee Organized · You're receiving this because you're set to get new-lead notifications for ${escapeHtml(locationName)}.</p>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-  </body>
-</html>`
+  // #113 — the Bee Organized branded chrome (gold bee logo + wordmark header,
+  // single 600px card, teal footer band, dark-mode guard) comes from the SHARED
+  // shell in drip-email-layout.ts — the same chrome the branded drips (#90) and
+  // stage emails (#114) use. The shell is body-agnostic: the drip fills its card
+  // slot with paragraphs, this fills it with the structured field grid + button.
+  // The old header carried a 🐝 emoji; the branded header carries the gold logo,
+  // so the emoji is dropped (they'd collide) — the logo is the ONE unavoidable
+  // content change (#113). The footer band carries the "why you're getting this"
+  // note, plus the #82 get-set-up line on the hub variant only.
+  const cardContentHtml = `<h1 style="margin:0 0 6px;font-family:Georgia,'Times New Roman',serif;font-size:22px;color:#1a2e2b;">${escapeHtml(heading)}</h1>
+              <p style="margin:0 0 18px;font-size:15px;line-height:1.55;color:#4a5e5a;">${escapeHtml(intro)}</p>
+              <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;">
+                ${rowsHtml}
+              </table>
+              ${detailsHtml}
+              ${buttonHtml}`
+
+  // Footer band content — white text on the teal band. The get-set-up line is
+  // BEE-HUB-scoped (#82/#91): it names the product, so it renders ONLY on the
+  // hub variant and is omitted entirely on the non-hub one (which must contain
+  // ZERO Bee Hub references). The "why you're receiving this" note is identical
+  // in both variants and names only Bee Organized.
+  const footerBandHtml = `${hasHubAccess ? `<div style="margin:0 0 8px;font-size:13px;line-height:1.6;color:#ffffff;">${escapeHtml(NO_ACCESS_FOOTER)}</div>
+                    ` : ''}<div style="margin:0;font-size:12px;line-height:1.6;color:#ffffff;">Sent by Bee Organized · You're receiving this because you're set to get new-lead notifications for ${escapeHtml(locationName)}.</div>`
+
+  const html = buildBrandedShellHtml(cardContentHtml, footerBandHtml)
 
   const textIntro = resubmission
     ? 'A client already in your list just submitted the website form again:'
     : 'A new inquiry just came in through your website:'
+  // Text alternative leads with the WORDMARK (not the logo — text can't carry an
+  // image, #113) so it stays in step with the html's branded header. Everything
+  // below is unchanged from before the brand pass.
   const textLines = [
+    BRAND_WORDMARK_TEXT,
+    '',
     heading,
     '',
     textIntro,
