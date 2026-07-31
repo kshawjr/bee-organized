@@ -28,6 +28,7 @@ import {
   transferQueueSource,
 } from '@/lib/hub-scope'
 import { buildAllOverview } from '@/lib/hub-all-overview'
+import { applyLeadActiveFilter, fetchSuppressedLeadIds } from '@/lib/lead-suppression'
 import { originalEngagementIds } from '@/components/hive/shared/engagementStatus'
 import BeeHub from '@/components/BeeHub'
 
@@ -457,13 +458,14 @@ export default async function HubPage({
     } else if (activeLocs && activeLocs.length > 0) {
       const counted = await Promise.all(
         (activeLocs as any[]).map(async (l) => {
-          const { count, error } = await supabaseService
-            .from('leads')
-            .select('id', { count: 'exact', head: true })
-            .eq('location_uuid', l.id)
-            // Mirrors the main leads query, so "largest" means largest by the
-            // rows this page would actually load.
-            .not('is_junk', 'is', true)
+          // Shares the main leads query's active-surface filter (junk +
+          // archived), so "largest" means largest by the rows that page loads.
+          const { count, error } = await applyLeadActiveFilter(
+            supabaseService
+              .from('leads')
+              .select('id', { count: 'exact', head: true })
+              .eq('location_uuid', l.id),
+          )
           if (error) console.error(`[hub-page] default-scope count failed for ${l.location_id}: ${error.message}`)
           return { id: l.id, slug: l.location_id ?? null, leadCount: count ?? 0 }
         })
@@ -1033,17 +1035,20 @@ export default async function HubPage({
     let leadsRaw: any[] | null = []
     let leadsError: { message: string } | null = null
     for (let from = 0; from < MAX_LEADS; from += PAGE) {
-      let q = supabaseService
-        .from('leads')
-        // "not junk" = false OR NULL. Jobber-imported leads leave is_junk
-        // unset (NULL), and `.eq('is_junk', false)` does NOT match NULL in
-        // Postgres — those leads loaded nowhere (not here, not the bin which
-        // is is_junk=true) and were invisible app-wide. `is_junk IS NOT TRUE`
-        // matches false and NULL, still excluding genuinely junked leads.
-        .select('*')
-        .not('is_junk', 'is', true)
-        .order('created_at', { ascending: false })
-        .range(from, from + PAGE - 1)
+      // Active-surface filter (shared #122 predicate): excludes junk AND
+      // archived leads. "not junk" = false OR NULL — Jobber-imported leads
+      // leave is_junk unset (NULL) and `.eq('is_junk', false)` does NOT match
+      // NULL in Postgres, so those leads would load nowhere; `is_junk IS NOT
+      // TRUE` matches false and NULL. archived_at IS NULL drops #122-archived
+      // clients off the Inbox/lists. One helper so this can't drift from the
+      // engagement-board drop below.
+      let q = applyLeadActiveFilter(
+        supabaseService
+          .from('leads')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .range(from, from + PAGE - 1),
+      )
 
       if (scopeLocationUuid) {
         q = q.eq('location_uuid', scopeLocationUuid)
@@ -1234,9 +1239,26 @@ export default async function HubPage({
           if ((data || []).length < PAGE) break
         }
 
+        // Drop engagements whose client lead is suppressed (junk or #122
+        // archived). The engagements row carries no copy of lead status, so the
+        // active board must exclude by the suppressed-client set — the same
+        // shared predicate the leads load above uses, so board and Inbox can't
+        // drift. Orphan engagements (client_id with no lead row) are NOT in this
+        // set and still render as "Unknown", surfacing the data gap rather than
+        // silently vanishing.
+        let engOpenActive = engOpen
+        if (engOpen.length > 0) {
+          try {
+            const suppressed = await fetchSuppressedLeadIds(supabaseService, { locationUuid: scopeLocationUuid })
+            engOpenActive = engOpen.filter((e: any) => !suppressed.has(e.client_id))
+          } catch (err: any) {
+            console.error('[hub-page] suppressed-lead fetch failed; board unfiltered:', err?.message || err)
+          }
+        }
+
         if (engErr) {
           console.error('[hub-page] engagements fetch error:', engErr.message)
-        } else if (engOpen.length > 0) {
+        } else if (engOpenActive.length > 0) {
           const leadInfoById: Record<string, { name: string; phone: string | null; email: string | null }> = {}
           for (const l of leadsRaw) leadInfoById[l.id] = { name: l.name || 'Unknown', phone: l.phone || null, email: l.email || null }
 
@@ -1255,7 +1277,7 @@ export default async function HubPage({
           const assessmentsByEng = byEngagement(assessmentsRaw)
           const serviceReqsByEng = byEngagement(serviceRequestsRaw)
 
-          initialEngagements = engOpen.map((e: any) => ({
+          initialEngagements = engOpenActive.map((e: any) => ({
             ...e,
             client_name: leadInfoById[e.client_id]?.name || 'Unknown',
             client_phone: leadInfoById[e.client_id]?.phone ?? null,
@@ -1341,6 +1363,21 @@ export default async function HubPage({
         if (error) { engErr = error; break }
         engLean.push(...(data || []))
         if ((data || []).length < PAGE) break
+      }
+
+      // The all-overview OPEN counts are active-work numbers, so exclude
+      // suppressed (junk + #122 archived) clients — mirrors the scoped board.
+      // Global set (no location filter) for the all-locations view. Closed/won
+      // head counts below are historical and stay unfiltered.
+      if (!engErr && engLean.length > 0) {
+        try {
+          const suppressed = await fetchSuppressedLeadIds(supabaseService, {})
+          for (let i = engLean.length - 1; i >= 0; i--) {
+            if (suppressed.has(engLean[i].client_id)) engLean.splice(i, 1)
+          }
+        } catch (err: any) {
+          console.error('[hub-page] all-overview suppressed-lead fetch failed; counts unfiltered:', err?.message || err)
+        }
       }
 
       if (engErr) {
@@ -1493,14 +1530,15 @@ export default async function HubPage({
         .filter((p: any) => p.atLocOther)
         .slice(0, TRANSFER_QUEUE_MAX)
     } else {
-      const { data: transferRaw, error: transferErr } = await supabaseService
-        .from('leads')
-        .select('*')
-        .eq('location_id', LOC_OTHER_SLUG)
-        .not('is_junk', 'is', true)
-        .order('created_at', { ascending: false })
-        .order('id', { ascending: true })
-        .limit(TRANSFER_QUEUE_MAX)
+      const { data: transferRaw, error: transferErr } = await applyLeadActiveFilter(
+        supabaseService
+          .from('leads')
+          .select('*')
+          .eq('location_id', LOC_OTHER_SLUG)
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: true })
+          .limit(TRANSFER_QUEUE_MAX),
+      )
 
       if (transferErr) {
         // Non-fatal: the queue is additive to the page. Log loudly — a silently

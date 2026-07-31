@@ -79,7 +79,13 @@
 //                                       defensively; Jobber signals payment
 //                                       via INVOICE_UPDATE in practice)
 //   INVOICE_DESTROY  → (no change)      null jobber_invoice_id on lead
-//   CLIENT_UPDATE    → (no change)      refresh name/email/phone
+//   CLIENT_UPDATE    → (no change)      refresh name/email/phone. ALSO (#122):
+//                                       isArchived true → stamp leads.archived_at
+//                                       (lead drops off Inbox/active board) +
+//                                       stop drip ('client_archived'); isArchived
+//                                       false → clear archived_at (reactivate,
+//                                       drips stay stopped). NEVER nulls links,
+//                                       deletes, marks won, or closes engagements.
 //   CLIENT_DESTROY   → (no change)      null ALL jobber_*_id columns on
 //                                       lead (full Jobber link break)
 //   PROPERTY_CREATE  → (no change)      sync property → lead address;
@@ -107,7 +113,7 @@
 
 import { jobberGraphQL } from './jobber'
 import { supabaseService } from './supabase-service'
-import { applyDripSideEffects } from './drip-lifecycle'
+import { applyDripSideEffects, stopActiveDripsForLead } from './drip-lifecycle'
 import { disconnectJobberFromLocation } from './jobber-disconnect'
 import {
   SINGLE_CLIENT_QUERY,
@@ -849,6 +855,21 @@ export function handleInvoiceUpdate(ctx: HandlerCtx) {
 }
 
 // CLIENT_UPDATE — refresh name/email/phone/address. No stage change.
+//
+// #122 archive branch: archiving a client in Jobber emits this bare UPDATE (not
+// a DESTROY), carrying Client.isArchived. The client STILL EXISTS and stays a
+// lead — archive is a soft-inactive state, not a link break:
+//   • isArchived true  → stamp leads.archived_at (idempotent) so the lead drops
+//     off the Inbox / active board / active lists, and stop any active drip
+//     (reason 'client_archived'). NEVER null Jobber links, delete the lead, or
+//     mark it won. Open engagements are deliberately left untouched (archiving
+//     says the person is inactive, NOT that the deal was lost) — they drop off
+//     the active board via the archived-lead exclusion, still reachable in the
+//     client's record and via Search.
+//   • isArchived false → un-archive: clear archived_at (reactivates the lead).
+//     Drips stay stopped — the owner re-activates by hand (the #112 re-spam
+//     guard); reactivating a lead is not re-enrolling marketing.
+// Fail-soft: an archive-bookkeeping error never fails the webhook.
 export async function handleClientUpdate(ctx: HandlerCtx): Promise<HandlerResult> {
   const globalId = encodeJobberId('Client', ctx.itemId)
   const res = await jobberGraphQL(ctx.location.location_id, SINGLE_CLIENT_QUERY, {
@@ -879,11 +900,48 @@ export async function handleClientUpdate(ctx: HandlerCtx): Promise<HandlerResult
     { importSource: 'jobber_webhook' },
   )
 
+  let archiveNote: string | undefined
+  try {
+    if (clientRec.isArchived === true) {
+      // Stamp archived_at only if not already set — preserves the original
+      // archive time across repeat CLIENT_UPDATEs (idempotent redelivery).
+      const { error: aErr } = await supabaseService
+        .from('leads')
+        .update({ archived_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('id', lead.id)
+        .is('archived_at', null)
+      if (aErr) throw new Error(aErr.message)
+      // Idempotent: only touches non-stopped drip rows.
+      await stopActiveDripsForLead(lead.id, 'client_archived')
+      // State-based note (fires whether or not THIS delivery stamped) so the
+      // landed check verifies archived_at is set even on redelivery.
+      archiveNote = 'CLIENT_UPDATE→archived'
+    } else {
+      // Un-archive: clear only if currently set, so a normal (non-archive)
+      // client update stays a plain field refresh with no note.
+      const { data: cleared, error: uErr } = await supabaseService
+        .from('leads')
+        .update({ archived_at: null, updated_at: new Date().toISOString() })
+        .eq('id', lead.id)
+        .not('archived_at', 'is', null)
+        .select('id')
+      if (uErr) throw new Error(uErr.message)
+      if (cleared && cleared.length > 0) archiveNote = 'CLIENT_UPDATE→unarchived'
+    }
+  } catch (err: any) {
+    console.error('[jobber-webhook] CLIENT_UPDATE archive bookkeeping failed (webhook still processed)', {
+      itemId: ctx.itemId,
+      location: ctx.location.location_id,
+      error: err?.message || err,
+    })
+  }
+
   return {
     processed: true,
     lead_id: lead.id,
     lead_stage: lead.stage,
     prev_stage: lead.stage,
+    ...(archiveNote ? { note: archiveNote } : {}),
   }
 }
 

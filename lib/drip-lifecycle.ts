@@ -31,6 +31,7 @@ export type DripStopReason =
   | 'manual_pause'
   | 'no_email'
   | 'opted_out'
+  | 'client_archived'
 
 interface LocationCtx {
   id: string

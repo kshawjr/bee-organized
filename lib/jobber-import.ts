@@ -139,7 +139,7 @@ export const JOB_INVOICES_QUERY = `
 export const SINGLE_CLIENT_QUERY = `
   query GetClient($id: EncodedId!) {
     client(id: $id) {
-      id firstName lastName companyName createdAt
+      id firstName lastName companyName createdAt isArchived
       emails { address primary }
       phones  { number  primary }
       billingAddress { street city province postalCode }

@@ -35,6 +35,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { foundManualEngagement } from '@/lib/engagements'
+import { fetchSuppressedLeadIds } from '@/lib/lead-suppression'
 // PURE zero-import module (§8.5) — safe from the server route; ONE
 // source for the terminal stage strings ('Closed Won' / 'Closed Lost').
 import { CLOSED_STAGE_FILTERS } from '@/components/hive/shared/stageConfig'
@@ -51,6 +52,22 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // (the realtime refetch) BOTH go through here — two copies would drift, and
 // a drifted shape reads as a phantom board change. The shape MUST mirror
 // _hub-page.tsx initialEngagements — keep them in lockstep.
+// Drop engagements whose client lead is suppressed (junk or #122 archived) —
+// the ACTIVE board reads (?open focus-revalidation, ?ids realtime refetch) must
+// mirror _hub-page's board, which excludes them. The ?closed historical read
+// deliberately does NOT call this (archiving never reshapes past won/lost).
+// Fail-soft: on a lookup error, serve unfiltered rather than blank the board.
+async function filterOutSuppressed(rows: any[], scopeLoc: string | null): Promise<any[]> {
+  if (rows.length === 0) return rows
+  try {
+    const suppressed = await fetchSuppressedLeadIds(supabaseService, { locationUuid: scopeLoc })
+    return rows.filter(r => !suppressed.has(r.client_id))
+  } catch (err: any) {
+    console.error('[engagements] suppressed-lead fetch failed; serving unfiltered:', err?.message || err)
+    return rows
+  }
+}
+
 async function enrichBoardRows(baseRows: any[]): Promise<any[]> {
   const clientIds = Array.from(new Set(baseRows.map(r => r.client_id).filter(Boolean)))
   const engIds = baseRows.map(r => r.id)
@@ -187,7 +204,9 @@ export async function GET(req: Request) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     if (!data || data.length === 0) return NextResponse.json({ rows: [], total: 0 })
 
-    const rows = await enrichBoardRows(data)
+    const active = await filterOutSuppressed(data, scopeLoc)
+    if (active.length === 0) return NextResponse.json({ rows: [], total: 0 })
+    const rows = await enrichBoardRows(active)
     return NextResponse.json({ rows, total: rows.length })
   }
 
@@ -226,7 +245,9 @@ export async function GET(req: Request) {
 
     if (openRows.length === 0) return NextResponse.json({ rows: [], total: 0 })
 
-    const rows = await enrichBoardRows(openRows)
+    const active = await filterOutSuppressed(openRows, scopeLoc)
+    if (active.length === 0) return NextResponse.json({ rows: [], total: 0 })
+    const rows = await enrichBoardRows(active)
     return NextResponse.json({ rows, total: rows.length })
   }
 

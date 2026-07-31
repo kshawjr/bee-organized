@@ -135,6 +135,25 @@ export async function checkLanded(
     // record 'na'.
     if (topic === 'REQUEST_UPDATE' && result.note?.includes('→archived')) return 'na'
 
+    // Archived / un-archived client (#122): CLIENT_UPDATE is normally a plain
+    // field refresh ('na'), but the archive branch has a verifiable
+    // post-condition on the matched lead — verify it rather than trusting
+    // "no error threw" (the write is fail-soft and swallows).
+    if (topic === 'CLIENT_UPDATE' && result.note) {
+      const archived = result.note.includes('→archived')
+      const unarchived = result.note.includes('→unarchived')
+      if (archived || unarchived) {
+        if (!result.lead_id) return 'na'
+        const { data } = await supabaseService
+          .from('leads')
+          .select('archived_at')
+          .eq('id', result.lead_id)
+          .maybeSingle()
+        if (archived) return data?.archived_at ? 'landed' : 'not_landed'
+        return data && data.archived_at == null ? 'landed' : 'not_landed'
+      }
+    }
+
     // Destroys — including the soft-destroy fallbacks that UPDATE
     // handlers take when Jobber says the record is already gone.
     const softDestroy = !!result.note?.includes('soft-destroy')

@@ -196,9 +196,30 @@ describe('checkLanded — errored + processed-only results', () => {
     expect(h.state.calls.length).toBe(0)
   })
 
-  it('CLIENT_UPDATE → na, zero DB reads', async () => {
+  it('CLIENT_UPDATE (plain refresh, no note) → na, zero DB reads', async () => {
     expect(await checkLanded(ctx('CLIENT_UPDATE'), ok())).toBe('na')
     expect(h.state.calls.length).toBe(0)
+  })
+
+  it('CLIENT_UPDATE→archived + lead has archived_at → landed (#122)', async () => {
+    h.enqueue('leads', { archived_at: '2026-07-31T05:48:05Z' })
+    expect(
+      await checkLanded(ctx('CLIENT_UPDATE'), ok({ note: 'CLIENT_UPDATE→archived' })),
+    ).toBe('landed')
+  })
+
+  it('CLIENT_UPDATE→archived but archived_at still NULL → not_landed (#122)', async () => {
+    h.enqueue('leads', { archived_at: null })
+    expect(
+      await checkLanded(ctx('CLIENT_UPDATE'), ok({ note: 'CLIENT_UPDATE→archived' })),
+    ).toBe('not_landed')
+  })
+
+  it('CLIENT_UPDATE→unarchived + archived_at cleared → landed (#122)', async () => {
+    h.enqueue('leads', { archived_at: null })
+    expect(
+      await checkLanded(ctx('CLIENT_UPDATE'), ok({ note: 'CLIENT_UPDATE→unarchived' })),
+    ).toBe('landed')
   })
 
   it('unknown topic → na', async () => {

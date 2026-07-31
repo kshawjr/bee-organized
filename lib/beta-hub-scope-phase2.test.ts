@@ -151,7 +151,9 @@ describe('_hub-page wiring — Phase 2', () => {
     const block = src.slice(src.indexOf('loc_other transfer queue'), src.indexOf('/clients/[id] passes initialSelectedLeadId'))
     expect(block).toContain('if (isElevated) {')
     expect(block).toContain(`.eq('location_id', LOC_OTHER_SLUG)`)
-    expect(block).toContain(`.not('is_junk', 'is', true)`)
+    // Active-surface filter via the shared #122 predicate (junk + archived) —
+    // one helper so this can't drift from the main leads query.
+    expect(block).toContain('applyLeadActiveFilter(')
     expect(block).toContain('.limit(TRANSFER_QUEUE_MAX)')
     // The whole point: it must NOT carry the page's location filter.
     expect(block).not.toContain('scopeLocationUuid)')

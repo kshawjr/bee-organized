@@ -261,8 +261,10 @@ describe('_hub-page wiring — Phase 3', () => {
     const block = src.slice(src.indexOf('const wantsDefault ='), src.indexOf('const scope0LocationUuid ='))
     expect(block).toContain('await Promise.all(')
     expect(block).toContain(`{ count: 'exact', head: true }`)
-    // "Largest" must mean largest by the rows this page would actually load.
-    expect(block).toContain(`.not('is_junk', 'is', true)`)
+    // "Largest" must mean largest by the rows this page would actually load —
+    // the shared #122 active-surface filter (junk + archived), same helper the
+    // main leads query uses so the count can't drift from it.
+    expect(block).toContain('applyLeadActiveFilter(')
   })
 
   it('an explicit All Locations is the ONLY preference the default cannot override', () => {
