@@ -42,7 +42,7 @@ import CloseEngagementConfirm from './shared/CloseEngagementConfirm'
 import StatusChip from '@/components/ui/StatusChip'
 import Card from '@/components/ui/Card'
 import SectionHeader from '@/components/ui/SectionHeader'
-import { statusIconFor, IconChevronRight } from '@/components/ui/icons'
+import { statusIconFor, IconChevronRight, IconPhone } from '@/components/ui/icons'
 import EngagementFilters from './EngagementFilters'
 import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters, engagementFilterCount, lastActivityTs, engagementValue as engValueOf } from './shared/engagementStatus'
 import { FilteredEmpty } from './shared/FilterPopover'
@@ -95,6 +95,19 @@ function EngagementCard({ e, onOpen, draggable, onDragStart, onDragEnd, accent =
           </p>
           {value && <span style={{ fontSize: '12px', fontWeight: 500, color: T.ink.primary, fontVariantNumeric: T.type.tabular, letterSpacing: T.type.trackNum, flexShrink: 0 }}>{value}</span>}
         </div>
+        {/* Phone (issue 129) — a tappable second path to the client's number,
+            directly under the name. stopPropagation so tapping the number
+            DIALS while a tap anywhere else on the card still opens the panel;
+            14px + vertical padding gives a real tap target (audience is 45-65
+            on phones). Null renders nothing — no layout shift. */}
+        {e.client_phone && (
+          <a href={`tel:${e.client_phone}`} title={e.client_phone}
+            onClick={ev => ev.stopPropagation()}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', maxWidth: '100%', padding: '3px 0', marginBottom: '3px', fontSize: '14px', color: T.accent.fg, textDecoration: 'none' }}>
+            <IconPhone size={13} style={{ flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.client_phone}</span>
+          </a>
+        )}
         <p title={displayTitle(e)} style={{ fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: '8px' }}>
           {displayTitle(e)}
         </p>

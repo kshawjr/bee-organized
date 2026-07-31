@@ -1,8 +1,10 @@
 // components/hive/shared/ContactField.jsx
 // ─────────────────────────────────────────────────────────────
-// THE editable contact row (phone/email) — one implementation, two
-// mounts: ClientProfile Key Facts + EngagementPanel Key Facts. Quiet
-// system per the locked design language: inline edit (no modal),
+// THE editable contact row (phone/email) — one implementation, one
+// mount: ClientProfile Key Facts. (The EngagementPanel shows the same
+// phone/email/address too since issue 129, but DISPLAY-ONLY — editing a
+// person's contact lives here, on the person record, not on the deal.)
+// Quiet system per the locked design language: inline edit (no modal),
 // hairline input, Enter/blur saves, Esc cancels. Affordances follow
 // the shared inline-edit standard (shared/inlineEdit.jsx, Kevin 7/10):
 // always-visible readable ✎ in view mode; edit mode gains the trailing

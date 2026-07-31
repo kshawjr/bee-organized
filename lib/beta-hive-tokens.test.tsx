@@ -265,7 +265,12 @@ describe('milestone records view', () => {
     const { host, unmount } = await mount(
       <EngagementPanel engagementId="eng-1" onClose={() => {}} setToast={() => {}} />
     )
-    const call = Array.from(host.querySelectorAll('a[href^="tel:"]'))[0] as HTMLElement
+    // The footer Call BUTTON specifically (labeled "Call") — not the
+    // display-only Contact phone row added in issue 129, which is also a
+    // tel: anchor but sits above and wears accent.fg. Both are the one
+    // accent family; this pin is about the action button's deep ink.
+    const call = Array.from(host.querySelectorAll('a[href^="tel:"]'))
+      .find(a => (a.textContent || '').includes('Call')) as HTMLElement
     expect(call).toBeTruthy()
     expect([T.accent.deep, 'rgb(3, 64, 60)']).toContain(call.style.color)
     await unmount()

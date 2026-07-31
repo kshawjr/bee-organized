@@ -34,7 +34,7 @@ import { ENGAGEMENT_STAGES, CHIP_STYLES, isTerminal, stageDisplayLabel, CLOSED_W
 import { T } from './shared/tokens'
 import { TEXT_MUTED } from '@/components/ui/tokens'
 import StatusChip from '@/components/ui/StatusChip'
-import { statusIconFor, IconChevronRight } from '@/components/ui/icons'
+import { statusIconFor, IconChevronRight, IconPhone } from '@/components/ui/icons'
 import LoadMore from './shared/LoadMore'
 import EngagementFilters from './EngagementFilters'
 import {
@@ -85,6 +85,18 @@ function EngagementRow({ e, nowMs, muted = false, onOpen, isMobile }) {
             <span style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, fontVariantNumeric: T.type.tabular, letterSpacing: T.type.trackNum, flexShrink: 0 }}>{value}</span>
           )}
         </div>
+        {/* Phone (issue 129) — tappable, directly under the name (mirrors the
+            board card). stopPropagation so tapping the number DIALS while a tap
+            anywhere else on the row still opens the panel; 14px + vertical
+            padding for a real tap target. Null renders nothing — no shift. */}
+        {e.client_phone && (
+          <a href={`tel:${e.client_phone}`} title={e.client_phone}
+            onClick={ev => ev.stopPropagation()}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', maxWidth: '100%', padding: '3px 0', marginTop: '2px', fontSize: '14px', color: T.accent.fg, textDecoration: 'none' }}>
+            <IconPhone size={13} style={{ flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.client_phone}</span>
+          </a>
+        )}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', minWidth: 0 }}>
           <span title={displayTitle(e)} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', color: `var(--text-muted, ${TEXT_MUTED})` }}>{displayTitle(e)}</span>
           {/* closed rows carry their terminal stage chip; open rows carry the

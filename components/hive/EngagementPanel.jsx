@@ -38,9 +38,12 @@
 // Fetches GET /api/engagements/:id on open (board rows stay
 // lightweight; `seed` renders the shell synchronously).
 //
-// PERSON-vs-DEAL (Kevin's split): contact/address/referrer/source and
-// the pinned buzz are PERSON-scoped — they live on ClientProfile (one
-// 'View profile' tap away) and were removed from this card in build 2.
+// PERSON-vs-DEAL (Kevin's split, REVISED issue 129): CONTACT (phone/
+// email/address) is now VISIBLE here — a rep working the deal needs to
+// reach the client without leaving the card — but stays EDITABLE only on
+// the person record (ClientProfile, one 'View profile' tap away); this
+// card renders it DISPLAY-ONLY (Contact block, right column). Referrer/
+// source and the pinned buzz remain PERSON-scoped and are not shown here.
 // Project type is DEAL-scoped — masthead only, never on the profile.
 //
 // NO manual stage mover (decision 2026-07-10, Kevin): all business
@@ -58,7 +61,7 @@ import React, { useState, useEffect } from 'react'
 import useIsMobile from './shared/useIsMobile'
 import { isTerminal, stageDisplayLabel, CHIP_STYLES, STAGE_RECORD_FAMILY, milestoneFamilies } from './shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
-import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconClock, IconPhone, IconExternalLink, IconCalendar, IconSend, IconPaperclip, IconMessage } from '@/components/ui/icons'
+import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconClock, IconPhone, IconMail, IconMapPin, IconExternalLink, IconCalendar, IconSend, IconPaperclip, IconMessage } from '@/components/ui/icons'
 import NotesStream from './NotesStream'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
@@ -69,6 +72,8 @@ import CardTabs from './shared/CardTabs'
 import InitialsAvatar from './shared/InitialsAvatar'
 import AssigneeCorner from './shared/AssigneeCorner'
 import { MicroLabel, ActionRow, actionBtn, metaValueBtn } from './shared/cardKit'
+import { metaRowStyle, metaIconStyle, metaValueStyle, META_ICON } from './shared/metaRow'
+import { formatLeadAddress } from '@/lib/lead-address'
 import { EditPencil } from './shared/inlineEdit'
 import RecordMenu from './shared/RecordMenu'
 import CloseLostWizard from './shared/CloseLostWizard'
@@ -639,10 +644,55 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
     </div>
   )
 
-  // RIGHT column — the working surface: description + deal-scoped
+  // RIGHT column — the working surface: contact + description + deal-scoped
   // activity/composer.
+  // Contact address is the ONE dedup-safe display string (formatLeadAddress:
+  // the full stored `address` with only the missing city/state/zip parts
+  // appended) — never re-parsed back into a unit (the issue 93 lesson).
+  const contactAddress = client ? formatLeadAddress(client) : ''
+  const hasContact = !!(client && (client.phone || client.email || contactAddress))
   const rightCol = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', minWidth: 0 }}>
+      {/* Contact (issue 129) — the client's phone/email/address surfaced on
+          the deal so a rep can reach them without leaving the card.
+          DISPLAY-ONLY: the values are live tel:/mailto: anchors, but editing a
+          person's contact stays on the person record (ClientProfile). A null
+          field renders NO row — no empty row, no dash. The footer Call button
+          stays as-is; the phone row is a second path to the same action. */}
+      {hasContact && (
+        <div>
+          <MicroLabel>Contact</MicroLabel>
+          {/* The three VALUE rows run at 14px, not the 12px metaRow scale:
+              this block exists so a rep (audience 45-65) can READ a number
+              and dial it — a read-and-act scale, not metadata. The MicroLabel
+              caps heading stays small (it IS a label). issue 129. */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '2px' }}>
+            {client.phone && (
+              <p data-contact-row="phone" style={{ ...metaRowStyle(), fontSize: '14px' }}>
+                <span style={metaIconStyle}><IconPhone size={META_ICON} /></span>
+                {/* title on the anchor: the clipped value reveals in full on
+                    hover while the row keeps its rhythm (issue 118). */}
+                <a className="bee-contact-link" href={`tel:${client.phone}`} title={client.phone}
+                  style={{ ...metaValueStyle, color: T.accent.fg, textDecoration: 'none' }}>{client.phone}</a>
+              </p>
+            )}
+            {client.email && (
+              <p data-contact-row="email" style={{ ...metaRowStyle(), fontSize: '14px' }}>
+                <span style={metaIconStyle}><IconMail size={META_ICON} /></span>
+                <a className="bee-contact-link" href={`mailto:${client.email}`} title={client.email}
+                  style={{ ...metaValueStyle, color: T.accent.fg, textDecoration: 'none' }}>{client.email}</a>
+              </p>
+            )}
+            {contactAddress && (
+              <p data-contact-row="address" style={{ ...metaRowStyle(), fontSize: '14px' }}>
+                <span style={metaIconStyle}><IconMapPin size={META_ICON} /></span>
+                <span title={contactAddress} style={{ ...metaValueStyle, color: T.ink.primary }}>{contactAddress}</span>
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Job description — engagements.description via the shared
           EditableDesc idiom (⌘-Enter/blur/✓ saves, Esc/✗ cancels;
           patchEngagement's boolean keeps a failed save open inline). */}
