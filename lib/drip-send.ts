@@ -457,7 +457,12 @@ async function recordDripSendStatus(
 // (kind='drip', method='email') — a sent step and a terminal-stop step differ
 // only in status ('sent' vs 'failed') and label. Best-effort: a failed insert
 // is logged but never blocks drip progression, exactly like recordDripSendStatus.
-async function recordDripTouchpoint(
+//
+// Exported (#104) so the Resend bounce webhook can record the SAME kind of
+// terminal-stop touchpoint from outside the send loop — an async hard bounce /
+// spam complaint stops the drip just like a send-time 422, and must leave the
+// same "Drip stopped — …" trace on the record, or the stop is invisible.
+export async function recordDripTouchpoint(
   leadId: string,
   locationId: string,
   fields: { status: 'sent' | 'failed'; label: string },
