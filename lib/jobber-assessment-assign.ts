@@ -58,3 +58,33 @@ export function diffAssessmentAssignment(
   const unexpected = returned.filter(id => !requestedSet.has(id))
   return { ok: missing.length === 0 && unexpected.length === 0, requested, returned, missing, unexpected }
 }
+
+// issue 145 — summarize the WHOLE send's assignment outcome for the terminal
+// sync_log row. Before this, that row was hard-coded status:'success', so a
+// send whose salesperson/team assignment silently failed still reported clean
+// — the root cause of the 3-week silence (0 of 22 assessments carried the
+// assignee, and not one breadcrumb named assignment). The individual sub-steps
+// still write their own topic= breadcrumb (the 144 convention, e.g.
+// ASSESSMENT_TEAM_MISMATCH / *_ASSIGN_RETRY); this folds them into the send
+// summary so the terminal row can no longer claim clean success while an
+// assignment degraded. It is the summary seam, not a second parallel one.
+//
+// Status shape (deliberate, see the writeSyncLog note in lib/sync-log.ts):
+//   · problems present → 'partial'. The client/request/assessment/job DO
+//     exist, so 'error' would falsely say the send failed; 'success' hid the
+//     failure. 'partial' is the only honest signal.
+//   · no problems, something WAS requested → 'success' + 'assignment=ok'.
+//   · nothing to assign (bare lead send) → 'success' + 'assignment=none'.
+//
+// `problems` are already human-readable ("request salesperson dropped …",
+// "assessment team incomplete …"); pass them in the order they occurred.
+export function summarizeAssignmentOutcome(input: {
+  requested: boolean
+  problems: string[]
+}): { status: 'success' | 'partial'; segment: string } {
+  const problems = input.problems.filter(Boolean)
+  if (problems.length > 0) {
+    return { status: 'partial', segment: `assignment=PARTIAL(${problems.join('; ')})` }
+  }
+  return { status: 'success', segment: input.requested ? 'assignment=ok' : 'assignment=none' }
+}

@@ -51,7 +51,7 @@ import {
 } from '@/lib/jobber-contact-writeback'
 import { getEngagementAssignees, resolveJobberAssignment } from '@/lib/engagement-assignee-sync'
 import { buildRequestDetails } from '@/lib/jobber-request-form'
-import { applyTeamToSchedule, diffAssessmentAssignment } from '@/lib/jobber-assessment-assign'
+import { applyTeamToSchedule, diffAssessmentAssignment, summarizeAssignmentOutcome } from '@/lib/jobber-assessment-assign'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -481,6 +481,16 @@ export async function POST(
     allAssigneeJobberIds = resolved.allJobberUserIds
   }
 
+  // issue 145 — assignment-outcome signals for the terminal sync_log row.
+  // Each assignment sub-step below flips one of these when it degrades (and
+  // still writes its own topic= breadcrumb, unchanged). The terminal row folds
+  // them in via summarizeAssignmentOutcome so a send can no longer report
+  // clean 'success' while the team/salesperson silently failed to attach.
+  const assignmentRequested = allAssigneeJobberIds.length > 0
+  let requestSalespersonDropped = false            // request created WITHOUT the salesperson
+  let jobSalespersonDropped = false                // job created WITHOUT the salesperson
+  let assessmentTeamShortfall: string | null = null // set to the human summary on a team mismatch
+
   // ── Address ─────────────────────────────────────────────────────
   const address = pickPrimaryAddress(lead)
   if (!address && addressRequired) {
@@ -689,6 +699,9 @@ export async function POST(
           status: 'success',
           message: `[send-to-jobber] topic=REQUEST_ASSIGN_RETRY salespersonId=${input.salespersonId} rejected (${res.userErrors[0]?.message ?? 'unknown'}) — request created unassigned`,
         })
+        // issue 145 — feed the terminal summary: the request shipped without
+        // its salesperson, an assignment degrade the send row must reflect.
+        requestSalespersonDropped = true
         const { salespersonId: _dropped, ...unassigned } = input
         res = await jobberMutation(
           locationSlug,
@@ -836,6 +849,12 @@ export async function POST(
               `requested=[${diff.requested.join(',')}] returned=[${diff.returned.join(',')}] ` +
               `missing=[${diff.missing.join(',')}] unexpected=[${diff.unexpected.join(',')}]`,
           })
+          // issue 145 — feed the terminal summary: the assessment team didn't
+          // fully apply. The ASSESSMENT_TEAM_MISMATCH breadcrumb above is the
+          // granular alarm; this makes the send row itself report 'partial'.
+          assessmentTeamShortfall =
+            `assessment team incomplete — missing=[${diff.missing.join(',')}]` +
+            (diff.unexpected.length ? ` unexpected=[${diff.unexpected.join(',')}]` : '')
         }
       }
     }
@@ -902,6 +921,9 @@ export async function POST(
         status: 'success',
         message: `[send-to-jobber] topic=JOB_ASSIGN_RETRY salespersonId=${jobInput.salespersonId} rejected (${jobCreate.userErrors[0]?.message ?? 'unknown'}) — job created unassigned`,
       })
+      // issue 145 — feed the terminal summary: the job shipped without its
+      // salesperson, an assignment degrade the send row must reflect.
+      jobSalespersonDropped = true
       delete jobInput.salespersonId
       jobCreate = await jobberMutation(locationSlug, JOB_CREATE_MUTATION, {
         input: jobInput,
@@ -1035,13 +1057,28 @@ export async function POST(
   }
 
   // ── sync_log (fire-and-forget; failures don't block the response) ──
+  // issue 145 — the terminal row is no longer hard-coded status:'success'.
+  // A send whose CORE succeeded but whose assignment degraded (salesperson
+  // dropped, assessment team incomplete) reports 'partial' and names the
+  // shortfall in the message, instead of the clean-success lie that hid the
+  // failure in prod for three weeks. A truly clean send still reports
+  // 'success'. summarizeAssignmentOutcome folds the sub-step signals set above.
+  const assignmentProblems: string[] = []
+  if (requestSalespersonDropped) assignmentProblems.push('request salesperson dropped (Jobber rejected the id)')
+  if (jobSalespersonDropped)     assignmentProblems.push('job salesperson dropped (Jobber rejected the id)')
+  if (assessmentTeamShortfall)   assignmentProblems.push(assessmentTeamShortfall)
+  const assignmentOutcome = summarizeAssignmentOutcome({
+    requested: assignmentRequested,
+    problems:  assignmentProblems,
+  })
+
   await writeSyncLog({
     location_id:      locationSlug,
     entity_id:        leadId,
     entity_type:      creation_type === 'job_direct' ? 'job' : 'request',
     direction:        'outbound',
     jobber_record_id: (creation_type === 'job_direct' ? jobberJobId : jobberRequestId) || jobberClientId || '',
-    status:           'success',
+    status:           assignmentOutcome.status,
     message:
       `Send-to-Jobber (${typeLabel}); match=${matchStatus}; ` +
       `client=${jobberClientId}` +
@@ -1049,6 +1086,7 @@ export async function POST(
       (jobberAssessmentId ? `; assessment=${jobberAssessmentId}` : '') +
       (jobberJobId        ? `; job=${jobberJobId}`            : '') +
       (engagementId       ? `; engagement=${engagementId}`    : '') +
+      `; ${assignmentOutcome.segment}` +
       `; contact=phone:${contactWriteback.phone},email:${contactWriteback.email}`,
   })
 

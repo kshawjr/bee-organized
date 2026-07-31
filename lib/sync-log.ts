@@ -33,7 +33,14 @@ export async function writeSyncLog({
   direction?:       'inbound' | 'outbound'
   zoho_record_id?:  string
   jobber_record_id?: string
-  status:           'success' | 'error'
+  // issue 145 — 'partial' is the terminal status for a send whose CORE
+  // succeeded (client/request/assessment/job created) but a sub-step failed
+  // (e.g. team/salesperson assignment didn't apply). 'success' would hide it
+  // — the 3-week silence — and 'error' would falsely imply the whole send
+  // failed. Requires migrations/sync_log_status_partial.sql (widens the
+  // status CHECK to accept 'partial'); pre-migration a status CHECK, if one
+  // exists, fail-soft-rejects the row, so apply that migration with the deploy.
+  status:           'success' | 'error' | 'partial'
   message:          string
   // Webhook rows only — recorded outcome of the landed check
   // (lib/webhook-landed.ts). Omitted entirely for non-webhook callers

@@ -143,7 +143,12 @@ describe('send-to-jobber route wiring (issue 144)', () => {
   })
 
   it('the team is assigned AT CREATION — schedule built via applyTeamToSchedule from the resolved ids', () => {
-    expect(route).toContain("import { applyTeamToSchedule, diffAssessmentAssignment } from '@/lib/jobber-assessment-assign'")
+    // issue 145 added summarizeAssignmentOutcome to this same import — assert
+    // the two 144 symbols are imported from the module rather than pinning the
+    // exact symbol list (which now also carries the 145 helper).
+    expect(route).toContain("from '@/lib/jobber-assessment-assign'")
+    expect(route).toContain('applyTeamToSchedule')
+    expect(route).toContain('diffAssessmentAssignment')
     expect(route).toContain('const schedule = applyTeamToSchedule(')
     expect(route).toContain('allAssigneeJobberIds,')
     // the create input is fed the schedule that (conditionally) carries the team
