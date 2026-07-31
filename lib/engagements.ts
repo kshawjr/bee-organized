@@ -109,7 +109,7 @@ const quoteActivity = (q: { sent_at?: string | null; approved_at?: string | null
 
 export function deriveEngagementStage(
   children: EngagementChildren,
-  opts: { mode?: 'live' | 'backfill'; nowMs?: number; closeWonOnDone?: boolean } = {},
+  opts: { mode?: 'live' | 'backfill'; nowMs?: number; closeWonOnDone?: boolean; closeOnArchivedQuote?: boolean } = {},
 ): DerivedStage {
   const mode = opts.mode ?? 'live'
   const now = opts.nowMs ?? Date.now()
@@ -118,6 +118,40 @@ export function deriveEngagementStage(
 
   const bookedJobs = jobs.filter(j => !jobUnbooked(j))
   const unbookedJobs = jobs.filter(jobUnbooked)
+
+  // #117 — archived-quote close. An archived quote is Jobber's lost/dead
+  // state (quote-status-map.ts: ARCHIVED → 'archived'). When EVERY quote on
+  // the engagement is archived and nothing has advanced past them — no jobs
+  // at all (booked or unbooked), no invoices — the deal is dead: Closed Lost.
+  //
+  //   · second, non-archived quote → every(archived) false → not closed
+  //   · a job (booked or unbooked) → jobs.length guard → not closed
+  //     (and a booked job already outranks this via the branch below)
+  //   · an invoice (even jobless, rule 6) → invoices.length guard → not closed
+  //   · already terminal → the CALLER's forward-only rank guard blocks it
+  //     (Closed Lost rank ties Closed Won — never overwrites either)
+  //
+  // Gated behind closeOnArchivedQuote (default OFF) so ONLY the automated
+  // advance path (maybeAdvanceEngagementStage — webhook + import) triggers
+  // it. The manual-reopen route and panel-open drift recovery call this in
+  // live mode DIRECTLY and must NOT auto-close: reopening is a human
+  // decision, and if live mode always re-closed an archived-quote deal a
+  // reopen could never take (#117 §5). The forward-only rank guard also
+  // makes un-archive a no-op — a re-derived Estimate never outranks the
+  // Closed Lost, so nothing auto-reopens.
+  if (
+    opts.closeOnArchivedQuote &&
+    quotes.length > 0 &&
+    jobs.length === 0 &&
+    invoices.length === 0 &&
+    quotes.every(q => (q.status || '').toLowerCase() === 'archived')
+  ) {
+    return {
+      stage: 'Closed Lost',
+      closed_reason: 'quote_archived',
+      closed_at: new Date(now).toISOString(),
+    }
+  }
 
   if (bookedJobs.length > 0) {
     if (bookedJobs.some(j => !engagementJobDone(j))) return { stage: 'Job in Progress' }
@@ -730,7 +764,11 @@ export async function maybeAdvanceEngagementStage(
     quotes: quotesRes.data ?? [],
     jobs: jobsRes.data ?? [],
     invoices,
-  }, { mode, closeWonOnDone })
+    // #117: the automated advance path (webhook + import) is the ONE place
+    // an archived quote closes the deal. Its own guard (all quotes archived,
+    // no jobs, no invoices) makes it inert on job/invoice events. Reopen and
+    // drift recovery call deriveEngagementStage directly WITHOUT this flag.
+  }, { mode, closeWonOnDone, closeOnArchivedQuote: true })
 
   const num = (v: any) => (v == null ? 0 : Number(v) || 0)
   const patch: Record<string, any> = {
@@ -755,6 +793,9 @@ export async function maybeAdvanceEngagementStage(
     if (derived.closed_at) patch.closed_at = derived.closed_at
     if (derived.closed_reason === 'stale_on_import') {
       patch.closed_note = 'Closed automatically at import: no activity within 30 days (Ruling A for quote-only).'
+    }
+    if (derived.closed_reason === 'quote_archived') {
+      patch.closed_note = 'Closed automatically: the quote was archived in Jobber (#117).'
     }
     if (staleLostOverride) patch.closed_note = null // the stale note is wrong on a Won row
   }
