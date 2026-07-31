@@ -26,7 +26,40 @@ describe('buildSafeContext — id-only whitelist (issue 110a)', () => {
       path: '/clients/lead-9',
       origin: 'client_profile_menu',
     })
-    expect(Object.keys(ctx!).sort()).toEqual([...FEEDBACK_CONTEXT_KEYS].sort())
+    // Every key it kept is on the whitelist (a subset — client reports don't
+    // carry the engagement keys).
+    expect([...FEEDBACK_CONTEXT_KEYS]).toEqual(expect.arrayContaining(Object.keys(ctx!)))
+  })
+
+  it('carries the engagement fields (kind/engagement_id/stage) for a deal report', () => {
+    const ctx = buildSafeContext({
+      kind: 'engagement',
+      engagement_id: 'eng-1',
+      lead_id: 'lead-9',
+      location_id: 'loc-uuid-1',
+      stage: 'Estimate',
+      screen: 'Clients',
+      path: '/clients/lead-9?e=eng-1',
+      origin: 'engagement_panel_menu',
+      // PII / deal specifics that must NOT survive:
+      title: 'Garage organization',
+      client_name: 'Pat Tester',
+      total_paid: 900,
+    })
+    expect(ctx).toEqual({
+      kind: 'engagement',
+      engagement_id: 'eng-1',
+      lead_id: 'lead-9',
+      location_id: 'loc-uuid-1',
+      stage: 'Estimate',
+      screen: 'Clients',
+      path: '/clients/lead-9?e=eng-1',
+      origin: 'engagement_panel_menu',
+    })
+    const s = JSON.stringify(ctx)
+    expect(s).not.toContain('Garage')       // no deal title
+    expect(s).not.toContain('Pat Tester')   // no client name
+    expect(s).not.toContain('900')          // no financials
   })
 
   it('DROPS PII / arbitrary keys — a tampered body cannot smuggle name/email/phone', () => {

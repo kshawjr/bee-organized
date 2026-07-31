@@ -58,7 +58,7 @@ import React, { useState, useEffect } from 'react'
 import useIsMobile from './shared/useIsMobile'
 import { isTerminal, stageDisplayLabel, CHIP_STYLES, STAGE_RECORD_FAMILY, milestoneFamilies } from './shared/stageConfig'
 import StatusChip from '@/components/ui/StatusChip'
-import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconClock, IconPhone, IconExternalLink, IconCalendar, IconSend, IconPaperclip } from '@/components/ui/icons'
+import { IconInbox, IconFileText, IconHammer, IconFileInvoice, IconCheck, IconX, IconClock, IconPhone, IconExternalLink, IconCalendar, IconSend, IconPaperclip, IconMessage } from '@/components/ui/icons'
 import NotesStream from './NotesStream'
 import EditableDesc from './EditableDesc'
 import OverlayShell from './OverlayShell'
@@ -182,7 +182,7 @@ function MilestoneRow({ kind, primary, secondary = null, state = null, href = nu
   )
 }
 
-export default function EngagementPanel({ engagementId, seed = null, people = [], locationUsers = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onReopened = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, onSendToJobber = null, jobberLinks = {}, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [], closeLostReasons: [] }, readOnly = false }) {
+export default function EngagementPanel({ engagementId, seed = null, people = [], locationUsers = [], onClose, onOpenClient = () => {}, onChanged = () => {}, onReopened = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, onSendToJobber = null, jobberLinks = {}, setToast = () => {}, lookupOptions = { sources: [], projectTypes: [], closeLostReasons: [] }, readOnly = false, onReportProblem = () => {} }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -459,10 +459,38 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   // button (canCloseWon gate, below) is the SOLE path to Close Won.
   // While a reopen is in flight the closed actions drop optimistically.
   // readOnly (868kawwmh) hides EVERY write affordance — the whole menu drops.
-  const menuItems = (eng && !readOnly) ? [
-    !isTerminal(eng.stage) && { key: 'lost', label: 'Mark as Closed Lost', icon: <IconX size={15} />, onClick: () => setWizard('lost') },
-    eng.stage === 'Closed Lost' && !reopening && { key: 'reopen', label: 'Reopen', icon: <IconClock size={15} />, onClick: reopenEngagement },
-  ].filter(Boolean) : []
+  const menuItems = eng ? [
+    // Always present once the record has loaded — non-mutating, so it rides
+    // read-only surfaces too (everyone can report a problem). It also means the
+    // menu is never empty: a Closed Won engagement (no Lost/Reopen) now still
+    // has a usable "···". Hands an ID-ONLY context up to BeeHub's feedback modal
+    // (kind 'engagement' + ids/stage — NO client name, deal title, or
+    // financials; lib/feedback-context.ts re-sanitizes server-side). The deal
+    // title only pre-fills the human-facing title field, an editable free-text.
+    {
+      key: 'report',
+      label: 'Report a problem with this engagement',
+      icon: <IconMessage size={15} />,
+      onClick: () => onReportProblem({
+        title: displayTitle(eng) ? `Problem with ${displayTitle(eng)}` : 'Problem with this engagement',
+        context: {
+          kind: 'engagement',
+          engagement_id: engagementId,
+          lead_id: client?.id || null,
+          location_id: eng.location_uuid || null,
+          stage: eng.stage || null,
+          screen: 'Clients',
+          path: client?.id ? `/clients/${client.id}?e=${engagementId}` : `/clients?e=${engagementId}`,
+          origin: 'engagement_panel_menu',
+        },
+      }),
+    },
+    // Mutating close-out actions stay behind the read-only gate.
+    ...(!readOnly ? [
+      !isTerminal(eng.stage) && { key: 'lost', label: 'Mark as Closed Lost', icon: <IconX size={15} />, onClick: () => setWizard('lost') },
+      eng.stage === 'Closed Lost' && !reopening && { key: 'reopen', label: 'Reopen', icon: <IconClock size={15} />, onClick: reopenEngagement },
+    ].filter(Boolean) : []),
+  ] : []
 
   // ── The milestone checklist rows (design-system pass 7/11) ────
   // The expected arc from the stage machine's canonical order; real
