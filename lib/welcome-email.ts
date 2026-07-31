@@ -254,6 +254,12 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
     subject: rendered.subject || `(no subject)`,
     html,
     text: rendered.body,
+    // Notebook context (#103): welcome shares the drip's sendEmail path and
+    // had the same null email_kind / lead_id gap. Stamp it so it isn't the one
+    // outbound rail still invisible to the notification_log queries.
+    lead_id: lead.id,
+    lead_name: lead.name ?? null,
+    email_kind: 'welcome',
   })
 
   if (!result.success) {

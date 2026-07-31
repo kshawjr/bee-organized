@@ -44,9 +44,9 @@ export interface NotificationContext {
   lead_name?: string | null
   location_id?: string | null
   location_slug?: string | null
-  // Descriptive label — 'lead_notification' | 'invite' | 'magic_link' | 'drip'.
-  // The column carries NO check constraint: a new caller inventing a new kind
-  // must never have its row rejected.
+  // Descriptive label — 'lead_notification' | 'invite' | 'magic_link' | 'drip'
+  // | 'welcome' | 'stage_email'. The column carries NO check constraint: a new
+  // caller inventing a new kind must never have its row rejected.
   email_kind?: string | null
 }
 

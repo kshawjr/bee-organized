@@ -213,13 +213,31 @@ describe('past-drip dedup — real touchpoint beats the back-estimate', () => {
     expect(dripItems[0].detail.estimated).toBeUndefined()
   })
 
-  it('an endpoint-only sent step (no touchpoint — per-step sends write none) is KEPT, flagged estimated', () => {
+  it('an endpoint-only sent step (no touchpoint) is KEPT, flagged estimated', () => {
     const drips = dripsPayload([
       { id: 'drip-step-1-prog-1', type: 'drip', step_order: 1, template_name: 'Nurture Day 3', subject: 's', channel: 'email', status: 'sent', fired_at: daysAgo(4), scheduled_at: null, drip_progress_id: 'prog-1', paused: false },
     ])
     const { past } = buildTimelineItems(aggPayload(), drips, { nowMs: NOW })
     expect(past).toHaveLength(1)
     expect(past[0].detail.estimated).toBe(true)
+  })
+
+  // #103: master drip steps are inline (master_template_id NULL) so the
+  // endpoint reports template_name=null. The real touchpoint (lib/drip-send.ts)
+  // is labelled with the rendered SUBJECT, so the dedup must fire on subject.
+  it('dedups an inline step (template_name=null) when the touchpoint label matches the SUBJECT', () => {
+    const realTs = daysAgo(3)
+    const agg = aggPayload({
+      touchpoints: [{ id: 't2', kind: 'drip', method: 'email', label: 'Thank you for reaching out!', status: 'sent', occurred_at: realTs }],
+    })
+    const drips = dripsPayload([
+      { id: 'drip-step-1-prog-1', type: 'drip', step_order: 1, template_name: null, subject: 'Thank you for reaching out!', channel: 'email', status: 'sent', fired_at: daysAgo(4), scheduled_at: null, drip_progress_id: 'prog-1', paused: false },
+    ])
+    const { past } = buildTimelineItems(agg, drips, { nowMs: NOW })
+    const dripItems = past.filter(i => (i.summary || '').includes('Thank you for reaching out!'))
+    expect(dripItems).toHaveLength(1)
+    expect(dripItems[0].ts).toBe(new Date(realTs).getTime()) // real touchpoint date, not the estimate
+    expect(dripItems[0].detail.estimated).toBeUndefined()
   })
 })
 

@@ -322,6 +322,12 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
     subject: rendered.subject || `(no subject)`,
     html,
     text: rendered.body,
+    // Notebook context (#103): stage emails share the drip's sendEmail path and
+    // had the same null email_kind / lead_id gap. Stamp it so it isn't the one
+    // outbound rail still invisible to the notification_log queries.
+    lead_id: lead.id,
+    lead_name: lead.name ?? null,
+    email_kind: 'stage_email',
   })
 
   if (!result.success) {

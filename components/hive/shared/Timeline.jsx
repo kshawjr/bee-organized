@@ -215,13 +215,20 @@ export function buildTimelineItems(agg, drips, { engagementId = null, nowMs = Da
   items.push(...futureDrips)
 
   // ── PAST drips from the endpoint — back-estimated dates. Prefer the
-  // real kind='drip' touchpoint (true occurred_at) when one matches by
-  // template name; keep the estimate only when nothing real exists. ──
+  // real kind='drip' touchpoint (true occurred_at) when one matches; keep
+  // the estimate only when nothing real exists. Match on template name OR
+  // subject: master drip steps are inline (master_template_id NULL), so the
+  // endpoint reports template_name=null for them and the real touchpoint is
+  // labelled with the rendered subject (lib/drip-send.ts). Subject-matching is
+  // what makes the dedup fire for the actual production data; template-name
+  // matching stays for any future linked-template steps. ──
   for (const it of (drips && drips.items) || []) {
     if (it.status !== 'sent') continue
     const ts = toTs(it.fired_at)
     if (ts == null) continue
-    if (dripTouchLabels.has(normLabel(it.template_name))) continue // real touchpoint wins
+    const nameKey = normLabel(it.template_name)
+    const subjKey = normLabel(it.subject)
+    if ((nameKey && dripTouchLabels.has(nameKey)) || (subjKey && dripTouchLabels.has(subjKey))) continue // real touchpoint wins
     items.push({
       id: it.id, ts, type: 'drip', category: 'email',
       summary: it.template_name || `Drip step ${it.step_order}`,

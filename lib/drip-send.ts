@@ -322,6 +322,12 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     subject: rendered.subject || `(no subject)`,
     html,
     text,
+    // Notebook context (#103). Without these the drip's notification_log row
+    // lands with a null email_kind / lead_id, and every outbound-mail query
+    // filters on email_kind — which is why 516 failed drip sends were invisible.
+    lead_id: lead.id,
+    lead_name: lead.name ?? null,
+    email_kind: 'drip',
   })
 
   if (!result.success) {
@@ -357,6 +363,13 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
         .from('lead_drip_progress')
         .update({ stopped_at: new Date().toISOString(), stopped_reason: 'invalid_recipient' })
         .eq('id', row.id)
+      // Timeline trace (#103): a terminal stop ends the sequence for good, so
+      // the owner should see WHY it went silent. Transient failures write no
+      // touchpoint (they retry and the eventual success records itself).
+      await recordDripTouchpoint(row.lead_id, loc.id, {
+        status: 'failed',
+        label: 'Drip stopped — invalid email address',
+      })
       return { sent: false, error: 'invalid_recipient' }
     }
 
@@ -367,7 +380,15 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     // way the seeded leads did. Terminal always stops first, so the cap only
     // ever sees genuinely-transient (or misclassified) failures.
     const capped = await bumpTransientFailureAndMaybeStop(row.id, row.current_step)
-    if (capped) return { sent: false, error: 'max_send_retries' }
+    if (capped) {
+      // Cap trip is also a permanent stop — same Timeline trace as the terminal
+      // case so the owner sees the sequence ended (distinct reason in copy).
+      await recordDripTouchpoint(row.lead_id, loc.id, {
+        status: 'failed',
+        label: 'Drip stopped — repeated send failures',
+      })
+      return { sent: false, error: 'max_send_retries' }
+    }
     return { sent: false, error: `send: ${result.error}` }
   }
 
@@ -375,6 +396,16 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     status: 'sent',
     step: row.current_step,
     error: null,
+  })
+
+  // Timeline trace (#103). A drip send left NO record on the client's Timeline
+  // — the owner had no evidence the email went out. Mirror the Welcome / stage
+  // email idiom: kind='drip', method='email', status='sent'. The label is the
+  // rendered subject (the client-facing identity of an inline master step),
+  // which is also the key the Timeline dedups the back-estimated projection on.
+  await recordDripTouchpoint(row.lead_id, loc.id, {
+    status: 'sent',
+    label: rendered.subject || `Drip step ${row.current_step}`,
   })
 
   // Reset the transient-failure counter on any successful send so the cap
@@ -418,6 +449,30 @@ async function recordDripSendStatus(
 
   if (error) {
     console.error('[drip-send] failed to record drip send status', { leadId, status: fields.status, error: error.message })
+  }
+}
+
+// Write a system-authored touchpoint for a drip send so it lands on the
+// client's Timeline (#103). Matches the Welcome / stage-email idiom exactly
+// (kind='drip', method='email') — a sent step and a terminal-stop step differ
+// only in status ('sent' vs 'failed') and label. Best-effort: a failed insert
+// is logged but never blocks drip progression, exactly like recordDripSendStatus.
+async function recordDripTouchpoint(
+  leadId: string,
+  locationId: string,
+  fields: { status: 'sent' | 'failed'; label: string },
+): Promise<void> {
+  const { error } = await supabaseService.from('touchpoints').insert({
+    lead_id: leadId,
+    location_uuid: locationId,
+    kind: 'drip',
+    method: 'email',
+    label: fields.label,
+    status: fields.status,
+    occurred_at: new Date().toISOString(),
+  })
+  if (error) {
+    console.error('[drip-send] touchpoint insert failed', { leadId, status: fields.status, error: error.message })
   }
 }
 
