@@ -18,6 +18,17 @@
 // manual typing stays a first-class fallback (Places errors and a
 // missing GOOGLE_PLACES_API_KEY degrade to a plain text input).
 //
+// Apt/Suite is a DISCRETE field (issue 133, the NetworkAddSheet
+// pattern): Google rarely returns a subpremise for a hand-typed unit,
+// so a unit typed into the street line used to be silently replaced by
+// the prediction. The discrete field is merge-safe on a pick — Google's
+// real subpremise wins when present, the typed unit survives when it
+// isn't, and the autocomplete-failure fallback parse never clobbers it.
+// The unit rides the street line into storage (no new column), and we
+// NEVER parse it back out of a stored street string (the issue 93
+// lesson) — on edit-open the field starts empty and any embedded unit
+// stays part of the street text.
+//
 // DELIBERATE deviation from ContactField: NO blur-save. This editor is
 // multi-field — focus hops between street/city/state/zip and onto the
 // autocomplete dropdown, so a blur-commit would fire mid-edit. Save is
@@ -86,6 +97,7 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
   // value: { address, city, state, zip } — the lead's four address columns.
   const [editing, setEditing] = useState(false)
   const [street, setStreet] = useState('')
+  const [apt, setApt] = useState('')
   const [city, setCity] = useState('')
   const [stateVal, setStateVal] = useState('')
   const [zip, setZip] = useState('')
@@ -99,6 +111,10 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
     // Prefill the parts: street is the stored full string minus the part
     // columns (deriveStreet) — a legacy street-only row lands unchanged.
     setStreet(deriveStreet(value?.address, value || {}))
+    // Apt starts EMPTY on purpose — a unit already embedded in the
+    // stored street line stays there; extracting it back out would be
+    // the issue 93 combined-string parse we don't do.
+    setApt('')
     setCity((value?.city || '').trim())
     setStateVal((value?.state || '').trim())
     setZip((value?.zip || '').trim())
@@ -109,9 +125,12 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
 
   async function save() {
     if (saving.current) return
-    const s = street.trim(), c = city.trim(), st = stateVal.trim(), z = zip.trim()
-    if (!s && (c || st || z)) { setErr('Enter a street address'); return } // parts without a street is junk
-    const composed = composeLeadAddress({ street: s, city: c, state: st, zip: z })
+    const s = street.trim(), a = apt.trim(), c = city.trim(), st = stateVal.trim(), z = zip.trim()
+    if (!s && (a || c || st || z)) { setErr('Enter a street address'); return } // parts without a street is junk
+    // The unit rides the street line into storage (issue 133) — same
+    // convention as NetworkAddSheet; there is no apt column.
+    const streetLine = [s, a].filter(Boolean).join(' ')
+    const composed = composeLeadAddress({ street: streetLine, city: c, state: st, zip: z })
     if (normalizeAddressKey(composed) === normalizeAddressKey(display)) { cancel(); return } // no real change
     saving.current = true
     setBusy(true)
@@ -152,8 +171,13 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
               value={street}
               onChange={v => { setStreet(v); if (err) setErr(null) }}
               onParsed={p => {
-                // Autocomplete pick → parsed fields. Unit rides the street line.
-                setStreet([p.street, p.apt].filter(Boolean).join(' ') || p.full || '')
+                // Autocomplete pick → parsed fields. The unit is merge-safe
+                // (issue 133): Google's real subpremise wins; a typed unit
+                // survives when the prediction has none (the common case) —
+                // and the fallback parse carries no apt key, so it can
+                // never clobber a typed unit either.
+                setStreet(p.street || p.full || '')
+                setApt(a => p.apt || a)
                 setCity(p.city || '')
                 setStateVal(p.state || '')
                 setZip(p.zip || '')
@@ -162,6 +186,9 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
               style={{ ...INPUT_STYLE, width: '100%' }}
               onKeyDown={keys}
             />
+            <input aria-label="Apt" value={apt} disabled={busy} placeholder="Apt / Suite (optional)"
+              onChange={e => { setApt(e.target.value); if (err) setErr(null) }} onKeyDown={keys}
+              style={{ ...INPUT_STYLE, width: '100%' }} />
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '5px' }}>
               <input aria-label="City" value={city} disabled={busy} placeholder="City"
                 onChange={e => { setCity(e.target.value); if (err) setErr(null) }} onKeyDown={keys} style={INPUT_STYLE} />

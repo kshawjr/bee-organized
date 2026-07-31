@@ -172,7 +172,7 @@ export default function NewClientSheet({
   // notifyEmail / notifySlack / startDrip: the on-create multi-select, all
   // default OFF (a manual lead with nothing selected is silent). startDrip
   // replaces the old `drip` toggle default-ON.
-  const [form, setForm] = useState({ name: null, email: null, phone: null, source: 'Manual', projectType: 'Client', requestDetails: '', notifyEmail: false, notifySlack: false, startDrip: false, street: '', city: '', state: '', zip: '' })
+  const [form, setForm] = useState({ name: null, email: null, phone: null, source: 'Manual', projectType: 'Client', requestDetails: '', notifyEmail: false, notifySlack: false, startDrip: false, street: '', apt: '', city: '', state: '', zip: '' })
   // Address is OPTIONAL and collapsed by default — the sheet's stated
   // intent is founding-viable fields only, so the block stays hidden until
   // the user asks for it (mirrors Classic's default-off "📍 Add address").
@@ -251,16 +251,23 @@ export default function NewClientSheet({
   function buildAddressFields() {
     const street = (form.street || '').trim()
     if (!street) return {}
+    // The discrete Apt/Suite value rides the street line into storage
+    // (issue 133, the NetworkAddSheet convention) — including the
+    // addresses[].street the Send-to-Jobber property step reads, so the
+    // unit reaches the Jobber property too. A unit without a street is
+    // junk and is dropped with the rest of the block.
+    const apt = (form.apt || '').trim()
+    const streetLine = [street, apt].filter(Boolean).join(' ')
     const city = (form.city || '').trim()
     const state = (form.state || '').trim()
     const zip = (form.zip || '').trim()
-    const full = composeLeadAddress({ street, city, state, zip })
+    const full = composeLeadAddress({ street: streetLine, city, state, zip })
     return {
       address: full || null,
       city: city || null,
       state: state || null,
       zip: zip || null,
-      addresses: [{ type: 'Service', value: full, street, city, state, zip }],
+      addresses: [{ type: 'Service', value: full, street: streetLine, city, state, zip }],
     }
   }
 
@@ -626,8 +633,13 @@ export default function NewClientSheet({
                   onChange={v => set('street', v)}
                   onParsed={p => setForm(f => ({
                     ...f,
-                    // Unit rides the street line (same as AddressField).
-                    street: [p.street, p.apt].filter(Boolean).join(' ') || p.full || '',
+                    // Merge-safe unit handling (issue 133, same as
+                    // AddressField): Google's real subpremise wins; a
+                    // typed Apt/Suite survives when the prediction has
+                    // none (the common case), and the fallback parse
+                    // carries no apt key so it never clobbers one.
+                    street: p.street || p.full || '',
+                    apt: p.apt || f.apt || '',
                     city: p.city || '',
                     state: p.state || '',
                     zip: p.zip || '',
@@ -635,6 +647,7 @@ export default function NewClientSheet({
                   placeholder="Start typing a street address…"
                   style={inp}
                 />
+                <input style={inp} value={form.apt || ''} onChange={e => set('apt', e.target.value)} placeholder="Apt / Suite (optional)" aria-label="Apt" />
                 <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '8px' }}>
                   <input style={inp} value={form.city || ''} onChange={e => set('city', e.target.value)} placeholder="City" aria-label="City" />
                   <input style={inp} value={form.state || ''} onChange={e => set('state', e.target.value)} placeholder="ST" maxLength={2} aria-label="State" />

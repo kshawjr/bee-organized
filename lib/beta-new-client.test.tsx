@@ -57,12 +57,18 @@ const jsonRes = (body: any, status = 200) => ({
 })
 let createdBodies: any[] = []
 let foundedBodies: any[] = []
-const installFetch = () => {
+// placesOpts (issue 133 tests): predictions for /autocomplete; details for
+// /details (null → 500, exercising the client-side fallback parse).
+const installFetch = (placesOpts: { predictions?: any[]; details?: any } = {}) => {
   createdBodies = []
   foundedBodies = []
   const mock = vi.fn(async (url: any, opts: any = {}) => {
     const u = String(url)
     if (u.includes('/api/lookups')) return jsonRes({ lookups: [] })
+    if (u.includes('/api/places/autocomplete')) return jsonRes({ predictions: placesOpts.predictions || [] })
+    if (u.includes('/api/places/details')) {
+      return placesOpts.details ? jsonRes(placesOpts.details) : jsonRes({ error: 'nope' }, 500)
+    }
     // Manual founding (decoupled from Send to Jobber) — returns the real
     // engagement row in board shape, like POST /api/engagements does.
     if (u.includes('/api/engagements') && opts.method === 'POST') {
@@ -116,6 +122,11 @@ const type = (input: Element, value: string) => act(async () => {
 })
 const buttonByText = (host: Element, text: string) =>
   [...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === text)
+// AddressAutofill picks predictions on mousedown (issue 133 tests).
+const mousedown = (el: Element) => act(async () => {
+  el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+})
+const sleep = (ms: number) => act(async () => { await new Promise(r => setTimeout(r, ms)) })
 
 // Seeds BOTH width paths: __BEE_TEST_WIDTH__ covers renderToString (no
 // effects), and window.innerWidth covers happy-dom mounts — useIsMobile's
@@ -335,6 +346,7 @@ describe('NewClientSheet frames', () => {
     expect(host.querySelector('input[aria-label="City"]'), 'City revealed').toBeTruthy()
     expect(host.querySelector('input[aria-label="State"]'), 'State revealed').toBeTruthy()
     expect(host.querySelector('input[aria-label="ZIP"]'), 'ZIP revealed').toBeTruthy()
+    expect(host.querySelector('input[aria-label="Apt"]'), 'Apt/Suite revealed (issue 133)').toBeTruthy()
     await unmount()
   })
 
@@ -381,6 +393,94 @@ describe('NewClientSheet frames', () => {
     ])
     // Let the AddressAutofill debounce settle while still mounted.
     await act(async () => { await new Promise(r => setTimeout(r, 200)) })
+    await unmount()
+  })
+
+  // ── discrete Apt/Suite (issue 133 — Ankur's bug) ────────────────
+  // A unit typed into the street line was silently replaced by the Google
+  // prediction (predictions rarely carry a subpremise for a hand-typed
+  // unit). The unit now has a DISCRETE field, merge-safe on a pick, and
+  // rides the street line into `address` AND addresses[].street (the
+  // Send-to-Jobber property read).
+  const OAK = {
+    predictions: [{ place_id: 'p1', description: '500 Oak Ave, Austin, TX, USA' }],
+    details: { formatted: '500 Oak Ave, Austin, TX 78701, USA', street: '500 Oak Ave', apt: '', city: 'Austin', state: 'TX', zip: '78701' },
+  }
+  const openAddressBlock = async (host: Element) => {
+    await type(host.querySelector('input[aria-label="Search clients"]')!, 'Fresh Person')
+    await click(host.querySelector('button[aria-label="Add address"]')!)
+    return [...host.querySelectorAll('input')].find(i => (i.getAttribute('placeholder') || '').startsWith('Start typing a street'))!
+  }
+  const pickOak = async (host: Element, street: Element) => {
+    await type(street, '500 Oak')
+    await sleep(250) // debounce → /autocomplete
+    const suggestion = [...host.querySelectorAll('button')].find(b => (b.textContent || '').includes('500 Oak Ave'))!
+    expect(suggestion, 'prediction rendered').toBeTruthy()
+    await mousedown(suggestion)
+  }
+  const aptInput = (host: Element) => host.querySelector('input[aria-label="Apt"]') as HTMLInputElement
+
+  it('issue 133: typed unit survives picking a prediction with NO subpremise', async () => {
+    installFetch(OAK)
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[person()]} locFilter="loc-uuid-1" currentUserId="user-1" onClose={() => {}} onCreated={() => {}} />
+    )
+    const street = await openAddressBlock(host)
+    await type(aptInput(host), 'Apt 4')
+    await pickOak(host, street)
+    // The prediction replaced the street line — the typed unit did NOT go with it.
+    expect(aptInput(host).value).toBe('Apt 4')
+    await click(buttonByText(host, 'Create — opens card')!)
+    expect(createdBodies).toHaveLength(1)
+    expect(createdBodies[0]).toMatchObject({
+      address: '500 Oak Ave Apt 4, Austin, TX, 78701',
+      city: 'Austin', state: 'TX', zip: '78701',
+    })
+    expect(createdBodies[0].addresses[0].street).toBe('500 Oak Ave Apt 4')
+    await unmount()
+  })
+
+  it('issue 133: a prediction WITH a real subpremise fills the Apt field and saves', async () => {
+    installFetch({ ...OAK, details: { ...OAK.details, apt: 'Unit 12' } })
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[person()]} locFilter="loc-uuid-1" currentUserId="user-1" onClose={() => {}} onCreated={() => {}} />
+    )
+    const street = await openAddressBlock(host)
+    await pickOak(host, street)
+    expect(aptInput(host).value).toBe('Unit 12')
+    await click(buttonByText(host, 'Create — opens card')!)
+    expect(createdBodies[0].address).toBe('500 Oak Ave Unit 12, Austin, TX, 78701')
+    expect(createdBodies[0].addresses[0].street).toBe('500 Oak Ave Unit 12')
+    await unmount()
+  })
+
+  it('issue 133: autocomplete yields nothing → manually typed street + unit still post', async () => {
+    installFetch() // no predictions — the manual-typing fallback path
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[person()]} locFilter="loc-uuid-1" currentUserId="user-1" onClose={() => {}} onCreated={() => {}} />
+    )
+    const street = await openAddressBlock(host)
+    await type(street, '742 Evergreen Terrace')
+    await type(aptInput(host), 'Apt 9')
+    await type(host.querySelector('input[aria-label="City"]')!, 'Springfield')
+    await sleep(250) // let the (empty) autocomplete round-trip settle
+    await click(buttonByText(host, 'Create — opens card')!)
+    expect(createdBodies[0].address).toBe('742 Evergreen Terrace Apt 9, Springfield')
+    expect(createdBodies[0].addresses[0].street).toBe('742 Evergreen Terrace Apt 9')
+    await unmount()
+  })
+
+  it('issue 133: no unit at all → no stray text (exact composed string after a pick)', async () => {
+    installFetch(OAK)
+    const { host, unmount } = await mount(
+      <NewClientSheet people={[person()]} locFilter="loc-uuid-1" currentUserId="user-1" onClose={() => {}} onCreated={() => {}} />
+    )
+    const street = await openAddressBlock(host)
+    await pickOak(host, street)
+    expect(aptInput(host).value).toBe('')
+    await click(buttonByText(host, 'Create — opens card')!)
+    expect(createdBodies[0].address).toBe('500 Oak Ave, Austin, TX, 78701')
+    expect(createdBodies[0].addresses[0].street).toBe('500 Oak Ave')
     await unmount()
   })
 

@@ -14,6 +14,11 @@
 //   * autocomplete pick → parsed {street, city, state, zip} fill the
 //     part fields; manual typing is a first-class fallback when Places
 //     is down (or GOOGLE_PLACES_API_KEY is absent server-side)
+//   * discrete Apt/Suite (issue 133): merge-safe on a pick — Google's
+//     real subpremise wins, a typed unit survives a subpremise-less
+//     prediction AND the fallback parse; the unit rides the street
+//     line into the composed `address`; never parsed back out of a
+//     stored street string (the issue 93 lesson)
 //   * toast tells the whole truth from address_writeback:
 //     updated/added → '· synced to Jobber'; failed → '· Jobber sync
 //     failed — saved in Bee Hub only'; absent → plain
@@ -262,6 +267,114 @@ describe('AddressField — Places autocomplete and the manual fallback', () => {
       city: 'Springfield', state: null, zip: null,
     }])
     expect(toasts[0].msg).toBe('Address added')
+    await unmount()
+  })
+})
+
+// ── discrete Apt/Suite (issue 133 — Ankur's bug) ────────────────
+describe('AddressField — discrete Apt/Suite (issue 133)', () => {
+  const EMPTY = { address: null, city: null, state: null, zip: null }
+  const OAK = {
+    predictions: [{ place_id: 'p1', description: '500 Oak Ave, Austin, TX, USA' }],
+    details: { formatted: '500 Oak Ave, Austin, TX 78701, USA', street: '500 Oak Ave', apt: '', city: 'Austin', state: 'TX', zip: '78701' },
+  }
+  const pickOak = async (host: Element) => {
+    await type(streetInput(host)!, '500 Oak')
+    await sleep(250) // debounce → /autocomplete
+    const suggestion = Array.from(host.querySelectorAll('button')).find(b => b.textContent?.includes('500 Oak Ave'))!
+    expect(suggestion, 'prediction rendered').toBeTruthy()
+    await mousedown(suggestion)
+  }
+
+  it('typed unit survives picking a prediction with NO subpremise (the reported case)', async () => {
+    installFetch(OAK)
+    const { host, unmount } = await mountField(EMPTY)
+    await click(host.querySelector('p')!)
+    await type(input(host, 'Apt')!, 'Apt 4')
+    await pickOak(host)
+    // The prediction replaced the street line — the unit did NOT go with it.
+    expect(input(host, 'Apt')!.value).toBe('Apt 4')
+    await click(saveBtn(host)!)
+    expect(leadPatches).toEqual([{
+      address: '500 Oak Ave Apt 4, Austin, TX, 78701',
+      city: 'Austin', state: 'TX', zip: '78701',
+    }])
+    await unmount()
+  })
+
+  it('a prediction WITH a real subpremise fills the Apt field and saves', async () => {
+    installFetch({ ...OAK, details: { ...OAK.details, apt: 'Unit 12' } })
+    const { host, unmount } = await mountField(EMPTY)
+    await click(host.querySelector('p')!)
+    await pickOak(host)
+    expect(input(host, 'Apt')!.value).toBe('Unit 12')
+    await click(saveBtn(host)!)
+    expect(leadPatches[0].address).toBe('500 Oak Ave Unit 12, Austin, TX, 78701')
+    await unmount()
+  })
+
+  it('/details down → fallback parse (no apt key) never clobbers the typed unit', async () => {
+    // Two-segment description because parseAddress reads "street, city ST zip".
+    installFetch({ predictions: [{ place_id: 'p1', description: '500 Oak Ave, Austin TX 78701' }], details: null })
+    const { host, unmount } = await mountField(EMPTY)
+    await click(host.querySelector('p')!)
+    await type(input(host, 'Apt')!, 'Apt 4')
+    await pickOak(host)
+    expect(input(host, 'Apt')!.value).toBe('Apt 4')
+    await click(saveBtn(host)!)
+    expect(leadPatches[0].address).toBe('500 Oak Ave Apt 4, Austin, TX, 78701')
+    await unmount()
+  })
+
+  it('Places down entirely → manually typed street + unit still save', async () => {
+    installFetch({ placesFail: true })
+    const { host, unmount } = await mountField(EMPTY)
+    await click(host.querySelector('p')!)
+    await type(streetInput(host)!, '742 Evergreen Terrace')
+    await sleep(250) // failed autocomplete must not break anything
+    await type(input(host, 'Apt')!, 'Apt 9')
+    await type(input(host, 'City')!, 'Springfield')
+    await click(saveBtn(host)!)
+    expect(leadPatches).toEqual([{
+      address: '742 Evergreen Terrace Apt 9, Springfield',
+      city: 'Springfield', state: null, zip: null,
+    }])
+    await unmount()
+  })
+
+  it('no unit at all → no stray text (exact composed string after a pick)', async () => {
+    installFetch(OAK)
+    const { host, unmount } = await mountField(EMPTY)
+    await click(host.querySelector('p')!)
+    await pickOak(host)
+    expect(input(host, 'Apt')!.value).toBe('')
+    await click(saveBtn(host)!)
+    expect(leadPatches[0].address).toBe('500 Oak Ave, Austin, TX, 78701')
+    await unmount()
+  })
+
+  it('unit without a street is junk — inline error, zero writes', async () => {
+    installFetch()
+    const { host, unmount } = await mountField(EMPTY)
+    await click(host.querySelector('p')!)
+    await type(input(host, 'Apt')!, 'Apt 4')
+    await click(saveBtn(host)!)
+    expect(host.textContent).toContain('Enter a street address')
+    expect(leadPatches).toEqual([])
+    await unmount()
+  })
+
+  it('edit-open never parses a stored unit back out — Apt starts empty, street keeps it (issue 93 lesson)', async () => {
+    installFetch()
+    const { host, unmount } = await mountField({
+      address: '123 Main St Apt 4, Denver, CO, 80202', city: 'Denver', state: 'CO', zip: '80202',
+    })
+    await click(host.querySelector('p')!)
+    expect(streetInput(host)!.value).toBe('123 Main St Apt 4')
+    expect(input(host, 'Apt')!.value).toBe('')
+    // Untouched save is still a no-change close — zero writes, no doubling.
+    await click(saveBtn(host)!)
+    expect(leadPatches).toEqual([])
     await unmount()
   })
 })
