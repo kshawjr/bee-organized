@@ -158,14 +158,28 @@ describe('intake observability — error rows', () => {
     expect(lastLog().message).toContain('error=invalid_json')
   })
 
-  it('validation 400 → logged with the error code; entity_id is the submitted email', async () => {
+  it('missing slug (pre-slug path) → entity_id is "unknown", NEVER the email; email_present token carries the signal (#110a)', async () => {
     const res = await POST(makeReq(submission({ location_slug: undefined })))
     expect(res.status).toBe(400)
     expect(lastLog()).toMatchObject({
       status: 'error', landed_status: 'na', location_id: null,
-      entity_id: 'sarah@email.com',
+      entity_id: 'unknown',
     })
+    expect(lastLog().entity_id).not.toContain('@') // PII invariant
     expect(lastLog().message).toContain('error=location_slug required')
+    expect(lastLog().message).toContain('email_present=true')
+  })
+
+  it('missing full_name → entity_id is the slug, never the email; email_present token present (#110a)', async () => {
+    const res = await POST(makeReq(submission({ full_name: undefined })))
+    expect(res.status).toBe(400)
+    expect(lastLog()).toMatchObject({
+      status: 'error', landed_status: 'na', location_id: null,
+      entity_id: 'boulder-01',
+    })
+    expect(lastLog().entity_id).not.toContain('@') // PII invariant
+    expect(lastLog().message).toContain('error=full_name required')
+    expect(lastLog().message).toContain('email_present=true')
   })
 
   it('location_not_found → entity_id is the slug and the message carries it (Make typo diagnosable)', async () => {
@@ -189,7 +203,7 @@ describe('intake observability — error rows', () => {
     expect(lastLog().message).toContain('connection refused')
   })
 
-  it('insert_failed → error row scoped to the location slug, message carries insertErr.message', async () => {
+  it('insert_failed → error row scoped to the location slug (never the email), message carries insertErr.message (#110a)', async () => {
     h.enqueue('locations', LOC)
     h.enqueue('leads', []) // strong keys
     h.enqueue('leads', []) // name
@@ -200,10 +214,12 @@ describe('intake observability — error rows', () => {
       status: 'error',
       landed_status: 'na',
       location_id: 'boulder-01', // SLUG — the dashboard joins names on it
-      entity_id: 'sarah@email.com',
+      entity_id: 'boulder-01',
     })
+    expect(lastLog().entity_id).not.toContain('@') // PII invariant
     expect(lastLog().message).toContain('error=insert_failed')
     expect(lastLog().message).toContain('value too long')
+    expect(lastLog().message).toContain('email_present=true')
   })
 })
 
@@ -362,11 +378,14 @@ describe('intake unknown-key detection (#108)', () => {
 
 // ═══ C. email-or-phone policy ══════════════════════════════
 describe('intake email-or-phone — validation', () => {
-  it('neither email nor usable phone → 400 email_or_phone_required (and logged)', async () => {
+  it('neither email nor usable phone → 400 email_or_phone_required (and logged, entity=slug, email_present=false)', async () => {
     const res = await POST(makeReq(submission({ email: undefined, phone: undefined })))
     expect(res.status).toBe(400)
     expect((await res.json()).error).toBe('email_or_phone_required')
     expect(lastLog().message).toContain('error=email_or_phone_required')
+    expect(lastLog()).toMatchObject({ entity_id: 'boulder-01' })
+    expect(lastLog().entity_id).not.toContain('@') // PII invariant
+    expect(lastLog().message).toContain('email_present=false')
   })
 
   it('phone under 7 digits does not satisfy the policy', async () => {

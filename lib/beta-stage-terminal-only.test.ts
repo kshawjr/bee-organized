@@ -66,6 +66,7 @@ vi.mock('@/lib/sync-log', () => ({
 }))
 
 import { PATCH } from '@/app/api/engagements/[id]/route'
+import { writeSyncLog } from '@/lib/sync-log'
 
 const ENG = (over: any = {}) => ({
   id: 'e1', client_id: 'c1', location_uuid: 'loc-uuid-1',
@@ -168,6 +169,28 @@ describe('terminal closes remain the one human stage write', () => {
     const update = engagementWrites().find(c => c.ops.some(([m]) => m === 'update'))!
     const payload = update.ops.find(([m]) => m === 'update')![1][0]
     expect(payload.closed_reason).toBe('won')
+  })
+
+  it('#110a: close breadcrumb carries the client lead UUID — never the name, never the free-text closed_note', async () => {
+    arm(ENG({ stage: 'Estimate' }))
+    h.enqueue('engagements', null)                          // the update
+    h.enqueue('touchpoints', null)                          // stage_change trail
+    h.enqueue('leads', { location_id: 'loc1', name: 'Jane Q Customer' }) // close trail lookup
+    h.enqueue('engagements', null, null, 0)                 // other-open count
+    const res = await patch('e1', {
+      stage: 'Closed Lost',
+      closed_reason: 'lost_no_response',
+      closed_note: 'called her at 555-123-4567, went with a competitor',
+    })
+    expect(res.status).toBe(200)
+    const logged = (writeSyncLog as any).mock.calls.map((c: any) => c[0])
+    const row = logged[logged.length - 1]
+    expect(row.entity_id).toBe('e1')            // engagement UUID
+    expect(row.message).toContain('c1')          // client lead UUID — joinable
+    expect(row.message).not.toContain('Jane Q Customer') // no name
+    expect(row.message).not.toContain('555-123-4567')    // no closed_note free text
+    expect(row.message).not.toContain('competitor')
+    expect(row.message).toContain('reason=lost_no_response') // structured signal survives
   })
 
   it('terminal → terminal stays rejected (Closed Lost → Closed Won is not a manual flip)', async () => {

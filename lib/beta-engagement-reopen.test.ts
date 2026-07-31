@@ -50,6 +50,7 @@ vi.mock('@/lib/supabase-server', () => ({
 vi.mock('@/lib/sync-log', () => ({ writeSyncLog: vi.fn(async () => {}) }))
 
 import { POST } from '@/app/api/engagements/[id]/reopen/route'
+import { writeSyncLog } from '@/lib/sync-log'
 
 const ENG = (over: any = {}) => ({
   id: 'e1', client_id: 'c1', location_uuid: 'loc-uuid-1',
@@ -160,5 +161,22 @@ describe('auth', () => {
     expect(res.status).toBe(403)
     expect((await res.json()).error).toBe('forbidden_wrong_location')
     expect(engagementUpdate()).toBeUndefined()
+  })
+})
+
+describe('sync_log breadcrumb — no PII (#110a)', () => {
+  it('reopen row carries the client lead UUID, never the client name', async () => {
+    arm(ENG({ stage: 'Closed Lost' }))
+    armChildren({ quotes: [{ status: 'sent', sent_at: new Date().toISOString() }] })
+    h.enqueue('engagements', null)                              // the update
+    h.enqueue('touchpoints', null)                             // stage_change trail
+    h.enqueue('leads', { location_id: 'loc1', name: 'Jane Q Customer' })
+    const res = await post('e1')
+    expect(res.status).toBe(200)
+    const logged = (writeSyncLog as any).mock.calls.map((c: any) => c[0])
+    const row = logged[logged.length - 1]
+    expect(row.entity_id).toBe('e1')            // engagement UUID
+    expect(row.message).toContain('c1')          // client lead UUID — joinable
+    expect(row.message).not.toContain('Jane Q Customer')
   })
 })

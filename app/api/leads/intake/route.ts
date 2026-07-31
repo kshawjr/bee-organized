@@ -222,28 +222,34 @@ export async function POST(req: NextRequest) {
     typeof email === 'string' && EMAIL_RE.test(email) ? email.trim() : null
   const phoneDigits = typeof phone === 'string' ? phone.replace(/\D/g, '') : ''
   const hasPhone = phoneDigits.length >= 7
-  // Best pre-insert handle for error-row entity_id: no lead id exists yet.
-  const emailEntity =
-    typeof email === 'string' && email.trim() ? email.trim() : 'unknown'
+  // Error-row entity_id: NEVER the raw email (PII that lives forever in
+  // sync_log). No lead id exists pre-insert, so use the location_slug as the
+  // handle where it's known, 'unknown' on the pre-slug path. The diagnostic
+  // "did the payload carry an email at all" survives as a presence token on
+  // the message (email_present=true even for an unparseable address — that's
+  // exactly the signal the email_or_phone path needs). See #110a.
+  const emailPresent =
+    typeof email === 'string' && email.trim().length > 0
+  const emailPresentToken = ` email_present=${emailPresent}`
 
   if (!location_slug || typeof location_slug !== 'string') {
     await logIntake({
       status: 'error', landed: 'na', locationSlug: null,
-      entityId: emailEntity, detail: `error=location_slug required${unknownKeysToken}`,
+      entityId: 'unknown', detail: `error=location_slug required${emailPresentToken}${unknownKeysToken}`,
     })
     return NextResponse.json({ error: 'location_slug required' }, { status: 400 })
   }
   if (!full_name || typeof full_name !== 'string' || !full_name.trim()) {
     await logIntake({
       status: 'error', landed: 'na', locationSlug: null,
-      entityId: emailEntity, detail: `error=full_name required${unknownKeysToken}`,
+      entityId: location_slug, detail: `error=full_name required${emailPresentToken}${unknownKeysToken}`,
     })
     return NextResponse.json({ error: 'full_name required' }, { status: 400 })
   }
   if (!validEmail && !hasPhone) {
     await logIntake({
       status: 'error', landed: 'na', locationSlug: null,
-      entityId: emailEntity, detail: `error=email_or_phone_required${unknownKeysToken}`,
+      entityId: location_slug, detail: `error=email_or_phone_required${emailPresentToken}${unknownKeysToken}`,
     })
     return NextResponse.json({ error: 'email_or_phone_required' }, { status: 400 })
   }
@@ -393,8 +399,8 @@ export async function POST(req: NextRequest) {
   if (insertErr || !lead) {
     await logIntake({
       status: 'error', landed: 'na', locationSlug: location.location_id,
-      entityId: emailEntity,
-      detail: `error=insert_failed — ${insertErr?.message || 'insert returned no row'}${unknownKeysToken}`,
+      entityId: location.location_id,
+      detail: `error=insert_failed — ${insertErr?.message || 'insert returned no row'}${emailPresentToken}${unknownKeysToken}`,
     })
     return NextResponse.json(
       { error: 'insert_failed', detail: insertErr?.message },

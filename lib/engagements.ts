@@ -328,7 +328,7 @@ export async function foundEngagement(params: {
     locationSlug: lead.location_id,
     engagementId: created.id,
     foundedBy,
-    note: params.note || `founded via ${foundingChildTable}/${foundingChildId} for lead "${lead.name || clientId}" at stage ${stage}`,
+    note: params.note || `founded via ${foundingChildTable}/${foundingChildId} for lead ${clientId} at stage ${stage}`,
   })
   return { id: created.id, created: true }
 }
@@ -386,7 +386,7 @@ export async function foundManualEngagement(params: {
     locationSlug: lead.location_id,
     engagementId: created.id,
     foundedBy: 'manual',
-    note: params.note || `manual founding for lead "${lead.name || clientId}" at stage ${OPENING_STAGE.manual}`,
+    note: params.note || `manual founding for lead ${clientId} at stage ${OPENING_STAGE.manual}`,
   })
   return { engagement: created, created: true }
 }

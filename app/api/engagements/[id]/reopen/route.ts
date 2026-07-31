@@ -140,9 +140,10 @@ export async function POST(
 
   const { data: clientLead } = await supabaseService
     .from('leads')
-    .select('location_id, name')
+    .select('location_id')
     .eq('id', engagement.client_id)
     .maybeSingle()
+  // client is the lead UUID (joinable), never the name — see #110a.
   await writeSyncLog({
     location_id: clientLead?.location_id || 'unknown',
     entity_id: id,
@@ -150,7 +151,7 @@ export async function POST(
     status: 'success',
     message:
       `[engagement:reopen] Closed Lost → ${derived.stage} (re-derived from records) ` +
-      `for client "${clientLead?.name || engagement.client_id}"`,
+      `for client ${engagement.client_id}`,
   })
 
   return NextResponse.json({

@@ -402,13 +402,17 @@ export async function PATCH(
   // work reads this trail. Fire-and-forget (writeSyncLog swallows errors).
   if (stageChanged && (patch.stage === 'Closed Won' || patch.stage === 'Closed Lost')) {
     const [{ data: clientLead }, { count: otherOpen }] = await Promise.all([
-      supabaseService.from('leads').select('location_id, name').eq('id', engagement.client_id).maybeSingle(),
+      supabaseService.from('leads').select('location_id').eq('id', engagement.client_id).maybeSingle(),
       supabaseService.from('engagements').select('id', { count: 'exact', head: true })
         .eq('client_id', engagement.client_id)
         .not('stage', 'in', '("Closed Won","Closed Lost")')
         .neq('id', id),
     ])
     const entersNurture = patch.stage === 'Closed Lost' && (otherOpen ?? 0) === 0
+    // entity_id keys this row to the engagement; the client is the lead UUID
+    // (joinable), never the name — and never patch.closed_note, which is free
+    // staff text that could carry any PII and whose diagnostic content
+    // (closed_reason) is already captured structurally above. See #110a.
     await writeSyncLog({
       location_id: clientLead?.location_id || 'unknown',
       entity_id: id,
@@ -416,8 +420,7 @@ export async function PATCH(
       status: 'success',
       message:
         `[engagement:close] ${patch.stage} reason=${patch.closed_reason}` +
-        (patch.closed_note ? ` note="${patch.closed_note}"` : '') +
-        ` — client "${clientLead?.name || engagement.client_id}" has ${otherOpen ?? 0} other open engagement(s)` +
+        ` — client ${engagement.client_id} has ${otherOpen ?? 0} other open engagement(s)` +
         (entersNurture ? ' → enters nurture pool (step-5 trail)' : ''),
     })
   }

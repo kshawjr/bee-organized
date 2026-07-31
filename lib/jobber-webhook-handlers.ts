@@ -906,7 +906,7 @@ async function nullifyLeadJobberColumns(
     lead_id: lead.id,
     lead_stage: lead.stage || null,
     prev_stage: lead.stage || null,
-    note: `${noun}: nulled ${nullColumns.join(', ')} on lead "${lead.name || lead.id}"`,
+    note: `${noun}: nulled ${nullColumns.join(', ')} on lead ${lead.id}`,
   }
 }
 
@@ -1051,7 +1051,7 @@ async function handlePropertyCore(
     lead_id: lead.id,
     lead_stage: lead.stage || null,
     prev_stage: lead.stage || null,
-    note: `${noun}: synced property address to lead "${lead.name || lead.id}"`,
+    note: `${noun}: synced property address to lead ${lead.id}`,
   }
 }
 
