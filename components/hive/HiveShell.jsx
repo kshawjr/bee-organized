@@ -891,6 +891,7 @@ export default function HiveShell({
           jobberLinks={jobberLinks}
           setToast={setToast}
           lookupOptions={lookupOptions}
+          onReportProblem={onReportProblem}
         />
       )}
       {/* Lead detail is UNIFIED on ClientProfile below — the old PersonCard

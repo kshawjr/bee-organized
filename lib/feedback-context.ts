@@ -14,13 +14,18 @@
 // an oversized blob) into the column.
 
 // The ONLY keys ever persisted. Everything is an id or a non-PII descriptor:
-//   kind        — record type ('client'), so the shape can extend later
-//   lead_id     — the record; the reader resolves name/contact from this
-//   location_id — the record's franchise (already non-PII, aids triage scoping)
-//   screen      — friendly screen label the user was on ('Clients')
-//   path        — deep link to reopen the exact record ('/clients/<id>')
-//   origin      — which affordance filed it ('client_profile_menu')
-export const FEEDBACK_CONTEXT_KEYS = ['kind', 'lead_id', 'location_id', 'screen', 'path', 'origin'] as const
+//   kind          — record type ('client' | 'engagement'), so the shape extends
+//   lead_id       — the client record; the reader resolves name/contact from this
+//   location_id   — the record's franchise (already non-PII, aids triage scoping)
+//   engagement_id — the deal record (engagement reports); reader resolves the rest
+//   stage         — the deal's pipeline stage ('Estimate' … 'Closed Won'). NOT PII;
+//                   a triage-useful snapshot ("stuck at Estimate") at report time
+//   screen        — friendly screen label the user was on ('Clients')
+//   path          — deep link to reopen the exact record ('/clients/<id>[?e=<id>]')
+//   origin        — which affordance filed it ('client_profile_menu' | 'engagement_panel_menu')
+//
+// PII stays OUT: never a client name, deal title, email, phone, or any financials.
+export const FEEDBACK_CONTEXT_KEYS = ['kind', 'lead_id', 'location_id', 'engagement_id', 'stage', 'screen', 'path', 'origin'] as const
 
 export type FeedbackContext = Partial<Record<(typeof FEEDBACK_CONTEXT_KEYS)[number], string>>
 

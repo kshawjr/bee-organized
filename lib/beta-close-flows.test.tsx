@@ -137,9 +137,16 @@ describe('··· masthead menu — portal, close actions, reopen visibility', ()
     expect(menuItem('Mark as Closed Lost')).toBeFalsy()
   })
 
-  it('Closed WON: no Reopen (out of scope) — menu has no items, so no trigger renders', async () => {
+  it('Closed WON: no Reopen/Lost (out of scope) — but the always-present "Report a problem" keeps the menu usable (#131b)', async () => {
     const { container } = await mountPanel(eng({ stage: 'Closed Won', closed_reason: 'won' }), emptyChildren())
-    expect(recordTrigger(container)).toBeFalsy()
+    // The trigger now renders (the report item is always present)…
+    expect(recordTrigger(container)).toBeTruthy()
+    await openMenu(container)
+    expect(menuItem('Report a problem with this engagement')).toBeTruthy()
+    // …but the close-out actions are still correctly absent on a won deal.
+    expect(menuItem('Reopen')).toBeFalsy()
+    expect(menuItem('Mark as Closed Lost')).toBeFalsy()
+    expect(menuItem('Mark as Closed Won')).toBeFalsy()
   })
 
   it('reopen from the ··· menu POSTs the reopen route', async () => {

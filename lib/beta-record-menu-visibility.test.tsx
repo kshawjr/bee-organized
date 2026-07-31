@@ -131,9 +131,12 @@ describe('··· menu — conditional visibility (Won never in menu; Lost open-o
     expect(menuItem('Mark as Closed Lost')).toBeTruthy()
   })
 
-  it('Closed WON: NO Lost, NO Reopen — the menu is empty so no ··· trigger renders (Lost cannot leak onto Won)', async () => {
+  it('Closed WON: NO Lost, NO Reopen — but the always-present "Report a problem" keeps a usable ··· (#131b; Lost/Reopen still cannot leak onto Won)', async () => {
     const { container } = await mountPanel(eng({ stage: 'Closed Won', closed_reason: 'won' }), emptyChildren())
-    expect(recordTrigger(container)).toBeFalsy()
+    // The trigger renders now that a non-mutating report item is always present.
+    expect(recordTrigger(container)).toBeTruthy()
+    await openMenu(container)
+    expect(menuItem('Report a problem with this engagement')).toBeTruthy()
     expect(menuItem('Mark as Closed Lost')).toBeFalsy()
     expect(menuItem('Reopen')).toBeFalsy()
   })
