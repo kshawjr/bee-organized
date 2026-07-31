@@ -28,6 +28,7 @@ import { notifyNewLead } from '@/lib/lead-notification-email'
 import { notifyNewLeadSlack } from '@/lib/slack-bot'
 import { logSlackNotification } from '@/lib/notification-log'
 import { writeLeadAssignment } from '@/lib/lead-assignment'
+import { getPrimaryOwnerForLocation } from '@/lib/owner-resolution'
 
 export const runtime = 'nodejs'
 
@@ -149,6 +150,9 @@ export async function POST(req: NextRequest) {
 
   // ─── assigned_to validation (must be a hub_user in this location) ──
   let assignedTo: string | null = null
+  // How the assignment was decided — a human pick vs the issue 153 fallback.
+  // Drives lead_assignees.assigned_via in the mirror below.
+  let assignedVia: 'manual' | 'location_owner' = 'manual'
   if (body.assigned_to) {
     const { data: assignee } = await supabaseService
       .from('hub_users')
@@ -163,6 +167,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'assigned_to_wrong_location' }, { status: 400 })
     }
     assignedTo = assignee.id
+  }
+
+  // issue 153 — never mint an unassigned lead. body.assigned_to arrives null
+  // when the client couldn't resolve currentUserId; rather than a lead with no
+  // assignee and no junction row, fall back to the location owner. A human pick
+  // (handled above) always wins when present — this only fires when it's blank.
+  if (!assignedTo) {
+    const owner = await getPrimaryOwnerForLocation(location.id)
+    if (owner?.id) {
+      assignedTo = owner.id
+      assignedVia = 'location_owner'
+    }
   }
 
   // ─── Insert ──────────────────────────────────────────────────
@@ -208,7 +224,8 @@ export async function POST(req: NextRequest) {
 
   // ─── Mirror the assignment into the plural junction ──────────
   // This route takes a SINGLE assigned_to from the create form (which defaults
-  // to the creating user), and that column is written above. Mirror it into
+  // to the creating user), or — when that arrives null — the location owner
+  // (issue 153). Either way the column is written above; mirror it into
   // lead_assignees so the lead's assignment lives where every other path reads
   // it — without this, a hand-created lead would found its engagement with an
   // EMPTY assignee set (seedEngagementAssigneesFromLead reads the junction, not
@@ -220,7 +237,8 @@ export async function POST(req: NextRequest) {
   if (assignedTo) {
     const mirrored = await writeLeadAssignment({
       leadId: lead.id,
-      assignedVia: 'manual', // a human picked this; not an auto-resolution
+      // 'manual' when a human picked; 'location_owner' for the issue 153 fallback.
+      assignedVia,
       resolved: {
         hubUserIds: [assignedTo],
         basis: 'location_owner',

@@ -21,6 +21,7 @@
 
 import { supabaseService } from './supabase-service'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
+import { getLeadAssigneeIds } from './lead-assignment'
 import { writeSyncLog } from './sync-log'
 import { mapQuoteStatus, quoteStatusStampsApproval } from './quote-status-map'
 import {
@@ -747,6 +748,48 @@ async function findAdoptionCandidate(args: {
   return { kind: 'none' }
 }
 
+// issue 153 — assign every Jobber-born lead the moment it is created.
+//
+// The Jobber seam has always written leads.assigned_to at insert but NEVER a
+// lead_assignees row, so a Jobber-born lead founded its engagement with an
+// EMPTY junction — the gap issues 149 and 150 exist to paper over downstream.
+// Close it at the source: stamp the location owner into the junction as the
+// lead is created. Those nets stay in place (they still cover 9,242 historical
+// blanks and anything a creation hook can't reach) — this just means they fire
+// far less often.
+//
+// assigned_via is always 'location_owner': a Jobber client carries no
+// project_type, so resolveLeadAssignees would collapse to the owner anyway, and
+// a per-lead resolver across a bulk import is thousands of reads for a foregone
+// conclusion. We stamp the owner directly instead.
+//
+// THE GUARD (belt and braces). upsertLead re-enters on EVERY webhook UPDATE
+// (CLIENT_UPDATE, REQUEST_UPDATE), not only creation. An ungated junction write
+// would re-stamp over a manual pick or issue 150's send-time resolution on
+// every Jobber change — the blanket-stamp bug reborn. So callers invoke this
+// ONLY on the created / blank-owner branches, AND it writes only when the
+// junction is still empty. Fail-soft throughout: a missing migration or a
+// racing write must never cost the caller the lead row it just committed.
+async function stampOwnerToLeadJunctionIfEmpty(
+  leadId: string,
+  ownerId: string | null | undefined,
+): Promise<void> {
+  if (!ownerId) return
+  try {
+    const existing = await getLeadAssigneeIds(leadId)
+    if (existing.length > 0) return // a manual pick / prior resolution owns it — never clobber
+    const { error } = await supabaseService.from('lead_assignees').upsert(
+      { lead_id: leadId, hub_user_id: ownerId, assigned_via: 'location_owner' },
+      { onConflict: 'lead_id,hub_user_id', ignoreDuplicates: true },
+    )
+    if (error) throw new Error(error.message)
+  } catch (err: any) {
+    console.error(
+      `[jobber-import] lead_assignees seed failed for lead ${leadId} (issue 153) — ${err?.message || err}`,
+    )
+  }
+}
+
 // Execute the adoption. Returns null when the candidate turned out to be
 // unusable (vanished, or linked by a racing writer) — the caller then
 // falls through to the normal insert.
@@ -791,9 +834,13 @@ async function adoptLead(args: {
   }
   // Same "never orphaned" guarantee the insert path gives — but only when
   // the row has no owner yet; an existing assignment is the owner's.
+  let ownerForJunction: string | null = null
   if (isBlank(row.assigned_to)) {
     const primaryOwner = await getPrimaryOwnerForLocation(location_uuid)
-    if (primaryOwner?.id) patch.assigned_to = primaryOwner.id
+    if (primaryOwner?.id) {
+      patch.assigned_to = primaryOwner.id
+      ownerForJunction = primaryOwner.id // issue 153 — seed the junction too, after the update lands
+    }
   }
   // Deliberately NOT set: import_source, source, request_details, and
   // `paused`. The first three keep the row's web-form provenance intact.
@@ -828,6 +875,13 @@ async function adoptLead(args: {
     }
     throw new Error(updErr.message)
   }
+
+  // issue 153 — same treatment as the insert branch: a freshly-adopted lead
+  // that had no owner gets the location owner in the junction, not just
+  // leads.assigned_to. Gated on the blank-owner fill above AND (inside the
+  // helper) an empty junction — an adopted intake lead already carries its
+  // resolved assignees and must be left alone.
+  await stampOwnerToLeadJunctionIfEmpty(row.id, ownerForJunction)
 
   return { id: row.id, created: false, stage: (row.stage as string | null) ?? null }
 }
@@ -966,6 +1020,10 @@ export async function upsertLead(
     }
     throw new Error(error.message)
   }
+  // issue 153 — the row exists now, so stamp the owner into the junction. Only
+  // reached on a genuine insert (created===true); the dup-recovery branch above
+  // returns the winner as created:false and never lands here.
+  await stampOwnerToLeadJunctionIfEmpty(data.id, primaryOwner?.id)
   return { id: data.id, created: true, stage: data.stage as string | null }
 }
 
