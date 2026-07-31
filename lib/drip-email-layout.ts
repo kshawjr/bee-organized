@@ -23,13 +23,30 @@
 // does not re-render, convert, or add tokens.
 // ─────────────────────────────────────────────────────────────
 
-// The live beeorganized.com header logo — the gold bee mark, transparent PNG,
-// served from the brand's own Shopify CDN. Absolute HTTPS, not an attachment or
-// data URI, per #90. Transparent background means it survives a client's
-// dark-mode inversion (gold-on-dark stays visible) rather than becoming a gold
-// bee trapped on a white tile.
-export const DRIP_LOGO_URL =
-  'https://beeorganized.com/cdn/shop/files/Bee-300x211-1.png?v=1740006486'
+// The gold bee mark — the SAME transparent PNG the brand site uses, but
+// SELF-HOSTED in this app's public/ dir rather than hot-linked off
+// beeorganized.com's Shopify CDN. Mail clients re-fetch the logo on every open,
+// so a hot-link would break every drip ever sent (including ones already in
+// inboxes) the day the site is redesigned or the CDN path changes. Serving it
+// from our own stable origin removes that dependency.
+//
+// Absolute HTTPS (built from the app origin below), not an attachment or data
+// URI, per #90. Transparent background means it survives a client's dark-mode
+// inversion (gold-on-dark stays visible) rather than becoming a gold bee
+// trapped on a white tile.
+export const DRIP_LOGO_PATH = '/bee-organized-logo.png'
+
+// Build the absolute logo URL from the app origin. NEXT_PUBLIC_APP_URL is the
+// stable, non-SSO custom domain (see lib/internal-origin.ts); NEXT_PUBLIC_SITE_URL
+// is the same domain under an alternate key. Email needs an ABSOLUTE url, so if
+// neither is set we fall back to the root-relative path — it won't load in a
+// mail client (the alt text + wordmark still render), but it never resurrects a
+// third-party CDN dependency. Resolved at render time so a deploy that sets the
+// env doesn't require a rebuild of this constant.
+export function resolveDripLogoUrl(env: NodeJS.ProcessEnv = process.env): string {
+  const base = (env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_SITE_URL || '').replace(/\/+$/, '')
+  return base ? `${base}${DRIP_LOGO_PATH}` : DRIP_LOGO_PATH
+}
 
 // Brand teal = ui/tokens GREEN_FILL (hive token set accent.fg — the site's own
 // deep teal). Closest existing brand colour to the reference's teal band, and
@@ -152,6 +169,7 @@ function footerSegments(ctx: BrandedEmailContext): {
 
 // ── HTML ──────────────────────────────────────────────────────────────────
 export function buildBrandedDripHtml(renderedBody: string, ctx: BrandedEmailContext): string {
+  const logoUrl = resolveDripLogoUrl()
   const reviewsLink = ctx.reviews_link?.trim() || null
   const addReviewsLine = reviewsLink && !bodyHasReviewsLink(renderedBody, reviewsLink)
 
@@ -191,7 +209,7 @@ export function buildBrandedDripHtml(renderedBody: string, ctx: BrandedEmailCont
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="bo-card" style="width:600px;max-width:600px;background:#ffffff;border-radius:4px;overflow:hidden;">
           <tr>
             <td align="center" style="padding:36px 40px 4px;background:#ffffff;">
-              <img src="${DRIP_LOGO_URL}" width="120" height="84" alt="Bee Organized" style="display:block;border:0;outline:none;text-decoration:none;width:120px;height:auto;">
+              <img src="${logoUrl}" width="120" height="84" alt="Bee Organized" style="display:block;border:0;outline:none;text-decoration:none;width:120px;height:auto;">
               <div style="font-family:Georgia,'Times New Roman',serif;font-size:23px;letter-spacing:3px;color:${DRIP_BRAND_TEAL};padding-top:16px;">BEE ORGANIZED</div>
               <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:${DRIP_BRAND_GOLD_INK};padding-top:6px;">Simplify Your Hive</div>
             </td>

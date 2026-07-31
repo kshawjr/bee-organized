@@ -5,16 +5,30 @@
 // and a missing optional token degrades to nothing rather than a raw {{token}}.
 
 import { describe, it, expect } from 'vitest'
+import { afterEach, beforeEach } from 'vitest'
 import {
   buildBrandedDripHtml,
   buildBrandedDripText,
   linkifyLine,
-  DRIP_LOGO_URL,
+  resolveDripLogoUrl,
+  DRIP_LOGO_PATH,
   DRIP_BRAND_TEAL,
   DRIP_WEBSITE_URL,
   DRIP_WEBSITE_LABEL,
   REVIEWS_LINE_TEXT,
 } from './drip-email-layout'
+
+// The self-hosted logo URL is built from the app origin at render time. Pin a
+// known origin for the tests so the src is deterministic; restore afterwards.
+const APP_ORIGIN = 'https://beehive.beeorganized.com'
+const savedEnv = { app: process.env.NEXT_PUBLIC_APP_URL, site: process.env.NEXT_PUBLIC_SITE_URL }
+beforeEach(() => {
+  process.env.NEXT_PUBLIC_APP_URL = APP_ORIGIN
+})
+afterEach(() => {
+  process.env.NEXT_PUBLIC_APP_URL = savedEnv.app
+  process.env.NEXT_PUBLIC_SITE_URL = savedEnv.site
+})
 
 const ctx = {
   location_name: 'Boulder',
@@ -46,12 +60,27 @@ Thank you,
 Sarah Mitchell`
 
 describe('branded drip wrapper — chrome', () => {
-  it('embeds the absolute HTTPS logo with real alt text (not a data URI / attachment)', () => {
+  it('embeds the self-hosted logo as an absolute HTTPS URL off the app origin, real alt text (not a data URI / CDN hot-link)', () => {
     const html = buildBrandedDripHtml(BODY_NO_REVIEWS, ctx)
-    expect(html).toContain(`src="${DRIP_LOGO_URL}"`)
-    expect(DRIP_LOGO_URL.startsWith('https://')).toBe(true)
+    const expectedUrl = `${APP_ORIGIN}${DRIP_LOGO_PATH}`
+    expect(html).toContain(`src="${expectedUrl}"`)
+    expect(expectedUrl.startsWith('https://')).toBe(true)
+    // Self-hosted: never the third-party Shopify CDN, never a data URI.
     expect(html).not.toContain('data:image')
+    expect(html).not.toContain('cdn/shop')
+    expect(html).not.toContain('beeorganized.com/cdn')
     expect(html).toMatch(/alt="Bee Organized"/)
+  })
+
+  it('resolveDripLogoUrl: NEXT_PUBLIC_APP_URL wins, trailing slash trimmed, falls back to SITE_URL then the bare path', () => {
+    expect(resolveDripLogoUrl({ NEXT_PUBLIC_APP_URL: 'https://a.example.com/' } as any)).toBe(
+      `https://a.example.com${DRIP_LOGO_PATH}`,
+    )
+    expect(resolveDripLogoUrl({ NEXT_PUBLIC_SITE_URL: 'https://b.example.com' } as any)).toBe(
+      `https://b.example.com${DRIP_LOGO_PATH}`,
+    )
+    // Neither set → root-relative path, never a third-party CDN.
+    expect(resolveDripLogoUrl({} as any)).toBe(DRIP_LOGO_PATH)
   })
 
   it('is table-based with the wordmark and a max-width single column', () => {
