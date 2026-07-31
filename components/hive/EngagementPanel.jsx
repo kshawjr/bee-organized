@@ -71,6 +71,7 @@ import Timeline from './shared/Timeline'
 import CardTabs from './shared/CardTabs'
 import InitialsAvatar from './shared/InitialsAvatar'
 import AssigneeCorner from './shared/AssigneeCorner'
+import AssigneeSyncStatus from './shared/AssigneeSyncStatus'
 import { MicroLabel, ActionRow, actionBtn, metaValueBtn } from './shared/cardKit'
 import { metaRowStyle, metaIconStyle, metaValueStyle, META_ICON } from './shared/metaRow'
 import { formatLeadAddress } from '@/lib/lead-address'
@@ -206,6 +207,10 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
   // state instantly (ClosedSummary hides, Reopen item drops) while the
   // server re-derives the open stage; a failure rolls it back.
   const [reopening, setReopening] = useState(false)
+  // issue 148 — the latest assignee → Jobber sync outcome, lifted from the
+  // AssigneeCorner toggle. Drives the inline status line under the picker;
+  // null = nothing to say (silent).
+  const [assignSync, setAssignSync] = useState(null)
   const nowMs = Date.now()
 
   const reducedMotion = useReducedMotion()
@@ -215,7 +220,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
 
   useEffect(() => {
     let dead = false
-    setData(null); setLoadErr(null)
+    setData(null); setLoadErr(null); setAssignSync(null) // issue 148 — clear stale sync note on record switch
     fetch(`/api/engagements/${engagementId}`)
       .then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `HTTP ${r.status}`); return r.json() })
       .then(d => {
@@ -882,6 +887,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                 mode="toggle"
                 jobberConnected={!!client?.jobber_connected}
                 onChange={next => setData(d => d ? { ...d, assignees: next } : d)}
+                onJobberSync={setAssignSync}
                 setToast={setToast}
                 readOnly={readOnly}
               />
@@ -895,6 +901,10 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
               <RecordMenu items={menuItems} ariaLabel="Engagement actions" />
             )}
           </div>
+          {/* issue 148 — assignee → Jobber status. Rendered directly under
+              the identity row that holds the AssigneeCorner picker; silent on
+              a clean push, speaks up only on a failed leg or unmapped people. */}
+          <AssigneeSyncStatus sync={assignSync} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
             <span title={displayTitle(eng)} style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, letterSpacing: T.type.trackTitle, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {displayTitle(eng)}

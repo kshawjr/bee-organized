@@ -53,6 +53,7 @@ export default function AssigneeCorner({
   mode = 'put',
   jobberConnected = false,
   onChange = () => {},
+  onJobberSync = () => {},
   setToast = () => {},
   readOnly = false,
   size = T.avatar.corner,
@@ -110,6 +111,12 @@ export default function AssigneeCorner({
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
       onChange(Array.isArray(j.assignees) ? j.assignees : [])
+      // issue 148 — lift the Jobber-sync outcome so the parent can surface a
+      // status line under the picker. Only the engagement (toggle) route
+      // drives a Jobber crew push and returns jobber_sync; the leads (put)
+      // route never does, so clear it there. null = latest attempt had
+      // nothing to say (silent).
+      onJobberSync(mode === 'toggle' ? (j.jobber_sync ?? null) : null)
       const label = user.name || user.email || 'member'
       // Only the Jobber-driven engagement route earns the internal-only note.
       const unmappedNote = mode === 'toggle' && adding && jobberConnected && !user.jobberUserId
@@ -117,6 +124,9 @@ export default function AssigneeCorner({
         : ''
       setToast({ kind: 'success', msg: `${adding ? 'Assigned' : 'Unassigned'} ${label}${unmappedNote}` })
     } catch (e) {
+      // The write itself failed — Jobber was never reached with a new set, so
+      // drop any stale sync note (issue 148); the error toast owns this case.
+      onJobberSync(null)
       setToast({ kind: 'error', msg: `Assign ${adding ? 'add' : 'remove'} failed: ${e.message}` })
     } finally { setBusyId(null) }
   }
