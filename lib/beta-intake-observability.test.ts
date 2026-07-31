@@ -286,6 +286,80 @@ describe('intake observability — success rows', () => {
   })
 })
 
+// ═══ B. unknown-key detection (#108) ═══════════════════════
+// A Make mapping rename (`zipcode` for `zip`) is dropped at the destructure
+// with no signal — the lead lands with that field blank. Surface the dropped
+// KEY NAMES (never their values) on the sync_log row, same presence-signal
+// idiom as desc_key=/no_description=. KEY NAMES ONLY is the load-bearing
+// invariant: a key called `zipcode` is not PII; its value is.
+describe('intake unknown-key detection (#108)', () => {
+  it('unknown top-level key → the key NAME appears in the success sync_log detail', async () => {
+    h.enqueue('locations', LOC)
+    h.enqueue('leads', [])
+    h.enqueue('leads', [])
+    h.enqueue('leads', { id: 'lead-uk-1' })
+    // `zipcode` is the exact drift the ticket calls out — a rename of `zip`.
+    const res = await POST(makeReq(submission({ zipcode: '80301' })))
+    expect(res.status).toBe(200)
+    expect(lastLog().status).toBe('success')
+    expect(lastLog().message).toContain('unknown_keys=zipcode')
+  })
+
+  it('known keys only → NO unknown_keys token at all', async () => {
+    h.enqueue('locations', LOC)
+    h.enqueue('leads', [])
+    h.enqueue('leads', [])
+    h.enqueue('leads', { id: 'lead-uk-2' })
+    // Every field here is a recognized key (incl. the description aliases).
+    const res = await POST(makeReq(submission({
+      address: '1 Pearl St', city: 'Boulder', state: 'CO', zip: '80302',
+      project_type: 'organizing', message: 'help please', source: 'website',
+      preferred_contact: 'Email', metadata: { utm: 'x' }, request_details: 'ok',
+    })))
+    expect(res.status).toBe(200)
+    expect(lastLog().message).not.toContain('unknown_keys=')
+  })
+
+  it('unknown key on a REJECTED request → still logged on the error row', async () => {
+    // Missing location_slug rejects at the validation gate (no DB touched),
+    // but the unknown key must still surface on that error row.
+    const res = await POST(makeReq(submission({ location_slug: undefined, zipcode: '80301' })))
+    expect(res.status).toBe(400)
+    expect(lastLog().status).toBe('error')
+    expect(lastLog().message).toContain('error=location_slug required')
+    expect(lastLog().message).toContain('unknown_keys=zipcode')
+  })
+
+  it('unknown key with a PII-shaped value → the NAME is logged, the VALUE is not', async () => {
+    h.enqueue('locations', LOC)
+    h.enqueue('leads', [])
+    h.enqueue('leads', [])
+    h.enqueue('leads', { id: 'lead-uk-3' })
+    const res = await POST(makeReq(submission({
+      backup_email: 'leaked@pii.example',
+      mobile: '555-867-5309',
+    })))
+    expect(res.status).toBe(200)
+    const msg = lastLog().message
+    // Names present…
+    expect(msg).toContain('unknown_keys=backup_email,mobile')
+    // …values absent. This is the PII invariant.
+    expect(msg).not.toContain('leaked@pii.example')
+    expect(msg).not.toContain('867-5309')
+  })
+
+  it('merge (success) path carries the token too — resubmission drift is visible', async () => {
+    h.enqueue('locations', LOC)
+    h.enqueue('leads', [storedLead()])                 // solid email match
+    h.enqueue('lead_drip_progress', { id: 'prog-1' })  // already enrolled
+    const res = await POST(makeReq(submission({ zipcode: '80301' })))
+    const body = await res.json()
+    expect(body.merged).toBe(true)
+    expect(lastLog().message).toContain('merged (matched on email)')
+    expect(lastLog().message).toContain('unknown_keys=zipcode')
+  })
+})
+
 // ═══ C. email-or-phone policy ══════════════════════════════
 describe('intake email-or-phone — validation', () => {
   it('neither email nor usable phone → 400 email_or_phone_required (and logged)', async () => {

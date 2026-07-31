@@ -167,6 +167,39 @@ export async function POST(req: NextRequest) {
   if (!requestDetails) {
     console.warn('[intake] payload has no description under any accepted key (message/description/request_details)')
   }
+
+  // ─── Unknown-key detection ────────────────────────────────────
+  // The destructure above names a FIXED set of keys; anything else a
+  // producer sends — a Make mapping rename like `zipcode` for `zip` — is
+  // silently dropped and the lead lands with that field blank, no signal.
+  // Surface the dropped KEY NAMES (never their values) on the sync_log row
+  // so the drift is diagnosable straight off the Webhooks tab, exactly like
+  // the desc_key=/no_description= presence tokens. This is the one gap the
+  // #108 scout found: a Make rename would vanish, which is how the zip field
+  // went unnoticed until someone happened to look.
+  //
+  // KEY NAMES ONLY — a key called `zipcode` is not PII; its VALUE (an email,
+  // a phone) is. We join the names and never touch body[k].
+  //
+  // NOTE: `metadata` is a passthrough object (stored verbatim as
+  // leads.metadata), so nested drift INSIDE it is deliberately not inspected
+  // — only TOP-LEVEL keys, which is the drift that matters: a renamed
+  // top-level form field is what lands nowhere.
+  const KNOWN_INTAKE_KEYS = new Set([
+    'location_slug', 'full_name', 'email', 'phone', 'address', 'city',
+    'state', 'zip', 'project_type', 'message', 'preferred_contact',
+    'source', 'metadata',
+    // description aliases the DESC_KEYS loop above already accepts.
+    'description', 'request_details',
+  ])
+  const unknownKeys =
+    body && typeof body === 'object'
+      ? Object.keys(body).filter((k) => !KNOWN_INTAKE_KEYS.has(k))
+      : []
+  const unknownKeysToken = unknownKeys.length
+    ? ` unknown_keys=${unknownKeys.join(',')}`
+    : ''
+
   // leads.source answers "how did the client hear about us" in the admin
   // lead_sources vocabulary. Producers send per-form slugs — normalize
   // here (the ONLY seam every stored value passes through) so the picker
@@ -196,21 +229,21 @@ export async function POST(req: NextRequest) {
   if (!location_slug || typeof location_slug !== 'string') {
     await logIntake({
       status: 'error', landed: 'na', locationSlug: null,
-      entityId: emailEntity, detail: 'error=location_slug required',
+      entityId: emailEntity, detail: `error=location_slug required${unknownKeysToken}`,
     })
     return NextResponse.json({ error: 'location_slug required' }, { status: 400 })
   }
   if (!full_name || typeof full_name !== 'string' || !full_name.trim()) {
     await logIntake({
       status: 'error', landed: 'na', locationSlug: null,
-      entityId: emailEntity, detail: 'error=full_name required',
+      entityId: emailEntity, detail: `error=full_name required${unknownKeysToken}`,
     })
     return NextResponse.json({ error: 'full_name required' }, { status: 400 })
   }
   if (!validEmail && !hasPhone) {
     await logIntake({
       status: 'error', landed: 'na', locationSlug: null,
-      entityId: emailEntity, detail: 'error=email_or_phone_required',
+      entityId: emailEntity, detail: `error=email_or_phone_required${unknownKeysToken}`,
     })
     return NextResponse.json({ error: 'email_or_phone_required' }, { status: 400 })
   }
@@ -226,7 +259,7 @@ export async function POST(req: NextRequest) {
     await logIntake({
       status: 'error', landed: 'na', locationSlug: null,
       entityId: location_slug,
-      detail: `error=location_lookup_failed slug=${location_slug} — ${locErr.message}`,
+      detail: `error=location_lookup_failed slug=${location_slug} — ${locErr.message}${unknownKeysToken}`,
     })
     return NextResponse.json(
       { error: 'location_lookup_failed', detail: locErr.message },
@@ -239,7 +272,7 @@ export async function POST(req: NextRequest) {
     await logIntake({
       status: 'error', landed: 'na', locationSlug: null,
       entityId: location_slug,
-      detail: `error=location_not_found slug=${location_slug} — no location with this slug (check the Make location mapping)`,
+      detail: `error=location_not_found slug=${location_slug} — no location with this slug (check the Make location mapping)${unknownKeysToken}`,
     })
     return NextResponse.json({ error: 'location_not_found' }, { status: 400 })
   }
@@ -291,6 +324,9 @@ export async function POST(req: NextRequest) {
         // #86 — the resubmission notification builds the same /clients/<id>
         // deep-link the create path does, from the same origin source.
         reqOrigin: req.nextUrl?.origin ?? null,
+        // #108 — same unknown-key signal on the merge (success) path: a
+        // returning client's resubmission can drift its mapping too.
+        unknownKeysToken,
       })
     }
 
@@ -358,7 +394,7 @@ export async function POST(req: NextRequest) {
     await logIntake({
       status: 'error', landed: 'na', locationSlug: location.location_id,
       entityId: emailEntity,
-      detail: `error=insert_failed — ${insertErr?.message || 'insert returned no row'}`,
+      detail: `error=insert_failed — ${insertErr?.message || 'insert returned no row'}${unknownKeysToken}`,
     })
     return NextResponse.json(
       { error: 'insert_failed', detail: insertErr?.message },
@@ -642,6 +678,10 @@ export async function POST(req: NextRequest) {
       // presence-signals — a normal `message` lead carries neither.
       (!requestDetails ? ' no_description=true' : '') +
       (descKey && descKey !== 'message' ? ` desc_key=${descKey}` : '') +
+      // Producer-mapping drift: names the top-level keys we received but
+      // don't recognize (KEY NAMES ONLY, never values). A clean payload
+      // carries no token.
+      unknownKeysToken +
       // Only when muted, so the token's presence is the signal. Without it a
       // muted location reads as `notified=0`, which is indistinguishable from
       // "nobody was subscribed" — the ambiguity this flag has to avoid.
@@ -716,8 +756,11 @@ async function mergeResubmission(args: {
   // Request origin for the notification deep-link (#86). Null degrades to a
   // button-less email / link-less Slack card, exactly like the create path.
   reqOrigin: string | null
+  // #108 — pre-rendered ` unknown_keys=<names>` token (or '' when clean),
+  // computed once in POST. KEY NAMES ONLY — never values.
+  unknownKeysToken: string
 }): Promise<NextResponse> {
-  const { matched, matchedOn, location, submittedName, submission, source, now, reqOrigin } = args
+  const { matched, matchedOn, location, submittedName, submission, source, now, reqOrigin, unknownKeysToken } = args
   const warnings: string[] = [...args.baseWarnings]
 
   const incoming: Record<string, string | null> = {
@@ -1044,6 +1087,8 @@ async function mergeResubmission(args: {
       // submission.message is the alias-resolved description (see POST) —
       // same presence-signal as the create path.
       (!submission.message?.trim() ? ' no_description=true' : '') +
+      // #108 — producer-mapping drift, key names only (see POST).
+      unknownKeysToken +
       (dripSkippedReason ? ` drip_skipped_reason=${dripSkippedReason}` : '') +
       (warnings.length ? ` — warnings: ${warnings.join('; ')}` : ''),
   })
