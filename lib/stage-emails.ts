@@ -25,6 +25,7 @@ import { sendEmail, renderTemplate, type RenderContext } from './resend'
 import { blockedOnMissingRate } from './rate-guard'
 import { resolveOwnerBookingLink, blockedOnMissingBookingLink } from './booking-link'
 import { bodyToHtml } from './drip-send'
+import { buildBrandedDripHtml, buildBrandedDripText, type BrandedEmailContext } from './drip-email-layout'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -56,6 +57,47 @@ const ALL_STAGE_EMAIL_KEYS = [
   ...ESTIMATE_ORGANIZING_TRIGGERS,
   ...ESTIMATE_MOVING_TRIGGERS,
 ].map(t => t.key)
+
+// ──────────────────────────────────────────────────────────────────────
+// Branded-wrapper eligibility (#114)
+// ──────────────────────────────────────────────────────────────────────
+// The four opp_*_estimate follow-ups are TRANSACTIONAL — each follows up on
+// the recipient's own estimate/inquiry — so they get the #90 Bee Organized
+// branded wrapper (logo header, single column, teal footer band), matching
+// drips. They need no CAN-SPAM marketing footer.
+//
+// The two opp_closed_job_* templates are DELIBERATELY excluded: the CAN-SPAM
+// tripwire classifies them COMMERCIAL (opp_closed_job_3mo = "1 Free Hour" offer;
+// opp_closed_job_12mo = year-later re-solicitation). Wrapping a footer-less
+// commercial email in branded chrome would make it *look* like it carries an
+// official footer while remaining non-compliant — worse than plain. They keep
+// the unbranded bodyToHtml path until #115 lands the postal-address +
+// unsubscribe footer. (welcome-email is likewise commercial, but it lives in
+// lib/welcome-email.ts and never routes through here.)
+const TRANSACTIONAL_STAGE_EMAIL_KEYS = new Set(
+  [...ESTIMATE_ORGANIZING_TRIGGERS, ...ESTIMATE_MOVING_TRIGGERS].map(t => t.key),
+)
+
+// Choose the HTML/text rendering for a stage email. Transactional estimate
+// follow-ups get the branded wrapper; commercial closed-job templates get the
+// plain bodyToHtml path (byte-identical to pre-#114). Pure + exported so the
+// wrap/no-wrap split is unit-testable without the send-time DB plumbing.
+//
+// bodyToHtml is NOT modified here (#90): welcome + closed-job output stays
+// byte-identical.
+export function renderStageEmailContent(
+  stageEmailKey: string,
+  renderedBody: string,
+  brandCtx: BrandedEmailContext,
+): { html: string; text: string } {
+  if (TRANSACTIONAL_STAGE_EMAIL_KEYS.has(stageEmailKey)) {
+    return {
+      html: buildBrandedDripHtml(renderedBody, brandCtx),
+      text: buildBrandedDripText(renderedBody, brandCtx),
+    }
+  }
+  return { html: bodyToHtml(renderedBody), text: renderedBody }
+}
 
 // ──────────────────────────────────────────────────────────────────────
 // Drip category lookup: project_type → 'general' | 'move'
@@ -314,14 +356,23 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
   }
 
   const rendered = renderTemplate({ subject: tpl.subject, body: tpl.body }, ctx)
-  const html = bodyToHtml(rendered.body)
+
+  // #114 — wrap the four transactional estimate follow-ups in the branded
+  // layout; commercial closed-job templates keep the plain path. The wrapper
+  // reads the location chrome (name/phone/reviews) off the same resolved values
+  // the body tokens use, and never re-renders tokens.
+  const { html, text } = renderStageEmailContent(row.stage_email_key, rendered.body, {
+    location_name: loc.name,
+    location_phone: loc.phone,
+    reviews_link: loc.reviews_link,
+  })
 
   const result = await sendEmail({
     locationId: loc.id,
     to: lead.email.trim(),
     subject: rendered.subject || `(no subject)`,
     html,
-    text: rendered.body,
+    text,
     // Notebook context (#103): stage emails share the drip's sendEmail path and
     // had the same null email_kind / lead_id gap. Stamp it so it isn't the one
     // outbound rail still invisible to the notification_log queries.

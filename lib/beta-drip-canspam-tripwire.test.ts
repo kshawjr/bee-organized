@@ -19,6 +19,20 @@
 //     opp_closed_job_12mo  year-later re-solicitation (no lexical marker,
 //                          so it is hash-pinned: ANY copy edit trips)
 //
+// BRANDED-WRAPPER SPLIT (#114, tip a668be3 + this change): the #90 Bee
+// Organized wrapper (lib/drip-email-layout.ts) now wraps the four
+// TRANSACTIONAL estimate follow-ups at the stage-email send site
+// (lib/stage-emails.ts renderStageEmailContent) — opp_organizing_estimate_3d,
+// opp_organizing_estimate_30d, opp_moving_estimate_3d, opp_moving_estimate_30d
+// — plus the drip steps (lib/drip-send.ts). The three COMMERCIAL emails are
+// DELIBERATELY left on the plain unbranded bodyToHtml path: wrapping a
+// footer-less commercial email in branded chrome would make it *look* like it
+// carries an official footer while remaining non-compliant. welcome,
+// opp_closed_job_3mo, and opp_closed_job_12mo wait on #115 (postal-address +
+// unsubscribe footer). NOTE: this tripwire hashes the seed BODIES, so an HTML
+// wrapper change does NOT trip it — the split is enforced in code + guarded by
+// lib/beta-stage-email-wrapper.test.ts, not here. This comment is the record.
+//
 // Deliberately NOT built yet (Kevin 7/24: tripwire only, no footers):
 // the three send rails append no footer and mint no unsubscribe token.
 // That exposure is pinned too — the day footer machinery lands, this
