@@ -21,6 +21,15 @@
 //     family's bg/text), name + location beside it.
 //   · a row click opens the SAME ClientProfile the directory opens
 //     (onOpenClient), threaded up through HiveShell.
+//
+// PER-GROUP CARD NAV (issue 134, Ankur): a row click hands its GROUP's displayed
+// row ids (the A-Z-within-band order on screen) as the profile's siblings,
+// so the card's ‹ › chevrons page card-to-card WITHIN the status band and
+// stop at its ends. Group-scoped on purpose — bands collapse independently,
+// so walking across a boundary would land inside a band that isn't open.
+// Siblings must always be the DISPLAYED order: an earlier build passed the
+// raw filtered order and the chevrons walked a different sequence than the
+// screen showed.
 //   · location names resolve from the `locations` roster already loaded for
 //     the app switcher — no new query.
 // ─────────────────────────────────────────────────────────────
@@ -82,9 +91,6 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
         || (p.email || '').toLowerCase().includes(q)
         || (p.phone || '').toLowerCase().includes(q))
     : classified
-
-  // The full visible id order powers the ClientProfile prev/next chevrons.
-  const orderedIds = visible.map(({ p }) => p.id)
 
   // Bucket into status → rows, name-sorted within each group.
   const groups = useMemo(() => {
@@ -152,7 +158,7 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
                 {rows.map(p => {
                   const loc = locName(p.locationId)
                   return (
-                    <div key={p.id} className="bee-grp-row" onClick={() => onOpenClient(p.id, orderedIds)}
+                    <div key={p.id} className="bee-grp-row" onClick={() => onOpenClient(p.id, rows.map(r => r.id))}
                       style={{ display: 'flex', alignItems: 'center', gap: '12px', background: T.surface.raised, border: T.border.thin, borderRadius: T.radius.inset, padding: '11px 14px', cursor: 'pointer', transition: 'border-color 0.15s' }}>
                       <InitialsAvatar name={p.name} bg={fam.bg} text={fam.text} />
                       <div style={{ flex: 1, minWidth: 0 }}>

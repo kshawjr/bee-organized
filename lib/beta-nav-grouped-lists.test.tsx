@@ -292,3 +292,61 @@ describe('ClientGroupedList — grouped by status, collapsible', () => {
     expect(src).toContain('CLIENT_STATUS_META')
   })
 })
+
+// ── 6) per-group card navigation (#134) ─────────────────────────
+// A row click hands the profile its GROUP's displayed row ids as siblings —
+// the chevrons must walk the on-screen order (A-Z within the band) and stop
+// at the band's edge. The regression this pins: siblings used to be the raw
+// filtered order, so ‹ › landed on a different client than the list showed.
+describe('ClientGroupedList — per-group prev/next siblings (#134)', () => {
+  // Raw order deliberately interleaves groups AND reverses the alphabet, so
+  // "raw filtered order" and "displayed order" disagree everywhere.
+  const NAV_PEOPLE = [
+    person({ id: 'new-zed', name: 'Zed Newman', created: daysAgo(1) }),                     // New
+    person({ id: 'past-pete', name: 'Pete Past', paidAmount: 900, created: daysAgo(400) }), // Past client
+    person({ id: 'new-ann', name: 'Ann Field', created: daysAgo(2) }),                      // New — displays BEFORE Zed
+  ]
+
+  const rowByName = (host: Element, band: string, name: string) =>
+    Array.from(rowsInBand(host, band)).find(r => (r.textContent || '').includes(name)) as HTMLElement
+
+  it('siblings are the DISPLAYED order (A-Z within the band), not the raw filtered order', async () => {
+    const onOpen = vi.fn()
+    const { host, unmount } = await mount(
+      <ClientGroupedList people={NAV_PEOPLE as any} engagements={[]} locations={LOCATIONS as any} onOpenClient={onOpen} />
+    )
+    await clickEl(bandHeader(host, 'New')!)
+    await clickEl(rowByName(host, 'New', 'Zed Newman'))
+    // raw order puts Zed first; the screen (and so the chevrons) put Ann first
+    expect(onOpen).toHaveBeenCalledWith('new-zed', ['new-ann', 'new-zed'])
+    await unmount()
+  })
+
+  it('siblings stop at the group boundary — a New row never pages into Past client', async () => {
+    const onOpen = vi.fn()
+    const { host, unmount } = await mount(
+      <ClientGroupedList people={NAV_PEOPLE as any} engagements={[]} locations={LOCATIONS as any} onOpenClient={onOpen} />
+    )
+    await clickEl(bandHeader(host, 'New')!)
+    await clickEl(rowByName(host, 'New', 'Ann Field'))
+    const sibs = onOpen.mock.calls[0][1]
+    expect(sibs).toEqual(['new-ann', 'new-zed'])
+    expect(sibs).not.toContain('past-pete')
+    await unmount()
+  })
+
+  it('a one-row group hands a length-1 list; HiveShell nulls it so the chevrons hide (source pin)', async () => {
+    const onOpen = vi.fn()
+    const { host, unmount } = await mount(
+      <ClientGroupedList people={NAV_PEOPLE as any} engagements={[]} locations={LOCATIONS as any} onOpenClient={onOpen} />
+    )
+    await clickEl(bandHeader(host, 'Past client')!)
+    await clickEl(rowByName(host, 'Past client', 'Pete Past'))
+    expect(onOpen).toHaveBeenCalledWith('past-pete', ['past-pete'])
+    // HiveShell's openClient drops a ≤1 list to null — ClientProfile hides
+    // the chevrons entirely on null siblings (pinned in beta-card-layout).
+    const shell = readFileSync('components/hive/HiveShell.jsx', 'utf8')
+    expect(shell).toContain('Array.isArray(siblings) && siblings.length > 1 ? siblings : null')
+    await unmount()
+  })
+})
