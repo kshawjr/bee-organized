@@ -53,7 +53,7 @@ describe('feedback composer affordance (franchise mount only)', () => {
     expect(franchiseMount).toContain("onReportFeedback={() => setShowFeedback('submit')}")
     // Reuse contract: showFeedback mounts the one existing modal; the
     // 'submit' intent rides through as initialTab.
-    expect(beehub).toContain("{showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} viewAsUserId={viewAsUser?.id || null} onClose={() => setShowFeedback(false)} />}")
+    expect(beehub).toContain("{showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} viewAsUserId={viewAsUser?.id || null} seed={feedbackSeed} onClose={() => { setShowFeedback(false); setFeedbackSeed(null) }} />}")
   })
 
   it('the elevated admin mounts pass NO composer prop and NO location override', () => {
@@ -114,11 +114,8 @@ describe('real-session scoping unchanged (server routes)', () => {
 // the "mine" tab under view-as shows the IMPERSONATED user's items, via an
 // elevated-only ?user_id= override on GET /api/feedback.
 describe('view-as feedback identity parity (mine tab)', () => {
-  // The FeedbackModal function body (up to the next top-level component).
-  const modalSrc = beehub.slice(
-    beehub.indexOf('function FeedbackModal('),
-    beehub.indexOf('function FeedbackModal(') + 6000
-  )
+  // FeedbackModal now lives in its own module (extracted from BeeHub.jsx).
+  const modalSrc = readFileSync(join(process.cwd(), 'components/feedback/FeedbackModal.jsx'), 'utf8')
 
   it('the modal mount passes the IMPERSONATED user id (null for real sessions)', () => {
     expect(beehub).toContain('viewAsUserId={viewAsUser?.id || null}')
