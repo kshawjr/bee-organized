@@ -31011,6 +31011,61 @@ function ReportsScreen() {
   )
 }
 
+// ─── Back Office (issue 140) ───────────────────────────────────────────────
+// TWO deliberately-different screens behind ONE nav tab. screen() picks by role:
+//   · every non-super_admin → BackOfficeComingSoon (the shared placeholder)
+//   · super_admin           → BackOfficeScreen     (the build-out surface)
+// They MUST NOT render the same thing — that sameness is the issue 136 trap.
+
+// Non-super_admin audience: the shared, section-agnostic ComingSoonPlaceholder
+// (issue 139) with Back Office copy. Same header chrome as Reports so the tab
+// feels native. Owner-facing voice: "being built," never "broken."
+function BackOfficeComingSoon() {
+  return (
+    <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
+      <div style={{ background:'#1a2e2b', padding:'1.25rem 1.25rem 0' }}>
+        <h1 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'white', marginBottom:'2px' }}>🗂️ Back Office</h1>
+        <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.7)', marginBottom:'10px' }}>The behind-the-scenes side of your business — coming soon</p>
+      </div>
+
+      <div style={{ padding:'0 1.25rem 1rem' }}>
+        <ComingSoonPlaceholder
+          icon="🗂️"
+          title="Back Office"
+          body="We're building a new Back Office — one place to handle the behind-the-scenes side of running your business. It's on the way. Check back soon."
+        />
+      </div>
+    </div>
+  )
+}
+
+// super_admin only: the real build-out surface. This is where Kevin grows the
+// hiring pipeline in production over time. It renders a plainly-labeled WORK IN
+// PROGRESS scaffold from commit one — visibly distinct from the Coming Soon
+// placeholder above (different layout, WIP badge, left-aligned) so the two
+// render paths can never be mistaken for one another.
+function BackOfficeScreen() {
+  return (
+    <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
+      <div style={{ background:'#1a2e2b', padding:'1.25rem 1.25rem 0' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'2px' }}>
+          <h1 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'white' }}>🗂️ Back Office</h1>
+          <span style={{ fontSize:'10px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.12)', border:'1px solid rgba(212,160,70,0.3)', padding:'2px 8px', borderRadius:'20px', textTransform:'uppercase', letterSpacing:'0.4px' }}>Work in progress</span>
+        </div>
+        <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.7)', marginBottom:'10px' }}>Super admin build-out surface — not yet visible to owners</p>
+      </div>
+
+      <div style={{ padding:'1.25rem' }}>
+        <div style={{ border:'1px dashed rgba(26,46,43,0.3)', borderRadius:'12px', background:'white', padding:'22px 20px' }}>
+          <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'8px' }}>🚧 Back Office build zone</p>
+          <p style={{ fontSize:'13px', color:'#5a6b68', lineHeight:1.6, marginBottom:'14px' }}>This is the super-admin-only workspace for the Back Office section. The hiring pipeline and the rest of the back-office tools get built out here. Owners currently see the “coming soon” placeholder instead.</p>
+          <p style={{ fontSize:'11px', color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', fontWeight:700 }}>Nothing wired yet — placeholder scaffold</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ═══════════════════════════════════════════════════════
 //  ROOT APP - Role-aware shell
 // ═══════════════════════════════════════════════════════
@@ -32822,6 +32877,11 @@ if (Array.isArray(initialPeople)) return
     { key:'hive',     icon:'🐝', label:'Clients'    },
     { key:'partners', icon:'👥', label:'Network'},
     { key:'reports',  icon:'📊', label:'Reports' },
+    // issue 140: Back Office sits alongside Reports/Settings and is shown to
+    // EVERY role on purpose (build anticipation, don't hide). The render split
+    // lives in screen(): super_admin gets the real BackOfficeScreen build-out
+    // surface, everyone else gets the shared ComingSoonPlaceholder.
+    { key:'backoffice', icon:'🗂️', label:'Back Office' },
     { key:'settings', icon:'⚙️', label:'Settings'},
     // 'Manual' moved out of the nav — the Guide and the Manual both open
     // from the Ask Bee Hub panel footer (issue 132).
@@ -32882,6 +32942,7 @@ if (Array.isArray(initialPeople)) return
       if (activeNav === 'hive') return 'Clients'
       if (activeNav === 'partners') return 'Network'
       if (activeNav === 'reports') return 'Reports'
+      if (activeNav === 'backoffice') return 'Back Office' // issue 140
       if (activeNav === 'settings') return 'Settings'
       if (activeNav === 'admin') return role === 'super_admin' ? 'Admin' : 'Corp'
       return 'Bee Hub'
@@ -32961,7 +33022,10 @@ if (Array.isArray(initialPeople)) return
               // SettingsScreen itself allowlists the sections (owner:
               // everything; manager and lite_user: Profile only, a self-edit).
               // Don't reintroduce a nav-level role denylist for either.
-              const isLocked = (isOnboardingState && !isElevated && item.key!=='home')
+              // issue 140: Back Office is exempt from the onboarding lock too —
+              // it's meant to build anticipation, so it stays clickable (never
+              // dimmed) for every role, even mid-setup.
+              const isLocked = (isOnboardingState && !isElevated && !['home','backoffice'].includes(item.key))
               const isActive = activeNav===item.key
               return (
                 <button
@@ -33191,6 +33255,12 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
       </div>
     )
     if (activeNav==='reports') return <div style={pageStyle}><ReportsScreen /></div>
+    // issue 140: deliberate render split. super_admin lands on the real
+    // BackOfficeScreen (the build-out surface — a visibly-distinct work-in-
+    // progress stub, NOT the placeholder), every other role lands on the shared
+    // ComingSoonPlaceholder. Two paths, two different screens — the anti-#136
+    // rule: never let both paths render the same thing.
+    if (activeNav==='backoffice') return <div style={pageStyle}>{role==='super_admin' ? <BackOfficeScreen /> : <BackOfficeComingSoon />}</div>
     if (activeNav==='settings') return (
       <div style={pageStyle}>
         {/* locationId: was `locFilter==='all' ? 'loc_kc' : locFilter` — a
@@ -33408,6 +33478,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             activeNav === 'hive' ? 'Clients'
             : activeNav === 'partners' ? 'Network'
             : activeNav === 'reports' ? 'Reports'
+            : activeNav === 'backoffice' ? 'Back Office' /* issue 140 */
             : activeNav === 'settings' ? 'Settings'
             : activeNav === 'admin' ? (role === 'super_admin' ? 'Admin' : 'Corp')
             : 'Home'
@@ -33452,7 +33523,9 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             // denylist for either. Onboarding lockdown only applies to franchise
             // users mid-setup — super_admin / corporate are always elevated and
             // never "onboarding."
-            const isLocked = (isOnboardingState && !isElevated && item.key!=='home')
+            // issue 140: Back Office is exempt from the onboarding lock (see the
+            // sidebar block above) — always clickable for every role.
+            const isLocked = (isOnboardingState && !isElevated && !['home','backoffice'].includes(item.key))
             const isActive = activeNav===item.key
             return (
               <button key={item.key} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ width:'100%', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left', background:isActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>

@@ -33,6 +33,8 @@ export const ROUTE_TO_NAV = {
   contacts:'partners',
   partners:'partners',
   reports: 'reports',
+  // issue 140: Back Office is its own top-level tab, self-mapped like reports.
+  backoffice:'backoffice',
   settings:'settings',
   admin:   'admin',
   home:    'home',
@@ -45,6 +47,7 @@ export const NAV_TO_URL = {
   hive:    '/clients',
   partners:'/network',
   reports: '/reports',
+  backoffice:'/backoffice',
   settings:'/settings',
   admin:   '/admin',
 }
