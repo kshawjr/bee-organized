@@ -108,6 +108,36 @@ const TEAL = CHIP_STYLES.teal, BLUE = CHIP_STYLES.blue, AMBER = CHIP_STYLES.ambe
 
 const freshlySent = (p) => /^(REQ|JOB)-/.test(p.jobberRef || '')
 
+// Stable empty set for the settledSendIds default — a fresh new Set() per
+// render would defeat the prop's referential stability for no reason.
+const EMPTY_SET = new Set()
+
+// The after-Send waiting state (issue 155), shown in place of the row's action
+// cluster once a lead has been sent to Jobber. A card can't leave the Inbox
+// until its engagement exists, and the Jobber webhook founds that ~11s later
+// (p90 22s) — HiveShell polls for it and injects it the moment it lands, at
+// which point the row derives Active and leaves on its own. Until then this
+// tells the owner the work is done and in motion, never that anything is
+// waiting on THEM:
+//   · setting-up — we're actively watching for it (soft clock).
+//   · settled    — the poll reached its cap before the engagement landed (the
+//     rare slow tail); a calm, positive close. NEVER an error — the send
+//     genuinely succeeded, the record exists in Jobber, and the next page load
+//     shows it. Plainspoken for a non-technical, 45-65 audience: "we're on it,"
+//     not a description of the machinery.
+function SentWaiting({ settled }) {
+  return (
+    <span style={{
+      fontSize: '12px', color: T.accent.fg, fontWeight: 500, whiteSpace: 'nowrap',
+      display: 'inline-flex', alignItems: 'center', gap: '5px',
+    }}>
+      {settled
+        ? <><IconCheck size={13} /> Sent to Jobber · it’ll appear on the board shortly</>
+        : <><IconClock size={13} /> Sent to Jobber · setting up…</>}
+    </span>
+  )
+}
+
 // Origin line for a Needs-transfer row: "city, ST zip · project · from
 // global form". Each part drops out when absent (a lead may carry a zip but
 // no street, or no project_type yet).
@@ -309,7 +339,7 @@ function RowMenu({ anchorId, isMobile, onClose, children }) {
   )
 }
 
-export default function InboxScreen({ people = [], transferPeople = [], locationRequired = false, onOpenLocationPicker = null, engagements = [], locFilter = 'all', locations = [], locationUsers = [], onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, specialties = [], setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
+export default function InboxScreen({ people = [], transferPeople = [], locationRequired = false, onOpenLocationPicker = null, engagements = [], settledSendIds = EMPTY_SET, locFilter = 'all', locations = [], locationUsers = [], onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, specialties = [], setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
   // The selected location's NAME, for the New section's header. Half of why
   // the unrouted queue read as this location's leads is that the location's
   // own section wasn't labelled either — both just read as "the inbox". Null
@@ -859,10 +889,13 @@ export default function InboxScreen({ people = [], transferPeople = [], location
         )}
       </span>
     ) : null
+    // The after-Send waiting state (issue 155) replaces the row's actions once
+    // a lead is sent to Jobber. It resolves not on a timer but when the founded
+    // engagement lands (the poll injects it and the row derives out of the
+    // Inbox); settledSendIds carries the leads whose poll hit its cap, so the
+    // copy softens to the calm close instead of ever spinning forever.
     const actions = sent ? (
-      <span style={{ fontSize: '12px', color: T.accent.fg, fontWeight: 500, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-        <IconCheck size={13} /> Sent — engagement will appear on the board
-      </span>
+      <SentWaiting settled={settledSendIds.has(p.id)} />
     ) : readOnly ? null : isTransfer ? (
       /* Needs-transfer row: TWO corporate dispositions, and ONLY these — the
          normal cluster (log call, Send to Jobber, ···) stays absent because a

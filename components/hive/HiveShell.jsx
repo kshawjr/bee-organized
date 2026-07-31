@@ -31,6 +31,7 @@ import { isInboxCountable } from './shared/inboxCountable'
 import { isTerminal, CLOSED_WON } from './shared/stageConfig'
 import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters } from './shared/engagementStatus'
 import { reconcileServerRows, mergeEngagements } from './shared/engagementRevalidate'
+import { reconcileSentPolls, pollDelayForElapsed, SEND_POLL_CAP_MS } from './shared/jobberSendPoll'
 import { useEngagementsRealtime } from '@/lib/use-engagements-realtime'
 import { useStoredState } from './shared/useStoredControls'
 import { nextRecordOverlay } from './shared/hubUrl'
@@ -561,6 +562,121 @@ export default function HiveShell({
   const nowMs = Date.now()
   const openCount = openFiltered.filter(e => passesEngagementFilters(e, workFilters, nowMs)).length
 
+  // ── after-Send engagement poll (issue 155) ─────────────────────────
+  // A Send to Jobber founds the lead's engagement server-side via the Jobber
+  // webhook — an INSERT that lands ~11s later (p90 22s). Engagements realtime
+  // is UPDATE-only and the focus sweep's reconcile drops rows it doesn't
+  // already know, so nothing client-side surfaces that new engagement: the
+  // card would sit in the Inbox, stale, until a reload. So on each confirmed
+  // send we poll the SAME ?open=1 set the focus sweep fetches until the
+  // founded engagement appears, then inject it into sessionEngagements — the
+  // very seam onFounded uses to make a card appear without reload. On match
+  // the lead derives Active and leaves the Inbox (and the badge + board
+  // correct) from that one injection; on cap we settle to a calm state and let
+  // SSR-on-next-load be the backstop. The poll LOGIC lives in the pure
+  // jobberSendPoll module; this owns only the timer, the fetch, and the state.
+  //
+  // TRIGGER: jobberLinks. BeeHub stashes { jobber_client_id, … } there on
+  // EVERY confirmed send (the stale-button fix) and threads it down, so a new
+  // key is an unambiguous "a send just succeeded for this client" signal —
+  // no new callback needed. A send that already has an open engagement (a
+  // founded-not-sent panel send, or a returning client) is skipped: there is
+  // nothing to wait for, its card isn't in the Inbox.
+  const [settledSendIds, setSettledSendIds] = useState(() => new Set())
+  // clientIds already begun tracking (jobberLinks accumulates). Baselined to
+  // the keys PRESENT AT MOUNT so ONLY keys added afterward — i.e. a send that
+  // happened during this mount — ever enqueue. jobberLinks lives in BeeHub and
+  // outlives this dynamically-imported shell, and may carry pre-existing keys
+  // (a remount after an earlier send, or server-seeded links): a lead sent
+  // long ago whose engagement has since CLOSED has a link and no OPEN
+  // engagement, so an empty baseline would misread it as a fresh send and poll
+  // 90s finding nothing. The lazy null-check initializes exactly once.
+  const sentHandledRef = useRef(null)
+  if (sentHandledRef.current === null) sentHandledRef.current = new Set(Object.keys(jobberLinks || {}))
+  const pendingSendsRef = useRef([])         // [{ clientId, startedAt }]
+  const sendPollTimerRef = useRef(null)
+  const sendPollActiveRef = useRef(false)
+  const runSendPollRef = useRef(null)
+  // Latest locFilter for the poll fetch, read fresh each tick (a location
+  // switch mid-poll must not fetch the wrong scope).
+  const locFilterRef = useRef(locFilter)
+  locFilterRef.current = locFilter
+  // Client ids that ALREADY carry an open engagement this render — used to
+  // skip sends that need no wait. Held in a ref so the jobberLinks effect can
+  // read the latest without taking `openFiltered` (a new array each render) as
+  // a dependency and re-firing on every board change.
+  const openEngagementClientIdsRef = useRef(new Set())
+  openEngagementClientIdsRef.current = new Set(openFiltered.map(e => e.client_id))
+
+  const runSendPoll = useCallback(async () => {
+    sendPollTimerRef.current = null
+    sendPollActiveRef.current = true
+    try {
+      if (pendingSendsRef.current.length === 0) return
+      let openRows = []
+      try {
+        const params = new URLSearchParams({ open: '1' })
+        const loc = locFilterRef.current
+        if (loc && loc !== 'all') params.set('location_uuid', loc)
+        const res = await fetch(`/api/engagements?${params}`)
+        if (res.ok) {
+          const j = await res.json().catch(() => null)
+          if (j && Array.isArray(j.rows)) openRows = j.rows
+        }
+      } catch {
+        // best-effort — a failed tick simply retries on the next interval. The
+        // send itself already succeeded, so this NEVER surfaces an error.
+      }
+      const now = Date.now()
+      const { injects, stillPending, settled } = reconcileSentPolls(pendingSendsRef.current, openRows, now, SEND_POLL_CAP_MS)
+      if (injects.length > 0) {
+        // Inject via the onFounded seam — a card appears without reload, the
+        // lead derives Active out of the Inbox, and the badge/board follow.
+        setSessionEngagements(prev => {
+          const have = new Set(prev.map(e => e.id))
+          const add = injects.filter(r => r && r.id && !have.has(r.id))
+          return add.length > 0 ? [...add, ...prev] : prev
+        })
+      }
+      if (settled.length > 0) {
+        setSettledSendIds(prev => {
+          const n = new Set(prev)
+          settled.forEach(id => n.add(id))
+          return n
+        })
+      }
+      pendingSendsRef.current = stillPending
+    } finally {
+      sendPollActiveRef.current = false
+      // Re-arm from the live ref (not a stale snapshot): a send enqueued
+      // DURING this tick's fetch would otherwise be stranded, and a matched/
+      // capped tick that empties the queue must NOT re-arm (that is how the
+      // loop stops on match and at the cap).
+      if (pendingSendsRef.current.length > 0 && !sendPollTimerRef.current) {
+        const oldest = Math.min(...pendingSendsRef.current.map(p => p.startedAt))
+        sendPollTimerRef.current = setTimeout(() => runSendPollRef.current?.(), pollDelayForElapsed(Date.now() - oldest))
+      }
+    }
+  }, [])
+  runSendPollRef.current = runSendPoll
+
+  useEffect(() => {
+    let added = false
+    for (const clientId of Object.keys(jobberLinks || {})) {
+      if (sentHandledRef.current.has(clientId)) continue
+      sentHandledRef.current.add(clientId)
+      if (openEngagementClientIdsRef.current.has(clientId)) continue // nothing to wait for
+      pendingSendsRef.current = [...pendingSendsRef.current, { clientId, startedAt: Date.now() }]
+      added = true
+    }
+    if (added && !sendPollTimerRef.current && !sendPollActiveRef.current) {
+      sendPollTimerRef.current = setTimeout(() => runSendPollRef.current?.(), pollDelayForElapsed(0))
+    }
+  }, [jobberLinks])
+
+  // Drop a timer armed at unmount — the fetch would resolve into a dead tree.
+  useEffect(() => () => { if (sendPollTimerRef.current) clearTimeout(sendPollTimerRef.current) }, [])
+
   // Layer: page-load snapshot → local log-call override. ONE merge, here, so
   // every lens below derives client status through it — that is the whole
   // point of lifting the override out of the Inbox. Additive by id: a refetch
@@ -752,6 +868,7 @@ export default function HiveShell({
           specialties={specialties}
           setToast={setToast}
           readOnly={readOnly}
+          settledSendIds={settledSendIds}
           initialSection={inboxInitialSection}
           onInitialSectionConsumed={() => setInboxInitialSection(null)}
         />
