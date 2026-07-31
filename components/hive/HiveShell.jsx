@@ -185,6 +185,10 @@ export default function HiveShell({
   onOpenEngagementUrl = () => {},
   onCloseRecord = () => {},
   onSendToJobber = () => {},
+  // "Report a problem with this client" seam: BeeHub owns the feedback modal,
+  // so ClientProfile's "···" menu item hands its id-only record context UP
+  // through this callback (BeeHub opens the seeded FeedbackModal). Passed DOWN.
+  onReportProblem = () => {},
   // Live Jobber-link patch, keyed by client id (BeeHub owns it; passed DOWN
   // per §8.5). After a confirmed send-to-jobber the record stays open, and
   // the panel/profile overlays merge { jobber_client_id, jobber_request_id }
@@ -919,6 +923,7 @@ export default function HiveShell({
           setToast={setToast}
           lookupOptions={lookupOptions}
           specialties={specialties}
+          onReportProblem={onReportProblem}
         />
       )}
     </div>

@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
+import { buildSafeContext, insertFeedbackRow } from '@/lib/feedback-context'
 
 export const runtime = 'nodejs'
 
@@ -81,6 +82,10 @@ export async function POST(req: NextRequest) {
     title?: string
     description?: string
     attachments?: Array<{ path?: string; name?: string; size?: number; type?: string }>
+    // Optional id-only record pointer (e.g. from "Report a problem with this
+    // client"). Re-sanitized here — see buildSafeContext — so a tampered body
+    // can never write a name/email/phone or an oversized blob into the column.
+    context?: unknown
   }
   try { body = await req.json() } catch {
     return NextResponse.json({ error: 'invalid_json_body' }, { status: 400 })
@@ -131,23 +136,37 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const { data: row, error } = await supabaseService
-    .from('feedback_items')
-    .insert({
-      user_id: user.id,
-      location_id: hubUser.location_id || null,
-      type,
-      title,
-      description,
-      status: 'submitted',
-      attachments,
-    })
-    .select('*')
-    .single()
+  // Re-derive the record context server-side (id-only whitelist). null when
+  // absent or nothing survives → no column written.
+  const context = buildSafeContext(body.context)
+
+  const baseRow = {
+    user_id: user.id,
+    location_id: hubUser.location_id || null,
+    type,
+    title,
+    description,
+    status: 'submitted',
+    attachments,
+  }
+
+  // Insert with context attached — but if the `context` column hasn't been
+  // migrated yet (the DDL is HELD; Kevin runs it), fail SOFT: retry without it
+  // so the report still files rather than 500ing. Real errors still surface.
+  const { data: row, error, contextDropped } = await insertFeedbackRow(
+    async (r) => await supabaseService.from('feedback_items').insert(r).select('*').single(),
+    baseRow,
+    context,
+  )
 
   if (error || !row) {
     console.error('[feedback POST]', error)
-    return NextResponse.json({ error: error?.message || 'insert_failed' }, { status: 500 })
+    return NextResponse.json({ error: (error as { message?: string })?.message || 'insert_failed' }, { status: 500 })
+  }
+
+  if (contextDropped) {
+    // Non-fatal breadcrumb: the item filed, just without its record pointer.
+    console.warn('[feedback POST] context column missing — filed without record context (migration pending)')
   }
 
   return NextResponse.json(row, { status: 201 })

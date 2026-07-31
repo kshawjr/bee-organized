@@ -91,7 +91,7 @@ const STAGE_ICON = {
 // siblings/onNavigate: the opener's natural ordering (e.g. the client
 // directory's visible rows). When absent the prev/next chevrons hide —
 // a panel→profile swap or a fresh create has no "next client".
-export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, lookupOptions = { sources: [], projectTypes: [], clientTags: [] }, specialties = [], locationUsers = [], siblings = null, onNavigate = () => {}, jobberLinks = {}, readOnly = false }) {
+export default function ClientProfile({ clientId, people = [], onClose, onOpenEngagement = () => {}, onSendToJobber = null, setToast = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, onCallLogged = () => {}, lookupOptions = { sources: [], projectTypes: [], clientTags: [] }, specialties = [], locationUsers = [], siblings = null, onNavigate = () => {}, jobberLinks = {}, readOnly = false, onReportProblem = () => {} }) {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
   const [tab, setTab] = useState('overview')
@@ -823,11 +823,34 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             so rides on linked records too; it hides once a twin exists, and
             stays hidden while the lookup is still in flight (null) so it
             can't flash onto someone already in the Network. */}
-        <CardMenu items={readOnly ? [] : [
-          ...(networkTwin === false
-            ? [{ key: 'network', label: 'Add to Network…', onPick: () => setConvertOpen(true) }]
-            : []),
-          ...(jobberLinked ? [] : [{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]),
+        {/* "Report a problem with this client" is ALWAYS present (when the
+            record has loaded) — it's non-mutating (like Add to Network, it
+            deletes nothing), so it rides read-only surfaces too (lite_user,
+            paused locations) where the write items are hidden. Everyone can
+            report a problem. It also means the menu is never empty, closing the
+            issue-120 dead end (a Jobber-linked, already-networked client used to
+            show nothing here). It hands an ID-ONLY context up to BeeHub's
+            feedback modal — no name/email/phone is stored (issue 110a); the
+            client name only pre-fills the human-facing title. Mutating items
+            (Add to Network / Mark as junk) stay behind the read-only gate. */}
+        <CardMenu items={[
+          ...(c ? [{ key: 'report', label: 'Report a problem with this client', onPick: () => onReportProblem({
+            title: c.name ? `Problem with ${c.name}` : 'Problem with this client',
+            context: {
+              kind: 'client',
+              lead_id: c.id,
+              location_id: c.location_uuid || null,
+              screen: 'Clients',
+              path: `/clients/${c.id}`,
+              origin: 'client_profile_menu',
+            },
+          }) }] : []),
+          ...(readOnly ? [] : [
+            ...(networkTwin === false
+              ? [{ key: 'network', label: 'Add to Network…', onPick: () => setConvertOpen(true) }]
+              : []),
+            ...(jobberLinked ? [] : [{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]),
+          ]),
         ]} />
       </div>
 

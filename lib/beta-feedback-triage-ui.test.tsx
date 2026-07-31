@@ -32,21 +32,22 @@ const screenSrc = beehub.slice(
   beehub.indexOf('function AdminFeedbackScreen('),
   beehub.indexOf('const US_TIMEZONES')
 )
-const modalSrc = beehub.slice(
-  beehub.indexOf('function FeedbackModal('),
-  beehub.indexOf('function ManualModal(')
-)
+// FeedbackModal now lives in its own module (extracted from BeeHub.jsx so it
+// is mount-testable — see lib/beta-client-report-problem.test.tsx). The shared
+// status maps + FeedbackStatusBadge moved alongside it into feedbackShared.
+const modalSrc = readFileSync(join(process.cwd(), 'components/feedback/FeedbackModal.jsx'), 'utf8')
+const sharedSrc = readFileSync(join(process.cwd(), 'components/feedback/feedbackShared.jsx'), 'utf8')
 
 describe('submit-tab default (Feedback-screen button only)', () => {
   it('FeedbackModal takes initialTab, defaulting to mine (Help-menu behavior unchanged)', () => {
-    expect(modalSrc).toContain("function FeedbackModal({ onClose, initialTab = 'mine', viewAsUserId = null })")
+    expect(modalSrc).toContain("function FeedbackModal({ onClose, initialTab = 'mine', viewAsUserId = null, seed = null })")
     expect(modalSrc).toContain('useState(initialTab)')
   })
 
   it("the Feedback screen's composer button opens on the SUBMIT tab", () => {
     expect(beehub).toContain("onReportFeedback={() => setShowFeedback('submit')}")
     expect(beehub).toContain(
-      "{showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} viewAsUserId={viewAsUser?.id || null} onClose={() => setShowFeedback(false)} />}"
+      "{showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} viewAsUserId={viewAsUser?.id || null} seed={feedbackSeed} onClose={() => { setShowFeedback(false); setFeedbackSeed(null) }} />}"
     )
   })
 
@@ -119,11 +120,11 @@ describe('modern layout — rows', () => {
 
   it('status chips cover the real 6-status vocabulary in locked chip anatomy + families', () => {
     // Anatomy: 11px/500, 2px 8px, radius 10 — the StatusChip spec.
-    expect(beehub).toMatch(/FeedbackStatusBadge\(\{ status \}\) \{[\s\S]*?padding:'2px 8px', borderRadius:'10px', fontSize:'11px', fontWeight:500/)
+    expect(sharedSrc).toMatch(/FeedbackStatusBadge\(\{ status \}\) \{[\s\S]*?padding:'2px 8px', borderRadius:'10px', fontSize:'11px', fontWeight:500/)
     // Families (spot-check the ramp ends + the in-flight amber).
-    expect(beehub).toContain("submitted:    { label:'Submitted',    color:'#085041', bg:'#E1F5EE' }")
-    expect(beehub).toContain("in_progress:  { label:'In Progress',  color:'#633806', bg:'#FAEEDA' }")
-    expect(beehub).toContain("declined:     { label:'Declined',     color:'#444441', bg:'#F1EFE8' }")
+    expect(sharedSrc).toContain("submitted:    { label:'Submitted',    color:'#085041', bg:'#E1F5EE' }")
+    expect(sharedSrc).toContain("in_progress:  { label:'In Progress',  color:'#633806', bg:'#FAEEDA' }")
+    expect(sharedSrc).toContain("declined:     { label:'Declined',     color:'#444441', bg:'#F1EFE8' }")
     // Rows render the shared badge.
     expect(screenSrc).toContain('<FeedbackStatusBadge status={it.status} />')
   })

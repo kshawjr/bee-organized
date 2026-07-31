@@ -17,6 +17,8 @@ import { daysSince as sharedDaysSince } from "@/components/hive/shared/engagemen
 import { isTerminal as engIsTerminal, CHIP_STYLES as HIVE_CHIP_STYLES } from "@/components/hive/shared/stageConfig"
 import { useStoredState } from "@/components/hive/shared/useStoredControls"
 import BeeLoader from "@/components/hive/shared/BeeLoader"
+import FeedbackModal from "@/components/feedback/FeedbackModal"
+import { feedbackTimeAgo, FeedbackAttachmentList, FeedbackStatusBadge, FEEDBACK_STATUS_CONF, FEEDBACK_STATUS_PLAIN, FEEDBACK_STATUS_ORDER } from "@/components/feedback/feedbackShared"
 // Scope cookie — the client writes it, app/_hub-page.tsx reads it back. Pure
 // zero-import module, so the name/shape can never drift between the two sides.
 import { scopeCookieString, SCOPE_ALL, SCOPE_COOKIE_NAME } from "@/lib/hub-scope"
@@ -9710,7 +9712,7 @@ async function patchLeadAPI(leadId, patch) {
   }
 }
 
-function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], locationRequired=false, onOpenLocationPicker=null, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, initialSelectedEngagementId=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onEngagementChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, initialHiveIntent=null, onHiveIntentConsumed=()=>{} }) {
+function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], locationRequired=false, onOpenLocationPicker=null, readOnly=false, locFilter='all', isElevated=false, locations=ALL_LOCATIONS, initialSelected=null, initialSelectedEngagementId=null, onInitialSelectedConsumed=()=>{}, onSelectedChange=()=>{}, onEngagementChange=()=>{}, onAddFollowUp=()=>{}, currentUserId='u11', setToast=()=>{}, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, initialHiveIntent=null, onHiveIntentConsumed=()=>{}, onReportProblem=()=>{} }) {
   if (!people) return null
   const allPeople = locFilter==='all' ? people : people.filter(p=>p.locationId===locFilter)
   // Real hub_users roster (LocationUsersContext) drives the "Assigned To"
@@ -10077,6 +10079,7 @@ function HiveScreen({ onNavigate, people, setPeople, transferPeople=[], location
           onCloseRecord={()=>{ setSelected(null); setSelectedEngagementId(null) }}
           onSendToJobber={(p, opts)=>setBetaSendPerson({ person: p, engagementId: opts?.engagementId || null })}
           jobberLinks={jobberLinks}
+          onReportProblem={onReportProblem}
         />
         {/* The shared send-to-jobber confirm flow, mounted for the beta
             Inbox/panel/profile. onDone mirrors PersonPanel's handleSendToJobber
@@ -21781,7 +21784,7 @@ function HomeGreeting({ ownerName, ownerEmail }) {
   )
 }
 
-function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, transferPeople=[], allOverview=null, leadsTruncated=false, networkTruncated=false, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, onOpenSystemHealth=()=>{} }) {
+function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, locationName=null, role='franchise', franchiseRole='owner', locFilter='all', selectedLoc=null, isElevated=false, crmStatus='active', ownerName='Kevin Shaw', ownerEmail='', topOffset=0, partners=[], setPartners=()=>{}, companies=[], setCompanies=()=>{}, people=ALL_PEOPLE, setPeople=()=>{}, transferPeople=[], allOverview=null, leadsTruncated=false, networkTruncated=false, locations=ALL_LOCATIONS, activeNav: activeNavProp=null, nav: navProp=null, onOpenRecord=null, onOpenHive=null, followUps=[], setFollowUps=()=>{}, onCompleteOnboarding=()=>{}, currentUserId='u11', onClickLocation=null, currentLocation=null, isCoOwner=false, currentUserProfile=null, engagements=[], engagementsClosedCount=0, engagementsClosedWonCount=0, newBoardAllowed=false, onOpenSystemHealth=()=>{}, onReportProblem=()=>{} }) {
   const [activeNavLocal, setActiveNavLocal] = useState(startNav)
   const activeNav = activeNavProp || activeNavLocal
   function nav(key) { if (navProp) { navProp(key) } else { setActiveNavLocal(key) }; window.scrollTo(0,0) }
@@ -22222,7 +22225,7 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
     // allow browsing but read-only during grace
   }
 
-  if (activeNav==='hive') return <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} locationRequired={!!allOverview} onOpenLocationPicker={onClickLocation} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} locations={locations} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} setToast={setToast} engagements={engagements} newBoardAllowed={newBoardAllowed} engagementsClosedCount={engagementsClosedCount} engagementsClosedWonCount={engagementsClosedWonCount} />{toast && <InlineToast {...toast} />}</>
+  if (activeNav==='hive') return <><PastDueBar /><HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} locationRequired={!!allOverview} onOpenLocationPicker={onClickLocation} readOnly={isReadOnly||isPastDue} locFilter={locFilter} isElevated={isElevated} locations={locations} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={currentUserId} setToast={setToast} engagements={engagements} newBoardAllowed={newBoardAllowed} engagementsClosedCount={engagementsClosedCount} engagementsClosedWonCount={engagementsClosedWonCount} onReportProblem={onReportProblem} />{toast && <InlineToast {...toast} />}</>
 
   if (activeNav==='schedule') return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingBottom:'5rem' }}>
@@ -28170,424 +28173,8 @@ function AskBeeHubButton({ onOpen, compact = false }) {
   )
 }
 
-// ═══════════════════════════════════════════════════════
-//  FEEDBACK / BUG-REPORT system
-//  - FeedbackModal: user-facing modal (My Items + Submit tabs), reached
-//    from the "? Help" pill's 3rd option.
-//  - AdminFeedbackScreen: super_admin / admin triage view, a tab in the
-//    Admin area.
-//  Both share FEEDBACK_STATUS_CONF + the relative-time helper below.
-// ═══════════════════════════════════════════════════════
-
-// Status → display config. Keys mirror the DB check constraint on
-// feedback_items.status. Colors are the locked beta chip families
-// (components/ui/README.md, dark-on-light pairs) so feedback chips speak
-// the same vocabulary as the hive surfaces: submitted → teal (new),
-// under_review → blue (in motion), planned → purple, in_progress → amber
-// (in-flight/attention), shipped → green (done), declined → gray (closed).
-const FEEDBACK_STATUS_CONF = {
-  submitted:    { label:'Submitted',    color:'#085041', bg:'#E1F5EE' },
-  under_review: { label:'Under Review', color:'#0C447C', bg:'#E6F1FB' },
-  planned:      { label:'Planned',      color:'#3C3489', bg:'#EEEDFE' },
-  in_progress:  { label:'In Progress',  color:'#633806', bg:'#FAEEDA' },
-  shipped:      { label:'Shipped',      color:'#27500A', bg:'#EAF3DE' },
-  declined:     { label:'Declined',     color:'#444441', bg:'#F1EFE8' },
-}
-const FEEDBACK_STATUS_ORDER = ['submitted','under_review','planned','in_progress','shipped','declined']
-
-// Plain-English status labels for the owner-facing surfaces (issue 126). The
-// stored values in FEEDBACK_STATUS_ORDER / the DB are UNCHANGED — this is a
-// display map only. The audience is non-technical franchise owners, so the
-// filter chips, the row badge, and the triage dropdown all read in plain words
-// ("Looking at it") instead of the database vocabulary ("under_review").
-const FEEDBACK_STATUS_PLAIN = {
-  submitted:    'New',
-  under_review: 'Looking at it',
-  planned:      'Planned',
-  in_progress:  'In progress',
-  shipped:      'Fixed',
-  declined:     'Not planned',
-}
-
-function feedbackTimeAgo(iso) {
-  if (!iso) return ''
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return ''
-  const diff = Date.now() - then
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins} minute${mins !== 1 ? 's' : ''} ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs} hour${hrs !== 1 ? 's' : ''} ago`
-  const days = Math.floor(hrs / 24)
-  if (days < 30) return `${days} day${days !== 1 ? 's' : ''} ago`
-  return new Date(iso).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })
-}
-
-// Locked chip anatomy (StatusChip spec): 11px/500, padding 2px 8px,
-// radius 10px, no border.
-function FeedbackStatusBadge({ status }) {
-  const conf = FEEDBACK_STATUS_CONF[status] || FEEDBACK_STATUS_CONF.submitted
-  // Chip color stays the stored-status family; the label reads in plain words.
-  const label = FEEDBACK_STATUS_PLAIN[status] || conf.label
-  return (
-    <span style={{ display:'inline-block', padding:'2px 8px', borderRadius:'10px', fontSize:'11px', fontWeight:500, lineHeight:1.5, color:conf.color, background:conf.bg, whiteSpace:'nowrap' }}>
-      {label}
-    </span>
-  )
-}
-
-// Human-readable byte size: "1.2 MB", "840 KB", "12 B".
-function feedbackFmtBytes(n) {
-  const b = Number(n) || 0
-  if (b < 1024) return `${b} B`
-  const kb = b / 1024
-  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`
-  const mb = kb / 1024
-  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`
-}
-
-function feedbackIsImage(type) {
-  return typeof type === 'string' && type.startsWith('image/')
-}
-
-// Build the signed-URL endpoint href for a stored attachment. Each path
-// segment is encoded so spaces/specials survive the catch-all route, and the
-// route 302-redirects to the real signed URL — so this works as both an <a
-// href> (click to open) and an <img src> (thumbnail follows the redirect).
-function feedbackAttUrl(path) {
-  return '/api/feedback/attachment/' + String(path || '').split('/').map(encodeURIComponent).join('/')
-}
-
-// A single attachment, used in My Items + Admin detail. Images render as a
-// thumbnail; everything else as a 📎 filename·size chip. Clicking opens the
-// file in a new tab via the signed-URL endpoint.
-function FeedbackAttachmentChip({ att, thumb = 80 }) {
-  const url = feedbackAttUrl(att.path)
-  if (feedbackIsImage(att.type)) {
-    return (
-      <a href={url} target="_blank" rel="noopener noreferrer" title={`${att.name} · ${feedbackFmtBytes(att.size)}`} style={{ display:'inline-block', textDecoration:'none' }}>
-        <img src={url} alt={att.name} style={{ width:`${thumb}px`, height:`${thumb}px`, objectFit:'cover', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.1)', display:'block', background:'#f0efe9' }} />
-      </a>
-    )
-  }
-  return (
-    <a href={url} target="_blank" rel="noopener noreferrer" style={{ display:'inline-flex', alignItems:'center', gap:'6px', maxWidth:'220px', padding:'6px 10px', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.12)', background:'white', textDecoration:'none', color:'#1a2e2b', fontSize:'12px', fontFamily:'inherit' }}>
-      <span style={{ flexShrink:0 }}>📎</span>
-      <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{att.name}</span>
-      <span style={{ color:'#8a9e9a', flexShrink:0 }}>· {feedbackFmtBytes(att.size)}</span>
-    </a>
-  )
-}
-
-// Wrapped row of attachment chips. Returns null when there's nothing to show.
-function FeedbackAttachmentList({ attachments, thumb = 80 }) {
-  const atts = Array.isArray(attachments) ? attachments : []
-  if (atts.length === 0) return null
-  return (
-    <div style={{ display:'flex', flexWrap:'wrap', gap:'8px', alignItems:'center' }}>
-      {atts.map((a, i) => <FeedbackAttachmentChip key={a.path || i} att={a} thumb={thumb} />)}
-    </div>
-  )
-}
-
-// One card in the "My Items" tab — handles its own show-more collapse.
-function FeedbackItemCard({ item }) {
-  const [expanded, setExpanded] = useState(false)
-  const long = (item.description || '').length > 150
-  const shown = !long || expanded ? item.description : `${item.description.slice(0, 150)}…`
-  return (
-    <div style={{ border:'1px solid rgba(0,0,0,0.08)', borderRadius:'12px', padding:'14px', background:'white' }}>
-      <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:'10px', marginBottom:'6px' }}>
-        <div style={{ display:'flex', alignItems:'flex-start', gap:'8px', minWidth:0 }}>
-          <span style={{ fontSize:'18px', lineHeight:1.2, flexShrink:0 }}>{item.type === 'bug' ? '🐛' : '✨'}</span>
-          <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', lineHeight:1.35, wordBreak:'break-word' }}>{item.title}</p>
-        </div>
-        <FeedbackStatusBadge status={item.status} />
-      </div>
-      <p style={{ fontSize:'11px', color:'#8a9e9a', margin:'0 0 8px 26px' }}>{feedbackTimeAgo(item.created_at)}</p>
-      <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.55, margin:'0 0 0 26px', whiteSpace:'pre-wrap', wordBreak:'break-word' }}>
-        {shown}
-        {long && (
-          <button onClick={() => setExpanded(e => !e)} style={{ marginLeft:'6px', background:'none', border:'none', color:'#2563eb', fontFamily:'inherit', fontSize:'13px', fontWeight:600, cursor:'pointer', padding:0 }}>
-            {expanded ? 'Show less' : 'Show more'}
-          </button>
-        )}
-      </p>
-      {item.admin_response && (
-        <div style={{ marginTop:'12px', marginLeft:'26px', padding:'10px 12px', background:'rgba(168,201,196,0.14)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'10px' }}>
-          <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b', marginBottom:'4px' }}>💬 Response from team</p>
-          <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.55, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{item.admin_response}</p>
-          {item.admin_response_at && (
-            <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'5px' }}>{feedbackTimeAgo(item.admin_response_at)}</p>
-          )}
-        </div>
-      )}
-      {Array.isArray(item.attachments) && item.attachments.length > 0 && (
-        <div style={{ marginTop:'12px', marginLeft:'26px' }}>
-          <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', marginBottom:'6px' }}>📎 {item.attachments.length} attachment{item.attachments.length !== 1 ? 's' : ''}</p>
-          <FeedbackAttachmentList attachments={item.attachments} thumb={80} />
-        </div>
-      )}
-    </div>
-  )
-}
-
-// initialTab: 'mine' (default — the Help "?" menu path) | 'submit' (the
-// Feedback screen's composer button lands straight on the form).
-//
-// viewAsUserId: under view-as the "mine" tab should preview the IMPERSONATED
-// user's items, but API calls ride the real session (view-as is display-only),
-// so the mount passes the impersonated hub_users id and loadItems appends
-// ?user_id= — which /api/feedback honors for elevated callers and ignores for
-// everyone else. Null for real sessions → no param, own items as always.
-// Known wrinkle: the Submit tab still files as the REAL session user, so a
-// submission made while impersonating won't appear in the list it lands on.
-function FeedbackModal({ onClose, initialTab = 'mine', viewAsUserId = null }) {
-  const [tab, setTab]           = useState(initialTab) // 'mine' | 'submit'
-  const [items, setItems]       = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [loadError, setLoadError] = useState(null)
-
-  // Submit form
-  const [type, setType]         = useState('bug')
-  const [title, setTitle]       = useState('')
-  const [desc, setDesc]         = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState(null)
-  const [toast, setToast]       = useState(null)
-  const bodyRef = useRef(null)
-
-  // Attachments — selected client-side, uploaded only at submit time. Each
-  // entry: { id, file, preview }. preview is an image data URL (or null).
-  const FB_MAX_FILES = 5
-  const FB_MAX_BYTES = 10 * 1024 * 1024
-  const [files, setFiles]       = useState([])
-  const [uploadProgress, setUploadProgress] = useState(null) // e.g. "Uploading 1 of 3…"
-  const fileInputRef = useRef(null)
-
-  function onPickFiles(e) {
-    const picked = Array.from(e.target.files || [])
-    e.target.value = '' // allow re-picking the same file after a remove
-    if (picked.length === 0) return
-    setSubmitError(null)
-    setFiles(prev => {
-      const next = [...prev]
-      for (const file of picked) {
-        if (next.length >= FB_MAX_FILES) {
-          setSubmitError(`You can attach up to ${FB_MAX_FILES} files.`)
-          break
-        }
-        if (file.size > FB_MAX_BYTES) {
-          setSubmitError(`"${file.name}" is larger than 10MB and was skipped.`)
-          continue
-        }
-        const entry = { id: `${file.name}-${file.size}-${file.lastModified}-${next.length}`, file, preview: null }
-        next.push(entry)
-        if (file.type && file.type.startsWith('image/')) {
-          const reader = new FileReader()
-          reader.onload = () => setFiles(cur => cur.map(f => f.id === entry.id ? { ...f, preview: reader.result } : f))
-          reader.readAsDataURL(file)
-        }
-      }
-      return next
-    })
-  }
-
-  function removeFile(id) {
-    setFiles(prev => prev.filter(f => f.id !== id))
-  }
-
-  async function loadItems() {
-    setLoading(true)
-    setLoadError(null)
-    try {
-      const res = await fetch(viewAsUserId ? `/api/feedback?user_id=${encodeURIComponent(viewAsUserId)}` : '/api/feedback')
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      setItems(Array.isArray(data.items) ? data.items : [])
-    } catch (e) {
-      setLoadError("Couldn't load your items. Please try again.")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { loadItems() }, [viewAsUserId])
-
-  useEffect(() => {
-    if (!toast) return
-    const t = setTimeout(() => setToast(null), 3200)
-    return () => clearTimeout(t)
-  }, [toast])
-
-  const canSubmit = title.trim().length > 0 && desc.trim().length > 0 && !submitting
-
-  async function handleSubmit() {
-    if (!canSubmit) return
-    setSubmitting(true)
-    setSubmitError(null)
-    try {
-      // 1) Upload any selected files first, collecting their stored metadata.
-      //    A failure here leaves the form (and file selection) intact so the
-      //    user can retry without re-entering anything.
-      const uploaded = []
-      for (let i = 0; i < files.length; i++) {
-        setUploadProgress(`Uploading ${i + 1} of ${files.length}…`)
-        const fd = new FormData()
-        fd.append('file', files[i].file)
-        const upRes = await fetch('/api/feedback/upload', { method: 'POST', body: fd })
-        if (!upRes.ok) {
-          const err = await upRes.json().catch(() => ({}))
-          throw new Error(err.detail || err.error || `Upload failed (${upRes.status})`)
-        }
-        uploaded.push(await upRes.json())
-      }
-      setUploadProgress(null)
-
-      // 2) Create the feedback item with the uploaded attachment metadata.
-      const res = await fetch('/api/feedback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, title: title.trim(), description: desc.trim(), attachments: uploaded }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.error || `HTTP ${res.status}`)
-      }
-      // Reset form, switch to My Items, refresh, toast.
-      setTitle(''); setDesc(''); setType('bug'); setFiles([])
-      setTab('mine')
-      setToast("Submitted! We'll review and respond.")
-      await loadItems()
-      if (bodyRef.current) bodyRef.current.scrollTop = 0
-    } catch (e) {
-      setSubmitError(e?.message ? `Could not submit — ${e.message}` : 'Could not submit — please try again.')
-    } finally {
-      setUploadProgress(null)
-      setSubmitting(false)
-    }
-  }
-
-  const tabBtn = (key, label) => (
-    <button
-      onClick={() => setTab(key)}
-      style={{ flex:1, padding:'11px', background:'none', border:'none', borderBottom: tab === key ? '2px solid #1a2e2b' : '2px solid transparent', cursor:'pointer', fontFamily:'inherit', fontSize:'13px', fontWeight: tab === key ? 700 : 500, color: tab === key ? '#1a2e2b' : '#8a9e9a' }}>
-      {label}
-    </button>
-  )
-
-  return (
-    <div onMouseDown={e => { if (e.target === e.currentTarget) onClose() }} style={{ position:'fixed', inset:0, zIndex:10120, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px', background:'rgba(26,46,43,0.55)', fontFamily:'"DM Sans",system-ui,sans-serif' }}>
-      <div style={{ background:'white', borderRadius:'16px', width:'100%', maxWidth:'600px', maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 24px 80px rgba(0,0,0,0.25)', overflow:'hidden' }}>
-        {/* Sticky header */}
-        <div style={{ padding:'16px 20px', borderBottom:'1px solid rgba(0,0,0,0.07)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', flexShrink:0 }}>
-          <h2 style={{ fontSize:'17px', fontFamily:'Georgia,serif', color:'#1a2e2b', margin:0 }}>🐛 Feedback</h2>
-          <button onClick={onClose} aria-label="Close" style={{ background:'none', border:'none', color:'#8a9e9a', cursor:'pointer', fontSize:'24px', lineHeight:1, padding:0 }}>×</button>
-        </div>
-        {/* Tab strip */}
-        <div style={{ display:'flex', borderBottom:'1px solid rgba(0,0,0,0.07)', flexShrink:0 }}>
-          {tabBtn('mine', 'My Items')}
-          {tabBtn('submit', 'Submit')}
-        </div>
-        {/* Scrollable body */}
-        <div ref={bodyRef} style={{ padding:'18px 20px', overflowY:'auto', flex:1 }}>
-          {tab === 'mine' ? (
-            loading ? (
-              <BeeLoader label="Gathering your reports…" />
-            ) : loadError ? (
-              <div style={{ textAlign:'center', padding:'24px 0' }}>
-                <p style={{ fontSize:'13px', color:'#b91c1c', marginBottom:'10px' }}>{loadError}</p>
-                <button onClick={loadItems} style={{ padding:'8px 16px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Retry</button>
-              </div>
-            ) : items.length === 0 ? (
-              <div style={{ textAlign:'center', padding:'34px 16px' }}>
-                <div style={{ fontSize:'34px', marginBottom:'10px' }}>📭</div>
-                <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>You haven't submitted anything yet</p>
-                <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>Switch to the Submit tab to file your first bug report or feature request.</p>
-              </div>
-            ) : (
-              <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
-                {items.map(it => <FeedbackItemCard key={it.id} item={it} />)}
-              </div>
-            )
-          ) : (
-            <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
-              {/* Type toggle */}
-              <div>
-                <label style={{ display:'block', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'7px' }}>Type</label>
-                <div style={{ display:'flex', gap:'8px' }}>
-                  {[{ k:'bug', icon:'🐛', label:'Bug' }, { k:'feature', icon:'✨', label:'Feature' }].map(o => (
-                    <button key={o.k} onClick={() => setType(o.k)} style={{ flex:1, padding:'10px', borderRadius:'10px', cursor:'pointer', fontFamily:'inherit', fontSize:'13px', fontWeight:600, border:'1.5px solid', borderColor: type === o.k ? '#1a2e2b' : 'rgba(0,0,0,0.1)', background: type === o.k ? '#1a2e2b' : 'white', color: type === o.k ? 'white' : '#4a5e5a' }}>
-                      {o.icon} {o.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {/* Title */}
-              <div>
-                <label style={{ display:'flex', alignItems:'center', justifyContent:'space-between', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>
-                  <span>Title</span>
-                  <span style={{ fontSize:'11px', fontWeight:500, color: title.length > 100 ? '#b91c1c' : '#8a9e9a' }}>{title.length}/100</span>
-                </label>
-                <input value={title} maxLength={100} onChange={e => setTitle(e.target.value)} placeholder="Short summary" style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }} />
-              </div>
-              {/* Description */}
-              <div>
-                <label style={{ display:'flex', alignItems:'center', justifyContent:'space-between', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>
-                  <span>Description</span>
-                  <span style={{ fontSize:'11px', fontWeight:500, color: desc.length > 2000 ? '#b91c1c' : '#8a9e9a' }}>{desc.length}/2000</span>
-                </label>
-                <textarea value={desc} maxLength={2000} onChange={e => setDesc(e.target.value)} rows={6} placeholder="What happened (or what would you like)?" style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', resize:'vertical', lineHeight:1.5 }} />
-              </div>
-              <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5 }}>Be specific. Include steps to reproduce for bugs.</p>
-              {/* Attachments */}
-              <div>
-                <label style={{ display:'block', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'2px' }}>Attachments (optional)</label>
-                <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, marginBottom:'8px' }}>Up to 5 files, 10MB each. Screenshots/videos especially helpful.</p>
-                <input ref={fileInputRef} type="file" multiple onChange={onPickFiles} style={{ display:'none' }} />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current && fileInputRef.current.click()}
-                  disabled={files.length >= FB_MAX_FILES || submitting}
-                  style={{ padding:'9px 14px', borderRadius:'10px', border:'1.5px dashed rgba(0,0,0,0.2)', background:'white', cursor: (files.length >= FB_MAX_FILES || submitting) ? 'default' : 'pointer', fontFamily:'inherit', fontSize:'13px', fontWeight:600, color: (files.length >= FB_MAX_FILES) ? '#8a9e9a' : '#1a2e2b', opacity: (files.length >= FB_MAX_FILES || submitting) ? 0.55 : 1 }}>
-                  📎 {files.length === 0 ? 'Add file' : files.length >= FB_MAX_FILES ? 'Maximum 5 files' : 'Add another file'}
-                </button>
-                {files.length > 0 && (
-                  <div style={{ display:'flex', flexDirection:'column', gap:'8px', marginTop:'10px' }}>
-                    {files.map(f => (
-                      <div key={f.id} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'8px 10px', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'10px', background:'white' }}>
-                        {f.preview ? (
-                          <img src={f.preview} alt="" style={{ width:'40px', height:'40px', objectFit:'cover', borderRadius:'6px', flexShrink:0, border:'1px solid rgba(0,0,0,0.08)' }} />
-                        ) : (
-                          <span style={{ width:'40px', height:'40px', display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:'18px', background:'#f0efe9', borderRadius:'6px', flexShrink:0 }}>📄</span>
-                        )}
-                        <div style={{ minWidth:0, flex:1 }}>
-                          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{f.file.name}</p>
-                          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{feedbackFmtBytes(f.file.size)}</p>
-                        </div>
-                        <button type="button" onClick={() => removeFile(f.id)} disabled={submitting} aria-label={`Remove ${f.file.name}`} style={{ background:'none', border:'none', color:'#8a9e9a', cursor: submitting ? 'default' : 'pointer', fontSize:'20px', lineHeight:1, padding:'0 4px', flexShrink:0 }}>×</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {submitError && <p style={{ fontSize:'12px', color:'#b91c1c' }}>{submitError}</p>}
-              <button onClick={handleSubmit} disabled={!canSubmit} style={{ padding:'12px', borderRadius:'10px', border:'none', cursor: canSubmit ? 'pointer' : 'default', fontFamily:'inherit', fontSize:'14px', fontWeight:700, color:'white', background: canSubmit ? '#1a2e2b' : 'rgba(26,46,43,0.35)' }}>
-                {uploadProgress ? uploadProgress : submitting ? 'Submitting…' : 'Submit'}
-              </button>
-            </div>
-          )}
-        </div>
-        {toast && (
-          <div style={{ position:'absolute', top:'14px', left:'50%', transform:'translateX(-50%)', background:'rgba(34,197,94,0.97)', color:'white', padding:'9px 16px', borderRadius:'10px', fontSize:'13px', fontWeight:600, boxShadow:'0 8px 24px rgba(0,0,0,0.2)', zIndex:10 }}>
-            {toast}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
+// FEEDBACK / BUG-REPORT system moved to components/feedback/ (FeedbackModal + feedbackShared).
+// Shared status maps/helpers are re-imported at the top of this file for AdminFeedbackScreen.
 
 // ═══════════════════════════════════════════════════════
 //  Hive Hub MANUAL — second guide system (expanded reference)
@@ -33749,6 +33336,17 @@ export default function App({
   // the Feedback screen's composer button sets 'submit' (lands on the
   // Submit tab). One modal, one state, two entry intents.
   const [showFeedback, setShowFeedback]     = useState(false)
+  // Record-context seed for the feedback modal — set when the modal is opened
+  // FROM a record (e.g. "Report a problem with this client"). Carries the
+  // pre-fill + the id-only context; cleared when the modal closes.
+  const [feedbackSeed, setFeedbackSeed]     = useState(null)
+  // Open the feedback modal on the Submit tab, seeded from a record. Called by
+  // the client profile's "···" menu (threaded through HiveScreen / DashboardScreen
+  // → HiveShell → ClientProfile). type is always 'bug' from this path.
+  const openRecordReport = (seed) => {
+    setFeedbackSeed({ type: 'bug', title: seed?.title || '', context: seed?.context || null })
+    setShowFeedback('submit')
+  }
   // Seat pricing: single source of truth from Supabase tier_prices. Falls back
   // to DEFAULT_TIER_PRICES synthetic rows if the table is empty / unmigrated,
   // so renders never crash on a fresh environment.
@@ -34758,7 +34356,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         {/* Sample-now/bulk-later gap state: the Clients surface must explain a
             partial book ("rest arrives tonight"), or it reads as data loss. */}
         <ImportGapBanner locationId={viewAsUser?.locationId || (locFilter==='all' ? null : locFilter)} />
-        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} locationRequired={!!initialAllOverview} onOpenLocationPicker={()=>setShowLocPicker(true)} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} initialSelectedEngagementId={globalSelectedEngagementId} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onEngagementChange={(id)=>setGlobalSelectedEngagementId(id)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} initialHiveIntent={hiveIntent} onHiveIntentConsumed={()=>setHiveIntent(null)} />
+        <HiveScreen onNavigate={nav} people={people} setPeople={setPeople} transferPeople={transferPeople} locationRequired={!!initialAllOverview} onOpenLocationPicker={()=>setShowLocPicker(true)} readOnly={betaReadOnly} locFilter={locFilter} isElevated={isElevated} locations={initialLocations || ALL_LOCATIONS} initialSelected={globalSelectedPerson} initialSelectedEngagementId={globalSelectedEngagementId} onInitialSelectedConsumed={()=>setGlobalSelectedPerson(null)} onSelectedChange={(p)=>setGlobalSelectedPerson(p)} onEngagementChange={(id)=>setGlobalSelectedEngagementId(id)} onAddFollowUp={fu=>setFollowUps(prev=>[...prev,fu])} currentUserId={viewAsUser?.id||'u11'} setToast={setToast} engagements={Array.isArray(initialEngagements)?initialEngagements:[]} newBoardAllowed={canSeeBetaBoard(role)} engagementsClosedCount={Number(initialEngagementsClosedCount)||0} engagementsClosedWonCount={Number(initialEngagementsClosedWonCount)||0} initialHiveIntent={hiveIntent} onHiveIntentConsumed={()=>setHiveIntent(null)} onReportProblem={openRecordReport} />
         {toast && <InlineToast {...toast} />}
       </div>
     )
@@ -34800,6 +34398,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
             on the onboarding profile step. */}
         <DashboardScreen
           startNav='home'
+          onReportProblem={openRecordReport}
           role={role}
           franchiseRole={role==='franchise'?franchiseRole:'owner'}
           locFilter={locFilter}
@@ -34950,7 +34549,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         open={showManual}
         onClose={() => setShowManual(false)}
       />
-      {showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} viewAsUserId={viewAsUser?.id || null} onClose={() => setShowFeedback(false)} />}
+      {showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} viewAsUserId={viewAsUser?.id || null} seed={feedbackSeed} onClose={() => { setShowFeedback(false); setFeedbackSeed(null) }} />}
       {showHelpChat && (
         <AskBeeHubPanel
           isMobile={isMobile}
