@@ -21,7 +21,18 @@ function getResend() {
 }
 
 type SendSuccess = { success: true; id: string }
-type SendFailure = { success: false; error: string }
+// errorName / errorStatus carry Resend's structured classification up to
+// callers that must decide whether a failure is worth retrying — the drip
+// engine keys terminal-vs-transient off errorName (lib/drip-send.ts). They are
+// only populated when Resend itself returned a typed error object; a malformed
+// send caught before Resend, or a thrown network error, leaves them undefined
+// (treated as transient). `error` (the human message) is unchanged.
+type SendFailure = {
+  success: false
+  error: string
+  errorName?: string | null
+  errorStatus?: number | null
+}
 export type SendResult = SendSuccess | SendFailure
 
 interface SendEmailArgs extends NotificationContext {
@@ -323,7 +334,11 @@ export async function sendEmailDirect(args: SendEmailDirectArgs): Promise<SendRe
         send_status: 'failed',
         error: message,
       })
-      return { success: false, error: message }
+      // Surface Resend's typed name + status so retry-aware callers can tell a
+      // permanently-rejected message (e.g. name='validation_error' / 422 — an
+      // invalid recipient) from a transient one (429 rate limit, 5xx). The
+      // human message alone can't be classified reliably.
+      return { success: false, error: message, errorName: error.name, errorStatus: error.statusCode }
     }
 
     if (!data?.id) {

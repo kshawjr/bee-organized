@@ -31,6 +31,28 @@ export type SendDripResult = {
   advanced_to_step?: number
 }
 
+// Backstop cap (#73): after this many CONSECUTIVE transient send failures on
+// the same lead+step, stop the drip rather than retrying forever. Set low on
+// purpose — 5 hourly ticks comfortably rides out a Resend outage or a
+// rate-limit burst, and the seeded leads that motivated this hit 259. The cap
+// is a safety net for failures the terminal classifier misses; a terminal
+// failure always stops first, so it never masks a classification gap.
+export const MAX_CONSECUTIVE_SEND_FAILURES = 5
+
+// TERMINAL vs TRANSIENT (#73). Terminal = Resend rejected the request itself
+// and an identical retry yields the identical rejection forever. The only such
+// failure the SYNCHRONOUS send path sees is name='validation_error' (422) — an
+// invalid / malformed recipient, i.e. a client who mistyped their email. (True
+// hard bounces to a valid-looking address are ACCEPTED by Resend at send time
+// and bounce later via webhook — they never reach this path.) Everything else
+// is treated as transient and keeps retrying: 429 rate limits, 5xx server
+// errors, and — deliberately — auth/config errors (401/403) and un-typed
+// network throws, because those are system-wide and self-heal, so they must
+// never stop a single lead's drip.
+export function isTerminalSendFailure(errorName?: string | null): boolean {
+  return errorName === 'validation_error'
+}
+
 export async function sendDripStep(leadId: string): Promise<SendDripResult> {
   const nowIso = new Date().toISOString()
 
@@ -100,7 +122,7 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
   // Lead
   const { data: lead, error: leadErr } = await supabaseService
     .from('leads')
-    .select('id, name, first_name, email, location_uuid, assigned_to, marketing_opt_out, project_type')
+    .select('id, name, first_name, email, location_uuid, assigned_to, marketing_opt_out, project_type, drip_last_send_status')
     .eq('id', row.lead_id)
     .maybeSingle()
 
@@ -315,7 +337,37 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
         ? 'Location send_from_email/sender_name/reply_to_email not configured'
         : result.error ?? 'unknown send error',
     })
-    // Leave row unchanged so the next cron tick retries.
+
+    // Sender config missing is a location-wide setup gap (self-heals the moment
+    // the owner fills it in), so it stays a HELD retry like the rate / booking
+    // guards — never terminal, never counted toward the cap. Leave the row for
+    // the next tick.
+    if (senderConfigMissing) {
+      return { sent: false, error: `send: ${result.error}` }
+    }
+
+    // TERMINAL failure (#73): Resend rejected the message itself and will
+    // reject an identical retry forever — the canonical case is an invalid /
+    // mistyped recipient (name='validation_error', 422). Retrying is pure
+    // noise, so STOP this lead's drip and record why. The full Resend message
+    // is already on the lead (drip_last_send_error above), so the record shows
+    // a bad address, not a system fault.
+    if (isTerminalSendFailure(result.errorName)) {
+      await supabaseService
+        .from('lead_drip_progress')
+        .update({ stopped_at: new Date().toISOString(), stopped_reason: 'invalid_recipient' })
+        .eq('id', row.id)
+      return { sent: false, error: 'invalid_recipient' }
+    }
+
+    // TRANSIENT failure (rate limit, 5xx, network, or anything we can't
+    // classify): leave the row untouched so the next cron tick retries — but
+    // count it. The cap is a BACKSTOP, not a second policy: it exists so the
+    // NEXT unclassified permanent failure mode can't rack up 259 retries the
+    // way the seeded leads did. Terminal always stops first, so the cap only
+    // ever sees genuinely-transient (or misclassified) failures.
+    const capped = await bumpTransientFailureAndMaybeStop(row.id, row.current_step)
+    if (capped) return { sent: false, error: 'max_send_retries' }
     return { sent: false, error: `send: ${result.error}` }
   }
 
@@ -324,6 +376,14 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
     step: row.current_step,
     error: null,
   })
+
+  // Reset the transient-failure counter on any successful send so the cap
+  // measures CONSECUTIVE failures per lead+step, not lifetime. Only bother when
+  // the prior attempt actually failed (cheap gate — avoids a write on the happy
+  // path and avoids churn while the migration is still HELD). Best-effort.
+  if (lead.drip_last_send_status === 'failed') {
+    await resetTransientFailures(row.id)
+  }
 
   // Step 1 of any new-lead drip triggers the 24h Welcome Email. Fire and
   // forget — a failed schedule is logged inside scheduleWelcomeEmail and
@@ -358,6 +418,69 @@ async function recordDripSendStatus(
 
   if (error) {
     console.error('[drip-send] failed to record drip send status', { leadId, status: fields.status, error: error.message })
+  }
+}
+
+// Backstop counter (#73). Increment the consecutive transient-failure count on
+// the progress row; when it reaches the cap, STOP the drip with a DISTINCT
+// reason ('max_send_retries') so it never collapses with the terminal
+// 'invalid_recipient' — a cap trip is a signal that the classifier missed a
+// case, and we want that visible in the data, not hidden.
+//
+// The count lives in lead_drip_progress.consecutive_failures, added by a
+// separate migration (drip_consecutive_failures.sql). Until that migration is
+// run the column is absent: the read errors, we swallow it, and the cap is
+// simply INERT — terminal-stop and per-tick retry behave exactly as before, so
+// this is safe to ship ahead of the migration. Returns true iff the drip was
+// stopped by the cap.
+async function bumpTransientFailureAndMaybeStop(progressId: string, step: number): Promise<boolean> {
+  try {
+    const { data, error } = await supabaseService
+      .from('lead_drip_progress')
+      .select('consecutive_failures')
+      .eq('id', progressId)
+      .maybeSingle()
+    // Column absent (migration not yet run) or read failed → cap inert.
+    if (error) return false
+
+    const next = ((data?.consecutive_failures as number | null) ?? 0) + 1
+
+    if (next >= MAX_CONSECUTIVE_SEND_FAILURES) {
+      console.warn('[drip-send] stopping drip after max consecutive transient failures', {
+        progressId, step, failures: next,
+      })
+      await supabaseService
+        .from('lead_drip_progress')
+        .update({
+          stopped_at: new Date().toISOString(),
+          stopped_reason: 'max_send_retries',
+          consecutive_failures: next,
+        })
+        .eq('id', progressId)
+      return true
+    }
+
+    await supabaseService
+      .from('lead_drip_progress')
+      .update({ consecutive_failures: next })
+      .eq('id', progressId)
+    return false
+  } catch {
+    // Any unexpected shape (incl. the column not existing) → cap inert.
+    return false
+  }
+}
+
+// Reset the transient-failure counter to zero after a successful send.
+// Best-effort and swallowed for the same pre-migration reason as the bump.
+async function resetTransientFailures(progressId: string): Promise<void> {
+  try {
+    await supabaseService
+      .from('lead_drip_progress')
+      .update({ consecutive_failures: 0 })
+      .eq('id', progressId)
+  } catch {
+    /* column absent / write failed — nothing to reset */
   }
 }
 
