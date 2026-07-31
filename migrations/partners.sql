@@ -58,6 +58,13 @@ CREATE INDEX IF NOT EXISTS idx_companies_name
 
 ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;
 
+-- CAST: hub_users.location_id is TEXT; companies.location_id is uuid. The uuid
+-- side MUST be cast — hub_users.location_id = companies.location_id::text — or
+-- CREATE POLICY errors 42883 (operator does not exist: text = uuid). Prod already
+-- carries this cast (verified in pg_policies: deployed quals show
+-- (companies.location_id)::text); it was fixed at apply time and this file never
+-- updated. Repo-vs-prod drift correction only, no prod change.
+DROP POLICY IF EXISTS "companies read" ON public.companies;
 CREATE POLICY "companies read"
   ON public.companies FOR SELECT TO authenticated
   USING (
@@ -66,11 +73,12 @@ CREATE POLICY "companies read"
       WHERE hub_users.id = auth.uid()
         AND (
           hub_users.role IN ('super_admin', 'admin')
-          OR hub_users.location_id = companies.location_id
+          OR hub_users.location_id = companies.location_id::text
         )
     )
   );
 
+DROP POLICY IF EXISTS "companies write" ON public.companies;
 CREATE POLICY "companies write"
   ON public.companies FOR ALL TO authenticated
   USING (
@@ -79,7 +87,7 @@ CREATE POLICY "companies write"
       WHERE hub_users.id = auth.uid()
         AND (
           hub_users.role IN ('super_admin', 'admin')
-          OR hub_users.location_id = companies.location_id
+          OR hub_users.location_id = companies.location_id::text
         )
     )
   )
@@ -89,7 +97,7 @@ CREATE POLICY "companies write"
       WHERE hub_users.id = auth.uid()
         AND (
           hub_users.role IN ('super_admin', 'admin')
-          OR hub_users.location_id = companies.location_id
+          OR hub_users.location_id = companies.location_id::text
         )
     )
   );
@@ -144,6 +152,11 @@ CREATE INDEX IF NOT EXISTS idx_partners_company
 
 ALTER TABLE public.partners ENABLE ROW LEVEL SECURITY;
 
+-- CAST: same as companies above — hub_users.location_id (TEXT) vs
+-- partners.location_id (uuid). Cast the uuid side to text or 42883. Prod already
+-- carries the cast (pg_policies: deployed quals show (partners.location_id)::text).
+-- Drift correction only.
+DROP POLICY IF EXISTS "partners read" ON public.partners;
 CREATE POLICY "partners read"
   ON public.partners FOR SELECT TO authenticated
   USING (
@@ -152,11 +165,12 @@ CREATE POLICY "partners read"
       WHERE hub_users.id = auth.uid()
         AND (
           hub_users.role IN ('super_admin', 'admin')
-          OR hub_users.location_id = partners.location_id
+          OR hub_users.location_id = partners.location_id::text
         )
     )
   );
 
+DROP POLICY IF EXISTS "partners write" ON public.partners;
 CREATE POLICY "partners write"
   ON public.partners FOR ALL TO authenticated
   USING (
@@ -165,7 +179,7 @@ CREATE POLICY "partners write"
       WHERE hub_users.id = auth.uid()
         AND (
           hub_users.role IN ('super_admin', 'admin')
-          OR hub_users.location_id = partners.location_id
+          OR hub_users.location_id = partners.location_id::text
         )
     )
   )
@@ -175,7 +189,7 @@ CREATE POLICY "partners write"
       WHERE hub_users.id = auth.uid()
         AND (
           hub_users.role IN ('super_admin', 'admin')
-          OR hub_users.location_id = partners.location_id
+          OR hub_users.location_id = partners.location_id::text
         )
     )
   );
