@@ -72,47 +72,9 @@ describe('BeeHub wiring — one shared predicate, no drift', () => {
   })
 })
 
-describe('Reports — financial sections split from operational', () => {
-  // File order: FranchiseReports → ReportsComingSoonPlaceholder → ReportsScreen.
-  const franchise = slice('function FranchiseReports', 'function ReportsComingSoonPlaceholder')
-  const reports = slice('function ReportsScreen', 'function PaymentConfirmStep')
-
-  it('ReportsScreen receives franchiseRole and computes the shared predicate', () => {
-    expect(reports).toContain('function ReportsScreen({ role, franchiseRole')
-    expect(reports).toContain('const canSeeFinancials = financialsVisible(role, franchiseRole)')
-    expect(reports).toContain('canSeeFinancials={canSeeFinancials}')
-  })
-
-  it('ReportsScreen mount passes franchiseRole through', () => {
-    const app = slice('export default function App', 'Responsive sidebar')
-    expect(app).toContain('<ReportsScreen role={role} franchiseRole={franchiseRole}')
-  })
-
-  it('FranchiseReports accepts the gate and hides the Revenue KPI when off', () => {
-    expect(franchise).toContain('canSeeFinancials=true }')
-    // Revenue KPI is conditionally spread into the kpis array
-    expect(franchise).toMatch(/canSeeFinancials \? \[\{ label:'Revenue'/)
-    // grid columns track the card count so 2 cards don't leave a phantom column
-    expect(franchise).toContain('repeat(${kpis.length},1fr)')
-  })
-
-  it('FranchiseReports hides the Revenue Trend card when off', () => {
-    // the Revenue Trend ReportCard is wrapped in the gate
-    const trend = franchise.slice(franchise.indexOf('Revenue trend'))
-    expect(franchise).toMatch(/\{canSeeFinancials && \(\s*<ReportCard title="Revenue Trend"/)
-    // sanity: the trend section still exists (not deleted)
-    expect(trend).toContain('Monthly collected revenue')
-  })
-
-  it('operational sections stay UNGATED (manager keeps them)', () => {
-    // Pipeline / Funnel / Sources / Service Types / Referrals must not be
-    // wrapped by canSeeFinancials — pin they render unconditionally.
-    for (const title of ['My Pipeline', 'Conversion Funnel', 'Partner Referrals']) {
-      const idx = franchise.indexOf(title)
-      expect(idx).toBeGreaterThan(-1)
-      // no canSeeFinancials guard immediately preceding these cards
-      const preceding = franchise.slice(Math.max(0, idx - 120), idx)
-      expect(preceding).not.toContain('canSeeFinancials')
-    }
-  })
-})
+// NOTE: the former "Reports — financial sections split from operational" block
+// tested the Gen 1 FranchiseReports (revenue KPI / trend gating). Those sections
+// were PURGED in issue 139 — Reports is now a role-independent Coming Soon state
+// with no financial content to gate. Coverage moved to
+// lib/beta-reports-coming-soon.test.tsx. The Home-tile financial gate above is
+// unaffected and still tested here.

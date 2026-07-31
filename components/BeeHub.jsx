@@ -17,6 +17,7 @@ import { daysSince as sharedDaysSince } from "@/components/hive/shared/engagemen
 import { isTerminal as engIsTerminal, CHIP_STYLES as HIVE_CHIP_STYLES } from "@/components/hive/shared/stageConfig"
 import { useStoredState } from "@/components/hive/shared/useStoredControls"
 import BeeLoader from "@/components/hive/shared/BeeLoader"
+import ComingSoonPlaceholder from "@/components/hive/ComingSoonPlaceholder"
 import FeedbackModal from "@/components/feedback/FeedbackModal"
 import { feedbackTimeAgo } from "@/components/feedback/feedbackShared"
 import { CurrentUserContext } from "@/components/hive/shared/currentUserContext"
@@ -21837,7 +21838,8 @@ function DashboardScreen({ onNavigate, startNav='home', locationSwitcher=null, l
   const isLiteUser   = isReadOnlyFranchiseRole(franchiseRole)
   // Money figures (Revenue card, royalty tile) — owner-or-corporate only.
   // Manager (operational lead) and lite_user are excluded. Shared predicate
-  // with ReportsScreen (lib/financial-access) so the two can't drift.
+  // (lib/financial-access). Reports no longer consume it — the Gen 1 report
+  // sections were purged in issue 139 and Reports is now a Coming Soon state.
   const canSeeFinancials = financialsVisible(role, franchiseRole)
   // Fresh invite-accept flag (sessionStorage). Set by AcceptInviteClient
   // post-accept; consumed once on the first home render so the invited
@@ -30926,71 +30928,22 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
   )
 }
 
-// ═══════════════════════════════════════════════════════
-//  REPORTS - Greyed out placeholder
-// ═══════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════
+//  REPORTS — Coming Soon (Gen 1 reports purged, issue 139)
+// ══════════════════════════════════════════════════════
+// The Gen 1 franchise Reports (revenue trend, pipeline, funnel, sources, service
+// types, partner referrals) rendered mock-shaped, stale numbers, so franchise
+// owners saw figures that didn't reflect their business. Per issue 139 the whole
+// section was removed; Reports now shows only a Coming Soon state, the same for
+// every role (elevated included), while the section is rebuilt from scratch. The
+// nav entry stays so the section remains discoverable — just empty.
+//
+// RETAINED below — still read by a LIVE surface (the admin Location drilldown's
+// Revenue Trend card in LocationDetailSheet, ~L27481): REPORT_MONTHS,
+// REPORT_REVENUE_BY_MONTH, seedRevByLoc(), BarChart. PROJECT_TYPES is retained
+// too: it drives live intake/drip dropdowns, not reports. Do NOT delete these as
+// "report" code — they are shared with live franchise/admin surfaces.
 
-// ─── Sync Log Data ────────────────────────────────────────────────────────────
-const SYNC_LOG_DATA = (() => {
-  const now = new Date('2026-05-05T09:00:00')
-  const locs = [
-    { id:'loc_kc',        name:'Kansas City',       owner:'Lynette Ewy'     },
-    { id:'loc_scottsdale',name:'Scottsdale',         owner:'Angie Ahlstedt'  },
-  ]
-  const types = ['jobber_sync','lead_import','token_refresh','webhook','export']
-  const statuses = ['success','success','success','success','warning','error']
-  const messages = {
-    success: [
-      'Jobber sync completed - 3 clients updated',
-      'Jobber sync completed - no changes',
-      'Token refreshed successfully',
-      'Webhook received: new_job',
-      'Webhook received: quote_approved',
-      'Client imported from web form',
-      '5 assessments synced from Jobber',
-      'Client profile updated via webhook',
-    ],
-    warning: [
-      'Jobber sync partial - 1 client skipped (missing email)',
-      'Token expiry within 24 hours - refresh recommended',
-      'Webhook payload missing field: phone',
-      'Rate limit approaching - 80% of quota used',
-    ],
-    error: [
-      'Jobber sync failed - authentication error',
-      'Webhook delivery failed - timeout after 30s',
-      'Token refresh failed - invalid client credentials',
-      'Jobber API returned 500 - retrying in 5 min',
-    ],
-  }
-
-  const entries = []
-  let id = 1
-  for (let i = 0; i < 80; i++) {
-    const loc = locs[Math.floor(Math.random() * locs.length)]
-    const status = statuses[Math.floor(Math.random() * statuses.length)]
-    const type = types[Math.floor(Math.random() * types.length)]
-    const msgs = messages[status]
-    const msg = msgs[Math.floor(Math.random() * msgs.length)]
-    const minsAgo = i * Math.floor(Math.random() * 45 + 5)
-    const ts = new Date(now - minsAgo * 60000)
-    entries.push({
-      id: id++,
-      locationId: loc.id,
-      locationName: loc.name,
-      owner: loc.owner,
-      type,
-      status,
-      message: msg,
-      ts,
-      duration: status==='error' ? null : Math.floor(Math.random() * 800 + 50) + 'ms',
-      jobberRef: type==='jobber_sync' ? `JOB-${1000+i}` : null,
-    })
-  }
-  return entries.sort((a,b) => b.ts - a.ts)
-})()
-
-// ─── Report Seed Data ─────────────────────────────────────────────────────────
 const REPORT_MONTHS = ['Oct','Nov','Dec','Jan','Feb','Mar','Apr','May']
 const REPORT_REVENUE_BY_MONTH = {
   'loc_kc':          [4200,3800,5100,4600,5800,6200,5400,3100],
@@ -31004,22 +30957,20 @@ const REPORT_REVENUE_BY_MONTH = {
   'loc_boston':      [3300,3000,4000,3700,4500,4900,4400,2400],
   'loc_miami':       [4100,3700,5000,4500,5500,6000,5300,2900],
 }
-const ALL_ACTIVE_LOC_IDS = ['loc_kc','loc_scottsdale','loc_omaha','loc_dallas','loc_denver','loc_chicago','loc_atlanta','loc_phoenix','loc_boston','loc_miami']
-const REPORT_SOURCES  = ['Website','Referral','Google','Instagram','Word of Mouth','Yelp','NextDoor']
+// Admin-editable project taxonomy — drives live intake + drip-category dropdowns
+// (NOT reports). Retained through the issue 139 reports purge.
 const PROJECT_TYPES = ['Home Organization','Kitchen + Pantry','Closet + Office','Garage','Full Home','Move-In Organization','Move-Out Organization','Bedroom + Closet','Basement','Attic','Master Closet','Pantry','Mudroom + Entry']
-const REPORT_PROJECTS = ['Full Home','Kitchen + Pantry','Closet','Garage','Office','Move-In','Move-Out']
-const REPORT_SOURCE_DIST  = [28,22,18,12,10,6,4]
-const REPORT_PROJECT_DIST = [24,20,16,14,10,9,7]
 
 function seedRevByLoc(locId, months=8) {
   const base = REPORT_REVENUE_BY_MONTH[locId]
   if (!base) return new Array(months).fill(0)  // new/unknown location - no fake data
   return base.slice(-months)
 }
-function totalRevByLoc(locId) { return seedRevByLoc(locId).reduce((s,v)=>s+v,0) }
-function royaltyByLoc(locId)  { return Math.round(totalRevByLoc(locId)*0.06) }
 
-// ─── Shared Chart Components ──────────────────────────────────────────────────
+// ─── Shared Chart ────────────────────────────────────────────────────
+// BarChart survives the issue 139 reports purge: the admin Location drilldown's
+// Revenue Trend card uses it. The Gen 1 report-only charts (LineChart, FunnelBar,
+// ReportCard, StatRow) were deleted with the reports they served.
 function BarChart({ data, labels, color='#a8c9c4', height=120, formatVal=(v)=>v, showValues=true }) {
   const max = Math.max(...data, 1)
   return (
@@ -31035,322 +30986,26 @@ function BarChart({ data, labels, color='#a8c9c4', height=120, formatVal=(v)=>v,
   )
 }
 
-function LineChart({ data, labels, color='#a8c9c4', height=80 }) {
-  const max = Math.max(...data, 1)
-  const min = Math.min(...data, 0)
-  const range = max - min || 1
-  const w = 300, h = height
-  const pts = data.map((v,i)=>`${(i/(data.length-1))*w},${h-((v-min)/range)*(h-10)-5}`)
-  return (
-    <div style={{ overflowX:'auto' }}>
-      <svg viewBox={`0 0 ${w} ${h}`} style={{ width:'100%', height:`${height}px` }}>
-        <polyline fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" points={pts.join(' ')} />
-        {data.map((v,i)=>{ const [x,y]=pts[i].split(','); return <circle key={i} cx={x} cy={y} r="3" fill={color} /> })}
-      </svg>
-    </div>
-  )
-}
-
-function FunnelBar({ label, value, max, color, pct }) {
-  return (
-    <div style={{ marginBottom:'10px' }}>
-      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'4px' }}>
-        <span style={{ fontSize:'12px', color:'#1a2e2b', fontWeight:500 }}>{label}</span>
-        <span style={{ fontSize:'12px', color:'#1a2e2b', fontWeight:700 }}>{value} {pct>0&&<span style={{ color:'#8a9e9a', fontWeight:400 }}>({pct}%)</span>}</span>
-      </div>
-      <div style={{ height:'8px', background:'rgba(0,0,0,0.06)', borderRadius:'4px', overflow:'hidden' }}>
-        <div style={{ height:'100%', width:`${(value/max)*100}%`, background:color, borderRadius:'4px', transition:'width 0.4s' }} />
-      </div>
-    </div>
-  )
-}
-
-function ReportCard({ title, subtitle, children, action }) {
-  return (
-    <div style={{ background:'white', borderRadius:'14px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.06)', boxShadow:'0 1px 4px rgba(0,0,0,0.05)' }}>
-      <div style={{ padding:'14px 16px 10px', display:'flex', alignItems:'flex-start', justifyContent:'space-between' }}>
-        <div>
-          <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', marginBottom:'2px' }}>{title}</p>
-          {subtitle&&<p style={{ fontSize:'11px', color:'#8a9e9a' }}>{subtitle}</p>}
-        </div>
-        {action}
-      </div>
-      <div style={{ padding:'0 16px 14px' }}>{children}</div>
-    </div>
-  )
-}
-
-function StatRow({ label, value, sub, color='#1a2e2b' }) {
-  return (
-    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 0', borderBottom:'1px solid rgba(0,0,0,0.04)' }}>
-      <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{label}</span>
-      <div style={{ textAlign:'right' }}>
-        <span style={{ fontSize:'14px', fontWeight:700, color, fontFamily:'Georgia,serif' }}>{value}</span>
-        {sub&&<p style={{ fontSize:'10px', color:'#b0c0bc' }}>{sub}</p>}
-      </div>
-    </div>
-  )
-}
-
-// ─── Reports Filter Bar ────────────────────────────────────────────────────────
-function ReportFilters({ range, setRange, locId, setLocId, source, setSource, project, setProject, showLoc=false }) {
-  const ranges = [{k:'7d',l:'7D'},{k:'30d',l:'30D'},{k:'90d',l:'90D'},{k:'ytd',l:'YTD'},{k:'all',l:'All'}]
-  return (
-    <div style={{ display:'flex', gap:'6px', flexWrap:'wrap', alignItems:'center', padding:'10px 0 4px' }}>
-      <div style={{ display:'flex', background:'rgba(0,0,0,0.05)', borderRadius:'8px', padding:'2px' }}>
-        {ranges.map(r=>(
-          <button key={r.k} onClick={()=>setRange(r.k)} style={{ padding:'5px 10px', borderRadius:'6px', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'11px', fontWeight:range===r.k?700:400, background:range===r.k?'white':'transparent', color:range===r.k?'#1a2e2b':'#8a9e9a', boxShadow:range===r.k?'0 1px 3px rgba(0,0,0,0.1)':'none' }}>
-            {r.l}
-          </button>
-        ))}
-      </div>
-      {showLoc&&(
-        <select value={locId} onChange={e=>setLocId(e.target.value)} style={{ padding:'6px 10px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', color:'#4a5e5a', background:'white', outline:'none' }}>
-          <option value='all'>All Locations</option>
-          {ALL_ACTIVE_LOC_IDS.map(id=>{ const l=ALL_LOCATIONS.find(x=>x.id===id); return l?<option key={id} value={id}>{l.name}</option>:null })}
-        </select>
-      )}
-      <select value={source} onChange={e=>setSource(e.target.value)} style={{ padding:'6px 10px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', color:'#4a5e5a', background:'white', outline:'none' }}>
-        <option value='all'>All Sources</option>
-        {REPORT_SOURCES.map(s=><option key={s} value={s}>{s}</option>)}
-      </select>
-      <select value={project} onChange={e=>setProject(e.target.value)} style={{ padding:'6px 10px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', color:'#4a5e5a', background:'white', outline:'none' }}>
-        <option value='all'>All Services</option>
-        {REPORT_PROJECTS.map(s=><option key={s} value={s}>{s}</option>)}
-      </select>
-    </div>
-  )
-}
-
-// ─── Report Sections ──────────────────────────────────────────────────────────
-
-function FranchiseReports({ range, locId, source, project, people, locFilter, canSeeFinancials=true }) {
-  const PARTNERS = useContext(PartnersContext)?.partners || []
-  const myLocId = locFilter!=='all' ? locFilter : locId
-  const myPeople = people.filter(p=>!p.isJunk&&(myLocId==='all'||p.locationId===myLocId))
-
-  // ─ Time-range filter (Bug 5) — applied upstream so every calc below reflects
-  // the selected range. Keys are lowercase to match ReportFilters
-  // ('7d'|'30d'|'90d'|'ytd'|'all'); same rolling-window pattern as the Home tab.
-  const rangeCutoff = (() => {
-    if (range === 'all') return 0
-    if (range === 'ytd') return new Date(new Date().getFullYear(), 0, 1).getTime()
-    const days = { '7d':7, '30d':30, '90d':90 }[range]
-    return days ? Date.now() - days*24*60*60*1000 : 0
-  })()
-  const rangeLeads = rangeCutoff === 0 ? myPeople : myPeople.filter(p => {
-    const c = new Date(p.created)
-    return !isNaN(c.getTime()) && c.getTime() >= rangeCutoff
-  })
-
-  const srcFiltered  = source==='all'  ? rangeLeads : rangeLeads.filter(p=>p.source===source)
-  const projFiltered = project==='all' ? srcFiltered : srcFiltered.filter(p=>p.project===project)
-
-  const active   = projFiltered.filter(p=>!['Closed Won','Closed Lost'].includes(p.stage))
-  const closed   = projFiltered.filter(p=>p.stage==='Closed Won')
-  const lost     = projFiltered.filter(p=>p.stage==='Closed Lost')
-
-  // ─ Revenue (Bug 1) — real collected revenue from each client's paid invoices
-  // (mapLeadToPerson nests these on person.invoices[] with a paidAmount each).
-  const invoicePaid = p => (p.invoices || []).reduce((s, inv) => s + Number(inv.paidAmount || 0), 0)
-  const revenue = projFiltered.reduce((sum, p) => sum + invoicePaid(p), 0)
-
-  // ─ Revenue trend (Bug 2) — last 7 months generated dynamically from today,
-  // bucketing real paid invoices by the month they were paid (inv.paidAt).
-  const revNow = new Date()
-  const revMonths = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(revNow.getFullYear(), revNow.getMonth() - (6 - i), 1)
-    return { label: d.toLocaleString('en-US', { month: 'short' }), year: d.getFullYear(), month: d.getMonth() }
-  })
-  const revData = revMonths.map(m => projFiltered.reduce((sum, p) =>
-    sum + (p.invoices || []).reduce((s, inv) => {
-      if (!inv.paidAmount || !inv.paidAt) return s
-      const dt = new Date(inv.paidAt)
-      if (isNaN(dt.getTime()) || dt.getFullYear() !== m.year || dt.getMonth() !== m.month) return s
-      return s + Number(inv.paidAmount || 0)
-    }, 0), 0))
-  const revLabels = revMonths.map(m => m.label)
-
-  const pipelineStages = STAGES.filter(s=>!['Closed Won','Closed Lost'].includes(s.key)).map(s=>({
-    ...s, count: projFiltered.filter(p=>p.stage===s.key).length
-  }))
-  const maxPipeline = Math.max(...pipelineStages.map(s=>s.count), 1)
-
-  const srcCounts = REPORT_SOURCES.map(s=>({ s, v:projFiltered.filter(p=>p.source===s).length })).filter(x=>x.v>0)
-  const srcMax    = Math.max(...srcCounts.map(x=>x.v), 1)
-
-  const projCounts = REPORT_PROJECTS.map(p=>({ p, v:projFiltered.filter(x=>x.project===p).length })).filter(x=>x.v>0)
-
-  // ─ Partner referrals (Bug 4) — real counts per partner from lead.referredBy
-  // (set by the referrer picker). Top 5 by count; partners with 0 are dropped.
-  const partnerReferrals = PARTNERS.filter(p=>!p.isDeleted)
-    .map(p => ({ ...p, refCount: projFiltered.filter(l => l.referredBy === p.id).length }))
-    .filter(p => p.refCount > 0)
-    .sort((a, b) => b.refCount - a.refCount)
-    .slice(0, 5)
-
-  // ─ Conversion funnel (Bug 3) — real stage progressions, not invented
-  // multipliers. Each step counts leads that reached that milestone.
-  const funnelSteps = [
-    { label:'Total Client',       value:projFiltered.length },
-    { label:'Contacted',          value:projFiltered.filter(p=>(p.outreachTimeline?.length||0)>0 || !!p.reachOutMethod).length },
-    { label:'Assessment/Request', value:projFiltered.filter(p=>!!p.assessment || !!p.requestRef).length },
-    { label:'Job Created',        value:projFiltered.filter(p=>(p.jobs?.length||0)>0).length },
-    { label:'Closed Won',         value:closed.length },
-  ]
-  const funnelMax = funnelSteps[0].value || 1
-
-  return (
-    <div style={{ display:'grid', gap:'12px' }}>
-      {/* KPIs — Revenue is a money figure, dropped for non-financial roles
-          (manager). Grid columns track the card count so 2 cards don't leave
-          a phantom third column. */}
-      {(() => {
-      const kpis = [
-        { label:'Active',      value:active.length,              color:'#1a2e2b' },
-        { label:'Closed Won',  value:closed.length,              color:'#22c55e' },
-        ...(canSeeFinancials ? [{ label:'Revenue', value:`$${(revenue/1000).toFixed(0)}k`, color:'#d4a046' }] : []),
-      ]
-      return (
-      <div style={{ display:'grid', gridTemplateColumns:`repeat(${kpis.length},1fr)`, gap:'8px' }}>
-        {kpis.map(s=>(
-          <div key={s.label} style={{ background:'white', borderRadius:'12px', padding:'12px', border:'1px solid rgba(0,0,0,0.06)' }}>
-            <p style={{ fontSize:'20px', fontWeight:700, color:s.color, fontFamily:'Georgia,serif', marginBottom:'3px' }}>{s.value}</p>
-            <p style={{ fontSize:'10px', color:'#8a9e9a' }}>{s.label}</p>
-          </div>
-        ))}
-      </div>
-      )})()}
-
-      {/* Revenue trend — money figure; hidden for non-financial roles (manager). */}
-      {canSeeFinancials && (
-      <ReportCard title="Revenue Trend" subtitle="Monthly collected revenue">
-        <BarChart data={revData} labels={revLabels} color='#d4a046' formatVal={v=>`$${(v/1000).toFixed(0)}k`} />
-        <div style={{ display:'flex', justifyContent:'space-between', marginTop:'8px', paddingTop:'8px', borderTop:'1px solid rgba(0,0,0,0.05)' }}>
-          <span style={{ fontSize:'11px', color:'#8a9e9a' }}>Total collected</span>
-          <span style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>${revenue.toLocaleString()}</span>
-        </div>
-      </ReportCard>
-      )}
-
-      {/* Pipeline breakdown */}
-      <ReportCard title="My Pipeline" subtitle="Client by stage">
-        {pipelineStages.map(s=>(
-          <div key={s.key} style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'8px' }}>
-            <span style={{ fontSize:'13px', width:'18px', flexShrink:0 }}>{s.icon}</span>
-            <span style={{ fontSize:'11px', color:'#8a9e9a', flex:1 }}>{s.label}</span>
-            <div style={{ width:'80px', height:'6px', background:'rgba(0,0,0,0.05)', borderRadius:'3px', overflow:'hidden' }}>
-              <div style={{ height:'100%', width:`${(s.count/maxPipeline)*100}%`, background:s.color, borderRadius:'3px' }} />
-            </div>
-            <span style={{ fontSize:'12px', fontWeight:700, color:s.color, width:'20px', textAlign:'right' }}>{s.count}</span>
-          </div>
-        ))}
-      </ReportCard>
-
-      {/* Conversion funnel */}
-      <ReportCard title="Conversion Funnel" subtitle="New → Closed Won">
-        {funnelSteps.map((step, i)=>(
-          <FunnelBar key={step.label} label={step.label} value={step.value} max={funnelMax}
-            pct={i>0?Math.round((step.value/funnelMax)*100):null}
-            color={['#6366f1','#0ea5e9','#a8c9c4','#d4a046','#22c55e'][i]} />
-        ))}
-      </ReportCard>
-
-      {/* Lead sources */}
-      {srcCounts.length > 0 && (
-        <ReportCard title="Client Sources" subtitle="Where your client comes from">
-          {srcCounts.map(({s,v})=>(
-            <div key={s} style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'8px' }}>
-              <span style={{ fontSize:'11px', color:'#8a9e9a', flex:1 }}>{s}</span>
-              <div style={{ width:'80px', height:'6px', background:'rgba(0,0,0,0.05)', borderRadius:'3px', overflow:'hidden' }}>
-                <div style={{ height:'100%', width:`${(v/srcMax)*100}%`, background:'#a8c9c4', borderRadius:'3px' }} />
-              </div>
-              <span style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', width:'20px', textAlign:'right' }}>{v}</span>
-            </div>
-          ))}
-        </ReportCard>
-      )}
-
-      {/* Service types */}
-      {projCounts.length > 0 && (
-        <ReportCard title="Service Types" subtitle="Most booked projects">
-          <BarChart data={projCounts.map(x=>x.v)} labels={projCounts.map(x=>x.p.split(' ')[0])} color='#d4a046' height={80} />
-        </ReportCard>
-      )}
-
-      {/* Partner referrals */}
-      <ReportCard title="Partner Referrals" subtitle="Top referring partners">
-        {partnerReferrals.length === 0 ? (
-          <p style={{ fontSize:'12px', color:'#8a9e9a', padding:'7px 0' }}>No partner referrals in this range yet.</p>
-        ) : partnerReferrals.map(p=>(
-          <div key={p.id} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'7px 0', borderBottom:'1px solid rgba(0,0,0,0.04)' }}>
-            <div style={{ width:'28px', height:'28px', borderRadius:'50%', background:'linear-gradient(135deg,#d4a046,#b07a20)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'10px', fontWeight:700, color:'white', flexShrink:0 }}>
-              {p.name.split(' ').map(w=>w[0]).join('').slice(0,2)}
-            </div>
-            <span style={{ fontSize:'12px', color:'#1a2e2b', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name}</span>
-            <span style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>{p.refCount} {p.refCount === 1 ? 'referral' : 'referrals'}</span>
-          </div>
-        ))}
-      </ReportCard>
-    </div>
-  )
-}
-
-// ─── Reports Coming Soon Placeholder ──────────────────────────────────────────
-// Elevated reporting has no real backend yet — the former platform/sync-log
-// views rendered mock data and were removed. Until the reporting backends land,
-// the elevated Reports path shows this honest placeholder. Mirrors the brand-teal
-// centered-card treatment used elsewhere. The owner-facing FranchiseReports
-// path is real and unaffected.
-function ReportsComingSoonPlaceholder() {
-  return (
-    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', padding:'48px 24px', minHeight:'46vh' }}>
-      <div style={{ width:'100%', maxWidth:'380px', background:'white', borderRadius:'16px', border:'1px solid rgba(0,0,0,0.06)', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', padding:'32px 24px', textAlign:'center' }}>
-        <div style={{ width:'56px', height:'56px', borderRadius:'16px', background:'linear-gradient(135deg,#1a2e2b,#2d4f4a)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'26px', margin:'0 auto 16px' }}>📊</div>
-        <p style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'6px' }}>Reports coming soon</p>
-        <p style={{ fontSize:'13px', color:'#8a9e9a', lineHeight:1.5 }}>We're building out reporting backends — owner reports work today.</p>
-      </div>
-    </div>
-  )
-}
-
-// ─── Reports Screen ───────────────────────────────────────────────────────────
-function ReportsScreen({ role, franchiseRole='owner', people=[], locFilter='all' }) {
-  const isElevated = role==='super_admin' || role==='corporate'
-  // Money figures gate — shared with the Home Revenue tile (lib/financial-access).
-  // Owner/elevated see revenue; manager sees operational reports only.
-  const canSeeFinancials = financialsVisible(role, franchiseRole)
-
-  const [range,   setRange]   = useState('30d')
-  const [locId,   setLocId]   = useState('all')
-  const [source,  setSource]  = useState('all')
-  const [project, setProject] = useState('all')
-
-  // No tabs: the Reports / Sync Log tab bar only ever existed for the elevated
-  // views, which are now gated to ReportsComingSoonPlaceholder below.
-
+// ─── Reports Screen ───────────────────────────────────────────────────────
+// issue 139: role-independent by design. No franchiseRole / people / financials
+// gate — there is no report content left to gate, so no stale data can render for
+// ANY role (owner, manager, or elevated). Just the header + the shared
+// ComingSoonPlaceholder (components/hive/ComingSoonPlaceholder) — the SAME
+// component Back Office (issue 140) reuses with its own copy.
+function ReportsScreen() {
   return (
     <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#f7f5f0', minHeight:'100vh', paddingBottom:'5rem' }}>
       <div style={{ background:'#1a2e2b', padding:'1.25rem 1.25rem 0' }}>
-        <h1 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'white', marginBottom:'2px' }}>
-          {isElevated ? '📊 Reports' : '📊 My Reports'}
-        </h1>
-        <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.7)', marginBottom:'10px' }}>
-          {isElevated ? 'Platform reporting' : 'Your location performance'}
-        </p>
+        <h1 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'white', marginBottom:'2px' }}>📊 Reports</h1>
+        <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.7)', marginBottom:'10px' }}>Your business at a glance — coming soon</p>
       </div>
 
       <div style={{ padding:'0 1.25rem 1rem' }}>
-        {isElevated ? (
-          <ReportsComingSoonPlaceholder />
-        ) : (
-          <>
-            <ReportFilters range={range} setRange={setRange} locId={locId} setLocId={setLocId} source={source} setSource={setSource} project={project} setProject={setProject} showLoc={isElevated} />
-            <div style={{ marginTop:'8px' }}>
-              <FranchiseReports range={range} locId={locId} source={source} project={project} people={people} locFilter={locFilter} canSeeFinancials={canSeeFinancials} />
-            </div>
-          </>
-        )}
+        <ComingSoonPlaceholder
+          icon="📊"
+          title="Reports are coming soon"
+          body="We're building a brand-new reporting section to show how your business is doing — your leads, jobs, and revenue, all in one place. It's on the way. Check back soon."
+        />
       </div>
     </div>
   )
@@ -33300,15 +32955,13 @@ if (Array.isArray(initialPeople)) return
           {/* Nav items */}
           <div style={{ flex:1, padding:'10px 10px 16px', display:'flex', flexDirection:'column', gap:'4px' }}>
             {navItems.map(item=>{
-              const fr = franchiseRole // owner|manager|viewer (+ 'light'/'readonly' under view-as)
-              const isReports  = item.key==='reports'  && !['super_admin','corporate'].includes(role) && !['owner','manager'].includes(fr)
-              // Settings nav is open to EVERY role — SettingsScreen itself
-              // allowlists the sections (owner: everything; manager and
-              // lite_user: Profile only, a self-edit). The old nav lockout here
-              // checked `['readonly'].includes(fr)`, a string mapRole never
-              // emits for a real lite_user ('viewer'), so it silently never
-              // fired — don't reintroduce a nav-level role denylist.
-              const isLocked = (isOnboardingState && !isElevated && item.key!=='home') || isReports
+              // issue 139: Reports has NO role lock — every role that sees the
+              // tab gets the identical Coming Soon screen (one behavior, no
+              // branch). Settings nav is likewise open to EVERY role —
+              // SettingsScreen itself allowlists the sections (owner:
+              // everything; manager and lite_user: Profile only, a self-edit).
+              // Don't reintroduce a nav-level role denylist for either.
+              const isLocked = (isOnboardingState && !isElevated && item.key!=='home')
               const isActive = activeNav===item.key
               return (
                 <button
@@ -33537,7 +33190,7 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         />
       </div>
     )
-    if (activeNav==='reports') return <div style={pageStyle}><ReportsScreen role={role} franchiseRole={franchiseRole} people={people} locFilter={locFilter} /></div>
+    if (activeNav==='reports') return <div style={pageStyle}><ReportsScreen /></div>
     if (activeNav==='settings') return (
       <div style={pageStyle}>
         {/* locationId: was `locFilter==='all' ? 'loc_kc' : locFilter` — a
@@ -33791,17 +33444,15 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
           {navItems.map(item=>{
             const isOnboardingState = effectiveCrmStatus==='onboarding'
             // Franchise sub-role gating
-            const fr = franchiseRole // owner|manager|viewer (+ 'light'/'readonly' under view-as)
-            const isReports  = item.key==='reports'  && !['super_admin','corporate'].includes(role) && !['owner','manager'].includes(fr)
-            // Settings nav is open to EVERY role — SettingsScreen itself
-            // allowlists the sections (owner: everything; manager and
-            // lite_user: Profile only, a self-edit). The old nav lockout here
-            // checked `['readonly'].includes(fr)`, a string mapRole never
-            // emits for a real lite_user ('viewer'), so it silently never
-            // fired — don't reintroduce a nav-level role denylist.
-            // Onboarding lockdown only applies to franchise users mid-setup —
-            // super_admin / corporate are always elevated and never "onboarding."
-            const isLocked = (isOnboardingState && !isElevated && item.key!=='home') || isReports
+            // issue 139: Reports has NO role lock — every role that sees the tab
+            // gets the identical Coming Soon screen (one behavior, no branch).
+            // Settings nav is likewise open to EVERY role — SettingsScreen itself
+            // allowlists the sections (owner: everything; manager and lite_user:
+            // Profile only, a self-edit). Don't reintroduce a nav-level role
+            // denylist for either. Onboarding lockdown only applies to franchise
+            // users mid-setup — super_admin / corporate are always elevated and
+            // never "onboarding."
+            const isLocked = (isOnboardingState && !isElevated && item.key!=='home')
             const isActive = activeNav===item.key
             return (
               <button key={item.key} onClick={()=>{ if (isLocked) return; if (item.action==='openManual') setShowManual(true); else nav(item.key) }} style={{ width:'100%', padding:'10px 14px', borderRadius:'10px', border:'none', cursor:isLocked?'default':'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'12px', textAlign:'left', background:isActive?'rgba(168,201,196,0.12)':'transparent', opacity:isLocked?0.3:1, transition:'background 0.15s' }}>
