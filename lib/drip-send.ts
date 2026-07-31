@@ -21,6 +21,7 @@ import {
 import { nextSendAt } from './drip-time'
 import { scheduleWelcomeEmail } from './welcome-email'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
+import { buildBrandedDripHtml, buildBrandedDripText } from './drip-email-layout'
 
 export type SendDripResult = {
   sent: boolean
@@ -307,8 +308,14 @@ export async function sendDripStepForRow(row: DripProgressRow): Promise<SendDrip
 
   const rendered = renderTemplate({ subject: subjectSource, body: bodySource }, ctx)
 
-  const text = rendered.body
-  const html = bodyToHtml(rendered.body)
+  // #90 — wrap the rendered body in the Bee Organized branded drip layout
+  // (logo header, single column, teal footer band). The wrapper reads the
+  // location chrome (name/phone/reviews) straight off ctx — the same resolved
+  // values the body tokens use — and never re-renders tokens. bodyToHtml is
+  // left for welcome/stage emails (drips only). The plain-text alternative is
+  // rebuilt to match, not left stale.
+  const html = buildBrandedDripHtml(rendered.body, ctx)
+  const text = buildBrandedDripText(rendered.body, ctx)
 
   // Per-project-type SENDER routing. If the location split senders by project
   // type, this drip sends AS the sender assigned to the lead's project_type;
