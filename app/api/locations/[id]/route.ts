@@ -3,7 +3,7 @@ import { requireAuth, getHubUser } from '@/lib/auth'
 import { supabaseService } from '@/lib/supabase-service'
 
 // PATCH /api/locations/[id]
-// Body: { address?, city?, state?, zip?, phone?, email?, timezone?,
+// Body: { name?, address?, city?, state?, zip?, phone?, email?, timezone?,
 //         sender_name?, send_from_email?, reply_to_email?,
 //         reviews_link?, calendar_link? }
 //
@@ -16,6 +16,10 @@ import { supabaseService } from '@/lib/supabase-service'
 // written. Empty strings clear (set to null); undefined leaves alone.
 
 const ALLOWED_FIELDS = [
+  // Display label only — every consumer (digest, Slack card, Stripe message,
+  // import logs) falls back to location_id/slug, and every lookup keys on
+  // id/slug, never on name. Safe to edit post-onboarding. See #93.
+  'name',
   'address',
   'city',
   'state',

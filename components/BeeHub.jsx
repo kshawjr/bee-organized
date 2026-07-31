@@ -3875,34 +3875,6 @@ function KanbanIconTooltip({ label, children }) {
 }
 
 
-// ─── Settings Address Row (avoids hooks-in-IIFE error) ───────────────────────
-function SettingsAddressAdd({ onSave }) {
-  const [showModal, setShowModal] = useState(false)
-  return (
-    <>
-      <button onClick={()=>setShowModal(true)} style={{ fontSize:'11px', color:'#a8c9c4', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', fontWeight:500 }}>+ Add</button>
-      {showModal&&<AddressModal onSave={({value})=>{ onSave(value); setShowModal(false) }} onClose={()=>setShowModal(false)} />}
-    </>
-  )
-}
-
-function SettingsAddressRow({ address, onUpdate, onDelete }) {
-  const [showModal, setShowModal] = useState(false)
-  return (
-    <>
-      <div onClick={()=>setShowModal(true)}
-        style={{ background:'#f7f5f0', borderRadius:'9px', padding:'9px 12px', display:'flex', alignItems:'center', gap:'8px', cursor:'pointer' }}>
-        <div style={{ flex:1, minWidth:0 }}>
-          <p style={{ fontSize:'10px', color:'#8a9e9a', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'2px' }}>Business</p>
-          <p style={{ fontSize:'12px', color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{address}</p>
-        </div>
-        <span style={{ fontSize:'11px', color:'#c8d8d4', flexShrink:0 }}>✏️</span>
-      </div>
-      {showModal&&<AddressModal addr={{type:'Business',value:address}} onSave={({value})=>{ onUpdate(value); setShowModal(false) }} onDelete={()=>{ onDelete(); setShowModal(false) }} onClose={()=>setShowModal(false)} />}
-    </>
-  )
-}
-
 // ─── Company Address Section (avoids hooks-in-IIFE error) ────────────────────
 function CompanyAddressSection({ company, onUpdate }) {
   const [showModal, setShowModal] = useState(false)
@@ -16044,6 +16016,9 @@ const DEFAULT_SETTINGS = {
     locId:          '',
     name:           '',
     address:        '',
+    city:           '',
+    state:          '',
+    zip:            '',
     phone:          '',
     bookingLink:    '',
     reviewsLink:    '',
@@ -19401,18 +19376,18 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   const locLocation = (currentLocationCtx && !(isSuperAdmin && selectedLoc)) ? (()=>{
     // Real franchise owner sign-in: hydrate every field from the locations
     // row that page.tsx fetched. DB stores address parts separately
-    // (address / city / state / zip); Settings UI shows a single address
-    // line, so we combine them as "Street, City, ST Zip".
-    const cityStateZip = [
-      currentLocationCtx.city,
-      [currentLocationCtx.state, currentLocationCtx.zip].filter(Boolean).join(' '),
-    ].filter(Boolean).join(', ')
-    const combinedAddress = [currentLocationCtx.address, cityStateZip].filter(Boolean).join(', ')
+    // (address / city / state / zip); Settings edits each in its own row and
+    // persists each to its own column (#93), so we hydrate them separately —
+    // no combined line, which could not round-trip back to the columns that
+    // feed {{business_city}} and the location line in client emails.
     return {
       ...DEFAULT_SETTINGS.location,
       locId:           currentLocationCtx.id,
       name:            currentLocationCtx.name || '',
-      address:         combinedAddress,
+      address:         currentLocationCtx.address || '',
+      city:            currentLocationCtx.city || '',
+      state:           currentLocationCtx.state || '',
+      zip:             currentLocationCtx.zip || '',
       phone:           currentLocationCtx.phone || '',
       timezone:        currentLocationCtx.timezone || '',
       reviewsLink:     currentLocationCtx.reviews_link || '',
@@ -19447,7 +19422,13 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     // locationId mapping in _hub-page.tsx.
     locId:          selectedLoc.locationId || selectedLoc.id,
     name:           selectedLoc.name,
-    address:        selectedLoc.address,
+    // Structured parts (street/city/state/zip) each edit + persist to their
+    // own column (#93). selectedLoc.address stays the combined display string
+    // used by the admin location cards — don't read it here.
+    address:        selectedLoc.street || '',
+    city:           selectedLoc.city || '',
+    state:          selectedLoc.state || '',
+    zip:            selectedLoc.zip || '',
     phone:          selectedLoc.phone,
     bookingLink:    selectedLoc.bookingLink,
     reviewsLink:    selectedLoc.reviewsLink,
@@ -19496,7 +19477,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       ...DEFAULT_SETTINGS.location,
       locId:          loc.id,
       name:           loc.name,
-      address:        loc.address||'',
+      address:        loc.street||loc.address||'',
+      city:           loc.city||'',
+      state:          loc.state||'',
+      zip:            loc.zip||'',
       phone:          loc.phone||'',
       bookingLink:    loc.bookingLink||'',
       reviewsLink:    loc.reviewsLink||'',
@@ -20087,6 +20071,40 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     }
   }
 
+  // Persist a single locations column through PATCH /api/locations/[id] — the
+  // same honest route the rate uses (500 on DB error, ok:true only on a landed
+  // write). Every Location-section text row routes through here so nothing on
+  // this screen is local-only-and-lost-on-reload again (#93). `stateKey` is the
+  // settings.location.* field to paint; `column` is the DB column to write;
+  // `noun` fills the shared alert wording (mirrors persistRatePerHour).
+  //
+  // Guard on realLocId BEFORE any fetch or paint, so a view-as session (non-UUID
+  // locId) can't show a value it never saved. And — unlike an optimistic paint —
+  // we paint ONLY after the write lands: on a server error the field keeps its
+  // old value and the user is told plainly, never a silent success.
+  async function persistLocationField(stateKey, column, v, noun) {
+    if (!realLocId) {
+      alert(`You're viewing this location, not signed in to it — open the real location to change the ${noun}.`)
+      return
+    }
+    try {
+      const res = await fetch(`/api/locations/${realLocId}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [column]: v }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(()=>({}))
+        throw new Error(j?.error || `HTTP ${res.status}`)
+      }
+      updateLocation(stateKey, v)
+    } catch (e) {
+      console.error(`[settings] ${column} save failed`, e)
+      alert(`Could not save your ${noun}: ` + (e?.message || e))
+    }
+  }
+
   // Persist the caller's OWN booking link to hub_users.booking_link. Unlike
   // the other Profile rows (First/Last/Email/Phone, which are local-only in
   // this screen), this one MUST reach the DB: it is what {{owner_booking_link}}
@@ -20426,27 +20444,26 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               })()}
             </div>
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-              <SettingsEditRow label="Location Name"   value={settings.location.name}          onSave={v=>updateLocation('name',v)} />
-              <div style={{ padding:'12px 16px', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'6px' }}>
-                  <p style={{ fontSize:'12px', fontWeight:600, color:'#4a5e5a' }}>📍 Address</p>
-                  {!settings.location.address && <SettingsAddressAdd onSave={v=>updateLocation('address',v)} />}
-                </div>
-                {settings.location.address&&<SettingsAddressRow
-                  address={settings.location.address}
-                  onUpdate={v=>updateLocation('address',v)}
-                  onDelete={()=>updateLocation('address','')}
-                />}
-              </div>
-              <SettingsEditRow label="Phone"           value={settings.location.phone}         onSave={v=>updateLocation('phone',v)} type="tel" />
-              <SettingsEditRow label="Timezone"        value={settings.location.timezone}      onSave={v=>updateLocation('timezone',v)} />
+              <SettingsEditRow label="Location Name"   value={settings.location.name}          onSave={v=>persistLocationField('name','name',v,'location name')} />
+              {/* Address is FOUR rows, each persisting to its own column
+                  (address/city/state/zip) — a straight full-width stack, no
+                  side-by-side State/Zip, so nothing feels cramped. The DB stores
+                  these separately and {{business_city}} / the client-email
+                  location line read city+state, so they are never merged into a
+                  single line here (#93). */}
+              <SettingsEditRow label="Street Address"  value={settings.location.address}       onSave={v=>persistLocationField('address','address',v,'street address')} />
+              <SettingsEditRow label="City"            value={settings.location.city}          onSave={v=>persistLocationField('city','city',v,'city')} />
+              <SettingsEditRow label="State"           value={settings.location.state}         onSave={v=>persistLocationField('state','state',v,'state')} />
+              <SettingsEditRow label="ZIP"             value={settings.location.zip}           onSave={v=>persistLocationField('zip','zip',v,'ZIP code')} type="tel" />
+              <SettingsEditRow label="Phone"           value={settings.location.phone}         onSave={v=>persistLocationField('phone','phone',v,'phone number')} type="tel" />
+              <SettingsEditRow label="Timezone"        value={settings.location.timezone}      onSave={v=>persistLocationField('timezone','timezone',v,'timezone')} />
               <SettingsEditRow label="Location ID"     value={settings.location.locId||'—'}   readOnly hint="Your unique franchise location identifier" />
             </div>
 
             <SectionHeader title="Online Presence" />
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-              <SettingsEditRow label="Booking Link"     value={settings.location.bookingLink}  onSave={v=>updateLocation('bookingLink',v)}  hint="Shared in your new lead emails" />
-              <SettingsEditRow label="Google Reviews"   value={settings.location.reviewsLink}  onSave={v=>updateLocation('reviewsLink',v)}  hint="Sent to completed clients" required validate={validateReviewsLink} />
+              <SettingsEditRow label="Booking Link"     value={settings.location.bookingLink}  onSave={v=>persistLocationField('bookingLink','calendar_link',v,'booking link')}  hint="Shared in your new lead emails" />
+              <SettingsEditRow label="Google Reviews"   value={settings.location.reviewsLink}  onSave={v=>persistLocationField('reviewsLink','reviews_link',v,'Google Reviews link')}  hint="Sent to completed clients" required validate={validateReviewsLink} />
             </div>
 
             <SectionHeader title="Pricing" desc="Quoted to clients in your follow-up emails" />
@@ -20457,16 +20474,22 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
 
             <SectionHeader title="Assessment Default" desc="Used when scheduling - can be overridden per client" />
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
+              {/* DISABLED (#93): locations has no assessment_type column, so this
+                  control could only ever write to session state and vanish on
+                  reload — the exact bug #93 fixes. Rather than ship a lie, the
+                  buttons are non-interactive and a note explains it. Persisting
+                  this needs a migration (see the PR notes); tracked separately. */}
               <div style={{ padding:'12px 16px', background:'white' }}>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', opacity:0.5 }}>
                   {[['in-person','🏠','In-Person'],['virtual','💻','Virtual']].map(([v,icon,label])=>(
-                    <button key={v} onClick={()=>updateLocation('assessmentType',v)} style={{ padding:'12px', borderRadius:'10px', cursor:'pointer', border:'2px solid', borderColor:settings.location.assessmentType===v?'#a8c9c4':'rgba(0,0,0,0.08)', background:settings.location.assessmentType===v?'rgba(168,201,196,0.12)':'#f7f5f0', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'8px', justifyContent:'center' }}>
+                    <div key={v} aria-disabled="true" style={{ padding:'12px', borderRadius:'10px', cursor:'not-allowed', border:'2px solid', borderColor:settings.location.assessmentType===v?'#a8c9c4':'rgba(0,0,0,0.08)', background:settings.location.assessmentType===v?'rgba(168,201,196,0.12)':'#f7f5f0', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'8px', justifyContent:'center' }}>
                       <span style={{ fontSize:'20px' }}>{icon}</span>
                       <span style={{ fontSize:'13px', fontWeight:settings.location.assessmentType===v?600:400, color:'#1a2e2b' }}>{label}</span>
                       {settings.location.assessmentType===v&&<span style={{ color:'#a8c9c4' }}>✓</span>}
-                    </button>
+                    </div>
                   ))}
                 </div>
+                <p style={{ fontSize:'11px', color:'#b0c0bc', marginTop:'8px' }}>Saving a location-wide default isn’t available yet. For now, set the assessment type per client when scheduling.</p>
               </div>
             </div>
 
@@ -20739,9 +20762,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                   "Who hears about new leads" card, which also leads with its toggle. */}
               <ProjectTypeSenders realLocId={realLocId} readOnly={false} embedded />
               <div style={{ borderTop:'0.5px solid rgba(26,46,43,0.08)' }}>
-                <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>updateLocation('sendFromName',v)}  hint="e.g. Bee Organized Kansas City" />
-                <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>updateLocation('sendFromEmail',v)} hint="Must be a verified sender in your email provider" type="email" />
-                <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>updateLocation('replyToEmail',v)}  hint="Where client replies land (defaults to Send From)" type="email" />
+                <SettingsEditRow label="Send From Name"  value={settings.location.sendFromName||''}  onSave={v=>persistLocationField('sendFromName','sender_name',v,'Send From name')}  hint="e.g. Bee Organized Kansas City" />
+                <SettingsEditRow label="Send From Email" value={settings.location.sendFromEmail||''} onSave={v=>persistLocationField('sendFromEmail','send_from_email',v,'Send From email')} hint="Must be a verified sender in your email provider" type="email" />
+                <SettingsEditRow label="Reply-To Email"  value={settings.location.replyToEmail||''}  onSave={v=>persistLocationField('replyToEmail','reply_to_email',v,'Reply-To email')}  hint="Where client replies land (defaults to Send From)" type="email" />
               </div>
             </div>
 

@@ -919,12 +919,20 @@ export default async function HubPage({
         payment_source: row.payment_source || 'none',
         paid_through_date: row.paid_through_date || null,
         billing_notes: row.billing_notes || null,
-        // DB stores address parts separately; combine for display (matches the
-        // franchise-owner path in SettingsScreen's currentLocationCtx branch).
+        // DB stores address parts separately; combine for display in the admin
+        // location cards. The Settings editor reads street/city/state/zip
+        // below instead — it persists each to its own column (#93), so it must
+        // not round-trip through this combined string.
         address: (() => {
           const cityStateZip = [row.city, [row.state, row.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')
           return [row.address, cityStateZip].filter(Boolean).join(', ')
         })(),
+        // Structured parts for the Settings four-field editor (#93). `state` is
+        // already exposed above for other admin surfaces; street/city/zip are
+        // added here so the editor hydrates the same values a franchise owner sees.
+        street: row.address || '',
+        city: row.city || '',
+        zip: row.zip || '',
         phone: row.phone || '',
         website: '',
         reviewsLink: row.reviews_link || '',
