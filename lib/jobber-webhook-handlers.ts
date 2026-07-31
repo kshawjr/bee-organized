@@ -30,7 +30,16 @@
 //                                          not-found (race: DESTROY may
 //                                          arrive before UPDATE in a batch);
 //                                          soft-destroy runs the same #66
-//                                          cleanup as REQUEST_DESTROY
+//                                          cleanup as REQUEST_DESTROY.
+//                                          ALSO (#122): requestStatus
+//                                          'archived' runs the same #66
+//                                          cleanup (childless SR + empty
+//                                          engagement) but does NOT null
+//                                          jobber_request_id — an archived
+//                                          request still EXISTS in Jobber, so
+//                                          the link must survive (nulling it
+//                                          would let a re-import re-link and
+//                                          fight the archive)
 //   REQUEST_DESTROY  → (no change)         null jobber_request_id +
 //                                          jobber_assessment_id on lead, then
 //                                          delete the stale service_requests
@@ -192,14 +201,25 @@ async function findServiceRequestByJobberId(
 // Always passes promoteLead=false to upsertServiceRequest. The caller
 // is responsible for driving any explicit lead.stage promotion (per
 // the topic→stage map at the top of this file).
+type FetchRequestOk = { lead_id: string; service_request_id: string; lead_stage_before: string | null }
+// Overloads: the { archived: true } outcome is reachable ONLY when the caller
+// opts into archivedCleanup (handleRequestUpdate). Every other caller
+// (handleRequestCreate + the quote/job/invoice fallbacks) gets the plain union
+// and never has to narrow a branch it can't hit.
 async function fetchAndUpsertRequest(
   requestGlobalId: string,
   ctx: HandlerCtx,
-): Promise<{
-  lead_id: string
-  service_request_id: string
-  lead_stage_before: string | null
-} | { error: string }> {
+): Promise<FetchRequestOk | { error: string }>
+async function fetchAndUpsertRequest(
+  requestGlobalId: string,
+  ctx: HandlerCtx,
+  opts: { archivedCleanup: true },
+): Promise<FetchRequestOk | { archived: true } | { error: string }>
+async function fetchAndUpsertRequest(
+  requestGlobalId: string,
+  ctx: HandlerCtx,
+  opts?: { archivedCleanup?: boolean },
+): Promise<FetchRequestOk | { archived: true } | { error: string }> {
   const res = await jobberGraphQL(ctx.location.location_id, SINGLE_REQUEST_QUERY, {
     id: requestGlobalId,
   })
@@ -221,6 +241,20 @@ async function fetchAndUpsertRequest(
     return { error: 'request_not_found_in_jobber' }
   }
   if (!reqRec.client?.id) return { error: 'request_missing_client' }
+
+  // Archive short-circuit — REQUEST_UPDATE path only (opts.archivedCleanup).
+  // An archived request is torn down by the #66 stale-mirror cleanup, so
+  // re-upserting the SR and re-founding its engagement only to delete them is
+  // pure churn — and on webhook re-delivery would spawn a throwaway engagement
+  // each round. The quote/job/invoice fallback callers deliberately do NOT
+  // pass the flag: a quote or job on an archived request is real downstream
+  // work whose SR the cleanup keeps, so those still ingest normally.
+  //
+  // Archive rides requestStatus (there is NO Request.isArchived); the enum
+  // value is the lowercase 'archived' (introspected live, API 2025-04-16).
+  if (opts?.archivedCleanup && reqRec.requestStatus === 'archived') {
+    return { archived: true }
+  }
 
   // Hydrate the _has* flags so determineStage produces the right SR
   // classification (we don't promote the lead here, but the SR row's
@@ -331,13 +365,25 @@ export async function handleRequestCreate(ctx: HandlerCtx): Promise<HandlerResul
 
 // REQUEST_UPDATE → refresh fields, no stage change.
 //
-// Race-condition fallback: if Jobber returns request_not_found_in_jobber,
-// the request was destroyed between the UPDATE event being queued and
-// us fetching it (Jobber sometimes ships DESTROY before UPDATE in the
-// same batch). Treat as a soft destroy — same cleanup as REQUEST_DESTROY.
+// Two teardown branches, both reusing the #66 stale-mirror + engagement tidy:
+//
+//   1. Race-condition fallback: Jobber returns request_not_found_in_jobber —
+//      the request was destroyed between the UPDATE event being queued and us
+//      fetching it (Jobber sometimes ships DESTROY before UPDATE in the same
+//      batch). Treat as a soft DESTROY: the record is gone, so we also null
+//      the lead's jobber_request_id linkage (nullifyLeadJobberColumns).
+//
+//   2. Archive (#122): the fetch succeeds with requestStatus === 'archived'.
+//      Archiving in Jobber does NOT emit a DESTROY — it arrives as this bare
+//      UPDATE, and the archive state lives in requestStatus (never fetched
+//      before). In EFFECT an archived request is like a destroy — the #66
+//      cleanup deletes a childless SR mirror and soft-closes the engagement it
+//      founded — but with ONE critical divergence: we do NOT null
+//      jobber_request_id. The request still EXISTS in Jobber; nulling the link
+//      would let a re-fetch / re-import re-link it and fight the archive.
 export async function handleRequestUpdate(ctx: HandlerCtx): Promise<HandlerResult> {
   const globalId = encodeJobberId('Request', ctx.itemId)
-  const res = await fetchAndUpsertRequest(globalId, ctx)
+  const res = await fetchAndUpsertRequest(globalId, ctx, { archivedCleanup: true })
   if ('error' in res) {
     if (res.error === 'request_not_found_in_jobber') {
       const spec = DESTROY_SPECS.REQUEST_DESTROY
@@ -352,6 +398,16 @@ export async function handleRequestUpdate(ctx: HandlerCtx): Promise<HandlerResul
       return destroyed
     }
     return { processed: false, error: res.error }
+  }
+  if ('archived' in res) {
+    // Archived request: run the SAME #66 cleanup, but NEVER null
+    // jobber_request_id (the request still exists — see above). We reach
+    // cleanup WITHOUT nullifyLeadJobberColumns, so the linkage is preserved by
+    // construction. The '→archived' note (no 'soft-destroy' substring) keeps
+    // the landed check out of the destroy-column verification path.
+    const result: HandlerResult = { processed: true, note: 'REQUEST_UPDATE→archived' }
+    await applyRequestDestroyCleanup(ctx, result)
+    return result
   }
   const stage = await readLeadStage(res.lead_id)
   return {

@@ -125,6 +125,16 @@ export async function checkLanded(
     const numeric = extractJobberId(ctx.itemId) || ctx.itemId
     const loc = ctx.location.location_id
 
+    // Archived request (#122): REQUEST_UPDATE with requestStatus 'archived'
+    // runs the #66 cleanup, which DELETES the SR mirror when the request was
+    // childless. There is no single post-condition row to verify — the SR is
+    // intentionally absent for an empty archived request (and legitimately
+    // present when it had downstream work), so the plain REQUEST_UPDATE
+    // "SR exists → landed" rule would false-alarm 'not_landed'. This is
+    // best-effort bookkeeping (fail-soft), same rationale as CLIENT_UPDATE:
+    // record 'na'.
+    if (topic === 'REQUEST_UPDATE' && result.note?.includes('→archived')) return 'na'
+
     // Destroys — including the soft-destroy fallbacks that UPDATE
     // handlers take when Jobber says the record is already gone.
     const softDestroy = !!result.note?.includes('soft-destroy')

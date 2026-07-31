@@ -294,6 +294,20 @@ describe('checkLanded — destroys verify the DESTROY_SPECS columns', () => {
       ),
     ).toBe('landed')
   })
+
+  it('REQUEST_UPDATE→archived (#122) → na, NOT the destroy-column check', async () => {
+    // Archived request: the #66 cleanup may have deleted the SR (childless) or
+    // kept it (had work). No single post-condition row proves success, and we
+    // deliberately do NOT null jobber_request_id — so this must NOT route into
+    // checkDestroyLanded (which would demand the columns be null) nor the plain
+    // REQUEST_UPDATE "SR exists" rule (which would false-alarm on the empty case).
+    expect(
+      await checkLanded(
+        ctx('REQUEST_UPDATE'),
+        ok({ note: 'REQUEST_UPDATE→archived; REQUEST_DESTROY: deleted stale SR sr-1; closed empty engagement eng-1 (request_destroyed)' }),
+      ),
+    ).toBe('na')
+  })
 })
 
 describe('checkLanded — property + disconnect', () => {

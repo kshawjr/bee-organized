@@ -150,7 +150,7 @@ export const SINGLE_CLIENT_QUERY = `
 export const SINGLE_REQUEST_QUERY = `
   query GetRequest($id: EncodedId!) {
     request(id: $id) {
-      id createdAt jobberWebUri
+      id createdAt jobberWebUri requestStatus
       client { id firstName lastName companyName createdAt
                emails { address primary }
                phones  { number  primary }
