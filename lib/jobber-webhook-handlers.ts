@@ -28,9 +28,16 @@
 //   REQUEST_CREATE   → 'Request'           forward-only
 //   REQUEST_UPDATE   → (no change)         soft-destroys if Jobber returns
 //                                          not-found (race: DESTROY may
-//                                          arrive before UPDATE in a batch)
+//                                          arrive before UPDATE in a batch);
+//                                          soft-destroy runs the same #66
+//                                          cleanup as REQUEST_DESTROY
 //   REQUEST_DESTROY  → (no change)         null jobber_request_id +
-//                                          jobber_assessment_id on lead
+//                                          jobber_assessment_id on lead, then
+//                                          delete the stale service_requests
+//                                          mirror + soft-close the engagement
+//                                          it founded when nothing else is
+//                                          left (#66; fail-soft, never fails
+//                                          the webhook)
 //   QUOTE_CREATE     → 'Estimate Sent'     forward-only
 //   QUOTE_UPDATE     → (no change)
 //   QUOTE_SENT       → 'Estimate Sent'     forward-only (idempotent)
@@ -340,6 +347,8 @@ export async function handleRequestUpdate(ctx: HandlerCtx): Promise<HandlerResul
         spec.nulls,
         'REQUEST_UPDATE→soft-destroy',
       )
+      // Same stale-mirror + engagement tidy as REQUEST_DESTROY (#66).
+      await applyRequestDestroyCleanup(ctx, destroyed)
       return destroyed
     }
     return { processed: false, error: res.error }
@@ -911,9 +920,157 @@ async function nullifyLeadJobberColumns(
 }
 
 // REQUEST_DESTROY → null jobber_request_id + jobber_assessment_id (paired)
-export function handleRequestDestroy(ctx: HandlerCtx) {
+// on the lead, then tidy the stale service_requests mirror + its engagement
+// (see cleanupDestroyedRequest / applyRequestDestroyCleanup below).
+export async function handleRequestDestroy(ctx: HandlerCtx): Promise<HandlerResult> {
   const spec = DESTROY_SPECS.REQUEST_DESTROY
-  return nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'REQUEST_DESTROY')
+  const result = await nullifyLeadJobberColumns(ctx, spec.match, spec.nulls, 'REQUEST_DESTROY')
+  await applyRequestDestroyCleanup(ctx, result)
+  return result
+}
+
+// ── stale-request cleanup (#66) ───────────────────────────────
+//
+// A REQUEST_DESTROY (or the REQUEST_UPDATE soft-destroy fallback) means
+// Jobber deleted the request. nullifyLeadJobberColumns clears the lead's
+// linkage columns — but those are only ever set by the Send-to-Jobber path;
+// the import pipeline never writes leads.jobber_request_id (upsertLead only
+// stamps jobber_client_id). So for an *imported* request that lead match
+// no-ops, and the real mirror — the service_requests row — is left behind: a
+// phantom "Request" on the engagement card (confirmed live, loc_test 7/24).
+// The reliable key is the SR table itself, which always carries
+// jobber_request_id.
+//
+// This is BOOKKEEPING and the caller MUST fail-soft: the Jobber-side delete
+// already committed, so a cleanup failure must never fail the webhook.
+// cleanupDestroyedRequest may throw on a hard DB error;
+// applyRequestDestroyCleanup owns the try/catch.
+//
+// Safe by construction:
+//   • An SR with downstream work (a quote/job/invoice references it via
+//     service_request_id) is real history — left intact, engagement
+//     untouched. This also keeps the delete FK-safe: we never delete a row
+//     other rows point at.
+//   • Only a request-founded engagement left with nothing is closed, and it
+//     is SOFT-closed (Closed Lost / closed_reason='request_destroyed'),
+//     never deleted — the engagement's assignee join is ON DELETE CASCADE, so
+//     a delete would erase the crew (the #66 trap). Manual containers
+//     (founded_by='manual') and engagements still holding other children are
+//     left exactly as-is, stage untouched.
+async function cleanupDestroyedRequest(ctx: HandlerCtx): Promise<string | null> {
+  const numeric = extractJobberId(ctx.itemId) || ctx.itemId
+
+  const { data: sr, error: srErr } = await supabaseService
+    .from('service_requests')
+    .select('id, lead_id, engagement_id')
+    .eq('jobber_request_id', numeric)
+    .eq('location_id', ctx.location.location_id)
+    .maybeSingle()
+  if (srErr) throw new Error(`SR lookup: ${srErr.message}`)
+  if (!sr) return null // request was never imported into this location — no-op
+
+  // Existence probe via select+limit(1) (NOT count(): PostgREST aggregates
+  // are disabled here — see engagementHasServiceRequest for the same idiom).
+  const anyRows = async (table: string, col: string, val: string): Promise<boolean> => {
+    const { data, error } = await supabaseService.from(table).select('id').eq(col, val).limit(1)
+    if (error) throw new Error(`${table}.${col} check: ${error.message}`)
+    return (data?.length ?? 0) > 0
+  }
+
+  // SR that produced downstream work is legitimate history: leave it and the
+  // engagement fully intact (stage untouched).
+  const hasChildWork =
+    (await anyRows('quotes', 'service_request_id', sr.id)) ||
+    (await anyRows('jobs', 'service_request_id', sr.id)) ||
+    (await anyRows('invoices', 'service_request_id', sr.id))
+  if (hasChildWork) {
+    return `REQUEST_DESTROY: SR ${sr.id} kept — has downstream quote/job/invoice`
+  }
+
+  // Childless SR = the request never advanced. Its Jobber assessment (if any)
+  // was destroyed with the request; drop our mirror child first (FK), then
+  // the SR row.
+  const { error: aErr } = await supabaseService
+    .from('assessments')
+    .delete()
+    .eq('service_request_id', sr.id)
+  if (aErr) throw new Error(`assessment delete: ${aErr.message}`)
+  const { error: dErr } = await supabaseService
+    .from('service_requests')
+    .delete()
+    .eq('id', sr.id)
+  if (dErr) throw new Error(`SR delete: ${dErr.message}`)
+
+  const engId = sr.engagement_id
+  if (!engId) return `REQUEST_DESTROY: deleted stale SR ${sr.id} (no engagement)`
+
+  const { data: eng, error: eErr } = await supabaseService
+    .from('engagements')
+    .select('id, stage, founded_by')
+    .eq('id', engId)
+    .maybeSingle()
+  if (eErr) throw new Error(`engagement read: ${eErr.message}`)
+  if (!eng) return `REQUEST_DESTROY: deleted stale SR ${sr.id}`
+
+  // Only an engagement this request FOUNDED is a candidate to close. A manual
+  // container (or a quote/job-founded engagement) keeps its own meaning even
+  // with this SR gone.
+  if (eng.founded_by !== 'request') {
+    return `REQUEST_DESTROY: deleted stale SR ${sr.id}; engagement ${engId} left (founded_by=${eng.founded_by})`
+  }
+
+  // Anything else still hanging off the engagement? (another SR, or a
+  // quote/job/invoice attached by engagement_id) → real work remains: leave
+  // it, stage untouched.
+  const stillHasChildren =
+    (await anyRows('service_requests', 'engagement_id', engId)) ||
+    (await anyRows('quotes', 'engagement_id', engId)) ||
+    (await anyRows('jobs', 'engagement_id', engId)) ||
+    (await anyRows('invoices', 'engagement_id', engId))
+  if (stillHasChildren) {
+    return `REQUEST_DESTROY: deleted stale SR ${sr.id}; engagement ${engId} left (other children remain)`
+  }
+
+  // Already terminal — idempotent re-delivery, or a human already closed it.
+  if (eng.stage === 'Closed Won' || eng.stage === 'Closed Lost') {
+    return `REQUEST_DESTROY: deleted stale SR ${sr.id}; engagement ${engId} already ${eng.stage}`
+  }
+
+  // Nothing left to represent → SOFT-close. Never delete (assignee cascade).
+  // closed_reason='request_destroyed' is a human-close reason, so the panel's
+  // drift recovery (which only re-derives stale_on_import closes) leaves it.
+  const nowIso = new Date().toISOString()
+  const { error: uErr } = await supabaseService
+    .from('engagements')
+    .update({
+      stage: 'Closed Lost',
+      closed_reason: 'request_destroyed',
+      closed_at: nowIso,
+      closed_note: 'Founding Jobber request was deleted; no other work on this engagement.',
+      stage_entered_at: nowIso,
+      updated_at: nowIso,
+    })
+    .eq('id', engId)
+  if (uErr) throw new Error(`engagement close: ${uErr.message}`)
+
+  return `REQUEST_DESTROY: deleted stale SR ${sr.id}; closed empty engagement ${engId} (request_destroyed)`
+}
+
+// Fail-soft wrapper: the SR-mirror + engagement tidy must NEVER fail the
+// webhook (the Jobber-side delete already committed). Enriches the result
+// note when cleanup did work; swallows + logs any error otherwise. Shared by
+// REQUEST_DESTROY and the REQUEST_UPDATE soft-destroy fallback.
+async function applyRequestDestroyCleanup(ctx: HandlerCtx, result: HandlerResult): Promise<void> {
+  try {
+    const note = await cleanupDestroyedRequest(ctx)
+    if (note) result.note = result.note ? `${result.note}; ${note}` : note
+  } catch (err: any) {
+    console.error('[jobber-webhook] REQUEST_DESTROY cleanup failed (webhook still processed)', {
+      itemId: ctx.itemId,
+      location: ctx.location.location_id,
+      error: err?.message || err,
+    })
+  }
 }
 
 // QUOTE_DESTROY → null jobber_quote_id
