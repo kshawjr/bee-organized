@@ -16,8 +16,8 @@
 //   7. Create a new property if no match
 //   8. Branch on creation_type:
 //        - request_only             → requestCreate
-//        - request_with_assessment  → requestCreate + assessmentCreate +
-//                                     (optional) appointmentEditAssignment
+//        - request_with_assessment  → requestCreate + assessmentCreate
+//                                     (team assigned IN the create — issue 144)
 //        - job_direct               → jobCreate
 //   9. Write IDs + status back to the lead row
 //  10. Append a sync_log entry
@@ -51,6 +51,7 @@ import {
 } from '@/lib/jobber-contact-writeback'
 import { getEngagementAssignees, resolveJobberAssignment } from '@/lib/engagement-assignee-sync'
 import { buildRequestDetails } from '@/lib/jobber-request-form'
+import { applyTeamToSchedule, diffAssessmentAssignment } from '@/lib/jobber-assessment-assign'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -244,25 +245,23 @@ const REQUEST_CREATE_MUTATION = /* GraphQL */ `
 // mutation as a top-level arg; the input now only carries `instructions`
 // and `schedule: ScheduledItemAttributes`. Inside schedule, startAt/endAt
 // are LocalDateTimeAttributes objects, not ISO strings.
+// issue 144 — the team is assigned AT CREATION via schedule.
+// teamMemberIdsToAssign (see the schedule build below). We read back
+// assignedUsers here so the caller can VERIFY the create applied the team:
+// the reason the old post-create appointmentEditAssignment failure went
+// unnoticed for 22 sends is that nothing ever checked the result.
+// assignedUsers is a UserConnection (introspected live 2026-07-31), hence
+// the { nodes { id } } selection.
 const ASSESSMENT_CREATE_MUTATION = /* GraphQL */ `
   mutation AssessmentCreate(
     $requestId: EncodedId!,
     $input: AssessmentCreateInput!
   ) {
     assessmentCreate(requestId: $requestId, input: $input) {
-      assessment { id }
-      userErrors { message path }
-    }
-  }
-`
-
-const APPOINTMENT_EDIT_ASSIGNMENT_MUTATION = /* GraphQL */ `
-  mutation AppointmentEditAssignment(
-    $appointmentId: EncodedId!,
-    $input: AppointmentEditAssignmentInput!
-  ) {
-    appointmentEditAssignment(appointmentId: $appointmentId, input: $input) {
-      appointment { id }
+      assessment {
+        id
+        assignedUsers { nodes { id } }
+      }
       userErrors { message path }
     }
   }
@@ -779,42 +778,64 @@ export async function POST(
           400,
         )
       }
+      // issue 144 — assign the team AT CREATION. The old flow created the
+      // assessment and THEN called appointmentEditAssignment(appointmentId);
+      // live read-back proved it never applied (0 of 22 sent assessments
+      // carried the assigned person). ScheduledItemAttributes.
+      // teamMemberIdsToAssign is [EncodedId!] (introspected live 2026-07-31);
+      // allAssigneeJobberIds are already-encoded User gids. An empty/unresolved
+      // list omits the field entirely — an explicit [] would read as a
+      // deliberate clear. notifyTeam is deliberately left UNSET: turning on
+      // anything that emails a franchise team member needs Kevin's ok first.
+      const schedule = applyTeamToSchedule(
+        {
+          startAt: toLocalDateTime(new Date(startMs).toISOString(), tz),
+          endAt:   toLocalDateTime(new Date(endMs).toISOString(),   tz),
+        },
+        allAssigneeJobberIds,
+      )
       const assessCreate = await jobberMutation(
         locationSlug,
         ASSESSMENT_CREATE_MUTATION,
         {
           requestId: jobberRequestGlobalId,
-          input: {
-            schedule: {
-              startAt: toLocalDateTime(new Date(startMs).toISOString(), tz),
-              endAt:   toLocalDateTime(new Date(endMs).toISOString(),   tz),
-            },
-          },
+          input: { schedule },
         },
       )
       if (assessCreate.userErrors?.length) {
         return fail('assessment_create', assessCreate.userErrors[0].message)
       }
-      jobberAssessmentGlobalId = assessCreate.data?.assessmentCreate?.assessment?.id || null
+      const createdAssessment = assessCreate.data?.assessmentCreate?.assessment || null
+      jobberAssessmentGlobalId = createdAssessment?.id || null
 
-      // Assign the team to the assessment appointment. MULTI now
-      // (engagement-assigned-to-multi): AppointmentEditAssignmentInput.
-      // assignedUserIds is [EncodedId!]! (introspected 2026-07-11), so we
-      // send ALL mapped assignees, not just one. Non-fatal — a missing
-      // assignment shouldn't kill the whole send. Unmapped assignees
-      // (no jobber_user_id) are simply absent from the array.
-      if (jobberAssessmentGlobalId && allAssigneeJobberIds.length > 0) {
-        const assign = await jobberMutation(
-          locationSlug,
-          APPOINTMENT_EDIT_ASSIGNMENT_MUTATION,
-          {
-            appointmentId: jobberAssessmentGlobalId,
-            input: { assignedUserIds: allAssigneeJobberIds },
-          },
+      // issue 144 — VERIFY the create actually applied the team. Nothing
+      // checked before, which is why the silent failure survived 22 sends.
+      // Compare what we asked to assign against assessment.assignedUsers and
+      // surface any mismatch loudly (console + sync_log) instead of swallowing
+      // it. Non-fatal: the assessment and request already exist; a mismatch is
+      // a data-quality alarm for follow-up, not a reason to fail the whole send.
+      if (allAssigneeJobberIds.length > 0) {
+        const diff = diffAssessmentAssignment(
+          allAssigneeJobberIds,
+          createdAssessment?.assignedUsers?.nodes,
         )
-        if (assign.userErrors?.length) {
-          console.warn('[send-to-jobber] assignment userErrors',
-            JSON.stringify(assign.userErrors))
+        if (!diff.ok) {
+          console.warn('[send-to-jobber] issue 144 assessment team mismatch', {
+            leadId, engagementId, assessmentId: jobberAssessmentGlobalId,
+            requested: diff.requested, returned: diff.returned,
+            missing: diff.missing, unexpected: diff.unexpected,
+          })
+          await writeSyncLog({
+            location_id: locationSlug,
+            entity_id: leadId,
+            entity_type: 'client',
+            status: 'error',
+            message:
+              `[send-to-jobber] topic=ASSESSMENT_TEAM_MISMATCH (issue 144) ` +
+              `assessment=${jobberAssessmentGlobalId} ` +
+              `requested=[${diff.requested.join(',')}] returned=[${diff.returned.join(',')}] ` +
+              `missing=[${diff.missing.join(',')}] unexpected=[${diff.unexpected.join(',')}]`,
+          })
         }
       }
     }
