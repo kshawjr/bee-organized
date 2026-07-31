@@ -43,6 +43,14 @@ CREATE INDEX IF NOT EXISTS idx_subscription_seats_unassigned
 ALTER TABLE public.subscription_seats ENABLE ROW LEVEL SECURITY;
 
 -- Read: super_admin/admin see all; owners (and any hub_user at the location) see their location.
+--
+-- CAST: hub_users.location_id is TEXT; subscription_seats.location_id is uuid.
+-- The uuid side MUST be cast — hub_users.location_id = subscription_seats.location_id::text.
+-- Omitting it errors 42883 (operator does not exist: text = uuid) at CREATE POLICY time.
+-- Prod already carries this cast (verified in pg_policies: the deployed read/write
+-- quals show (subscription_seats.location_id)::text) — it was fixed at apply time and
+-- this file was never updated. This edit is repo-vs-prod drift correction only.
+DROP POLICY IF EXISTS "subscription_seats read" ON public.subscription_seats;
 CREATE POLICY "subscription_seats read"
   ON public.subscription_seats FOR SELECT TO authenticated
   USING (
@@ -51,13 +59,14 @@ CREATE POLICY "subscription_seats read"
       WHERE hub_users.id = auth.uid()
         AND (
           hub_users.role IN ('super_admin', 'admin')
-          OR hub_users.location_id = subscription_seats.location_id
+          OR hub_users.location_id = subscription_seats.location_id::text
         )
     )
   );
 
 -- Write: super_admin/admin OR the owner of the seat's location.
 -- Single FOR ALL policy covers INSERT/UPDATE/DELETE with USING + WITH CHECK.
+DROP POLICY IF EXISTS "subscription_seats write" ON public.subscription_seats;
 CREATE POLICY "subscription_seats write"
   ON public.subscription_seats FOR ALL TO authenticated
   USING (
@@ -66,7 +75,7 @@ CREATE POLICY "subscription_seats write"
       WHERE hub_users.id = auth.uid()
         AND (
           hub_users.role IN ('super_admin', 'admin')
-          OR (hub_users.role = 'owner' AND hub_users.location_id = subscription_seats.location_id)
+          OR (hub_users.role = 'owner' AND hub_users.location_id = subscription_seats.location_id::text)
         )
     )
   )
@@ -76,7 +85,7 @@ CREATE POLICY "subscription_seats write"
       WHERE hub_users.id = auth.uid()
         AND (
           hub_users.role IN ('super_admin', 'admin')
-          OR (hub_users.role = 'owner' AND hub_users.location_id = subscription_seats.location_id)
+          OR (hub_users.role = 'owner' AND hub_users.location_id = subscription_seats.location_id::text)
         )
     )
   );
