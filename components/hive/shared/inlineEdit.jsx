@@ -24,8 +24,7 @@
 // view row and InlineEditControls beside the input; never a private ✎
 // or a bespoke save affordance. Adopters today: shared/ContactField
 // (ClientProfile + EngagementPanel mounts) and EditableDesc
-// (ClientProfile + PersonCard request_details, EngagementPanel
-// description).
+// (ClientProfile request_details, EngagementPanel description).
 // ─────────────────────────────────────────────────────────────
 'use client'
 

@@ -1,10 +1,10 @@
 // components/hive/shared/ReferrerField.jsx
 // ─────────────────────────────────────────────────────────────
 // The referrer add/edit/clear field — extracted from ClientProfile
-// (a574f70) so PersonCard and EngagementPanel get the SAME affordance
+// (a574f70) so any lead-detail surface gets the SAME affordance
 // without a copy. One editable "Referred by <name>" line (dashed-
 // underline tap → ReferrerPicker) + × clear + "＋ Add referrer" when
-// unset. All three lead-detail surfaces render THIS.
+// unset. ClientProfile is the mounting surface today.
 //
 // The referrer lives on the LEAD — even on EngagementPanel (work-world)
 // the PATCH targets /api/leads/[lead.id], never an engagement field.

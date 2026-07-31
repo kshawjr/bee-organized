@@ -1,25 +1,20 @@
 // @vitest-environment happy-dom
-// Tabbed lead-detail cards (PersonCard / ClientProfile / EngagementPanel):
-//   — shared skeleton: header → VITALS STRIP → tabs → content; Overview
+// Tabbed lead-detail cards (ClientProfile / EngagementPanel — the old
+// PersonCard's tests retired with the component, #136):
+//   — shared skeleton: header → metric band → tabs → content; Overview
 //     default; Timeline tab embeds the 848cb60 Timeline component; Files
-//     on ClientProfile + EngagementPanel only (nothing to file
-//     pre-founding)
-//   — vitals strip: four cells between the header identity row and the
-//     tab bar on every card (so it stays visible on every tab) —
-//     EngagementPanel Stage/Value/Last touch/Next, ClientProfile
-//     Status/Lifetime/Last touch/Open, PersonCard Status/Inquired/
-//     Last touch/Next; absent values render '—'; the strip REPLACED the
+//     on both cards
+//   — metric band: ClientProfile runs the full-bleed Collected/Invoiced/
+//     Owing/Last touch band; the panel's masthead carries stage/value
+//     itself; absent values render '—'; the band REPLACED the
 //     panel's standalone stage bar and both cards' money-tile rows
 //     (invoiced/paid detail moved to the invoice record row; nonzero
 //     owing keeps a red Key-facts line on the profile)
-//   — pinned buzz on every Overview; the SAME client-level buzz rows
-//     show on ClientProfile AND that client's EngagementPanel (one
-//     standing note, inherited — not two per-surface notes), and both
-//     append through the same lead_notes kind='buzz' write
-//   — per-surface content: PersonCard lean (no money/engagements list);
-//     ClientProfile engagements + client-WIDE activity incl.
-//     client-level job notes (the old inventory gap) with '· re:' tags;
-//     EngagementPanel description + records checklist
+//   — pinned buzz on the profile Overview; the SAME client-level buzz
+//     rows append through the same lead_notes kind='buzz' write
+//   — per-surface content: ClientProfile engagements + client-WIDE
+//     activity incl. client-level job notes (the old inventory gap)
+//     with '· re:' tags; EngagementPanel description + records checklist
 //   — TWO activity surfaces: Overview quick slice + composer AND the
 //     Timeline tab's full stream
 //   — write paths preserved: Source None-clear, EditableDesc, the ···
@@ -43,7 +38,6 @@ import { readFileSync } from 'node:fs'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import PersonCard from '@/components/hive/PersonCard'
 import { formatFullDate } from '@/components/hive/shared/engagementStatus'
 import ClientProfile from '@/components/hive/ClientProfile'
 import EngagementPanel from '@/components/hive/EngagementPanel'
@@ -52,12 +46,6 @@ import EngagementPanel from '@/components/hive/EngagementPanel'
 
 const now = Date.now()
 const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString()
-
-const person = (over: any = {}) => ({
-  id: 'lead-9', name: 'Dana Client', email: 'dana@x.com', phone: '(561) 555-0100',
-  source: 'Webform', locationId: 'loc-uuid-1', created: daysAgo(40),
-  isJunk: false, outreachTimeline: [], ...over,
-})
 
 const LOOKUPS = { sources: ['Webform', 'Website', 'Referral'], projectTypes: ['Client', 'Move'] }
 
@@ -83,7 +71,7 @@ const profilePayload = (over: any = {}) => ({
   ],
   buzz_notes: BUZZ_ROWS,
   job_notes: [
-    // client-level note (posted on PersonCard) — the old inventory gap
+    // client-level note (no engagement_id) — the old inventory gap
     { id: 'jn1', text: 'Measured the garage', user_label: 'Kevin', created_at: daysAgo(3), engagement_id: null },
     // engagement-scoped note — must carry the '· re:' tag on the profile
     { id: 'jn2', text: 'Confirmed pantry scope', user_label: 'Kevin', created_at: daysAgo(2), engagement_id: 'eng-77' },
@@ -187,7 +175,6 @@ const tabButton = (host: Element, label: string) =>
 const buttonContaining = (host: Element, text: string) =>
   [...host.querySelectorAll('button')].find(b => (b.textContent || '').includes(text))
 
-const mountPerson = () => mount(<PersonCard person={person()} onClose={() => {}} lookupOptions={LOOKUPS} onSendToJobber={() => {}} />)
 const mountProfile = () => mount(<ClientProfile clientId="lead-9" onClose={() => {}} onSendToJobber={() => {}} />)
 const mountPanel = (props: any = {}) => mount(<EngagementPanel engagementId="eng-1" onClose={() => {}} lookupOptions={LOOKUPS} {...props} />)
 
@@ -195,13 +182,7 @@ beforeEach(() => installFetch())
 
 // ═══ shared skeleton ═══════════════════════════════════════
 describe('tabbed skeleton', () => {
-  it('all three cards: Overview default; Files on profile + panel, NOT on PersonCard', async () => {
-    const pc = await mountPerson()
-    expect(tabButton(pc.host, 'Overview')?.getAttribute('aria-selected')).toBe('true')
-    expect(tabButton(pc.host, 'Timeline')).toBeTruthy()
-    expect(tabButton(pc.host, 'Files')).toBeFalsy() // nothing to file pre-founding
-    await pc.unmount()
-
+  it('both cards: Overview default; Files tab on profile + panel', async () => {
     const cp = await mountProfile()
     expect(tabButton(cp.host, 'Overview')?.getAttribute('aria-selected')).toBe('true')
     expect(tabButton(cp.host, 'Timeline')).toBeTruthy()
@@ -213,14 +194,6 @@ describe('tabbed skeleton', () => {
     expect(tabButton(ep.host, 'Timeline')).toBeTruthy()
     expect(tabButton(ep.host, 'Files')).toBeTruthy()
     await ep.unmount()
-  })
-
-  it('the Timeline tab embeds the shared Timeline component (its stream renders)', async () => {
-    const { host, unmount } = await mountPerson()
-    expect(host.textContent).not.toContain('Client created') // timeline not mounted yet
-    await click(tabButton(host, 'Timeline')!)
-    expect(host.textContent).toContain('Client created') // Timeline's merged stream
-    await unmount()
   })
 
   it('tab switching post-streaming: Overview ↔ Timeline ↔ Files without content vanishing; the strip stays', async () => {
@@ -239,7 +212,7 @@ describe('tabbed skeleton', () => {
 
   it('§8.5: card pieces import no BeeHub/PartnersContext/useContext', () => {
     for (const f of [
-      'components/hive/PersonCard.jsx', 'components/hive/ClientProfile.jsx', 'components/hive/EngagementPanel.jsx',
+      'components/hive/ClientProfile.jsx', 'components/hive/EngagementPanel.jsx',
       'components/hive/shared/CardTabs.jsx', 'components/hive/shared/PinnedBuzz.jsx', 'components/hive/shared/cardKit.jsx',
       'components/hive/shared/VitalsStrip.jsx',
     ]) {
@@ -254,12 +227,10 @@ describe('tabbed skeleton', () => {
 
 // ═══ pinned buzz ═══════════════════════════════════════════
 describe('pinned buzz', () => {
-  it('shows on the PERSON-scoped Overviews (PersonCard + ClientProfile) — the panel dropped it in build 2 (person-vs-deal)', async () => {
-    for (const m of [mountPerson, mountProfile]) {
-      const { host, unmount } = await m()
-      expect(host.textContent).toContain('Gate code 4321')
-      await unmount()
-    }
+  it('shows on the PERSON-scoped Overview (ClientProfile) — the panel dropped it in build 2 (person-vs-deal)', async () => {
+    const { host, unmount } = await mountProfile()
+    expect(host.textContent).toContain('Gate code 4321')
+    await unmount()
   })
 
   it('the note is CLIENT-level (lead_id, no engagement scoping) from the profile band; the panel shows NO buzz since build 2', async () => {
@@ -293,33 +264,16 @@ describe('pinned buzz', () => {
 
 // ═══ per-surface content ═══════════════════════════════════
 describe('per-surface Overview content', () => {
-  it('PersonCard is lean: no money tiles, no engagements list, no stage bar', async () => {
-    const { host, unmount } = await mountPerson()
-    expect(host.textContent).not.toContain('Lifetime paid')
-    expect(host.textContent).not.toContain('Engagements ·')
-    expect(host.textContent).not.toContain('Estimate') // no stage bar segments
-    expect(host.textContent).toContain('What they want')
-    expect(host.textContent).toContain('Garage overhaul') // request_details
-    await unmount()
-  })
-
   it('ClientProfile: engagements list + client-WIDE activity with re: tags AND client-level job notes (the gap fix); money tiles GONE', async () => {
     const { host, unmount } = await mountProfile()
     expect(host.textContent).not.toContain('Lifetime paid') // tiles removed — the strip's Lifetime cell carries it
     expect(host.textContent).not.toContain('Open pipeline')
     expect(host.textContent).toContain('Engagements · 2 · 1 open')
     expect(host.textContent).toContain('Pantry refresh')
-    // THE GAP FIX: the client-level note posted on PersonCard is visible
+    // THE GAP FIX: the client-level (no-engagement) note is visible
     expect(host.textContent).toContain('Measured the garage')
     // engagement-scoped items carry the '· re:' tag
     expect(host.textContent).toContain('re: Pantry refresh')
-    await unmount()
-  })
-
-  it('PersonCard recent activity shows ONLY client-level notes (engagement-scoped stay with their engagement)', async () => {
-    const { host, unmount } = await mountPerson()
-    expect(host.textContent).toContain('Measured the garage')
-    expect(host.textContent).not.toContain('Confirmed pantry scope')
     await unmount()
   })
 
@@ -361,19 +315,10 @@ describe('per-surface Overview content', () => {
   })
 })
 
-// ═══ vitals strip ══════════════════════════════════════════
-const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const shortDate = (t: number) => { const d = new Date(t); return `${MON[d.getMonth()]} ${d.getDate()}` }
-const inDays = (n: number) => new Date(now + n * 86400000).toISOString()
-const stripOf = (host: Element) => host.querySelector('[aria-label="Vitals"]')!
-const stripLabels = (host: Element) =>
-  [...stripOf(host).children].map(cell => cell.querySelectorAll('p')[0].textContent)
-const stripValues = (host: Element) =>
-  [...stripOf(host).children].map(cell => cell.querySelectorAll('p')[1])
-
-// Build 2 split: PersonCard keeps the tinted VitalsStrip; ClientProfile
-// runs the full-bleed METRIC BAND; the panel's masthead carries
-// stage/value itself (no strip at all).
+// ═══ metric band ═══════════════════════════════════════════
+// Build 2 split (finalized by #136): ClientProfile runs the full-bleed
+// METRIC BAND; the panel's masthead carries stage/value itself (no
+// strip at all). No card renders the tinted VitalsStrip component.
 const bandOf = (host: Element) => host.querySelector('[aria-label="Metrics"]')!
 const bandLabels = (host: Element) =>
   [...bandOf(host).children].map(cell => cell.querySelectorAll('p')[0].textContent)
@@ -383,18 +328,6 @@ const chipSpan = (host: Element, label: string) =>
   [...host.querySelectorAll('span')].find(sp => (sp as HTMLElement).style.borderRadius === '8px' && sp.textContent === label)
 
 describe('vitals strip / metric band', () => {
-  it('PersonCard renders the 4-cell strip between the header identity row and the tab bar', async () => {
-    const { host, unmount } = await mountPerson()
-    const strip = stripOf(host)
-    expect(strip).toBeTruthy()
-    expect(stripLabels(host)).toHaveLength(4)
-    const name = [...host.querySelectorAll('h2, p')].find(el => (el.textContent || '').includes('Dana Client'))!
-    const tabBar = tabButton(host, 'Overview')!
-    expect(name.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(strip.compareDocumentPosition(tabBar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    await unmount()
-  })
-
   it('ClientProfile renders the METRIC BAND (Collected/Invoiced/Owing/Last touch) between header and tabs — full-bleed hairline, tabular numerals', async () => {
     const { host, unmount } = await mountProfile()
     const band = bandOf(host)
@@ -460,19 +393,6 @@ describe('vitals strip / metric band', () => {
     const { host, unmount } = await mountProfile()
     expect(chipSpan(host, 'Client')).toBeTruthy() // header status chip (exact-label span — 'Dana Client' prose can't match)
     await unmount()
-  })
-
-  it("PersonCard: Status/Inquired/Last touch/Next — Next is '—' pre-engagement, snooze fills it", async () => {
-    const pc = await mountPerson()
-    expect(stripLabels(pc.host)).toEqual(['Status', 'Inquired', 'Last touch', 'Next'])
-    // 40d-old lead, no reach-outs on the prop timeline → Nurturing;
-    // Inquired past the 30d tier → bare date; profile touchpoint 1d ago.
-    expect(stripValues(pc.host).map(p => p.textContent)).toEqual(['Nurturing', shortDate(now - 40 * 86400000), '1d', '—'])
-    await pc.unmount()
-
-    const snoozed = await mount(<PersonCard person={person({ snoozeUntil: inDays(3) })} onClose={() => {}} lookupOptions={LOOKUPS} onSendToJobber={() => {}} />)
-    expect(stripValues(snoozed.host).map(p => p.textContent)[3]).toBe(shortDate(now + 3 * 86400000))
-    await snoozed.unmount()
   })
 })
 
@@ -556,12 +476,6 @@ describe('full-date treatment (formatFullDate)', () => {
     await unmount()
   })
 
-  it("PersonCard subtitle: 'inquired' rides the full date (name was already the headline)", async () => {
-    const { host, unmount } = await mountPerson()
-    expect(host.textContent).toContain(`inquired ${fullDate(now - 40 * 86400000)}`)
-    await unmount()
-  })
-
   it('the metric band stays COMPACT — full dates never leak into the tight cells', async () => {
     const { host, unmount } = await mountProfile()
     const last = bandValues(host)[3].textContent!
@@ -576,7 +490,7 @@ describe('action row', () => {
   const rowOf = (host: Element) => buttonContaining(host, 'Log touchpoint')!.parentElement as HTMLElement
 
   it('every card: repeat(N,1fr) grid sized to the rendered button count — not a flex row', async () => {
-    for (const m of [mountPerson, mountProfile, () => mountPanel({ onSendToJobber: () => {} })]) {
+    for (const m of [mountProfile, () => mountPanel({ onSendToJobber: () => {} })]) {
       const { host, unmount } = await m()
       const row = rowOf(host)
       const n = row.children.length
@@ -599,18 +513,13 @@ describe('action row', () => {
     expect(log.getAttribute('style')).toMatch(/rgba\(0,\s*0,\s*0/) // neutral gray tint
     expect((log as HTMLElement).style.height).toBe('38px')
     await ep.unmount()
-
-    const pc = await mountPerson()
-    const send = buttonContaining(pc.host, 'Send to Jobber')!
-    expect(send.getAttribute('style')).toMatch(/#E3EEEC|rgb\(227,\s*238,\s*236\)/i) // founding door rides the accent
-    await pc.unmount()
   })
 })
 
 // ═══ two activity surfaces ═════════════════════════════════
 describe('two activity surfaces', () => {
   it('Overview keeps the quick slice + composer; the Timeline tab holds the full stream', async () => {
-    const { host, unmount } = await mountPerson()
+    const { host, unmount } = await mountProfile()
     // Overview: recent slice + composer input
     expect(host.textContent).toContain('Recent activity')
     const composer = [...host.querySelectorAll('input')].find(i => i.getAttribute('placeholder') === 'Add a note…')
@@ -624,14 +533,8 @@ describe('two activity surfaces', () => {
 
 // ═══ write paths preserved ═════════════════════════════════
 describe('write paths', () => {
-  it('Source None-clear still PATCHes null from the new key-facts block', async () => {
-    const { host, unmount } = await mountPerson()
-    await click(buttonContaining(host, 'Source: Webform')!)
-    await click([...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'None')!)
-    expect(leadPatches).toEqual([{ url: expect.stringContaining('/api/leads/lead-9'), body: { source: null } }])
-    await unmount()
-  })
-
+  // Source None-clear on the live surface (ClientProfile SourceField) is
+  // covered in beta-card-restore; the old PersonCard variant retired (#136).
   it('stage Advance is GONE (7/10 — stages move via Jobber); the route still writes the stage_change touchpoint on closes (source guard)', async () => {
     // Default payload = LOCAL engagement (zero work records) — the old
     // button rendered exactly here; now no surface offers a manual move.

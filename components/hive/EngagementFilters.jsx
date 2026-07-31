@@ -1,6 +1,6 @@
 // components/hive/EngagementFilters.jsx — the work-lens filter control
-// (button + popover), shared by EngagementBoard and EngagementList over
-// ONE filter state owned by HiveShell (single instance + one storage
+// (button + popover), shared by EngagementBoard and EngagementGroupedList
+// over ONE filter state owned by HiveShell (single instance + one storage
 // key, so the lenses and the open-count can never disagree; switching
 // lenses mid-triage keeps the subset).
 'use client'

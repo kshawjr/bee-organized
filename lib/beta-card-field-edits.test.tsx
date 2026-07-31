@@ -1,24 +1,15 @@
 // @vitest-environment happy-dom
-// Lead-detail card field edits (PersonCard / EngagementPanel /
-// ClientProfile). Covers the three-fix batch:
-//   FIX 1 — ReferrerField extraction: the shared referrer add/edit/clear
-//     renders on PersonCard AND EngagementPanel (ClientProfile's own
-//     rendering is covered in beta-referral-linking.test.tsx post-
-//     refactor); EngagementPanel writes the LEAD's columns via
-//     PATCH /api/leads/<lead id>, never an engagement field.
-//   FIX 2 — display updates optimistically on save (Source pill flips
-//     immediately), reverts on PATCH failure, and the confirmed patch
-//     propagates out through onLeadPatched (the shell→people seam) +
-//     the leadColsToPersonFields translator.
-//   FIX 3 — every meta select offers None; picking it PATCHes null and
-//     the display clears (no stale person-prop resurface); Source can be
-//     cleared independently AFTER the referrer coupling set it — the
-//     coupling never re-locks.
+// Lead-detail card field edits (EngagementPanel + the shared
+// leadColsToPersonFields translator). The old PersonCard field-edit
+// describes retired with the component (#136) — the live-surface
+// equivalents are beta-card-restore (ClientProfile SourceField:
+// optimistic PATCH + None-clear) and beta-referral-linking
+// (ClientProfile referrer add/edit/clear incl. the source coupling and
+// inline-create).
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import PersonCard from '@/components/hive/PersonCard'
 import EngagementPanel from '@/components/hive/EngagementPanel'
 import { leadColsToPersonFields } from '@/components/hive/shared/leadPatchMap'
 
@@ -173,110 +164,6 @@ describe('leadColsToPersonFields', () => {
 
   it('carries nulls through (a None-clear must propagate as null, not vanish)', () => {
     expect(leadColsToPersonFields({ source: null })).toEqual({ source: null })
-  })
-})
-
-// ═══ PersonCard ════════════════════════════════════════════
-const mountPersonCard = async (over: any = {}, source = 'Webform') => {
-  profileClientOver = { source }
-  const onLeadPatched = vi.fn()
-  const setToast = vi.fn()
-  const mounted = await mount(
-    <PersonCard person={person({ source })} people={[person({ id: 'p-other', name: 'Other Person' })]}
-      onClose={() => {}} setToast={setToast} onLeadPatched={onLeadPatched} lookupOptions={LOOKUPS} {...over} />
-  )
-  await flush() // profile fetch
-  return { ...mounted, onLeadPatched, setToast }
-}
-// The referrer field only mounts on a referral-sourced lead (7/23 gate,
-// beta-referrer-visibility). The retroactive path is now: set Source to
-// Referral first, THEN the referrer affordance appears — so these mount
-// there. The coupling on WRITE is unchanged and still asserted.
-const mountReferralPersonCard = (over: any = {}) => mountPersonCard(over, 'Referral')
-
-describe('PersonCard — field edits', () => {
-  it('Source pick updates the pill IMMEDIATELY, PATCHes the lead, and propagates via onLeadPatched', async () => {
-    const { host, unmount, onLeadPatched } = await mountPersonCard()
-    await click(buttonContaining(host, 'Source: Webform')!)
-    await click(buttonByText(host, 'Website')!)
-    expect(buttonContaining(host, 'Source: Website')).toBeTruthy() // optimistic
-    expect(leadPatches).toEqual([{ url: expect.stringContaining('/api/leads/lead-9'), body: { source: 'Website' } }])
-    expect(onLeadPatched).toHaveBeenCalledWith('lead-9', { source: 'Website' })
-    await unmount()
-  })
-
-  it('reverts the display and toasts on PATCH failure — no propagation', async () => {
-    const { host, unmount, onLeadPatched, setToast } = await mountPersonCard()
-    leadPatchFail = true
-    await click(buttonContaining(host, 'Source: Webform')!)
-    await click(buttonByText(host, 'Website')!)
-    expect(buttonContaining(host, 'Source: Webform')).toBeTruthy() // reverted
-    expect(onLeadPatched).not.toHaveBeenCalled()
-    expect(setToast).toHaveBeenCalledWith(expect.objectContaining({ kind: 'error' }))
-    await unmount()
-  })
-
-  it('None clears Source: PATCH null, pill shows the empty state — the stale person-prop never resurfaces', async () => {
-    const { host, unmount } = await mountPersonCard()
-    await click(buttonContaining(host, 'Source: Webform')!)
-    await click(buttonByText(host, 'None')!)
-    expect(leadPatches).toEqual([{ url: expect.stringContaining('/api/leads/lead-9'), body: { source: null } }])
-    // person.source is 'Webform' — the old ?? fallback would show it again.
-    expect(buttonContaining(host, 'Source: Webform')).toBeFalsy()
-    expect(buttonContaining(host, 'Source · add')).toBeTruthy()
-    await unmount()
-  })
-
-  it('Type pill is GONE from PersonCard (build 2: project type is DEAL-scoped — edits on the EngagementPanel masthead only; Source stays, leads are pre-deal)', async () => {
-    const { host, unmount } = await mountPersonCard()
-    expect(buttonContaining(host, 'Type: Client')).toBeUndefined()
-    expect(buttonContaining(host, 'Type · add')).toBeUndefined()
-    expect(buttonContaining(host, 'Source: Webform')).toBeTruthy() // source keeps its pre-deal home
-    await unmount()
-  })
-
-  it('has the shared ReferrerField: add referrer PATCHes kind+id AND source (the coupling)', async () => {
-    const { host, unmount, onLeadPatched } = await mountReferralPersonCard()
-    await click(host.querySelector('button[aria-label="Add referrer"]')!)
-    await flush() // partners fetch
-    await click(buttonContaining(host, 'Karen Partner')!)
-    expect(leadPatches).toEqual([{
-      url: expect.stringContaining('/api/leads/lead-9'),
-      body: { referred_by_kind: 'partner', referred_by_id: 'pt-1', source: 'Referral' },
-    }])
-    expect(host.textContent).toContain('Referred by Karen Partner')
-    expect(buttonContaining(host, 'Source: Referral')).toBeTruthy() // coupling reflected on the pill
-    expect(onLeadPatched).toHaveBeenCalledWith('lead-9', { referred_by_kind: 'partner', referred_by_id: 'pt-1', source: 'Referral' })
-    await unmount()
-  })
-
-  it('inline-create from the card hands the CONFIRMED partner row up onPartnerCreated (the Classic seam)', async () => {
-    const onPartnerCreated = vi.fn()
-    const { host, unmount } = await mountReferralPersonCard({ onPartnerCreated })
-    await click(host.querySelector('button[aria-label="Add referrer"]')!)
-    await flush()
-    await type(host.querySelector('input[aria-label="Search referrers"]')!, 'New Neighbor')
-    // Phase 2: ONE create door (the merged network pool, type='partner').
-    await click(buttonContaining(host, 'to your network')!)
-    expect(onPartnerCreated).toHaveBeenCalledTimes(1)
-    expect(onPartnerCreated.mock.calls[0][0]).toMatchObject({ id: 'pt-new-1', type: 'partner', name: 'New Neighbor' })
-    await unmount()
-  })
-
-  // This one also pins the visibility EDGE CASE from the other side: a
-  // stored referrer survives the source going to None — it does NOT
-  // vanish with the source that let it be added.
-  it("the coupling doesn't re-lock: Source clears to None AFTER a referrer set it, referrer stays", async () => {
-    const { host, unmount } = await mountReferralPersonCard()
-    await click(host.querySelector('button[aria-label="Add referrer"]')!)
-    await flush()
-    await click(buttonContaining(host, 'Karen Partner')!)
-    await click(buttonContaining(host, 'Source: Referral')!)
-    await click(buttonByText(host, 'None')!)
-    expect(leadPatches[1]).toEqual({ url: expect.stringContaining('/api/leads/lead-9'), body: { source: null } })
-    expect(buttonContaining(host, 'Source · add')).toBeTruthy()
-    expect(host.textContent).toContain('Referred by Karen Partner') // untouched
-    await unmount()
   })
 })
 

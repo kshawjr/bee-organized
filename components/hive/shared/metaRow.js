@@ -3,7 +3,7 @@
 // THE meta-row anatomy — one implementation of the "icon · muted label ·
 // value" line that every key-fact/contact row on the lead-detail cards
 // renders (ContactField phone/email, AddressField, SourceField,
-// ReferrerField, PersonCard's read-only contact rows).
+// ReferrerField).
 //
 // Why this exists: the anatomy was copy-pasted five times with the same
 // numbers typed out each time, so a row that forgot one of them (the

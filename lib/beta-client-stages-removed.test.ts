@@ -45,7 +45,7 @@ describe('B) the dead getter/setter/module-var + stale fallback wiring are remov
 })
 
 describe('C) regression — the classic (non-Hive) STAGES const stays, still consumed', () => {
-  // STAGES is NOT dead: the PersonCard/pipeline views in BeeHub render from it in
+  // STAGES is NOT dead: the classic PersonPanel/pipeline views in BeeHub render from it in
   // ~18 places. It was the picklist's stale FALLBACK, but removing it would break
   // the classic board. It must survive the picklist removal.
   it('the STAGES const is still defined', () => {

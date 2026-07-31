@@ -5,7 +5,7 @@
 // The section used to be suppressed behind !jobberLinked — a pre-Jobber
 // provenance framing from 93e583c ("webform text … hasn't become an SR record
 // yet"), not a data rule: Jobber never reads or writes request_details (the
-// import excludes it on both branches), and PersonCard already edits it on
+// import excludes it on both branches), and the lead card already edited it on
 // linked records. Kevin's call: the field is first-class on every record.
 // Covers:
 //   - jobber-linked + null → section PRESENT with the dashed add-slot

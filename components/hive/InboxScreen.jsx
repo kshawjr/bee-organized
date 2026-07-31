@@ -220,7 +220,8 @@ function AgeInline({ created, nowMs, style = {} }) {
 }
 
 // One row of the ··· overflow menu. stopPropagation keeps the click off
-// the row (PersonCard) and off the document outside-click closer.
+// the row (which opens the ClientProfile) and off the document
+// outside-click closer.
 function MenuRow({ label, danger, disabled, onPick }) {
   return (
     <button disabled={disabled}

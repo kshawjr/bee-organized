@@ -3,8 +3,8 @@
 // Quiet tap-to-edit meta select: 'Source: Webform' as a hairline pill
 // trigger → the modern popover menu rows (✓ on active, hover tint),
 // Escape/outside closes. Empty state: '{label} · add' dashed-quiet.
-// Options are admin-managed lookup labels. Used by PersonCard +
-// EngagementPanel's meta row. Beta chunk only.
+// Options are admin-managed lookup labels. Used by EngagementPanel's
+// meta row (and composed by shared/SourceField). Beta chunk only.
 //
 // renderTrigger (optional): swap the pill for a host-supplied trigger —
 // receives a toggle callback; the popover menu (None + options, the ONE

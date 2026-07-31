@@ -8,11 +8,10 @@ import { describe, it, expect, vi } from 'vitest'
 import React from 'react'
 import { renderToString } from 'react-dom/server'
 import EngagementBoard from '@/components/hive/EngagementBoard'
-import EngagementList from '@/components/hive/EngagementList'
+import EngagementGroupedList from '@/components/hive/EngagementGroupedList'
 import EngagementPanel from '@/components/hive/EngagementPanel'
-import ClientDirectory from '@/components/hive/ClientDirectory'
+import ClientGroupedList from '@/components/hive/ClientGroupedList'
 import InboxScreen from '@/components/hive/InboxScreen'
-import PersonCard from '@/components/hive/PersonCard'
 import { fmtTime, fmtShortTime, deriveStatusChip } from '@/components/hive/shared/engagementStatus'
 
 const now = Date.now()
@@ -75,13 +74,12 @@ const PEOPLE = [
 function renderAll() {
   const html: string[] = []
   html.push(renderToString(<EngagementBoard engagements={ENGAGEMENTS as any} />))
-  html.push(renderToString(<EngagementList engagements={ENGAGEMENTS as any} closedCount={5} />))
+  html.push(renderToString(<EngagementGroupedList engagements={ENGAGEMENTS as any} closedCount={5} />))
   html.push(renderToString(
     <EngagementPanel engagementId="e-x" seed={ENGAGEMENTS[4] as any} onClose={() => {}} />
   ))
-  html.push(renderToString(<ClientDirectory people={PEOPLE as any} engagements={ENGAGEMENTS as any} />))
+  html.push(renderToString(<ClientGroupedList people={PEOPLE as any} engagements={ENGAGEMENTS as any} />))
   html.push(renderToString(<InboxScreen people={PEOPLE as any} engagements={ENGAGEMENTS as any} />))
-  html.push(renderToString(<PersonCard person={PEOPLE[0] as any} onClose={() => {}} />))
   return html.join('\n')
 }
 

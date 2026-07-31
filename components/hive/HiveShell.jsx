@@ -16,10 +16,8 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import EngagementBoard from './EngagementBoard'
 // Nav restructure 2026-07-18: the List lens is now the grouped color-band
 // EngagementGroupedList; the Client List lens is the grouped ClientGroupedList.
-// The prior flat EngagementList / ClientDirectory are RETAINED on disk
-// (still unit-tested in isolation) but no longer mounted here — reversible
-// by restoring the import + render branch, same pattern as the Classic
-// retirement.
+// The prior flat EngagementList / ClientDirectory were DELETED (issue 136) —
+// restore from git history if a flat lens ever comes back.
 import EngagementGroupedList from './EngagementGroupedList'
 import EngagementPanel from './EngagementPanel'
 import ClientGroupedList from './ClientGroupedList'
@@ -296,7 +294,7 @@ export default function HiveShell({
   const anySheetOpen = overlay != null || newClientOpen
 
   // Admin-managed option lists (lookups: global, super-admin curated) —
-  // fetched ONCE per shell mount and threaded to PersonCard +
+  // fetched ONCE per shell mount and threaded to ClientProfile +
   // EngagementPanel (lighter than per-card fetches).
   const [lookupOptions, setLookupOptions] = useState({ sources: [], projectTypes: [], clientTags: [], closeLostReasons: [] })
   useEffect(() => {
@@ -895,10 +893,9 @@ export default function HiveShell({
         />
       )}
       {/* Lead detail is UNIFIED on ClientProfile below — the old PersonCard
-          overlay path is retired so a lead click, a new-lead create, and a
-          /clients/<id> deep-link all open the SAME panel and drive the URL.
-          PersonCard the component still exists (standalone-tested) but is no
-          longer a HiveShell overlay slot. */}
+          overlay path is retired (and the component deleted, issue 136) so a lead
+          click, a new-lead create, and a /clients/<id> deep-link all open the
+          SAME panel and drive the URL. */}
       {overlay?.type === 'client' && (
         <ClientProfile
           key={overlay.clientId}

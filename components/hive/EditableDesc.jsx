@@ -2,8 +2,8 @@
 // ─────────────────────────────────────────────────────────────
 // The description quote-block idiom (dfa1669): indented italic text on
 // the quiet surface, 2-line clamp with in-place 'Show more', tap-to-edit
-// textarea + readable ✎. Bound to leads.request_details on PersonCard /
-// ClientProfile AND engagements.description on EngagementPanel (its
+// textarea + readable ✎. Bound to leads.request_details on ClientProfile
+// AND engagements.description on EngagementPanel (its
 // private copy of this idiom was consolidated here 7/10). Beta chunk.
 //
 // Affordances follow the shared inline-edit standard

@@ -10,9 +10,9 @@
 //     the existing overflow (Junk / Snooze / Dismiss intact)
 //   - phone line: tel: link with DIGITS-ONLY href (phone_normalized
 //     first, client-side strip as fallback) displaying the FORMATTED
-//     phone; tapping it never opens the PersonCard
+//     phone; tapping it never opens the client card
 //   - phoneless lead: no tel: element at all, row still valid
-//   - row-click still opens the PersonCard (icons + tel all stop
+//   - row-click still opens the client card (icons + tel all stop
 //     propagation)
 //   - mapper: phone_normalized → person.phoneNormalized (read-only)
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -99,7 +99,7 @@ describe('ghost icon actions', () => {
     expect(html).not.toContain('···')
   })
 
-  it('Log call opens the shared composer (prefilled call) and never opens the PersonCard', async () => {
+  it('Log call opens the shared composer (prefilled call) and never opens the client card', async () => {
     // The row action used to fire a hardcoded one-click write. It opens the
     // unified TouchpointModal now — same reach_out on commit, but the notes
     // and the outcome are reachable, and the method is a choice.
@@ -163,7 +163,7 @@ describe('secondary-line phone', () => {
     await m.unmount()
   })
 
-  it('tapping the number dials — it does NOT open the PersonCard', async () => {
+  it('tapping the number dials — it does NOT open the client card', async () => {
     const onOpenPerson = vi.fn()
     const m = await mount(inbox([person()], { onOpenPerson }))
     await click(m.host.querySelector('a[href^="tel:"]')!)
@@ -183,7 +183,7 @@ describe('secondary-line phone', () => {
 
 // ═══ row interaction ═══════════════════════════════════════
 describe('row interaction', () => {
-  it('row click still opens the PersonCard', async () => {
+  it('row click still opens the client card', async () => {
     const p = person()
     const onOpenPerson = vi.fn()
     const m = await mount(inbox([p], { onOpenPerson }))

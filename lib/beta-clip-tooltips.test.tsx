@@ -16,10 +16,8 @@
 //   · empty / placeholder states carry NO title (a tooltip on "No buzz yet"
 //     or an absent contact is noise) — matches #68's bare placeholder.
 //
-// CORRECTION (#118 reopen): ContactLine is NOT behind any live surface — it
-// is imported only by ClientStrip, which nothing mounts (orphaned by the
-// tabbed-card unification; lead detail is ClientProfile now). The ContactLine
-// tests below pin a dead component's leaf contract only. The LIVE #118
+// #136: the ContactLine leaf tests that used to sit here were retired with
+// the component (dead since the tabbed-card unification). The LIVE #118
 // guarantee is the 'Client card (ClientProfile)' describe: it mounts the
 // surface a user actually reaches and asserts the title rides the clipped
 // email/phone/address there (shared/ContactField + shared/AddressField).
@@ -27,7 +25,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import ContactLine from '@/components/hive/ContactLine'
 import InboxScreen from '@/components/hive/InboxScreen'
 import ClientProfile from '@/components/hive/ClientProfile'
 
@@ -44,59 +41,6 @@ const mount = async (ui: React.ReactElement) => {
 // A value long enough to clip in any real row.
 const LONG_EMAIL = 'ankur.venkataraghavan.palmbeach.franchise@a-very-long-domain-name.example.com'
 const LONG_PHONE = '+1 (561) 555-0199 ext. 4471 — call before 5pm ET please'
-
-// The value span carries both the visible text and the title.
-const titledSpanWithText = (host: Element, text: string) =>
-  [...host.querySelectorAll('span[title]')].find(s => (s.textContent || '') === text) as HTMLElement | undefined
-
-describe('ContactLine — email/phone tooltips (#118)', () => {
-  it('a long email in a row → title present with the full value', async () => {
-    const { host, unmount } = await mount(<ContactLine email={LONG_EMAIL} />)
-    const span = titledSpanWithText(host, LONG_EMAIL)
-    expect(span).toBeTruthy()
-    expect(span!.getAttribute('title')).toBe(LONG_EMAIL)
-    // The mailto link is the host — confirms it is the EMAIL surface.
-    expect(host.querySelector('a[href^="mailto:"]')).toBeTruthy()
-    await unmount()
-  })
-
-  it('a long phone → title present with the full value', async () => {
-    const { host, unmount } = await mount(<ContactLine phone={LONG_PHONE} />)
-    const span = titledSpanWithText(host, LONG_PHONE)
-    expect(span?.getAttribute('title')).toBe(LONG_PHONE)
-    expect(host.querySelector('a[href^="tel:"]')).toBeTruthy()
-    await unmount()
-  })
-
-  it('a SHORT email → still renders, title present and equal to the value (rule: title always carries a present value)', async () => {
-    const short = 'a@b.co'
-    const { host, unmount } = await mount(<ContactLine email={short} />)
-    const span = titledSpanWithText(host, short)
-    expect(span?.getAttribute('title')).toBe(short)
-    await unmount()
-  })
-
-  it('email only → renders the email surface and no phone surface', async () => {
-    const { host, unmount } = await mount(<ContactLine email={LONG_EMAIL} />)
-    expect(host.querySelector('a[href^="mailto:"]')).toBeTruthy()
-    expect(host.querySelector('a[href^="tel:"]')).toBeNull()
-    await unmount()
-  })
-
-  it('no phone and no email → renders nothing (no stray titled node, no crash)', async () => {
-    const { host, unmount } = await mount(<ContactLine />)
-    expect(host.querySelector('span[title]')).toBeNull()
-    expect(host.textContent).toBe('')
-    await unmount()
-  })
-
-  it('inline layout (wide panel strip) carries the same title', async () => {
-    const { host, unmount } = await mount(<ContactLine email={LONG_EMAIL} phone={LONG_PHONE} layout="inline" />)
-    expect(titledSpanWithText(host, LONG_EMAIL)?.getAttribute('title')).toBe(LONG_EMAIL)
-    expect(titledSpanWithText(host, LONG_PHONE)?.getAttribute('title')).toBe(LONG_PHONE)
-    await unmount()
-  })
-})
 
 // ── Inbox list row: name clips silently; title must carry the full name.
 ;(globalThis as any).fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }))
@@ -157,8 +101,8 @@ describe('Inbox list row — name tooltip (#118)', () => {
 // This is where Ankur's clipped email actually lives: ClientProfile Key
 // Facts mounts shared/ContactField (phone/email) + shared/AddressField,
 // whose value line is the ellipsized element (metaValueStyle). The first
-// #118 pass put the title on ContactLine — a component nothing renders —
-// so these tests mount the card a user opens and assert the title is on
+// #118 pass put the title on ContactLine — a dead component, deleted in
+// #136 — so these tests mount the card a user opens and assert the title is on
 // the VALUE element itself. That placement is also the shadowing fix: the
 // row keeps title="Edit email"/"Edit address" (the edit affordance), and
 // in HTML the nearest titled ancestor wins — so the title must sit ON the

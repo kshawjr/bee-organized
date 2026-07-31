@@ -8,10 +8,12 @@
 // fit the narrow mobile sheet. Absent values render '—', never a
 // blank or a fabricated zero.
 //
-// Per-surface cells (the host card decides):
-//   EngagementPanel — Stage / Value / Last touch / Next
-//   ClientProfile   — Status / Lifetime / Last touch / Open
-//   PersonCard      — Status / Inquired / Last touch / Next
+// NOTE (issue 136): no card renders the strip COMPONENT today — ClientProfile
+// moved to MetricBand and EngagementPanel's masthead carries its own
+// vitals. What's live from this module is the helpers (vitalsAge /
+// vitalsFuture / nextFromChildren / EM_DASH), consumed by ClientProfile
+// and MetricBand. The component stays as the strip idiom's home should a
+// card need it again.
 //
 // §8.5: props only, no context.
 // ─────────────────────────────────────────────────────────────

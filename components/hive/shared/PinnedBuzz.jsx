@@ -6,11 +6,11 @@
 // loud: no hard border, design-language amber, one quiet pencil.
 //
 // Buzz is CLIENT-LEVEL (lead_notes kind='buzz') and APPEND-ONLY with
-// authored history behind it — same controlled contract as BuzzDrawer
-// (notes + onPost live with the data owner; "editing" appends a new
-// note, never mutates one). The SAME notes array shows on ClientProfile
-// and that client's EngagementPanel(s); on PersonCard it's the lead's
-// buzz that carries forward at founding.
+// authored history behind it — controlled contract: notes + onPost live
+// with the data owner; "editing" appends a new note, never mutates one.
+// The SAME notes array shows on ClientProfile and that client's
+// EngagementPanel(s); a pre-engagement lead's buzz carries forward at
+// founding.
 //
 // Collapsed: pin + latest note, one line. Tap (band or pencil) →
 // history + append input in place. No buzz yet → a quiet add

@@ -2,9 +2,10 @@
 //
 // GET /api/engagements?closed=1[&stage=won|lost][&location_uuid=][&offset=][&limit=]
 //
-// Collection endpoint for the EngagementList's lazy 'Closed' page — the
-// initial page load deliberately ships only OPEN engagements plus a
-// closed COUNT, so ~1,400 terminal rows never ride in the page payload.
+// Collection endpoint for the lazy 'Closed' pages (EngagementGroupedList's
+// Closed group + EngagementBoard's closed rail) — the initial page load
+// deliberately ships only OPEN engagements plus a closed COUNT, so ~1,400
+// terminal rows never ride in the page payload.
 // Returns { rows, total, offset, limit } ordered closed_at desc; rows
 // carry client_name (joined) in the same shape the list renders.
 //

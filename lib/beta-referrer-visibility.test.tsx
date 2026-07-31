@@ -35,7 +35,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import PersonCard from '@/components/hive/PersonCard'
 import ClientProfile from '@/components/hive/ClientProfile'
 import ReferrerField, { isReferralSourced } from '@/components/hive/shared/ReferrerField'
 import { metaRowStyle, META_ICON } from '@/components/hive/shared/metaRow'
@@ -45,7 +44,6 @@ import { metaRowStyle, META_ICON } from '@/components/hive/shared/metaRow'
 const now = Date.now()
 const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString()
 const LOC = 'loc-uuid-1'
-const LOOKUPS = { sources: ['Webform', 'Website', 'Referral'], projectTypes: ['Client'] }
 
 const person = (over: any = {}) => ({
   id: 'lead-9', name: 'Dana Client', email: 'dana@x.com', phone: '(561) 555-0100',
@@ -206,22 +204,15 @@ describe('stored referrer outlives a source change (the chosen behavior)', () =>
   })
 })
 
-// ═══ 3) the gate is live on BOTH mounting surfaces ═════════════
-const mountPersonCard = async () => {
-  const mounted = await mount(
-    <PersonCard person={person({ source: profileClient.source ?? 'Webform' })} people={[]}
-      onClose={() => {}} lookupOptions={LOOKUPS} />
-  )
-  await flush()
-  return mounted
-}
+// ═══ 3) the gate is live on the mounting surface (ClientProfile — the
+// one lead-detail card since the tabbed-card unification; #136) ════════
 const mountClientProfile = async () => {
   const mounted = await mount(<ClientProfile clientId="lead-9" people={[]} onClose={() => {}} />)
   await flush()
   return mounted
 }
 
-for (const [label, mountSurface] of [['PersonCard (the Inbox card)', mountPersonCard], ['ClientProfile', mountClientProfile]] as const) {
+for (const [label, mountSurface] of [['ClientProfile', mountClientProfile]] as const) {
   describe(`${label} — referrer visibility`, () => {
     it('non-referral source, nothing stored → no referrer row anywhere on the card', async () => {
       profileClient = { source: 'Webform' }
@@ -271,31 +262,9 @@ const styleOf = (el: HTMLElement) => ({
 })
 
 describe('meta-row rhythm — Source and Referrer match their neighbors', () => {
-  it('PersonCard: phone / email / source / referrer all render the ONE shared anatomy', async () => {
+  it('ClientProfile: the referrer row leads with an icon at the shared size — the value sits on the same left edge as the rows above', async () => {
     profileClient = { source: 'Referral', referred_by_kind: 'partner', referred_by_id: 'pt-1', referred_by_name: 'Karen Partner' }
-    const { host, unmount } = await mountPersonCard()
-
-    const rows = ['phone', 'email', 'source', 'referrer'].map(n => {
-      const el = row(host, n)
-      expect(el, `${n} row must render`).toBeTruthy()
-      return [n, el!] as const
-    })
-
-    for (const [name, el] of rows) {
-      for (const prop of RHYTHM) {
-        expect(styleOf(el)[prop], `${name}.${prop}`).toBe(String((SHARED as any)[prop]))
-      }
-    }
-    // And they agree with each other — no row is its own island.
-    const referrer = styleOf(row(host, 'referrer')!)
-    expect(referrer).toEqual(styleOf(row(host, 'source')!))
-    expect(referrer).toEqual(styleOf(row(host, 'phone')!))
-    await unmount()
-  })
-
-  it('PersonCard: the referrer row leads with an icon at the shared size — the value sits on the same left edge as the rows above', async () => {
-    profileClient = { source: 'Referral', referred_by_kind: 'partner', referred_by_id: 'pt-1', referred_by_name: 'Karen Partner' }
-    const { host, unmount } = await mountPersonCard()
+    const { host, unmount } = await mountClientProfile()
     for (const name of ['phone', 'source', 'referrer']) {
       const icon = row(host, name)!.querySelector('svg')
       expect(icon, `${name} icon`).toBeTruthy()
@@ -304,21 +273,9 @@ describe('meta-row rhythm — Source and Referrer match their neighbors', () => 
     await unmount()
   })
 
-  it('PersonCard: Source is a ROW, not the 11px pill — same type size as the line beneath it', async () => {
-    profileClient = { source: 'Referral', referred_by_kind: 'partner', referred_by_id: 'pt-1', referred_by_name: 'Karen Partner' }
-    const { host, unmount } = await mountPersonCard()
-    const source = row(host, 'source')!
-    // Still the same control (a button into the MetaSelect popover) —
-    // only its clothes changed.
-    expect(source.tagName).toBe('BUTTON')
-    expect(source.textContent).toContain('Source: Referral')
-    expect(source.style.fontSize).toBe(SHARED.fontSize)
-    await unmount()
-  })
-
-  it('PersonCard: the empty-state add-referrer row wears the anatomy too', async () => {
+  it('ClientProfile: the empty-state add-referrer row wears the anatomy too', async () => {
     profileClient = { source: 'Referral' }
-    const { host, unmount } = await mountPersonCard()
+    const { host, unmount } = await mountClientProfile()
     const el = row(host, 'referrer')!
     for (const prop of RHYTHM) {
       expect(styleOf(el)[prop], prop).toBe(String((metaRowStyle({ tone: 'faint' }) as any)[prop]))

@@ -1,7 +1,7 @@
 // components/hive/shared/Timeline.jsx
 // ─────────────────────────────────────────────────────────────
-// The unified activity timeline — ONE shared component embedded on all
-// three lead-detail surfaces (PersonCard, ClientProfile, EngagementPanel),
+// The unified activity timeline — ONE shared component embedded on the
+// lead-detail surfaces (ClientProfile, EngagementPanel, NetworkPersonRecord),
 // merging PAST history and FUTURE scheduled actions in a single stream.
 //
 // Layout: one vertical rail, time strictly descending down the page —

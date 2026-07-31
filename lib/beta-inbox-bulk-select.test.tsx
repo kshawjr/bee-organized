@@ -15,7 +15,7 @@
 //   - linked exclusion: grayed disabled checkbox ('Managed in
 //     Jobber'), select-all skips linked, row click can't select it,
 //     and the linked row's ··· menu carries no 'Mark as junk'
-//   - ClientProfile + PersonCard ··· guards: no junk menu on linked
+//   - ClientProfile ··· guard: no junk menu on linked
 //   - source guard: the API 409 (jobber_linked_junk_rejected) exists
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -25,7 +25,6 @@ import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import InboxScreen from '@/components/hive/InboxScreen'
 import ClientProfile from '@/components/hive/ClientProfile'
-import PersonCard from '@/components/hive/PersonCard'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -248,7 +247,7 @@ describe('selection mechanics', () => {
     await m.unmount()
   })
 
-  it('in selection mode row clicks select — they do NOT open the PersonCard; after exit they do again', async () => {
+  it('in selection mode row clicks select — they do NOT open the client card; after exit they do again', async () => {
     const p = person({ name: 'Alice Apple' })
     const onOpenPerson = vi.fn()
     const m = await mount(inbox([p], { onOpenPerson }))
@@ -415,7 +414,7 @@ describe('Jobber-linked rows in the Inbox', () => {
   })
 })
 
-// ═══ ClientProfile + PersonCard ··· guards ═════════════════
+// ═══ ClientProfile ··· guard ═══════════════════════════════
 describe('card menus enforce the linked guard', () => {
   it('ClientProfile: junk menu present for unlinked, GONE for jobber-linked', async () => {
     const m = await mount(
@@ -443,26 +442,6 @@ describe('card menus enforce the linked guard', () => {
     await m2.unmount()
   })
 
-  it('PersonCard: junk menu present for unlinked, GONE when person.jobberRef or profile jobber_client_id is set', async () => {
-    const m = await mount(
-      <PersonCard person={person({ name: 'Frank Free' })} onClose={() => {}} setToast={setToast} />
-    )
-    expect(m.host.querySelector('button[aria-label="More"]')).toBeTruthy()
-    await m.unmount()
-
-    const m2 = await mount(
-      <PersonCard person={person({ name: 'Judy Jobber', jobberRef: '12345' })} onClose={() => {}} setToast={setToast} />
-    )
-    expect(m2.host.querySelector('button[aria-label="More"]')).toBeFalsy()
-    await m2.unmount()
-
-    profileOver = { client: { jobber_client_id: 'jc-77' } }
-    const m3 = await mount(
-      <PersonCard person={person({ name: 'Linda Linked' })} onClose={() => {}} setToast={setToast} />
-    )
-    expect(m3.host.querySelector('button[aria-label="More"]')).toBeFalsy()
-    await m3.unmount()
-  })
 })
 
 // ═══ source guards ═════════════════════════════════════════

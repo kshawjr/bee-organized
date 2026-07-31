@@ -104,8 +104,8 @@ beforeEach(() => installFetch())
 
 // ═══ shared-component + §8.5 guards ════════════════════════
 describe('one shared Timeline, §8.5-clean', () => {
-  it('all three surfaces embed the SAME shared component', () => {
-    for (const f of ['components/hive/PersonCard.jsx', 'components/hive/ClientProfile.jsx', 'components/hive/EngagementPanel.jsx']) {
+  it('both lead-detail surfaces embed the SAME shared component', () => {
+    for (const f of ['components/hive/ClientProfile.jsx', 'components/hive/EngagementPanel.jsx']) {
       const src = readFileSync(f, 'utf8')
       expect(src, f).toContain("from './shared/Timeline'")
       expect(src, f).toContain('<Timeline')

@@ -16,12 +16,12 @@
 //      FilterButton 12px, StatusChip 11px/500 anatomy.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React, { act } from 'react'
+import { readFileSync } from 'node:fs'
 import { renderToString } from 'react-dom/server'
 import { createRoot } from 'react-dom/client'
 import EngagementBoard from '@/components/hive/EngagementBoard'
-import EngagementList from '@/components/hive/EngagementList'
 import InboxScreen from '@/components/hive/InboxScreen'
-import ClientDirectory from '@/components/hive/ClientDirectory'
+import ClientGroupedList from '@/components/hive/ClientGroupedList'
 import Banner from '@/components/ui/Banner'
 import StatusChip from '@/components/ui/StatusChip'
 import LoadMore from '@/components/hive/shared/LoadMore'
@@ -67,11 +67,6 @@ const newPerson = (over: any = {}) => ({
   locationId: 'loc-uuid-1',
   paidAmount: 0,
   ...over,
-})
-
-// Person that derives 'Nurturing' + paused → the Clients banner shows.
-const nurturingPaused = (over: any = {}) => newPerson({
-  name: 'Nora Nurture', created: daysAgo(120), paused: true, ...over,
 })
 
 const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ rows: [], total: 0 }) }) as any)
@@ -160,14 +155,11 @@ describe('displayTitle secondary text — one color token, sizes stay per densit
     expect(sub).toBeTruthy()
   })
 
-  it('list desktop (13px) and mobile (12px) rows use the same var(--text-muted)', () => {
-    const html = renderToString(
-      <EngagementList engagements={[eng()] as any} closedCount={0} closedWonCount={0} />
-    )
-    expect(html).toMatch(/font-size:13px;color:var\(--text-muted/)
-    // The drifted #6b6b66 title cell is gone — that hex may only appear
-    // via SECTION_LABEL (12px headers), never on a 13px body cell.
-    expect(html).not.toMatch(/font-size:13px;color:#6b6b66/)
+  it('grouped-list rows use the same var(--text-muted) (source pin — bands SSR collapsed, so rows never renderToString)', () => {
+    const src = readFileSync('components/hive/EngagementGroupedList.jsx', 'utf8')
+    expect(src).toContain('var(--text-muted, ${TEXT_MUTED})')
+    // The drifted #6b6b66 title cell is gone from the row markup.
+    expect(src).not.toMatch(/color:\s*'#6b6b66'/)
   })
 })
 
@@ -187,16 +179,9 @@ describe("'· soon' placeholders — one quiet gray on both tabs", () => {
     expect(trigger![1]).not.toContain('var(--hairline-border')
   })
 
-  it('Clients Activate-drips rides the same var(--text-quiet)', () => {
-    const html = renderToString(
-      <ClientDirectory people={[nurturingPaused()] as any} engagements={[]} />
-    )
-    expect(html).toContain('Activate drips · soon')
-    const soon = html.match(/title="Coming with drip activation \(step 5\)"[^>]*style="([^"]*)"/) ||
-      html.match(/style="([^"]*)"[^>]*title="Coming with drip activation/)
-    expect(soon).toBeTruthy()
-    expect(soon![1]).toContain(`var(--text-quiet, ${TEXT_QUIET})`)
-  })
+  // (The Clients 'Activate drips · soon' placeholder lived only on the
+  // flat ClientDirectory — retired with it, #136. No live surface renders
+  // a '· soon' placeholder today; the Inbox negative above is the guard.)
 })
 
 describe('interactive hairline — buttons and inputs share --hairline-border', () => {
@@ -212,7 +197,7 @@ describe('interactive hairline — buttons and inputs share --hairline-border', 
     const fbtn = renderToString(<FilterButton count={0} open={false} onToggle={() => {}} />)
     expect(fbtn).toContain('var(--hairline-border')
 
-    const dir = renderToString(<ClientDirectory people={[newPerson()] as any} engagements={[]} />)
+    const dir = renderToString(<ClientGroupedList people={[newPerson()] as any} engagements={[]} />)
     // search input
     expect(dir).toMatch(/<input[^>]*style="[^"]*var\(--hairline-border/)
   })
@@ -222,7 +207,7 @@ describe('interactive hairline — buttons and inputs share --hairline-border', 
       <Banner icon="!" text="note" action={{ label: 'Do it', onClick: () => {} }} />
     )
     expect(banner).not.toContain('rgba(0,0,0,0.12)')
-    const dir = renderToString(<ClientDirectory people={[newPerson()] as any} engagements={[]} />)
+    const dir = renderToString(<ClientGroupedList people={[newPerson()] as any} engagements={[]} />)
     expect(dir).not.toMatch(/<input[^>]*rgba\(0,0,0,0\.12\)/)
   })
 })
@@ -251,20 +236,18 @@ describe('shared structural components — one markup, affordances intact', () =
     expect(html).toContain('font-weight:600')
   })
 
-  it('LoadMore names the batch and still fires; both list + clients consume it', async () => {
+  it('LoadMore names the batch and still fires; the grouped list is its live consumer', async () => {
     const onClick = vi.fn()
     const container = mount(<LoadMore pageSize={100} remaining={340} onClick={onClick} />)
     expect(container.textContent).toContain('Load 100 more of 340')
     await fire(container.querySelector('button')!)
     expect(onClick).toHaveBeenCalledTimes(1)
 
-    // Clients pager: >100 visible rows → the shared button paints and pages.
-    const people = Array.from({ length: 130 }, (_, i) => newPerson({ id: `p${i}`, name: `P ${String(i).padStart(3, '0')}` }))
-    const dir = mount(<ClientDirectory people={people as any} engagements={[]} />)
-    const btn = [...dir.querySelectorAll('button')].find(b => (b.textContent || '').startsWith('Load '))!
-    expect(btn.textContent).toContain('Load 30 more of 30')
-    await fire(btn)
-    expect([...dir.querySelectorAll('button')].find(b => (b.textContent || '').startsWith('Load '))).toBeFalsy()
+    // Live consumer pin: the grouped engagements list pages its lazy
+    // Closed group through THIS component (the flat lists retired, #136).
+    const src = readFileSync('components/hive/EngagementGroupedList.jsx', 'utf8')
+    expect(src).toContain("import LoadMore from './shared/LoadMore'")
+    expect(src).toContain('<LoadMore')
   })
 
   it('Inbox Log call button still reaches the touchpoint write (via the shared composer)', async () => {

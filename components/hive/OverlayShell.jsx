@@ -2,8 +2,8 @@
 // ─────────────────────────────────────────────────────────────
 // THE overlay container: desktop centered modal (740px, r16, close X) /
 // mobile bottom sheet (drag handle + swipe-down dismiss). Extracted from
-// EngagementPanel/ClientProfile so PersonCard and any future overlay
-// render the identical chrome. Beta chunk only.
+// EngagementPanel/ClientProfile so every overlay (sheets, modals,
+// records) renders the identical chrome. Beta chunk only.
 //
 // Open discipline: every open (and panel↔profile swap — HiveShell keys
 // the overlays by record id, so a swap remounts this shell) starts the

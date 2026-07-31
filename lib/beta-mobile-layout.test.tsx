@@ -14,9 +14,8 @@ import { describe, it, expect, afterEach } from 'vitest'
 import React from 'react'
 import { renderToString } from 'react-dom/server'
 import HiveShell from '@/components/hive/HiveShell'
-import EngagementList from '@/components/hive/EngagementList'
-import ClientDirectory from '@/components/hive/ClientDirectory'
-import PersonCard from '@/components/hive/PersonCard'
+import EngagementGroupedList from '@/components/hive/EngagementGroupedList'
+import ClientGroupedList from '@/components/hive/ClientGroupedList'
 import OverlayShell from '@/components/hive/OverlayShell'
 import { FilterPopover } from '@/components/hive/shared/FilterPopover'
 
@@ -95,32 +94,9 @@ describe('beta mobile layout', () => {
     expect(html).toContain('aria-label="Engagements view"')
   })
 
-  it('directory chip row is a single-line nowrap scroller with the filter pill beside it', () => {
-    setWidth(390)
-    const html = renderToString(<ClientDirectory people={PEOPLE as any} engagements={ENGAGEMENTS as any} />)
-    const strip = html.match(/<div style="([^"]*overflow-x:auto[^"]*)">/)
-    expect(strip, 'chip scroll strip missing').toBeTruthy()
-    expect(strip![1]).toContain('flex-wrap:nowrap')
-    expect(html).toMatch(/Filter(s| &(amp;)? sort)/)
-  })
-
-  it('list chip row WRAPS (both collapse groups can expand at once) — never an off-screen scroller', () => {
-    setWidth(390)
-    const list = renderToString(<EngagementList engagements={ENGAGEMENTS as any} closedCount={2} />)
-    // The wrap-mode strip carries the two-axis gap; assert it wraps and
-    // dropped the horizontal scroller.
-    const strip = list.match(/<div style="([^"]*gap:2px 14px[^"]*)">/)
-    expect(strip, 'wrapping chip strip missing').toBeTruthy()
-    expect(strip![1]).toContain('flex-wrap:wrap')
-    expect(strip![1]).not.toContain('overflow-x:auto')
-    expect(list).toMatch(/Filter(s| &(amp;)? sort)/)
-    // Mobile list = two-line rows, never the desktop sort-header grid.
-    expect(list).not.toContain('class="bee-sort-header"')
-  })
-
   it('mobile overlay is a bottom sheet with contained overscroll', () => {
     setWidth(390)
-    const html = renderToString(<PersonCard person={PEOPLE[0] as any} onClose={() => {}} />)
+    const html = renderToString(<OverlayShell isMobile onClose={() => {}}><div /></OverlayShell>)
     expect(html).toContain('border-radius:16px 16px 0 0') // T.radius.card sheet corners
     expect(html).toContain('overscroll-behavior:contain')
     expect(html).toContain('-webkit-overflow-scrolling:touch')
@@ -154,9 +130,9 @@ describe('beta mobile layout', () => {
     setWidth(390)
     const rendered = [
       renderToString(<HiveShell engagements={ENGAGEMENTS as any} people={PEOPLE as any} />),
-      renderToString(<EngagementList engagements={ENGAGEMENTS as any} closedCount={2} />),
-      renderToString(<ClientDirectory people={PEOPLE as any} engagements={ENGAGEMENTS as any} />),
-      renderToString(<PersonCard person={PEOPLE[0] as any} onClose={() => {}} />),
+      renderToString(<EngagementGroupedList engagements={ENGAGEMENTS as any} closedCount={2} />),
+      renderToString(<ClientGroupedList people={PEOPLE as any} engagements={ENGAGEMENTS as any} />),
+      renderToString(<OverlayShell isMobile onClose={() => {}}><div /></OverlayShell>),
       renderToString(<FilterPopover open count={0} onClear={() => {}}>x</FilterPopover>),
     ].join('\n')
     const offenders = [...rendered.matchAll(/style="([^"]*)"/g)]

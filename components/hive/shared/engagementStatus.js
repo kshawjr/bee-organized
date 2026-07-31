@@ -1,8 +1,8 @@
 // components/hive/shared/engagementStatus.js
 // ─────────────────────────────────────────────────────────────
 // PURE module — the single within-stage status derivation consumed by
-// BOTH EngagementBoard cards and EngagementList rows, so the two lenses
-// can never disagree. Also owns the shared display helpers (junk-title
+// BOTH EngagementBoard cards and EngagementGroupedList rows, so the two
+// lenses can never disagree. Also owns the shared display helpers (junk-title
 // fallback, value, activity age). Zero imports beyond none — safe in
 // any bundle (§8.5 pure-module rule).
 // ─────────────────────────────────────────────────────────────

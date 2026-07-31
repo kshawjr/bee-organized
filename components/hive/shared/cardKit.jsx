@@ -1,7 +1,7 @@
 // components/hive/shared/cardKit.jsx
 // ─────────────────────────────────────────────────────────────
-// Shared chrome for the tabbed lead-detail cards (PersonCard /
-// ClientProfile / EngagementPanel) so the three don't re-declare it:
+// Shared chrome for the tabbed lead-detail cards (ClientProfile /
+// EngagementPanel) so the cards don't re-declare it:
 //   MicroLabel    — the 11px letterspaced section header
 //   quietBtn      — the hairline quiet button (kept for inline mini-form
 //                   controls like the touchpoint Log)

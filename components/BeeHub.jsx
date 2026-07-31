@@ -188,7 +188,7 @@ const CompaniesContext = createContext(null)
 // that actually exist server-side.
 const isUuidStr = (s) => typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 
-// Classic (non-Hive) board stage vocabulary — the PersonCard/pipeline
+// Classic (non-Hive) board stage vocabulary — the PersonPanel/pipeline
 // views in BeeHub still render from this. NOT the Hive engagement stage
 // machine (that's ENGAGEMENT_STAGES in components/hive/shared/stageConfig).
 const STAGES = [

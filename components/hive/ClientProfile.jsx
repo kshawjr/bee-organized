@@ -257,8 +257,8 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
     } catch (e) { setToast({ kind: 'error', msg: `Note failed: ${e.message}` }) }
   }
 
-  // Client-level note (kind='job', no engagement_id) — the same write
-  // PersonCard's composer uses; both cards read the same rows now.
+  // Client-level note (kind='job', no engagement_id) — stays with the
+  // person; engagement notes live with their engagement.
   async function addNote(text) {
     if (!text || !c) return
     try {
@@ -518,8 +518,8 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
           (#69): the old !jobberLinked gate was a pre-Jobber provenance
           framing, but the field is first-class — Jobber never reads or
           writes it (the import excludes it on both branches), so a manual
-          entry here is safe from sync, and PersonCard already edits it on
-          linked records. Empty → EditableDesc's dashed add-slot. */}
+          entry here is safe from sync, linked records included. Empty →
+          EditableDesc's dashed add-slot. */}
       <div>
         <MicroLabel>Request details</MicroLabel>
         <EditableDesc text={c.request_details} showEmpty onSave={saveReqDetails} readOnly={readOnly} />

@@ -80,8 +80,7 @@ export async function GET(
     supabaseService.from('lead_notes').select('id, kind, text, user_label, created_at').eq('lead_id', id).eq('kind', 'buzz').order('created_at', { ascending: false }).limit(50),
     // ALL kind='job' notes with engagement_id — ClientProfile's
     // client-WIDE activity slice tags engagement-scoped ones
-    // '· re: <title>'; PersonCard filters to engagement_id IS NULL
-    // (client-level only) client-side.
+    // '· re: <title>'.
     supabaseService.from('lead_notes').select('id, kind, text, user_label, created_at, engagement_id').eq('lead_id', id).eq('kind', 'job').order('created_at', { ascending: false }).limit(50),
     supabaseService.from('locations').select('name').eq('id', lead.location_uuid).maybeSingle(),
     referrerQuery,

@@ -13,9 +13,9 @@
 //     existing nurture-funnel derivation
 //   - mapper: won_summary joined data → person.wonEngagements (null
 //     when absent)
-//   - ClientDirectory renders the green 'Client' chip + the won-history
-//     detail line ("$4,400 · 2 Jobs"); a session Closed Won engagement
-//     in the prop flips the row without wonEngagements
+//   - ClientGroupedList buckets a won client into the 'Client' band; a
+//     session Closed Won engagement in the prop flips the band without
+//     wonEngagements (the flat ClientDirectory variant retired, #136)
 //   - InboxScreen: a won client never appears in the worklist (they are
 //     a customer, not front-of-funnel)
 import { describe, it, expect } from 'vitest'
@@ -24,7 +24,7 @@ import { renderToString } from 'react-dom/server'
 import { deriveClientStatus, CLIENT_STATUS_ORDER, CLIENT_STATUS_META } from '@/components/hive/shared/clientStatus'
 import { CHIP_STYLES } from '@/components/hive/shared/stageConfig'
 import { mapLeadToPerson } from '@/lib/people-mapper'
-import ClientDirectory from '@/components/hive/ClientDirectory'
+import ClientGroupedList from '@/components/hive/ClientGroupedList'
 import InboxScreen from '@/components/hive/InboxScreen'
 
 const now = Date.now()
@@ -110,37 +110,36 @@ describe('people-mapper — won_summary → person.wonEngagements', () => {
   })
 })
 
-describe('ClientDirectory — Client rows', () => {
-  it('renders the Client chip with the won-history detail line ($ value · jobs)', () => {
+describe('ClientGroupedList — Client band', () => {
+  it('buckets a won client into the Client band (hydrated wonEngagements roll-up)', () => {
     const p = person({
       wonEngagements: WON,
       jobs: [{ id: 'j1' }, { id: 'j2' }],
     })
     const html = renderToString(
-      <ClientDirectory people={[p as any]} engagements={[]} locFilter="all" />
+      <ClientGroupedList people={[p as any]} engagements={[]} locFilter="all" />
     )
-    expect(html).toContain('Dana Whitfield')
-    expect(html).toContain('>Client<')
-    expect(html).toContain('$4,400 · 2 Jobs')
+    expect(html).toContain('aria-label="Client group"')
+    expect(html).not.toContain('aria-label="Nurturing group"')
   })
 
-  it('a session Closed Won engagement flips the row to Client without a roll-up or reload', () => {
+  it('a session Closed Won engagement flips the band to Client without a roll-up or reload', () => {
     const p = person() // no wonEngagements — pre-sweep person, just closed
     const html = renderToString(
-      <ClientDirectory people={[p as any]} engagements={[{ id: 'e1', client_id: p.id, stage: 'Closed Won' } as any]} locFilter="all" />
+      <ClientGroupedList people={[p as any]} engagements={[{ id: 'e1', client_id: p.id, stage: 'Closed Won' } as any]} locFilter="all" />
     )
-    expect(html).toContain('>Client<')
-    // and the terminal row must NOT read as an open engagement
-    expect(html).not.toContain('Open Engagement')
+    expect(html).toContain('aria-label="Client group"')
+    // and the terminal engagement must NOT read as open (no Active band)
+    expect(html).not.toContain('aria-label="Active group"')
   })
 
   it('a won client is out of the Nurturing pool (falls to Client even when aged + never booked)', () => {
     const p = person({ wonEngagements: WON })
     expect(deriveClientStatus(p, new Set(), now)).not.toBe('Nurturing')
     const html = renderToString(
-      <ClientDirectory people={[p as any]} engagements={[]} locFilter="all" />
+      <ClientGroupedList people={[p as any]} engagements={[]} locFilter="all" />
     )
-    expect(html).not.toContain('Never Booked') // the Nurturing detail line
+    expect(html).not.toContain('aria-label="Nurturing group"')
   })
 })
 

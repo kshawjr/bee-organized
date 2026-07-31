@@ -308,7 +308,7 @@ export async function foundEngagement(params: {
     ? (((childRow as any).notes || '').trim() || (lead.request_details || '').trim() || null)
     : null
   // Project type seeds the same way: authored on the lead pre-founding
-  // (PersonCard), carried onto the work at request-founding. Quote/job
+  // (lead detail card), carried onto the work at request-founding. Quote/job
   // foundings skip it — the lead's type may describe earlier work.
   const projectType = foundedBy === 'request' ? ((lead.project_type || '').trim() || null) : null
   const { data: created, error: insErr } = await supabaseService

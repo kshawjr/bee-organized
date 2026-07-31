@@ -4,7 +4,8 @@
 // mockups): a full-bleed money row under the profile header — hairline
 // top/bottom rules, hairline cell dividers, TABULAR NUMERALS so the
 // four figures column-align. Replaces the profile's tinted VitalsStrip
-// (the strip idiom lives on for PersonCard).
+// (no surface renders the strip component anymore — its helpers,
+// vitalsAge/EM_DASH, are what live on).
 //
 // Full-bleed: the host card's body has horizontal padding, so the band
 // takes `bleed` (that padding in px) and cancels it with negative

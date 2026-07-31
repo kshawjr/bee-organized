@@ -13,7 +13,7 @@
 //   - the junk-stops-drips / dismiss-keeps-drips asymmetry (source
 //     guard: drip-lifecycle knows is_junk, never inbox_dismissed_at)
 //   - mapper + PATCHABLE_FIELDS wiring for inbox_dismissed_at
-//   - row-click still opens the PersonCard; ··· does not
+//   - row-click still opens the client card; ··· does not
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -21,7 +21,7 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import InboxScreen from '@/components/hive/InboxScreen'
-import ClientDirectory from '@/components/hive/ClientDirectory'
+import ClientGroupedList from '@/components/hive/ClientGroupedList'
 import { deriveClientStatus } from '@/components/hive/shared/clientStatus'
 import { mapLeadToPerson } from '@/lib/people-mapper'
 
@@ -262,19 +262,20 @@ describe('Dismiss', () => {
     await m.unmount()
   })
 
-  it('dismissed rows leave the Inbox but STILL appear in the Client Directory as their real status', async () => {
+  it('dismissed rows leave the Inbox but STILL appear in the Client List as their real status', async () => {
     const p = person({ inboxDismissedAt: daysAgo(1) })
 
     const inboxMount = await mount(inbox([p]))
     expect(inboxMount.host.textContent).not.toContain('Sarah Mitchell')
     await inboxMount.unmount()
 
-    // Directory is blind to the column — the person reads as derived New.
+    // The client list is blind to the column — the person reads as derived
+    // New, so the New band renders with them in it.
     expect(deriveClientStatus(p, new Set(), now)).toBe('New')
     const dir = await mount(
-      <ClientDirectory people={[p]} engagements={[]} locFilter="all" />
+      <ClientGroupedList people={[p]} engagements={[]} locFilter="all" />
     )
-    expect(dir.host.textContent).toContain('Sarah Mitchell')
+    expect(dir.host.querySelector('[aria-label="New group"]')).toBeTruthy()
     await dir.unmount()
   })
 
@@ -334,7 +335,7 @@ describe('wiring', () => {
 
 // ═══ interaction idioms ════════════════════════════════════
 describe('row interaction', () => {
-  it('row click still opens the PersonCard; ··· does not', async () => {
+  it('row click still opens the client card; ··· does not', async () => {
     const p = person()
     const onOpenPerson = vi.fn()
     const m = await mount(inbox([p], { onOpenPerson }))

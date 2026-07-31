@@ -159,7 +159,7 @@ describe('age/icon alignment — one center line', () => {
 
 // ═══ no behavior change ════════════════════════════════════
 describe('restyle behavior intact', () => {
-  it('tel: link still dials without opening the PersonCard; row click still opens it', async () => {
+  it('tel: link still dials without opening the client card; row click still opens it', async () => {
     const p = person()
     const onOpenPerson = vi.fn()
     const m = await mount(inbox([p], { onOpenPerson }))

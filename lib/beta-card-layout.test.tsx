@@ -12,12 +12,10 @@
 //   4) DRIP BANNER visibility matrix — live/paused → shown;
 //      stopped/completed/absent → hidden (route ships null); closed
 //      engagement → ClosedSummary owns the slot.
-//   5) MODAL WIDTH — 840px desktop for ClientProfile + EngagementPanel;
-//      PersonCard keeps 740.
+//   5) MODAL WIDTH — 840px desktop for ClientProfile + EngagementPanel.
 //   6) PREV/NEXT — chevrons navigate the opener's sibling ordering;
 //      hidden entirely without one; ends disable.
-//   7) PersonCard type-pill ABSENCE (source pin; the DOM half lives in
-//      beta-card-field-edits).
+//   7) EngagementPanel invoice inset — honest deep links only.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import React from 'react'
@@ -25,7 +23,6 @@ import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import ClientProfile from '@/components/hive/ClientProfile'
 import EngagementPanel from '@/components/hive/EngagementPanel'
-import PersonCard from '@/components/hive/PersonCard'
 import { profileAggregates } from '@/lib/profile-aggregates'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
@@ -35,12 +32,6 @@ const daysAgo = (n: number) => new Date(now - n * 86400000).toISOString()
 const inDays = (n: number) => new Date(now + n * 86400000).toISOString()
 
 const LOOKUPS = { sources: ['Webform', 'Website'], projectTypes: ['Client', 'Move'] }
-
-const person = (over: any = {}) => ({
-  id: 'lead-9', name: 'Dana Client', email: 'dana@x.com', phone: '(561) 555-0100',
-  source: 'Webform', locationId: 'loc-uuid-1', created: daysAgo(40),
-  isJunk: false, outreachTimeline: [], ...over,
-})
 
 const profilePayload = (over: any = {}) => ({
   client: {
@@ -259,7 +250,7 @@ describe('drip banner (v2 — display only, Build-3 pause)', () => {
 describe('modal width (desktop)', () => {
   const modalOf = (host: Element) => host.querySelector('.bee-overlay-modal') as HTMLElement
 
-  it('ClientProfile + EngagementPanel run 840px; PersonCard keeps 740', async () => {
+  it('ClientProfile + EngagementPanel run 840px', async () => {
     const cp = await mountProfile()
     expect(modalOf(cp.host).style.maxWidth).toBe('840px')
     await cp.unmount()
@@ -267,10 +258,6 @@ describe('modal width (desktop)', () => {
     const ep = await mountPanel()
     expect(modalOf(ep.host).style.maxWidth).toBe('840px')
     await ep.unmount()
-
-    const pc = await mount(<PersonCard person={person()} onClose={() => {}} setToast={() => {}} lookupOptions={LOOKUPS} />)
-    expect(modalOf(pc.host).style.maxWidth).toBe('740px')
-    await pc.unmount()
   })
 
   it('both cards stack the two-column grid under ~700px (media-query source pin)', () => {
@@ -318,22 +305,16 @@ describe('prev/next chevrons (opener ordering)', () => {
     await unmount()
   })
 
-  it('the directory passes its visible row ordering; HiveShell threads it (source pins)', () => {
-    expect(readFileSync('components/hive/ClientDirectory.jsx', 'utf8')).toContain('onOpenClient(p.id, rows.map(r => r.p.id))')
+  it('the grouped client list passes its displayed row ordering; HiveShell threads it (source pins)', () => {
+    expect(readFileSync('components/hive/ClientGroupedList.jsx', 'utf8')).toContain('onOpenClient(p.id, rows.map(r => r.id))')
     const shell = readFileSync('components/hive/HiveShell.jsx', 'utf8')
     expect(shell).toContain('siblings={overlay.siblings ?? null}')
     expect(shell).toContain('onNavigate=')
   })
 })
 
-// ═══ 7) PersonCard type pill — source pin ══════════════════════
-describe('PersonCard (build-2 straggler)', () => {
-  it('no Type pill in source — project type is deal-scoped; Source stays (leads are pre-deal)', () => {
-    const src = readFileSync('components/hive/PersonCard.jsx', 'utf8')
-    expect(src).not.toContain('label="Type"')
-    expect(src).toContain('label="Source"')
-  })
-
+// ═══ 7) EngagementPanel invoice inset ══════════════════════════
+describe('EngagementPanel invoice inset', () => {
   it('invoice inset (build-3 verdict): actions are HONEST DEEP LINKS — Jobber has no send/payment mutations, so no button pretends otherwise', async () => {
     engBody = engagementPayload({
       children: { invoices: [{ id: 'i1', jobber_invoice_id: '990551221', invoice_url: 'https://secure.getjobber.com/invoices/551', total: 4400, status: 'sent', balance_owing: 4400, paid_amount: 0, issued_at: daysAgo(9) }] },

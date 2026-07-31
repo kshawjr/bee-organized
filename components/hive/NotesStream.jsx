@@ -3,8 +3,8 @@
 // The NOTES section idiom: micro label + buttonless composer (Enter
 // posts + clears + keeps focus) over one interleaved stream of typed
 // notes and touchpoints (method icon + 'Call · Kevin · 2 Hours ago').
-// Extracted from EngagementPanel so the pre-engagement PersonCard's
-// 'NOTES · this person' is the identical component. Beta chunk.
+// Extracted from EngagementPanel; ClientProfile's client-wide activity
+// slice renders the identical component. Beta chunk.
 //
 // items: [{ t:'note', id, ts, text, user_label, tag? }
 //         | { t:'touch', id, ts, method, label, notes, user_label, tag? }]

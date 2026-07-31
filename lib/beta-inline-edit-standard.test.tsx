@@ -14,7 +14,7 @@
 //      tap can't double-save; a FAILED save keeps edit mode open with
 //      the inline error and the draft intact.
 //   D) Adopters: ContactField (both mounts), EditableDesc (ClientProfile
-//      + PersonCard request_details), EngagementPanel description —
+//      request_details), EngagementPanel description —
 //      whose private descBlock copy was consolidated onto EditableDesc.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
