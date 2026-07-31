@@ -10,19 +10,33 @@
 // link-forwarding from granting a seat to a different account.
 //
 // Atomicity / drift policy: the three writes (hub_users insert, seat
-// claim, invite mark) are NOT wrapped in a single transaction — Supabase
+// claim, invite consume) are NOT wrapped in a single transaction — Supabase
 // REST doesn't expose one. Instead the order is deliberate and each step
 // is retry-safe:
 //   1. hub_users insert — idempotent via the existingHubUser short-circuit.
-//   2. subscription_seats claim — picks ANY unclaimed seat at the tier;
-//      if step 3 fails on retry we just re-claim the same row to the same
-//      user_id (no-op).
-//   3. pending_invites.accepted_at — set last. If a transient failure
-//      occurs after step 2 succeeds, we leave accepted_at null and log
-//      the error so the invitee can retry the link (steps 1 & 2 are
-//      no-ops on retry, step 3 succeeds, drift resolves).
+//   2. subscription_seats claim — idempotent PER USER: if this user already
+//      holds an active seat at (location, tier) we skip the claim, so a retry
+//      after a later step fails never claims a SECOND seat.
+//   3. pending_invites.accepted_at — the consume signal, set last and LOUDLY.
+//      If it fails we do NOT return success: a 200 on an invite whose
+//      accepted_at is still null leaves the link claimable forever (this was
+//      issue #65 — the write also carried accepted_user_id, a column missing
+//      in prod, so PostgREST rejected the whole UPDATE with PGRST204 and the
+//      route returned 200 anyway). Acceptance now fails closed; the invitee
+//      retries and steps 1 & 2 no-op, so a transient blip self-heals without
+//      ever handing out a reusable link.
+//   3b. pending_invites.accepted_user_id — audit only, written best-effort in
+//      a SEPARATE statement so the missing-column drift can never take the
+//      consume down with it. No-ops silently until the held migration
+//      (pending_invites_accepted_user_id.sql) adds the column.
 // Corporate (tier='admin') invites skip step 2 entirely — admins have no
 // location and don't claim a seat.
+//
+// Idempotent re-click: once accepted_at is set, a re-visit is short-circuited
+// by the page-level guard. If the same invitee still POSTs (effect race,
+// direct call), we detect that THEY are the accepter (their hub_users row
+// exists and the invite email already matched) and return 200 — they're in,
+// not an error. A different clicker gets 410.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
@@ -56,13 +70,10 @@ export async function POST(request: NextRequest) {
   if (inviteErr || !invite) {
     return NextResponse.json({ error: 'invite not found' }, { status: 404 })
   }
-  if (invite.accepted_at) {
-    return NextResponse.json({ error: 'invite already accepted' }, { status: 410 })
-  }
-  if (new Date(invite.invite_expires_at).getTime() < Date.now()) {
-    return NextResponse.json({ error: 'invite expired' }, { status: 410 })
-  }
 
+  // Identity gate runs FIRST: a forwarded link is only usable by whoever can
+  // authenticate as the invited email (Google emails are 1:1 with accounts).
+  // Every branch below can therefore trust that the caller IS the invitee.
   const authEmail = (user.email || '').toLowerCase().trim()
   if (!authEmail || authEmail !== String(invite.email).toLowerCase().trim()) {
     return NextResponse.json(
@@ -76,12 +87,31 @@ export async function POST(request: NextRequest) {
 
   // Idempotency: if a hub_users row already exists for this auth user, reuse
   // it (means they already accepted and bounced back to the link). Otherwise
-  // upsert so a race between two browser tabs doesn't produce duplicates.
+  // insert below so a race between two browser tabs doesn't produce duplicates.
   const { data: existingHubUser } = await supabaseService
     .from('hub_users')
     .select('id, location_id, role')
     .eq('id', user.id)
     .single()
+
+  // Already consumed? The email already matched, so the person clicking IS the
+  // invitee. If their hub_users row exists they're simply re-clicking their own
+  // link (or a second POST raced the first) — return 200 so the UI takes them
+  // home, NOT a 410 that reads like they did something wrong. No hub_users row
+  // means someone else consumed it (or a stale/forwarded reuse): stay 410.
+  if (invite.accepted_at) {
+    if (existingHubUser) {
+      return NextResponse.json(
+        { ok: true, already_accepted: true, location_id: invite.location_id },
+        { status: 200 }
+      )
+    }
+    return NextResponse.json({ error: 'invite already accepted' }, { status: 410 })
+  }
+
+  if (new Date(invite.invite_expires_at).getTime() < Date.now()) {
+    return NextResponse.json({ error: 'invite expired' }, { status: 410 })
+  }
 
   // Hard-block 2nd-location accept: if this auth user already has a hub_users
   // row at a DIFFERENT location, reject before either the insert or seat claim
@@ -178,82 +208,128 @@ export async function POST(request: NextRequest) {
   // if no seat is free (owner removed seats between invite + accept) we
   // surface a clear error rather than letting them in without a seat.
   if (invite.tier !== 'admin') {
-    const { data: availableSeats, error: seatsErr } = await supabaseService
+    // Per-user idempotency: if this user already holds an active seat at this
+    // (location, tier), don't claim another. Without this, a retry after a
+    // later step fails (or a re-POST) grabs a SECOND free seat for the same
+    // person instead of no-opping — the seat-drain half of issue #65. The
+    // claim below never re-selects an already-claimed row (it filters
+    // user_id IS NULL), so this explicit check is what makes the claim a
+    // true no-op on retry.
+    const { data: heldSeats, error: heldErr } = await supabaseService
       .from('subscription_seats')
       .select('id')
       .eq('location_id', invite.location_id)
       .eq('tier', invite.tier)
       .eq('status', 'active')
-      .is('user_id', null)
-      // Never claim a seat scheduled for removal — the invite gate excluded
-      // it from availability, and claiming it would strand the new member on
-      // the removal date. Keep the two filters in lockstep.
-      .is('scheduled_removal_at', null)
-      .order('added_at', { ascending: true })
+      .eq('user_id', user.id)
       .limit(1)
-    if (seatsErr) {
-      console.error('[accept seats fetch]', seatsErr)
-      return NextResponse.json({ error: seatsErr.message }, { status: 500 })
+    if (heldErr) {
+      console.error('[accept seats held-check]', heldErr)
+      return NextResponse.json({ error: heldErr.message }, { status: 500 })
     }
-    if (!availableSeats || availableSeats.length === 0) {
-      return NextResponse.json(
-        {
-          error:
-            'No available seats remain at your tier. Ask the location owner to add a seat.',
-          code: 'no_available_seats',
-        },
-        { status: 409 }
-      )
-    }
+    const alreadyHoldsSeat = !!heldSeats && heldSeats.length > 0
 
-    const seatId = availableSeats[0].id
-    const { error: claimErr } = await supabaseService
-      .from('subscription_seats')
-      .update({ user_id: user.id, updated_at: new Date().toISOString() })
-      .eq('id', seatId)
-    if (claimErr) {
-      console.error('[accept seat claim]', claimErr)
-      return NextResponse.json({ error: claimErr.message }, { status: 500 })
-    }
-
-    // Phase 2: the FIRST owner to claim a seat at a location becomes the
-    // designated primary owner (the sending identity for emails/drips) when
-    // no primary is set yet. A co-owner accepting later (a primary already
-    // exists) is left is_primary=false and is promoted only via an explicit
-    // "Make Primary" action. Best-effort: a failure here leaves the seat
-    // claimed but undesignated; the resolver's earliest-owner fallback keeps
-    // outbound identity deterministic until someone designates a primary.
-    if (invite.tier === 'owner') {
-      const { count: primaryCount } = await supabaseService
+    // Only claim when they don't already hold one. Skipping the whole block on
+    // retry keeps the claim a no-op AND avoids a spurious no_available_seats
+    // 409 for someone who's already seated.
+    if (!alreadyHoldsSeat) {
+      const { data: availableSeats, error: seatsErr } = await supabaseService
         .from('subscription_seats')
-        .select('id', { count: 'exact', head: true })
+        .select('id')
         .eq('location_id', invite.location_id)
-        .eq('tier', 'owner')
-        .eq('is_primary', true)
-      if ((primaryCount ?? 0) === 0) {
-        const { error: primaryErr } = await supabaseService
+        .eq('tier', invite.tier)
+        .eq('status', 'active')
+        .is('user_id', null)
+        // Never claim a seat scheduled for removal — the invite gate excluded
+        // it from availability, and claiming it would strand the new member on
+        // the removal date. Keep the two filters in lockstep.
+        .is('scheduled_removal_at', null)
+        .order('added_at', { ascending: true })
+        .limit(1)
+      if (seatsErr) {
+        console.error('[accept seats fetch]', seatsErr)
+        return NextResponse.json({ error: seatsErr.message }, { status: 500 })
+      }
+      if (!availableSeats || availableSeats.length === 0) {
+        return NextResponse.json(
+          {
+            error:
+              'No available seats remain at your tier. Ask the location owner to add a seat.',
+            code: 'no_available_seats',
+          },
+          { status: 409 }
+        )
+      }
+
+      const seatId = availableSeats[0].id
+      const { error: claimErr } = await supabaseService
+        .from('subscription_seats')
+        .update({ user_id: user.id, updated_at: new Date().toISOString() })
+        .eq('id', seatId)
+      if (claimErr) {
+        console.error('[accept seat claim]', claimErr)
+        return NextResponse.json({ error: claimErr.message }, { status: 500 })
+      }
+
+      // Phase 2: the FIRST owner to claim a seat at a location becomes the
+      // designated primary owner (the sending identity for emails/drips) when
+      // no primary is set yet. A co-owner accepting later (a primary already
+      // exists) is left is_primary=false and is promoted only via an explicit
+      // "Make Primary" action. Best-effort: a failure here leaves the seat
+      // claimed but undesignated; the resolver's earliest-owner fallback keeps
+      // outbound identity deterministic until someone designates a primary.
+      if (invite.tier === 'owner') {
+        const { count: primaryCount } = await supabaseService
           .from('subscription_seats')
-          .update({ is_primary: true, updated_at: new Date().toISOString() })
-          .eq('id', seatId)
-        if (primaryErr) {
-          console.error('[accept mark primary owner]', primaryErr)
+          .select('id', { count: 'exact', head: true })
+          .eq('location_id', invite.location_id)
+          .eq('tier', 'owner')
+          .eq('is_primary', true)
+        if ((primaryCount ?? 0) === 0) {
+          const { error: primaryErr } = await supabaseService
+            .from('subscription_seats')
+            .update({ is_primary: true, updated_at: new Date().toISOString() })
+            .eq('id', seatId)
+          if (primaryErr) {
+            console.error('[accept mark primary owner]', primaryErr)
+          }
         }
       }
     }
   }
 
-  // Mark invite consumed last — if it fails the seat claim still stands,
-  // and we leave invite.accepted_at null so the user can retry without
-  // a 410. Most likely failure here is a transient DB blip.
+  // Consume the invite — LOUD. accepted_at is the single-use signal both 410
+  // guards read; if this write fails we must NOT report success, or the link
+  // stays claimable (issue #65). accepted_user_id is deliberately NOT in this
+  // payload: it's missing in prod until the held migration runs, and bundling
+  // it here is exactly what made PostgREST reject the whole UPDATE (PGRST204)
+  // and leave accepted_at null while the route returned 200.
   const { error: markErr } = await supabaseService
     .from('pending_invites')
-    .update({
-      accepted_at: new Date().toISOString(),
-      accepted_user_id: user.id,
-    })
+    .update({ accepted_at: new Date().toISOString() })
     .eq('id', invite.id)
   if (markErr) {
-    console.error('[accept mark consumed]', markErr)
+    console.error('[accept mark consumed] FAILED — invite left unconsumed:', markErr)
+    return NextResponse.json(
+      {
+        error:
+          'We could not finish activating your invitation. Please try the link again in a moment.',
+        code: 'consume_failed',
+      },
+      { status: 500 }
+    )
+  }
+
+  // Audit stamp — best-effort, in its own statement so the missing-column
+  // drift can never take the consume (above) down with it. No-ops silently
+  // until pending_invites_accepted_user_id.sql adds the column; once it does,
+  // this starts populating with no further code change.
+  const { error: auditErr } = await supabaseService
+    .from('pending_invites')
+    .update({ accepted_user_id: user.id })
+    .eq('id', invite.id)
+  if (auditErr && auditErr.code !== 'PGRST204' && auditErr.code !== '42703') {
+    console.warn('[accept mark consumed audit]', auditErr)
   }
 
   return NextResponse.json({ ok: true, location_id: invite.location_id }, { status: 200 })
