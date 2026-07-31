@@ -375,7 +375,11 @@ export default function HiveShell({
   // deep-linkable everywhere (no PersonCard/ClientProfile two-UI split, the
   // same unification 3c0ad3a did for clients). ClientProfile is a superset of
   // the old PersonCard (junk/buzz/source/referrer/request-details/touchpoints).
-  const openPerson = (person) => { if (person?.id) openClient(person.id) }
+  // siblingIds (issue 134 follow-up): the Inbox hands each row's SECTION
+  // displayed order through here, so the profile's ‹ › chevrons page within
+  // that section — same length>1 gate as every other opener (openClient
+  // nulls a length-1 list, hiding the chevrons on a one-row section).
+  const openPerson = (person, siblingIds = null) => { if (person?.id) openClient(person.id, siblingIds) }
 
   // URL → overlay sync: when the URL-named client id OR engagement id changes
   // (deep-link on mount, browser back/forward), open/close/swap the overlay to

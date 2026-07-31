@@ -810,6 +810,18 @@ export default function InboxScreen({ people = [], transferPeople = [], location
 
   function Row({ p, family, pill }) {
     const isTransfer = pill === 'Transfer'
+    // Per-section card nav (issue 134, Inbox follow-up): a row click hands its
+    // SECTION's displayed row ids as the profile's siblings, so the card's ‹ ›
+    // chevrons page card-to-card within this section in the on-screen order —
+    // section-scoped for the same reason the client list is band-scoped. The
+    // list is captured AT OPEN, deliberately: the section derivation
+    // (soft-removal Sets + view filters) is Inbox-local, and a live recompute
+    // would drop the open lead from its own list the moment a logged call
+    // re-derives it New→Attempting — stranding the walk mid-worklist. The
+    // trade: a row dispositioned mid-walk stays walkable. That is safe — the
+    // profile fetches by id and soft removals are flags, never deletes — the
+    // chevron just shows a lead that has since left the list.
+    const sectionRows = isTransfer ? transfer : pill === 'New' ? fresh : working
     const sent = freshlySent(p)
     const canSend = !p.jobberRef
     // Jobber-owns-deletion rule: ANY jobberRef (imported/linked client,
@@ -934,7 +946,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
           // click that follows the pointer release.
           if (lpFired.current) { lpFired.current = false; return }
           if (selectMode) toggleSelect(p)
-          else onOpenPerson(p)
+          else onOpenPerson(p, sectionRows.map(r => r.id))
         }}
         onPointerDown={() => pressStart(p)}
         onPointerUp={pressEnd} onPointerLeave={pressEnd} onPointerCancel={pressEnd}

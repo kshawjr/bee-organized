@@ -188,7 +188,7 @@ describe('row interaction', () => {
     const onOpenPerson = vi.fn()
     const m = await mount(inbox([p], { onOpenPerson }))
     await click(m.host.querySelector('.bee-inbox-row')!)
-    expect(onOpenPerson).toHaveBeenCalledWith(p)
+    expect(onOpenPerson).toHaveBeenCalledWith(p, [p.id]) // + section siblings (issue 134 follow-up)
     await m.unmount()
   })
 })

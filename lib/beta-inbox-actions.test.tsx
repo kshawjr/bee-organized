@@ -343,7 +343,7 @@ describe('row interaction', () => {
     expect(onOpenPerson).not.toHaveBeenCalled()
 
     await click(m.host.querySelector('.bee-inbox-row')!)
-    expect(onOpenPerson).toHaveBeenCalledWith(p)
+    expect(onOpenPerson).toHaveBeenCalledWith(p, [p.id]) // + section siblings (issue 134 follow-up)
     await m.unmount()
   })
 

@@ -112,7 +112,9 @@ describe('HiveShell — Inbox lead open is unified on ClientProfile + drives the
 describe('HiveShell wiring (source-pinned): lead overlay unified on ClientProfile', () => {
   const src = readFileSync('components/hive/HiveShell.jsx', 'utf8')
   it('openPerson routes to openClient(person.id) (URL-driving), not a person overlay', () => {
-    expect(src).toMatch(/const openPerson = \(person\) => \{ if \(person\?\.id\) openClient\(person\.id\) \}/)
+    // Signature grew siblingIds (issue 134 follow-up: Inbox chevrons) — still
+    // the unified openClient door, now carrying the section order through.
+    expect(src).toMatch(/const openPerson = \(person, siblingIds = null\) => \{ if \(person\?\.id\) openClient\(person\.id, siblingIds\) \}/)
   })
   it('the PersonCard overlay slot is retired (no type:person render, no import)', () => {
     expect(src).not.toContain("overlay?.type === 'person'")

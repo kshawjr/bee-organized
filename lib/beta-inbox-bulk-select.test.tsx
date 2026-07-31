@@ -259,7 +259,7 @@ describe('selection mechanics', () => {
 
     await click(buttonByText(m.host, 'Cancel')!)
     await click(rowByName(m.host, 'Alice Apple')!)
-    expect(onOpenPerson).toHaveBeenCalledWith(p)
+    expect(onOpenPerson).toHaveBeenCalledWith(p, [p.id]) // + section siblings (issue 134 follow-up)
     await m.unmount()
   })
 })
