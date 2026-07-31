@@ -185,7 +185,10 @@ export default function AddressField({ leadId, value, onSaved = () => {}, setToa
       data-meta-row="address"
       style={{ ...metaRowStyle(), cursor: readOnly ? 'default' : 'text' }}>
       <span style={metaIconStyle}><IconMapPin size={META_ICON} /></span>
-      <span style={metaValueStyle}>{display}</span>
+      {/* title on the VALUE span, not just the row: the child's title
+          wins within its own box, so hovering the clipped text reveals
+          the full address while the row keeps its edit affordance (issue 118). */}
+      <span style={metaValueStyle} title={display}>{display}</span>
       {!readOnly && <EditPencil />}
     </p>
   ) : readOnly ? null : (

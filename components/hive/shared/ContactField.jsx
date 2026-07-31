@@ -147,7 +147,11 @@ export default function ContactField({ kind, leadId, value, onSaved = () => {}, 
       data-meta-row={kind}
       style={{ ...metaRowStyle(), cursor: readOnly ? 'default' : 'text' }}>
       <span style={metaIconStyle}><f.Icon size={META_ICON} /></span>
+      {/* title on the VALUE anchor, not just the row: the child's title
+          wins within its own box, so hovering the clipped text reveals
+          the full value while the row keeps its edit affordance (issue 118). */}
       <a className="bee-contact-link" href={f.href(value)} onClick={e => e.stopPropagation()}
+        title={value}
         style={{ ...metaValueStyle, color: T.accent.fg, textDecoration: 'none' }}>
         {value}
       </a>
