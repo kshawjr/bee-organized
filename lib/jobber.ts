@@ -173,6 +173,11 @@ export async function getLocation(locationId: string) {
 //   4. Fail loud — a rejected refresh token (invalid_grant) is a permanent
 //      RECONNECT-REQUIRED state, stamped on the row + surfaced distinctly,
 //      not swallowed as a transient blip.
+//   5. Race-loss adoption (#102) — invalid_grant is NOT assumed terminal: a
+//      loser of a concurrent-rotation burst gets the same reply, so before
+//      stamping we poll for a sibling's winning write and, if the token was
+//      rotated + is now valid, adopt it (webhook succeeds; no false stamp).
+//      Defences #1/#2 narrow the race; #5 makes losing it harmless.
 
 // Thrown when Jobber rejects the refresh token itself (dead / rotated away).
 // Code cannot recover this — the location owner must re-OAuth. Callers use
@@ -192,6 +197,38 @@ export class JobberReauthRequiredError extends Error {
 // across concurrent requests on the SAME warm instance (best-effort — a
 // cross-instance burst still relies on defence #2). Cleared on settle.
 const inFlightRefresh = new Map<string, Promise<string>>()
+
+// ── Concurrent-refresh race resolver (#102) ─────────────────────────────
+// Called only after Jobber rejects our refresh token with invalid_grant. In a
+// webhook burst the rejection often means a SIBLING lambda already rotated the
+// token single-use; its winning write may land a few hundred ms after our
+// rejection (observed ~485ms in prod). Poll the row a few times: if the stored
+// refresh token has changed from the one WE posted (proof a concurrent refresh
+// succeeded) and a fresh, clock-valid access token is present, return it so the
+// caller adopts the winner's token instead of stamping RECONNECT-REQUIRED.
+// Returns null when nothing rotated within the window → genuinely dead token.
+// Total window ≈ attempts × intervalMs. 4×500ms = 2s comfortably covers the
+// ~485ms winner-write lag seen in prod. Exported (mutable) only so tests can
+// shrink the interval — never mutated in app code.
+export const __raceResolveTuning = { attempts: 4, intervalMs: 500 }
+async function awaitConcurrentRefresh(
+  locId: string,
+  postedRefreshToken: string,
+): Promise<string | null> {
+  const fiveMinutes = 5 * 60 * 1000
+  for (let i = 0; i < __raceResolveTuning.attempts; i++) {
+    await sleep(__raceResolveTuning.intervalMs)
+    const after = await getLocation(locId).catch(() => null)
+    if (!after) continue
+    const rotated =
+      !!after.jobber_refresh_token && after.jobber_refresh_token !== postedRefreshToken
+    const afterExpiry = after.token_expiry ? parseInt(after.token_expiry) : 0
+    const tokenValid =
+      !!after.jobber_access_token && afterExpiry > 0 && Date.now() < afterExpiry - fiveMinutes
+    if (rotated && tokenValid) return after.jobber_access_token
+  }
+  return null
+}
 
 async function doRefresh(location: any, opts: { force?: boolean } = {}): Promise<string> {
   const locId = location.location_id
@@ -258,6 +295,24 @@ async function performRefresh(location: any, opts: { force?: boolean }): Promise
       res.status === 400 || res.status === 401 ||
       /invalid_grant|authorization grant is invalid|invalid.*refresh/i.test(raw)
     if (isDeadRefresh) {
+      // ── Concurrent-refresh race check (#102) ──────────────────────────
+      // Jobber rotates refresh tokens single-use. A burst of webhooks for the
+      // same location (each its own lambda) can all POST the SAME stored token
+      // before any of them writes back: Jobber honours ONE and invalidates the
+      // rest, so the losers get this exact invalid_grant. That is a race-LOSS,
+      // NOT a dead token — the winner just minted a fresh one. Stamping
+      // RECONNECT-REQUIRED here would scare an owner whose location is fine, and
+      // fail a webhook that could still succeed. So before treating invalid_grant
+      // as terminal, poll for the winner's write; if the refresh token has been
+      // rotated out from under us AND a fresh valid access token now exists,
+      // adopt it and return — no stamp, no failure. Only a token that STAYS
+      // un-rotated through the wait is genuinely dead. (Re-reads are live here:
+      // the webhook route sets fetchCache='force-no-store' — #96b.)
+      const raced = await awaitConcurrentRefresh(locId, refreshToken)
+      if (raced) {
+        console.log('[jobber-token] invalid_grant was a concurrent-refresh race loss — adopting the winner’s token for', locId)
+        return raced
+      }
       console.error(`[jobber-token] RECONNECT REQUIRED — Jobber rejected refresh token (${res.status}) for ${locId}: ${detail}`)
       await supabase.from('locations').update({
         last_sync_status: `RECONNECT REQUIRED — Jobber rejected refresh token (${res.status}) @ ${new Date().toISOString().slice(0, 19)}`,

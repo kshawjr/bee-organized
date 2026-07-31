@@ -49,7 +49,12 @@ import {
   JobberReauthRequiredError,
   computeTokenExpiryMs,
   DEFAULT_TOKEN_LIFETIME_MS,
+  __raceResolveTuning,
 } from '@/lib/jobber'
+
+// Keep the concurrent-refresh race poll near-instant in tests (prod: 4×500ms).
+__raceResolveTuning.attempts = 4
+__raceResolveTuning.intervalMs = 1
 
 // ── fetch stub: routes OAuth token vs GraphQL by URL ──
 const oauth = vi.fn()
@@ -151,6 +156,50 @@ describe('getValidJobberToken', () => {
     // never clobber the token columns on a failed refresh
     expect('jobber_access_token' in patch).toBe(false)
     expect('jobber_refresh_token' in patch).toBe(false)
+  })
+
+  // ── Concurrent-refresh race (#102) ─────────────────────────────
+  it('invalid_grant that is a concurrent-refresh race loss adopts the winner’s token — no stamp, no throw', async () => {
+    // Our POST loses the single-use rotation: Jobber returns invalid_grant.
+    // Reads: [double-check still-old] then [winner has rotated + written a
+    // fresh, clock-valid token]. We must adopt it instead of stamping.
+    state.row = baseRow()
+    state.reads = [
+      baseRow(), // performRefresh double-check: still the old, expired row
+      baseRow({ jobber_refresh_token: 'refresh_v1', jobber_access_token: 'winner_access', token_expiry: String(FUTURE) }),
+    ]
+    oauth.mockResolvedValue(resp(400, { error: 'invalid_grant' }))
+
+    const token = await getValidJobberToken(baseRow())
+
+    expect(token).toBe('winner_access')          // adopted the winner's token
+    expect(oauth).toHaveBeenCalledTimes(1)        // did NOT re-rotate
+    // no RECONNECT-REQUIRED stamp was written
+    const stamped = state.updates.some(u => /RECONNECT REQUIRED/.test(u.patch.last_sync_status || ''))
+    expect(stamped).toBe(false)
+  })
+
+  it('invalid_grant with NO concurrent rotation is still a genuine dead token — stamps + throws', async () => {
+    // Every re-read shows the SAME (un-rotated) refresh token → nothing raced,
+    // so the token is genuinely dead and we must fall through to the stamp.
+    state.row = baseRow()                         // all reads return this (refresh_v0, expired)
+    oauth.mockResolvedValue(resp(400, { error: 'invalid_grant' }))
+
+    await expect(getValidJobberToken(baseRow())).rejects.toBeInstanceOf(JobberReauthRequiredError)
+    expect(state.updates.some(u => /RECONNECT REQUIRED/.test(u.patch.last_sync_status || ''))).toBe(true)
+  })
+
+  it('race loss where the winner only rotated the ACCESS token (expiry still stale) does NOT falsely adopt', async () => {
+    // Defensive: a rotated refresh token but a token_expiry that is NOT yet
+    // clock-valid must not be adopted (tokenValid guard) → genuine-dead path.
+    state.row = baseRow()
+    state.reads = [
+      baseRow(),
+      baseRow({ jobber_refresh_token: 'refresh_v1', jobber_access_token: 'winner_access', token_expiry: String(PAST) }),
+    ]
+    oauth.mockResolvedValue(resp(400, { error: 'invalid_grant' }))
+
+    await expect(getValidJobberToken(baseRow())).rejects.toBeInstanceOf(JobberReauthRequiredError)
   })
 })
 
