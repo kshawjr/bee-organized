@@ -526,6 +526,24 @@ export async function findOpenEngagementForClient(
   return (data?.[0] as any) ?? null
 }
 
+// Most-recent engagement for a client REGARDLESS of stage — the terminal-
+// inclusive twin of findOpenEngagementForClient. Used ONLY by the invoice
+// rule-6 fallback (#98): a jobless invoice billed straight to a client whose
+// engagements are ALL closed must still land its money on the latest deal.
+// Deliberately NOT the open-engagement policy — #94 depends on
+// findOpenEngagementForClient excluding terminals, so this stays separate.
+async function findMostRecentEngagementForClient(
+  clientId: string,
+): Promise<{ id: string; stage: EngagementStage } | null> {
+  const { data } = await supabaseService
+    .from('engagements')
+    .select('id, stage')
+    .eq('client_id', clientId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+  return (data?.[0] as any) ?? null
+}
+
 // True when the engagement already owns a service_request row. The 1-SR-per-
 // engagement invariant (rule 1) is what makes the #67 adoption safe for bulk
 // import: an SR-founded engagement always HAS its SR, so it is never adopted
@@ -615,10 +633,26 @@ export async function resolveEngagementForChild(params: {
     return openEng.id
   }
 
-  // 5. No open engagement → implicit founding (quotes/jobs only; the
-  //    founded_by CHECK has no 'invoice' value by design).
+  // 5. Invoices get no implicit founding (the founded_by CHECK has no
+  //    'invoice' value by design). Rule 6 instead: an invoice is real money
+  //    that must land on the client's deal even after every engagement has
+  //    closed — a jobless invoice billed straight to a client whose only
+  //    engagement is already Closed Won/Lost (KC #98) otherwise orphans off
+  //    the card. Attach to the client's MOST-RECENT engagement of ANY stage.
+  //    Safe because maybeAdvanceEngagementStage never moves a terminal stage,
+  //    so this can't reopen a closed deal — it only surfaces the money.
   if (childTable === 'invoices') {
-    console.error('[engagements] orphan invoice unresolvable — no job, no SR, no open engagement', { childId, leadId })
+    const recentEng = await findMostRecentEngagementForClient(leadId)
+    if (recentEng) {
+      await logFounding({
+        locationSlug: params.locationSlug ?? null,
+        engagementId: recentEng.id,
+        foundedBy: 'job',
+        note: `invoice ${childId}: no job/SR and no open engagement — attached to most-recent engagement (stage ${recentEng.stage}) (rule 6)`,
+      })
+      return recentEng.id
+    }
+    console.error('[engagements] orphan invoice unresolvable — no job, no SR, no engagement at all', { childId, leadId })
     return null
   }
   const foundedBy: FoundedBy = childTable === 'quotes' ? 'quote' : 'job'
