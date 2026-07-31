@@ -206,6 +206,23 @@ vi.mock('@/lib/jobber-import', () => ({
 vi.mock('@/lib/engagements', () => ({
   attachToEngagement: vi.fn(async () => {}),
 }))
+// issue 150 — the no-engagement send path now resolves + persists the lead's
+// assignees at send time. That behavior is covered in beta-lead-assignment.test.ts
+// and beta-send-time-assignee-resolve.test.ts; here it is inert noise, so its
+// collaborators are stubbed exactly like jobber/sync-log/engagements above.
+vi.mock('@/lib/lead-assignment', () => ({
+  resolveAndPersistLeadAssigneesIfEmpty: vi.fn(async () => {}),
+}))
+vi.mock('@/lib/engagement-assignee-sync', () => ({
+  getLeadAssignees: vi.fn(async () => []),
+  getEngagementAssignees: vi.fn(async () => []),
+  resolveJobberAssignment: (assignees: any[]) => ({
+    primaryJobberUserId: null,
+    allJobberUserIds: [],
+    mappedCount: 0,
+    unmappedCount: assignees.length,
+  }),
+}))
 
 import { POST } from '@/app/api/leads/[id]/send-to-jobber/route'
 import { createServerSupabaseClient } from '@/lib/supabase-server'

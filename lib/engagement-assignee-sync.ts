@@ -231,6 +231,32 @@ export async function getEngagementAssignees(engagementId: string): Promise<Enga
   })
 }
 
+// The lead-level analog of getEngagementAssignees: the lead_assignees junction
+// → hub_users join, ordered by assignment time (created_at) so "primary" is the
+// first person assigned. issue 150 — the send path reads this on a BARE lead
+// (no engagement founded yet) to build the assessment team at send time. Same
+// EngagementAssignee shape, so resolveJobberAssignment below maps it identically
+// (mapped ids → Jobber team; unmapped users stay internal-only). Returns [] on
+// any error, including a missing lead_assignees table before its migration.
+export async function getLeadAssignees(leadId: string): Promise<EngagementAssignee[]> {
+  const { data, error } = await supabaseService
+    .from('lead_assignees')
+    .select('hub_user_id, created_at, hub_users(id, full_name, first_name, last_name, email, jobber_user_id)')
+    .eq('lead_id', leadId)
+    .order('created_at', { ascending: true })
+  if (error || !data) return []
+  return data.map((row: any) => {
+    const u = Array.isArray(row.hub_users) ? row.hub_users[0] : row.hub_users
+    const name = u?.full_name || [u?.first_name, u?.last_name].filter(Boolean).join(' ').trim() || null
+    return {
+      hub_user_id: row.hub_user_id,
+      name: name || u?.email || null,
+      email: u?.email ?? null,
+      jobber_user_id: u?.jobber_user_id ?? null,
+    }
+  })
+}
+
 // Resolve the Jobber-facing crew/team set from the assignees.
 //   all     = every mapped assignee — the crew/team pushed to both the
 //             assessment appointment and each job visit (both MULTI).

@@ -316,6 +316,44 @@ export async function assignIncomingLead(args: {
   return { ...written, resolved }
 }
 
+// issue 150 — resolve + persist a lead's assignees AT SEND TIME, EMPTY-ONLY.
+//
+// Send-to-Jobber runs on a bare lead: the engagement does not exist yet (the
+// Jobber webhook founds it ~11s AFTER the send), so there is no engagement to
+// read assignees off. The assignee is a fact about the LEAD, so decide it here,
+// from the lead's own junction, using the SAME resolver intake (assignIncomingLead)
+// and founding (seedEngagementAssigneesFromLead, issue 149) use — never a second
+// resolver.
+//
+// EMPTY-ONLY, ALWAYS: if lead_assignees already has rows (an intake resolution
+// or a manual masthead pick), we resolve NOTHING and leave them untouched. Only
+// a lead that has never been resolved gets a decision here.
+//
+// WHY PERSIST (not just resolve-in-memory): the decision is recorded once. When
+// the webhook founds the engagement ~11s later, issue 149's seed copies THIS set
+// forward verbatim instead of re-resolving against a config that could have
+// changed between the two moments — which would let Jobber and Bee Hub disagree
+// about who owns the work. writeLeadAssignment is fail-soft (see its note); a
+// missing migration or a failed write never throws out to the send.
+export async function resolveAndPersistLeadAssigneesIfEmpty(args: {
+  leadId: string
+  locationUuid: string
+  projectType: string | null
+}): Promise<void> {
+  const existing = await getLeadAssigneeIds(args.leadId)
+  if (existing.length > 0) return // populated → use as-is, resolve nothing
+  const resolved = await resolveLeadAssignees({
+    locationUuid: args.locationUuid,
+    projectType: args.projectType,
+  })
+  if (resolved.projectTypeUnrecognized) {
+    console.warn(
+      `[lead-assignment] lead ${args.leadId} project_type ${JSON.stringify(args.projectType)} is not a known project-type label — send-time assignment fell back to the location owner`,
+    )
+  }
+  await writeLeadAssignment({ leadId: args.leadId, resolved })
+}
+
 // Current assignees for a lead (junction → hub_user ids), oldest first so
 // "primary" is stable = the first person assigned. Returns [] if the table is
 // not there yet.

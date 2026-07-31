@@ -49,7 +49,8 @@ import {
   resolveContactWriteback,
   type ContactWriteback,
 } from '@/lib/jobber-contact-writeback'
-import { getEngagementAssignees, resolveJobberAssignment } from '@/lib/engagement-assignee-sync'
+import { getEngagementAssignees, getLeadAssignees, resolveJobberAssignment } from '@/lib/engagement-assignee-sync'
+import { resolveAndPersistLeadAssigneesIfEmpty } from '@/lib/lead-assignment'
 import { buildRequestDetails } from '@/lib/jobber-request-form'
 import { applyTeamToSchedule, diffAssessmentAssignment, summarizeAssignmentOutcome } from '@/lib/jobber-assessment-assign'
 
@@ -464,21 +465,46 @@ export async function POST(
     return fail('lookup', 'location_not_connected_to_jobber', 400)
   }
 
-  // Assignee → Jobber ids. Assignment lives ONLY on the engagement
-  // (engagement_assignees, plural) — read the junction when we have an
-  // engagementId. Request/job take ONE salesperson (the PRIMARY = first
-  // assignee); the assessment appointment takes ALL mapped assignees.
-  // No leads.assigned_to fallback: that column is import-stamped junk
-  // (ids aren't hub_users) and assignment is forward-only now. A bare
-  // lead send (no engagementId — the webhook founds the engagement later)
-  // simply ships unassigned; the user assigns via the panel afterward.
+  // Assignee → Jobber ids. Request/job take ONE salesperson (the PRIMARY =
+  // first assignee); the assessment appointment takes ALL mapped assignees.
   let salesPersonJobberId: string | null = null   // request/job salesperson (singular)
   let allAssigneeJobberIds: string[] = []          // assessment appointment (multi)
   if (engagementId) {
+    // Send on an already-founded engagement: assignment lives on the
+    // engagement junction (engagement_assignees) and already has a real
+    // answer. Read it, resolve nothing.
     const engAssignees = await getEngagementAssignees(engagementId)
     const resolved = resolveJobberAssignment(engAssignees)
     salesPersonJobberId = resolved.primaryJobberUserId
     allAssigneeJobberIds = resolved.allJobberUserIds
+  } else {
+    // issue 150 — the common path: a BARE lead with no engagement yet. The
+    // Jobber webhook founds the engagement ~11s AFTER this send, so there is
+    // nothing to read assignees off — which is why every first-send assessment
+    // has been shipping unassigned by construction (scout 146). The assignee is
+    // a fact about the LEAD, so resolve it here from the lead's own junction and
+    // PERSIST it (EMPTY-ONLY: an intake resolution or a manual pick already on
+    // lead_assignees is used verbatim, nothing re-resolves). Persisting records
+    // the decision once, so when the webhook founds the engagement, issue 149's
+    // seed copies THIS set forward instead of re-deciding against a config that
+    // may have changed in between. Non-fatal throughout (writeLeadAssignment is
+    // fail-soft; getLeadAssignees returns [] before its migration).
+    await resolveAndPersistLeadAssigneesIfEmpty({
+      leadId,
+      locationUuid: lead.location_uuid,
+      projectType: lead.project_type ?? null,
+    })
+    // Map the persisted set to Jobber ids for the assessmentCreate team path
+    // (issue 144). resolveJobberAssignment filters unmapped users (null
+    // jobber_user_id) out of the Jobber push — an all-internal set yields an
+    // empty list, applyTeamToSchedule omits teamMemberIdsToAssign, and the
+    // assessment ships unassigned in Jobber while the assignment stays recorded
+    // internally. The terminal sync_log then reports assignment=none, which is
+    // correct and honest — we do NOT fabricate a Jobber assignment. The request/
+    // job salesperson is deliberately left unset on this path (the team model
+    // assigns the actual work, not pre-work — see engagement-assignee-sync).
+    const leadAssignees = await getLeadAssignees(leadId)
+    allAssigneeJobberIds = resolveJobberAssignment(leadAssignees).allJobberUserIds
   }
 
   // issue 145 — assignment-outcome signals for the terminal sync_log row.

@@ -75,6 +75,7 @@ vi.mock('./notification-recipients', () => ({
 import {
   resolveLeadAssignees,
   writeLeadAssignment,
+  resolveAndPersistLeadAssigneesIfEmpty,
   canonicalProjectType,
 } from '@/lib/lead-assignment'
 import { mapLeadToPerson } from '@/lib/people-mapper'
@@ -389,6 +390,62 @@ describe('writeLeadAssignment — fail-soft before the migration lands', () => {
     const junction = h.state.calls.find(c => c.table === 'lead_assignees')!
     const rows = junction.ops.find(([m]) => m === 'upsert')![1][0]
     expect(rows.every((r: any) => r.assigned_via === 'manual')).toBe(true)
+  })
+})
+
+// ── issue 150 — resolve + persist at SEND TIME, empty-only ───────────────────
+// The send path runs on a bare lead (no engagement yet — the webhook founds it
+// ~11s later), so it resolves the lead's assignees here and PERSISTS them, so the
+// founding seed (issue 149) copies the recorded set forward instead of re-deciding.
+describe('resolveAndPersistLeadAssigneesIfEmpty (issue 150)', () => {
+  const leadAssigneeUpsert = () =>
+    h.state.calls.find(c => c.table === 'lead_assignees' && c.ops.some(([m]) => m === 'upsert'))
+
+  it('a fresh lead with a CLAIMED project type resolves and persists the claimant', async () => {
+    // Empty junction → resolve runs. Split ON with a specific claimant.
+    h.enqueue('lead_assignees', []) // the empty-check read
+    splitMock.mockResolvedValue(true)
+    queueVocabulary()
+    recipientsMock.mockResolvedValue({
+      users: [user('claimer-1', 'Moving/Relocation')],
+      externals: [],
+    })
+    await resolveAndPersistLeadAssigneesIfEmpty({
+      leadId: 'lead-1', locationUuid: LOC, projectType: 'Moving/Relocation',
+    })
+    const upsert = leadAssigneeUpsert()!.ops.find(([m]) => m === 'upsert')!
+    expect(upsert[1][0]).toEqual([
+      { lead_id: 'lead-1', hub_user_id: 'claimer-1', assigned_via: 'project_type' },
+    ])
+  })
+
+  it('an UNCLAIMED type falls back to the location owner (and persists the owner)', async () => {
+    h.enqueue('lead_assignees', [])
+    splitMock.mockResolvedValue(true)
+    queueVocabulary()
+    recipientsMock.mockResolvedValue({ users: [], externals: [] }) // nobody claims it
+    await resolveAndPersistLeadAssigneesIfEmpty({
+      leadId: 'lead-1', locationUuid: LOC, projectType: 'Moving/Relocation',
+    })
+    const upsert = leadAssigneeUpsert()!.ops.find(([m]) => m === 'upsert')!
+    expect(upsert[1][0]).toEqual([
+      { lead_id: 'lead-1', hub_user_id: 'owner-1', assigned_via: 'location_owner' },
+    ])
+  })
+
+  it('a lead that ALREADY has assignees is untouched — no resolve, no write', async () => {
+    h.enqueue('lead_assignees', [
+      { hub_user_id: 'already-there', created_at: '2026-07-01T00:00:00Z' },
+    ])
+    await resolveAndPersistLeadAssigneesIfEmpty({
+      leadId: 'lead-1', locationUuid: LOC, projectType: 'Moving/Relocation',
+    })
+    // No resolution ran…
+    expect(splitMock).not.toHaveBeenCalled()
+    expect(recipientsMock).not.toHaveBeenCalled()
+    expect(ownerMock).not.toHaveBeenCalled()
+    // …and nothing was written to the junction.
+    expect(leadAssigneeUpsert()).toBeUndefined()
   })
 })
 
