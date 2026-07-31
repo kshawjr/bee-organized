@@ -14,8 +14,13 @@
 //   · echo-guard invariant       — no inbound handler touches the junction
 //   · lead-level row removed      — AssignedToField gone from ClientProfile
 //
-// INTROSPECTED LIVE 2026-07-11 (loc_test, API 2025-04-16):
-//   AppointmentEditAssignmentInput.assignedUserIds : [EncodedId!]! (multi) — assessment team
+// INTROSPECTED LIVE 2026-07-11 / re-introspected 2026-07-31 (API 2025-04-16):
+//   Assessment team (issue 147): assessmentEdit(assessmentId, input) with
+//     AssessmentEditInput.schedule.teamMemberIdsToAssign : [EncodedId!] (multi).
+//     NOT appointmentEditAssignment — that wanted an Appointment id the schema
+//     never exposes for an assessment, so it was a silent no-op (0 of 22 in prod).
+//     The edit reads back assignedUsers to VERIFY, and re-sends the current
+//     startAt/endAt (read live) so preserving the schedule can't wipe the time.
 //   VisitEditAssignedUsersInput.assignedUserIds    : [EncodedId!]! (multi) — job crew (per visit)
 //   Job crew read via job(id).visits.nodes { id isComplete }
 //   JobEditInput / RequestEditInput expose only salespersonId (singular) —
@@ -56,14 +61,40 @@ const h = vi.hoisted(() => {
 vi.mock('@/lib/supabase-service', () => ({
   supabaseService: { from: (t: string) => h.makeBuilder(t) },
 }))
-const jobberMutation = vi.fn(async () => ({ data: {}, userErrors: [] as any[] }))
-// Job crew reads the job's visits first (jobberGraphQL). Default: one
-// non-completed visit V1 per job — tests that need a different visit set
-// override with jobberGraphQL.mockImplementation / mockResolvedValueOnce.
-const jobberGraphQL = vi.fn(async () => ({
-  data: { job: { id: 'J1', visits: { totalCount: 1, nodes: [{ id: 'V1', isComplete: false }] } } },
-  errors: undefined as any,
-}))
+// issue 147 — the assessment leg now uses assessmentEdit and READS BACK
+// assignedUsers to verify the team applied (a clean userErrors array is not
+// proof). The default mutation mock therefore ECHOES the requested team back
+// as assignedUsers (a WORKING Jobber) and preserves startAt/endAt — tests that
+// want a silent no-op / mismatch override with a non-echoing implementation.
+const ASSESS_START = '2026-08-01T17:00:00Z' // 13:00 America/New_York
+const ASSESS_END = '2026-08-01T18:00:00Z'   // 14:00 America/New_York
+const defaultMutationImpl = async (_loc: any, mutation: any, vars: any) => {
+  if (String(mutation).includes('assessmentEdit')) {
+    const ids: string[] = vars?.input?.schedule?.teamMemberIdsToAssign ?? []
+    return {
+      data: { assessmentEdit: { assessment: {
+        id: 'A-GID', startAt: ASSESS_START, endAt: ASSESS_END,
+        assignedUsers: { nodes: ids.map(id => ({ id })) },
+      } } },
+      userErrors: [] as any[],
+    }
+  }
+  return { data: {}, userErrors: [] as any[] }
+}
+const jobberMutation = vi.fn(defaultMutationImpl)
+// jobberGraphQL serves TWO reads: the job's visits (job crew) and the
+// assessment's current schedule (issue 147, to re-send startAt/endAt
+// unchanged). Branch on the query. Tests override per-case as needed.
+const defaultGraphQLImpl = async (_loc: any, query: any) => {
+  if (String(query).includes('AssessmentScheduleForSync')) {
+    return { data: { assessment: { id: 'A-GID', startAt: ASSESS_START, endAt: ASSESS_END } }, errors: undefined as any }
+  }
+  return {
+    data: { job: { id: 'J1', visits: { totalCount: 1, nodes: [{ id: 'V1', isComplete: false }] } } },
+    errors: undefined as any,
+  }
+}
+const jobberGraphQL = vi.fn(defaultGraphQLImpl)
 vi.mock('@/lib/jobber', () => ({
   jobberMutation: (...a: any[]) => jobberMutation(...a),
   jobberGraphQL: (...a: any[]) => jobberGraphQL(...a),
@@ -81,12 +112,9 @@ import { persistRosterAndMatch } from '@/lib/jobber-team-roster'
 import EngagementAssignees from '@/components/hive/shared/EngagementAssignees'
 
 beforeEach(() => {
-  h.reset(); jobberMutation.mockClear(); writeSyncLog.mockClear()
-  jobberGraphQL.mockClear()
-  jobberGraphQL.mockImplementation(async () => ({
-    data: { job: { id: 'J1', visits: { totalCount: 1, nodes: [{ id: 'V1', isComplete: false }] } } },
-    errors: undefined as any,
-  }))
+  h.reset(); writeSyncLog.mockClear()
+  jobberMutation.mockClear(); jobberMutation.mockImplementation(defaultMutationImpl)
+  jobberGraphQL.mockClear(); jobberGraphQL.mockImplementation(defaultGraphQLImpl)
 })
 
 // `over` keys are honored verbatim when present — including explicit null
@@ -164,7 +192,8 @@ describe('getEngagementAssignees', () => {
 
 // ══ 3) syncEngagementAssignmentToJobber — the TEAM/CREW push ══════
 // Assignees are the crew who DO the work, PLURAL:
-//   · Assessment appointment  → ALL assignees (appointmentEditAssignment)
+//   · Assessment team         → ALL assignees via assessmentEdit, VERIFIED by
+//                               read-back; startAt/endAt preserved (issue 147)
 //   · Job crew                → ALL assignees onto every non-completed
 //                               visit (visitEditAssignedUsers)
 //   · Request                 → NEVER assigned (result 'skipped')
@@ -184,6 +213,10 @@ describe('syncEngagementAssignmentToJobber (team/crew)', () => {
     ])
     h.enqueue('jobs', over.jobs ?? [{ jobber_job_id: JOB_NUM }])
     h.enqueue('assessments', over.assess ?? [{ jobber_assessment_id: ASSESS_NUM }])
+    // issue 147 — the assessment leg reads the location timezone to preserve
+    // startAt/endAt across the edit. Unconsumed when nobody is mapped (the tz
+    // read is gated on there being a team to push).
+    h.enqueue('locations', 'timezone' in over ? over.timezone : { timezone: 'America/New_York' })
   }
   const varsFor = (needle: string) =>
     jobberMutation.mock.calls.filter(c => String(c[1]).includes(needle)).map(c => c[2])
@@ -205,12 +238,24 @@ describe('syncEngagementAssignmentToJobber (team/crew)', () => {
     expect(varsFor('visitEditAssignedUsers')).toEqual([
       { visitId: 'V1', input: { assignedUserIds: ['j1', 'j2'] } },
     ])
-    // assessment appointment = ALL mapped ids; appointmentId re-encoded to
-    // the Assessment gid (the EncodedId! the mutation demands).
-    expect(varsFor('appointmentEditAssignment')).toEqual([
-      { appointmentId: ASSESS_GID, input: { assignedUserIds: ['j1', 'j2'] } },
-    ])
-    expect(varsFor('appointmentEditAssignment')[0].appointmentId).not.toMatch(/^\d+$/)
+    // assessment team = ALL mapped ids via assessmentEdit (issue 147);
+    // assessmentId re-encoded to the Assessment gid (the EncodedId! the
+    // mutation demands — the encode STAYS, it was never the bug). The team
+    // rides ScheduledItemAttributes.teamMemberIdsToAssign, and the current
+    // startAt/endAt are re-sent (converted to the location's local wall-clock)
+    // so preserving the schedule can't wipe the appointment time.
+    const av = varsFor('assessmentEdit')
+    expect(av).toEqual([{
+      assessmentId: ASSESS_GID,
+      input: { schedule: {
+        startAt: { date: '2026-08-01', time: '13:00:00', timezone: 'America/New_York' },
+        endAt:   { date: '2026-08-01', time: '14:00:00', timezone: 'America/New_York' },
+        teamMemberIdsToAssign: ['j1', 'j2'],
+      } },
+    }])
+    expect(av[0].assessmentId).not.toMatch(/^\d+$/)
+    // the OLD mutation is gone entirely
+    expect(varsFor('appointmentEditAssignment')).toEqual([])
     // no salesperson / request / job edit anywhere (team model)
     expect(varsFor('jobEdit')).toEqual([])
     expect(varsFor('requestEdit')).toEqual([])
@@ -220,15 +265,15 @@ describe('syncEngagementAssignmentToJobber (team/crew)', () => {
     expect(writeSyncLog.mock.calls[0][0]).toMatchObject({ entity_type: 'engagement', direction: 'outbound', status: 'success' })
   })
 
-  it('assessment with null jobber_assessment_id → assessment none, no appointmentEditAssignment (the id-drop bug)', async () => {
+  it('assessment with null jobber_assessment_id → assessment none, no assessmentEdit (the id-drop bug)', async () => {
     // Reproduces engagement 59badae2: the assessment row exists but its
-    // jobber_assessment_id is null, so there is no appointment to target.
+    // jobber_assessment_id is null, so there is no assessment to target.
     // The sync must report assessment=none and never call the mutation.
     // (The 'A1' happy-path test above pins the inverse: id present → synced.)
     wireLinked({ jobs: [], assess: [{ jobber_assessment_id: null }] })
     const res = await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
     expect(res.assessment).toBe('none')
-    expect(varsFor('appointmentEditAssignment')).toEqual([])
+    expect(varsFor('assessmentEdit')).toEqual([])
     // and the query guards at the source: filters out null-id rows
     const assessCall = h.state.calls.find(c => c.table === 'assessments')!
     expect(assessCall.ops).toContainEqual(['not', ['jobber_assessment_id', 'is', null]])
@@ -261,27 +306,34 @@ describe('syncEngagementAssignmentToJobber (team/crew)', () => {
     expect(varsFor('visitEditAssignedUsers')).toEqual([])
   })
 
-  it('nobody mapped → crew + team cleared (empty arrays), request still skipped', async () => {
+  it('nobody mapped → visit crew cleared (empty array); assessment NOT cleared via assessmentEdit (issue 147)', async () => {
+    // The visit crew clears with an explicit [] (visitEditAssignedUsers takes
+    // it as a clear). The assessment team does NOT: teamMemberIdsToAssign is
+    // assign-oriented and omitted for an empty list, so the sync will not risk
+    // the appointment schedule for an unassign the field can't express — and a
+    // clear never worked through the old silent-no-op path anyway. assessment=none.
     wireLinked({ assignees: [assignee({ hub_user_id: 'u1', jobber_user_id: null })] })
     const res = await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
-    expect(res).toMatchObject({ request: 'skipped', job: 'cleared', assessment: 'cleared', mapped: 0, unmapped: 1 })
+    expect(res).toMatchObject({ request: 'skipped', job: 'cleared', assessment: 'none', mapped: 0, unmapped: 1 })
     expect(varsFor('visitEditAssignedUsers')).toEqual([{ visitId: 'V1', input: { assignedUserIds: [] } }])
-    expect(varsFor('appointmentEditAssignment')).toEqual([{ appointmentId: ASSESS_GID, input: { assignedUserIds: [] } }])
+    // no assessmentEdit call at all — and never any assessment schedule read
+    expect(varsFor('assessmentEdit')).toEqual([])
+    expect(jobberGraphQL.mock.calls.some(c => String(c[1]).includes('AssessmentScheduleForSync'))).toBe(false)
   })
 
   it('a visit userErrors reply marks the job failed but does not throw; assessment still syncs', async () => {
     wireLinked()
-    jobberMutation.mockImplementation(async (_loc: any, mut: any) =>
+    jobberMutation.mockImplementation(async (loc: any, mut: any, vars: any) =>
       String(mut).includes('visitEditAssignedUsers')
         ? { data: {}, userErrors: [{ message: 'user not on visit' }] }
-        : { data: {}, userErrors: [] })
+        : defaultMutationImpl(loc, mut, vars)) // assessmentEdit still echoes → synced
     const res = await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
     expect(res.job).toBe('failed')
     expect(res.assessment).toBe('synced')
     expect(res.request).toBe('skipped')
-    // failure flips the breadcrumb to error but still writes it
-    expect(writeSyncLog.mock.calls[0][0]).toMatchObject({ status: 'error' })
-    jobberMutation.mockImplementation(async () => ({ data: {}, userErrors: [] }))
+    // the terminal breadcrumb flips to error (job failed) but still writes
+    const terminal = writeSyncLog.mock.calls.map(c => c[0]).find(a => String(a.message).includes('job='))
+    expect(terminal).toMatchObject({ status: 'error' })
   })
 
   it('a failed visits READ marks the job failed (no visit push attempted)', async () => {
@@ -306,9 +358,9 @@ describe('syncEngagementAssignmentToJobber (team/crew)', () => {
     expect(varsFor('visitEditAssignedUsers')).toEqual([
       { visitId: 'V1', input: { assignedUserIds: ['j1', 'j2', 'j3'] } },
     ])
-    expect(varsFor('appointmentEditAssignment')).toEqual([
-      { appointmentId: ASSESS_GID, input: { assignedUserIds: ['j1', 'j2', 'j3'] } },
-    ])
+    // the full current team rides teamMemberIdsToAssign on assessmentEdit
+    expect(varsFor('assessmentEdit')[0].assessmentId).toBe(ASSESS_GID)
+    expect(varsFor('assessmentEdit')[0].input.schedule.teamMemberIdsToAssign).toEqual(['j1', 'j2', 'j3'])
   })
 
   it('request is NEVER assigned — no requestEdit/salesperson mutation, result skipped', async () => {
@@ -319,6 +371,85 @@ describe('syncEngagementAssignmentToJobber (team/crew)', () => {
     expect(h.state.calls.some(c => c.table === 'service_requests')).toBe(false)
     expect(jobberMutation.mock.calls.some(c => String(c[1]).includes('requestEdit'))).toBe(false)
   })
+
+  // ── issue 147: VERIFY-BY-READBACK + SCHEDULE PRESERVATION ──────────
+  it('read-back mismatch → assessment FAILED + a persisted ASSESSMENT_TEAM_MISMATCH breadcrumb', async () => {
+    wireLinked()
+    // Jobber returns a CLEAN userErrors array but nobody actually got assigned
+    // — the EXACT silent-no-op signature the old appointmentEditAssignment
+    // produced. Only the read-back diff catches it; userErrors would not.
+    jobberMutation.mockImplementation(async (_loc: any, mut: any) => {
+      if (String(mut).includes('assessmentEdit')) {
+        return { data: { assessmentEdit: { assessment: {
+          id: 'A-GID', startAt: ASSESS_START, endAt: ASSESS_END,
+          assignedUsers: { nodes: [] }, // <- applied nobody
+        } } }, userErrors: [] }
+      }
+      return { data: {}, userErrors: [] }
+    })
+    const res = await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
+    expect(res.assessment).toBe('failed')
+    // PERSISTED, not console-only — a dedicated error breadcrumb naming the miss
+    const mismatch = writeSyncLog.mock.calls.map(c => c[0])
+      .find(a => String(a.message).includes('ASSESSMENT_TEAM_MISMATCH'))
+    expect(mismatch).toMatchObject({ status: 'error', entity_type: 'engagement', direction: 'outbound' })
+    expect(String(mismatch.message)).toContain('team mismatch')
+    expect(String(mismatch.message)).toContain('missing=[j1,j2]')
+  })
+
+  it('schedule drift in the read-back → assessment FAILED (guards against wiping/moving the time)', async () => {
+    wireLinked()
+    jobberMutation.mockImplementation(async (_loc: any, mut: any, vars: any) => {
+      if (String(mut).includes('assessmentEdit')) {
+        const ids: string[] = vars?.input?.schedule?.teamMemberIdsToAssign ?? []
+        return { data: { assessmentEdit: { assessment: {
+          id: 'A-GID',
+          startAt: '2026-08-02T17:00:00Z', // moved a day — DRIFT
+          endAt: ASSESS_END,
+          assignedUsers: { nodes: ids.map(id => ({ id })) }, // team applied fine
+        } } }, userErrors: [] }
+      }
+      return { data: {}, userErrors: [] }
+    })
+    const res = await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
+    expect(res.assessment).toBe('failed')
+    const drift = writeSyncLog.mock.calls.map(c => c[0])
+      .find(a => String(a.message).includes('schedule drift'))
+    expect(drift).toBeTruthy()
+  })
+
+  it('re-sends the assessment\'s CURRENT startAt/endAt (read LIVE), converted to local — not hard-coded', async () => {
+    wireLinked()
+    jobberGraphQL.mockImplementation(async (_loc: any, query: any) => {
+      if (String(query).includes('AssessmentScheduleForSync'))
+        return { data: { assessment: { id: 'A-GID', startAt: '2026-12-15T20:30:00Z', endAt: '2026-12-15T21:30:00Z' } }, errors: undefined }
+      return { data: { job: { id: 'J1', visits: { totalCount: 1, nodes: [{ id: 'V1', isComplete: false }] } } }, errors: undefined }
+    })
+    await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
+    const sched = varsFor('assessmentEdit')[0].input.schedule
+    // 20:30Z → 15:30 EST (America/New_York, winter offset -5) — proves the time
+    // is read live and tz-converted, not a fixed value.
+    expect(sched.startAt).toEqual({ date: '2026-12-15', time: '15:30:00', timezone: 'America/New_York' })
+    expect(sched.endAt).toEqual({ date: '2026-12-15', time: '16:30:00', timezone: 'America/New_York' })
+  })
+
+  it('missing/invalid location timezone → assessment FAILED, no assessmentEdit (never risk the schedule)', async () => {
+    wireLinked({ timezone: {} }) // locations row with no timezone column
+    const res = await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
+    expect(res.assessment).toBe('failed')
+    expect(varsFor('assessmentEdit')).toEqual([])
+    // the schedule read is never even attempted
+    expect(jobberGraphQL.mock.calls.some(c => String(c[1]).includes('AssessmentScheduleForSync'))).toBe(false)
+    const problem = writeSyncLog.mock.calls.map(c => c[0])
+      .find(a => String(a.message).includes('cannot preserve schedule'))
+    expect(problem).toMatchObject({ status: 'error' })
+  })
+
+  // LIVE-ONLY: whether Jobber's assessmentEdit actually persists
+  // teamMemberIdsToAssign onto the assessment can only be proven against a real
+  // account (mirrors the it.todo in beta-assessment-team-assign.test.ts). The
+  // read-back diff above is the in-prod guard for exactly that unknown.
+  it.todo('assessmentEdit actually persists teamMemberIdsToAssign onto the assessment in prod — needs a live Jobber call')
 
   it('no linked Jobber records → no reads/mutations, no breadcrumb (pure local engagement)', async () => {
     wireLinked({ jobs: [], assess: [] })
@@ -333,8 +464,8 @@ describe('syncEngagementAssignmentToJobber (team/crew)', () => {
 // ══ 3b) ENCODED-ID CONTRACT — no bare numeric may reach EncodedId! ══
 // Regression guard for the 2026-07-11 prod bug (engagement 59badae2):
 // jobber_job_id / jobber_assessment_id are stored NUMERIC, but the job-visits
-// read (jobId), the appointment assignment (appointmentId), and the visit
-// crew push (visitId) all type their id as EncodedId!. Feeding the bare
+// read (jobId), the assessment schedule read + edit (assessmentId), and the
+// visit crew push (visitId) all type their id as EncodedId!. Feeding the bare
 // number is rejected ("'<n>' is not a valid EncodedId"). visit ids arrive
 // already-encoded from the read; jobber_user_id is stored already-encoded by
 // the roster — so those two pass through, and re-encoding them would
@@ -349,6 +480,7 @@ describe('encoded-id contract (EncodedId! args)', () => {
     ])
     h.enqueue('jobs', [{ jobber_job_id: JOB_NUM }])
     h.enqueue('assessments', [{ jobber_assessment_id: ASSESS_NUM }])
+    h.enqueue('locations', { timezone: 'America/New_York' }) // issue 147 — tz for schedule preservation
   }
   const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64')
   const decode = (s: string) => Buffer.from(s, 'base64').toString('utf8')
@@ -361,37 +493,45 @@ describe('encoded-id contract (EncodedId! args)', () => {
     expect(encodeJobberId('Job', gid)).toBe(gid)
   })
 
-  it('jobId (visits read) and appointmentId (assign) are sent as gids, never bare numeric', async () => {
+  it('jobId (visits read) and assessmentId (schedule read + edit) are sent as gids, never bare numeric', async () => {
     wire()
     await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
     const jobId = jobberGraphQL.mock.calls[0][2].jobId
     expect(jobId).toBe(b64('gid://Jobber/Job/141304145'))
     expect(decode(jobId)).toMatch(/^gid:\/\/Jobber\/Job\/\d+$/)
 
-    const apptVars = jobberMutation.mock.calls.find(c => String(c[1]).includes('appointmentEditAssignment'))![2]
-    expect(apptVars.appointmentId).toBe(b64('gid://Jobber/Assessment/2123185874'))
-    expect(decode(apptVars.appointmentId)).toMatch(/^gid:\/\/Jobber\/Assessment\/\d+$/)
+    // the assessment schedule read keys on `id` (EncodedId!)
+    const readVars = jobberGraphQL.mock.calls.find(c => String(c[1]).includes('AssessmentScheduleForSync'))![2]
+    expect(readVars.id).toBe(b64('gid://Jobber/Assessment/2123185874'))
+
+    // the edit keys on `assessmentId` (EncodedId!)
+    const editVars = jobberMutation.mock.calls.find(c => String(c[1]).includes('assessmentEdit'))![2]
+    expect(editVars.assessmentId).toBe(b64('gid://Jobber/Assessment/2123185874'))
+    expect(decode(editVars.assessmentId)).toMatch(/^gid:\/\/Jobber\/Assessment\/\d+$/)
   })
 
   it('NO EncodedId! arg anywhere in the sync is a bare numeric string', async () => {
     wire()
     await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
     const idsSent: string[] = []
-    for (const [, , vars] of jobberGraphQL.mock.calls) if (vars?.jobId) idsSent.push(vars.jobId)
+    for (const [, , vars] of jobberGraphQL.mock.calls) {
+      if (vars?.jobId) idsSent.push(vars.jobId)
+      if (vars?.id) idsSent.push(vars.id) // assessment schedule read
+    }
     for (const [, , vars] of jobberMutation.mock.calls) {
       if (vars?.visitId) idsSent.push(vars.visitId)
-      if (vars?.appointmentId) idsSent.push(vars.appointmentId)
+      if (vars?.assessmentId) idsSent.push(vars.assessmentId)
     }
     expect(idsSent.length).toBeGreaterThan(0)
     for (const id of idsSent) expect(id).not.toMatch(/^\d+$/)
   })
 
-  it('assignedUserIds (already-encoded jobber_user_id) pass through UNtouched — not re-wrapped', async () => {
+  it('teamMemberIdsToAssign (already-encoded jobber_user_id) pass through UNtouched — not re-wrapped', async () => {
     wire()
     await syncEngagementAssignmentToJobber('eng-1', 'loc_test')
-    const apptVars = jobberMutation.mock.calls.find(c => String(c[1]).includes('appointmentEditAssignment'))![2]
+    const editVars = jobberMutation.mock.calls.find(c => String(c[1]).includes('assessmentEdit'))![2]
     // exactly the stored value — a re-encode would corrupt it to a double gid
-    expect(apptVars.input.assignedUserIds).toEqual(['Z2lkOi8vSm9iYmVyL1VzZXIvMQ=='])
+    expect(editVars.input.schedule.teamMemberIdsToAssign).toEqual(['Z2lkOi8vSm9iYmVyL1VzZXIvMQ=='])
   })
 
   it('the module re-encodes job + assessment ids at the call site (source pin)', () => {
