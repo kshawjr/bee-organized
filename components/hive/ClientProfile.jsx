@@ -43,9 +43,8 @@ import React, { useState, useEffect } from 'react'
 import { CHIP_STYLES, stageDisplayLabel } from './shared/stageConfig'
 import { T } from './shared/tokens'
 import { deriveClientStatus, CLIENT_STATUS_META } from './shared/clientStatus'
-import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, daysSince, closedReasonLabel } from './shared/engagementStatus'
+import { deriveStatusChip, engagementValue, displayTitle, fmtMoney, daysSince, closedReasonLabel, vitalsAge } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
-import { vitalsAge } from './shared/VitalsStrip'
 import MetricBand from './shared/MetricBand'
 import {
   IconPhone, IconExternalLink, IconSend, IconChevronRight,

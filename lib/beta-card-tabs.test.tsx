@@ -26,7 +26,7 @@
 //     title is NOT rendered); quiet subtitle = 'View profile' accent
 //     link (fires onOpenClient — the old View client → button is gone)
 //     + full-format opened date + founded-by. Full prose dates ride the
-//     roomy header/subtitle spots ONLY — the vitals strip and Timeline
+//     roomy header/subtitle spots ONLY — the metric band and Timeline
 //     rows keep their compact formats (deliberate, not drift)
 //   — action rows are cardKit ActionRow: equal-width repeat(N,1fr)
 //     grid, soft-tinted no-border buttons (Call blue / neutral gray /
@@ -214,7 +214,7 @@ describe('tabbed skeleton', () => {
     for (const f of [
       'components/hive/ClientProfile.jsx', 'components/hive/EngagementPanel.jsx',
       'components/hive/shared/CardTabs.jsx', 'components/hive/shared/PinnedBuzz.jsx', 'components/hive/shared/cardKit.jsx',
-      'components/hive/shared/VitalsStrip.jsx',
+      'components/hive/shared/MetricBand.jsx', 'components/hive/shared/engagementStatus.js',
     ]) {
       const src = readFileSync(f, 'utf8')
       const importLines = src.split('\n').filter(l => /^\s*import\b/.test(l)).join('\n')
@@ -318,7 +318,8 @@ describe('per-surface Overview content', () => {
 // ═══ metric band ═══════════════════════════════════════════
 // Build 2 split (finalized by #136): ClientProfile runs the full-bleed
 // METRIC BAND; the panel's masthead carries stage/value itself (no
-// strip at all). No card renders the tinted VitalsStrip component.
+// strip at all). The tinted VitalsStrip component was deleted in #138;
+// its live helpers (vitalsAge / EM_DASH) moved to engagementStatus.
 const bandOf = (host: Element) => host.querySelector('[aria-label="Metrics"]')!
 const bandLabels = (host: Element) =>
   [...bandOf(host).children].map(cell => cell.querySelectorAll('p')[0].textContent)
@@ -327,7 +328,7 @@ const bandValues = (host: Element) =>
 const chipSpan = (host: Element, label: string) =>
   [...host.querySelectorAll('span')].find(sp => (sp as HTMLElement).style.borderRadius === '8px' && sp.textContent === label)
 
-describe('vitals strip / metric band', () => {
+describe('metric band', () => {
   it('ClientProfile renders the METRIC BAND (Collected/Invoiced/Owing/Last touch) between header and tabs — full-bleed hairline, tabular numerals', async () => {
     const { host, unmount } = await mountProfile()
     const band = bandOf(host)
@@ -342,15 +343,12 @@ describe('vitals strip / metric band', () => {
     // DOM order: header → band → tab bar
     const tabBar = tabButton(host, 'Overview')!
     expect(band.compareDocumentPosition(tabBar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    // the strip idiom is GONE from this card
-    expect(host.querySelector('[aria-label="Vitals"]')).toBeNull()
     await unmount()
   })
 
   it('EngagementPanel: NO strip — the masthead itself carries stage chip + right-aligned value', async () => {
     engOver = { engagement: { total_invoiced: 1200 }, children: { quotes: [{ id: 'q1', status: 'approved', total: 900 }] } }
     const { host, unmount } = await mountPanel()
-    expect(host.querySelector('[aria-label="Vitals"]')).toBeNull()
     expect(host.querySelector('[aria-label="Metrics"]')).toBeNull()
     expect(host.textContent).toContain('$1,200') // total_invoiced wins over the quote
     await unmount()

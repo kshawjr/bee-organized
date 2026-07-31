@@ -3,9 +3,9 @@
 // The client-v4 METRIC BAND (card-restore build 2, Kevin's 7/10
 // mockups): a full-bleed money row under the profile header — hairline
 // top/bottom rules, hairline cell dividers, TABULAR NUMERALS so the
-// four figures column-align. Replaces the profile's tinted VitalsStrip
-// (no surface renders the strip component anymore — its helpers,
-// vitalsAge/EM_DASH, are what live on).
+// four figures column-align. Replaced the profile's tinted vitals
+// strip (the strip component was deleted in issue 138; its live
+// helpers, vitalsAge/EM_DASH, moved to engagementStatus).
 //
 // Full-bleed: the host card's body has horizontal padding, so the band
 // takes `bleed` (that padding in px) and cancels it with negative
@@ -18,7 +18,7 @@
 'use client'
 
 import React from 'react'
-import { EM_DASH } from './VitalsStrip'
+import { EM_DASH } from './engagementStatus'
 import { T } from './tokens'
 
 export default function MetricBand({ cells = [], bleed = 24 }) {

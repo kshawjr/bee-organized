@@ -32,7 +32,7 @@ export const fmtTime = (d) => {
 
 // Full prose date — 'July 7, 2026' (full month name). For the roomy
 // header/subtitle spots (opened / client since / inquired lines); the
-// vitals strip and Timeline rows KEEP the compact formatInboxAge/
+// metric band and Timeline rows KEEP the compact formatInboxAge/
 // formatInboxFuture treatment — deliberate, not an inconsistency.
 const FULL_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
 export const formatFullDate = (d) => {
@@ -254,6 +254,27 @@ export function formatInboxFutureParts(when, nowMs = Date.now()) {
 export function formatInboxFuture(when, nowMs = Date.now()) {
   const { anchor, hint } = formatInboxFutureParts(when, nowMs)
   return hint ? `${anchor} · ${hint}` : anchor
+}
+
+// THE absent-value glyph for tight metric cells — '—', never a blank or
+// a fabricated zero. (Moved here from the retired VitalsStrip module,
+// issue 138.)
+export const EM_DASH = '—'
+
+// Compact card-cell rendering of the Inbox age idiom — a metric-band
+// cell is ~70px on a narrow card, so '2d', not 'Jul 7 · 2d ago'.
+// Relative inside 30 days ('now' / '45m' / '3h' / '2d'), the bare date
+// anchor beyond ('Apr 21', 'Dec 12, 2025'). Built ON formatInboxAgeParts
+// so the tiers can never drift from the Inbox row's. (Moved here from
+// the retired VitalsStrip module, issue 138.)
+export function vitalsAge(when, nowMs = Date.now()) {
+  if (!when) return EM_DASH
+  const { anchor, hint } = formatInboxAgeParts(when, nowMs)
+  if (hint) return hint.replace(' ago', '') // 'Jun 5 · 29d ago' → '29d'
+  if (anchor === 'just now') return 'now'
+  const rel = anchor.match(/^(\d+) (min|hour)s? ago$/)
+  if (rel) return `${rel[1]}${rel[2] === 'min' ? 'm' : 'h'}`
+  return anchor // date-only tiers pass through
 }
 
 // ── engagement filters (shared by board + list, owned by HiveShell) ──
