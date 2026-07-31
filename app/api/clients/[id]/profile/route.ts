@@ -73,7 +73,7 @@ export async function GET(
         .maybeSingle()
     : Promise.resolve({ data: null } as { data: { id: string, name: string } | null })
 
-  const [contactsRes, engagementsRes, touchesRes, notesRes, jobNotesRes, locRes, referrerRes, referredUsRes, tagsRes] = await Promise.all([
+  const [contactsRes, engagementsRes, touchesRes, notesRes, jobNotesRes, locRes, referrerRes, referredUsRes, tagsRes, dripRes] = await Promise.all([
     supabaseService.from('lead_contacts').select('id, name, role, phone, email').eq('lead_id', id).order('created_at', { ascending: true }),
     supabaseService.from('engagements').select('id, title, description, stage, founded_by, created_at, stage_entered_at, closed_at, closed_reason, closed_note, nurture_started_at, total_invoiced, total_paid, balance_owing').eq('client_id', id).order('created_at', { ascending: false }),
     supabaseService.from('touchpoints').select('id, kind, method, label, notes, occurred_at, engagement_id, user_id').eq('lead_id', id).order('occurred_at', { ascending: false }).limit(50),
@@ -96,7 +96,31 @@ export async function GET(
     // selecting one 42703'd and silently blanked every tag on the card. Only
     // tag_lookup_id is read below (resolved to lookups.label).
     supabaseService.from('lead_tags').select('tag_lookup_id').eq('lead_id', id),
+    // Nurture-drip lifecycle (#112). leads.paused is only the PAUSE flag —
+    // terminal stops (hard_bounce, invalid_recipient, max_send_retries,
+    // no_email, opted_out, spam_complaint, stage_changed, junk) write
+    // lead_drip_progress only, so without this the Preferences panel reads
+    // "active" on a dead sequence. Small: one row per drip_path per lead.
+    supabaseService.from('lead_drip_progress').select('stopped_at, stopped_reason, completed_at, created_at').eq('lead_id', id),
   ])
+
+  // Effective nurture-drip state for PreferencesBlock. A live row (neither
+  // stopped nor completed — includes paused, which the leads.paused flag
+  // already carries) means the drip is NOT terminal; only when every row is
+  // terminal do we surface the most-recent terminal outcome. stopped wins
+  // over completed on the same row by construction (a completed row never
+  // gets stopped_at).
+  const dripRows = dripRes.data ?? []
+  const dripHasLive = dripRows.some(r => !r.stopped_at && !r.completed_at)
+  let drip_stopped_reason: string | null = null
+  let drip_completed = false
+  if (!dripHasLive && dripRows.length > 0) {
+    const latest = [...dripRows].sort(
+      (a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime(),
+    )[0]
+    if (latest.stopped_at) drip_stopped_reason = latest.stopped_reason ?? 'unknown'
+    else if (latest.completed_at) drip_completed = true
+  }
 
   // touchpoints carry user_id but no user_label — resolve author names
   // (same as the engagement GET) so note/touch streams can say who.
@@ -178,6 +202,11 @@ export async function GET(
       referred_by_name: referrerRes.data?.name ?? null,
       referred_by_missing: referredByMissing,
       assigned_to_name: lead.assigned_to ? (authorById[lead.assigned_to] ?? null) : null,
+      // #112 — nurture-drip terminal state (see derivation above). null
+      // stopped_reason + false completed → drip is live/paused/never-enrolled,
+      // and PreferencesBlock falls through to its existing paused/active rows.
+      drip_stopped_reason,
+      drip_completed,
     },
     referred_us: referredUsRes.data ?? [],
     referred_us_total: referredUsRes.count ?? (referredUsRes.data?.length ?? 0),

@@ -57,7 +57,16 @@ export default function NotesStream({ label, items = [], onPost, placeholder = '
               {a.method === 'email' ? <IconMail size={12} /> : <IconPhone size={12} />}
             </span>
             <span style={{ minWidth: 0 }}>
-              {METHOD_LABEL[a.method] || a.label || 'Reach-out'}{a.notes ? ` — ${a.notes}` : ''}
+              {/* Human touchpoints (kind='reach_out') send a placeholder label
+                  ('Reach-out') with the real content in notes, so method-first
+                  is right and the placeholder stays hidden. System-authored
+                  rows (issues 103/109: kind='drip'/'system') INVERT that — the
+                  meaningful text is the label and method is just the channel —
+                  so label wins there or the drip subject / 'Drip stopped — …'
+                  trace renders as the generic channel word ('Email'/'System'). */}
+              {(a.kind === 'drip' || a.kind === 'system')
+                ? (a.label || METHOD_LABEL[a.method] || 'Reach-out')
+                : (METHOD_LABEL[a.method] || a.label || 'Reach-out')}{a.notes ? ` — ${a.notes}` : ''}
               {a.tag && <span style={{ fontSize: '11px', color: T.ink.secondary }}> · re: {a.tag}</span>}
               <span style={{ fontSize: '10px', color: T.ink.quiet, marginLeft: '6px', whiteSpace: 'nowrap' }}>
                 {a.user_label || '—'} · {relAge(new Date(a.ts).getTime(), nowMs)} ago

@@ -44,6 +44,24 @@ const SNOOZE_PRESETS = [
   { key: '3m', label: '3 months', days: 90 },
 ]
 
+// issue 112 — a terminally-stopped nurture drip must read in plain English, never
+// as the raw stopped_reason enum. `reason` = why the sequence ended; `guide` =
+// what the owner can do about it (audience is non-technical). There is NO
+// restart button: the owner-accessible resume path (drip-resume) only revives
+// PAUSED rows and silently no-ops on a stopped one, so the guidance points at
+// the real recovery instead of a dead control. Unknown reasons fall back.
+const DRIP_STOP_COPY = {
+  hard_bounce:       { reason: 'the client’s email address bounced',       guide: 'Fix the client’s email address, then contact support to restart nurture emails.' },
+  invalid_recipient: { reason: 'the client’s email address looks invalid', guide: 'Fix the client’s email address, then contact support to restart nurture emails.' },
+  no_email:          { reason: 'there’s no email address on file',         guide: 'Add the client’s email address, then contact support to restart nurture emails.' },
+  max_send_retries:  { reason: 'emails kept failing to send',              guide: 'Check the client’s email address, then contact support to restart nurture emails.' },
+  spam_complaint:    { reason: 'the client marked our email as spam',      guide: 'Nurture emails won’t restart for this client.' },
+  opted_out:         { reason: 'the client opted out of marketing',        guide: 'Re-subscribe them above to resume nurture emails.' },
+  stage_changed:     { reason: 'the client moved forward in the pipeline', guide: 'This is normal — nurture stops once a client is active.' },
+  junk:              { reason: 'the client was marked as junk',            guide: 'Restore the client to resume nurture emails.' },
+}
+const DRIP_STOP_FALLBACK = { reason: 'nurture emails were stopped', guide: 'Contact support to restart nurture emails.' }
+
 export default function PreferencesBlock({ client, openCount = 0, onPatched = () => {}, setToast = () => {}, nowMs = Date.now(), readOnly = false }) {
   const c = client
   const [busy, setBusy] = useState(false)
@@ -54,6 +72,16 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
   const [snoozeNote, setSnoozeNote] = useState('')
 
   const snoozed = !!(c.snoozed_until && new Date(c.snoozed_until).getTime() > nowMs)
+
+  // issue 112 — nurture-drip lifecycle. The panel historically read only
+  // leads.paused (c.paused), so every TERMINAL stop (hard_bounce et al.,
+  // written to lead_drip_progress alone) rendered "active" with a live Pause.
+  // The profile route now surfaces the effective terminal state; stopped
+  // outranks completed outranks the paused/active flag rows below.
+  const dripStopCopy = c.drip_stopped_reason
+    ? (DRIP_STOP_COPY[c.drip_stopped_reason] || DRIP_STOP_FALLBACK)
+    : null
+  const dripCompleted = !dripStopCopy && !!c.drip_completed
 
   async function patchLead(patch) {
     const res = await fetch(`/api/leads/${c.id}`, {
@@ -180,18 +208,37 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
         )}
       </div>
 
-      {/* Nurture drip — hidden with live business (v4 rule). */}
+      {/* Nurture drip — hidden with live business (v4 rule). issue 112: three
+          states ahead of the paused/active flag. STOPPED (terminal — bounce,
+          opt-out, …) shows the plain reason + what to do, and NO button (a
+          dead sequence can't be paused and resume no-ops). COMPLETED (ran to
+          the end) is display-only too. Only a live drip gets Pause/Activate. */}
       {openCount === 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <p style={{ fontSize: '12px', color: c.paused ? T.state.warning.deep : T.accent.deep, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
-            <IconPlayerPause size={13} /> {c.paused ? 'Nurture drips paused' : 'Nurture drips active'}
-          </p>
-          {readOnly ? null : c.paused ? (
-            <button className="bee-small-action" style={rowBtn()} disabled={busy} onClick={() => setDrip(false)}>Activate</button>
-          ) : (
-            <button className="bee-small-action" style={rowBtn()} disabled={busy} onClick={() => setDrip(true)}>Pause</button>
-          )}
-        </div>
+        dripStopCopy ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+            <p style={{ fontSize: '12px', color: T.state.warning.deep, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
+              <IconPlayerPause size={13} /> Nurture drips stopped — {dripStopCopy.reason}
+            </p>
+            <p style={{ fontSize: '11px', color: T.ink.muted, lineHeight: 1.45 }}>{dripStopCopy.guide}</p>
+          </div>
+        ) : dripCompleted ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <p style={{ fontSize: '12px', color: T.ink.secondary, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
+              <IconPlayerPause size={13} /> Nurture drips completed
+            </p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <p style={{ fontSize: '12px', color: c.paused ? T.state.warning.deep : T.accent.deep, display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
+              <IconPlayerPause size={13} /> {c.paused ? 'Nurture drips paused' : 'Nurture drips active'}
+            </p>
+            {readOnly ? null : c.paused ? (
+              <button className="bee-small-action" style={rowBtn()} disabled={busy} onClick={() => setDrip(false)}>Activate</button>
+            ) : (
+              <button className="bee-small-action" style={rowBtn()} disabled={busy} onClick={() => setDrip(true)}>Pause</button>
+            )}
+          </div>
+        )
       )}
     </div>
   )
