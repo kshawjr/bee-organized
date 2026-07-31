@@ -53,6 +53,11 @@ ALTER TABLE public.pending_invites ENABLE ROW LEVEL SECURITY;
 -- their location's invites. The accept page reads via service role
 -- (token lookup must work pre-auth), so RLS gates the Settings-side
 -- listing only.
+--
+-- CAST: hub_users.location_id is TEXT; pending_invites.location_id is uuid.
+-- The uuid side MUST be cast — hub_users.location_id = pending_invites.location_id::text.
+-- Omitting it errors 42883 (operator does not exist: text = uuid). NEVER omit it.
+DROP POLICY IF EXISTS "pending_invites read" ON public.pending_invites;
 CREATE POLICY "pending_invites read"
   ON public.pending_invites FOR SELECT TO authenticated
   USING (
@@ -61,13 +66,14 @@ CREATE POLICY "pending_invites read"
       WHERE hub_users.id = auth.uid()
         AND (
           hub_users.role IN ('super_admin', 'admin')
-          OR hub_users.location_id = pending_invites.location_id
+          OR hub_users.location_id = pending_invites.location_id::text
         )
     )
   );
 
 -- Write: super_admin/admin OR the location owner. App-layer checks in
 -- /api/hub_users/invite are the real gate; this RLS policy backstops.
+DROP POLICY IF EXISTS "pending_invites write" ON public.pending_invites;
 CREATE POLICY "pending_invites write"
   ON public.pending_invites FOR ALL TO authenticated
   USING (
@@ -76,7 +82,7 @@ CREATE POLICY "pending_invites write"
       WHERE hub_users.id = auth.uid()
         AND (
           hub_users.role IN ('super_admin', 'admin')
-          OR (hub_users.role = 'owner' AND hub_users.location_id = pending_invites.location_id)
+          OR (hub_users.role = 'owner' AND hub_users.location_id = pending_invites.location_id::text)
         )
     )
   )
@@ -86,7 +92,7 @@ CREATE POLICY "pending_invites write"
       WHERE hub_users.id = auth.uid()
         AND (
           hub_users.role IN ('super_admin', 'admin')
-          OR (hub_users.role = 'owner' AND hub_users.location_id = pending_invites.location_id)
+          OR (hub_users.role = 'owner' AND hub_users.location_id = pending_invites.location_id::text)
         )
     )
   );
