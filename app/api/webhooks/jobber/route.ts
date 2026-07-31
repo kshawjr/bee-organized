@@ -46,6 +46,19 @@ import { writeSyncLog } from '@/lib/sync-log'
 import { checkLanded, type LandedStatus } from '@/lib/webhook-landed'
 
 export const runtime = 'nodejs'
+// force-no-store on EVERY fetch in this route. supabase-js reads go through the
+// Next-patched global fetch as un-annotated GETs (no cache option — see
+// @supabase/postgrest-js), so Next's Data Cache freezes any CONSTANT-predicate
+// read under a stable URL, across redeploys, with no revalidate. This route
+// takes TWO such reads on EVERY inbound Jobber event: lookupLocationByJobberAccountId
+// (jobber_account_id=<const per account>) and, via handlers → jobberGraphQL →
+// resolveJobberToken → getLocation (location_id=<slug>), the token row itself —
+// token_expiry / jobber_refresh_token. A frozen token read is the dangerous one:
+// it can drive a needless refresh or a FALSE invalid_grant → RECONNECT-REQUIRED
+// stamp on a location that's actually fine. Mirrors the #95/#96 fix (22cf0ad /
+// f79cb22); fetchCache is the control force-dynamic's side-effect fails to apply
+// in 14.2.3 (#96b).
+export const fetchCache = 'force-no-store'
 export const maxDuration = 60
 
 const REPLAY_WINDOW_MS = 5 * 60 * 1000
