@@ -86,8 +86,11 @@ describe('send-to-jobber send-time resolution wiring (issue 150)', () => {
 
   it('PIN: the bare-lead path feeds the persisted set into allAssigneeJobberIds', () => {
     // getLeadAssignees → resolveJobberAssignment → the assessmentCreate team.
+    // issue 157 split the single-line resolve so unmappedCount is retained too;
+    // the mapped ids still flow to allAssigneeJobberIds from the same resolve.
     expect(route).toContain('const leadAssignees = await getLeadAssignees(leadId)')
-    expect(route).toContain('allAssigneeJobberIds = resolveJobberAssignment(leadAssignees).allJobberUserIds')
+    expect(route).toContain('const resolved = resolveJobberAssignment(leadAssignees)')
+    expect(route).toContain('allAssigneeJobberIds = resolved.allJobberUserIds')
   })
 
   it('PIN: allAssigneeJobberIds still reaches teamMemberIdsToAssign (issue 144)', () => {

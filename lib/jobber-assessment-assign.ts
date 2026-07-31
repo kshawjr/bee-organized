@@ -76,15 +76,59 @@ export function diffAssessmentAssignment(
 //   · no problems, something WAS requested → 'success' + 'assignment=ok'.
 //   · nothing to assign (bare lead send) → 'success' + 'assignment=none'.
 //
+// issue 157 — the picked-but-unmapped case. An owner can pick an assignee who
+// has no jobber_user_id (Kevin/Leslie, no Jobber identity). resolveJobberAssignment
+// drops them from the Jobber push, so `requested` (mapped-count > 0) never sees
+// them and the terminal row reported a bare 'assignment=ok' — a chosen person
+// reached Jobber for nobody to see they didn't. Issue 148 already made the
+// interactive picker honest about this; the send path now matches. Two counts
+// close the gap:
+//   · unmapped > 0 AND some mapped (requested) → still 'success' (NOTHING
+//     failed — the mapped ones landed and the unmapped ones are correctly
+//     assigned internally), but the segment STATES it and is no longer a bare
+//     ok: 'assignment=ok(<mapped> of <total> to Jobber, <unmapped> internal-only)'.
+//   · all-unmapped — assignees WERE picked but NONE map to Jobber (requested is
+//     false, unmapped > 0) → 'success' + 'assignment=none(<unmapped> internal-only)'.
+//     Nothing failed and nothing reached Jobber, but this MUST read differently
+//     from a bare none: a bare none is the value a send with an EMPTY assignee
+//     field produces, and conflating "nobody was picked" with "three people were
+//     picked, none linked to Jobber" is the exact bug issue 157 exists to kill —
+//     it cost real diagnosis time on a live send. (Log copy — kin to issue 148's
+//     owner-facing "not linked to Jobber" line, not identical to it.)
+//   · genuinely nobody picked (requested false, unmapped 0) → bare
+//     'assignment=none'. That distinction is the whole point.
+// mapped/unmapped are optional: absent → treated as 0, so every issue-145
+// caller and the all-mapped path keep reporting exactly 'assignment=ok'/'none'.
+//
 // `problems` are already human-readable ("request salesperson dropped …",
 // "assessment team incomplete …"); pass them in the order they occurred.
 export function summarizeAssignmentOutcome(input: {
   requested: boolean
   problems: string[]
+  mapped?: number
+  unmapped?: number
 }): { status: 'success' | 'partial'; segment: string } {
   const problems = input.problems.filter(Boolean)
   if (problems.length > 0) {
     return { status: 'partial', segment: `assignment=PARTIAL(${problems.join('; ')})` }
   }
-  return { status: 'success', segment: input.requested ? 'assignment=ok' : 'assignment=none' }
+  const unmapped = Number(input.unmapped) || 0
+  // Nothing mapped reached Jobber. Two DIFFERENT sends land here and must NOT
+  // read alike: assignees picked but none linked to Jobber (unmapped > 0), vs a
+  // genuinely empty assignee field (unmapped 0 → bare none).
+  if (!input.requested) {
+    return {
+      status: 'success',
+      segment: unmapped > 0 ? `assignment=none(${unmapped} internal-only)` : 'assignment=none',
+    }
+  }
+  if (unmapped > 0) {
+    const mapped = Number(input.mapped) || 0
+    const total = mapped + unmapped
+    return {
+      status: 'success',
+      segment: `assignment=ok(${mapped} of ${total} to Jobber, ${unmapped} internal-only)`,
+    }
+  }
+  return { status: 'success', segment: 'assignment=ok' }
 }

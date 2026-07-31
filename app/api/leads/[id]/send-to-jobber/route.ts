@@ -469,6 +469,11 @@ export async function POST(
   // first assignee); the assessment appointment takes ALL mapped assignees.
   let salesPersonJobberId: string | null = null   // request/job salesperson (singular)
   let allAssigneeJobberIds: string[] = []          // assessment appointment (multi)
+  // issue 157 — picked assignees with no jobber_user_id. They ARE correctly
+  // assigned internally, but never reach Jobber; resolveJobberAssignment drops
+  // them from allJobberUserIds. We retain the count here (was discarded) so the
+  // terminal row can STATE the shortfall instead of reporting a bare ok.
+  let assigneeUnmappedCount = 0
   if (engagementId) {
     // Send on an already-founded engagement: assignment lives on the
     // engagement junction (engagement_assignees) and already has a real
@@ -477,6 +482,7 @@ export async function POST(
     const resolved = resolveJobberAssignment(engAssignees)
     salesPersonJobberId = resolved.primaryJobberUserId
     allAssigneeJobberIds = resolved.allJobberUserIds
+    assigneeUnmappedCount = resolved.unmappedCount
   } else {
     // issue 150 — the common path: a BARE lead with no engagement yet. The
     // Jobber webhook founds the engagement ~11s AFTER this send, so there is
@@ -504,7 +510,9 @@ export async function POST(
     // job salesperson is deliberately left unset on this path (the team model
     // assigns the actual work, not pre-work — see engagement-assignee-sync).
     const leadAssignees = await getLeadAssignees(leadId)
-    allAssigneeJobberIds = resolveJobberAssignment(leadAssignees).allJobberUserIds
+    const resolved = resolveJobberAssignment(leadAssignees)
+    allAssigneeJobberIds = resolved.allJobberUserIds
+    assigneeUnmappedCount = resolved.unmappedCount
   }
 
   // issue 145 — assignment-outcome signals for the terminal sync_log row.
@@ -1089,6 +1097,12 @@ export async function POST(
   // shortfall in the message, instead of the clean-success lie that hid the
   // failure in prod for three weeks. A truly clean send still reports
   // 'success'. summarizeAssignmentOutcome folds the sub-step signals set above.
+  //
+  // issue 157 — an unmapped picked assignee is NOT one of those problems: the
+  // mapped assignees landed and the unmapped one is correctly assigned in Bee
+  // Hub only. It does not flip status to 'partial' — nothing failed — but the
+  // row must STATE it (mapped/unmapped) so a chosen person who never reached
+  // Jobber can no longer hide behind a bare 'assignment=ok'.
   const assignmentProblems: string[] = []
   if (requestSalespersonDropped) assignmentProblems.push('request salesperson dropped (Jobber rejected the id)')
   if (jobSalespersonDropped)     assignmentProblems.push('job salesperson dropped (Jobber rejected the id)')
@@ -1096,6 +1110,8 @@ export async function POST(
   const assignmentOutcome = summarizeAssignmentOutcome({
     requested: assignmentRequested,
     problems:  assignmentProblems,
+    mapped:    allAssigneeJobberIds.length,
+    unmapped:  assigneeUnmappedCount,
   })
 
   await writeSyncLog({
