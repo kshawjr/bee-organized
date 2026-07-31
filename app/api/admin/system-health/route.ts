@@ -41,6 +41,17 @@ import { LOC_OTHER_SLUG } from '@/lib/hub-scope'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+// force-no-store on EVERY fetch in this route. This panel calls the SAME
+// fetchRateHealth / fetchBookingLinkHealth as the webhook digest, which read
+// `locations` on a constant predicate (lifecycle_status='active') via
+// supabase-js — un-annotated GETs through the Next-patched global fetch (no
+// cache option — see @supabase/postgrest-js). Next's Data Cache caches them
+// under a stable URL with no revalidate, so they were served frozen for days
+// across redeploys: this panel showed the SAME stale rollup the digest did (a
+// location's rate long since set still listed as missing). `dynamic='force-dynamic'`
+// recomputes the route but did not propagate no-store to these nested library
+// GETs in 14.2.3; fetchCache does. Mirrors the #95 fix (22cf0ad) for #96.
+export const fetchCache = 'force-no-store'
 
 const ELEVATED_ROLES = ['super_admin', 'admin']
 
