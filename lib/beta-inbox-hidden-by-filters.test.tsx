@@ -150,7 +150,7 @@ const clearBtn = (host: HTMLElement) =>
 describe('#119 Inbox — hidden-by-filters strip reconciles with the badge', () => {
   it('filter hides the only New lead, nothing else on screen → strip shows "1 lead", count matches the badge', async () => {
     // hasPhone filter hides a phone-less (email-only) New lead from the list.
-    localStorage.setItem('bee_hive_inbox_filters', JSON.stringify({ hasPhone: true }))
+    localStorage.setItem(`bee_hive_inbox_filters:${KC}`, JSON.stringify({ hasPhone: true }))
     const host = await mount(base({ people: [newLead({ name: 'Emailonly Lead', phone: '', email: 'e@x.com' })] }))
     expect(badgeCount(host)).toBe(1)          // badge still counts it
     await openInbox(host)
@@ -163,7 +163,7 @@ describe('#119 Inbox — hidden-by-filters strip reconciles with the badge', () 
   })
 
   it('filter hides a New lead AND the transfer section is rendering → strip STILL shows (the gap FilteredEmpty missed)', async () => {
-    localStorage.setItem('bee_hive_inbox_filters', JSON.stringify({ hasPhone: true }))
+    localStorage.setItem(`bee_hive_inbox_filters:${KC}`, JSON.stringify({ hasPhone: true }))
     const host = await mount(base({
       people: [newLead({ name: 'Emailonly Lead', phone: '', email: 'e@x.com' })],
       transferPeople: [locOtherLead()],
@@ -185,7 +185,7 @@ describe('#119 Inbox — hidden-by-filters strip reconciles with the badge', () 
 
   it('filters active but nothing hidden → no strip', async () => {
     // hasPhone filter is on, but the lead HAS a phone, so nothing is hidden.
-    localStorage.setItem('bee_hive_inbox_filters', JSON.stringify({ hasPhone: true }))
+    localStorage.setItem(`bee_hive_inbox_filters:${KC}`, JSON.stringify({ hasPhone: true }))
     const host = await mount(base({ people: [newLead({ name: 'Has Phone', phone: '(561) 555-0000' })] }))
     expect(badgeCount(host)).toBe(1)
     await openInbox(host)
@@ -194,7 +194,7 @@ describe('#119 Inbox — hidden-by-filters strip reconciles with the badge', () 
   })
 
   it('Clear resets the filters: strip disappears and the hidden lead returns', async () => {
-    localStorage.setItem('bee_hive_inbox_filters', JSON.stringify({ hasPhone: true }))
+    localStorage.setItem(`bee_hive_inbox_filters:${KC}`, JSON.stringify({ hasPhone: true }))
     const host = await mount(base({ people: [newLead({ name: 'Emailonly Lead', phone: '', email: 'e@x.com' })] }))
     await openInbox(host)
     expect(stripShown(host)).toBe(true)
@@ -209,7 +209,7 @@ describe('#119 Inbox — hidden-by-filters strip reconciles with the badge', () 
   it('mixed set: badge == visible rows + strip count', async () => {
     // Two email-only New leads are hidden by hasPhone; one phone-having New
     // lead stays visible. Badge counts all three; strip counts the two hidden.
-    localStorage.setItem('bee_hive_inbox_filters', JSON.stringify({ hasPhone: true }))
+    localStorage.setItem(`bee_hive_inbox_filters:${KC}`, JSON.stringify({ hasPhone: true }))
     const host = await mount(base({
       people: [
         newLead({ name: 'Hidden A', phone: '', email: 'a@x.com' }),

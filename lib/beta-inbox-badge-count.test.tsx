@@ -181,7 +181,7 @@ describe('#89 Inbox badge count matches the list', () => {
   it('MUST-NOT-REGRESS: a VIEW filter hides a live lead from the list but keeps it COUNTED', async () => {
     // hasPhone filter hides a phone-less (email-only) lead from the LIST. The
     // badge must still count it — filtering a view is not "no work".
-    localStorage.setItem('bee_hive_inbox_filters', JSON.stringify({ hasPhone: true }))
+    localStorage.setItem(`bee_hive_inbox_filters:${KC}`, JSON.stringify({ hasPhone: true }))
     const host = await mount(base({
       people: [newLead({ name: 'Emailonly Lead', phone: '', email: 'e@x.com' })],
     }))

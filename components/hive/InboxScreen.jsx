@@ -375,7 +375,21 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   const [confirmRemove, setConfirmRemove] = useState(false) // bulk remove confirm step (any N)
   const [sortRaw, setSort] = useStoredState('bee_hive_inbox_sort', { key: 'newest' })
   const inboxSort = INBOX_SORTS.some(o => o.key === sortRaw.key) ? sortRaw.key : 'newest'
-  const [filters, setFilters, clearFilters] = useStoredState('bee_hive_inbox_filters', INBOX_FILTER_DEFAULTS)
+  // Inbox filters are namespaced per location scope (issue 123). The `sources`
+  // filter is drawn from each location's OWN leads, so under a single shared
+  // key a source set at one location emptied every other location's Inbox
+  // (leads there lack that source) — and the key survived logout, following the
+  // user across locations. locFilter is 'all' or a location id; every scope
+  // (including 'all') gets its own ':scope' namespace, so an all-locations
+  // filter set never leaks into a specific location's view and vice versa.
+  const filtersKey = `bee_hive_inbox_filters:${locFilter}`
+  const [filters, setFilters, clearFilters] = useStoredState(filtersKey, INBOX_FILTER_DEFAULTS)
+  // One-time cleanup of the pre-namespacing key (issue 123). Its single shared
+  // filter set is intentionally NOT migrated to any location — adopting it into
+  // whichever location loads first would re-seed the exact cross-location leak
+  // this fixes — so existing filters simply reset. Drop the orphan so it can't
+  // linger in localStorage.
+  useEffect(() => { try { localStorage.removeItem('bee_hive_inbox_filters') } catch {} }, [])
   const [fltOpen, setFltOpen] = useState(false)
   const nowMs = Date.now()
 
