@@ -53,6 +53,7 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { deriveClientStatus } from './shared/clientStatus'
+import { isSoftRemovedFromInbox } from './shared/inboxSoftRemoval'
 import { CHIP_STYLES, CLOSED_WON, isTerminal } from './shared/stageConfig'
 import { formatInboxAgeParts } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
@@ -435,11 +436,11 @@ export default function InboxScreen({ people = [], transferPeople = [], location
       // Soft removals — session Set OR the DB-backed field (rows arriving
       // already junked/snoozed/dismissed, incl. Realtime refetches). These
       // are Inbox-scoped ONLY: deriveClientStatus stays blind to them, so
-      // the same person still reads New/Attempting in the directory.
-      if (p.isJunk || junkedIds.has(p.id)) continue
-      if (snoozedIds.has(p.id) || (p.snoozeUntil && new Date(p.snoozeUntil).getTime() > nowMs)) continue
-      if (p.inboxDismissedAt || dismissedIds.has(p.id)) continue
-      if (transferredIds.has(p.id)) continue // just-transferred — optimistic removal from every section
+      // the same person still reads New/Attempting in the directory. Shared
+      // with the nav badge count via isSoftRemovedFromInbox so the two can't
+      // drift again (#89). View filters below are a SEPARATE step — not
+      // removals, and deliberately not part of the badge's count.
+      if (isSoftRemovedFromInbox(p, nowMs, { junkedIds, snoozedIds, dismissedIds, transferredIds })) continue
       if (!passesInboxFilters(p)) continue
       // loc_other rows are EXCLUDED from New/Attempting (a loc_other New lead
       // shows ONLY in the transfer section) but are no longer collected here —
@@ -463,10 +464,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     // already role-gated upstream, so a franchise viewer gets [] and the
     // section self-gates on emptiness exactly as it did before.
     for (const p of (transferPeople || [])) {
-      if (p.isJunk || junkedIds.has(p.id)) continue
-      if (snoozedIds.has(p.id) || (p.snoozeUntil && new Date(p.snoozeUntil).getTime() > nowMs)) continue
-      if (p.inboxDismissedAt || dismissedIds.has(p.id)) continue
-      if (transferredIds.has(p.id)) continue
+      if (isSoftRemovedFromInbox(p, nowMs, { junkedIds, snoozedIds, dismissedIds, transferredIds })) continue
       if (!passesInboxFilters(p)) continue
       transfer.push(p)
     }

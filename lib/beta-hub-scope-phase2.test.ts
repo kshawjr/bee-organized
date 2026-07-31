@@ -243,8 +243,12 @@ describe('Inbox wiring — Phase 2', () => {
 
   it('the transfer bucket honors the same soft removals as every other section', () => {
     const block = src.slice(src.indexOf('for (const p of (transferPeople || [])) {'))
-    for (const guard of ['junkedIds.has(p.id)', 'snoozedIds.has(p.id)', 'dismissedIds.has(p.id)', 'transferredIds.has(p.id)', 'passesInboxFilters(p)']) {
-      expect(block.slice(0, 800)).toContain(guard)
+    // Soft removal is now ONE shared predicate every section calls
+    // (isSoftRemovedFromInbox, #89) so the buckets — and the nav badge count —
+    // can't drift. The transfer bucket passes the session Sets and still
+    // layers the view filters on top.
+    for (const guard of ['isSoftRemovedFromInbox(p, nowMs, { junkedIds, snoozedIds, dismissedIds, transferredIds })', 'passesInboxFilters(p)']) {
+      expect(block.slice(0, 400)).toContain(guard)
     }
   })
 

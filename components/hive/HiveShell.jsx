@@ -30,6 +30,7 @@ import { mapLeadToPerson, touchpointToTimelineEntry } from '@/lib/people-mapper'
 import { leadColsToPersonFields } from './shared/leadPatchMap'
 import { mergePeopleTouches } from './shared/peopleTouchPatch'
 import { deriveClientStatus } from './shared/clientStatus'
+import { isSoftRemovedFromInbox } from './shared/inboxSoftRemoval'
 import { isTerminal, CLOSED_WON } from './shared/stageConfig'
 import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters } from './shared/engagementStatus'
 import { reconcileServerRows, mergeEngagements } from './shared/engagementRevalidate'
@@ -562,17 +563,26 @@ export default function HiveShell({
   // (mergePeopleTouches returns `people` itself, so no re-render).
   const patchedPeople = useMemo(() => mergePeopleTouches(people, touchPatches), [people, touchPatches])
 
-  // Inbox badge: New + Attempting in the current location scope. The
-  // won set (session-closed Won + hydrated person.wonEngagements inside
-  // the derivation) keeps won clients out of the count — same inputs as
-  // the Inbox worklist itself.
+  // Inbox badge: New + Attempting in the current location scope, minus the
+  // rows the Inbox worklist soft-removes. The won set (session-closed Won +
+  // hydrated person.wonEngagements inside the derivation) keeps won clients
+  // out; isSoftRemovedFromInbox drops junked/snoozed/dismissed/transferred
+  // rows so the count matches what the list actually shows (#89 — before, the
+  // badge omitted this test and counted dismissed leads the list hid). The
+  // shared helper is the single soft-removal predicate both sides call; the
+  // badge passes no session Sets (those are Inbox-local) and reconciles to an
+  // in-session action on the next people refetch. The list layers its own
+  // view filters (passesInboxFilters) ON TOP — those are NOT removals and are
+  // deliberately absent here, so filtering a view never zeroes the badge.
   const inboxCount = useMemo(() => {
     const scopedPeople = locFilter === 'all' ? patchedPeople : patchedPeople.filter(p => p.locationId === locFilter)
     const openIds = new Set(openFiltered.map(e => e.client_id))
     const wonIds = new Set(filtered.filter(e => e.stage === CLOSED_WON).map(e => e.client_id))
+    const now = Date.now()
     let n = 0
     for (const p of scopedPeople) {
-      const s = deriveClientStatus(p, openIds, Date.now(), wonIds)
+      if (isSoftRemovedFromInbox(p, now)) continue
+      const s = deriveClientStatus(p, openIds, now, wonIds)
       if (s === 'New' || s === 'Attempting') n++
     }
     return n
