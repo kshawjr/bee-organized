@@ -126,19 +126,22 @@ describe('#114 stage-email wrapper — commercial closed-job templates stay unbr
   )
 })
 
-describe('#114 stage-email wrapper — welcome-email stays byte-identical (untouched path)', () => {
+describe('welcome-email render path — unbranded bodyToHtml base, never the #90 wrapper', () => {
   // welcome is COMMERCIAL and never routes through renderStageEmailContent; it
-  // renders in lib/welcome-email.ts via the plain bodyToHtml path. Guard that
-  // that module still uses bodyToHtml and never adopts the branded wrapper, so
-  // welcome output remains byte-identical to before #114.
+  // renders in lib/welcome-email.ts via the plain bodyToHtml path. #115 now
+  // appends the CAN-SPAM footer on top of that base — but welcome must never
+  // adopt the branded #90 drip wrapper (which would fake an official footer).
   const src = readFileSync(join(__dirname, 'welcome-email.ts'), 'utf8')
 
-  it('welcome-email.ts renders via bodyToHtml with the raw body as the text alternative', () => {
+  it('welcome-email.ts builds its base HTML via the plain bodyToHtml path', () => {
     expect(src).toContain('const html = bodyToHtml(rendered.body)')
-    expect(src).toContain('text: rendered.body')
   })
 
   it('welcome-email.ts does not import or call the branded drip wrapper', () => {
     expect(/buildBrandedDrip|drip-email-layout/.test(src)).toBe(false)
+  })
+
+  it('welcome-email.ts appends the #115 CAN-SPAM footer (it is a commercial email)', () => {
+    expect(src).toContain('appendCanSpamFooter')
   })
 })

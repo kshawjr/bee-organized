@@ -32,6 +32,24 @@ export type MarketingConsentFields = {
 
 export type MarketingBlockReason = 'opted_out' | 'unsubscribed' | 'no_consent'
 
+// Who the recipient is — decides the footer's "why you're getting this" line.
+// CAN-SPAM requires that line to be ACCURATE: it is a header/identification
+// element, so a false one ("you joined our mailing list" to someone who never
+// did) is its own deceptive-header violation, not a copy nicety.
+//
+//   mailing_list  — joined the opt-in list via the no-coverage flow (the only
+//                   genuine mailing-list cohort; DEFAULT so existing behavior
+//                   and any future real mailing-list send are unchanged).
+//   inquiry       — asked about Bee Organized (the Welcome email's audience).
+//   client        — a past/current client (the Closed-Job follow-ups' audience).
+export type MarketingAudience = 'mailing_list' | 'inquiry' | 'client'
+
+const AUDIENCE_REASON: Record<MarketingAudience, string> = {
+  mailing_list: "You're receiving this because you joined the Bee Organized mailing list.",
+  inquiry: "You're receiving this because you inquired about Bee Organized.",
+  client: "You're receiving this because you're a Bee Organized client.",
+}
+
 // The send-time gate. Null = this lead may receive marketing; any string is
 // the refusal reason, ordered most-explicit-first so a lead that both opted
 // out and lacks consent reports the stronger fact.
@@ -77,20 +95,24 @@ function escapeHtml(s: string): string {
 export function buildMarketingFooter(args: {
   unsubscribeUrl: string
   postalAddress?: string | null
+  // Selects the accurate "why you're getting this" line. Defaults to
+  // 'mailing_list' so pre-existing callers and tests are unchanged.
+  audience?: MarketingAudience
 }): { html: string; text: string } {
   const { unsubscribeUrl } = args
   const postal = (args.postalAddress || '').trim()
+  const reason = AUDIENCE_REASON[args.audience ?? 'mailing_list']
 
   const textLines = [
     '—',
-    "You're receiving this because you joined the Bee Organized mailing list.",
+    reason,
     `Unsubscribe at any time: ${unsubscribeUrl}`,
     ...(postal ? [`Bee Organized · ${postal}`] : []),
   ]
   const text = textLines.join('\n')
 
   const html = `<div style="margin-top:28px;padding-top:14px;border-top:1px solid rgba(0,0,0,0.08);font-size:11px;line-height:1.6;color:#8a9e9a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
-  <p style="margin:0 0 4px;">You're receiving this because you joined the Bee Organized mailing list.</p>
+  <p style="margin:0 0 4px;">${escapeHtml(reason)}</p>
   <p style="margin:0 0 4px;"><a href="${escapeHtml(unsubscribeUrl)}" style="color:#4a5e5a;text-decoration:underline;">Unsubscribe</a> at any time — one click, nothing to fill in.</p>
   ${postal ? `<p style="margin:0;">Bee Organized &middot; ${escapeHtml(postal)}</p>` : ''}
 </div>`

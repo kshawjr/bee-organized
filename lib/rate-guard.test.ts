@@ -17,7 +17,7 @@
 // All three return error='missing_rate', which the cron counts as
 // held_missing_rate (expected skip, own counter — never a silent skip,
 // never a failure alarm). No placeholder rate is ever invented.
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // ── chainable supabaseService mock (per-table FIFO queue + call recording),
 //    same shape as drip-interface-active-gate.test.ts. ────────────────────
@@ -73,9 +73,19 @@ const LOC_UUID = 'loc-uuid-1'
 // The live sentence from the -a/-b master templates.
 const RATE_BODY = 'Our rate starts at {{rate_per_hour}} per hour per Bee.'
 
+// #115 — the commercial welcome send now appends a CAN-SPAM footer, which fails
+// closed without a postal address + app origin. Set both so the happy-path
+// welcome SEND behaves as before; the HELD (missing-rate) tests bail earlier.
+const savedEnv = { postal: process.env.MARKETING_POSTAL_ADDRESS, app: process.env.NEXT_PUBLIC_APP_URL }
 beforeEach(() => {
   h.reset()
   vi.clearAllMocks()
+  process.env.MARKETING_POSTAL_ADDRESS = '123 Hive Lane, Suite 4, Omaha, NE 68102'
+  process.env.NEXT_PUBLIC_APP_URL = 'https://beehive.beeorganized.com'
+})
+afterEach(() => {
+  savedEnv.postal === undefined ? delete process.env.MARKETING_POSTAL_ADDRESS : (process.env.MARKETING_POSTAL_ADDRESS = savedEnv.postal)
+  savedEnv.app === undefined ? delete process.env.NEXT_PUBLIC_APP_URL : (process.env.NEXT_PUBLIC_APP_URL = savedEnv.app)
 })
 
 // ═══ 1. The predicate itself ═══════════════════════════════════════
@@ -193,6 +203,7 @@ describe('rate guard — welcome (sendWelcomeEmail)', () => {
     h.enqueue('leads', welcomeLead)
     h.enqueue('locations', { ...locBase, rate_per_hour: '$95' })
     h.enqueue('templates', { subject: 'Welcome!', body: RATE_BODY })
+    h.enqueue('leads', { unsubscribe_token: 'tok-existing' })  // #115 CAN-SPAM footer token read
     h.enqueue('leads', null)        // mark-sent update
     h.enqueue('touchpoints', null)  // touchpoint insert
 

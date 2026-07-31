@@ -27,6 +27,7 @@ import { resolveOwnerBookingLink, blockedOnMissingBookingLink } from './booking-
 import { bodyToHtml } from './drip-send'
 import { buildBrandedDripHtml, buildBrandedDripText, type BrandedEmailContext } from './drip-email-layout'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
+import { appendCanSpamFooter } from './marketing-unsubscribe'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -77,6 +78,12 @@ const ALL_STAGE_EMAIL_KEYS = [
 const TRANSACTIONAL_STAGE_EMAIL_KEYS = new Set(
   [...ESTIMATE_ORGANIZING_TRIGGERS, ...ESTIMATE_MOVING_TRIGGERS].map(t => t.key),
 )
+
+// The two Closed-Job follow-ups are COMMERCIAL (opp_closed_job_3mo = "1 Free
+// Hour" offer; opp_closed_job_12mo = year-later re-solicitation). #115 attaches
+// the CAN-SPAM footer to these at send time (see sendStageEmail); the four
+// estimate follow-ups above are transactional and get no footer.
+const COMMERCIAL_STAGE_EMAIL_KEYS = new Set(CLOSED_WON_TRIGGERS.map(t => t.key))
 
 // Choose the HTML/text rendering for a stage email. Transactional estimate
 // follow-ups get the branded wrapper; commercial closed-job templates get the
@@ -361,11 +368,36 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
   // layout; commercial closed-job templates keep the plain path. The wrapper
   // reads the location chrome (name/phone/reviews) off the same resolved values
   // the body tokens use, and never re-renders tokens.
-  const { html, text } = renderStageEmailContent(row.stage_email_key, rendered.body, {
+  let { html, text } = renderStageEmailContent(row.stage_email_key, rendered.body, {
     location_name: loc.name,
     location_phone: loc.phone,
     reviews_link: loc.reviews_link,
   })
+
+  // #115 — the two Closed-Job follow-ups are COMMERCIAL, so they carry the
+  // CAN-SPAM footer (unsubscribe link + postal address); audience 'client'
+  // because these go to past/current clients. The four estimate follow-ups are
+  // transactional and are sent unchanged (no footer).
+  //
+  // FAIL CLOSED: if no token can be minted or MARKETING_POSTAL_ADDRESS is unset,
+  // HOLD — leave send_at intact (do NOT mark sent) so the cron retries and it
+  // goes out on the first tick after the gap is fixed, exactly like the rate /
+  // booking-link holds above. A non-compliant send is the violation; not sending
+  // is the safe failure.
+  if (COMMERCIAL_STAGE_EMAIL_KEYS.has(row.stage_email_key)) {
+    const footered = await appendCanSpamFooter(html, text, {
+      leadId: lead.id,
+      audience: 'client',
+    })
+    if (!footered.ok) {
+      console.warn('[stage-emails] held: CAN-SPAM footer could not be built — send refused', {
+        rowId: row.id, leadId: lead.id, key: row.stage_email_key, reason: footered.reason,
+      })
+      return { sent: false, error: `canspam_${footered.reason}` }
+    }
+    html = footered.html
+    text = footered.text
+  }
 
   const result = await sendEmail({
     locationId: loc.id,

@@ -33,10 +33,15 @@
 // wrapper change does NOT trip it — the split is enforced in code + guarded by
 // lib/beta-stage-email-wrapper.test.ts, not here. This comment is the record.
 //
-// Deliberately NOT built yet (Kevin 7/24: tripwire only, no footers):
-// the three send rails append no footer and mint no unsubscribe token.
-// That exposure is pinned too — the day footer machinery lands, this
-// file trips and the pins here get consciously updated.
+// FOOTER STATUS (#115, this change): the three COMMERCIAL emails now carry a
+// CAN-SPAM footer (unsubscribe link + postal address). The rail split is
+// recorded and guarded in the "rail split" block below:
+//   welcome            → lib/welcome-email.ts appends the footer (audience inquiry)
+//   opp_closed_job_3mo → lib/stage-emails.ts appends the footer (audience client)
+//   opp_closed_job_12mo→ lib/stage-emails.ts appends the footer (audience client)
+// The drip rail (lib/drip-send.ts) stays footer-less — its 24 steps are
+// transactional. The seed BODIES are unchanged (the footer is appended at send
+// time, not stored), so the hash pins below still hold and still guard copy edits.
 //
 // Scope caveat: this sweeps migrations/seed_master_drip_paths.sql, the
 // repo source of master content (masters are corp-gated byte-pristine in
@@ -132,14 +137,14 @@ const EXPECTED_TEMPLATE_PROFILES: Record<string, string[]> = {
   opp_moving_estimate_30d: [],
 }
 
-// Commercial-primary set per the audit. These send footer-less TODAY —
-// membership changes only with a redone assessment (and, for additions,
-// a footer plan).
+// Commercial-primary set per the audit. As of #115 these carry a CAN-SPAM
+// footer (appended at send time — see the rail-split block). Membership changes
+// only with a redone assessment.
 const COMMERCIAL_PRIMARY = ['welcome', 'opp_closed_job_3mo', 'opp_closed_job_12mo']
 
-// The commercial trio is hash-pinned: any copy edit to a footer-less
-// commercial email must re-ask the CAN-SPAM question (12mo especially —
-// its classification rests on judgment, not lexical markers).
+// The commercial trio is hash-pinned: any copy edit to a commercial email must
+// re-ask the CAN-SPAM question (12mo especially — its classification rests on
+// judgment, not lexical markers).
 const COMMERCIAL_BODY_HASHES: Record<string, string> = {
   welcome: '70fcc5951201',
   opp_closed_job_3mo: '5b28a1f22e7a',
@@ -193,33 +198,58 @@ describe('CAN-SPAM tripwire — content classification', () => {
     ).toBe(false)
   })
 
-  it('commercial-primary bodies are byte-pinned until they get a footer', () => {
+  it('commercial-primary bodies are byte-pinned (copy edits must re-ask the question)', () => {
     for (const key of COMMERCIAL_PRIMARY) {
       expect(
         hash12(byKey.get(key)!.body),
-        `${key} copy changed. It is classified commercial-primary and sends WITHOUT a ` +
-          'CAN-SPAM footer — re-run the assessment on the new copy (and update this hash) ' +
-          'or ship the footer with the change.',
+        `${key} copy changed. It is classified commercial-primary and sends WITH the #115 ` +
+          'CAN-SPAM footer — re-run the primary-purpose assessment on the new copy and ' +
+          'update this hash (a new offer or a shift in purpose may change what the footer must say).',
       ).toBe(COMMERCIAL_BODY_HASHES[key])
     }
   })
 })
 
-describe('CAN-SPAM tripwire — rails stay footer-less knowingly', () => {
-  // The documented exposure: no rail appends buildMarketingFooter or
-  // mints an unsubscribe token. When footer machinery lands (the fix for
-  // the commercial trio), this trips so the pins above get revisited —
-  // update COMMERCIAL_* expectations and retire this block deliberately.
-  const RAILS = ['lib/drip-send.ts', 'lib/welcome-email.ts', 'lib/stage-emails.ts']
+describe('CAN-SPAM tripwire — the commercial/transactional rail split (#115)', () => {
+  // #115 wired the footer onto the three COMMERCIAL emails. The split is now
+  // enforced structurally: the commercial rails carry the footer machinery, the
+  // drip rail does not. If this block trips, a rail crossed the line — either a
+  // commercial rail lost its footer, or the transactional drip rail grew one.
+  const FOOTER_MACHINERY = /appendCanSpamFooter|buildMarketingFooter|ensureUnsubscribeToken|marketing-unsubscribe|marketing-consent/
 
-  it('no drip rail imports footer/unsubscribe machinery yet', () => {
-    for (const rail of RAILS) {
+  it('the commercial rails (welcome, stage-emails) carry the CAN-SPAM footer machinery', () => {
+    for (const rail of ['lib/welcome-email.ts', 'lib/stage-emails.ts']) {
       const src = readFileSync(join(ROOT, rail), 'utf8')
       expect(
-        /buildMarketingFooter|ensureUnsubscribeToken|marketing-consent|marketing-unsubscribe/.test(src),
-        `${rail} now touches footer/unsubscribe machinery — the footer work has started. ` +
-          'Update the COMMERCIAL_PRIMARY pins in this tripwire (welcome, opp_closed_job_3mo, ' +
-          'opp_closed_job_12mo were the emails needing the footer) and retire this assertion.',
+        FOOTER_MACHINERY.test(src),
+        `${rail} no longer imports the CAN-SPAM footer machinery — a commercial email ` +
+          '(welcome / opp_closed_job_3mo / opp_closed_job_12mo) may now send footer-less. ' +
+          'Restore appendCanSpamFooter on the commercial path.',
+      ).toBe(true)
+    }
+  })
+
+  it('the drip rail stays footer-less — its 24 steps are transactional', () => {
+    const src = readFileSync(join(ROOT, 'lib/drip-send.ts'), 'utf8')
+    expect(
+      FOOTER_MACHINERY.test(src),
+      'lib/drip-send.ts now touches footer/unsubscribe machinery. Drip steps are ' +
+        'transactional and must stay footer-less — if a step became commercial, redo the ' +
+        'assessment and update this tripwire deliberately.',
+    ).toBe(false)
+  })
+
+  it('no rail gates a commercial send on marketingSendBlockReason (CAN-SPAM ≠ prior consent)', () => {
+    // That gate demands marketing_consented_at, the OPT-IN mailing-list contract
+    // (0/9431 leads in prod). CAN-SPAM turns on opt-out + address + accurate
+    // headers, not consent — using it here would refuse every commercial send.
+    for (const rail of ['lib/drip-send.ts', 'lib/welcome-email.ts', 'lib/stage-emails.ts']) {
+      const src = readFileSync(join(ROOT, rail), 'utf8')
+      expect(
+        /marketingSendBlockReason/.test(src),
+        `${rail} calls marketingSendBlockReason — that consent gate is for the opt-in ` +
+          'mailing list, not CAN-SPAM. Commercial rails keep their marketing_opt_out check ' +
+          'and add only the token + footer.',
       ).toBe(false)
     }
   })

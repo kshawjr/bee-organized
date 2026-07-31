@@ -22,7 +22,7 @@
 //
 // All three return error='missing_booking_link', counted by the cron as
 // held_missing_booking_link.
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // ── chainable supabaseService mock (per-table FIFO queue + call recording),
 //    same shape as rate-guard.test.ts. ────────────────────────────────────
@@ -96,10 +96,20 @@ const BOOKING_BODY =
 const OWNER_BOOKING_BODY =
   'Please click HERE ({{owner_booking_link}}) to select a day and time that will work best for you.'
 
+// #115 — the commercial welcome/closed-job sends now append a CAN-SPAM footer,
+// which fails closed without a postal address + app origin. Set both so this
+// suite's happy-path SENDS behave as before; the HELD tests bail earlier.
+const savedEnv = { postal: process.env.MARKETING_POSTAL_ADDRESS, app: process.env.NEXT_PUBLIC_APP_URL }
 beforeEach(() => {
   h.reset()
   vi.clearAllMocks()
   getPrimaryOwnerMock.mockResolvedValue(null)
+  process.env.MARKETING_POSTAL_ADDRESS = '123 Hive Lane, Suite 4, Omaha, NE 68102'
+  process.env.NEXT_PUBLIC_APP_URL = 'https://beehive.beeorganized.com'
+})
+afterEach(() => {
+  savedEnv.postal === undefined ? delete process.env.MARKETING_POSTAL_ADDRESS : (process.env.MARKETING_POSTAL_ADDRESS = savedEnv.postal)
+  savedEnv.app === undefined ? delete process.env.NEXT_PUBLIC_APP_URL : (process.env.NEXT_PUBLIC_APP_URL = savedEnv.app)
 })
 
 // ═══ 1. The resolution chain ═══════════════════════════════════════
@@ -390,6 +400,7 @@ describe('booking guard — welcome (sendWelcomeEmail)', () => {
     h.enqueue('leads', welcomeLead)
     h.enqueue('locations', { ...locBase, calendar_link: LOC_LINK })
     h.enqueue('templates', { subject: 'Welcome!', body: BOOKING_BODY })
+    h.enqueue('leads', { unsubscribe_token: 'tok-existing' })  // #115 CAN-SPAM footer token read
     h.enqueue('leads', null)        // mark-sent update
     h.enqueue('touchpoints', null)  // touchpoint insert
 

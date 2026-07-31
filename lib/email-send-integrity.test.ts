@@ -10,7 +10,7 @@
 //   3. drip-pause / drip-resume endpoints sync leads.paused so the flag
 //      (chip, welcome-hold) and the progress rows (cron) can't diverge.
 //   4. The dead unpaused door (dual-write createLead) stays deleted.
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // ── mock supabaseService: recording query-builder with per-table FIFO
 //    response queues (same pattern as beta-intake-dedup.test.ts).
@@ -115,9 +115,23 @@ const LOC = {
   city: 'Boulder', state: 'CO', timezone: 'America/Denver',
 }
 
+// #115 — welcome + closed-job stage emails are commercial and now append the
+// CAN-SPAM footer, which fails closed without a postal address + app origin. Set
+// both so the happy-path SENDS in this suite behave as they did pre-#115; the
+// opt-out / junk / pause tests bail before the footer and are unaffected.
+const savedEnv = {
+  postal: process.env.MARKETING_POSTAL_ADDRESS,
+  app: process.env.NEXT_PUBLIC_APP_URL,
+}
 beforeEach(() => {
   h.reset()
   vi.clearAllMocks()
+  process.env.MARKETING_POSTAL_ADDRESS = '123 Hive Lane, Suite 4, Omaha, NE 68102'
+  process.env.NEXT_PUBLIC_APP_URL = 'https://beehive.beeorganized.com'
+})
+afterEach(() => {
+  savedEnv.postal === undefined ? delete process.env.MARKETING_POSTAL_ADDRESS : (process.env.MARKETING_POSTAL_ADDRESS = savedEnv.postal)
+  savedEnv.app === undefined ? delete process.env.NEXT_PUBLIC_APP_URL : (process.env.NEXT_PUBLIC_APP_URL = savedEnv.app)
 })
 
 // ═══ 1. marketing_opt_out × three queues ═══════════════════
@@ -223,11 +237,12 @@ describe('welcome email — junk cancels, pause holds, resume releases', () => {
     h.enqueue('leads', baseLead({ paused: false }))
     h.enqueue('locations', LOC)
     h.enqueue('templates', { subject: 'Welcome!', body: 'Hi {{first_name}}' })
+    h.enqueue('leads', { unsubscribe_token: 'tok-existing' })   // #115 CAN-SPAM footer token read (no mint)
     const res = await sendWelcomeEmail('lead-1')
     expect(res).toEqual({ sent: true })
     expect(sendEmailMock).toHaveBeenCalledTimes(1)
     const upd = updatePayloads('leads')
-    expect(upd).toHaveLength(1)
+    expect(upd).toHaveLength(1)   // only welcome_email_sent_at; existing token → no mint write
     expect(upd[0].welcome_email_sent_at).toBeTruthy()
   })
 

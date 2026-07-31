@@ -17,6 +17,7 @@ import { blockedOnMissingRate } from './rate-guard'
 import { resolveOwnerBookingLink, blockedOnMissingBookingLink } from './booking-link'
 import { bodyToHtml } from './drip-send'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
+import { appendCanSpamFooter } from './marketing-unsubscribe'
 
 const WELCOME_LEGACY_ID = 'welcome'
 const WELCOME_DELAY_MS = 24 * 60 * 60 * 1000  // 24 hours
@@ -246,14 +247,39 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
   }
 
   const rendered = renderTemplate({ subject: tpl.subject, body: tpl.body }, ctx)
+  // Base HTML is the plain bodyToHtml path — welcome is COMMERCIAL, so it does
+  // NOT adopt the #90 branded drip wrapper (#114); the CAN-SPAM footer below is
+  // what makes it compliant.
   const html = bodyToHtml(rendered.body)
+
+  // #115 — the Welcome email is COMMERCIAL (pure brand promo, no transactional
+  // content), so it must carry a CAN-SPAM footer: a working unsubscribe link +
+  // physical postal address. Append it to both bodies; audience 'inquiry' because
+  // the recipient asked about Bee Organized (they never joined a mailing list —
+  // an inaccurate reason line is itself a deceptive-header problem).
+  //
+  // FAIL CLOSED: if no token can be minted or MARKETING_POSTAL_ADDRESS is unset,
+  // HOLD — leave welcome_email_scheduled_at intact (do NOT mark sent) so the cron
+  // retries and the email goes out on the first tick after the gap is fixed,
+  // exactly like the rate / booking-link holds above. A non-compliant send is the
+  // violation; not sending is the safe failure.
+  const footered = await appendCanSpamFooter(html, rendered.body, {
+    leadId: lead.id,
+    audience: 'inquiry',
+  })
+  if (!footered.ok) {
+    console.warn('[welcome] held: CAN-SPAM footer could not be built — send refused', {
+      leadId, locationId: loc.id, reason: footered.reason,
+    })
+    return { sent: false, error: `canspam_${footered.reason}` }
+  }
 
   const result = await sendEmail({
     locationId: loc.id,
     to: lead.email.trim(),
     subject: rendered.subject || `(no subject)`,
-    html,
-    text: rendered.body,
+    html: footered.html,
+    text: footered.text,
     // Notebook context (#103): welcome shares the drip's sendEmail path and
     // had the same null email_kind / lead_id gap. Stamp it so it isn't the one
     // outbound rail still invisible to the notification_log queries.
