@@ -29,8 +29,7 @@ import NewClientSheet from './NewClientSheet'
 import { mapLeadToPerson, touchpointToTimelineEntry } from '@/lib/people-mapper'
 import { leadColsToPersonFields } from './shared/leadPatchMap'
 import { mergePeopleTouches } from './shared/peopleTouchPatch'
-import { deriveClientStatus } from './shared/clientStatus'
-import { isSoftRemovedFromInbox } from './shared/inboxSoftRemoval'
+import { isInboxCountable } from './shared/inboxCountable'
 import { isTerminal, CLOSED_WON } from './shared/stageConfig'
 import { ENGAGEMENT_FILTER_DEFAULTS, passesEngagementFilters } from './shared/engagementStatus'
 import { reconcileServerRows, mergeEngagements } from './shared/engagementRevalidate'
@@ -569,7 +568,9 @@ export default function HiveShell({
   // out; isSoftRemovedFromInbox drops junked/snoozed/dismissed/transferred
   // rows so the count matches what the list actually shows (#89 — before, the
   // badge omitted this test and counted dismissed leads the list hid). The
-  // shared helper is the single soft-removal predicate both sides call; the
+  // count rule itself — New/Attempting AND not soft-removed — is the shared
+  // isInboxCountable helper (issue 119), so the "N hidden by filters" strip derives
+  // its number from the SAME predicate and can't drift from this badge. The
   // badge passes no session Sets (those are Inbox-local) and reconciles to an
   // in-session action on the next people refetch. The list layers its own
   // view filters (passesInboxFilters) ON TOP — those are NOT removals and are
@@ -581,9 +582,7 @@ export default function HiveShell({
     const now = Date.now()
     let n = 0
     for (const p of scopedPeople) {
-      if (isSoftRemovedFromInbox(p, now)) continue
-      const s = deriveClientStatus(p, openIds, now, wonIds)
-      if (s === 'New' || s === 'Attempting') n++
+      if (isInboxCountable(p, openIds, wonIds, now)) n++
     }
     return n
   }, [patchedPeople, locFilter, openFiltered, filtered])

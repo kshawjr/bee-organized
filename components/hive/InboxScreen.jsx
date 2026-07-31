@@ -54,6 +54,7 @@ import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 're
 import { createPortal } from 'react-dom'
 import { deriveClientStatus } from './shared/clientStatus'
 import { isSoftRemovedFromInbox } from './shared/inboxSoftRemoval'
+import { isInboxCountable } from './shared/inboxCountable'
 import { CHIP_STYLES, CLOSED_WON, isTerminal } from './shared/stageConfig'
 import { formatInboxAgeParts } from './shared/engagementStatus'
 import StatusChip from '@/components/ui/StatusChip'
@@ -66,7 +67,7 @@ import TouchpointModal, { METHODS } from './TouchpointModal'
 import TransferLeadModal from './TransferLeadModal'
 import NoCoverageModal from './NoCoverageModal'
 import NetworkConvertSheet from './NetworkConvertSheet'
-import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty } from './shared/FilterPopover'
+import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty, ClearAllButton } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
 
@@ -79,6 +80,27 @@ const INBOX_SORTS = [
 const INBOX_FILTER_DEFAULTS = { sources: [], hasPhone: false, hasEmail: false, touchBand: null, age: null }
 const inboxFilterCount = (f) =>
   (f.sources.length ? 1 : 0) + (f.hasPhone ? 1 : 0) + (f.hasEmail ? 1 : 0) + (f.touchBand ? 1 : 0) + (f.age ? 1 : 0)
+
+// Persistent strip that reconciles the Inbox nav badge with the list: when a
+// view filter is holding New/Attempting leads off the list, `count` is exactly
+// how many (badge − visible), so the badge and this number agree. Shows even
+// when the transfer section is on screen — the gap FilteredEmpty (all-empty
+// only) misses. Plain sentence for a 45-65 audience, quiet sunken banner, and
+// the SAME "Clear all" affordance as the popover so the reset reads familiar.
+function HiddenByFiltersStrip({ count, onClear }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap',
+      padding: '7px 12px', marginBottom: '12px',
+      background: T.surface.sunken, border: T.border.thin, borderRadius: T.radius.inset,
+    }}>
+      <span style={{ fontSize: '12px', color: T.ink.secondary, lineHeight: 1.4 }}>
+        {count === 1 ? '1 lead is hidden by your filters.' : `${count} leads are hidden by your filters.`}
+      </span>
+      <ClearAllButton onClick={onClear} />
+    </div>
+  )
+}
 
 // Section color families ride the CHIP_STYLES pairs (teal = New, blue =
 // Attempting) — the same one pair the chips and unread badge resolve to.
@@ -478,6 +500,27 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     working.sort(cmp)
     return { transfer, fresh, working }
   }, [scoped, transferPeople, openClientIds, wonClientIds, junkedIds, snoozedIds, dismissedIds, transferredIds, filters, inboxSort]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // How many badge-countable leads a VIEW filter is keeping off the list.
+  // By construction this equals (nav badge) − (visible fresh + working): same
+  // per-location scope, same isInboxCountable rule the badge uses (New/
+  // Attempting AND not soft-removed, via the shared helper), same atLocOther
+  // exclusion the badge already applies in practice — the ONLY difference from
+  // the visible set is passesInboxFilters, so a lead lands here exactly when
+  // the filter is why it isn't on the list. That makes the strip's number
+  // reconcile with the badge instead of contradicting it (issue 119). Short-circuit
+  // on no active filters so an unfiltered inbox never pays for the scan.
+  const hiddenByFilters = useMemo(() => {
+    if (inboxFilterCount(filters) === 0) return 0
+    const sessionSets = { junkedIds, snoozedIds, dismissedIds, transferredIds }
+    let n = 0
+    for (const p of scoped) {
+      if (p.atLocOther) continue
+      if (passesInboxFilters(p)) continue
+      if (isInboxCountable(p, openClientIds, wonClientIds, nowMs, sessionSets)) n++
+    }
+    return n
+  }, [scoped, openClientIds, wonClientIds, junkedIds, snoozedIds, dismissedIds, transferredIds, filters, nowMs]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Selection universe ─────────────────────────────────────
   // The VISIBLE rows (filters + section derivation already applied),
@@ -1115,6 +1158,15 @@ export default function InboxScreen({ people = [], transferPeople = [], location
         </div>
       )}
 
+      {/* Hidden-by-filters strip — ABOVE the empty/sections branch so it shows
+          whether the list is empty OR the transfer section is rendering. Its
+          count is the badge − visible delta, so a badge of 1 over an empty
+          list now has a plain, on-screen explanation. Gated on hidden > 0, not
+          on the whole list being empty (the case FilteredEmpty missed). */}
+      {!locationRequired && hiddenByFilters > 0 && (
+        <HiddenByFiltersStrip count={hiddenByFilters} onClear={clearFilters} />
+      )}
+
       {/* `!locationRequired &&` is load-bearing: on 'All Locations' there are no
           leads loaded, so all three buckets are empty and this generic empty
           state would win — showing "New inquiries land here" to someone whose
@@ -1123,12 +1175,19 @@ export default function InboxScreen({ people = [], transferPeople = [], location
           required, always fall through to the sections branch so the transfer
           queue and the prompt render. */}
       {!locationRequired && transfer.length === 0 && fresh.length === 0 && working.length === 0 ? (
+        hiddenByFilters > 0 ? null : (
+        // A filter is nominally active but nothing New/Attempting is hidden by
+        // it (hidden === 0 → no badge to contradict): FilteredEmpty still names
+        // the active filter so a source/age that matches zero leads doesn't
+        // read as "no leads exist". The strip owns the badge-reconciling case
+        // above; this owns the genuinely-empty-but-filtered one.
         inboxFilterCount(filters) > 0 ? (
           <FilteredEmpty count={inboxFilterCount(filters)} onClear={clearFilters} noun="inbox leads" />
         ) : (
         <div style={{ padding: '36px', textAlign: 'center', color: T.ink.quiet, fontSize: '12px', border: T.border.dashedSoft, borderRadius: T.radius.inset }}>
           New inquiries land here
         </div>
+        )
         )
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
