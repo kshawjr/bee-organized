@@ -43,9 +43,10 @@ describe('feedback composer affordance (franchise mount only)', () => {
     expect(screenSrc).toContain('onReportFeedback = null')
     // Button renders only when the prop is passed…
     expect(screenSrc).toMatch(/\{onReportFeedback && \(\s*<button/)
-    // …fires the callback, and is labeled for both actions.
+    // …fires the callback, and is labeled for both actions ("idea" is the
+    // owner-facing word for a feature request now — issue 126).
     expect(screenSrc).toContain('onClick={onReportFeedback}')
-    expect(screenSrc).toContain('Report a bug / suggest a feature')
+    expect(screenSrc).toContain('Report a bug or share an idea')
   })
 
   it('the franchise feedback mount passes onReportFeedback → the EXISTING FeedbackModal (setShowFeedback), landing on the Submit tab', () => {

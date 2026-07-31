@@ -48,6 +48,7 @@ import AskBeeHubPanel from "@/components/hive/AskBeeHubPanel"
 // Pure presentational icon set (inline SVG, zero deps) — safe to import
 // statically like betaGate; it pulls no beta-chunk surface code with it.
 import { IconBug, IconBulb, IconPlus, IconPaperclip, IconMessage } from "@/components/ui/icons"
+import FilterChips from "@/components/ui/FilterChips"
 import AdminNotificationsScreen from "@/components/admin/AdminNotificationsScreen"
 import SystemHealthScreen from "@/components/admin/SystemHealthScreen"
 // The compact, Home-sized cut of System Health — stands in for the operational
@@ -28194,6 +28195,20 @@ const FEEDBACK_STATUS_CONF = {
 }
 const FEEDBACK_STATUS_ORDER = ['submitted','under_review','planned','in_progress','shipped','declined']
 
+// Plain-English status labels for the owner-facing surfaces (issue 126). The
+// stored values in FEEDBACK_STATUS_ORDER / the DB are UNCHANGED — this is a
+// display map only. The audience is non-technical franchise owners, so the
+// filter chips, the row badge, and the triage dropdown all read in plain words
+// ("Looking at it") instead of the database vocabulary ("under_review").
+const FEEDBACK_STATUS_PLAIN = {
+  submitted:    'New',
+  under_review: 'Looking at it',
+  planned:      'Planned',
+  in_progress:  'In progress',
+  shipped:      'Fixed',
+  declined:     'Not planned',
+}
+
 function feedbackTimeAgo(iso) {
   if (!iso) return ''
   const then = new Date(iso).getTime()
@@ -28213,9 +28228,11 @@ function feedbackTimeAgo(iso) {
 // radius 10px, no border.
 function FeedbackStatusBadge({ status }) {
   const conf = FEEDBACK_STATUS_CONF[status] || FEEDBACK_STATUS_CONF.submitted
+  // Chip color stays the stored-status family; the label reads in plain words.
+  const label = FEEDBACK_STATUS_PLAIN[status] || conf.label
   return (
     <span style={{ display:'inline-block', padding:'2px 8px', borderRadius:'10px', fontSize:'11px', fontWeight:500, lineHeight:1.5, color:conf.color, background:conf.bg, whiteSpace:'nowrap' }}>
-      {conf.label}
+      {label}
     </span>
   )
 }
@@ -29747,7 +29764,7 @@ function AdminFeedbackDetailModal({ item, onClose, onSaved }) {
             <label style={{ display:'block', fontSize:'12px', fontWeight:700, color:'#1a2e2b', marginBottom:'6px' }}>Status</label>
             <select value={status} onChange={e => setStatus(e.target.value)} style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', background:'white', cursor:'pointer' }}>
               {FEEDBACK_STATUS_ORDER.map(s => (
-                <option key={s} value={s}>{FEEDBACK_STATUS_CONF[s].label}</option>
+                <option key={s} value={s}>{FEEDBACK_STATUS_PLAIN[s] || FEEDBACK_STATUS_CONF[s].label}</option>
               ))}
             </select>
           </div>
@@ -30062,7 +30079,9 @@ function ConversionsDueTab({ onOpenLocation = () => {} }) {
 }
 
 // Admin-area "Feedback" tab — org-wide triage list + detail modal.
-function AdminFeedbackScreen({
+// Exported so the filter redesign (issue 126) can be mounted directly in tests
+// rather than pinned by source-string match.
+export function AdminFeedbackScreen({
   onPendingCountChange = () => {},
   // VIEW-AS DATA SCOPING IS PER-SURFACE: "view as" swaps displayed
   // role/name only — API calls still ride the REAL session, so when a
@@ -30084,9 +30103,18 @@ function AdminFeedbackScreen({
   const [error, setError]       = useState(null)
   const [typeFilter, setTypeFilter]     = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [mineOnly, setMineOnly]         = useState(false)
   const [locFilter, setLocFilter]       = useState('all')
   const [userQuery, setUserQuery]       = useState('')
   const [selected, setSelected] = useState(null)
+
+  // "Just mine" matches the viewer's own submissions by user_id. Deliberately
+  // NOT persisted — every filter here resets on navigation (issue 126). A
+  // stored filter would strand someone behind a view they set weeks ago and
+  // don't remember (the issue 123 trap); a feedback screen that always opens
+  // showing everything is the correct default.
+  const currentUserCtx = useContext(CurrentUserContext)
+  const myId = currentUserCtx?.id || null
 
   async function load() {
     setLoading(true)
@@ -30119,17 +30147,31 @@ function AdminFeedbackScreen({
     return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
   })()
 
-  const filtered = items.filter(i => {
-    if (typeFilter !== 'all' && i.type !== typeFilter) return false
-    if (statusFilter !== 'all' && i.status !== statusFilter) return false
-    if (locFilter !== 'all' && i.location_id !== locFilter) return false
-    if (userQuery.trim()) {
-      const q = userQuery.trim().toLowerCase()
-      const hay = `${i.submitter_name || ''} ${i.submitter_email || ''}`.toLowerCase()
-      if (!hay.includes(q)) return false
-    }
-    return true
-  })
+  // Per-axis match predicates. Kept separate so the counts below can be
+  // FACETED — each chip's number is exactly what that choice would show given
+  // the OTHER active filters, so the count never lies and no one clicks into
+  // an empty list (the issue 119 lesson: the count is what stops the blind
+  // click). `type`/`status` are single-choice; `mine` and the text search
+  // narrow further.
+  const matchType   = (i, t) => t === 'all' || i.type === t
+  const matchStatus = (i, s) => s === 'all' || i.status === s
+  const matchMine   = (i, m) => !m || (!!myId && i.user_id === myId)
+  const matchLoc    = (i)    => locFilter === 'all' || i.location_id === locFilter
+  const matchQuery  = (i) => {
+    const q = userQuery.trim().toLowerCase()
+    if (!q) return true
+    return `${i.submitter_name || ''} ${i.submitter_email || ''}`.toLowerCase().includes(q)
+  }
+
+  const filtered = items.filter(i =>
+    matchType(i, typeFilter) && matchStatus(i, statusFilter) &&
+    matchMine(i, mineOnly) && matchLoc(i) && matchQuery(i))
+
+  // Faceted counts: hold the other axes at their current selection, vary the
+  // one being counted.
+  const countType   = t => items.filter(i => matchType(i, t)   && matchStatus(i, statusFilter) && matchMine(i, mineOnly) && matchLoc(i) && matchQuery(i)).length
+  const countStatus = s => items.filter(i => matchType(i, typeFilter) && matchStatus(i, s) && matchMine(i, mineOnly) && matchLoc(i) && matchQuery(i)).length
+  const countMine   = m => items.filter(i => matchType(i, typeFilter) && matchStatus(i, statusFilter) && matchMine(i, m) && matchLoc(i) && matchQuery(i)).length
 
   // The franchise (owner/manager) mount is the one that passes the
   // composer callback; the elevated admin mounts never do. The same
@@ -30144,25 +30186,35 @@ function AdminFeedbackScreen({
   // count excludes them.
   const isClosedStatus = s => s === 'shipped' || s === 'declined'
   const openCount = items.filter(i => !isClosedStatus(i.status)).length
-  const statusCounts = items.reduce((acc, i) => { acc[i.status] = (acc[i.status] || 0) + 1; return acc }, {})
-  const typePills = [
-    { key:'all',     label:'All',      count: items.length },
-    { key:'bug',     label:'Bugs',     count: items.filter(i => i.type === 'bug').length },
-    { key:'feature', label:'Features', count: items.filter(i => i.type === 'feature').length },
+
+  // TYPE — a single-choice segmented control (FilterChips: plain text with an
+  // underline under the active segment). This is the core issue 126 fix: the
+  // old gray-fill pills read as multi-select toggles even though only one is
+  // ever active. "feature" shows as "Ideas" — the owner's word, not ours —
+  // while the stored value stays 'feature'.
+  const typeItems = [
+    { key:'all',     label:'Everything', count: countType('all') },
+    { key:'bug',     label:'Bugs',       count: countType('bug') },
+    { key:'feature', label:'Ideas',      count: countType('feature') },
   ]
-  const statusPills = [
-    { key:'all', label:'All', count: null },
-    ...FEEDBACK_STATUS_ORDER.map(s => ({ key:s, label: FEEDBACK_STATUS_CONF[s].label, count: statusCounts[s] || 0 })),
+  // STATUS — plain-word labels, and only statuses that ACTUALLY EXIST in the
+  // data are offered (plus the active one, so it can't vanish under you). That
+  // drops 'declined' — unused in prod — instead of hardcoding its removal, and
+  // auto-surfaces 'New'/'In progress' the moment real items land there.
+  const statusItems = [
+    { key:'all', label:'All', count: countStatus('all') },
+    ...FEEDBACK_STATUS_ORDER
+      .filter(s => countStatus(s) > 0 || statusFilter === s)
+      .map(s => ({ key:s, label: FEEDBACK_STATUS_PLAIN[s], count: countStatus(s) })),
+  ]
+  // "Just mine" — a SEPARATE axis (who submitted it), never mixed into type or
+  // status. Shown only when we know who the viewer is (a real session id);
+  // view-as / demo paths have no stable own-id so the control hides.
+  const mineItems = [
+    { key:'everyone', label:'Everyone',  count: countMine(false) },
+    { key:'mine',     label:'Just mine', count: countMine(true) },
   ]
 
-  // Soft filter pill — active gets a quiet gray fill, inactive is muted
-  // text; the count trails after a middot in quiet gray.
-  const pillStyle = active => ({
-    padding:'5px 12px', borderRadius:'20px', border:'none',
-    background: active ? 'rgba(0,0,0,0.07)' : 'transparent',
-    color: active ? '#1a1a18' : '#6b6b66',
-    fontSize:'12px', fontWeight:500, fontFamily:'inherit', cursor:'pointer', whiteSpace:'nowrap',
-  })
   // Quiet input chrome — the interactive-hairline alpha (buttons and
   // inputs share rgba(0,0,0,0.15); container hairlines stay at 0.08).
   const quietInput = { padding:'7px 10px', border:'0.5px solid rgba(0,0,0,0.15)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#1a1a18', background:'white', cursor:'pointer' }
@@ -30183,36 +30235,39 @@ function AdminFeedbackScreen({
         {onReportFeedback && (
           <button
             onClick={onReportFeedback}
-            aria-label="Report a bug or suggest a feature"
+            aria-label="Report a bug or share an idea"
             style={{ display:'inline-flex', alignItems:'center', gap:'6px', height:'36px', padding:'0 14px', borderRadius:'9px', border:'none', background:'rgba(55,138,221,0.10)', color:'#2b6aad', fontSize:'13px', fontWeight:500, fontFamily:'inherit', cursor:'pointer', whiteSpace:'nowrap', flexShrink:0 }}
           >
-            <IconPlus size={13} /> Report a bug / suggest a feature
+            <IconPlus size={13} /> Report a bug or share an idea
           </button>
         )}
       </div>
 
-      {/* Filter pills — type group | status group, one wrapping strip. */}
-      <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', gap:'2px 4px', marginBottom:'8px' }}>
-        {typePills.map(p => (
-          <button key={`type-${p.key}`} onClick={() => setTypeFilter(p.key)} aria-pressed={typeFilter === p.key} style={pillStyle(typeFilter === p.key)}>
-            {p.label}{p.count != null && <span style={{ color:'#b5b3ac', fontWeight:400 }}> · {p.count}</span>}
-          </button>
-        ))}
-        <span aria-hidden="true" style={{ width:'1px', height:'16px', background:'rgba(0,0,0,0.12)', margin:'0 8px', flexShrink:0 }} />
-        {statusPills.map(p => (
-          <button key={`status-${p.key}`} onClick={() => setStatusFilter(p.key)} aria-pressed={statusFilter === p.key} style={pillStyle(statusFilter === p.key)}>
-            {p.label}{p.count != null && <span style={{ color:'#b5b3ac', fontWeight:400 }}> · {p.count}</span>}
-          </button>
-        ))}
+      {/* TYPE — single-choice segmented control (underline-active, not a
+          fill). Reads as one-of, which the old pills did not. */}
+      <div style={{ marginBottom:'9px' }}>
+        <FilterChips items={typeItems} active={typeFilter} onChange={setTypeFilter} wrap />
       </div>
-      <div style={{ display:'flex', flexWrap:'wrap', gap:'8px', marginBottom:'14px' }}>
+      {/* STATUS — plain words, only the statuses present in the data. */}
+      <div style={{ marginBottom:'9px' }}>
+        <FilterChips items={statusItems} active={statusFilter} onChange={setStatusFilter} wrap />
+      </div>
+      {/* "Just mine" (its own axis) + location (elevated only) + name search. */}
+      <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', gap:'10px 16px', marginBottom:'14px' }}>
+        {myId && (
+          <FilterChips
+            items={mineItems}
+            active={mineOnly ? 'mine' : 'everyone'}
+            onChange={k => setMineOnly(k === 'mine')}
+          />
+        )}
         {!franchiseMount && (
           <select value={locFilter} onChange={e => setLocFilter(e.target.value)} style={quietInput}>
             <option value="all">All locations</option>
             {locOptions.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
         )}
-        <input value={userQuery} onChange={e => setUserQuery(e.target.value)} placeholder="Search by user name/email" style={{ ...quietInput, cursor:'text', flex:'1 1 200px', maxWidth:'320px' }} />
+        <input value={userQuery} onChange={e => setUserQuery(e.target.value)} placeholder="Search by name or email" style={{ ...quietInput, cursor:'text', flex:'1 1 200px', maxWidth:'320px' }} />
       </div>
 
       {loading ? (
@@ -30224,7 +30279,7 @@ function AdminFeedbackScreen({
         </div>
       ) : filtered.length === 0 ? (
         <p style={{ fontSize:'13px', color:'#8a8a84', textAlign:'center', padding:'30px 0' }}>
-          {items.length === 0 ? 'No feedback submitted yet.' : 'No items match these filters.'}
+          {items.length === 0 ? 'No feedback submitted yet.' : 'No feedback matches these filters.'}
         </p>
       ) : (
         /* One rounded container, hairline-divided rows — not per-row boxes. */

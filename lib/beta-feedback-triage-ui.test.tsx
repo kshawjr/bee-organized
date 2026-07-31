@@ -9,13 +9,13 @@
 //      true and the modal keeps its 'mine' (My Items) default.
 //
 //   2) MODERN LAYOUT: header (19px/500 headline + muted count subtitle,
-//      composer as a soft-tinted accent action), soft pill filters for the
-//      REAL filter axes (type + status; location select + submitter search
-//      stay as quiet inputs), hairline-divided rows inside ONE rounded
-//      container (no per-row boxes, no table header row), soft-tinted type
-//      tiles (bug → red family / feature → accent blue), locked-anatomy
-//      status chips over the REAL 6-status vocabulary, closed rows
-//      (shipped/declined) dimmed to 0.72.
+//      composer as a soft-tinted accent action), single-choice FilterChips
+//      for the type + status axes (issue 126 — was gray-fill pills; behavior
+//      is mount-tested in beta-feedback-filters), hairline-divided rows inside
+//      ONE rounded container (no per-row boxes, no table header row),
+//      soft-tinted type tiles (bug → red family / feature → accent blue),
+//      locked-anatomy status chips over the REAL 6-status vocabulary, closed
+//      rows (shipped/declined) dimmed to 0.72.
 //
 //   3) PER-MOUNT LOCATION: the franchise mount (the one that passes
 //      onReportFeedback) drops the location filter and the row meta's
@@ -68,23 +68,36 @@ describe('modern layout — header + pills', () => {
 
   it('composer button is a soft-tinted accent action with a plus icon (franchise mount only)', () => {
     expect(screenSrc).toMatch(/\{onReportFeedback && \(\s*<button/)
-    const btn = screenSrc.slice(screenSrc.indexOf('{onReportFeedback && ('), screenSrc.indexOf('Report a bug / suggest a feature'))
+    // "feature" is the owner's word "idea" now (issue 126) — stored value
+    // unchanged, UI copy softened for a non-technical audience. Slice to the
+    // IconPlus (the aria-label now shares the visible string, so stop at the
+    // icon to keep the style chrome inside the window).
+    const btn = screenSrc.slice(screenSrc.indexOf('{onReportFeedback && ('), screenSrc.indexOf('<IconPlus size={13} />'))
     expect(btn).toContain("background:'rgba(55,138,221,0.10)'")
     expect(btn).toContain("color:'#2b6aad'")
-    expect(btn).toContain('<IconPlus')
+    expect(btn).toContain('aria-label="Report a bug or share an idea"')
     expect(btn).not.toContain('🐛')
   })
 
-  it('filters are soft pills over the REAL axes (type + all six statuses), active = quiet fill', () => {
-    expect(screenSrc).toMatch(/pillStyle = active => \(\{\s*padding:'5px 12px', borderRadius:'20px'/)
-    expect(screenSrc).toContain("background: active ? 'rgba(0,0,0,0.07)' : 'transparent'")
-    // Real filter vocabularies — type from the two DB types, status from
-    // FEEDBACK_STATUS_ORDER (not an invented Open/Bugs/Ideas set).
-    expect(screenSrc).toMatch(/typePills = \[\s*\{ key:'all'/)
-    expect(screenSrc).toContain("i.type === 'bug'")
-    expect(screenSrc).toContain('...FEEDBACK_STATUS_ORDER.map(s => ({ key:s, label: FEEDBACK_STATUS_CONF[s].label, count: statusCounts[s] || 0 }))')
-    // Counts ride the pills.
-    expect(screenSrc).toContain('> · {p.count}</span>')
+  // FILTER BEHAVIOR is covered by mount tests in beta-feedback-filters — this
+  // source pin only guards the design CALL: single-choice FilterChips over the
+  // real axes, not the old gray-fill pills (issue 126).
+  it('type + status are single-choice FilterChips, not multi-select pills', () => {
+    expect(screenSrc).toContain('<FilterChips items={typeItems} active={typeFilter} onChange={setTypeFilter}')
+    expect(screenSrc).toContain('<FilterChips items={statusItems} active={statusFilter} onChange={setStatusFilter}')
+    // The old pill machinery is gone — assert against a slice bounded to
+    // AdminFeedbackScreen alone (the broad screenSrc runs into the Webhooks
+    // tab, which legitimately keeps its own pillStyle).
+    const fbOnly = beehub.slice(
+      beehub.indexOf('function AdminFeedbackScreen('),
+      beehub.indexOf('const WEBHOOK_WINDOWS')
+    )
+    expect(fbOnly).not.toContain('pillStyle')
+    expect(fbOnly).not.toContain('typePills')
+    expect(fbOnly).not.toContain('statusPills')
+    // Type vocab is the owner-facing set; status pulls plain words, not raw db.
+    expect(screenSrc).toMatch(/key:'feature', label:'Ideas'/)
+    expect(screenSrc).toContain('label: FEEDBACK_STATUS_PLAIN[s]')
   })
 })
 
