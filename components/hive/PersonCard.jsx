@@ -224,9 +224,9 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
     <p style={metaRowStyle()} data-meta-row={kind}>
       <span style={metaIconStyle}><Icon size={META_ICON} /></span>
       {href ? (
-        <a href={href} style={{ ...metaValueStyle, color: T.accent.fg, textDecoration: 'none' }}>{value}</a>
+        <a href={href} title={value} style={{ ...metaValueStyle, color: T.accent.fg, textDecoration: 'none' }}>{value}</a>
       ) : (
-        <span style={metaValueStyle}>{value}</span>
+        <span style={metaValueStyle} title={value}>{value}</span>
       )}
     </p>
   ) : null
@@ -358,7 +358,7 @@ export default function PersonCard({ person, people = [], onClose, onSendToJobbe
         <InitialsAvatar name={person.name} bg={fam.bg} text={fam.text} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <h2 style={{ minWidth: 0, fontSize: '16px', fontWeight: 500, color: T.ink.primary, letterSpacing: T.type.trackTitle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <h2 title={person.name} style={{ minWidth: 0, fontSize: '16px', fontWeight: 500, color: T.ink.primary, letterSpacing: T.type.trackTitle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {person.name}
             </h2>
             {statusMeta && (

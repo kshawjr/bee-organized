@@ -65,8 +65,8 @@ function Row({ icon, title, subline, onClick, chevron = false, muted = false }) 
     <>
       <span style={{ display: 'inline-flex', color: muted ? T.ink.muted : T.ink.strong, flexShrink: 0 }}>{icon}</span>
       <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: muted ? T.ink.muted : T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
-        {subline && <span style={{ display: 'block', fontSize: '11px', color: T.ink.muted, marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{subline}</span>}
+        <span title={title} style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: muted ? T.ink.muted : T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+        {subline && <span title={subline} style={{ display: 'block', fontSize: '11px', color: T.ink.muted, marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{subline}</span>}
       </span>
       {chevron && <span style={{ display: 'inline-flex', color: T.ink.quiet, flexShrink: 0 }}><IconChevronRight size={14} /></span>}
     </>
@@ -152,8 +152,8 @@ export default function IdentityScopeControl({
                 {initials}
               </span>
               <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
-                {email && <span style={{ display: 'block', fontSize: '11px', color: T.ink.muted, marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</span>}
+                <span title={name} style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+                {email && <span title={email} style={{ display: 'block', fontSize: '11px', color: T.ink.muted, marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</span>}
               </span>
               {roleLabel && (
                 <span style={{ flexShrink: 0, padding: '2px 8px', borderRadius: T.radius.chip, background: badge.bg, color: badge.text, fontSize: '11px', fontWeight: 500, whiteSpace: 'nowrap' }}>

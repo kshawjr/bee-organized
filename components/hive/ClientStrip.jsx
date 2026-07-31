@@ -30,7 +30,7 @@ export default function ClientStrip({
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+            <span title={name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
             {chip && <StatusChip label={chip.label} styleKey={chip.styleKey} />}
           </p>
           <p style={{ fontSize: '11px', color: T.ink.muted, marginTop: '1px' }}>{meta}</p>

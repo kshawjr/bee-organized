@@ -326,7 +326,7 @@ function Row({ it, last, dashed, nowMs, expanded, onToggle, actionSlot }) {
             font: 'inherit', textAlign: 'left', cursor: 'pointer',
           }}
         >
-          <span style={{ flex: 1, minWidth: 0, fontSize: '12px', color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span title={it.summary} style={{ flex: 1, minWidth: 0, fontSize: '12px', color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {it.summary}
           </span>
           <span style={{ flexShrink: 0, fontSize: '11px', color: T.ink.muted, whiteSpace: 'nowrap' }}>

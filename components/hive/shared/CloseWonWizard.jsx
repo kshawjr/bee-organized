@@ -161,7 +161,7 @@ export default function CloseWonWizard({
                   Open <IconExternalLink size={12} />
                 </a>
               </div>
-              <p style={{ fontSize: '11px', color: T.ink.quiet, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{reviewsLink}</p>
+              <p title={reviewsLink} style={{ fontSize: '11px', color: T.ink.quiet, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{reviewsLink}</p>
             </div>
           ) : (
             <p style={{ fontSize: '11px', color: T.ink.quiet }}>

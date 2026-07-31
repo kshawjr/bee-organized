@@ -33,13 +33,13 @@ export default function ContactLine({ phone = null, email = null, layout = 'stac
   const phoneLink = phone && (
     <a className="bee-contact-link" href={`tel:${phone}`} onClick={e => e.stopPropagation()} style={{ ...linkStyle, flexShrink: 0 }}>
       <span style={iconStyle}><IconPhone size={11} /></span>
-      <span style={valueStyle}>{phone}</span>
+      <span style={valueStyle} title={phone}>{phone}</span>
     </a>
   )
   const emailLink = email && (
     <a className="bee-contact-link" href={`mailto:${email}`} onClick={e => e.stopPropagation()} style={linkStyle}>
       <span style={iconStyle}><IconMail size={11} /></span>
-      <span style={valueStyle}>{email}</span>
+      <span style={valueStyle} title={email}>{email}</span>
     </a>
   )
 

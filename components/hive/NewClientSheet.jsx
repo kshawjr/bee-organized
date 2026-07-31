@@ -439,7 +439,7 @@ export default function NewClientSheet({
               alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 500,
             }}>{initialsOf(activeMatch.person.name)}</span>
             <div style={{ minWidth: 0 }}>
-              <p style={{ fontSize: '15px', fontWeight: 500, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <p title={activeMatch.person.name} style={{ fontSize: '15px', fontWeight: 500, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {activeMatch.person.name}
               </p>
               <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '2px' }}>

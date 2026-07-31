@@ -146,8 +146,8 @@ export function InlineText({ label, value, onSave, href = null, placeholder = 'a
       <span style={{ fontSize: '11px', color: T.ink.muted, fontWeight: 500, width: '72px', flexShrink: 0 }}>{label}</span>
       {value
         ? (href
-          ? <a href={href} onClick={e => e.stopPropagation()} style={{ fontSize: '12px', color: T.ink.primary, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</a>
-          : <span style={{ fontSize: '12px', color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>)
+          ? <a href={href} onClick={e => e.stopPropagation()} title={value} style={{ fontSize: '12px', color: T.ink.primary, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</a>
+          : <span title={value} style={{ fontSize: '12px', color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>)
         : <span style={{ fontSize: '12px', color: T.ink.faint }}>{placeholder}</span>}
       {!readOnly && <EditPencil />}
     </div>

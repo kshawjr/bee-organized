@@ -761,7 +761,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
             <InitialsAvatar name={client?.name || eng.client_name || '?'} bg={stageFam.bg} text={stageFam.text} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <h2 style={{ minWidth: 0, fontSize: '19px', fontWeight: 600, color: T.ink.primary, letterSpacing: T.type.trackTitle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <h2 title={client?.name || eng.client_name || undefined} style={{ minWidth: 0, fontSize: '19px', fontWeight: 600, color: T.ink.primary, letterSpacing: T.type.trackTitle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {client?.name || eng.client_name || 'Client'}
                 </h2>
                 {client?.location_name && (
@@ -818,7 +818,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
             )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-            <span style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, letterSpacing: T.type.trackTitle, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span title={displayTitle(eng)} style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, letterSpacing: T.type.trackTitle, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {displayTitle(eng)}
             </span>
             {/* Keyed on the stage so a MOVE (close / reopen / drift fix)
@@ -853,7 +853,7 @@ export default function EngagementPanel({ engagementId, seed = null, people = []
                 readOnly={readOnly}
                 renderTrigger={(toggle) => (
                   <button onClick={toggle} aria-label="Edit type" style={metaValueBtn(!!eng.project_type)}>
-                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{eng.project_type || 'Add type'}</span>
+                    <span title={eng.project_type || undefined} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{eng.project_type || 'Add type'}</span>
                     <EditPencil />
                   </button>
                 )}

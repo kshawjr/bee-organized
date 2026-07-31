@@ -102,7 +102,7 @@ export default function NetworkCompanyRecord({
             {(company.name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?'}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <h2 style={{ fontSize: '19px', fontWeight: 600, color: T.ink.primary, letterSpacing: T.type.trackTitle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{company.name}</h2>
+            <h2 title={company.name} style={{ fontSize: '19px', fontWeight: 600, color: T.ink.primary, letterSpacing: T.type.trackTitle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{company.name}</h2>
             <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '2px' }}>
               {[company.industry, `${people.length} ${people.length === 1 ? 'person' : 'people'}`].filter(Boolean).join(' · ')}
             </p>
@@ -196,7 +196,7 @@ export default function NetworkCompanyRecord({
               <div key={t.id} style={{ display: 'flex', alignItems: 'baseline', gap: '8px', padding: '4px 0' }}>
                 <span style={{ fontSize: '12px', color: T.ink.primary, flexShrink: 0 }}>{METHOD_LABEL[t.method] || t.label || 'Touchpoint'}</span>
                 <span style={{ fontSize: '12px', color: T.accent.deep, flexShrink: 0 }}>with {t.partner_name || '—'}</span>
-                {t.notes && <span style={{ fontSize: '11px', color: T.ink.muted, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.notes}</span>}
+                {t.notes && <span title={t.notes} style={{ fontSize: '11px', color: T.ink.muted, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.notes}</span>}
                 <span style={{ fontSize: '11px', color: T.ink.quiet, marginLeft: 'auto', flexShrink: 0 }}>{fmtLastTalk(t.occurred_at, nowMs)}</span>
               </div>
             ))}
@@ -214,7 +214,7 @@ export default function NetworkCompanyRecord({
             {(referrals?.referred || []).slice(0, 8).map(r => (
               <a key={r.id} href={`/clients/${r.id}`}
                 style={{ display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none', padding: '6px 8px', borderRadius: T.radius.control, background: T.surface.sunken }}>
-                <span style={{ fontSize: '12px', fontWeight: 500, color: T.ink.primary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+                <span title={r.name} style={{ fontSize: '12px', fontWeight: 500, color: T.ink.primary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
                 <span style={{ fontSize: '11px', color: T.ink.muted, flexShrink: 0 }}>
                   {r.via?.kind === 'partner' && r.via?.name ? `via ${r.via.name}` : 'company direct'}
                 </span>

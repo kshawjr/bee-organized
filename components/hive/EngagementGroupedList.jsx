@@ -80,13 +80,13 @@ function EngagementRow({ e, nowMs, muted = false, onOpen, isMobile }) {
     >
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-          <span style={{ flex: 1, minWidth: 0, fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.client_name}</span>
+          <span title={e.client_name} style={{ flex: 1, minWidth: 0, fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.client_name}</span>
           {isMobile && value && (
             <span style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, fontVariantNumeric: T.type.tabular, letterSpacing: T.type.trackNum, flexShrink: 0 }}>{value}</span>
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', minWidth: 0 }}>
-          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', color: `var(--text-muted, ${TEXT_MUTED})` }}>{displayTitle(e)}</span>
+          <span title={displayTitle(e)} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', color: `var(--text-muted, ${TEXT_MUTED})` }}>{displayTitle(e)}</span>
           {/* closed rows carry their terminal stage chip; open rows carry the
               within-stage status chip (Sent / Scheduled / Approved …) */}
           {closed

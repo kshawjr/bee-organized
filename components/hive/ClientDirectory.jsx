@@ -283,8 +283,8 @@ export default function ClientDirectory({ people = [], engagements = [], locFilt
               style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: isMobile ? '12px 14px' : '13px 16px', borderBottom: T.border.divider, cursor: 'pointer' }}>
               <InitialsAvatar name={p.name} bg={fam.bg} text={fam.text} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
-                {detail && <p style={{ fontSize: '11px', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>{detail}</p>}
+                <p title={p.name} style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
+                {detail && <p title={detail} style={{ fontSize: '11px', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>{detail}</p>}
               </div>
               <span style={{ flexShrink: 0 }}>
                 <StatusChip label={meta.label} styleKey={meta.styleKey} />

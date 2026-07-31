@@ -47,7 +47,7 @@ export default function BuzzDrawer({
   const quietLine = (
     <p style={{ fontSize: '11px', color: latest ? T.ink.secondary : T.ink.quiet, display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0 }}>
       {!header && <span style={{ flexShrink: 0 }}>🐝</span>}
-      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{latest?.text || 'No buzz yet'}</span>
+      <span title={latest?.text || undefined} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{latest?.text || 'No buzz yet'}</span>
       {!header && chevron}
     </p>
   )

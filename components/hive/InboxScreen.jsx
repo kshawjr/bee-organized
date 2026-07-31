@@ -898,7 +898,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
           )}
           <InitialsAvatar name={p.name} bg={family.bg} text={family.text} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ fontSize: '14px', fontWeight: 600, color: `var(--text-primary, ${TEXT_PRIMARY})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <p title={p.name} style={{ fontSize: '14px', fontWeight: 600, color: `var(--text-primary, ${TEXT_PRIMARY})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {p.name}
             </p>
             {/* Compact secondary line (layout B) — ONE line: chip, then
@@ -911,7 +911,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
               {/* Needs-transfer rows show the lead's ORIGIN (where the global
                   form said it was) instead of a tappable number. */}
               {isTransfer && (
-                <span style={{
+                <span title={transferOriginLine(p)} style={{
                   fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`,
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
                 }}>
@@ -930,7 +930,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
                     padding: '7px 4px', margin: '-7px -4px',
                   }}>
                   <span style={{ color: `var(--text-muted, ${TEXT_MUTED})`, display: 'inline-flex', flexShrink: 0 }}><IconPhone size={11} /></span>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{phoneLabel}</span>
+                  <span title={phoneLabel} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{phoneLabel}</span>
                 </a>
               )}
               {isMobile && <AgeInline created={p.created} nowMs={nowMs} style={{ marginLeft: 'auto', minWidth: 0 }} />}

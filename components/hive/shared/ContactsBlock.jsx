@@ -132,7 +132,7 @@ export default function ContactsBlock({ leadId, contacts = [], onChange = () => 
                 </a>
               )}
               {ct.email && (
-                <a className="bee-contact-link" href={`mailto:${ct.email}`} onClick={e => e.stopPropagation()}
+                <a className="bee-contact-link" href={`mailto:${ct.email}`} onClick={e => e.stopPropagation()} title={ct.email}
                   style={{ color: T.accent.fg, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   <IconMail size={11} /> {ct.email}
                 </a>

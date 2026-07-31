@@ -539,11 +539,11 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
                 style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', background: T.surface.raised, border: T.border.divider, borderRadius: T.radius.control, cursor: 'pointer' }}>
                 <span style={{ color: (CHIP_STYLES[e.stage] || CHIP_STYLES.gray).text, display: 'inline-flex', flexShrink: 0 }}><StageIcon size={15} /></span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, fontVariantNumeric: T.type.tabular, letterSpacing: T.type.trackTitle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <p title={displayTitle(e)} style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, fontVariantNumeric: T.type.tabular, letterSpacing: T.type.trackTitle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {displayTitle(e)}{value != null ? ` · ${fmtMoney(value)}` : ''}
                   </p>
                   {(e.description || '').trim() && (
-                    <p style={{ fontSize: '11px', color: T.ink.muted, marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <p title={e.description.trim().split('\n')[0]} style={{ fontSize: '11px', color: T.ink.muted, marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {e.description.trim().split('\n')[0]}
                     </p>
                   )}
@@ -578,7 +578,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
                   <span style={{ color: won ? T.state.success.fg : T.ink.quiet, display: 'inline-flex', flexShrink: 0 }}>
                     {won ? <IconCheck size={12} /> : <IconX size={12} />}
                   </span>
-                  <span style={{ flex: 1, minWidth: 0, fontSize: '11px', color: T.ink.secondary, fontVariantNumeric: T.type.tabular, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span title={displayTitle(e)} style={{ flex: 1, minWidth: 0, fontSize: '11px', color: T.ink.secondary, fontVariantNumeric: T.type.tabular, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {displayTitle(e)}{Number(money) > 0 ? ` · ${fmtMoney(money)}` : ''} · {won ? 'won' : 'lost'} {monthYear(e.closed_at) || ''}{reason ? ` · ${reason}` : ''}
                   </span>
                   {/* Reopen (resurrect) — Closed LOST only; re-derives the
@@ -596,7 +596,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
                   )}
                 </span>
                 {note && (
-                  <span style={{ fontSize: '11px', fontStyle: 'italic', color: T.ink.muted, paddingLeft: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span title={note} style={{ fontSize: '11px', fontStyle: 'italic', color: T.ink.muted, paddingLeft: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     “{note}”
                   </span>
                 )}
@@ -757,7 +757,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
         <InitialsAvatar name={c.name} bg={fam.bg} text={fam.text} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ fontSize: '19px', fontWeight: 600, color: T.ink.primary, letterSpacing: T.type.trackTitle, display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+            <span title={c.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
             {statusMeta && <StatusChip label={statusMeta.label} styleKey={statusMeta.styleKey} />}
           </p>
           <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

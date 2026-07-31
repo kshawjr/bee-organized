@@ -378,7 +378,7 @@ export default function NetworkAddSheet({
                       <button key={p.id} data-link-person={p.id} aria-pressed={on}
                         onClick={() => setLinkedIds(prev => on ? prev.filter(x => x !== p.id) : [...prev, p.id])}
                         style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 10px', background: on ? T.accent.faint : T.surface.raised, border: on ? T.border.strong : T.border.thin, borderRadius: T.radius.control, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-                        <span style={{ flex: 1, fontSize: '13px', fontWeight: on ? 500 : 400, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                        <span title={p.name} style={{ flex: 1, fontSize: '13px', fontWeight: on ? 500 : 400, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
                         {p.title && <span style={{ fontSize: '11px', color: T.ink.muted, flexShrink: 0 }}>{p.title}</span>}
                         {on && <span aria-hidden style={{ color: T.accent.deep, fontSize: '13px', flexShrink: 0 }}>✓</span>}
                       </button>

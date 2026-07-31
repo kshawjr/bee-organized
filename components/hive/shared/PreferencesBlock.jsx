@@ -184,7 +184,7 @@ export default function PreferencesBlock({ client, openCount = 0, onPatched = ()
           )}
         </div>
         {snoozed && (c.snoozed_note || '').trim() && (
-          <p style={{ fontSize: '11px', fontStyle: 'italic', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <p title={c.snoozed_note.trim()} style={{ fontSize: '11px', fontStyle: 'italic', color: T.ink.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             “{c.snoozed_note.trim()}”
           </p>
         )}

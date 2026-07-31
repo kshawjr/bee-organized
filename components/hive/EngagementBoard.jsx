@@ -90,12 +90,12 @@ function EngagementCard({ e, onOpen, draggable, onDragStart, onDragEnd, accent =
     <div draggable={draggable || undefined} onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <Card onClick={onOpen} accent={accent}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '3px' }}>
-          <p style={{ flex: 1, minWidth: 0, fontSize: '13px', fontWeight: 500, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <p title={e.client_name} style={{ flex: 1, minWidth: 0, fontSize: '13px', fontWeight: 500, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {e.client_name}
           </p>
           {value && <span style={{ fontSize: '12px', fontWeight: 500, color: T.ink.primary, fontVariantNumeric: T.type.tabular, letterSpacing: T.type.trackNum, flexShrink: 0 }}>{value}</span>}
         </div>
-        <p style={{ fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: '8px' }}>
+        <p title={displayTitle(e)} style={{ fontSize: '11px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: '8px' }}>
           {displayTitle(e)}
         </p>
         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>

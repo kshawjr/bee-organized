@@ -70,7 +70,7 @@ function LocationRow({ t, selected, onPick }) {
         <IconMapPin size={15} />
       </span>
       <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{
+        <span title={t.name} style={{
           display: 'block', fontSize: '13px', fontWeight: 600,
           color: selected ? T.accent.deep : T.ink.primary,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',

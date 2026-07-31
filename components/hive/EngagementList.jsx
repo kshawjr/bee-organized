@@ -67,7 +67,7 @@ function ClientCell({ e, nowMs }) {
   const isNew = e.repeat_count === 1 && (nowMs - new Date(e.created_at).getTime()) < 30 * 86400000
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-      <span style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.client_name}</span>
+      <span title={e.client_name} style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.client_name}</span>
       {e.is_returning && <StatusChip label="Returning client" styleKey="repeat" />}
       {isNew && <StatusChip label="new" styleKey="teal" />}
     </div>
@@ -285,7 +285,7 @@ export default function EngagementList({ engagements = [], closedCount = 0, clos
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
-                    <span style={{ fontSize: '12px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayTitle(e)}</span>
+                    <span title={displayTitle(e)} style={{ fontSize: '12px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayTitle(e)}</span>
                     <StatusText chip={chip} size={12} />
                   </span>
                   <StatusChip label={stageDisplayLabel(e.stage)} styleKey={e.stage} />
@@ -299,7 +299,7 @@ export default function EngagementList({ engagements = [], closedCount = 0, clos
               <ClientCell e={e} nowMs={nowMs} />
               {/* displayTitle secondary text: 13px stays (table density) —
                   the COLOR is the unified token, same as board + mobile. */}
-              <span style={{ fontSize: '13px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayTitle(e)}</span>
+              <span title={displayTitle(e)} style={{ fontSize: '13px', color: `var(--text-muted, ${TEXT_MUTED})`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayTitle(e)}</span>
               <span><StatusChip label={stageDisplayLabel(e.stage)} styleKey={e.stage} /></span>
               <StatusText chip={chip} size={12} />
               <span style={{ fontSize: '14px', fontWeight: 600, color: value ? T.ink.primary : T.ink.quiet, fontVariantNumeric: T.type.tabular, letterSpacing: T.type.trackNum, textAlign: 'right', paddingRight: '10px' }}>{value || '—'}</span>

@@ -74,7 +74,7 @@ export default function PinnedBuzz({ notes = [], onPost = () => {}, emptyLabel =
         <span style={{ color: `var(--text-warning, ${WARNING_TEXT})`, display: 'inline-flex', flexShrink: 0 }}>
           <IconPin size={13} />
         </span>
-        <span style={{
+        <span title={!open && latest ? latest.text : undefined} style={{
           flex: 1, minWidth: 0, fontSize: '12px', color: `var(--text-warning, ${WARNING_TEXT})`,
           ...(open ? { whiteSpace: 'normal', overflowWrap: 'anywhere' } : { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }),
         }}>

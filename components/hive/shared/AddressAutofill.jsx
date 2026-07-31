@@ -164,8 +164,8 @@ export default function AddressAutofill({ value, onChange, onSelect, onParsed, p
             <button key={s.place_id||i} onMouseDown={()=>pick(s)} style={{ width:'100%', padding:'10px 14px', background:T.surface.raised, border:'none', borderBottom:i<suggestions.length-1?T.border.divider:'none', cursor:'pointer', textAlign:'left', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'8px' }}>
               <span style={{ fontSize:'14px', flexShrink:0 }}>📍</span>
               <div style={{ flex:1, minWidth:0 }}>
-                <p style={{ fontSize:'13px', color:T.ink.primary, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.main_text || s.description.split(',')[0]}</p>
-                <p style={{ fontSize:'11px', color:T.ink.muted, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.secondary_text || s.description.split(',').slice(1).join(',').trim()}</p>
+                <p title={s.main_text || s.description.split(',')[0]} style={{ fontSize:'13px', color:T.ink.primary, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.main_text || s.description.split(',')[0]}</p>
+                <p title={s.secondary_text || s.description.split(',').slice(1).join(',').trim()} style={{ fontSize:'11px', color:T.ink.muted, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.secondary_text || s.description.split(',').slice(1).join(',').trim()}</p>
               </div>
             </button>
           ))}

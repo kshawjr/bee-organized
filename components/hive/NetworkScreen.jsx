@@ -275,7 +275,7 @@ export default function NetworkScreen({
                 <span style={{ fontSize: '11px', fontWeight: 500, color: item.overdue ? T.state.danger.fg : T.ink.muted, flexShrink: 0, fontVariantNumeric: T.type.tabular }}>
                   {item.overdue ? 'overdue' : item.date.slice(5).replace('-', '/')}
                 </span>
-                <span style={{ fontSize: '12px', color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.text}</span>
+                <span title={item.text} style={{ fontSize: '12px', color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.text}</span>
                 <span style={{ fontSize: '11px', color: T.ink.quiet, flexShrink: 0 }}>· {item.partnerName}</span>
               </button>
             ))}
@@ -420,7 +420,7 @@ export default function NetworkScreen({
                         : <InitialsAvatar name={rec.name} bg={tone.bg} text={tone.text} />}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                          <p style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rec.name}</p>
+                          <p title={rec.name} style={{ fontSize: '14px', fontWeight: 600, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rec.name}</p>
                           {stage && (
                             <span data-stage-chip style={{ fontSize: T.badge.font, fontWeight: T.badge.weight, color: stageFam.text, background: stageFam.bg, borderRadius: T.radius.chip, padding: '2px 8px', whiteSpace: 'nowrap', flexShrink: 0 }}>{stage}</span>
                           )}

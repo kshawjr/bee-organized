@@ -198,7 +198,7 @@ export default function NetworkPersonRecord({
           <InitialsAvatar name={partner.name} bg={T.family.teal.bg} text={T.family.teal.text} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              <h2 style={{ fontSize: '19px', fontWeight: 600, color: T.ink.primary, letterSpacing: T.type.trackTitle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{partner.name}</h2>
+              <h2 title={partner.name} style={{ fontSize: '19px', fontWeight: 600, color: T.ink.primary, letterSpacing: T.type.trackTitle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{partner.name}</h2>
               {badges.map(b => <BadgeChip key={b.key} badge={b} />)}
             </div>
             <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '2px', display: 'flex', gap: '6px', alignItems: 'baseline', flexWrap: 'wrap' }}>
@@ -262,7 +262,7 @@ export default function NetworkPersonRecord({
               <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <button aria-label={`Mark done: ${s.text}`} disabled={readOnly} onClick={() => toggleStep(s.id)}
                   style={{ width: '16px', height: '16px', borderRadius: '4px', border: T.border.control, background: T.surface.raised, cursor: readOnly ? 'default' : 'pointer', flexShrink: 0, padding: 0 }} />
-                <span style={{ fontSize: '12px', color: T.ink.primary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.text}</span>
+                <span title={s.text} style={{ fontSize: '12px', color: T.ink.primary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.text}</span>
                 {s.date && <span style={{ fontSize: '11px', color: new Date(`${s.date}T00:00:00`).getTime() < nowMs - 86400000 ? T.state.danger.fg : T.ink.quiet, fontVariantNumeric: T.type.tabular }}>{s.date.slice(5).replace('-', '/')}</span>}
                 {!readOnly && <button aria-label={`Delete step: ${s.text}`} onClick={() => removeStep(s.id)} style={{ border: 'none', background: 'transparent', color: T.ink.quiet, cursor: 'pointer', fontSize: '13px', lineHeight: 1, padding: '2px' }}>×</button>}
               </div>
@@ -310,7 +310,7 @@ export default function NetworkPersonRecord({
               return (
                 <a key={r.id} href={`/clients/${r.id}`}
                   style={{ display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none', padding: '6px 8px', borderRadius: T.radius.control, background: T.surface.sunken }}>
-                  <span style={{ fontSize: '12px', fontWeight: 500, color: T.ink.primary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+                  <span title={r.name} style={{ fontSize: '12px', fontWeight: 500, color: T.ink.primary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
                   <span style={{ fontSize: T.badge.font, fontWeight: 500, color: fam.text, background: fam.bg, borderRadius: T.radius.chip, padding: '1px 7px' }}>{chip.label}</span>
                   {r.revenue > 0 && <span style={{ fontSize: '12px', color: T.ink.primary, fontVariantNumeric: T.type.tabular }}>{money(r.revenue)}</span>}
                 </a>
