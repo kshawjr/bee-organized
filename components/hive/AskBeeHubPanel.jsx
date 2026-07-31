@@ -91,6 +91,12 @@ export default function AskBeeHubPanel({
   isMobile,
   onClose,
   screenName = 'Bee Hub',
+  // Footer walkthrough links (issue 132). The first-run hint and the pill's
+  // own comment promise the Quick Start Guide and Manual live here — these
+  // props are the ONLY user-reachable entry points for both, so a null
+  // handler hides its link rather than rendering a dead one.
+  onOpenGuide = null,
+  onOpenManual = null,
   onOpenFeedback = null,
 }) {
   const rootRef = useRef(null)
@@ -527,10 +533,30 @@ export default function AskBeeHubPanel({
           </button>
         </form>
 
+        {/* Walkthrough links — the Quick Start Guide + Manual entry points
+            (issue 132; restores what the f67caa9 footer trim stranded). */}
+        {(onOpenGuide || onOpenManual) && (
+          <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '8px', lineHeight: 1.5 }}>
+            Prefer a walkthrough?{' '}
+            {onOpenGuide && (
+              <button onClick={onOpenGuide} className="bee-small-action" style={linkBtn}>
+                Quick Start Guide
+              </button>
+            )}
+            {onOpenGuide && onOpenManual ? ' · ' : ''}
+            {onOpenManual && (
+              <button onClick={onOpenManual} className="bee-small-action" style={linkBtn}>
+                Manual
+              </button>
+            )}
+          </p>
+        )}
         {/* Escalation link — report a bug or request a feature. Wears the
             small-action release so the floor doesn't inflate it mid-line. */}
         {onOpenFeedback && (
-          <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '8px', lineHeight: 1.5 }}>
+          <p style={{ fontSize: '12px', color: T.ink.muted, marginTop: '4px', lineHeight: 1.5 }}>
+            {/* 4px when stacked under the walkthrough line; the two rows read
+                as one footer block. */}
             Something not working?{' '}
             <button onClick={onOpenFeedback} className="bee-small-action" style={linkBtn}>
               Report Bug or Feature
