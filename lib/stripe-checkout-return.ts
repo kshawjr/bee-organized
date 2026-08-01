@@ -59,6 +59,47 @@ export function navigateToStripeCheckout(
   win.location.assign(url)
 }
 
+// ── Checkout-config classification (issue 167 BUG 2) ──────────
+// The onboarding pay step POSTs /api/locations/[id]/checkout to mint a Stripe
+// session. Its response has to be classified into exactly one of four states,
+// because a FAILED checkout must NOT silently fall back to the record-only
+// "no charge today" confirm — that button activated locations for free.
+//
+//   • 'ready'          — a session url came back; show "Pay with Stripe".
+//   • 'unconfigured'   — Stripe is genuinely not set up for this tier (or the
+//                        source is non-paying). The honest record-only confirm
+//                        is LEGITIMATE here; the free-grant door stays open.
+//   • 'already_active' — the webhook already activated (a fast return beat us);
+//                        resume the polling wait, never re-activate.
+//   • 'error'          — checkout is BROKEN (502 stripe_error, checkout_no_url,
+//                        a network failure). Surface it; do NOT offer a button
+//                        that gives the owner the product for nothing.
+//
+// The distinction between 'unconfigured' and 'error' is the whole point: only
+// the specific 409 "not configured" errors are unconfigured; everything else
+// is broken.
+export type CheckoutConfigState = 'ready' | 'unconfigured' | 'already_active' | 'error'
+
+export const CHECKOUT_UNCONFIGURED_ERRORS = [
+  'stripe_not_configured',
+  'owner_price_not_configured',
+  'non_paying_source',
+] as const
+
+export function classifyCheckoutResponse(
+  status: number,
+  body: { url?: string | null; error?: string | null } | null | undefined,
+): CheckoutConfigState {
+  const b = body || {}
+  if (status >= 200 && status < 300 && b.url) return 'ready'
+  if (status === 409 && b.error === 'already_active') return 'already_active'
+  if (status === 409 && b.error && (CHECKOUT_UNCONFIGURED_ERRORS as readonly string[]).includes(b.error)) {
+    return 'unconfigured'
+  }
+  // 502 stripe_error, 200-without-url, network failure, anything else → broken.
+  return 'error'
+}
+
 // Map the Stripe return marker to the onboarding pay step to resume at:
 //   • 'complete' → 'stripe_wait'  — poll activation-status; the webhook is
 //                                   the backstop, so a fast return that beats

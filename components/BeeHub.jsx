@@ -29,7 +29,7 @@ import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
-import { navigateToStripeCheckout, payStepForCheckoutReturn, CHECKOUT_RETURN_PARAM, CHECKOUT_INFLIGHT_KEY } from "@/lib/stripe-checkout-return"
+import { navigateToStripeCheckout, payStepForCheckoutReturn, classifyCheckoutResponse, CHECKOUT_RETURN_PARAM, CHECKOUT_INFLIGHT_KEY } from "@/lib/stripe-checkout-return"
 import { splitNameForPrefill } from "@/lib/name-prefill"
 import { captureViewAsSnapshot, revertViewAsCancel, viewAsIdentityFor, isElevatedRole, visibleTransferQueue } from "@/lib/view-as-identity"
 import { makeUpdatePartner } from "@/lib/partner-writes"
@@ -10992,26 +10992,43 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   // Stripe checkout URL returned by a 402 payment_required response —
   // backstop for when the server has a link the client context missed.
   const [serverPayUrl, setServerPayUrl]     = useState(null)
+  // issue 167 BUG 2 — the outcome of asking the server for a checkout session.
+  // 'idle' | 'loading' | 'ready' | 'unconfigured' | 'error'. A FAILED checkout
+  // ('error') must NOT fall back to the record-only "no charge" confirm; only
+  // a genuinely-unconfigured tier ('unconfigured') keeps that honest path.
+  const [checkoutState, setCheckoutState]   = useState('idle')
+  // Bumped by the "Try again" button to re-run the checkout-session effect
+  // (serverPayUrl stays null on error, so it can't be the retrigger).
+  const [checkoutNonce, setCheckoutNonce]   = useState(0)
   // The real Stripe checkout URL for owner activation (null → record-only
   // fallback). Location identity + email are appended client-side.
   const ownerStripeUrl = paymentSourceForPay === 'direct'
     ? (buildStripePayUrl(tierPricesCtx?.getTierLink?.('owner'), currentLocationCtx?.id, currentUserCtx?.email) || serverPayUrl)
     : null
 
-  // issue 161: when the owner reaches the pay step and no Payment Link is
-  // configured (the current, deliberate state — we do NOT use links),
-  // ask the server to create a Stripe subscription Checkout Session and
-  // surface it as serverPayUrl. PaymentConfirmStep then shows "Pay with
-  // Stripe →" alongside the record-only confirm, and StripeCheckoutWait
-  // (unchanged) polls activation-status. A non-2xx (Stripe not configured,
-  // corporate/non-paying, already active) leaves serverPayUrl null → the
-  // record-only path stays, keeping the free-grant door open.
+  // issue 161/167: when the owner reaches the pay step, ask the server to
+  // create a Stripe subscription Checkout Session and classify the outcome:
+  //   • ready        → serverPayUrl set → PaymentConfirmStep shows "Pay with
+  //                    Stripe →"; StripeCheckoutWait polls activation-status.
+  //   • unconfigured → Stripe genuinely not set up for this tier (or non-paying
+  //                    source) → the honest record-only confirm is legitimate.
+  //   • already_active → the webhook already activated → drop into the polling
+  //                    wait, never re-activate.
+  //   • error        → checkout is BROKEN (502, network) → surface it; do NOT
+  //                    render the record-only confirm (issue 167 BUG 2/BUG 3).
+  // A configured Payment Link short-circuits to 'ready' without a round trip.
   useEffect(() => {
     if (payStep !== 'pay_confirm') return
     if (paymentSourceForPay !== 'direct') return
     const locId = currentLocationCtx?.id
-    if (!locId || serverPayUrl) return
+    if (!locId) return
+    // A configured Payment Link already gives us a URL — no session needed.
+    if (buildStripePayUrl(tierPricesCtx?.getTierLink?.('owner'), locId, currentUserCtx?.email)) {
+      setCheckoutState('ready'); return
+    }
+    if (serverPayUrl) { setCheckoutState('ready'); return }
     let cancelled = false
+    setCheckoutState('loading')
     ;(async () => {
       try {
         const res = await fetch(`/api/locations/${locId}/checkout`, {
@@ -11019,13 +11036,18 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
           headers: { 'Content-Type': 'application/json' },
           body: '{}',
         })
-        if (!res.ok) return
         const j = await res.json().catch(() => ({}))
-        if (!cancelled && j?.url) setServerPayUrl(j.url)
-      } catch { /* record-only fallback stays */ }
+        if (cancelled) return
+        const state = classifyCheckoutResponse(res.status, j)
+        if (state === 'ready') { setServerPayUrl(j.url); setCheckoutState('ready'); return }
+        if (state === 'already_active') { setCheckoutState('ready'); setPayStep('stripe_wait'); return }
+        setCheckoutState(state) // 'unconfigured' | 'error'
+      } catch {
+        if (!cancelled) setCheckoutState('error')
+      }
     })()
     return () => { cancelled = true }
-  }, [payStep, paymentSourceForPay, currentLocationCtx?.id, serverPayUrl])
+  }, [payStep, paymentSourceForPay, currentLocationCtx?.id, serverPayUrl, checkoutNonce])
 
   // Per-step forms - prefilled from invite data, or from DB on remount (Pass 2)
   const [profileForm, setProfileForm] = useState({
@@ -11615,6 +11637,16 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
         setActivateError('')
         return
       }
+      // issue 167 BUG 3 — the server refuses to free-activate an owner-pays
+      // location that CAN charge through Stripe. Bounce back to the pay step,
+      // which re-fetches a checkout session (never a silent free activation).
+      if (subRes.status === 409 && subJson?.error === 'stripe_checkout_required') {
+        setServerPayUrl(null)
+        setCheckoutState('idle')
+        setActivateError('')
+        setPayStep('pay_confirm')
+        return
+      }
       if (!subRes.ok) throw new Error(subJson.error || 'Failed to activate subscription')
 
       if (subJson.seat && seatsCtx?.setSeats) {
@@ -11865,21 +11897,66 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                 }]
               })
             const confirmTotal = confirmLineItems.reduce((sum, li) => sum + li.amount, 0)
+
+            // issue 167 — decide which confirm surface the owner-pays path shows.
+            // A configured Stripe checkout (link or session) → "Pay with Stripe".
+            // The record-only "no charge" confirm is offered ONLY when Stripe is
+            // genuinely unconfigured for this tier — never as the fallback for a
+            // checkout that FAILED or is still loading, which used to activate
+            // the location for free (BUG 2/BUG 3). Non-direct (corporate/
+            // sponsored) sources are unchanged: they always use record-only.
+            const isDirect      = paymentSourceForPay === 'direct'
+            const showStripe    = !!ownerStripeUrl
+            const showRecordOnly = !isDirect || (isDirect && checkoutState === 'unconfigured')
+            const showError     = isDirect && !showStripe && checkoutState === 'error'
+            const showLoading   = isDirect && !showStripe && !showRecordOnly && !showError
+
             return (
               <div style={{ maxWidth:'520px', margin:'0 auto' }}>
                 <div style={{ background:'white', borderRadius:'14px', padding:'18px 18px 16px', border:'1px solid rgba(0,0,0,0.06)', boxShadow:'0 2px 10px rgba(26,46,43,0.05)' }}>
-                  <PaymentConfirmStep
-                    title="Confirm payment"
-                    lineItems={confirmLineItems}
-                    total={confirmTotal}
-                    confirmLabel="Confirm & Activate"
-                    onConfirm={() => { setActivateError(''); processPayment() }}
-                    onCancel={() => setPayStep('pricing')}
-                    isProcessing={false}
-                    error={activateError || null}
-                    stripePayUrl={ownerStripeUrl}
-                    onStripeOpen={() => { setActivateError(''); setPayStep('stripe_wait') }}
-                  />
+                  {showError ? (
+                    <div style={{ display:'flex', flexDirection:'column', gap:'14px', width:'100%' }}>
+                      <div>
+                        <h3 style={{ fontSize:'17px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'2px' }}>Checkout is temporarily unavailable</h3>
+                        <p style={{ fontSize:'12.5px', color:'#8a9e9a', lineHeight:1.5 }}>We couldn't reach secure payment just now, so nothing was charged and your subscription is <strong>not</strong> active yet. Please try again in a moment — if it keeps happening, contact Bee Organized and we'll sort it out.</p>
+                      </div>
+                      <div style={{ display:'flex', gap:'8px', marginTop:'2px' }}>
+                        <button onClick={() => setPayStep('pricing')}
+                          style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>
+                          ← Back
+                        </button>
+                        <button onClick={() => { setServerPayUrl(null); setCheckoutState('loading'); setCheckoutNonce(n => n + 1) }}
+                          style={{ flex:2, padding:'12px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+                          Try again
+                        </button>
+                      </div>
+                    </div>
+                  ) : showLoading ? (
+                    <div style={{ display:'flex', flexDirection:'column', gap:'14px', width:'100%', textAlign:'center', padding:'8px 0' }}>
+                      <div style={{ fontSize:'36px' }}>🔒</div>
+                      <div>
+                        <h3 style={{ fontSize:'17px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>Preparing secure checkout…</h3>
+                        <p style={{ fontSize:'12.5px', color:'#8a9e9a', lineHeight:1.5 }}>One moment while we set up your payment.</p>
+                      </div>
+                      <button onClick={() => setPayStep('pricing')}
+                        style={{ padding:'10px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>
+                        ← Back
+                      </button>
+                    </div>
+                  ) : (
+                    <PaymentConfirmStep
+                      title="Confirm payment"
+                      lineItems={confirmLineItems}
+                      total={confirmTotal}
+                      confirmLabel="Confirm & Activate"
+                      onConfirm={showRecordOnly ? () => { setActivateError(''); processPayment() } : undefined}
+                      onCancel={() => setPayStep('pricing')}
+                      isProcessing={false}
+                      error={activateError || null}
+                      stripePayUrl={showStripe ? ownerStripeUrl : null}
+                      onStripeOpen={() => { setActivateError(''); setPayStep('stripe_wait') }}
+                    />
+                  )}
                 </div>
               </div>
             )

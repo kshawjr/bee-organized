@@ -22,6 +22,7 @@
 
 import { supabaseService } from './supabase-service'
 import { buildStripePayUrl } from './stripe-links'
+import { stripeConfigured } from './stripe'
 import { annualRenewalFromSignup, legacyFixedRenewalDate } from './subscription-math'
 
 const SEAT_COLS =
@@ -152,6 +153,27 @@ export async function getStripeRequirement(
   const link = (tierRow as any)?.payment_link_url ?? null
   const payUrl = buildStripePayUrl(link, location.id, prefilledEmail)
   return { required: !!payUrl, payUrl }
+}
+
+// ── Owner-checkout-configured gate (issue 167) ────────────────
+// True when this location CAN charge the owner through Stripe checkout —
+// i.e. it is owner-pays (not a non-paying/corporate source), Stripe is
+// configured server-side, AND the owner tier has a stripe_price_id. When
+// this is true, only the Stripe webhook (a real payment) may activate the
+// location; an owner must NOT be able to free-activate it through the
+// record-only complete-onboarding path (issue 167 BUG 3). When it is false
+// — non-paying source, Stripe not configured, or no owner price yet — the
+// record-only / free-grant door stays open exactly as before.
+export async function ownerCheckoutConfigured(location: LocationBillingRow): Promise<boolean> {
+  if (NON_PAYING_SOURCES.includes(location.payment_source || '')) return false
+  if (!stripeConfigured()) return false
+  // select('*') tolerates a pre-migration schema (no stripe_price_id column).
+  const { data: tierRow } = await supabaseService
+    .from('tier_prices')
+    .select('*')
+    .eq('id', 'owner')
+    .maybeSingle()
+  return !!(tierRow as any)?.stripe_price_id
 }
 
 // issue 162: a new self-paying location's paid_through anchors to signup + 1yr

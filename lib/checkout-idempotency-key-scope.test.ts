@@ -34,6 +34,7 @@ vi.mock('@/lib/stripe', () => ({ getStripe: () => stripe }))
 
 import {
   ownerCheckoutIdempotencyKey,
+  customerIdempotencyKey,
   CHECKOUT_IDEMPOTENCY_WINDOW_MS,
   createOwnerCheckoutSession,
   getOrCreateStripeCustomer,
@@ -103,14 +104,31 @@ describe('issue 165 — createOwnerCheckoutSession threads the bucketed key to S
   })
 })
 
-describe('issue 165 — the customer key stays permanent (one customer per location)', () => {
-  it('bh_customer_{locationId} is stable across attempts ⇒ no duplicate customer', async () => {
-    await getOrCreateStripeCustomer({ locationId: 'loc-1', name: 'A', email: 'a@x.test', existingCustomerId: null })
-    await getOrCreateStripeCustomer({ locationId: 'loc-1', name: 'A', email: 'a@x.test', existingCustomerId: null })
+// issue 167 OVERTURNS issue 165's "customer key stays permanent" — a permanent
+// key is exactly what let Stripe replay a since-DELETED customer's id for 24h,
+// 502ing checkout with "No such customer". The key is now bucketed per attempt,
+// like the owner-checkout key.
+describe('issue 167 — the customer key is bucketed per attempt (not permanent)', () => {
+  it('customerIdempotencyKey keeps the location prefix but varies by window', () => {
+    expect(customerIdempotencyKey('loc-1', 0)).toMatch(/^bh_customer_loc-1_\d+$/)
+  })
+
+  it('a rapid double-submit (same window) shares ONE key ⇒ still one customer', async () => {
+    const t0 = 1_700_000_000_000
+    await getOrCreateStripeCustomer({ locationId: 'loc-1', name: 'A', email: 'a@x.test', existingCustomerId: null, nowMs: t0 })
+    await getOrCreateStripeCustomer({ locationId: 'loc-1', name: 'A', email: 'a@x.test', existingCustomerId: null, nowMs: t0 + 900 })
     const opts1 = stripe.customers.create.mock.calls[0][1] as any
     const opts2 = stripe.customers.create.mock.calls[1][1] as any
-    expect(opts1.idempotencyKey).toBe('bh_customer_loc-1')
-    expect(opts2.idempotencyKey).toBe('bh_customer_loc-1')
+    expect(opts1.idempotencyKey).toBe(opts2.idempotencyKey)
+  })
+
+  it('a later attempt lands in a NEW window ⇒ a fresh key, never a 24h replay of a dead customer', async () => {
+    const t0 = 1_700_000_000_000
+    await getOrCreateStripeCustomer({ locationId: 'loc-1', name: 'A', email: 'a@x.test', existingCustomerId: null, nowMs: t0 })
+    await getOrCreateStripeCustomer({ locationId: 'loc-1', name: 'A', email: 'a@x.test', existingCustomerId: null, nowMs: t0 + CHECKOUT_IDEMPOTENCY_WINDOW_MS })
+    const opts1 = stripe.customers.create.mock.calls[0][1] as any
+    const opts2 = stripe.customers.create.mock.calls[1][1] as any
+    expect(opts1.idempotencyKey).not.toBe(opts2.idempotencyKey)
   })
 
   it('a stored customer id short-circuits before any create call (never a second customer)', async () => {

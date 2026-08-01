@@ -28,6 +28,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import {
   activateLocationSubscription,
   getLocationBilling,
+  ownerCheckoutConfigured,
 } from '@/lib/subscription-activation'
 
 export const runtime = 'nodejs'
@@ -55,6 +56,27 @@ export async function POST(
 
   const location = await getLocationBilling(params.id)
   if (!location) return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
+
+  // issue 167 BUG 3 — the record-only activation path must not hand an
+  // owner-pays location the product for free when Stripe CAN charge them.
+  // Only the Stripe webhook (a confirmed payment) may activate such a
+  // location. This closes the hole server-side even if a stale client sends
+  // the record-only POST. Deliberately NOT applied when:
+  //   • the caller is super_admin — Kevin's comp / manual-grant door stays open;
+  //   • the location is already active — this is then a redundant confirm, not
+  //     a free activation (activateLocationSubscription short-circuits below);
+  //   • Stripe isn't configured for the owner tier, or the source is
+  //     non-paying — the honest record-only / free-grant path stays open.
+  // The client maps this to bouncing back to the pay step and starting Stripe
+  // checkout (completePay), so the owner is never stuck.
+  if (
+    isOwnerOfTarget &&
+    !isSuperAdmin &&
+    location.subscription_status !== 'active' &&
+    (await ownerCheckoutConfigured(location))
+  ) {
+    return NextResponse.json({ error: 'stripe_checkout_required' }, { status: 409 })
+  }
 
   const body = await req.json().catch(() => ({}))
   const proratedCostCents =

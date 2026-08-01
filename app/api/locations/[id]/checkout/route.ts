@@ -21,8 +21,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { stripeConfigured } from '@/lib/stripe'
 import {
-  getOrCreateStripeCustomer,
-  createOwnerCheckoutSession,
+  createOwnerCheckoutSessionResilient,
   ownerCheckoutReturnUrls,
 } from '@/lib/stripe-billing'
 import {
@@ -97,31 +96,27 @@ export async function POST(
     process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') || req.nextUrl.origin
 
   try {
-    // 1. Customer — write locations.stripe_customer_id (the column that had
-    //    no write path). Idempotent: reuses a stored id, and the create call
-    //    carries an idempotency key so a retry never mints a second customer.
-    const { customerId } = await getOrCreateStripeCustomer({
+    // Customer + subscription-mode checkout session for the owner's annual
+    // seat, in one resilient call (issue 167):
+    //  • writes locations.stripe_customer_id (the column that had no write
+    //    path) via writeLocationStripeIds, only when it changes;
+    //  • recovers from a stale/deleted customer — if Stripe throws "No such
+    //    customer" (a dashboard deletion, or a 24h idempotency-key replay of a
+    //    since-deleted customer), it mints a fresh customer, overwrites the
+    //    stale column, and retries the session ONCE, rather than 502ing.
+    // issue 163: return the owner to the onboarding route in the SAME tab
+    // after checkout (success_url / cancel_url).
+    const { successUrl, cancelUrl } = ownerCheckoutReturnUrls(origin)
+    const { session, customerId } = await createOwnerCheckoutSessionResilient({
       locationId: location.id,
       name: location.name,
       email,
       existingCustomerId: location.stripe_customer_id,
-    })
-    if (customerId !== location.stripe_customer_id) {
-      await writeLocationStripeIds(location.id, { customerId })
-    }
-
-    // 2. Subscription-mode checkout session for the owner's annual seat.
-    //    issue 163: return the owner to the onboarding route in the SAME tab
-    //    after checkout (success_url / cancel_url), instead of stranding them
-    //    on Stripe's success page in a second window.
-    const { successUrl, cancelUrl } = ownerCheckoutReturnUrls(origin)
-    const session = await createOwnerCheckoutSession({
-      customerId,
       priceId,
-      locationId: location.id,
       tier: OWNER_TIER,
       successUrl,
       cancelUrl,
+      persistCustomerId: (cid) => writeLocationStripeIds(location.id, { customerId: cid }),
     })
 
     if (!session.url) {

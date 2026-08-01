@@ -28,16 +28,46 @@
 import type Stripe from 'stripe'
 import { getStripe } from './stripe'
 
+// ── Customer idempotency key (issue 167) ──────────────────────
+// The customer-create key used to be permanent (bh_customer_{locationId}).
+// That was WRONG, and confirmed live: a location whose stripe_customer_id
+// was NULL called customers.create, and Stripe — which caches idempotency
+// keys for 24h — REPLAYED the id of a customer since DELETED in the
+// dashboard. Session creation then threw "No such customer: cus_…" and the
+// route 502'd, and clearing the column couldn't help because the replay
+// happens at Stripe, keyed on a permanent key we could never rotate.
+//
+// Fix mirrors the owner-checkout key (issue 165): bucket the key by the same
+// coarse time window. Two creates in the SAME window (a double-submit) still
+// share a key ⇒ Stripe yields ONE customer — the double-submit guarantee.
+// A deliberate later attempt (a repeat onboarding test, or recovery after a
+// dashboard deletion) lands in a NEW window ⇒ a genuinely fresh customer,
+// never a 24h replay of a dead one. One-customer-per-location within an
+// attempt still holds; across attempts we WANT a fresh customer if the old
+// one is gone.
+export function customerIdempotencyKey(
+  locationId: string,
+  nowMs: number = Date.now(),
+): string {
+  const bucket = Math.floor(nowMs / CHECKOUT_IDEMPOTENCY_WINDOW_MS)
+  return `bh_customer_${locationId}_${bucket}`
+}
+
 // ── Customer ──────────────────────────────────────────────────
-// One Stripe customer per location. Dedup is two-layered: the caller
-// passes the location's stored stripe_customer_id when it has one (we
-// trust it and skip the API entirely), and the create call carries an
-// idempotency key so even a first-time double-submit yields one customer.
+// One Stripe customer per location per attempt. Dedup is two-layered: the
+// caller passes the location's stored stripe_customer_id when it has one (we
+// trust it and skip the API entirely), and the create call carries a
+// per-attempt idempotency key (customerIdempotencyKey) so a double-submit
+// still yields one customer. `idempotencyKey` can be overridden for the
+// stale-customer recovery path (issue 167) so a fresh customer is minted
+// under a key that can never replay the dead id.
 export async function getOrCreateStripeCustomer(args: {
   locationId: string
   name?: string | null
   email?: string | null
   existingCustomerId?: string | null
+  nowMs?: number
+  idempotencyKey?: string
 }): Promise<{ customerId: string; created: boolean }> {
   const { locationId, name, email, existingCustomerId } = args
   if (existingCustomerId) return { customerId: existingCustomerId, created: false }
@@ -49,7 +79,7 @@ export async function getOrCreateStripeCustomer(args: {
       email: email || undefined,
       metadata: { location_id: locationId },
     },
-    { idempotencyKey: `bh_customer_${locationId}` },
+    { idempotencyKey: args.idempotencyKey || customerIdempotencyKey(locationId, args.nowMs) },
   )
   return { customerId: customer.id, created: true }
 }
@@ -128,6 +158,11 @@ export async function createOwnerCheckoutSession(args: {
   cancelUrl: string
   tier?: string
   nowMs?: number
+  // issue 167: override the derived key on the stale-customer recovery retry.
+  // The first (failed) session-create request poisons its key for the SAME
+  // request body; the retry uses a fresh customer (a DIFFERENT body), so it
+  // must also carry a fresh key or Stripe rejects the key reuse.
+  idempotencyKey?: string
 }): Promise<Stripe.Checkout.Session> {
   const { customerId, priceId, locationId, successUrl, cancelUrl } = args
   const tier = args.tier || 'owner'
@@ -146,8 +181,72 @@ export async function createOwnerCheckoutSession(args: {
     // issue 165: bucket the key per attempt (see ownerCheckoutIdempotencyKey
     // above). A retry within the window replays the same session; a later
     // attempt gets a fresh one instead of a dead completed/expired session.
-    { idempotencyKey: ownerCheckoutIdempotencyKey(locationId, args.nowMs) },
+    { idempotencyKey: args.idempotencyKey || ownerCheckoutIdempotencyKey(locationId, args.nowMs) },
   )
+}
+
+// ── Stale / deleted customer recovery (issue 167) ─────────────
+// True when a Stripe error means the customer we referenced no longer exists
+// — deleted in the dashboard, or an idempotency-key replay of a since-deleted
+// customer. Stripe surfaces this as code 'resource_missing' on param
+// 'customer' with a "No such customer: cus_…" message.
+export function isNoSuchCustomerError(err: any): boolean {
+  if (!err) return false
+  const code = err.code ?? err?.raw?.code
+  const param = err.param ?? err?.raw?.param
+  const msg = String(err.message ?? err?.raw?.message ?? '')
+  if (code === 'resource_missing' && param === 'customer') return true
+  return /no such customer/i.test(msg)
+}
+
+// Create the owner checkout session, recovering from a stale/deleted customer
+// instead of 502ing. On the first "No such customer", we mint a genuinely
+// fresh customer under a key derived from the dead id (so it can NEVER replay
+// the same ghost), persist it over the stale column via the injected
+// persistCustomerId, and retry the session ONCE with a fresh session key.
+// persistCustomerId is only invoked when the id actually changes (issue 167).
+export async function createOwnerCheckoutSessionResilient(args: {
+  locationId: string
+  name?: string | null
+  email?: string | null
+  existingCustomerId?: string | null
+  priceId: string
+  successUrl: string
+  cancelUrl: string
+  tier?: string
+  nowMs?: number
+  persistCustomerId: (customerId: string) => Promise<void>
+}): Promise<{ session: Stripe.Checkout.Session; customerId: string; recovered: boolean }> {
+  const { locationId, name, email, existingCustomerId, priceId, successUrl, cancelUrl, tier, nowMs, persistCustomerId } = args
+
+  const first = await getOrCreateStripeCustomer({ locationId, name, email, existingCustomerId, nowMs })
+  let customerId = first.customerId
+  if (customerId !== existingCustomerId) await persistCustomerId(customerId)
+
+  try {
+    const session = await createOwnerCheckoutSession({ customerId, priceId, locationId, tier, successUrl, cancelUrl, nowMs })
+    return { session, customerId, recovered: false }
+  } catch (err: any) {
+    if (!isNoSuchCustomerError(err)) throw err
+
+    const staleId = customerId
+    const fresh = await getOrCreateStripeCustomer({
+      locationId, name, email,
+      existingCustomerId: null,
+      // Distinct from any key that could ever replay the dead customer, and
+      // stable across retries of the SAME recovery so it stays idempotent.
+      idempotencyKey: `bh_customer_${locationId}_recover_${staleId}`,
+    })
+    customerId = fresh.customerId
+    await persistCustomerId(customerId)
+
+    const session = await createOwnerCheckoutSession({
+      customerId, priceId, locationId, tier, successUrl, cancelUrl,
+      // Fresh customer ⇒ a different request body ⇒ a fresh session key.
+      idempotencyKey: `${ownerCheckoutIdempotencyKey(locationId, nowMs)}_recover_${staleId}`,
+    })
+    return { session, customerId, recovered: true }
+  }
 }
 
 // ── Billing portal ────────────────────────────────────────────
