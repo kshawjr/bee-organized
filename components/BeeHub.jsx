@@ -29,6 +29,7 @@ import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
+import { navigateToStripeCheckout, payStepForCheckoutReturn, CHECKOUT_RETURN_PARAM, CHECKOUT_INFLIGHT_KEY } from "@/lib/stripe-checkout-return"
 import { splitNameForPrefill } from "@/lib/name-prefill"
 import { captureViewAsSnapshot, revertViewAsCancel, viewAsIdentityFor, isElevatedRole, visibleTransferQueue } from "@/lib/view-as-identity"
 import { makeUpdatePartner } from "@/lib/partner-writes"
@@ -11322,6 +11323,44 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
       setToast({ kind: 'error', msg: `Couldn't connect Jobber: ${reason}` })
     }
     window.history.replaceState({}, '', window.location.pathname)
+  }, [])
+
+  // issue 163 — return from Stripe hosted checkout. The pay step now
+  // navigates the WHOLE tab to Stripe (no window.open), so Stripe's
+  // success_url / cancel_url bring the owner right back here on mount:
+  //   • ?stripe_checkout=complete → drop into the polling wait step. The
+  //     webhook (checkout.session.completed / invoice.paid) is still the
+  //     source of truth; StripeCheckoutWait polls activation-status until
+  //     subscription_status flips active. A return that BEATS the webhook
+  //     simply keeps polling — no race to lose.
+  //   • ?stripe_checkout=cancel → back to the pay step, never a broken
+  //     state. Re-attempting replays the same idempotent checkout session
+  //     (issue 161 keys) → no second customer or subscription.
+  //   • No marker but we left for Stripe and came back via the browser BACK
+  //     button (the CHECKOUT_INFLIGHT_KEY flag) → also resume the pay step.
+  // The marker/flag is consumed once so a manual refresh is inert.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const marker = params.get(CHECKOUT_RETURN_PARAM)
+    if (marker) {
+      params.delete(CHECKOUT_RETURN_PARAM)
+      const qs = params.toString()
+      window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''))
+      try { sessionStorage.removeItem(CHECKOUT_INFLIGHT_KEY) } catch {}
+      const step = payStepForCheckoutReturn(marker)
+      if (step) setPayStep(step)
+      return
+    }
+    // Browser-BACK return from Stripe carries no marker — the in-flight flag
+    // is the only signal. Land on the pay step so the owner can finish or
+    // retry, rather than the pricing screen.
+    try {
+      if (sessionStorage.getItem(CHECKOUT_INFLIGHT_KEY)) {
+        sessionStorage.removeItem(CHECKOUT_INFLIGHT_KEY)
+        setPayStep('pay_confirm')
+      }
+    } catch {}
   }, [])
 
   // Hydrate OAuth intent from sessionStorage on every fresh mount.
@@ -31285,7 +31324,7 @@ function PaymentConfirmStep({
           ← Back
         </button>
         {stripePayUrl ? (
-          <button onClick={() => { window.open(stripePayUrl, '_blank', 'noopener'); if (onStripeOpen) onStripeOpen() }}
+          <button onClick={() => { if (onStripeOpen) onStripeOpen(); navigateToStripeCheckout(stripePayUrl) }}
             style={{ flex:2, padding:'12px', background:'#635bff', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
             Pay with Stripe →
           </button>
@@ -31337,9 +31376,9 @@ function StripeCheckoutWait({ locationId, until, onPaid, onBack, payUrl }) {
     <div style={{ display:'flex', flexDirection:'column', gap:'14px', width:'100%', textAlign:'center', padding:'8px 0' }}>
       <div style={{ fontSize:'40px' }}>🐝</div>
       <div>
-        <h3 style={{ fontSize:'17px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>Complete your payment in the Stripe tab</h3>
+        <h3 style={{ fontSize:'17px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>Confirming your payment…</h3>
         <p style={{ fontSize:'12.5px', color:'#8a9e9a', lineHeight:1.5 }}>
-          This page updates automatically once Stripe confirms your payment — usually within a few seconds of paying.
+          You're back from Stripe. This finishes automatically the moment your payment is confirmed — usually within a few seconds. No need to do anything.
         </p>
       </div>
       {slow && (
@@ -31352,7 +31391,7 @@ function StripeCheckoutWait({ locationId, until, onPaid, onBack, payUrl }) {
         </div>
       )}
       {payUrl && (
-        <button onClick={() => window.open(payUrl, '_blank', 'noopener')}
+        <button onClick={() => navigateToStripeCheckout(payUrl)}
           style={{ padding:'10px', background:'transparent', border:'none', fontSize:'12px', color:'#635bff', cursor:'pointer', fontFamily:'inherit', textDecoration:'underline' }}>
           Reopen Stripe checkout
         </button>

@@ -349,11 +349,18 @@ export async function recordStripeInvoice(args: {
   amountCents: number
   currency: string | null
   sessionId: string | null
+  // issue 163: the Stripe invoice id (in_…), when the row originates from an
+  // invoice event. Populates the dedicated stripe_invoice_id column so it no
+  // longer sits empty while the id hides in reference_number. Checkout-session
+  // rows (activation-legacy / seat purchase) carry no invoice id and leave it
+  // null. Idempotency still runs off stripe_payment_intent_id, unchanged.
+  invoiceId?: string | null
   paymentIntentId: string | null
   memo: string
   periodEnd?: string | null
 }): Promise<'inserted' | 'duplicate' | 'skipped_zero_amount'> {
   const { locationId, amountCents, currency, sessionId, paymentIntentId, memo, periodEnd } = args
+  const invoiceId = args.invoiceId ?? null
   // billing_invoices CHECKs amount_cents > 0; a 100%-coupon session is
   // recorded in stripe_webhook_events + sync_log only.
   if (!Number.isInteger(amountCents) || amountCents <= 0) return 'skipped_zero_amount'
@@ -366,8 +373,14 @@ export async function recordStripeInvoice(args: {
     period_end: periodEnd ?? null,
     source: 'stripe',
     payment_method: 'card',
-    reference_number: sessionId,
+    // reference_number is the source-agnostic human reference (a check #, wire
+    // ref, etc. for manual rows). For a Stripe row the best human reference is
+    // the invoice id when there is one (what shows on the customer's Stripe
+    // receipt), else the checkout session id — so prefer invoiceId, fall back
+    // to sessionId. The canonical machine id lives in stripe_invoice_id.
+    reference_number: invoiceId ?? sessionId,
     memo,
+    stripe_invoice_id: invoiceId,
     stripe_payment_intent_id: paymentIntentId,
   })
   if (error) {

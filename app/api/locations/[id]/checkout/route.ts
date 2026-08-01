@@ -20,7 +20,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { stripeConfigured } from '@/lib/stripe'
-import { getOrCreateStripeCustomer, createOwnerCheckoutSession } from '@/lib/stripe-billing'
+import {
+  getOrCreateStripeCustomer,
+  createOwnerCheckoutSession,
+  ownerCheckoutReturnUrls,
+} from '@/lib/stripe-billing'
 import {
   getLocationBilling,
   writeLocationStripeIds,
@@ -107,13 +111,17 @@ export async function POST(
     }
 
     // 2. Subscription-mode checkout session for the owner's annual seat.
+    //    issue 163: return the owner to the onboarding route in the SAME tab
+    //    after checkout (success_url / cancel_url), instead of stranding them
+    //    on Stripe's success page in a second window.
+    const { successUrl, cancelUrl } = ownerCheckoutReturnUrls(origin)
     const session = await createOwnerCheckoutSession({
       customerId,
       priceId,
       locationId: location.id,
       tier: OWNER_TIER,
-      successUrl: `${origin}/?stripe_checkout=complete`,
-      cancelUrl: `${origin}/?stripe_checkout=cancel`,
+      successUrl,
+      cancelUrl,
     })
 
     if (!session.url) {

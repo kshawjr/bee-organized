@@ -540,7 +540,11 @@ async function handleInvoiceEvent(event: any) {
           locationId: location.id,
           amountCents: amountPaid,
           currency,
-          sessionId: invoiceId,
+          // issue 163: this row IS a Stripe invoice — populate the dedicated
+          // stripe_invoice_id column (not just reference_number). No checkout
+          // session is involved here, so sessionId is null.
+          sessionId: null,
+          invoiceId,
           paymentIntentId,
           memo: `Stripe ${billingReason === 'subscription_create' ? 'subscription activation' : 'renewal'} (${billingReason || 'invoice.paid'})`,
           periodEnd: newDate,

@@ -54,6 +54,27 @@ export async function getOrCreateStripeCustomer(args: {
   return { customerId: customer.id, created: true }
 }
 
+// ── Owner-activation checkout return URLs (issue 163) ─────────
+// Where Stripe sends the owner after hosted checkout. Both point at the
+// onboarding route ('/') — the pay step now navigates the WHOLE tab to
+// Stripe (no window.open), so these success_url / cancel_url are what bring
+// the owner back into Bee Hub. The onboarding client reads the
+// ?stripe_checkout= marker on mount (payStepForCheckoutReturn):
+//   • complete → resume at the polling wait (webhook is still the truth)
+//   • cancel   → resume at the pay step
+// Subscription-mode Checkout Sessions use success_url / cancel_url — the
+// dahlia API's return_url is for embedded (ui_mode:'embedded') checkout
+// only, which we do not use — so these are the correct fields.
+export function ownerCheckoutReturnUrls(
+  origin: string,
+): { successUrl: string; cancelUrl: string } {
+  const base = origin.replace(/\/$/, '')
+  return {
+    successUrl: `${base}/?stripe_checkout=complete`,
+    cancelUrl: `${base}/?stripe_checkout=cancel`,
+  }
+}
+
 // ── Owner-activation checkout ─────────────────────────────────
 // Subscription-mode Checkout Session for the owner's annual seat. The
 // card is captured on Stripe's hosted page; the webhook
