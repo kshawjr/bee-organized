@@ -75,6 +75,45 @@ export function ownerCheckoutReturnUrls(
   }
 }
 
+// ── Owner-activation checkout idempotency key (issue 165) ─────
+// The key must vary per checkout ATTEMPT. The old location-only key
+// (bh_owner_checkout_{locationId}) never changed, so Stripe — which
+// replays the SAME session for a repeated key — made a location's FIRST
+// checkout session its ONLY one. That first session can be already
+// completed (a location reset for a repeat onboarding test) or expired
+// (Checkout Sessions die after 24h). Stripe then serves "you're all done
+// here — you've either completed your payment or this checkout session has
+// timed out" with no chance to enter card details and no way to start over.
+//
+// Fix: bucket the key by a coarse time window. Two create calls inside the
+// SAME window (a double-click, or an immediate network re-send) share a key
+// and Stripe replays ONE session — exactly the double-submit idempotency
+// exists to stop. A deliberate later retry, or a return after abandoning,
+// lands in a NEW window and mints a fresh session, so a dead session never
+// traps the owner.
+//
+// Why a fresh session here can't leak a second subscription: a subscription
+// is created only when a session is COMPLETED, and activation is idempotent
+// per location (the Stripe webhook short-circuits once subscription_status
+// === 'active'), so extra open sessions never become extra subscriptions.
+// One-customer-per-location is guaranteed separately by bh_customer_
+// {locationId} (getOrCreateStripeCustomer), which is intentionally
+// permanent and left unchanged.
+//
+// The window is far shorter than a Checkout Session's 24h life (so an
+// abandoned/dead session is never the only one an owner can ever have) yet
+// comfortably wider than a rapid double-submit (sub-second to a few
+// seconds of network retry).
+export const CHECKOUT_IDEMPOTENCY_WINDOW_MS = 60 * 1000 // 60 seconds
+
+export function ownerCheckoutIdempotencyKey(
+  locationId: string,
+  nowMs: number = Date.now(),
+): string {
+  const bucket = Math.floor(nowMs / CHECKOUT_IDEMPOTENCY_WINDOW_MS)
+  return `bh_owner_checkout_${locationId}_${bucket}`
+}
+
 // ── Owner-activation checkout ─────────────────────────────────
 // Subscription-mode Checkout Session for the owner's annual seat. The
 // card is captured on Stripe's hosted page; the webhook
@@ -88,6 +127,7 @@ export async function createOwnerCheckoutSession(args: {
   successUrl: string
   cancelUrl: string
   tier?: string
+  nowMs?: number
 }): Promise<Stripe.Checkout.Session> {
   const { customerId, priceId, locationId, successUrl, cancelUrl } = args
   const tier = args.tier || 'owner'
@@ -103,10 +143,10 @@ export async function createOwnerCheckoutSession(args: {
       success_url: successUrl,
       cancel_url: cancelUrl,
     },
-    // One checkout per location activation attempt. A retry within the
-    // idempotency window replays the same session instead of opening a
-    // second subscription behind the owner's back.
-    { idempotencyKey: `bh_owner_checkout_${locationId}` },
+    // issue 165: bucket the key per attempt (see ownerCheckoutIdempotencyKey
+    // above). A retry within the window replays the same session; a later
+    // attempt gets a fresh one instead of a dead completed/expired session.
+    { idempotencyKey: ownerCheckoutIdempotencyKey(locationId, args.nowMs) },
   )
 }
 

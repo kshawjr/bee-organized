@@ -53,9 +53,10 @@ describe('issue 163 — checkout return URLs', () => {
       cancel_url: 'https://app.bee.test/?stripe_checkout=cancel',
       client_reference_id: 'loc-1',
     })
-    // Same idempotency key ⇒ a re-attempt after abandon replays the SAME
-    // session, never a second subscription (issue 161).
-    expect(opts).toMatchObject({ idempotencyKey: 'bh_owner_checkout_loc-1' })
+    // issue 165: the key is bucketed per attempt (bh_owner_checkout_<loc>_<bucket>),
+    // so it still starts with the location prefix but no longer traps the owner on a
+    // dead session forever. Exact bucketing is pinned in checkout-idempotency-key-scope.test.ts.
+    expect(opts.idempotencyKey).toMatch(/^bh_owner_checkout_loc-1_\d+$/)
   })
 })
 
