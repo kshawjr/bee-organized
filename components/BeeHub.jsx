@@ -82,9 +82,8 @@ import {
   calculateSeatTotal,
   formatCurrency,
   formatRenewalDate,
-  nextRenewalDate,
-  daysUntilNextRenewal,
-  prorateToNextRenewal,
+  resolveLocationRenewalDate,
+  prorateToRenewal,
 } from "@/lib/subscription-math"
 import { importEstimateLine, SAMPLE_MODE_MIN_CLIENTS } from "@/lib/import-estimate"
 // Pure phase/park vocabulary shared with the import route — lib/import-phase
@@ -10958,7 +10957,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
       ? currentLocationCtx.payment_source
       : 'direct'
   // Co-owner pricing rule (2nd Zee Bee at Hive Manager rate) is applied inside
-  // calculateSeatTotal, so paySubDisplay.annual / .prorated already reflect it.
+  // calculateSeatTotal, so paySubDisplay.annual / .dueToday already reflect it.
   const livePricesForPay = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
   const paySubDisplay = getSubscriptionDisplay(
     paymentSourceForPay,
@@ -10966,13 +10965,15 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     new Date(),
     livePricesForPay,
   )
-  const effectiveProratedForPay = paySubDisplay.prorated
+  // issue 162: a new location pays a FULL YEAR at signup — no proration. The
+  // pay-step "due today" is the full annual, and the renewal date is the
+  // location's own signup anniversary (getSubscriptionDisplay derives both).
+  const effectiveDueTodayForPay = paySubDisplay.dueToday
   // Back-compat shim — the pay screens (pricing, confirm, done) read
-  // `proration.*`.
+  // `proration.*`. `.prorated` now carries the full-year due-today amount.
   const proration = {
-    prorated: effectiveProratedForPay,
+    prorated: effectiveDueTodayForPay,
     annual:   paySubDisplay.annual,
-    days:     paySubDisplay.daysUntilRenewal,
     renewDate: formatRenewalDate(paySubDisplay.renewalDate),
   }
 
@@ -11779,49 +11780,49 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                 </div>
               )}
               {payStep==='pricing'&&<button onClick={()=>{
-                // Zero prorated total → no payment screen needed. Corp-sponsored
-                // locations (subscription_status='deferred', prorated computed as
+                // Zero due today → no payment screen needed. Corp-sponsored
+                // locations (subscription_status='deferred', due-today computed as
                 // 0 by SubscriptionCalculator's normalizedSource branch) and any
                 // future zero-cost configuration jump straight to the next
                 // onboarding step. The owner seat is already pre-allocated via
                 // /api/hub_users/accept, so no /api/seats POST is needed here.
-                if (effectiveProratedForPay === 0) {
+                if (effectiveDueTodayForPay === 0) {
                   markDone('pay')
                   setActiveStepOpen(null)
                   return
                 }
                 setPayStep('pay_confirm')
-              }} style={{ width:'100%', padding:'15px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', marginBottom:'10px' }}>{effectiveProratedForPay === 0 ? 'Continue →' : paymentSourceForPay === 'direct' ? `Activate for ${formatCurrency(proration.prorated)} →` : 'Continue →'}</button>}
+              }} style={{ width:'100%', padding:'15px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', marginBottom:'10px' }}>{effectiveDueTodayForPay === 0 ? 'Continue →' : paymentSourceForPay === 'direct' ? `Activate for ${formatCurrency(proration.prorated)} →` : 'Continue →'}</button>}
               {showSmsModal&&<SmsVoiceInfoModal onClose={()=>setShowSmsModal(false)} />}
             </>
           )}
           {payStep==='pay_confirm'&&(() => {
             // Line-item breakdown: replicate the SubscriptionCalculator "Breakdown"
-            // shape so the user sees the same per-tier amounts they just configured,
-            // prorated. Co-owner discount (count ≥ 2 Zee Bees) is folded in here so
-            // the line items add up to the total.
+            // shape so the user sees the same per-tier amounts they just configured.
+            // issue 162: a new location pays a FULL YEAR at signup — no proration —
+            // so each line is the full annual rate. Co-owner discount (count ≥ 2
+            // Zee Bees) is folded in here so the line items add up to the total.
             const livePricesForConfirm = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
-            const confirmManagerProrated = prorateToNextRenewal(livePricesForConfirm.manager || 0)
+            const confirmManagerAnnual = livePricesForConfirm.manager || 0
             const confirmLineItems = selectedSeats
               .filter(s => s.count > 0)
               .flatMap(s => {
                 const meta = SUBSCRIPTION_TIER_META.find(t => t.key === s.tier)
                 const name = meta?.name || s.tier
                 const annualEach = livePricesForConfirm[s.tier] || 0
-                const proratedEach = prorateToNextRenewal(annualEach)
                 if (s.tier === 'owner' && s.count >= 2) {
                   // Primary owner at full rate, extras at Hive Manager rate.
                   return [
-                    { label: `1 ${name} (prorated)`, amount: proratedEach },
+                    { label: `1 ${name} (annual)`, amount: annualEach },
                     {
-                      label: `${s.count - 1} co-owner ${name}${s.count - 1 !== 1 ? 's' : ''} (prorated, billed at Hive Manager rate)`,
-                      amount: (s.count - 1) * confirmManagerProrated,
+                      label: `${s.count - 1} co-owner ${name}${s.count - 1 !== 1 ? 's' : ''} (annual, billed at Hive Manager rate)`,
+                      amount: (s.count - 1) * confirmManagerAnnual,
                     },
                   ]
                 }
                 return [{
-                  label: `${s.count} ${name}${s.count !== 1 ? 's' : ''} (prorated)`,
-                  amount: s.count * proratedEach,
+                  label: `${s.count} ${name}${s.count !== 1 ? 's' : ''} (annual)`,
+                  amount: s.count * annualEach,
                 }]
               })
             const confirmTotal = confirmLineItems.reduce((sum, li) => sum + li.amount, 0)
@@ -20559,9 +20560,12 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           const tierKeysWithSeats = SUBSCRIPTION_TIER_META.map(m=>m.key).filter(k => (seatCountsByTier[k]?.total||0) > 0)
           const hasAnySeats = tierKeysWithSeats.length > 0
           const billingAnnual = Object.entries(seatCountsByTier).reduce((sum, [tier, c]) => sum + getTierPrice(tier) * (c?.total||0), 0)
-          const billingRenewalDate = nextRenewalDate()
+          // issue 162: renewal reflects the location's OWN anniversary
+          // (paid_through_date, the mirror of Stripe's period end), not a
+          // fixed March 1. Legacy fallback only when no paid_through exists.
+          const billingPaidThrough = currentLocationCtx?.paid_through_date ?? selectedLoc?.paid_through_date ?? null
+          const billingRenewalDate = resolveLocationRenewalDate({ paidThroughDate: billingPaidThrough })
           const billingRenewalLabel = formatRenewalDate(billingRenewalDate)
-          const billingRenewalYear = billingRenewalDate.getUTCFullYear()
           let summaryTitle, summaryBody, summaryAccent, summaryIsSponsored = false
           if (billingPaymentSource === 'prepaid_corporate') {
             summaryTitle = 'Prepaid by Bee Organized'
@@ -20601,7 +20605,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                   )}
                   {summaryIsSponsored && (
                     <div style={{ background:'#fef3c7', border:'1px solid #f59e0b', borderRadius:'8px', padding:'12px 14px', marginTop:'12px', fontSize:'13px', color:'#78350f', lineHeight:1.5 }}>
-                      <strong>⚠️ Important:</strong> When testing concludes, you'll be responsible for a prorated subscription fee from that date through March 1, {billingRenewalYear}. Your normal annual renewal continues March 1 thereafter.
+                      {/* issue 162: renewal anchors to the location's own
+                          conversion date, not a fleet-wide March 1. */}
+                      <strong>⚠️ Important:</strong> When testing concludes, you'll be responsible for a prorated subscription fee from that date through the end of your first paid year. Your annual renewal continues on that anniversary thereafter.
                     </div>
                   )}
                 </div>
@@ -21524,6 +21530,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       {showAddSeatsModal && resolvedBillingLocationId && (
         <AddSeatsModal
           locationId={resolvedBillingLocationId}
+          paidThroughDate={currentLocationCtx?.paid_through_date ?? selectedLoc?.paid_through_date ?? null}
           onClose={()=>setShowAddSeatsModal(false)}
           onSeatsAdded={(rows)=>{ seatsCtx?.setSeats?.(prev=>[...prev, ...rows]) }}
         />
@@ -21538,6 +21545,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
         <ScheduleRemovalModal
           seat={scheduleRemovalSeat}
           tierMeta={SUBSCRIPTION_TIER_META.find(m=>m.key===scheduleRemovalSeat.tier)}
+          paidThroughDate={currentLocationCtx?.paid_through_date ?? selectedLoc?.paid_through_date ?? null}
           onClose={()=>setScheduleRemovalSeat(null)}
           onScheduled={(updated)=>{ seatsCtx?.setSeats?.(prev=>prev.map(s=>s.id===updated.id?updated:s)); setScheduleRemovalSeat(null) }}
         />
@@ -22674,12 +22682,14 @@ function SubscriptionCalculator({
   const display = getSubscriptionDisplay(normalizedSource, seats, new Date(), livePrices)
 
   // Co-owner rule (2nd Zee Bee at Hive Manager rate) lives in calculateSeatTotal,
-  // so display.annual / .prorated already reflect it. Owner seats capped at 2 —
+  // so display.annual / .dueToday already reflect it. Owner seats capped at 2 —
   // one primary owner + one co-owner.
   const SEAT_MAX = (tier) => tier === 'owner' ? 2 : 99
   const managerPrice = getTierPrice('manager')
   const effectiveAnnual = display.annual
-  const effectiveProrated = display.prorated
+  // issue 162: new-location signup pays a full year — "due today" is the full
+  // annual (no proration), and the renewal is the signup anniversary.
+  const effectiveDueToday = display.dueToday
 
   function adjustSeat(tier, delta) {
     // Deferred tiers (Worker Bee, Honey Watcher) are locked at 0 — buttons are
@@ -22708,21 +22718,20 @@ function SubscriptionCalculator({
     return found?.count || 0
   }
 
-  const renewalLabel = formatRenewalDate(nextRenewalDate())
-  const daysLeft = daysUntilNextRenewal()
+  const renewalLabel = formatRenewalDate(display.renewalDate)
 
   // Header headline number depends on mode:
-  // - direct: prorated $ they pay today
+  // - direct: full annual they pay today (issue 162 — no proration at signup)
   // - prepaid: $0 today, annual is informational
   // - sponsored: $0 today, no math shown
   const heroNumber =
     display.mode === 'direct'
-      ? formatCurrency(effectiveProrated)
+      ? formatCurrency(effectiveDueToday)
       : formatCurrency(0)
 
   const heroSub =
     display.mode === 'direct'
-      ? `Prorated to next ${renewalLabel}`
+      ? `Full year · renews ${renewalLabel}`
       : display.mode === 'prepaid'
         ? `Prepaid through ${renewalLabel}`
         : 'Sponsored by corporate during testing'
@@ -22803,10 +22812,10 @@ function SubscriptionCalculator({
           <>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', padding:'6px 8px', background:'rgba(212,160,70,0.08)', border:'1px solid rgba(212,160,70,0.2)', borderRadius:'8px', marginBottom:'8px' }}>
               <span style={{ fontSize:'11px', color:'#b88820', fontWeight:600 }}>
-                Prorated ({daysLeft} days)
+                Full year today
               </span>
               <span style={{ fontSize:'13.5px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
-                {formatCurrency(effectiveProrated)}
+                {formatCurrency(effectiveDueToday, { showCents:'never' })}
               </span>
             </div>
             <p style={{ fontSize:'11px', color:'#8a9e9a', textAlign:'center' }}>
@@ -22825,7 +22834,9 @@ function SubscriptionCalculator({
               Corporate-sponsored during testing period. No charge today.
             </p>
             <div style={{ background:'#fef3c7', border:'1px solid #f59e0b', borderRadius:'8px', padding:'12px 14px', marginTop:'12px', fontSize:'13px', color:'#78350f', lineHeight:1.5 }}>
-              <strong>⚠️ Important:</strong> When testing concludes, you'll be responsible for a prorated subscription fee from that date through March 1, {nextRenewalDate().getUTCFullYear()}. Your normal annual renewal continues March 1 thereafter.
+              {/* issue 162: renewal anchors to the location's own conversion
+                  date, not a fleet-wide March 1. */}
+              <strong>⚠️ Important:</strong> When testing concludes, you'll be responsible for a prorated subscription fee from that date through the end of your first paid year. Your annual renewal continues on that anniversary thereafter.
             </div>
           </>
         )}
@@ -25247,23 +25258,24 @@ function InviteModal({
 // is locked context (no picker). Collects owner email/name + the billing
 // setup (payment source / paid-through date / notes), then surfaces the
 // invite link on success in case the email bounced.
-function InviteOwnerModal({ location, onSuccess, onClose }) {
+export function InviteOwnerModal({ location, onSuccess, onClose }) {
   React.useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = prev }
   }, [])
 
-  const DEFAULT_PAID_THROUGH = '2027-03-01'
-  const DEFAULT_NOTES =
-    'Zee Bee Tester — corp-sponsored launch. 2027-03-01 conversion target.'
-
   const [firstName, setFirstName]   = useState('')
   const [lastName, setLastName]     = useState('')
   const [email, setEmail]           = useState('')
-  const [paymentSource, setPaymentSource] = useState('prepaid_corporate')
-  const [paidThrough, setPaidThrough] = useState(DEFAULT_PAID_THROUGH)
-  const [billingNotes, setBillingNotes] = useState(DEFAULT_NOTES)
+  // issue 162: Direct is the normal case — every new franchise pays for
+  // itself. Corporate arrangements are the exception, chosen deliberately.
+  const [paymentSource, setPaymentSource] = useState('direct')
+  // issue 162: paid_through starts EMPTY. A brand-new franchise hasn't paid
+  // for anything, so there's no such date to invent. It is set only when a
+  // location has genuine prepaid time (a corporate arrangement).
+  const [paidThrough, setPaidThrough] = useState('')
+  const [billingNotes, setBillingNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]           = useState('')
   const [warnings, setWarnings]     = useState(null) // [{code,message}] when confirmation required
@@ -25271,10 +25283,12 @@ function InviteOwnerModal({ location, onSuccess, onClose }) {
   const [result, setResult]         = useState(null)
   const [copied, setCopied]         = useState(false)
 
+  // issue 162: Direct listed first as the default/normal path. Corporate
+  // options remain for the exceptions.
   const PAYMENT_SOURCES = [
-    { key:'prepaid_corporate',   label:'Prepaid corporate', desc:'Corp pre-paid · keeps paid-through date (recommended)' },
+    { key:'direct',              label:'Direct',            desc:'Franchisee pays directly (normal case)' },
+    { key:'prepaid_corporate',   label:'Prepaid corporate', desc:'Corp pre-paid · keeps paid-through date' },
     { key:'corporate_sponsored', label:'Corporate sponsored', desc:'Corp covers cost · legacy toggle clears paid-through' },
-    { key:'direct',              label:'Direct',            desc:'Franchisee pays directly' },
   ]
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
@@ -25429,10 +25443,12 @@ function InviteOwnerModal({ location, onSuccess, onClose }) {
               </div>
             </div>
 
-            {/* Paid through */}
+            {/* Paid through — issue 162: optional, empty by default. Only set
+                for a location with genuine prepaid time. */}
             <div style={{ marginBottom:'16px' }}>
-              <p style={labelStyle}>Paid Through Date</p>
+              <p style={labelStyle}>Paid Through Date <span style={{ color:'#8a9e9a', fontWeight:400, textTransform:'none', letterSpacing:0 }}>(optional)</span></p>
               <input type="date" value={paidThrough} onChange={e=>{setPaidThrough(e.target.value); setWarnings(null)}} style={fieldStyle} />
+              <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'4px' }}>Leave empty for a new franchise — set only if this location has prepaid time.</p>
             </div>
 
             {/* Billing notes */}
@@ -27122,7 +27138,8 @@ function PricingManagementTab() {
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'14px 0 10px' }}>
           <div>
             <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b' }}>Subscription Pricing</p>
-            <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Annual seat prices · renew March 1</p>
+            {/* issue 162: renewal is each location's own signup anniversary, not a fleet-wide March 1. */}
+            <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Annual seat prices · renew on each location's anniversary</p>
           </div>
         </div>
         <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
@@ -31351,13 +31368,15 @@ function StripeCheckoutWait({ locationId, until, onPaid, onBack, payUrl }) {
 // ─── ScheduleRemovalModal ──────────────────────────────────────────────────
 // Owner schedules a seat for removal at renewal. No mid-cycle credits.
 // PATCH /api/seats/[id] with { scheduled_removal_at: 'YYYY-MM-DD' }.
-function ScheduleRemovalModal({ seat, tierMeta, onClose, onScheduled }) {
-  const nextMarchFirst = (() => {
-    const now = new Date()
-    const year = now.getUTCMonth() < 2 ? now.getUTCFullYear() : now.getUTCFullYear() + 1
-    return `${year}-03-01`
-  })()
-  const [date, setDate]       = useState(nextMarchFirst)
+function ScheduleRemovalModal({ seat, tierMeta, onClose, onScheduled, paidThroughDate=null }) {
+  const currentLocationCtx = useContext(CurrentLocationContext)
+  // issue 162: removal defaults to the LOCATION'S OWN renewal date
+  // (paid_through_date — the anniversary its seat is billed through), not a
+  // fixed March 1. Legacy fixed date only when no paid_through exists.
+  const defaultRemovalDate = resolveLocationRenewalDate({
+    paidThroughDate: paidThroughDate ?? currentLocationCtx?.paid_through_date ?? null,
+  }).toISOString().slice(0, 10)
+  const [date, setDate]       = useState(defaultRemovalDate)
   const [saving, setSaving]   = useState(false)
   const [error, setError]     = useState('')
   const hasUser = !!seat.user_id
@@ -31407,7 +31426,7 @@ function ScheduleRemovalModal({ seat, tierMeta, onClose, onScheduled }) {
             onChange={e => { setDate(e.target.value); setError('') }}
             style={{ width:'100%', padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', boxSizing:'border-box' }}
           />
-          <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'6px' }}>Defaults to next March 1 (annual renewal date).</p>
+          <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'6px' }}>Defaults to your location's renewal date.</p>
           {error && <p style={{ fontSize:'12px', color:'#ef4444', marginTop:'8px' }}>{error}</p>}
         </div>
         <div style={{ padding:'12px 20px 20px', display:'flex', gap:'10px', justifyContent:'flex-end' }}>
@@ -31487,11 +31506,20 @@ function CancelScheduledRemovalModal({ seat, tierMeta, onClose, onCanceled }) {
 // to /api/seats. On success, pushes the new seats into SeatsContext so
 // the billing card refreshes without a reload. No real Stripe yet —
 // "Pay" just records the prorated_cost on each seat row.
-function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
+function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null }) {
   const tierPricesCtx  = useContext(TierPricesContext)
   const currentUserCtx = useContext(CurrentUserContext)
+  const currentLocationCtx = useContext(CurrentLocationContext)
   const seatsCtx       = useContext(SeatsContext)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
+  // issue 162: a mid-year seat add prorates to the LOCATION'S OWN renewal
+  // date — paid_through_date, the mirror of the Stripe subscription's period
+  // end that Stripe itself prorates against — not a fixed March 1. Prop wins
+  // (super_admin managing another location); else the owner's own context;
+  // else the legacy fixed fallback inside resolveLocationRenewalDate.
+  const seatRenewalDate = resolveLocationRenewalDate({
+    paidThroughDate: paidThroughDate ?? currentLocationCtx?.paid_through_date ?? null,
+  })
 
   const [step, setStep]         = useState('form') // form | paymentConfirm | stripeWait
   const [tier, setTier]         = useState('manager')
@@ -31522,11 +31550,11 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
   const TIER_OPTIONS = SUBSCRIPTION_TIER_META.filter(t => t.key !== 'owner')
 
   const annualEach   = getTierPrice(tier)
-  const proratedEach = prorateToNextRenewal(annualEach)
+  const proratedEach = prorateToRenewal(annualEach, seatRenewalDate)
   const totalProrated = proratedEach * quantity
   const totalAnnual   = annualEach * quantity
   const tierMeta     = SUBSCRIPTION_TIER_META.find(t => t.key === tier)
-  const renewalLabel = formatRenewalDate(nextRenewalDate())
+  const renewalLabel = formatRenewalDate(seatRenewalDate)
 
   // Triggered by the form-step Pay button. Just transitions to the
   // payment-confirmation interstitial; the real /api/seats POST runs
@@ -31616,7 +31644,7 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
                   ? `Pick the number of ${tierMeta?.name || tier} seats on the Stripe checkout page — each lands as an open seat on the team roster, ready to invite into.`
                   : step === 'paymentConfirm'
                   ? `Adds ${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'} to your pool. Each appears as an open seat on the team roster, ready to invite into.`
-                  : 'Billed annually, prorated to next March 1. Once added, you can invite team members anytime.'}
+                  : `Billed annually, prorated to your renewal date (${renewalLabel}). Once added, you can invite team members anytime.`}
               </p>
             </div>
             <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', lineHeight:1, padding:'0 0 0 8px' }}>×</button>
@@ -31708,7 +31736,7 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
               <span style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{formatCurrency(totalAnnual, { showCents:'never' })}</span>
             </div>
             <div style={{ display:'flex', justifyContent:'space-between' }}>
-              <span style={{ fontSize:'12px', color:'#4a5e5a' }}>Prorated to Mar 1</span>
+              <span style={{ fontSize:'12px', color:'#4a5e5a' }}>Prorated to {renewalLabel}</span>
               <span style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b' }}>{formatCurrency(totalProrated, { showCents:'auto' })}</span>
             </div>
           </div>
@@ -31744,11 +31772,17 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
 //
 // AddSeatsModal still exists for pre-buying ahead of inviting — see
 // Settings > Billing.
-function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTier=null }) {
+function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTier=null, paidThroughDate=null }) {
   const seatsCtx = useContext(SeatsContext)
   const tierPricesCtx = useContext(TierPricesContext)
   const currentUserCtx = useContext(CurrentUserContext)
+  const currentLocationCtx = useContext(CurrentLocationContext)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
+  // issue 162: buy-and-invite prorates the purchased seat to the LOCATION'S
+  // OWN renewal date (paid_through_date — Stripe's period end), not March 1.
+  const seatRenewalDate = resolveLocationRenewalDate({
+    paidThroughDate: paidThroughDate ?? currentLocationCtx?.paid_through_date ?? null,
+  })
 
   const [step, setStep] = useState('form') // form | paymentConfirm | stripeWait | success
   const [email, setEmail] = useState('')
@@ -31794,10 +31828,9 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTi
 
   const tierMeta = SUBSCRIPTION_TIER_META.find(t => t.key === tier)
   const annualPrice = getTierPrice(tier)
-  const proratedDollars = prorateToNextRenewal(annualPrice)
+  const proratedDollars = prorateToRenewal(annualPrice, seatRenewalDate)
   const proratedCents = Math.round(proratedDollars * 100)
-  const renewalLabel = formatRenewalDate(nextRenewalDate())
-  const renewalYear = nextRenewalDate().getUTCFullYear()
+  const renewalLabel = formatRenewalDate(seatRenewalDate)
 
   function isValidEmail(s) {
     return typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim())
@@ -32009,7 +32042,7 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTi
                             ? 'Coming soon'
                             : availAtT > 0
                               ? `${availAtT} available`
-                              : `none available — +${formatCurrency(prorateToNextRenewal(getTierPrice(t.key)), { showCents:'auto' })} prorated`}
+                              : `none available — +${formatCurrency(prorateToRenewal(getTierPrice(t.key), seatRenewalDate), { showCents:'auto' })} prorated`}
                         </p>
                       </div>
                       {deferred ? (

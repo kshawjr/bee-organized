@@ -55,7 +55,7 @@ import {
   advancePaidThroughDate,
   getLocationBilling,
   getLocationByStripeSubscriptionId,
-  nextRenewalDateString,
+  annualRenewalFromSignupString,
   recordStripeInvoice,
   setLocationSubscriptionStatus,
   writeLocationStripeIds,
@@ -280,10 +280,13 @@ export async function POST(req: NextRequest) {
       // the subscription's REAL period end (signup + 1yr — Stripe sets the
       // billing_cycle_anchor at checkout), persist both ids, and let
       // invoice.paid record the billing_invoices row so the same activation
-      // payment is never recorded twice. The legacy one-time Payment-Link
-      // path (no subscription) keeps recording here against the fixed renewal.
+      // payment is never recorded twice.
+      //
+      // issue 162: the default (before we read the real period end, and for
+      // the legacy one-time Payment-Link path that has no subscription) is
+      // signup + 1yr — the location's own anniversary — NOT a fixed March 1.
       const hasSubscription = !!subscriptionId
-      let paidThrough = nextRenewalDateString()
+      let paidThrough = annualRenewalFromSignupString()
       let resolvedCustomerId: string | null = customerId
       if (hasSubscription && stripeConfigured()) {
         try {

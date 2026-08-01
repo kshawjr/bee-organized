@@ -34,7 +34,7 @@ import {
   addManuallyGrantedSeats,
   getLocationBilling,
   manualGrantSeatNote,
-  nextRenewalDateString,
+  annualRenewalFromSignupString,
 } from '@/lib/subscription-activation'
 
 export const runtime = 'nodejs'
@@ -190,7 +190,9 @@ export async function POST(request: NextRequest) {
       // Owner activation goes through THE shared function. quantity is
       // forced to 1 — activation mints exactly one owner seat (a co-owner
       // is a separate grant on the now-active location, handled below).
-      const paidThrough = nextRenewalDateString()
+      // issue 162: a comp activation covers a full year from grant (signup +
+      // 1yr), the location's own anniversary — not a fixed March 1.
+      const paidThrough = annualRenewalFromSignupString()
       const result = await activateLocationSubscription({
         locationId: location.id,
         ownerUserId: owner.id,

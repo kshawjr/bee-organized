@@ -22,7 +22,7 @@
 
 import { supabaseService } from './supabase-service'
 import { buildStripePayUrl } from './stripe-links'
-import { nextRenewalDate } from './subscription-math'
+import { annualRenewalFromSignup, legacyFixedRenewalDate } from './subscription-math'
 
 const SEAT_COLS =
   'id, location_id, tier, user_id, status, added_at, removed_at, prorated_cost, added_by, notes, is_primary, scheduled_removal_at'
@@ -154,8 +154,18 @@ export async function getStripeRequirement(
   return { required: !!payUrl, payUrl }
 }
 
-export function nextRenewalDateString(from: Date = new Date()): string {
-  return nextRenewalDate(from).toISOString().slice(0, 10)
+// issue 162: a new self-paying location's paid_through anchors to signup + 1yr
+// (the same anniversary Stripe's billing_cycle_anchor produces), NOT a fixed
+// March 1. Used as the activation default when the real Stripe period end
+// isn't available yet.
+export function annualRenewalFromSignupString(from: Date = new Date()): string {
+  return annualRenewalFromSignup(from).toISOString().slice(0, 10)
+}
+
+// LEGACY-ONLY (issue 162): the fixed next-March-1 string. Retained for the
+// pre-Stripe cohort; do not use as the default for new activations.
+export function legacyFixedRenewalDateString(from: Date = new Date()): string {
+  return legacyFixedRenewalDate(from).toISOString().slice(0, 10)
 }
 
 // ── The ONE activation function ───────────────────────────────

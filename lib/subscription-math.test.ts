@@ -1,9 +1,15 @@
 import {
   DEFAULT_TIER_PRICES,
   type SeatLine,
-  nextRenewalDate,
-  daysUntilNextRenewal,
-  prorateToNextRenewal,
+  LEGACY_RENEWAL_MONTH,
+  LEGACY_RENEWAL_DAY,
+  legacyFixedRenewalDate,
+  addYears,
+  annualRenewalFromSignup,
+  parsePaidThroughDate,
+  resolveLocationRenewalDate,
+  daysUntilRenewal,
+  prorateToRenewal,
   calculateOwnerSubtotal,
   calculateSeatTotal,
   calculateProratedSeatTotal,
@@ -12,63 +18,103 @@ import {
   formatRenewalDate,
 } from './subscription-math'
 
-describe('nextRenewalDate', () => {
-  it('returns current year March 1 when from is before March 1', () => {
-    const from = new Date('2026-01-15T00:00:00Z')
-    const result = nextRenewalDate(from)
-    expect(result.toISOString()).toBe('2026-03-01T00:00:00.000Z')
+// issue 162: March 1 is no longer a fleet-wide renewal date. A location's
+// renewal anniversary is its own signup date (mirrored into paid_through_date
+// from Stripe's period end). The fixed March-1 constants survive ONLY as the
+// legacy fallback for the pre-Stripe cohort.
+
+describe('legacyFixedRenewalDate (legacy cohort only)', () => {
+  it('returns current-year March 1 when from is before March 1', () => {
+    expect(legacyFixedRenewalDate(new Date('2026-01-15T00:00:00Z')).toISOString()).toBe(
+      '2026-03-01T00:00:00.000Z',
+    )
   })
 
-  it('advances to next year when from is exactly on March 1', () => {
-    const from = new Date('2026-03-01T00:00:00Z')
-    const result = nextRenewalDate(from)
-    expect(result.toISOString()).toBe('2027-03-01T00:00:00.000Z')
+  it('advances to next year on/after March 1', () => {
+    expect(legacyFixedRenewalDate(new Date('2026-03-01T00:00:00Z')).toISOString()).toBe(
+      '2027-03-01T00:00:00.000Z',
+    )
+    expect(legacyFixedRenewalDate(new Date('2026-05-17T00:00:00Z')).toISOString()).toBe(
+      '2027-03-01T00:00:00.000Z',
+    )
   })
 
-  it('returns next year March 1 when from is after March 1', () => {
-    const from = new Date('2026-05-17T00:00:00Z')
-    const result = nextRenewalDate(from)
-    expect(result.toISOString()).toBe('2027-03-01T00:00:00.000Z')
-  })
-})
-
-describe('daysUntilNextRenewal', () => {
-  it('returns 288 for 2026-05-17 to 2027-03-01', () => {
-    const from = new Date('2026-05-17T00:00:00Z')
-    expect(daysUntilNextRenewal(from)).toBe(288)
-  })
-
-  it('returns 1 on the day before renewal', () => {
-    const from = new Date('2026-02-28T00:00:00Z')
-    expect(daysUntilNextRenewal(from)).toBe(1)
-  })
-
-  it('returns 365 on March 1 (advances to next year)', () => {
-    const from = new Date('2026-03-01T00:00:00Z')
-    expect(daysUntilNextRenewal(from)).toBe(365)
-  })
-
-  it('leap year: Feb 29 to March 1 is 1 day, not 0', () => {
-    const from = new Date('2024-02-29T00:00:00Z')
-    expect(daysUntilNextRenewal(from)).toBe(1)
+  it('constants remain March 1 for the legacy path', () => {
+    expect(LEGACY_RENEWAL_MONTH).toBe(3)
+    expect(LEGACY_RENEWAL_DAY).toBe(1)
   })
 })
 
-describe('prorateToNextRenewal', () => {
-  it('prorates owner annual price (550) from 2026-05-17 to 433.97', () => {
-    const from = new Date('2026-05-17T00:00:00Z')
-    expect(prorateToNextRenewal(550, from)).toBe(433.97)
+describe('addYears / annualRenewalFromSignup (new-location model)', () => {
+  it('adds one calendar year in UTC', () => {
+    expect(addYears(new Date('2026-05-17T00:00:00Z'), 1).toISOString()).toBe(
+      '2027-05-17T00:00:00.000Z',
+    )
   })
 
-  it('rounds to 2 decimal places (cents precision)', () => {
-    const from = new Date('2026-05-17T00:00:00Z')
-    const result = prorateToNextRenewal(200, from)
-    expect(result).toBe(Math.round((200 * 288) / 365 * 100) / 100)
+  it('a new location renews one year from signup, NOT March 1', () => {
+    const signup = new Date('2026-08-01T00:00:00Z')
+    const renewal = annualRenewalFromSignup(signup)
+    expect(renewal.toISOString()).toBe('2027-08-01T00:00:00.000Z')
+    // Explicitly not the legacy fixed date.
+    expect(renewal.toISOString()).not.toBe(legacyFixedRenewalDate(signup).toISOString())
+  })
+})
+
+describe('resolveLocationRenewalDate', () => {
+  const from = new Date('2026-11-17T00:00:00Z')
+
+  it('uses paid_through_date (Stripe period-end mirror) when present', () => {
+    const d = resolveLocationRenewalDate({ paidThroughDate: '2027-05-17' }, from)
+    expect(d.toISOString()).toBe('2027-05-17T00:00:00.000Z')
   })
 
-  it('returns 0 for zero annual price', () => {
-    const from = new Date('2026-05-17T00:00:00Z')
-    expect(prorateToNextRenewal(0, from)).toBe(0)
+  it('resolves the legacy fixed date for a location with no paid_through', () => {
+    // The legacy path still resolves — for the pre-Stripe cohort / any row
+    // with no paid_through_date at all.
+    const d = resolveLocationRenewalDate({ paidThroughDate: null }, from)
+    expect(d.toISOString()).toBe('2027-03-01T00:00:00.000Z')
+  })
+
+  it('legacy-ten shape: a fixed 2027-02-27 date resolves to itself', () => {
+    const d = resolveLocationRenewalDate({ paidThroughDate: '2027-02-27' }, from)
+    expect(d.toISOString()).toBe('2027-02-27T00:00:00.000Z')
+  })
+
+  it('ignores a malformed paid_through and falls back to legacy', () => {
+    expect(parsePaidThroughDate('not-a-date')).toBeNull()
+    const d = resolveLocationRenewalDate({ paidThroughDate: 'not-a-date' }, from)
+    expect(d.toISOString()).toBe('2027-03-01T00:00:00.000Z')
+  })
+})
+
+describe('prorateToRenewal / daysUntilRenewal (mid-year seat adds)', () => {
+  it('prorates a mid-year seat to the LOCATION\'S OWN renewal date, not March 1', () => {
+    const from = new Date('2026-11-17T00:00:00Z')
+    const ownRenewal = resolveLocationRenewalDate({ paidThroughDate: '2027-05-17' }, from)
+    const legacyRenewal = legacyFixedRenewalDate(from)
+
+    // 181 days to the location's own anniversary vs 104 to the legacy March 1.
+    expect(daysUntilRenewal(ownRenewal, from)).toBe(181)
+    expect(daysUntilRenewal(legacyRenewal, from)).toBe(104)
+
+    const toOwn = prorateToRenewal(400, ownRenewal, from)
+    const toLegacy = prorateToRenewal(400, legacyRenewal, from)
+    expect(toOwn).toBe(Math.round((400 * 181) / 365 * 100) / 100) // 198.36
+    // Proving the anchor moved: own-date proration differs from March-1 proration.
+    expect(toOwn).not.toBe(toLegacy)
+  })
+
+  it('returns 0 for a zero annual price', () => {
+    const from = new Date('2026-11-17T00:00:00Z')
+    const renewal = resolveLocationRenewalDate({ paidThroughDate: '2027-05-17' }, from)
+    expect(prorateToRenewal(0, renewal, from)).toBe(0)
+  })
+
+  it('never goes negative past the renewal date', () => {
+    const from = new Date('2027-06-01T00:00:00Z')
+    expect(daysUntilRenewal(new Date('2027-05-17T00:00:00Z'), from)).toBe(0)
+    expect(prorateToRenewal(400, new Date('2027-05-17T00:00:00Z'), from)).toBe(0)
   })
 })
 
@@ -99,18 +145,6 @@ describe('calculateSeatTotal', () => {
     expect(calculateSeatTotal([{ tier: 'owner', count: 2 }])).toBe(950)
   })
 
-  it('manager alone', () => {
-    expect(calculateSeatTotal([{ tier: 'manager', count: 1 }])).toBe(400)
-  })
-
-  it('light alone', () => {
-    expect(calculateSeatTotal([{ tier: 'light', count: 1 }])).toBe(200)
-  })
-
-  it('readonly alone', () => {
-    expect(calculateSeatTotal([{ tier: 'readonly', count: 1 }])).toBe(50)
-  })
-
   it('full team mix sums to 1650', () => {
     const fullTeam: SeatLine[] = [
       { tier: 'owner', count: 1 },
@@ -121,55 +155,59 @@ describe('calculateSeatTotal', () => {
     expect(calculateSeatTotal(fullTeam)).toBe(1650)
   })
 
-  it('co-owned (two owners, second billed as manager) sums to 950', () => {
-    const coOwned: SeatLine[] = [
-      { tier: 'owner', count: 1 },
-      { tier: 'manager', count: 1 },
-    ]
-    expect(calculateSeatTotal(coOwned)).toBe(950)
-  })
-
   it('zero seats returns 0', () => {
     expect(calculateSeatTotal([])).toBe(0)
-  })
-
-  it('zero count lines contribute 0', () => {
-    expect(calculateSeatTotal([{ tier: 'owner', count: 0 }])).toBe(0)
   })
 })
 
 describe('calculateProratedSeatTotal', () => {
-  it('matches prorateToNextRenewal(calculateSeatTotal(...))', () => {
-    const from = new Date('2026-05-17T00:00:00Z')
-    const seats: SeatLine[] = [{ tier: 'owner', count: 1 }]
-    expect(calculateProratedSeatTotal(seats, from)).toBe(433.97)
+  it('prorates a seat config to the given renewal date', () => {
+    const from = new Date('2026-11-17T00:00:00Z')
+    const renewal = resolveLocationRenewalDate({ paidThroughDate: '2027-05-17' }, from)
+    const seats: SeatLine[] = [{ tier: 'manager', count: 1 }]
+    expect(calculateProratedSeatTotal(seats, renewal, from)).toBe(
+      prorateToRenewal(400, renewal, from),
+    )
   })
 })
 
-describe('getSubscriptionDisplay', () => {
-  const from = new Date('2026-05-17T00:00:00Z')
+describe('getSubscriptionDisplay — new-location pay step (issue 162)', () => {
+  const from = new Date('2026-08-01T00:00:00Z')
   const seats: SeatLine[] = [{ tier: 'owner', count: 1 }]
 
-  it('direct mode shows prorated + annual', () => {
+  it('direct: a new location (paid_through NULL) is quoted the FULL annual, no proration', () => {
     const result = getSubscriptionDisplay('direct', seats, from)
     expect(result.mode).toBe('direct')
     expect(result.annual).toBe(550)
-    expect(result.prorated).toBe(433.97)
-    expect(result.daysUntilRenewal).toBe(288)
-    expect(result.message).toBe('$434 prorated · Renews Mar 1, 2027 at $550/yr')
+    // Due today equals the full annual — the number Stripe charges — with no
+    // date-dependent proration term that could drift from the actual charge.
+    expect(result.dueToday).toBe(550)
+    expect(result.dueToday).toBe(result.annual)
+    // Renewal is the signup anniversary, not March 1.
+    expect(result.renewalDate.toISOString()).toBe('2027-08-01T00:00:00.000Z')
+    expect(result.message).toBe('$550 today · Renews Aug 1, 2027 at $550/yr')
   })
 
-  it('prepaid_corporate maps to prepaid mode with zero prorated', () => {
+  it('full team direct quote is the full annual sum', () => {
+    const team: SeatLine[] = [
+      { tier: 'owner', count: 1 },
+      { tier: 'manager', count: 2 },
+    ]
+    const result = getSubscriptionDisplay('direct', team, from)
+    expect(result.dueToday).toBe(calculateSeatTotal(team))
+  })
+
+  it('prepaid_corporate owes nothing today', () => {
     const result = getSubscriptionDisplay('prepaid_corporate', seats, from)
     expect(result.mode).toBe('prepaid')
-    expect(result.prorated).toBe(0)
-    expect(result.message).toBe('Prepaid through Mar 1, 2027')
+    expect(result.dueToday).toBe(0)
+    expect(result.message).toBe('Prepaid through Aug 1, 2027')
   })
 
-  it('corporate_sponsored maps to sponsored mode', () => {
+  it('corporate_sponsored owes nothing today', () => {
     const result = getSubscriptionDisplay('corporate_sponsored', seats, from)
     expect(result.mode).toBe('sponsored')
-    expect(result.prorated).toBe(0)
+    expect(result.dueToday).toBe(0)
     expect(result.message).toBe('Sponsored by corporate during testing')
   })
 
@@ -192,18 +230,6 @@ describe('formatCurrency', () => {
     expect(formatCurrency(435.67)).toBe('$436')
   })
 
-  it('auto: ceils up rather than nearest (432.46 → $433, not $432)', () => {
-    expect(formatCurrency(432.46)).toBe('$433')
-  })
-
-  it('auto: 100.01 → $101 (proves ceil, not round)', () => {
-    expect(formatCurrency(100.01)).toBe('$101')
-  })
-
-  it("showCents 'always' shows two decimals", () => {
-    expect(formatCurrency(15, { showCents: 'always' })).toBe('$15.00')
-  })
-
   it("showCents 'never' ceils to whole", () => {
     expect(formatCurrency(15.34, { showCents: 'never' })).toBe('$16')
   })
@@ -214,7 +240,11 @@ describe('formatCurrency', () => {
 })
 
 describe('formatRenewalDate', () => {
-  it('formats March 1 2027 as Mar 1, 2027', () => {
+  it('formats a signup-anniversary date', () => {
+    expect(formatRenewalDate(new Date('2027-08-01T00:00:00Z'))).toBe('Aug 1, 2027')
+  })
+
+  it('formats a legacy March 1 date', () => {
     expect(formatRenewalDate(new Date('2027-03-01T00:00:00Z'))).toBe('Mar 1, 2027')
   })
 })

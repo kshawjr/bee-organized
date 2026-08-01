@@ -55,13 +55,14 @@ const INVITE_REPLY_TO_EMAIL =
 
 const INVITE_TTL_DAYS = 7
 
-// payment_source values the form offers. corporate_sponsored is allowed but
-// flagged: the legacy billing toggle nulls paid_through_date for it, so the
-// recommended default is prepaid_corporate (keeps the conversion date).
+// payment_source values the form offers. issue 162: 'direct' is the normal
+// case — every new franchise pays for itself, with an EMPTY paid_through_date
+// (nothing prepaid). The corporate options are the exceptions: prepaid_corporate
+// keeps a conversion date, corporate_sponsored nulls paid_through_date.
 const VALID_PAYMENT_SOURCES = [
+  'direct',
   'prepaid_corporate',
   'corporate_sponsored',
-  'direct',
 ] as const
 type PaymentSource = (typeof VALID_PAYMENT_SOURCES)[number]
 
