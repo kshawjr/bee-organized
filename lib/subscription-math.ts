@@ -65,6 +65,28 @@ export function parsePaidThroughDate(paidThroughDate?: string | null): Date | nu
   return isNaN(d.getTime()) ? null : d
 }
 
+// issue 171 — a location whose paid_through_date is in the FUTURE has already
+// been paid for. The pre-Stripe cohort (five corporate-bought Zoho licences,
+// five owner-bought) was seeded with paid_through_date = 2027-02-27; either way
+// that first year is owed to them as Bee Hub value. The pay step must recognise
+// this, charge nothing, and activate.
+//
+// Pure and date-injectable so the SAME truth drives all three seams: the client
+// pay-step display, the checkout route (skip minting a Stripe session), and the
+// complete-onboarding gate (let this zero-due activation through issue 167's
+// guard). Comparison is strict `>` against the parsed midnight-UTC date, so on
+// the renewal day itself the term is no longer "in the future" — the location
+// falls back to the normal Stripe path, which is exactly when it must start
+// paying again.
+export function isPaidThroughFuture(
+  paidThroughDate?: string | null,
+  from: Date = new Date(),
+): boolean {
+  const paid = parsePaidThroughDate(paidThroughDate)
+  if (!paid) return false
+  return paid.getTime() > from.getTime()
+}
+
 // Resolve a location's OWN renewal date for mid-cycle proration and removal
 // scheduling. Priority (issue 162):
 //   1. paid_through_date — the webhook's mirror of the Stripe subscription's

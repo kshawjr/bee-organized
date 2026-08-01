@@ -89,6 +89,8 @@ import {
   formatRenewalDate,
   resolveLocationRenewalDate,
   prorateToRenewal,
+  isPaidThroughFuture,
+  parsePaidThroughDate,
 } from "@/lib/subscription-math"
 import { importEstimateLine, SAMPLE_MODE_MIN_CLIENTS } from "@/lib/import-estimate"
 // Pure phase/park vocabulary shared with the import route — lib/import-phase
@@ -10982,6 +10984,20 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     renewDate: formatRenewalDate(paySubDisplay.renewalDate),
   }
 
+  // issue 171 — a 'direct' location whose paid_through_date is in the FUTURE has
+  // already been paid for (the pre-Stripe cohort seeded with 2027-02-27). It
+  // owes nothing today: never quote a charge, never send it to Stripe. Computed
+  // from the SAME paid_through_date the server reads, so the client display and
+  // the server's checkout-skip / complete-onboarding allowance can't disagree.
+  // Corporate / sponsored sources already owe nothing via their own path, so
+  // this is scoped to 'direct' to avoid double-handling.
+  const prepaidThroughDate   = currentLocationCtx?.paid_through_date ?? null
+  const prepaidThroughFuture = paymentSourceForPay === 'direct' && isPaidThroughFuture(prepaidThroughDate)
+  const prepaidRenewLabel    = (() => {
+    const d = parsePaidThroughDate(prepaidThroughDate)
+    return d ? formatRenewalDate(d) : null
+  })()
+
   // Payment. The old fake card/ACH forms (and their digit state) are GONE —
   // direct locations pay on Stripe's hosted checkout when a Payment Link is
   // configured, and fall back to the honest record-only confirm when not.
@@ -11006,7 +11022,9 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   const [checkoutNonce, setCheckoutNonce]   = useState(0)
   // The real Stripe checkout URL for owner activation (null → record-only
   // fallback). Location identity + email are appended client-side.
-  const ownerStripeUrl = paymentSourceForPay === 'direct'
+  // issue 171 — a prepaid-through-future location is never sent to Stripe, so it
+  // must not resolve a pay URL even when an owner Payment Link is configured.
+  const ownerStripeUrl = (paymentSourceForPay === 'direct' && !prepaidThroughFuture)
     ? (buildStripePayUrl(tierPricesCtx?.getTierLink?.('owner'), currentLocationCtx?.id, currentUserCtx?.email) || serverPayUrl)
     : null
 
@@ -11026,6 +11044,10 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     if (paymentSourceForPay !== 'direct') return
     const locId = currentLocationCtx?.id
     if (!locId) return
+    // issue 171 — prepaid through a future date: owes nothing today. Skip the
+    // checkout session entirely (and the Payment-Link short-circuit below) so
+    // the pay step shows the "paid through …" surface, not "Pay with Stripe".
+    if (prepaidThroughFuture) { setCheckoutState('prepaid'); return }
     // A configured Payment Link already gives us a URL — no session needed.
     if (buildStripePayUrl(tierPricesCtx?.getTierLink?.('owner'), locId, currentUserCtx?.email)) {
       setCheckoutState('ready'); return
@@ -11051,7 +11073,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
       }
     })()
     return () => { cancelled = true }
-  }, [payStep, paymentSourceForPay, currentLocationCtx?.id, serverPayUrl, checkoutNonce])
+  }, [payStep, paymentSourceForPay, currentLocationCtx?.id, serverPayUrl, checkoutNonce, prepaidThroughFuture])
 
   // Per-step forms - prefilled from invite data, or from DB on remount (Pass 2)
   const [profileForm, setProfileForm] = useState({
@@ -11627,11 +11649,15 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     setActivateError('')
     try {
       const isDirect = paymentSourceForPay === 'direct'
+      // issue 171 — a prepaid-through-future activation charges nothing today, so
+      // the owner seat's recorded cost is $0, not the full annual it would carry
+      // for a fresh self-paying franchise.
+      const proratedCostCents = prepaidThroughFuture ? 0 : Math.round(proration.prorated * 100)
       const subRes = await fetch(`/api/locations/${locId}/complete-onboarding`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
-          isDirect ? { prorated_cost: Math.round(proration.prorated * 100) } : {}
+          isDirect ? { prorated_cost: proratedCostCents } : {}
         ),
       })
       const subJson = await subRes.json().catch(() => ({}))
@@ -11791,11 +11817,16 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
               <span style={{ fontSize:'36px' }}>🎉</span>
               <div>
                 <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'2px' }}>Welcome to Bee Hub!</h2>
-                <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Order recorded · renews {proration.renewDate}</p>
+                {/* issue 171 — a prepaid location owes nothing and is NOT invoiced;
+                   never show it the "order recorded · invoiced separately" copy. */}
+                <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{prepaidThroughFuture ? `Paid through ${prepaidRenewLabel || 'your prepaid term'} · nothing due today` : `Order recorded · renews ${proration.renewDate}`}</p>
               </div>
             </div>
             <div style={{ background:'#f7f5f0', borderRadius:'12px', padding:'12px 14px', marginBottom:'16px' }}>
-              {[['Plan','Owner · Annual'],['Order total',`$${finalAmt}`],['Billing','Invoiced separately'],['Renews',proration.renewDate]].map(([l,v])=>(
+              {(prepaidThroughFuture
+                ? [['Plan','Owner · Annual'],['Paid through', prepaidRenewLabel || '—'],['Due today','$0'],['Renews', prepaidRenewLabel || '—']]
+                : [['Plan','Owner · Annual'],['Order total',`$${finalAmt}`],['Billing','Invoiced separately'],['Renews',proration.renewDate]]
+              ).map(([l,v])=>(
                 <div key={l} style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
                   <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{l}</span>
                   <span style={{ fontSize:'12px', color:'#1a2e2b', fontWeight:500 }}>{v}</span>
@@ -11871,7 +11902,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                   return
                 }
                 setPayStep('pay_confirm')
-              }} style={{ width:'100%', padding:'15px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', marginBottom:'10px' }}>{effectiveDueTodayForPay === 0 ? 'Continue →' : paymentSourceForPay === 'direct' ? `Activate for ${formatCurrency(proration.prorated)} →` : 'Continue →'}</button>}
+              }} style={{ width:'100%', padding:'15px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'15px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer', marginBottom:'10px' }}>{/* issue 171 — a prepaid location owes $0, so don't quote the annual on the way to the "nothing due" confirm. */}{effectiveDueTodayForPay === 0 ? 'Continue →' : prepaidThroughFuture ? 'Continue →' : paymentSourceForPay === 'direct' ? `Activate for ${formatCurrency(proration.prorated)} →` : 'Continue →'}</button>}
               {showSmsModal&&<SmsVoiceInfoModal onClose={()=>setShowSmsModal(false)} />}
             </>
           )}
@@ -11914,15 +11945,67 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
             // the location for free (BUG 2/BUG 3). Non-direct (corporate/
             // sponsored) sources are unchanged: they always use record-only.
             const isDirect      = paymentSourceForPay === 'direct'
-            const showStripe    = !!ownerStripeUrl
-            const showRecordOnly = !isDirect || (isDirect && checkoutState === 'unconfigured')
-            const showError     = isDirect && !showStripe && checkoutState === 'error'
-            const showLoading   = isDirect && !showStripe && !showRecordOnly && !showError
+            // issue 171 — prepaid through a future date wins over every other
+            // surface: no Stripe, no record-only "isn't set up" lie, no loading.
+            // Keyed off the authoritative client fact (prepaidThroughFuture); the
+            // server's 'prepaid' classification is accepted too as a backstop.
+            const showPrepaid   = isDirect && (prepaidThroughFuture || checkoutState === 'prepaid')
+            const showStripe    = !showPrepaid && !!ownerStripeUrl
+            const showRecordOnly = !showPrepaid && (!isDirect || (isDirect && checkoutState === 'unconfigured'))
+            const showError     = !showPrepaid && isDirect && !showStripe && checkoutState === 'error'
+            const showLoading   = !showPrepaid && isDirect && !showStripe && !showRecordOnly && !showError
 
             return (
               <div style={{ maxWidth:'520px', margin:'0 auto' }}>
                 <div style={{ background:'white', borderRadius:'14px', padding:'18px 18px 16px', border:'1px solid rgba(0,0,0,0.06)', boxShadow:'0 2px 10px rgba(26,46,43,0.05)' }}>
-                  {showError ? (
+                  {showPrepaid ? (
+                    // issue 171 — the location is already paid for through a
+                    // future date. Say so plainly: nothing due today, nothing
+                    // sent to Stripe. Confirming records the activation (the
+                    // complete-onboarding gate allows this zero-due flip). This
+                    // is deliberately NOT the "Online payment isn't set up yet"
+                    // copy — that fallback is for an UNCONFIGURED tier and would
+                    // be a lie here; Stripe IS configured, the owner simply owes
+                    // nothing right now.
+                    <div style={{ display:'flex', flexDirection:'column', gap:'14px', width:'100%' }}>
+                      <div>
+                        <h3 style={{ fontSize:'17px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'2px' }}>You're already paid up</h3>
+                        <p style={{ fontSize:'12.5px', color:'#8a9e9a', lineHeight:1.5 }}>Your first year is already covered — there's nothing to pay today.</p>
+                      </div>
+                      <div style={{ background:'#f7f5f0', borderRadius:'12px', padding:'12px 14px' }}>
+                        {[['Plan','Owner · Annual'],['Paid through', prepaidRenewLabel || '—'],['Due today','$0'],['Renews', prepaidRenewLabel || '—']].map(([l,v])=>(
+                          <div key={l} style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
+                            <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{l}</span>
+                            <span style={{ fontSize:'12px', color:'#1a2e2b', fontWeight:600 }}>{v}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ borderRadius:'12px', border:'1.5px solid rgba(34,197,94,0.35)', background:'rgba(34,197,94,0.07)', padding:'12px 14px' }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px' }}>
+                          <span style={{ fontSize:'18px' }}>✅</span>
+                          <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b', textTransform:'uppercase', letterSpacing:'0.6px' }}>Nothing due today</p>
+                        </div>
+                        <p style={{ fontSize:'12.5px', color:'#4a5e5a', lineHeight:1.5 }}>
+                          Your subscription is <strong>paid through {prepaidRenewLabel || 'your prepaid term'}</strong>, so <strong>no card will be charged</strong> and there's nothing to pay now. Confirming activates Bee Hub right away, and your plan renews on {prepaidRenewLabel || 'that date'}.
+                        </p>
+                      </div>
+                      {activateError && (
+                        <p style={{ padding:'8px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.18)', borderRadius:'9px', color:'#b91c1c', fontSize:'12px' }}>
+                          {activateError}
+                        </p>
+                      )}
+                      <div style={{ display:'flex', gap:'8px', marginTop:'2px' }}>
+                        <button onClick={() => setPayStep('pricing')}
+                          style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>
+                          ← Back
+                        </button>
+                        <button onClick={() => { setActivateError(''); processPayment() }}
+                          style={{ flex:2, padding:'12px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+                          Activate — $0 due today →
+                        </button>
+                      </div>
+                    </div>
+                  ) : showError ? (
                     <div style={{ display:'flex', flexDirection:'column', gap:'14px', width:'100%' }}>
                       <div>
                         <h3 style={{ fontSize:'17px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'2px' }}>Checkout is temporarily unavailable</h3>

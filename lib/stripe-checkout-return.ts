@@ -69,6 +69,13 @@ export function navigateToStripeCheckout(
 //   • 'unconfigured'   — Stripe is genuinely not set up for this tier (or the
 //                        source is non-paying). The honest record-only confirm
 //                        is LEGITIMATE here; the free-grant door stays open.
+//   • 'prepaid'        — issue 171: the location's paid_through_date is in the
+//                        FUTURE, so it has already been paid for. It owes
+//                        nothing today; show the "paid through …" surface and
+//                        record the activation (never a Stripe session). This
+//                        is NOT the issue 167 free-activation hole — the server
+//                        authorises it off an unforgeable positive fact
+//                        (paid_through_date > today), not a broken checkout.
 //   • 'already_active' — the webhook already activated (a fast return beat us);
 //                        resume the polling wait, never re-activate.
 //   • 'error'          — checkout is BROKEN (502 stripe_error, checkout_no_url,
@@ -78,13 +85,19 @@ export function navigateToStripeCheckout(
 // The distinction between 'unconfigured' and 'error' is the whole point: only
 // the specific 409 "not configured" errors are unconfigured; everything else
 // is broken.
-export type CheckoutConfigState = 'ready' | 'unconfigured' | 'already_active' | 'error'
+export type CheckoutConfigState = 'ready' | 'unconfigured' | 'prepaid' | 'already_active' | 'error'
 
 export const CHECKOUT_UNCONFIGURED_ERRORS = [
   'stripe_not_configured',
   'owner_price_not_configured',
   'non_paying_source',
 ] as const
+
+// issue 171 — the specific 409 the checkout route returns when the location is
+// already paid for through a future date. Distinct from the 'unconfigured'
+// errors: those mean "Stripe can't charge here at all"; this means "Stripe
+// COULD charge, but nothing is owed right now."
+export const CHECKOUT_PREPAID_ERROR = 'prepaid_through_future'
 
 export function classifyCheckoutResponse(
   status: number,
@@ -93,6 +106,7 @@ export function classifyCheckoutResponse(
   const b = body || {}
   if (status >= 200 && status < 300 && b.url) return 'ready'
   if (status === 409 && b.error === 'already_active') return 'already_active'
+  if (status === 409 && b.error === CHECKOUT_PREPAID_ERROR) return 'prepaid'
   if (status === 409 && b.error && (CHECKOUT_UNCONFIGURED_ERRORS as readonly string[]).includes(b.error)) {
     return 'unconfigured'
   }

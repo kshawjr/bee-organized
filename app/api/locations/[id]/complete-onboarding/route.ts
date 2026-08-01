@@ -30,6 +30,7 @@ import {
   getLocationBilling,
   ownerCheckoutConfigured,
 } from '@/lib/subscription-activation'
+import { isPaidThroughFuture } from '@/lib/subscription-math'
 
 export const runtime = 'nodejs'
 
@@ -66,13 +67,24 @@ export async function POST(
   //   • the location is already active — this is then a redundant confirm, not
   //     a free activation (activateLocationSubscription short-circuits below);
   //   • Stripe isn't configured for the owner tier, or the source is
-  //     non-paying — the honest record-only / free-grant path stays open.
-  // The client maps this to bouncing back to the pay step and starting Stripe
-  // checkout (completePay), so the owner is never stuck.
+  //     non-paying — the honest record-only / free-grant path stays open;
+  //   • issue 171: the location is prepaid through a FUTURE date — it owes
+  //     nothing today, so activating it charges nothing legitimately. This is
+  //     a DIFFERENT case from issue 167's: that hole was a BROKEN or ABANDONED
+  //     checkout silently activating; here the server authorises the free flip
+  //     off an unforgeable positive fact (paid_through_date > today) it reads
+  //     itself, not off a client claim. A location that actually owes money has
+  //     paid_through_date null or past → isPaidThroughFuture is false → the gate
+  //     below fires exactly as issue 167 built it. So the guarantee is intact:
+  //     the ONLY owner-pays locations that free-activate here are the ones that
+  //     genuinely owe nothing.
+  // The client maps the gate's 409 to bouncing back to the pay step and
+  // starting Stripe checkout (completePay), so the owner is never stuck.
   if (
     isOwnerOfTarget &&
     !isSuperAdmin &&
     location.subscription_status !== 'active' &&
+    !isPaidThroughFuture(location.paid_through_date) &&
     (await ownerCheckoutConfigured(location))
   ) {
     return NextResponse.json({ error: 'stripe_checkout_required' }, { status: 409 })

@@ -29,6 +29,8 @@ import {
   writeLocationStripeIds,
   NON_PAYING_SOURCES,
 } from '@/lib/subscription-activation'
+import { isPaidThroughFuture } from '@/lib/subscription-math'
+import { CHECKOUT_PREPAID_ERROR } from '@/lib/stripe-checkout-return'
 import { getPrimaryOwnerForLocation } from '@/lib/owner-resolution'
 
 export const runtime = 'nodejs'
@@ -66,6 +68,20 @@ export async function POST(
   // Already activated — nothing to buy.
   if (location.subscription_status === 'active') {
     return NextResponse.json({ error: 'already_active' }, { status: 409 })
+  }
+
+  // issue 171 — a location prepaid through a FUTURE date has already been paid
+  // for (the pre-Stripe cohort seeded with paid_through_date = 2027-02-27). It
+  // owes nothing today, so never mint a checkout session and never quote a
+  // charge: the client shows the "paid through …" surface and records the
+  // activation through complete-onboarding, whose issue-167 gate now steps
+  // aside for exactly this case. This runs BEFORE the Stripe-config checks so a
+  // configured owner price can't drag a prepaid location into a $550 quote.
+  if (isPaidThroughFuture(location.paid_through_date)) {
+    return NextResponse.json(
+      { error: CHECKOUT_PREPAID_ERROR, paid_through_date: location.paid_through_date },
+      { status: 409 },
+    )
   }
 
   if (!stripeConfigured()) {
