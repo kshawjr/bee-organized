@@ -153,9 +153,10 @@ export type WebhookLogEvent = {
   message: string
 }
 
-// '3h'/'12h' exist for the Slack digest cron (the redesigned digest runs
-// every 3h — see app/api/cron/webhook-digest); the dashboard pills only
-// offer 24h/7d/30d/all.
+// '3h'/'12h' predate the daily digest and are retained for callers that
+// still ask for them; the digest cron now reads the '24h' window (once
+// daily — see app/api/cron/webhook-digest, issue 159). The dashboard pills
+// only offer 24h/7d/30d/all.
 export type FetchWindow = '3h' | '12h' | '24h' | '7d' | '30d' | 'all'
 
 export const WINDOW_MS: Record<Exclude<FetchWindow, 'all'>, number> = {

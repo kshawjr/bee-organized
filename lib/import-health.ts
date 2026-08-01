@@ -22,9 +22,14 @@
 import { supabaseService } from './supabase-service'
 import { parseContinuationLogMessage, isFailedOutcome } from './import-continuation'
 
-// Match the digest cadence (vercel.json: "0 */3 * * *") so a failed import is
-// reported exactly once, in the window it failed.
-export const IMPORT_DIGEST_WINDOW_MS = 3 * 60 * 60 * 1000
+// Match the digest cadence (vercel.json: "0 10 * * *", once daily) so a failed
+// import is reported exactly once, in the digest window it failed — a daily
+// digest on a 3h import window would only ever show the 3h before 10:00 UTC and
+// silently drop the other 21h (issue 159 — was 3h under the every-3h cadence).
+// Real-time coverage is separate: the ~5-min watermark cron alerts on each
+// failed import instantly (app/api/cron/failure-alerts); this window is only
+// how far back the once-a-day rundown looks.
+export const IMPORT_DIGEST_WINDOW_MS = 24 * 60 * 60 * 1000
 // Claim staleness at which a running import is called out as stalled. Above
 // the sweeper's 2-min re-poke cutoff (normal handoffs) and below its 15-min
 // fail-out — so this catches genuine stalls the sweeper is still fighting.

@@ -3,7 +3,7 @@
 // The webhook digest's durable heartbeat (migrations/digest_runs.sql).
 // One row per cron run — INCLUDING suppressed runs and no_webhook_url
 // skips, because the row's job is liveness first, content second: a
-// digest that hasn't written a row in 6+ hours means a stale-deployment
+// digest that hasn't written a row in ~2 days means a stale-deployment
 // cron (Vercel crons pin to the deployment that registered them), and
 // Slack silence looks identical to a quiet period.
 //
@@ -15,9 +15,11 @@
 import { supabaseService } from './supabase-service'
 import type { WebhookDigest } from './webhook-digest'
 
-// The digest fires every 3h (vercel.json). Twice-missed = stale: one
-// missed beat could be a transient function failure; two is the pin.
-export const DIGEST_STALE_MS = 6 * 60 * 60 * 1000
+// The digest fires once daily (vercel.json: "0 10 * * *"). Twice-missed =
+// stale: one missed daily beat could be a transient function failure; two
+// is the pin. 2× the 24h cadence, so a healthy 24h gap never trips it
+// (issue 159 — was 6h when the digest ran every 3h).
+export const DIGEST_STALE_MS = 48 * 60 * 60 * 1000
 
 export type DigestRunRow = {
   ran_at: string
@@ -48,7 +50,7 @@ export async function recordDigestRun(
 ): Promise<void> {
   try {
     const { error } = await supabaseService.from('digest_runs').insert({
-      window_label: 'last 3h',
+      window_label: 'last 24h',
       suppressed: digest.suppressed,
       posted: post?.ok ?? false,
       skipped: post?.skipped ?? null,

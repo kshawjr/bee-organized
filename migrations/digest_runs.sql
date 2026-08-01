@@ -6,7 +6,7 @@
 -- System Health screen shows "run tracking not wired yet" — the same
 -- ships-before-the-table posture as notification_log.
 --
--- WHY. The webhook-digest cron (app/api/cron/webhook-digest, 0 */3 UTC)
+-- WHY. The webhook-digest cron (app/api/cron/webhook-digest, 0 10 UTC daily)
 -- reads, posts to Slack, and forgets — no run leaves a durable trace.
 -- That makes two things unknowable in-app:
 --   1. "What did the last digest say?"
@@ -23,7 +23,7 @@
 CREATE TABLE IF NOT EXISTS public.digest_runs (
   id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   ran_at               timestamptz NOT NULL DEFAULT now(),
-  window_label         text,                          -- 'last 3h'
+  window_label         text,                          -- 'last 24h'
   suppressed           boolean NOT NULL DEFAULT false, -- quiet window, nothing posted
   posted               boolean NOT NULL DEFAULT false, -- Slack accepted the message
   skipped              text,                          -- e.g. 'no_webhook_url'

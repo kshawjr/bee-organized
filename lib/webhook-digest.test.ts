@@ -1,7 +1,7 @@
 // @vitest-environment node
 //
-// Slack webhook digest (runs every 3h) — formatter unit tests + source
-// pins for the cron route.
+// Slack webhook digest (runs once daily — issue 159) — formatter unit
+// tests + source pins for the cron route.
 //
 // The redesigned digest LEADS with lead-intake health and re-presents
 // Jobber sync underneath. What these tests pin:
@@ -17,9 +17,9 @@
 //      didn't-land and is flagged loud.
 //   5) Quiet window → suppressed entirely (post nothing).
 //   6) loc_other spike detection.
-//   7) Cron route pins: 3h window, suppression no-post, CRON_SECRET
+//   7) Cron route pins: 24h window, suppression no-post, CRON_SECRET
 //      fail-closed, missing SLACK_WEBHOOK_URL 200 no-op, and vercel.json
-//      registers the "0 */3 * * *" schedule.
+//      registers the "0 10 * * *" (once-daily) schedule.
 
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -395,9 +395,9 @@ describe('cron route + registration pins', () => {
     expect(route).toContain("{ error: 'unauthorized' }, { status: 401 }")
   })
 
-  it('queries the 3h window', () => {
-    expect(route).toContain("fetchWebhookLogEvents({ window: '3h' })")
-    expect(route).toContain("windowLabel: 'last 3h'")
+  it('queries the 24h window (daily cadence — issue 159)', () => {
+    expect(route).toContain("fetchWebhookLogEvents({ window: '24h' })")
+    expect(route).toContain("windowLabel: 'last 24h'")
   })
 
   it('suppresses a quiet window by posting nothing', () => {
@@ -411,7 +411,7 @@ describe('cron route + registration pins', () => {
     expect(route).toContain('status: 502')
   })
 
-  it('vercel.json registers the every-3-hours schedule', () => {
-    expect(vercel).toContain('"path": "/api/cron/webhook-digest", "schedule": "0 */3 * * *"')
+  it('vercel.json registers the once-daily schedule (issue 159)', () => {
+    expect(vercel).toContain('"path": "/api/cron/webhook-digest", "schedule": "0 10 * * *"')
   })
 })

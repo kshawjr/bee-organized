@@ -1,6 +1,6 @@
 // lib/webhook-digest.ts
 // ─────────────────────────────────────────────────────────────
-// Pure formatter for the Slack webhook digest (runs every 3h — see
+// Pure formatter for the Slack webhook digest (runs once daily — see
 // app/api/cron/webhook-digest). The cron fetches the enriched events for
 // the window and posts whatever this returns; keeping the formatting pure
 // keeps it unit-testable without Slack or Supabase.
@@ -396,7 +396,7 @@ export function buildWebhookDigest(opts: {
   bookingLinkHealth?: BookingLinkHealthDigestInput // missing-link hold rollup (lib/booking-link-health)
 }): WebhookDigest {
   const { appUrl } = opts
-  const windowLabel = opts.windowLabel || 'last 3h'
+  const windowLabel = opts.windowLabel || 'last 24h'
   const c = classifyDigestEvents(opts.events)
 
   const leadsFailed = c.leadFailures.length

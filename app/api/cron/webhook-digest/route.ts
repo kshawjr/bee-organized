@@ -1,9 +1,12 @@
 // app/api/cron/webhook-digest/route.ts
 //
-// GET /api/cron/webhook-digest — Vercel cron entrypoint, fires every 3
-// hours around the clock (vercel.json: "0 */3 * * *" UTC).
+// GET /api/cron/webhook-digest — Vercel cron entrypoint, fires once daily
+// at 10:00 UTC (vercel.json: "0 10 * * *" — 6am EDT / 5am EST; the DST
+// drift is accepted, no timezone gate). Real-time failures are covered
+// separately by the ~5-minute watermark cron (app/api/cron/failure-alerts,
+// issue 159); this digest is the once-a-day rundown.
 //
-// Queries the last 3h of webhook sync_log activity (same enrichment as
+// Queries the last 24h of webhook sync_log activity (same enrichment as
 // the admin Webhooks tab) and posts a Slack digest that LEADS with
 // lead-intake health (website→Bee Hub, running in parallel with Zoho)
 // and re-presents Jobber webhook sync underneath. See lib/webhook-digest
@@ -28,7 +31,7 @@
 //
 // CRON REGISTRATION CAVEAT: Vercel crons pin to the deployment that
 // registered them — after this schedule change lands, check the Vercel
-// dashboard's Cron tab and Redeploy if the new 3h cadence didn't take.
+// dashboard's Cron tab and Redeploy if the new daily cadence didn't take.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { fetchWebhookLogEvents } from '@/lib/webhook-observability'
@@ -45,7 +48,7 @@ export const dynamic = 'force-dynamic'
 // force-no-store on EVERY fetch in this route. supabase-js reads go through the
 // Next-patched global fetch as un-annotated GETs (no cache option — see
 // @supabase/postgrest-js), so Next's Data Cache caches them. Time-windowed reads
-// (webhook events, created_at>=now-3h) dodge it — their URL changes each run — but
+// (webhook events, created_at>=now-24h) dodge it — their URL changes each run — but
 // the STATIC reads (rate-health, booking-link-health: `locations` on a constant
 // predicate) hit a stable URL and were served frozen for days, across redeploys,
 // with no revalidate to expire them: the digest kept naming locations whose rate
@@ -71,7 +74,7 @@ export async function GET(req: NextRequest) {
   let digest
   try {
     const nowMs = Date.now()
-    const { events } = await fetchWebhookLogEvents({ window: '3h' })
+    const { events } = await fetchWebhookLogEvents({ window: '24h' })
     const appUrl = (
       process.env.NEXT_PUBLIC_APP_URL ||
       process.env.NEXT_PUBLIC_SITE_URL ||
@@ -111,7 +114,7 @@ export async function GET(req: NextRequest) {
     digest = buildWebhookDigest({
       events,
       appUrl,
-      windowLabel: 'last 3h',
+      windowLabel: 'last 24h',
       rateHealth,
       bookingLinkHealth,
       importHealth: {
@@ -133,7 +136,7 @@ export async function GET(req: NextRequest) {
   // post nothing (200, not a failure).
   if (digest.suppressed) {
     console.log(
-      `[cron webhook-digest] window=3h suppressed (quiet window) self_heals=${digest.selfHeals}`,
+      `[cron webhook-digest] window=24h suppressed (quiet window) self_heals=${digest.selfHeals}`,
     )
     // Persist the heartbeat even when nothing is posted — a quiet window is
     // still proof the cron is alive. Fail-soft (never throws, no-ops
@@ -157,7 +160,7 @@ export async function GET(req: NextRequest) {
   }
 
   console.log(
-    `[cron webhook-digest] window=3h posted=${post.ok} allClear=${digest.allClear} ` +
+    `[cron webhook-digest] window=24h posted=${post.ok} allClear=${digest.allClear} ` +
       `leadsIn=${digest.leadsLanded} leadsFailed=${digest.leadsFailed} ` +
       `jobberLanded=${digest.jobberLanded} jobberDidntLand=${digest.jobberDidntLand} ` +
       `importFailed=${digest.importFailed} importStalled=${digest.importStalled} importOriginGated=${digest.importOriginGated} ` +
