@@ -29,12 +29,15 @@ let cleanup: Array<() => void> = []
 beforeEach(() => { setReducedMotion(false) })
 afterEach(() => { cleanup.forEach(fn => fn()); cleanup = [] })
 
-// Mount into a host that is itself transformed — the real bug was a transformed
-// onboarding ancestor confining position:fixed to the content column. A correct
-// fix must escape it.
+// Mount into a host that is itself transformed. Note (issue 170): the real bug
+// was NOT a transformed ancestor — there is none in the onboarding tree — it was
+// the 220px-offset content column (.bee-main). We still mount inside a transform
+// here because portalling to document.body must escape it either way: a fix that
+// survives the strictest containing block (a transform) also survives the mere
+// margin offset that is the actual production cause.
 async function mountInTransformedHost(ui: React.ReactElement) {
   const host = document.createElement('div')
-  host.style.transform = 'translateZ(0)' // establishes a fixed-positioning containing block
+  host.style.transform = 'translateZ(0)' // strictest case: a fixed-positioning containing block
   host.setAttribute('data-host', '')
   document.body.appendChild(host)
   const root = createRoot(host)
@@ -85,6 +88,37 @@ describe('ViewportCenteredOverlay — centres against the viewport', () => {
     expect(overlay.style.background).toBe('#1a2e2b')
     expect(overlay.style.position).toBe('fixed')
     expect(overlay.style.justifyContent).toBe('center')
+  })
+
+  // issue 170 — pricing, pay_confirm and stripe_wait ride the `scroll` variant:
+  // the full-height pay page portals to body (escaping the offset column) and is
+  // a top-anchored, scrollable viewport layer rather than a flex-centred card.
+  it('scroll variant portals the full-height pay page out to document.body', async () => {
+    const host = await mountInTransformedHost(
+      <ViewportCenteredOverlay backdrop="#1a2e2b" padding={0} scroll>
+        <div style={{ minHeight: '100vh' }}>Activate your subscription</div>
+      </ViewportCenteredOverlay>,
+    )
+    const overlay = overlayEl()
+    expect(overlay).toBeTruthy()
+    expect(host.contains(overlay)).toBe(false)
+    expect(overlay!.parentElement).toBe(document.body)
+  })
+
+  it('scroll variant is a viewport-anchored, top-aligned scrollable layer (no top clipping)', async () => {
+    await mountInTransformedHost(
+      <ViewportCenteredOverlay backdrop="#1a2e2b" padding={0} scroll>
+        <div style={{ minHeight: '100vh' }}>Activate your subscription</div>
+      </ViewportCenteredOverlay>,
+    )
+    const overlay = overlayEl()!
+    expect(overlay.style.position).toBe('fixed')
+    expect(overlay.style.inset === '0px' || overlay.style.inset === '0').toBe(true)
+    // block + overflow-y:auto, NOT flex/align-items:center — a full-height page
+    // must scroll from the top, not be vertically centred and clipped.
+    expect(overlay.style.display).toBe('block')
+    expect(overlay.style.overflowY).toBe('auto')
+    expect(overlay.style.alignItems).toBe('')
   })
 
   it('keeps the Continue Setup button live inside the portalled overlay', async () => {

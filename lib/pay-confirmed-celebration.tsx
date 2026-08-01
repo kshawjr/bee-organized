@@ -1,20 +1,33 @@
 'use client'
 
 // issue 168 — viewport-centering shell + celebration for the onboarding pay modals.
+// issue 170 — the same shell now also wraps the pricing, pay_confirm and
+// stripe_wait steps (via the `scroll` variant, which carries the full-height
+// pay page rather than a short modal card).
 //
-// CENTERING. The pay modals render inside the DashboardScreen content column
-// (.bee-main, offset right of the 220px desktop sidebar). Their overlay is
-// position:fixed; inset:0, which SHOULD span the viewport — but a transformed
-// onboarding ancestor establishes a containing block that confines the fixed
-// overlay to the content column. The card then sits right of true centre with the
-// greyed, non-interactive sidebar as a dead column beside it. ViewportCenteredOverlay
-// portals the overlay to document.body, so the viewport (not the transformed
-// ancestor) becomes its containing block: it centres on the whole screen and paints
-// over the sidebar, regardless of which ancestor is transformed.
+// CENTERING. The pay screens render inside the DashboardScreen content column
+// (.bee-main), which app/globals.css offsets by margin-left:220px on desktop to
+// clear the fixed 220px sidebar. Their inner cards use margin:0 auto, so they
+// centre within that OFFSET column — 110px right of true centre, with the
+// sidebar sitting beside them. ViewportCenteredOverlay portals the layer to
+// document.body, OUTSIDE .bee-main, so the inner centering is measured against
+// the whole viewport (not the offset column) and the layer paints over the
+// sidebar.
 //
-// We centre against the viewport rather than hiding the sidebar because the sidebar
-// is NOT pure decoration during onboarding — Back Office stays deliberately clickable
-// (issue 140) and Home returns to the wizard, so removing it would strand both.
+// NOTE (corrected issue 170): the earlier version of this comment blamed a
+// transformed onboarding ancestor for confining position:fixed to the content
+// column. That was WRONG — scout 169 checked globals.css and app/layout.tsx and
+// there is no transform / filter / perspective / contain anywhere in this
+// ancestry, so position:fixed already resolves against the viewport. The portal
+// is still the right tool, but for a plainer reason: it lifts the layer OUT of
+// the 220px-offset content column so the whole branded page (and the margin:0
+// auto cards inside it) is laid out against the full viewport instead of the
+// column. Escaping the offset — not defeating a containing block — is the job.
+//
+// We portal rather than remove the sidebar because the sidebar is NOT pure
+// decoration during onboarding — Back Office stays reachable (issue 140) and
+// Home returns to the wizard — so it must survive in the DOM behind the layer,
+// not be display:none'd out.
 //
 // CELEBRATION. PayConfirmedCelebration is a CSS-only confetti burst — no new
 // dependency. It is pointer-events:none and sits BEHIND the modal card, so it never
@@ -26,19 +39,30 @@ import React, { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useReducedMotion } from '@/components/hive/shared/motion'
 
-// Portal to <body> so the fixed overlay escapes any transformed onboarding ancestor
-// and centres on the viewport. Mount-guarded so SSR / first paint emit nothing
-// (no hydration mismatch), matching the client-only nature of the pay flow.
+// Portal to <body> so the fixed layer escapes the 220px-offset content column
+// (.bee-main) and is laid out against the viewport. Mount-guarded so SSR / first
+// paint emit nothing (no hydration mismatch), matching the client-only nature of
+// the pay flow — this mount gate is also what lets BeeHub's payStep lazy
+// initialiser read the Stripe-return marker without a mismatch (issue 170): the
+// server and the first client render both emit null here regardless of payStep.
+//
+// `scroll` (issue 170): the default is a flex-centred modal shell for a short
+// card. A full-height page (pricing) would have its top clipped by
+// align-items:center, so `scroll` swaps to a top-anchored, vertically-scrollable
+// block instead; the page's own margin:0 auto still centres its cards against the
+// now-full-viewport layer.
 export function ViewportCenteredOverlay({
   children,
   backdrop = 'rgba(26,46,43,0.55)',
   padding = '12px',
   zIndex = 100,
+  scroll = false,
 }: {
   children: React.ReactNode
   backdrop?: string
   padding?: string | number
   zIndex?: number
+  scroll?: boolean
 }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
@@ -48,7 +72,9 @@ export function ViewportCenteredOverlay({
       data-pay-modal-overlay=""
       style={{
         position: 'fixed', inset: 0, zIndex,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        ...(scroll
+          ? { display: 'block', overflowY: 'auto' }
+          : { display: 'flex', alignItems: 'center', justifyContent: 'center' }),
         background: backdrop, padding,
       }}
     >

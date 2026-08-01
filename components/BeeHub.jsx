@@ -29,7 +29,7 @@ import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
-import { navigateToStripeCheckout, payStepForCheckoutReturn, classifyCheckoutResponse, CHECKOUT_RETURN_PARAM, CHECKOUT_INFLIGHT_KEY } from "@/lib/stripe-checkout-return"
+import { navigateToStripeCheckout, payStepForCheckoutReturn, initialPayStepFromReturn, classifyCheckoutResponse, CHECKOUT_RETURN_PARAM, CHECKOUT_INFLIGHT_KEY } from "@/lib/stripe-checkout-return"
 // issue 168 — pay modals centre against the viewport (portal to body, escaping the
 // transformed onboarding ancestor that confined position:fixed to the content column)
 // and the confirmed state gets a reduced-motion-safe confetti celebration.
@@ -11002,7 +11002,27 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   // direct locations pay on Stripe's hosted checkout when a Payment Link is
   // configured, and fall back to the honest record-only confirm when not.
   // payStep: pricing | pay_confirm | stripe_wait | stripe_done | processing | done
-  const [payStep, setPayStep]   = useState('pricing')
+  //
+  // issue 170 — resolve the Stripe-return marker in the INITIAL state (lazy
+  // initialiser) so the 'pricing' frame never paints on a return from checkout.
+  // The post-paint useEffect below still runs — it consumes the ?stripe_checkout=
+  // param from the URL and clears the in-flight flag — but by then payStep is
+  // already the resume step, so pricing is never shown.
+  //
+  // SSR: the server has no window (this client component is not handed the
+  // route's searchParams), so the initialiser falls through to 'pricing' there,
+  // while the client's first render resolves 'stripe_wait'. That difference does
+  // NOT cause a hydration mismatch: every payStep-dependent frame in the
+  // `!isDone('pay')` block below renders inside a ViewportCenteredOverlay, which
+  // is mount-gated (returns null until its post-mount effect fires). So the
+  // server AND the first client render both emit null regardless of payStep —
+  // the marker is only ACTED ON one tick later, on the client, where window
+  // exists. (Reading window in an initialiser is exactly what the completedSteps
+  // note above keeps out of initialisers to avoid a mismatch; it is safe here
+  // only because the mount gate makes payStep invisible to hydration.)
+  const [payStep, setPayStep]   = useState(() =>
+    typeof window === 'undefined' ? 'pricing' : initialPayStepFromReturn(window.location.search)
+  )
   const [showSmsModal, setShowSmsModal] = useState(false)
   // Activation state: in-flight flag + last error message. Used by completePay
   // to gate the "Continue Setup →" button and surface a retry-able error if
@@ -11843,8 +11863,20 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
       </ViewportCenteredOverlay>
     )
     // Payment form
+    // issue 170 — pricing, pay_confirm and stripe_wait were left inside .bee-main
+    // (margin-left:220px on desktop), so their margin:0 auto cards centred 110px
+    // right of true centre with the sidebar beside them (stripe_wait, which
+    // lingers while polling, is the one Kevin saw). Wrap the same way issue 168
+    // wrapped the other pay states: a ViewportCenteredOverlay portalled to body,
+    // OUTSIDE the offset column. The dark/cream wrapper goes INSIDE the overlay so
+    // the whole branded page escapes the column (not just an inner card floating
+    // over a still-offset page) and its cards centre on the true viewport. The
+    // `scroll` variant is used rather than the flex-centred default because this
+    // is a full-height page, not a short modal card, and align-items:center would
+    // clip its top; scroll keeps it top-anchored and scrollable.
     return (
-      <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#1a2e2b' }}>
+      <ViewportCenteredOverlay backdrop="#1a2e2b" padding={0} zIndex={100} scroll>
+      <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#1a2e2b', width:'100%', minHeight:'100vh' }}>
         <div style={{ height:`${topOffset}px` }} />
         <div style={{ padding:'1.25rem 1.5rem 1rem', display:'flex', alignItems:'center', gap:'10px' }}>
           <span style={{ fontSize:'28px' }}>🐝</span>
@@ -12067,6 +12099,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
           )}
         </div>
       </div>
+      </ViewportCenteredOverlay>
     )
   }
 

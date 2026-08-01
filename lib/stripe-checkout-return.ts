@@ -131,3 +131,21 @@ export function payStepForCheckoutReturn(
   if (marker === 'cancel') return 'pay_confirm'
   return null
 }
+
+// issue 170 — the INITIAL onboarding pay step, resolved from the URL search
+// string BEFORE first paint. BeeHub's `payStep` used to initialise to 'pricing'
+// unconditionally and only read the marker in a post-paint useEffect, so the
+// "Activate your subscription" pricing frame painted once on every Stripe
+// return before flipping to the wait step. Feeding this into payStep's lazy
+// useState initialiser resolves the marker in the initial state instead, so the
+// pricing frame never renders on a return.
+//
+// A present 'complete' / 'cancel' marker maps to its resume step; anything else
+// — a normal onboarding visit, a bare refresh — stays 'pricing'. Pure and
+// synchronous so it is callable from a render-phase state initialiser.
+export function initialPayStepFromReturn(
+  search: string | null | undefined,
+): PayStep {
+  const marker = new URLSearchParams(search || '').get(CHECKOUT_RETURN_PARAM)
+  return payStepForCheckoutReturn(marker) || 'pricing'
+}

@@ -25,6 +25,7 @@ import {
 import {
   navigateToStripeCheckout,
   payStepForCheckoutReturn,
+  initialPayStepFromReturn,
   CHECKOUT_INFLIGHT_KEY,
 } from '@/lib/stripe-checkout-return'
 
@@ -92,6 +93,33 @@ describe('issue 163 — return marker → pay step (polling is the backstop)', (
     expect(payStepForCheckoutReturn('whatever')).toBeNull()
     expect(payStepForCheckoutReturn(null)).toBeNull()
     expect(payStepForCheckoutReturn(undefined)).toBeNull()
+  })
+})
+
+describe('issue 170 — the initial pay step never flashes pricing on a return', () => {
+  // Feeds BeeHub's payStep lazy useState initialiser: a Stripe return resolves
+  // its resume step in the INITIAL state so the 'pricing' frame never paints.
+  it('a ?stripe_checkout=complete return initialises straight to the wait step — never pricing', () => {
+    const step = initialPayStepFromReturn('?stripe_checkout=complete')
+    expect(step).toBe('stripe_wait')
+    expect(step).not.toBe('pricing')
+  })
+  it('leading "?" is optional (URLSearchParams tolerates both)', () => {
+    expect(initialPayStepFromReturn('stripe_checkout=complete')).toBe('stripe_wait')
+  })
+  it('a cancel return initialises to the pay step, not pricing', () => {
+    const step = initialPayStepFromReturn('?stripe_checkout=cancel')
+    expect(step).toBe('pay_confirm')
+    expect(step).not.toBe('pricing')
+  })
+  it('a marker mixed with other params is still honoured', () => {
+    expect(initialPayStepFromReturn('?foo=1&stripe_checkout=complete&bar=2')).toBe('stripe_wait')
+  })
+  it('no marker — a normal onboarding visit — stays on pricing', () => {
+    expect(initialPayStepFromReturn('')).toBe('pricing')
+    expect(initialPayStepFromReturn('?foo=1')).toBe('pricing')
+    expect(initialPayStepFromReturn(null)).toBe('pricing')
+    expect(initialPayStepFromReturn(undefined)).toBe('pricing')
   })
 })
 
