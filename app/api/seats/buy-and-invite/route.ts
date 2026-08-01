@@ -24,6 +24,7 @@ import {
   INVITE_FROM_NAME,
   INVITE_REPLY_TO_EMAIL,
 } from '@/lib/invite-email'
+import { applySeatDeltaToStripe } from '@/lib/seat-stripe-sync'
 
 export const runtime = 'nodejs'
 
@@ -200,6 +201,20 @@ export async function POST(request: NextRequest) {
     )
   }
 
+  // ─── Stripe seat line (issue 161) ───
+  // Add a line to the location's existing subscription for this tier. This
+  // is the "add the Stripe step" motion: buy-and-invite already captured
+  // WHO the seat is for (name/email/role) above. CONDITIONAL — a no-op when
+  // the location has no live subscription, so the free-grant invite path
+  // keeps working. NEVER rolls back the seat/invite: a Stripe failure is
+  // logged and reported, not fatal (the seat is real; billing reconciles).
+  const billing = await applySeatDeltaToStripe({
+    locationId: location_id,
+    tier,
+    delta: 1,
+    seatId: insertedSeat.id,
+  })
+
   const origin =
     process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
     request.nextUrl.origin
@@ -276,6 +291,7 @@ export async function POST(request: NextRequest) {
       invite_url,
       email_sent,
       ...(email_error ? { email_error } : {}),
+      billing: { stripe_applied: billing.applied, ...(billing.reason ? { stripe_skip_reason: billing.reason } : {}) },
     },
     { status: 201 }
   )

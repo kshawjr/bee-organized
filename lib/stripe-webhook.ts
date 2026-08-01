@@ -90,6 +90,11 @@ export type StripeCheckoutSession = {
   currency: string | null
   paymentStatus: string | null // 'paid' | 'unpaid' | 'no_payment_required'
   customerEmail: string | null
+  // Subscription-mode checkout (issue 161): the session carries the
+  // subscription + customer Stripe created. Null for the legacy one-time
+  // Payment-Link path (mode='payment').
+  subscriptionId: string | null
+  customerId: string | null
 }
 
 export const STRIPE_ACTIVATING_EVENTS = [
@@ -119,6 +124,96 @@ export function extractCheckoutSession(event: any): StripeCheckoutSession | null
     currency: str(session.currency),
     paymentStatus: str(session.payment_status),
     customerEmail: str(session.customer_details?.email) ?? str(session.customer_email),
+    // subscription/customer arrive as a string id or an expanded object.
+    subscriptionId: str(session.subscription) ?? str(session.subscription?.id),
+    customerId: str(session.customer) ?? str(session.customer?.id),
+  }
+}
+
+// ── Invoice + subscription lifecycle events (issue 161) ───────
+// Renewals and card failures arrive on invoice.* ; cancellation and
+// out-of-band changes on customer.subscription.* . These are NOT
+// checkout sessions — data.object is an invoice / subscription — so they
+// get their own extractors. The route maps them back to a location by
+// stripe_subscription_id (there is no client_reference_id here).
+
+export const STRIPE_INVOICE_EVENTS = ['invoice.paid', 'invoice.payment_failed'] as const
+export const STRIPE_SUBSCRIPTION_EVENTS = [
+  'customer.subscription.updated',
+  'customer.subscription.deleted',
+] as const
+
+export type StripeInvoiceEvent = {
+  eventId: string
+  eventType: string
+  invoiceId: string | null
+  subscriptionId: string | null
+  customerId: string | null
+  paymentIntentId: string | null
+  amountPaid: number | null // cents
+  currency: string | null
+  periodEnd: number | null // unix seconds (fallback; the route prefers the live subscription)
+  billingReason: string | null // 'subscription_create' | 'subscription_cycle' | …
+}
+
+const num = (v: unknown): number | null =>
+  typeof v === 'number' && Number.isFinite(v) ? v : null
+
+export function extractInvoiceEvent(event: any): StripeInvoiceEvent | null {
+  if (!event || typeof event !== 'object') return null
+  if (typeof event.id !== 'string' || typeof event.type !== 'string') return null
+  const inv = event.data?.object
+  if (!inv || typeof inv !== 'object') return null
+
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : null)
+  // dahlia moved the subscription id under parent.subscription_details;
+  // fall back to the legacy top-level field for older payloads.
+  const subDetails = inv.parent?.subscription_details
+  const subscriptionId =
+    str(subDetails?.subscription) ?? str(subDetails?.subscription?.id) ??
+    str(inv.subscription) ?? str(inv.subscription?.id)
+  return {
+    eventId: event.id,
+    eventType: event.type,
+    invoiceId: str(inv.id),
+    subscriptionId,
+    customerId: str(inv.customer) ?? str(inv.customer?.id),
+    paymentIntentId: str(inv.payment_intent) ?? str(inv.payment_intent?.id),
+    amountPaid: num(inv.amount_paid),
+    currency: str(inv.currency),
+    periodEnd: num(inv.period_end),
+    billingReason: str(inv.billing_reason),
+  }
+}
+
+export type StripeSubscriptionEvent = {
+  eventId: string
+  eventType: string
+  subscriptionId: string | null
+  customerId: string | null
+  status: string | null // 'active' | 'past_due' | 'canceled' | …
+  cancelAtPeriodEnd: boolean
+  periodEnd: number | null // unix seconds, from the first item
+  locationHint: string | null // metadata.location_id we stamped at checkout
+}
+
+export function extractSubscriptionEvent(event: any): StripeSubscriptionEvent | null {
+  if (!event || typeof event !== 'object') return null
+  if (typeof event.id !== 'string' || typeof event.type !== 'string') return null
+  const sub = event.data?.object
+  if (!sub || typeof sub !== 'object') return null
+
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : null)
+  const firstItem = sub.items?.data?.[0]
+  return {
+    eventId: event.id,
+    eventType: event.type,
+    subscriptionId: str(sub.id),
+    customerId: str(sub.customer) ?? str(sub.customer?.id),
+    status: str(sub.status),
+    cancelAtPeriodEnd: sub.cancel_at_period_end === true,
+    periodEnd: num(firstItem?.current_period_end),
+    locationHint: str(sub.metadata?.location_id),
   }
 }
 

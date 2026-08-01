@@ -30,7 +30,7 @@ const SEAT_COLS =
 // payment_source values that mean "Bee Organized/corporate pays, not the
 // owner" — these locations never go through Stripe checkout. Everything
 // else ('direct', 'stripe', 'none', null) is an owner-pays location.
-const NON_PAYING_SOURCES = ['prepaid_corporate', 'corporate_sponsored', 'corporate']
+export const NON_PAYING_SOURCES = ['prepaid_corporate', 'corporate_sponsored', 'corporate']
 
 export type LocationBillingRow = {
   id: string
@@ -39,15 +39,91 @@ export type LocationBillingRow = {
   subscription_status: string | null
   payment_source: string | null
   paid_through_date: string | null
+  stripe_customer_id: string | null
+  stripe_subscription_id: string | null
 }
+
+const LOCATION_BILLING_COLS =
+  'id, name, location_id, subscription_status, payment_source, paid_through_date, stripe_customer_id, stripe_subscription_id'
 
 export async function getLocationBilling(locationId: string): Promise<LocationBillingRow | null> {
   const { data } = await supabaseService
     .from('locations')
-    .select('id, name, location_id, subscription_status, payment_source, paid_through_date')
+    .select(LOCATION_BILLING_COLS)
     .eq('id', locationId)
     .maybeSingle()
   return (data as LocationBillingRow) ?? null
+}
+
+// ── Stripe id mapping (issue 161) ─────────────────────────────
+// invoice.* / customer.subscription.* events carry no client_reference_id,
+// so the webhook maps them back to a location by the subscription id it
+// stored at activation.
+export async function getLocationByStripeSubscriptionId(
+  subscriptionId: string,
+): Promise<LocationBillingRow | null> {
+  if (!subscriptionId) return null
+  const { data } = await supabaseService
+    .from('locations')
+    .select(LOCATION_BILLING_COLS)
+    .eq('stripe_subscription_id', subscriptionId)
+    .maybeSingle()
+  return (data as LocationBillingRow) ?? null
+}
+
+// Persist the Stripe customer/subscription ids on the location. Only writes
+// the fields provided and only when they'd actually change, so a webhook
+// retry is a no-op and the checkout route (which writes the customer id
+// early) never clobbers a subscription id the webhook wrote.
+export async function writeLocationStripeIds(
+  locationId: string,
+  ids: { customerId?: string | null; subscriptionId?: string | null },
+): Promise<void> {
+  const current = await getLocationBilling(locationId)
+  const update: Record<string, any> = {}
+  if (ids.customerId && current?.stripe_customer_id !== ids.customerId) {
+    update.stripe_customer_id = ids.customerId
+  }
+  if (ids.subscriptionId && current?.stripe_subscription_id !== ids.subscriptionId) {
+    update.stripe_subscription_id = ids.subscriptionId
+  }
+  if (Object.keys(update).length === 0) return
+  const { error } = await supabaseService.from('locations').update(update).eq('id', locationId)
+  if (error) throw new Error(`writeLocationStripeIds failed: ${error.message}`)
+}
+
+// Advance paid_through_date, never backward. Renewal (invoice.paid) pushes
+// it out to the subscription's new period end; a replayed/older event is a
+// no-op so a late-arriving duplicate can't shrink the window.
+export async function advancePaidThroughDate(
+  locationId: string,
+  newDate: string | null,
+): Promise<boolean> {
+  if (!newDate || !/^\d{4}-\d{2}-\d{2}$/.test(newDate)) return false
+  const current = await getLocationBilling(locationId)
+  if (current?.paid_through_date && current.paid_through_date >= newDate) return false
+  const { error } = await supabaseService
+    .from('locations')
+    .update({ paid_through_date: newDate })
+    .eq('id', locationId)
+  if (error) throw new Error(`advancePaidThroughDate failed: ${error.message}`)
+  return true
+}
+
+// Flip subscription_status (past_due on payment failure, canceled on
+// subscription.deleted, active on recovery). Constrained to the values the
+// locations_subscription_status_check CHECK allows.
+const ALLOWED_SUB_STATUS = ['deferred', 'active', 'past_due', 'canceled'] as const
+export async function setLocationSubscriptionStatus(
+  locationId: string,
+  status: (typeof ALLOWED_SUB_STATUS)[number],
+): Promise<void> {
+  if (!ALLOWED_SUB_STATUS.includes(status)) throw new Error(`invalid subscription_status ${status}`)
+  const { error } = await supabaseService
+    .from('locations')
+    .update({ subscription_status: status })
+    .eq('id', locationId)
+  if (error) throw new Error(`setLocationSubscriptionStatus failed: ${error.message}`)
 }
 
 // ── The Stripe-payment gate ───────────────────────────────────

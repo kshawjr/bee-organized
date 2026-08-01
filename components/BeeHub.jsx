@@ -10996,6 +10996,35 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     ? (buildStripePayUrl(tierPricesCtx?.getTierLink?.('owner'), currentLocationCtx?.id, currentUserCtx?.email) || serverPayUrl)
     : null
 
+  // issue 161: when the owner reaches the pay step and no Payment Link is
+  // configured (the current, deliberate state — we do NOT use links),
+  // ask the server to create a Stripe subscription Checkout Session and
+  // surface it as serverPayUrl. PaymentConfirmStep then shows "Pay with
+  // Stripe →" alongside the record-only confirm, and StripeCheckoutWait
+  // (unchanged) polls activation-status. A non-2xx (Stripe not configured,
+  // corporate/non-paying, already active) leaves serverPayUrl null → the
+  // record-only path stays, keeping the free-grant door open.
+  useEffect(() => {
+    if (payStep !== 'pay_confirm') return
+    if (paymentSourceForPay !== 'direct') return
+    const locId = currentLocationCtx?.id
+    if (!locId || serverPayUrl) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/locations/${locId}/checkout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        })
+        if (!res.ok) return
+        const j = await res.json().catch(() => ({}))
+        if (!cancelled && j?.url) setServerPayUrl(j.url)
+      } catch { /* record-only fallback stays */ }
+    })()
+    return () => { cancelled = true }
+  }, [payStep, paymentSourceForPay, currentLocationCtx?.id, serverPayUrl])
+
   // Per-step forms - prefilled from invite data, or from DB on remount (Pass 2)
   const [profileForm, setProfileForm] = useState({
     firstName: currentUserCtx?.first_name || namePrefill.firstName||'',
@@ -20559,6 +20588,17 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                   <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.5 }}>
                     {summaryBody}
                   </p>
+                  {/* issue 161: owners self-manage cards, invoices, and
+                      cancellation on Stripe's hosted portal. Direct-pay only —
+                      corporate/prepaid have nothing to manage here. */}
+                  {canViewBilling && billingPaymentSource !== 'prepaid_corporate' && billingPaymentSource !== 'corporate_sponsored' && (
+                    <button
+                      type="button"
+                      onClick={()=>openStripeBillingPortal(locationId)}
+                      style={{ marginTop:'10px', padding:'8px 14px', background:'transparent', border:'1px solid rgba(26,46,43,0.2)', borderRadius:'9px', fontFamily:'inherit', fontSize:'12px', fontWeight:600, color:'#1a2e2b', cursor:'pointer' }}>
+                      Manage billing in Stripe →
+                    </button>
+                  )}
                   {summaryIsSponsored && (
                     <div style={{ background:'#fef3c7', border:'1px solid #f59e0b', borderRadius:'8px', padding:'12px 14px', marginTop:'12px', fontSize:'13px', color:'#78350f', lineHeight:1.5 }}>
                       <strong>⚠️ Important:</strong> When testing concludes, you'll be responsible for a prorated subscription fee from that date through March 1, {billingRenewalYear}. Your normal annual renewal continues March 1 thereafter.
@@ -22569,6 +22609,41 @@ const SUBSCRIPTION_TIER_META = [
 // The set + helper keeps all call sites untouched; 503 backstops in invite routes.
 const DEFERRED_TIER_KEYS = new Set(['light'])
 function isDeferredTier(key) { return DEFERRED_TIER_KEYS.has(key) }
+
+// issue 161: open the Stripe Billing Portal for owner self-service (cards,
+// invoices, cancellation). One POST → one hosted portal session; Bee Hub
+// builds no billing UI for those. Pre-opens a blank tab so the async fetch
+// doesn't trip the popup blocker, and closes it on any non-URL outcome.
+async function openStripeBillingPortal(locationId) {
+  if (!locationId) return
+  const w = typeof window !== 'undefined' ? window.open('', '_blank', 'noopener') : null
+  try {
+    const res = await fetch(`/api/locations/${locationId}/billing-portal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+    const j = await res.json().catch(() => ({}))
+    if (res.ok && j?.url) {
+      if (w) w.location.href = j.url
+      else if (typeof window !== 'undefined') window.location.href = j.url
+      return
+    }
+    if (w) w.close()
+    if (typeof window !== 'undefined') {
+      window.alert(
+        j?.error === 'no_stripe_customer'
+          ? 'The billing portal opens once your subscription is set up in Stripe.'
+          : 'Could not open the billing portal right now. Please try again.',
+      )
+    }
+  } catch {
+    if (w) w.close()
+    if (typeof window !== 'undefined') {
+      window.alert('Could not open the billing portal right now. Please try again.')
+    }
+  }
+}
 
 function SubscriptionCalculator({
   initialSeats = [{ tier:'owner', count:1 }],

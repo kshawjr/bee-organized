@@ -16,6 +16,8 @@ import {
   parseStripeSignatureHeader,
   verifyStripeSignature,
   extractCheckoutSession,
+  extractInvoiceEvent,
+  extractSubscriptionEvent,
   deriveSeatQuantity,
   isUuid,
 } from './stripe-webhook'
@@ -164,5 +166,82 @@ describe('isUuid', () => {
     expect(isUuid('6f9619ff-8b86-4d01-b42d-00c04fc964ff')).toBe(true)
     expect(isUuid('not-a-uuid')).toBe(false)
     expect(isUuid(null)).toBe(false)
+  })
+})
+
+// ── issue 161: subscription-mode checkout + lifecycle events ──
+describe('extractCheckoutSession — subscription/customer ids (issue 161)', () => {
+  it('pulls subscription + customer from a subscription-mode session', () => {
+    const s = extractCheckoutSession({
+      id: 'evt_sub', type: 'checkout.session.completed',
+      data: { object: {
+        id: 'cs_sub', client_reference_id: '6f9619ff-8b86-4d01-b42d-00c04fc964ff',
+        metadata: { tier: 'owner' }, amount_total: 55000, currency: 'usd',
+        payment_status: 'paid', subscription: 'sub_123', customer: 'cus_123',
+      } },
+    })
+    expect(s).toMatchObject({ subscriptionId: 'sub_123', customerId: 'cus_123', tier: 'owner' })
+  })
+
+  it('tolerates expanded subscription/customer objects and nulls when absent', () => {
+    const expanded = extractCheckoutSession({
+      id: 'e', type: 'checkout.session.completed',
+      data: { object: { id: 'cs', subscription: { id: 'sub_exp' }, customer: { id: 'cus_exp' } } },
+    })
+    expect(expanded).toMatchObject({ subscriptionId: 'sub_exp', customerId: 'cus_exp' })
+    const bare = extractCheckoutSession({ id: 'e', type: 't', data: { object: { id: 'cs' } } })
+    expect(bare).toMatchObject({ subscriptionId: null, customerId: null })
+  })
+})
+
+describe('extractInvoiceEvent (issue 161)', () => {
+  const paid = {
+    id: 'evt_inv', type: 'invoice.paid',
+    data: { object: {
+      id: 'in_1', customer: 'cus_1', payment_intent: 'pi_1',
+      amount_paid: 55000, currency: 'usd', period_end: 1893456000,
+      billing_reason: 'subscription_cycle',
+      parent: { subscription_details: { subscription: 'sub_1' } },
+    } },
+  }
+
+  it('reads the subscription id from parent.subscription_details (dahlia)', () => {
+    expect(extractInvoiceEvent(paid)).toMatchObject({
+      eventType: 'invoice.paid', invoiceId: 'in_1', subscriptionId: 'sub_1',
+      customerId: 'cus_1', paymentIntentId: 'pi_1', amountPaid: 55000,
+      periodEnd: 1893456000, billingReason: 'subscription_cycle',
+    })
+  })
+
+  it('falls back to the legacy top-level subscription field', () => {
+    const legacy = { id: 'e', type: 'invoice.payment_failed', data: { object: { id: 'in_2', subscription: 'sub_legacy', amount_paid: 0 } } }
+    expect(extractInvoiceEvent(legacy)?.subscriptionId).toBe('sub_legacy')
+  })
+
+  it('returns null for non-event shapes', () => {
+    expect(extractInvoiceEvent(null)).toBeNull()
+    expect(extractInvoiceEvent({ id: 'e', type: 't' })).toBeNull()
+  })
+})
+
+describe('extractSubscriptionEvent (issue 161)', () => {
+  it('reads status, cancel flag, item period end, and the location hint', () => {
+    const s = extractSubscriptionEvent({
+      id: 'evt_s', type: 'customer.subscription.updated',
+      data: { object: {
+        id: 'sub_1', customer: 'cus_1', status: 'past_due', cancel_at_period_end: true,
+        items: { data: [{ current_period_end: 1893456000 }] },
+        metadata: { location_id: '6f9619ff-8b86-4d01-b42d-00c04fc964ff' },
+      } },
+    })
+    expect(s).toMatchObject({
+      subscriptionId: 'sub_1', status: 'past_due', cancelAtPeriodEnd: true,
+      periodEnd: 1893456000, locationHint: '6f9619ff-8b86-4d01-b42d-00c04fc964ff',
+    })
+  })
+
+  it('defaults cancelAtPeriodEnd false and nulls a missing period end', () => {
+    const s = extractSubscriptionEvent({ id: 'e', type: 'customer.subscription.deleted', data: { object: { id: 'sub_2', status: 'canceled' } } })
+    expect(s).toMatchObject({ status: 'canceled', cancelAtPeriodEnd: false, periodEnd: null, locationHint: null })
   })
 })

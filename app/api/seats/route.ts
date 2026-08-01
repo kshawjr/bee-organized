@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
+import { applySeatDeltaToStripe } from '@/lib/seat-stripe-sync'
 
 export const runtime = 'nodejs'
 
@@ -312,5 +313,21 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json(data)
+  // Decrement the matching line on the location's Stripe subscription
+  // (issue 161) — Stripe credits the unused portion. CONDITIONAL + non-fatal:
+  // a no-op when the location has no live subscription, and a Stripe failure
+  // never un-does the seat removal (the seat is inactive; billing reconciles).
+  let billing: any = null
+  const seat = data as any
+  if (seat?.location_id && seat?.tier) {
+    const res = await applySeatDeltaToStripe({
+      locationId: seat.location_id,
+      tier: seat.tier,
+      delta: -1,
+      seatId: seat.id,
+    })
+    billing = { stripe_applied: res.applied, ...(res.reason ? { stripe_skip_reason: res.reason } : {}) }
+  }
+
+  return NextResponse.json({ ...data, billing })
 }
