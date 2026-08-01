@@ -30,6 +30,10 @@ import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
 import { navigateToStripeCheckout, payStepForCheckoutReturn, classifyCheckoutResponse, CHECKOUT_RETURN_PARAM, CHECKOUT_INFLIGHT_KEY } from "@/lib/stripe-checkout-return"
+// issue 168 — pay modals centre against the viewport (portal to body, escaping the
+// transformed onboarding ancestor that confined position:fixed to the content column)
+// and the confirmed state gets a reduced-motion-safe confetti celebration.
+import { ViewportCenteredOverlay, PayConfirmedCelebration } from "@/lib/pay-confirmed-celebration"
 import { splitNameForPrefill } from "@/lib/name-prefill"
 import { captureViewAsSnapshot, revertViewAsCancel, viewAsIdentityFor, isElevatedRole, visibleTransferQueue } from "@/lib/view-as-identity"
 import { makeUpdatePartner } from "@/lib/partner-writes"
@@ -11736,24 +11740,27 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
 
   // ── Owner: payment flow ─────────────────────────────────────────────────────
   if (!isDone('pay')) {
+    // issue 168 — portal to the viewport so this loader centres on the whole
+    // screen instead of within the sidebar-offset content column.
     if (payStep==='processing') return (
-      <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingTop:`${topOffset}px` }}>
-        <div style={{ position:'fixed', inset:0, zIndex:100, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(26,46,43,0.6)' }}>
-          <div style={{ background:'white', borderRadius:'20px', padding:'40px 32px', textAlign:'center', maxWidth:'320px', width:'90%', boxShadow:'0 20px 60px rgba(26,46,43,0.3)' }}>
-            <div style={{ fontSize:'48px', marginBottom:'16px' }}>🐝</div>
-            <h2 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'8px' }}>Recording your order…</h2>
-            <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Just a moment</p>
-          </div>
+      <ViewportCenteredOverlay backdrop="rgba(26,46,43,0.6)" padding={0}>
+        <div style={{ background:'white', borderRadius:'20px', padding:'40px 32px', textAlign:'center', maxWidth:'320px', width:'90%', boxShadow:'0 20px 60px rgba(26,46,43,0.3)' }}>
+          <div style={{ fontSize:'48px', marginBottom:'16px' }}>🐝</div>
+          <h2 style={{ fontSize:'20px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'8px' }}>Recording your order…</h2>
+          <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Just a moment</p>
         </div>
-      </div>
+      </ViewportCenteredOverlay>
     )
     // Stripe path success — the webhook already created the seat and flipped
     // the subscription; this modal is pure celebration + advance. No
     // completePay call (there is nothing left to write).
     if (payStep==='stripe_done') return (
-      <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingTop:`${topOffset}px` }}>
-        <div style={{ position:'fixed', inset:0, zIndex:100, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(26,46,43,0.55)', padding:'12px' }}>
-          <div style={{ background:'white', borderRadius:'20px', padding:'28px 24px', maxWidth:'360px', width:'100%', boxShadow:'0 20px 60px rgba(26,46,43,0.3)' }}>
+      // issue 168 — viewport-centred takeover (portalled to body) + a
+      // reduced-motion-safe confetti celebration behind the card. The confetti is
+      // pointer-events:none, so Continue Setup is clickable from the first frame.
+      <ViewportCenteredOverlay backdrop="rgba(26,46,43,0.55)">
+        <PayConfirmedCelebration />
+        <div style={{ position:'relative', zIndex:1, background:'white', borderRadius:'20px', padding:'28px 24px', maxWidth:'360px', width:'100%', boxShadow:'0 20px 60px rgba(26,46,43,0.3)' }}>
             <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'20px' }}>
               <span style={{ fontSize:'36px' }}>🎉</span>
               <div>
@@ -11770,14 +11777,16 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
               ))}
             </div>
             <button onClick={()=>{ markDone('pay'); setPayStep('pricing') }} style={{ width:'100%', padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Continue Setup →</button>
-          </div>
         </div>
-      </div>
+      </ViewportCenteredOverlay>
     )
     if (payStep==='done') return (
-      <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:BRAND.cream, minHeight:'100vh', paddingTop:`${topOffset}px` }}>
-        <div style={{ position:'fixed', inset:0, zIndex:100, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(26,46,43,0.55)', padding:'12px' }}>
-          <div style={{ background:'white', borderRadius:'20px', padding:'28px 24px', maxWidth:'360px', width:'100%', boxShadow:'0 20px 60px rgba(26,46,43,0.3)' }}>
+      // issue 168 — same viewport-centred takeover as stripe_done. This is the
+      // record-only terminal (order invoiced separately); it is equally the moment
+      // the owner commits to a year, so it gets the same celebration.
+      <ViewportCenteredOverlay backdrop="rgba(26,46,43,0.55)">
+        <PayConfirmedCelebration />
+        <div style={{ position:'relative', zIndex:1, background:'white', borderRadius:'20px', padding:'28px 24px', maxWidth:'360px', width:'100%', boxShadow:'0 20px 60px rgba(26,46,43,0.3)' }}>
             <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'20px' }}>
               <span style={{ fontSize:'36px' }}>🎉</span>
               <div>
@@ -11799,9 +11808,8 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
               </div>
             )}
             <button onClick={completePay} disabled={activating} style={{ width:'100%', padding:'13px', background:activating?'#4a5e5a':'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:activating?'wait':'pointer', opacity:activating?0.85:1 }}>{activating ? 'Activating…' : 'Continue Setup →'}</button>
-          </div>
         </div>
-      </div>
+      </ViewportCenteredOverlay>
     )
     // Payment form
     return (
@@ -11983,8 +11991,11 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   const LAUNCH_STEPS_LABELS = ['Saving your profile…', 'Setting up your new lead emails…', 'Configuring your location…', 'Launching your Hub…']
 
   if (launching) return (
-    <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', background:'#1a2e2b', minHeight:'100vh', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'2rem', paddingTop:`${topOffset}px` }}>
-      <div style={{ textAlign:'center', maxWidth:'320px', width:'100%' }}>
+    // issue 168 — portal the launch screen to the viewport too: it had the same
+    // off-centre cause as the pay modals (it centred within the sidebar-offset
+    // content column). Opaque backdrop reproduces the original full-bleed #1a2e2b.
+    <ViewportCenteredOverlay backdrop="#1a2e2b" padding="2rem">
+      <div style={{ fontFamily:'DM Sans,system-ui,sans-serif', textAlign:'center', maxWidth:'320px', width:'100%' }}>
         <div style={{ fontSize:'52px', marginBottom:'20px', animation:'none' }}>🐝</div>
         <h2 style={{ fontSize:'22px', fontFamily:'Georgia,serif', color:'white', marginBottom:'8px' }}>Setting up your Hub</h2>
         <p style={{ fontSize:'13px', color:'rgba(168,201,196,0.6)', marginBottom:'32px' }}>Just a moment…</p>
@@ -12025,7 +12036,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
           </div>
         )}
       </div>
-    </div>
+    </ViewportCenteredOverlay>
   )
   const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box' }
 
