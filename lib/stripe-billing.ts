@@ -163,18 +163,56 @@ export async function createOwnerCheckoutSession(args: {
   // request body; the retry uses a fresh customer (a DIFFERENT body), so it
   // must also carry a fresh key or Stripe rejects the key reuse.
   idempotencyKey?: string
+  // issue 182: a FUTURE billing_cycle_anchor (unix seconds) for the
+  // "checkout link for an already-active location" path. Present only for
+  // that path; the onboarding pay step omits it and its behavior is
+  // unchanged. See the subscription_data assembly below for the zero-charge
+  // guarantee.
+  billingCycleAnchor?: number
+  // issue 182: the full set of subscription lines to create, one per seat
+  // tier (owner + managers + …) at the location's ACTIVE seat quantities, so
+  // the whole existing team is on the subscription from creation and bills as
+  // ONE invoice on the anchor date. When omitted (the onboarding path), the
+  // subscription is created with just the single owner line — unchanged.
+  lineItems?: Array<{ price: string; quantity: number }>
 }): Promise<Stripe.Checkout.Session> {
   const { customerId, priceId, locationId, successUrl, cancelUrl } = args
   const tier = args.tier || 'owner'
   const stripe = getStripe()
+
+  // Default to the single owner line (onboarding); issue 182 passes an
+  // explicit per-tier set. An empty array is treated as "not provided".
+  const lineItems =
+    args.lineItems && args.lineItems.length > 0
+      ? args.lineItems
+      : [{ price: priceId, quantity: 1 }]
+
+  const subscriptionData: Stripe.Checkout.SessionCreateParams.SubscriptionData = {
+    metadata: { tier, location_id: locationId },
+  }
+  // issue 182: an already-active location has been paid for (by corporate)
+  // through paid_through_date. Its checkout link exists only to put a card on
+  // file and start billing on that date — never to charge today. A FUTURE
+  // billing_cycle_anchor with proration_behavior 'none' makes Stripe collect
+  // the payment method now via a SetupIntent (amount due = $0, no
+  // PaymentIntent) and generate the FIRST full invoice on the anchor date.
+  // 'none' is essential: the default 'create_prorations' would bill the gap
+  // between now and the anchor immediately, which is exactly the charge we
+  // must avoid. Onboarding's pay step passes no anchor, so it keeps its
+  // signup-anchored, full-year-today behavior untouched.
+  if (typeof args.billingCycleAnchor === 'number' && Number.isFinite(args.billingCycleAnchor)) {
+    subscriptionData.billing_cycle_anchor = args.billingCycleAnchor
+    subscriptionData.proration_behavior = 'none'
+  }
+
   return stripe.checkout.sessions.create(
     {
       mode: 'subscription',
       customer: customerId,
-      line_items: [{ price: priceId, quantity: 1 }],
+      line_items: lineItems,
       client_reference_id: locationId,
       metadata: { tier, location_id: locationId },
-      subscription_data: { metadata: { tier, location_id: locationId } },
+      subscription_data: subscriptionData,
       success_url: successUrl,
       cancel_url: cancelUrl,
     },
@@ -215,16 +253,22 @@ export async function createOwnerCheckoutSessionResilient(args: {
   cancelUrl: string
   tier?: string
   nowMs?: number
+  // issue 182: forwarded verbatim to createOwnerCheckoutSession — a future
+  // billing_cycle_anchor and the per-tier line items for the
+  // already-active-location link. Both undefined for the onboarding path
+  // (unchanged: no anchor, single owner line).
+  billingCycleAnchor?: number
+  lineItems?: Array<{ price: string; quantity: number }>
   persistCustomerId: (customerId: string) => Promise<void>
 }): Promise<{ session: Stripe.Checkout.Session; customerId: string; recovered: boolean }> {
-  const { locationId, name, email, existingCustomerId, priceId, successUrl, cancelUrl, tier, nowMs, persistCustomerId } = args
+  const { locationId, name, email, existingCustomerId, priceId, successUrl, cancelUrl, tier, nowMs, billingCycleAnchor, lineItems, persistCustomerId } = args
 
   const first = await getOrCreateStripeCustomer({ locationId, name, email, existingCustomerId, nowMs })
   let customerId = first.customerId
   if (customerId !== existingCustomerId) await persistCustomerId(customerId)
 
   try {
-    const session = await createOwnerCheckoutSession({ customerId, priceId, locationId, tier, successUrl, cancelUrl, nowMs })
+    const session = await createOwnerCheckoutSession({ customerId, priceId, locationId, tier, successUrl, cancelUrl, nowMs, billingCycleAnchor, lineItems })
     return { session, customerId, recovered: false }
   } catch (err: any) {
     if (!isNoSuchCustomerError(err)) throw err
@@ -241,7 +285,7 @@ export async function createOwnerCheckoutSessionResilient(args: {
     await persistCustomerId(customerId)
 
     const session = await createOwnerCheckoutSession({
-      customerId, priceId, locationId, tier, successUrl, cancelUrl,
+      customerId, priceId, locationId, tier, successUrl, cancelUrl, billingCycleAnchor, lineItems,
       // Fresh customer ⇒ a different request body ⇒ a fresh session key.
       idempotencyKey: `${ownerCheckoutIdempotencyKey(locationId, nowMs)}_recover_${staleId}`,
     })

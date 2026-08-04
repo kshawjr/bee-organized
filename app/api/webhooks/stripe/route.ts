@@ -272,9 +272,62 @@ export async function POST(req: NextRequest) {
   if (currency && currency !== 'usd') amountNote += ` currency=${currency}`
 
   // 6. Business writes — idempotent, so a 500 → Stripe retry converges.
+  //
+  // issue 182: a subscription-mode checkout (subscriptionId present) for a
+  // location that is ALREADY active, at the owner tier, is the "checkout link
+  // for an active location" — the owner just put a card on file and Stripe
+  // anchored the first invoice to paid_through_date. It exists ONLY to attach
+  // billing to a live, already-seated location. So we persist the Stripe ids
+  // and STOP: we must NOT re-run activation (subscription_started_at is already
+  // stamped, the owner + manager seats already exist) and must NOT add a seat
+  // (the else branch below would otherwise mint a duplicate owner ghost seat
+  // and skip writing the ids entirely). The first real charge arrives later on
+  // the anchor date as invoice.paid and is handled by handleInvoiceEvent, which
+  // maps back to this location by the stripe_subscription_id we write here.
+  //
+  // This is uniquely identifiable: additional post-activation seats are added
+  // as line items on the EXISTING subscription (adjustSubscriptionSeatQuantity),
+  // never as a NEW subscription-mode checkout — so an active + owner + brand-new
+  // subscription can only be this link, never a seat purchase.
+  const isActiveSubscriptionLink =
+    location.subscription_status === 'active' && tier === 'owner' && !!subscriptionId
   const isActivation = location.subscription_status !== 'active' && tier === 'owner'
   try {
-    if (isActivation) {
+    if (isActiveSubscriptionLink) {
+      // Resolve the customer id from the session, falling back to the
+      // subscription (covers a session payload that omitted it).
+      let resolvedCustomerId: string | null = customerId
+      if (!resolvedCustomerId && stripeConfigured()) {
+        try {
+          const sub = await retrieveSubscription(subscriptionId!)
+          resolvedCustomerId =
+            typeof sub.customer === 'string' ? sub.customer : (sub.customer as any)?.id ?? null
+        } catch (e: any) {
+          console.error('[stripe-webhook] issue182 subscription retrieve failed —', e?.message || e)
+        }
+      }
+
+      // Write BOTH ids (idempotent; no-op on replay). No activation, no seat,
+      // no invoice row — nothing was charged today, and paid_through stays put
+      // until the anchor invoice advances it.
+      await writeLocationStripeIds(location.id, {
+        customerId: resolvedCustomerId,
+        subscriptionId,
+      })
+
+      const after = await getLocationBilling(location.id)
+      const landed = after?.stripe_subscription_id === subscriptionId ? 'landed' : 'not_landed'
+      await logStripeEvent({
+        locationSlug: location.location_id,
+        sessionId,
+        status: 'success',
+        detail: `tier=owner — subscription linked to already-active location (issue 182) sub=${subscriptionId} anchor=paid_through(${location.paid_through_date || 'n/a'}) — no activation, no seat`,
+        landed,
+      })
+      await postSlackMessage(
+        `🔗 Stripe subscription linked — ${location.name || location.id} — card on file, billing starts ${location.paid_through_date || 'its paid-through date'} (already active; no charge today).`,
+      )
+    } else if (isActivation) {
       // Subscription-mode checkout (issue 161): the session created via the
       // Stripe API carries a subscription + customer. Anchor paid_through to
       // the subscription's REAL period end (signup + 1yr — Stripe sets the
