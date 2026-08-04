@@ -29,6 +29,8 @@ import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
+// issue 185 — copy/format helpers for the "Get payment link" button
+import { translatePaymentLinkError, formatCheckoutLines, formatProjectedAnnual } from "@/lib/payment-link-copy"
 import { navigateToStripeCheckout, payStepForCheckoutReturn, initialPayStepFromReturn, classifyCheckoutResponse, CHECKOUT_RETURN_PARAM, CHECKOUT_INFLIGHT_KEY } from "@/lib/stripe-checkout-return"
 // issue 168 — pay modals centre against the viewport (portal to body, escaping the
 // transformed onboarding ancestor that confined position:fixed to the content column)
@@ -24692,6 +24694,13 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
                     Record a payment outside of a billing conversion (extra seat, renewal, adjustment).
                   </p>
                 </div>
+
+                {/* issue 185 — "Get payment link" for an already-active location.
+                    Mints a Stripe Checkout URL (issue 182 route) Kevin copies to
+                    the owner. Lives inside the canEditSubscription gate with the
+                    billing buttons above; guards against minting a DUPLICATE
+                    subscription when one already exists. */}
+                <GetPaymentLinkButton location={currentLoc} />
               </div>
             </div>
           )}
@@ -24786,6 +24795,175 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
             router.refresh()
           }}
         />
+      )}
+    </div>
+  )
+}
+
+// GetPaymentLinkButton — issue 185. A super_admin/corporate action (it renders
+// only inside LocationDetailSheet's canEditSubscription gate) that mints a
+// Stripe Checkout URL for an ALREADY-ACTIVE location via the issue-182 route
+// (POST /api/admin/subscription-checkout-link) and shows it so Kevin can copy
+// it to the owner. He'll do this for ~ten legacy locations over the coming
+// months, so this replaces calling the route from the browser console.
+//
+// It shows the route's sanity-check fields BEFORE the link is copied —
+// anchor date, seat composition, projected annual total — so a wrong link is
+// caught by reading, not after sending.
+//
+// THE DUPLICATE GUARD (the one that matters): the route does NOT check for an
+// existing subscription, so minting a second link for a location whose owner
+// already completed checkout would create a DUPLICATE subscription. We fetch
+// the location's stripe_subscription_id up front and, when one exists (or we
+// couldn't verify), the primary button is REPLACED by a red warning and the
+// link is only minted after an explicit "generate anyway" confirmation. We
+// warn-and-confirm rather than hard-refuse so a genuinely canceled/failed
+// subscription can still be re-minted without a code change — but the default
+// state blocks the accidental duplicate.
+function GetPaymentLinkButton({ location }) {
+  const [subMetaLoading, setSubMetaLoading] = useState(true)
+  const [existingSubId, setExistingSubId]   = useState(null)
+  const [metaError, setMetaError]           = useState(false)
+  const [confirming, setConfirming]         = useState(false)
+  const [generating, setGenerating]         = useState(false)
+  const [result, setResult]                 = useState(null)   // { url, anchor_date, lines, projected_annual_cents }
+  const [errorCopy, setErrorCopy]           = useState('')
+  const [copied, setCopied]                 = useState(false)
+
+  // Read the location's current subscription id so the duplicate guard can
+  // decide. The admin locations list (app/_hub-page.tsx) does NOT carry
+  // stripe_subscription_id, so we fetch it from the existing subscription GET.
+  useEffect(() => {
+    let alive = true
+    setSubMetaLoading(true); setMetaError(false)
+    fetch(`/api/locations/${location.id}/subscription`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => { if (alive) setExistingSubId(d?.location?.stripe_subscription_id || null) })
+      .catch(() => { if (alive) setMetaError(true) })
+      .finally(() => { if (alive) setSubMetaLoading(false) })
+    return () => { alive = false }
+  }, [location.id])
+
+  // A subscription id present OR an unverifiable state both gate behind the
+  // explicit confirmation — fail closed toward NOT minting a duplicate.
+  const needsConfirm = !!existingSubId || metaError
+
+  async function generate() {
+    setGenerating(true); setErrorCopy(''); setResult(null); setCopied(false)
+    try {
+      const res = await fetch('/api/admin/subscription-checkout-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location_id: location.id }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setErrorCopy(translatePaymentLinkError(data?.error, data?.detail))
+        return
+      }
+      setResult(data)
+      setConfirming(false)
+    } catch (err) {
+      setErrorCopy(translatePaymentLinkError('stripe_error', String(err?.message || err)))
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  function onPrimaryClick() {
+    setErrorCopy('')
+    if (needsConfirm) { setConfirming(true); return }
+    generate()
+  }
+
+  async function copyUrl() {
+    if (!result?.url) return
+    try {
+      await navigator.clipboard.writeText(result.url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* clipboard blocked — the URL is visible for manual copy */ }
+  }
+
+  return (
+    <div style={{ borderTop:'1px dashed rgba(0,0,0,0.1)', paddingTop:'10px', marginTop:'10px' }}>
+      {/* Primary CTA — hidden once a link is minted (the result panel takes over). */}
+      {!result && !confirming && (
+        <>
+          <button
+            onClick={onPrimaryClick}
+            disabled={subMetaLoading || generating}
+            style={{ width:'100%', padding:'10px', background:'white', border:'1.5px solid #635bff', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#4b45c6', cursor:(subMetaLoading||generating)?'not-allowed':'pointer', opacity:(subMetaLoading||generating)?0.6:1 }}
+          >{generating ? 'Generating…' : subMetaLoading ? 'Checking subscription…' : '🔗 Get payment link'}</button>
+          <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'6px', lineHeight:1.45 }}>
+            Mints a Stripe checkout link for this active location, anchored to its paid-through date. Review the details, then copy the link to the owner.
+          </p>
+        </>
+      )}
+
+      {/* Duplicate / unverified guard — replaces the primary button until Kevin
+          explicitly confirms. This is the one guard that matters (issue 185). */}
+      {confirming && !result && (
+        <div style={{ padding:'11px 12px', borderRadius:'8px', background:'rgba(239,68,68,0.07)', border:'1.5px solid rgba(239,68,68,0.4)' }}>
+          <p style={{ fontSize:'12px', fontWeight:700, color:'#b91c1c', margin:'0 0 5px' }}>⚠️ This location already has a subscription</p>
+          <p style={{ fontSize:'11px', color:'#7f1d1d', margin:'0 0 4px', lineHeight:1.5 }}>
+            {existingSubId
+              ? <>A Stripe subscription (<code style={{ fontSize:'10px' }}>{existingSubId}</code>) already exists. Generating another link risks a <strong>duplicate subscription</strong> and double billing. Only continue if this one is canceled/failed and must be re-created.</>
+              : <>Couldn’t verify whether a subscription already exists. Continue only if you’re sure this location has never completed checkout — otherwise you risk a <strong>duplicate subscription</strong>.</>}
+          </p>
+          <div style={{ display:'flex', gap:'8px', marginTop:'8px' }}>
+            <button
+              onClick={()=>{ setConfirming(false); setErrorCopy('') }}
+              disabled={generating}
+              style={{ flex:1, padding:'9px', background:'white', border:'1px solid rgba(0,0,0,0.15)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:generating?'not-allowed':'pointer' }}
+            >Cancel</button>
+            <button
+              onClick={generate}
+              disabled={generating}
+              style={{ flex:1, padding:'9px', background:'#b91c1c', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:generating?'not-allowed':'pointer', opacity:generating?0.7:1 }}
+            >{generating ? 'Generating…' : 'Generate anyway'}</button>
+          </div>
+        </div>
+      )}
+
+      {/* Error — the route's token translated into something actionable. */}
+      {errorCopy && !result && (
+        <p style={{ fontSize:'11.5px', color:'#b91c1c', margin:'8px 0 0', lineHeight:1.5 }}>{errorCopy}</p>
+      )}
+
+      {/* Success — sanity fields FIRST (the guard against sending a wrong link),
+          then the copyable URL with its expiry caveat. */}
+      {result && (
+        <div style={{ padding:'12px', borderRadius:'8px', background:'rgba(99,91,255,0.05)', border:'1.5px solid rgba(99,91,255,0.25)' }}>
+          <p style={{ fontSize:'10px', fontWeight:700, color:'#4b45c6', textTransform:'uppercase', letterSpacing:'0.4px', margin:'0 0 6px' }}>Review before sending</p>
+          <div style={{ fontSize:'12px', color:'#1a2e2b', lineHeight:1.6, marginBottom:'10px' }}>
+            <div><strong>{location.name}</strong></div>
+            <div>First invoice: <strong>{result.anchor_date || '—'}</strong></div>
+            <div>Seats: <strong>{formatCheckoutLines(result.lines)}</strong></div>
+            <div>Projected total: <strong>{formatProjectedAnnual(result.projected_annual_cents)}</strong></div>
+          </div>
+
+          <label style={{ display:'block', fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Payment link</label>
+          <div style={{ display:'flex', gap:'6px', alignItems:'stretch' }}>
+            <input
+              readOnly
+              value={result.url}
+              onFocus={e=>e.target.select()}
+              style={{ flex:1, padding:'8px 10px', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none', boxSizing:'border-box', minWidth:0 }}
+            />
+            <button
+              onClick={copyUrl}
+              style={{ padding:'8px 12px', background:'#635bff', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:'pointer', whiteSpace:'nowrap' }}
+            >{copied ? '✓ Copied' : 'Copy'}</button>
+          </div>
+          <p style={{ fontSize:'11px', color:'#8a5a20', margin:'8px 0 0', lineHeight:1.5 }}>
+            ⏳ This link expires in about 24 hours. If it isn’t used, generate a new one.
+          </p>
+          <button
+            onClick={()=>{ setResult(null); setConfirming(false); setErrorCopy('') }}
+            style={{ marginTop:'10px', width:'100%', padding:'8px', background:'white', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:'pointer' }}
+          >Done</button>
+        </div>
       )}
     </div>
   )
