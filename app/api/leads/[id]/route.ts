@@ -26,6 +26,7 @@ import { readOnlyWriteBlock } from '@/lib/read-only-access'
 import { applyDripSideEffects } from '@/lib/drip-lifecycle'
 import { sendDripStep } from '@/lib/drip-send'
 import { mapLeadToPerson } from '@/lib/people-mapper'
+import { rollUpEngagements } from '@/lib/engagement-rollup'
 import { diffContactPatch, normalizePhoneDigits, normalizeEmail, type ContactWriteback } from '@/lib/jobber-contact-writeback'
 import { syncLeadContactToJobber } from '@/lib/jobber-contact-sync'
 import { diffAddressPatch } from '@/lib/lead-address'
@@ -127,6 +128,7 @@ export async function GET(
     { data: quotes },
     { data: jobs },
     { data: invoices },
+    { data: engagementRows },
   ] = await Promise.all([
     supabaseService.from('lead_notes').select('*').eq('lead_id', id).order('created_at', { ascending: false }),
     supabaseService.from('touchpoints').select('*').eq('lead_id', id).order('occurred_at', { ascending: false }),
@@ -137,6 +139,10 @@ export async function GET(
     supabaseService.from('quotes').select('*').eq('lead_id', id).order('sent_at', { ascending: false }),
     supabaseService.from('jobs').select('*').eq('lead_id', id).order('scheduled_start', { ascending: false }),
     supabaseService.from('invoices').select('*').eq('lead_id', id).order('issued_at', { ascending: false }),
+    // issue 187 follow-up — engagements key on client_id (= the lead id), like
+    // the _hub-page.tsx sweep. Fetched so the refetch can ship the same
+    // engagementCount / wonEngagements roll-ups full hydration does (parity).
+    supabaseService.from('engagements').select('stage, total_paid, total_invoiced, closed_at').eq('client_id', id),
   ])
 
   // Resolve tag lookups
@@ -161,6 +167,10 @@ export async function GET(
     jobs:             jobs             || [],
     invoices:         invoices         || [],
     tag_lookups,
+    // issue 187 follow-up — same roll-ups the hydration sweep ships, so a
+    // Realtime refetch (which REPLACES the person last-wins) keeps a settled-
+    // lost / won client from reverting to a funnel status until a full reload.
+    ...rollUpEngagements(engagementRows),
   })
 
   return NextResponse.json({ person }, { status: 200 })
