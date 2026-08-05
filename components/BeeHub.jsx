@@ -13089,68 +13089,206 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
   return null
 }
 
-// Lead-phrased style copy for the onboarding confirm screen ONLY. Settings
-// keeps the c9b46c0 owner-phrased names (PATH_STYLES.label, e.g. "Reply to
-// schedule · rate on the call") — the divergence is deliberate: on this
-// screen the owner is reading what their LEAD experiences, plus what the
-// style costs THEM to set up. Order is cheapest-first, matching the default.
-const CONFIRM_STYLES = [
-  { id:'path-c', lead:'They reply to schedule · price on the call',          cost:'Nothing to set up' },
-  { id:'path-d', lead:'They book on your calendar · price on the call',      cost:'Needs your booking link' },
-  { id:'path-a', lead:'They reply to schedule · your rate in the email',     cost:'Needs your hourly rate' },
-  { id:'path-b', lead:'They book on your calendar · your rate in the email', cost:'Needs both' },
-]
+// issue 194 — the onboarding "new lead emails" step is a plain-language
+// wizard: intro, then the two questions that stand in for the path letters
+// (how a lead books, where the rate lives), then a preview of the real emails.
+// Owners never see A/B/C/D — the answer pair resolves to a master path via
+// pathStyleFromAnswers. Both project types take the same answers unless the
+// owner ticks "Handle moving jobs differently" at the end, which runs the two
+// questions a second time for moving only.
+// issue 194 — the four path letters are really TWO questions. Every master
+// path is a point in a clean 2x2: how a new lead books (they reply, or they
+// book online) crossed with where the rate lives (in the email, or on the
+// call). Owners never see a letter; they answer the two questions and these
+// helpers resolve the pair to the same 'path-a'..'path-d' the DB has always
+// stored. Both the onboarding wizard AND Settings → Communications drive their
+// default off this one mapping, so the plain wording can never drift from the
+// stored path_key.
+//   reply       + rate in email    -> path-a
+//   book online + rate in email    -> path-b
+//   reply       + rate on the call -> path-c   (needs nothing set up)
+//   book online + rate on the call -> path-d
+export const BOOKING_REPLY  = 'reply'
+export const BOOKING_ONLINE = 'online'
+export const RATE_IN_EMAIL  = 'email'
+export const RATE_ON_CALL   = 'call'
 
-const HOW_IT_WORKS = {
-  'path-c': 'How this works: your leads reply to you directly to schedule, and pricing comes up on the call — not in the email. Most owners start here.',
-  'path-d': 'How this works: your leads book time on your calendar (or phone you), and pricing comes up on the call — not in the email.',
-  'path-a': 'How this works: your leads reply to you directly to schedule, and your hourly rate is right there in the email.',
-  'path-b': 'How this works: your leads book time on your calendar, and your hourly rate is right there in the email.',
+export function pathStyleFromAnswers(booking, rate) {
+  if (booking === BOOKING_ONLINE && rate === RATE_IN_EMAIL) return 'path-b'
+  if (booking === BOOKING_ONLINE && rate === RATE_ON_CALL)  return 'path-d'
+  if (booking === BOOKING_REPLY  && rate === RATE_IN_EMAIL) return 'path-a'
+  // reply + rate on the call, and the safe default while a question is still
+  // unanswered — the caller gates Continue so a partial pair never persists.
+  return 'path-c'
+}
+
+export function answersFromPathStyle(styleId) {
+  switch (styleId) {
+    case 'path-a': return { booking: BOOKING_REPLY,  rate: RATE_IN_EMAIL }
+    case 'path-b': return { booking: BOOKING_ONLINE, rate: RATE_IN_EMAIL }
+    case 'path-d': return { booking: BOOKING_ONLINE, rate: RATE_ON_CALL }
+    case 'path-c': return { booking: BOOKING_REPLY,  rate: RATE_ON_CALL }
+    default:       return { booking: null, rate: null }
+  }
 }
 
 const COUNT_WORDS = ['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten']
 const countWord = n => COUNT_WORDS[n] || String(n)
 
-// The confirm-not-choose screen: one per project type. The owner CONFIRMS a
-// pre-selected style by reading the real emails (email 1 open, rest collapsed)
-// — the four-card decision only appears behind "Change how this works".
-// Kevin: the original complaint was "people don't really understand what they
-// are selecting"; four options with no explanation is where they freeze or
-// guess, so the decision is removed from the default path entirely.
-function OnboardingLeadEmailsConfirm({
-  projectLabel, emoji, stepKicker, sectionKey,
-  selected, onSelect, styleOptions, getSteps, previewSettings,
-  needsCalendar, needsRate, calendarLink, setCalendarLink, ratePerHour, setRatePerHour,
-  continueLabel, onContinue, onBack, backLabel,
+// The two questions, in the owner's words. `value` maps to the mapping
+// constants; the -c pair (reply + rate on the call) is the "nothing to set up"
+// answer on both, which is why those blurbs say so.
+const BOOKING_CHOICES = [
+  { value: BOOKING_REPLY,  emoji:'💬', title:'They reply to you',           blurb:'New leads answer your follow-up email to set up a time. Nothing for you to set up.' },
+  { value: BOOKING_ONLINE, emoji:'📅', title:'They book online themselves', blurb:'New leads pick a time on your booking page (Calendly, Acuity, etc.).' },
+]
+const RATE_CHOICES = [
+  { value: RATE_IN_EMAIL, emoji:'💵', title:'Yes, put my rate in the email', blurb:'Your hourly rate is written right into the follow-up email.' },
+  { value: RATE_ON_CALL,  emoji:'📞', title:"No, cover it on the call",       blurb:'Pricing comes up when you talk — never in writing. Nothing to set up.' },
+]
+
+// One-line, plain-language read-back of an answer pair — used in the preview
+// recap and above the moving preview.
+function recapSentence(booking, rate) {
+  const b = booking === BOOKING_ONLINE ? 'book time on your calendar' : 'reply to you to schedule'
+  const r = rate    === RATE_IN_EMAIL  ? 'your rate is right in the email' : 'pricing waits for the call'
+  return `New leads ${b}, and ${r}.`
+}
+
+// "How this works" explainer keyed by the resolved answer pair — the same
+// reassurance the old confirm screen carried, now driven by the two answers.
+function howItWorks(booking, rate) {
+  if (booking === BOOKING_ONLINE && rate === RATE_IN_EMAIL) return 'Your leads book time on your calendar, and your hourly rate is right there in the email.'
+  if (booking === BOOKING_ONLINE && rate === RATE_ON_CALL)  return 'Your leads book time on your calendar (or phone you), and pricing comes up on the call — not in the email.'
+  if (booking === BOOKING_REPLY  && rate === RATE_IN_EMAIL) return 'Your leads reply to you directly to schedule, and your hourly rate is right there in the email.'
+  return 'Your leads reply to you directly to schedule, and pricing comes up on the call — not in the email. Most owners start here.'
+}
+
+// Progress dots for the wizard (the mockup's step indicator). `index` is the
+// current 0-based screen, `total` the number of dots in this pass.
+function WizardDots({ index, total }) {
+  return (
+    <div style={{ display:'flex', gap:'6px', justifyContent:'center', alignItems:'center', padding:'2px 0 2px' }}>
+      {Array.from({ length: total }).map((_, i) => (
+        <div key={i} style={{ width: i===index ? '22px' : '7px', height:'7px', borderRadius:'4px', background: i===index ? '#1a2e2b' : i<index ? 'rgba(26,46,43,0.4)' : 'rgba(26,46,43,0.14)', transition:'all .2s ease' }} />
+      ))}
+    </div>
+  )
+}
+
+// The booking-link prerequisite, revealed inline the moment "book online" is
+// picked (issue 194: the prerequisite is WHY the choice was demoted, so we
+// collect it here rather than hide the option). Placeholder is load-bearing —
+// the preview + tests find this input by it.
+function OnboardingCalendarField({ calendarLink, setCalendarLink, prefilled }) {
+  const bad = calendarLink && !calendarLink.startsWith('http')
+  return (
+    <div style={{ background:'rgba(99,102,241,0.05)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'12px', padding:'14px' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}>
+        <span style={{ fontSize:'18px' }}>📅</span>
+        <div>
+          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Your booking link</p>
+          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{prefilled ? 'Already saved — change it here if you like.' : 'Clients tap this to grab a time from your follow-up email.'}</p>
+        </div>
+      </div>
+      <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5, marginBottom:'10px' }}>Paste your Calendly, Acuity, or other booking page URL.</p>
+      <input type="url" value={calendarLink} onChange={e=>setCalendarLink(e.target.value)}
+        placeholder="https://calendly.com/your-name"
+        style={{ width:'100%', padding:'10px 12px', border:`1.5px solid ${bad?'rgba(239,68,68,0.4)':'rgba(99,102,241,0.3)'}`, borderRadius:'9px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', background:'white' }} />
+      {bad && <p style={{ fontSize:'11px', color:'#ef4444', marginTop:'4px' }}>Enter a full URL starting with https://</p>}
+      {calendarLink && calendarLink.startsWith('http') && <p style={{ fontSize:'11px', color:'#22c55e', marginTop:'4px' }}>✓ Looks good</p>}
+    </div>
+  )
+}
+
+// The hourly-rate prerequisite, revealed inline when "rate in the email" is
+// picked. Same gating shape as the booking link.
+function OnboardingRateField({ ratePerHour, setRatePerHour, prefilled }) {
+  return (
+    <div style={{ background:'rgba(245,158,11,0.05)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'12px', padding:'14px' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}>
+        <span style={{ fontSize:'18px' }}>💰</span>
+        <div>
+          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Your hourly rate</p>
+          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{prefilled ? 'Already saved — change it here if you like.' : 'This goes into the follow-up email, word for word.'}</p>
+        </div>
+      </div>
+      <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5, marginBottom:'10px' }}>The email will read: &ldquo;Our rate starts at <strong>{ratePerHour.trim()||'___'}</strong> per hour per Bee.&rdquo; Write it exactly as it should read — e.g. $95.</p>
+      <input type="text" value={ratePerHour} onChange={e=>setRatePerHour(e.target.value)}
+        placeholder="$95"
+        style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(245,158,11,0.35)', borderRadius:'9px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', background:'white' }} />
+      {ratePerHour.trim() && <p style={{ fontSize:'11px', color:'#22c55e', marginTop:'4px' }}>✓ Looks good</p>}
+    </div>
+  )
+}
+
+// A single question screen: a headline, two big option cards, an optional
+// revealed prerequisite field, progress dots, and a gated Continue.
+function WizardQuestion({
+  kicker, title, subtitle, choices, value, onChange, reveal,
+  dotIndex, dotTotal, onBack, backLabel, onContinue, continueLabel, canContinue, gateLabel,
 }) {
-  // Which step is expanded: master step_order values start at 1, so email 1
-  // is open on entry — the "real email text visible" half of confirm-not-choose.
+  return (
+    <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
+      <WizardDots index={dotIndex} total={dotTotal} />
+      <div>
+        {kicker && <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.8px', marginBottom:'4px' }}>{kicker}</p>}
+        <p style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{title}</p>
+        {subtitle && <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.5, marginTop:'4px' }}>{subtitle}</p>}
+      </div>
+      <div style={{ display:'grid', gap:'10px' }}>
+        {choices.map(c => {
+          const sel = value === c.value
+          return (
+            <div key={c.value} onClick={()=>onChange(c.value)}
+              style={{ background:'white', borderRadius:'14px', border:`2px solid ${sel?'#1a2e2b':'rgba(0,0,0,0.08)'}`, padding:'14px', display:'flex', alignItems:'center', gap:'12px', cursor:'pointer' }}>
+              <span style={{ fontSize:'24px', flexShrink:0 }}>{c.emoji}</span>
+              <div style={{ flex:1, minWidth:0 }}>
+                <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'2px' }}>{c.title}</p>
+                <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.4 }}>{c.blurb}</p>
+              </div>
+              <div style={{ width:'22px', height:'22px', borderRadius:'50%', border:`2px solid ${sel?'#1a2e2b':'rgba(0,0,0,0.2)'}`, background:'white', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                {sel && <div style={{ width:'11px', height:'11px', borderRadius:'50%', background:'#1a2e2b' }} />}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {reveal}
+      <div style={{ display:'flex', gap:'8px' }}>
+        <button onClick={onBack} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>{backLabel}</button>
+        <button onClick={()=>canContinue&&onContinue()} disabled={!canContinue}
+          style={{ flex:1, padding:'11px', background:canContinue?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:canContinue?'white':'#9ca3af', cursor:canContinue?'pointer':'not-allowed' }}>
+          {canContinue ? continueLabel : gateLabel}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// The preview screen: a recap line with a Change link back to question 1, the
+// first email rendered in full (the shared 14-variable pipeline), the rest
+// collapsed to timing + subject, and the Back / finish controls. `extra`
+// carries the split checkbox on the shared pass.
+function WizardPreview({
+  projectLabel, steps, previewSettings, booking, rate, onChange, changeLabel,
+  extra, dotIndex, dotTotal, onBack, backLabel, onContinue, continueLabel, canContinue, gateLabel, loading,
+}) {
   const [openOrder, setOpenOrder] = useState(1)
-  const [chooserOpen, setChooserOpen] = useState(false)
-
-  const pathId = `${sectionKey}-${String(selected).replace('path-','')}`
-  const steps  = getSteps(pathId)
-  // Shared 14-variable preview pipeline (lib/preview-vars) — one build per
-  // render backs every collapsed row's substituted subject line; the expanded
-  // card mounts the same RenderedTemplatePreview as Settings → Communications.
   const previewVars = previewSettings ? buildPreviewVars(previewSettings) : null
-
-  const calendarReady = !needsCalendar || calendarLink.trim().startsWith('http')
-  const rateReady     = !needsRate || ratePerHour.trim() !== ''
-  const ready         = calendarReady && rateReady
-  const gateLabel     = !calendarReady ? 'Add your calendar link to continue'
-                      : !rateReady     ? 'Add your hourly rate to continue'
-                      : continueLabel
   const noun = steps.length && steps.every(s => s.type === 'email') ? 'email' : 'message'
 
   return (
-    <div style={{ display:'grid', gap:'10px' }}>
-      {/* Persistent project-type header (c9b46c0). Kevin: during onboarding
-          the two project types blended together — solid banner, not a subtle
-          label. The kicker now also says what's coming next. */}
-      <div style={{ background:'#1a2e2b', borderRadius:'10px', padding:'13px 15px' }}>
-        <p style={{ fontSize:'10px', fontWeight:700, color:'#a8c9c4', textTransform:'uppercase', letterSpacing:'0.8px', marginBottom:'5px' }}>{stepKicker}</p>
-        <p style={{ fontSize:'17px', fontWeight:700, color:'white', fontFamily:'Georgia,serif' }}>{emoji} {projectLabel} projects</p>
+    <div style={{ paddingTop:'12px', display:'grid', gap:'12px' }}>
+      <WizardDots index={dotIndex} total={dotTotal} />
+
+      {/* Recap of the two answers, with the Change link back to question 1. */}
+      <div style={{ background:'rgba(168,201,196,0.12)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'12px', padding:'12px 14px', display:'flex', alignItems:'flex-start', gap:'10px' }}>
+        <span style={{ fontSize:'16px', flexShrink:0 }}>✅</span>
+        <div style={{ flex:1, minWidth:0 }}>
+          <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.5 }}>{recapSentence(booking, rate)}</p>
+        </div>
+        <button onClick={onChange} style={{ background:'transparent', border:'none', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#4a7a74', cursor:'pointer', textDecoration:'underline', flexShrink:0 }}>{changeLabel || 'Change'}</button>
       </div>
 
       <div>
@@ -13160,17 +13298,14 @@ function OnboardingLeadEmailsConfirm({
         )}
       </div>
 
-      {steps.length===0 && (
+      {loading ? (
+        <BeeLoader label="Gathering your emails…" />
+      ) : steps.length === 0 ? (
         <p style={{ fontSize:'11px', color:'#8a9e9a', textAlign:'center', padding:'8px' }}>Couldn't load these emails — you can review them in Settings → Communications.</p>
-      )}
-      {steps.map(step=>{
+      ) : steps.map(step => {
         const icon   = {email:'📧',sms:'💬',call:'📞'}[step.type]||'📧'
         const isOpen = openOrder===step.order
-        // Collapsed row title is the subject line, run through the shared
-        // pipeline so {{location_name}}-style subjects read as they'll send.
-        const rowName = previewVars
-          ? (applyPreviewVars(step.name, previewVars) || step.name)
-          : step.name
+        const rowName = previewVars ? (applyPreviewVars(step.name, previewVars) || step.name) : step.name
         return (
           <div key={step.id} style={{ background:'white', borderRadius:'12px', border:`1px solid ${isOpen?'rgba(26,46,43,0.35)':'rgba(0,0,0,0.08)'}`, overflow:'hidden' }}>
             <div onClick={()=>setOpenOrder(isOpen?null:step.order)} style={{ padding:'10px 14px', display:'flex', alignItems:'center', gap:'10px', cursor:'pointer' }}>
@@ -13185,8 +13320,6 @@ function OnboardingLeadEmailsConfirm({
               <div style={{ borderTop:'1px solid rgba(0,0,0,0.06)', background:'#f7f5f0', padding:'10px' }}>
                 {step.body ? (
                   <div style={{ background:'white', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.07)' }}>
-                    {/* THE shared rendered-preview body (stage 2 pipeline) —
-                        onboarding preview and send can't drift. */}
                     <RenderedTemplatePreview type={step.type} subject={step.subject} body={step.body} settings={previewSettings} />
                   </div>
                 ) : (
@@ -13199,115 +13332,57 @@ function OnboardingLeadEmailsConfirm({
       })}
 
       <div style={{ background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'10px', padding:'11px 13px' }}>
-        <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>💡 {HOW_IT_WORKS[selected] || 'How this works: these emails go out automatically — you can change them anytime in Settings.'}</p>
+        <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>💡 {howItWorks(booking, rate)}</p>
       </div>
 
-      {chooserOpen && (
-        <div style={{ display:'grid', gap:'8px', paddingTop:'2px' }}>
-          <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>What should a new {projectLabel.toLowerCase()} lead do?</p>
-          {styleOptions.map(row=>{
-            const isSelected = selected===row.id
-            return (
-              <div key={row.id} onClick={()=>{ onSelect(row.id); setOpenOrder(1) }}
-                style={{ background:'white', borderRadius:'12px', border:`2px solid ${isSelected?'#1a2e2b':'rgba(0,0,0,0.08)'}`, padding:'11px 14px', display:'flex', alignItems:'center', gap:'10px', cursor:'pointer' }}>
-                <div style={{ width:'20px', height:'20px', borderRadius:'50%', border:`2px solid ${isSelected?'#1a2e2b':'rgba(0,0,0,0.2)'}`, background:'white', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                  {isSelected && <div style={{ width:'10px', height:'10px', borderRadius:'50%', background:'#1a2e2b' }} />}
-                </div>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{row.lead}</p>
-                  <p style={{ fontSize:'11px', color:row.cost==='Nothing to set up'?'#22c55e':'#8a9e9a' }}>{row.cost}</p>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {needsCalendar&&(
-        <div style={{ background:'rgba(99,102,241,0.05)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'12px', padding:'14px' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}>
-            <span style={{ fontSize:'18px' }}>📅</span>
-            <div>
-              <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Calendar link required</p>
-              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Your choice sends a booking link to clients.</p>
-            </div>
-          </div>
-          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5, marginBottom:'10px' }}>Add your Calendly, Acuity, or other booking page URL. Clients will use this to schedule directly from your follow-up email.</p>
-          <input type="url" value={calendarLink} onChange={e=>setCalendarLink(e.target.value)}
-            placeholder="https://calendly.com/your-name"
-            style={{ width:'100%', padding:'10px 12px', border:`1.5px solid ${calendarLink&&!calendarLink.startsWith('http')?'rgba(239,68,68,0.4)':'rgba(99,102,241,0.3)'}`, borderRadius:'9px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', background:'white' }} />
-          {calendarLink&&!calendarLink.startsWith('http')&&<p style={{ fontSize:'11px', color:'#ef4444', marginTop:'4px' }}>Enter a full URL starting with https://</p>}
-          {calendarLink&&calendarLink.startsWith('http')&&<p style={{ fontSize:'11px', color:'#22c55e', marginTop:'4px' }}>✓ Looks good</p>}
-        </div>
-      )}
-
-      {needsRate&&(
-        <div style={{ background:'rgba(245,158,11,0.05)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'12px', padding:'14px' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}>
-            <span style={{ fontSize:'18px' }}>💰</span>
-            <div>
-              <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Hourly rate required</p>
-              <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Your choice quotes your rate to clients.</p>
-            </div>
-          </div>
-          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5, marginBottom:'10px' }}>This goes into the follow-up email word-for-word: &ldquo;Our rate starts at <strong>{ratePerHour.trim()||'___'}</strong> per hour per Bee.&rdquo; Write it exactly as it should read — e.g. $95. You can change it anytime in Settings.</p>
-          <input type="text" value={ratePerHour} onChange={e=>setRatePerHour(e.target.value)}
-            placeholder="$95"
-            style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(245,158,11,0.35)', borderRadius:'9px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', background:'white' }} />
-          {ratePerHour.trim()&&<p style={{ fontSize:'11px', color:'#22c55e', marginTop:'4px' }}>✓ Looks good</p>}
-        </div>
-      )}
+      {extra}
 
       <div style={{ display:'flex', gap:'8px' }}>
         <button onClick={onBack} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>{backLabel}</button>
-        <button onClick={()=>ready&&onContinue()} disabled={!ready}
-          style={{ flex:1, padding:'11px', background:ready?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:ready?'white':'#9ca3af', cursor:ready?'pointer':'not-allowed' }}>
-          {gateLabel}
+        <button onClick={()=>canContinue&&onContinue()} disabled={!canContinue}
+          style={{ flex:1, padding:'11px', background:canContinue?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:canContinue?'white':'#9ca3af', cursor:canContinue?'pointer':'not-allowed' }}>
+          {canContinue ? continueLabel : gateLabel}
         </button>
       </div>
-      <button onClick={()=>setChooserOpen(o=>!o)}
-        style={{ width:'100%', padding:'8px', background:'transparent', border:'none', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer', textDecoration:'underline' }}>
-        {chooserOpen?'Hide these options':'Change how this works'}
-      </button>
       <p style={{ fontSize:'11px', color:'#8a9e9a', fontStyle:'italic', textAlign:'center' }}>Templates and timing can be customized anytime in Settings → Communications</p>
     </div>
   )
 }
 
 export function OnboardingPathsEditor({ onComplete, profileForm = null, locationForm = null }) {
-  // Onboarding picker reads from the corp master drip_paths
-  // (/api/drip-paths/masters) rather than per-location rows: with the
-  // master/copy model introduced by seed_master_drip_paths.sql, new
-  // locations don't have their own drip_paths until an owner clicks
-  // "Customize" in Settings → Communications.
+  // Onboarding reads from the corp master drip_paths (/api/drip-paths/masters)
+  // rather than per-location rows: with the master/copy model new locations
+  // don't have their own drip_paths until an owner clicks "Customize" in
+  // Settings → Communications.
   const currentLocationCtx = useContext(CurrentLocationContext)
   const currentUserCtx     = useContext(CurrentUserContext)
 
+  // Screens: intro → booking → rate → preview, then (only if the owner splits)
+  // moveBooking → moveRate → movePreview. Owners never see a path letter.
   const [wizardStep, setWizardStep] = useState('intro')
-  // Confirm-not-choose: both types land PRE-SELECTED on the -c style ("reply
-  // to schedule · rate on the call") — 7 of 9 live locations quote no rate,
-  // and it's the only style needing nothing from a new owner (no rate, no
-  // booking link). A re-run keeps the stored location default instead, so
-  // confirming never silently reverts an earlier choice.
-  const storedStyle = key => { const m = /^(?:moving|organizing)-([a-d])$/.exec(String(key||'')); return m ? 'path-'+m[1] : null }
-  const [selectedMove, setSelectedMove]       = useState(() => storedStyle(currentLocationCtx?.default_move_drip_path) || 'path-c')
-  const [selectedGeneral, setSelectedGeneral] = useState(() => storedStyle(currentLocationCtx?.default_drip_path) || 'path-c')
-  // Pre-seed both value asks from the location so re-running the wizard
-  // doesn't demand a re-type of something that's already saved.
-  const [calendarLink, setCalendarLink]       = useState(currentLocationCtx?.calendar_link || '')
-  const [ratePerHour, setRatePerHour]         = useState(currentLocationCtx?.rate_per_hour || '')
 
-  // Which PATH_STYLES are backed by a master drip_paths row. `null` while
-  // loading. Keyed by PATH_STYLES.id (e.g. 'path-a'). With the 8 seeded
-  // masters this resolves to ['path-a','path-b','path-c','path-d'] for
-  // both categories.
-  const [availableMoveStyleIds,    setAvailableMoveStyleIds]    = useState(null)
-  const [availableGeneralStyleIds, setAvailableGeneralStyleIds] = useState(null)
-  const [pathsLoadError, setPathsLoadError] = useState(null)
-  // { [path_key]: uiSteps } built from the SAME masters response. The 👁 Preview
-  // in the picker renders these — i.e. the exact subject/body that will send —
-  // instead of the prototype copy the wizard used to show from the JS bundle.
+  // Kevin: every owner WILL choose now, so nothing is pre-selected on a fresh
+  // location — both answers start empty and Continue is gated until picked. A
+  // re-run seeds from the stored default so confirming never reverts a choice.
+  const storedStyle = key => { const m = /^(?:moving|organizing)-([a-d])$/.exec(String(key||'')); return m ? 'path-'+m[1] : null }
+  const seededGen  = answersFromPathStyle(storedStyle(currentLocationCtx?.default_drip_path)      || '')
+  const seededMove = answersFromPathStyle(storedStyle(currentLocationCtx?.default_move_drip_path) || '')
+  const [booking, setBooking] = useState(seededGen.booking)   // shared answers (both project types)
+  const [rate, setRate]       = useState(seededGen.rate)
+  // Moving-only override, used only when "Handle moving jobs differently" is on.
+  const [splitMoving, setSplitMoving] = useState(false)
+  const [moveBooking, setMoveBooking] = useState(seededMove.booking)
+  const [moveRate, setMoveRate]       = useState(seededMove.rate)
+  // Prerequisite values, pre-seeded from the location so a re-run never demands
+  // a re-type of something already saved.
+  const [calendarLink, setCalendarLink] = useState(currentLocationCtx?.calendar_link || '')
+  const [ratePerHour, setRatePerHour]   = useState(currentLocationCtx?.rate_per_hour || '')
+
+  const hadCalendar = !!(currentLocationCtx?.calendar_link || '').trim()
+  const hadRate     = !!(currentLocationCtx?.rate_per_hour || '').trim()
+
   const [masterSteps, setMasterSteps] = useState({})
+  const [pathsLoaded, setPathsLoaded] = useState(false)
 
   React.useEffect(() => {
     let cancelled = false
@@ -13318,48 +13393,22 @@ export function OnboardingPathsEditor({ onComplete, profileForm = null, location
         const json = await res.json()
         if (cancelled) return
         const masters = Array.isArray(json?.masters) ? json.masters : []
-        const move = new Set()
-        const gen  = new Set()
-        for (const p of masters) {
-          if (!p?.path_key || p?.is_active === false) continue
-          if (p.path_key.startsWith('moving-')) {
-            move.add('path-' + p.path_key.slice('moving-'.length))
-          } else if (p.path_key.startsWith('organizing-')) {
-            gen.add('path-' + p.path_key.slice('organizing-'.length))
-          }
-        }
-        setAvailableMoveStyleIds(Array.from(move))
-        setAvailableGeneralStyleIds(Array.from(gen))
         setMasterSteps(masterStepsByKey(masters))
       } catch (err) {
         if (cancelled) return
         console.error('[OnboardingPathsEditor] masters fetch failed:', err)
-        setPathsLoadError(err?.message || 'Failed to load your new lead emails')
-        // Defensive fallback: assume all four styles are available — the
-        // user can still finish onboarding and adjust in Settings → Communications.
-        const all = PATH_STYLES.filter(s => s.id !== 'custom').map(s => s.id)
-        setAvailableMoveStyleIds(all)
-        setAvailableGeneralStyleIds(all)
+        // Degrade honestly — the preview shows a "couldn't load" note rather
+        // than invented copy, and the owner can still finish and adjust later.
+      } finally {
+        if (!cancelled) setPathsLoaded(true)
       }
     })()
     return () => { cancelled = true }
   }, [])
 
-  // Per-section chooser rows: only styles backed by a master drip_paths row.
-  // "Build your own" is CUT from onboarding: the Settings builder it pointed
-  // at was removed (e2adea3), and picking it configured ZERO automatic emails
-  // — the Welcome included — while the card claimed a placeholder sequence
-  // ran. An owner who wants a custom sequence builds it in Settings →
-  // Communications, where the editing tools actually live.
-  const moveStyleOptions    = CONFIRM_STYLES.filter(s => (availableMoveStyleIds    || []).includes(s.id))
-  const generalStyleOptions = CONFIRM_STYLES.filter(s => (availableGeneralStyleIds || []).includes(s.id))
-  const pathsLoading = availableMoveStyleIds === null || availableGeneralStyleIds === null
-
-  // Intro cadence, read from the masters that actually send (fix for the
-  // hardcoded "3 emails / 5 days / 30 days" claim — the copy now can't drift
-  // from seed_master_drip_paths.sql). null while the fetch is in flight;
-  // uniform=false if the masters ever stop sharing one schedule, which swaps
-  // the specific claim for an honest generic one.
+  // Intro cadence, read from the masters that actually send (never a hardcoded
+  // count/schedule). null while the fetch is in flight; uniform=false swaps the
+  // specific claim for an honest generic one if the masters ever diverge.
   const introCadence = React.useMemo(() => {
     const lists = Object.entries(masterSteps)
       .filter(([k]) => k.startsWith('moving-') || k.startsWith('organizing-'))
@@ -13371,13 +13420,10 @@ export function OnboardingPathsEditor({ onComplete, profileForm = null, location
     return { steps: first, uniform: lists.every(l => sig(l) === sig(first)) }
   }, [masterSteps])
 
-  // Preview settings for the 👁 peeks, in the SettingsScreen shape that
-  // lib/preview-vars.buildPreviewVars() consumes — the wizard rides the SAME
-  // 14-variable pipeline as Settings → Communications (RenderedTemplatePreview),
-  // so onboarding preview and send can't drift. Typed-but-unsaved wizard
-  // values (rate, calendar link) win over the stored row so the preview
-  // tracks what the owner is about to save; buildPreviewVars fills anything
-  // still unknown with its labelled samples rather than a hole.
+  // Preview settings in the SettingsScreen shape buildPreviewVars() consumes —
+  // the wizard rides the SAME 14-variable pipeline as Settings → Communications,
+  // so onboarding preview and send can't drift. Typed-but-unsaved values win
+  // over the stored row so the preview tracks what's about to be saved.
   const previewSettings = React.useMemo(() => ({
     profile: {
       firstName:   profileForm?.firstName || currentUserCtx?.first_name || '',
@@ -13398,24 +13444,31 @@ export function OnboardingPathsEditor({ onComplete, profileForm = null, location
     },
   }), [currentLocationCtx, currentUserCtx, profileForm, locationForm, ratePerHour, calendarLink])
 
-  // Value asks are per-screen: Moving's confirm gates on Moving's selection
-  // alone; the final (Organizing) confirm gates on the union of both, as the
-  // last stop before Save. The rate-included styles quote {{rate_per_hour}}
-  // verbatim (the 'rates' tag) — picking one is choosing to send a sentence
-  // that needs this value, so the screen asks for it the same way the
-  // booking-link styles ask for the calendar link. -c styles never ask.
-  const styleTags = id => PATH_STYLES.find(p=>p.id===id)?.tags || []
-  const moveNeedsCalendar = styleTags(selectedMove).includes('calendar')
-  const moveNeedsRate     = styleTags(selectedMove).includes('rates')
-  const allNeedsCalendar  = moveNeedsCalendar || styleTags(selectedGeneral).includes('calendar')
-  const allNeedsRate      = moveNeedsRate     || styleTags(selectedGeneral).includes('rates')
+  // Steps for a resolved answer pair, from the masters that actually send.
+  const stepsFor = (section, styleId) => masterSteps[`${section}-${styleId.replace('path-','')}`] || []
 
-  // Steps come from the master rows fetched above — the content that actually
-  // sends. No local fallback: if masters didn't load, the preview shows the
-  // "couldn't load" note rather than inventing copy.
-  function getSteps(pathId) { return masterSteps[pathId] || [] }
+  const generalStyle = pathStyleFromAnswers(booking, rate)
+  const moveStyle    = splitMoving ? pathStyleFromAnswers(moveBooking, moveRate) : generalStyle
 
-  if (wizardStep==='intro') return (
+  const calendarValid = calendarLink.trim().startsWith('http')
+  const rateValid     = ratePerHour.trim() !== ''
+
+  function finish() {
+    // Same payload shape savePaths has always consumed. calendar_link/rate are
+    // written only when a chosen answer needs them; savePaths/the API ignore an
+    // empty rate and omit an empty link, so a -c pair never wipes a saved value.
+    const needCalendar = booking === BOOKING_ONLINE || (splitMoving && moveBooking === BOOKING_ONLINE)
+    const needRate     = rate === RATE_IN_EMAIL || (splitMoving && moveRate === RATE_IN_EMAIL)
+    onComplete({
+      moveDefault:    moveStyle,
+      generalDefault: generalStyle,
+      calendarLink:   needCalendar ? calendarLink.trim() : (calendarLink.trim() || ''),
+      ratePerHour:    needRate ? ratePerHour.trim() : '',
+    })
+  }
+
+  // ── Screen: intro ──────────────────────────────────────────────────────────
+  if (wizardStep === 'intro') return (
     <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
       <div style={{ background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.25)', borderRadius:'12px', padding:'16px' }}>
         <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'8px' }}>📬 What are new lead emails?</p>
@@ -13426,8 +13479,6 @@ export function OnboardingPathsEditor({ onComplete, profileForm = null, location
           Think of it like a friendly robot that follows up for you while you're busy with a job. 🐝
         </p>
         <div style={{ background:'white', borderRadius:'9px', padding:'10px 12px', border:'1px solid rgba(0,0,0,0.07)', marginBottom:'10px' }}>
-          {/* Schedule read from the masters that send (introCadence) — never a
-              hardcoded count/cadence that can drift from the seeded rows. */}
           {introCadence === null ? (
             <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Loading your email schedule…</p>
           ) : introCadence.uniform ? (
@@ -13448,57 +13499,161 @@ export function OnboardingPathsEditor({ onComplete, profileForm = null, location
               })}
             </>
           ) : (
-            <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>Each option is a short series of emails — you'll see each one's schedule on the next screens.</p>
+            <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>Each option is a short series of emails — you'll see the schedule on the preview screen.</p>
           )}
-          <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.6, marginTop:'8px', paddingTop:'8px', borderTop:'1px solid rgba(0,0,0,0.06)' }}>🐝 Separately, a <strong>Welcome Email</strong> from Bee Organized HQ goes out 24 hours after that first email. It's the same whichever option you pick, and sends automatically.</p>
+          <p style={{ fontSize:'11px', color:'#4a5e5a', lineHeight:1.6, marginTop:'8px', paddingTop:'8px', borderTop:'1px solid rgba(0,0,0,0.06)' }}>🐝 Separately, a <strong>Welcome Email</strong> from Bee Organized HQ goes out 24 hours after that first email. It's the same whichever way you set this up, and sends automatically.</p>
         </div>
         <p style={{ fontSize:'12px', color:'#8a9e9a', fontStyle:'italic' }}>💡 Don't stress - you can change the emails and timing anytime in Settings. This just gets you started.</p>
       </div>
-      <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.5 }}>Both are <strong>already set up for you</strong> — you'll just look them over: first <strong>📦 Moving projects</strong>, then <strong>🏠 Organizing projects</strong> (kitchens, closets, full homes, etc.). Each one gets its own emails.</p>
-      <button onClick={()=>setWizardStep('move')}
+      <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.5 }}>Just <strong>two quick questions</strong> and you're set. We'll use your answers for both <strong>📦 Moving</strong> and <strong>🏠 Organizing</strong> projects — you can split them at the end if you want.</p>
+      <button onClick={()=>setWizardStep('booking')}
         style={{ width:'100%', padding:'12px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
-        Start with 📦 Moving →
+        Get started →
       </button>
     </div>
   )
 
-  if (wizardStep==='move') return (
-    <div style={{ paddingTop:'12px', display:'grid', gap:'12px' }}>
-      {pathsLoading ? (
-        <BeeLoader label="Gathering your emails…" />
-      ) : moveStyleOptions.length === 0 ? (
-        <div style={{ padding:'14px', background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'10px', fontSize:'12px', color:'#7f1d1d', lineHeight:1.5 }}>
-          No master Moving emails found. Contact support — at least one <code>moving-*</code> master must be seeded (see migrations/seed_master_drip_paths.sql).
-        </div>
-      ) : (
-        <OnboardingLeadEmailsConfirm key="moving" projectLabel="Moving" emoji="📦" stepKicker="Step 1 of 2 · Organizing is next" sectionKey="moving"
-          selected={selectedMove} onSelect={setSelectedMove} styleOptions={moveStyleOptions} getSteps={getSteps} previewSettings={previewSettings}
-          needsCalendar={moveNeedsCalendar} needsRate={moveNeedsRate}
-          calendarLink={calendarLink} setCalendarLink={setCalendarLink} ratePerHour={ratePerHour} setRatePerHour={setRatePerHour}
-          continueLabel="Looks good — continue" onContinue={()=>setWizardStep('general')}
-          onBack={()=>setWizardStep('intro')} backLabel="← Back" />
-      )}
+  // ── Screen: booking question (shared) ────────────────────────────────────────
+  if (wizardStep === 'booking') return (
+    <WizardQuestion
+      kicker="Question 1 of 2" title="How should new leads book with you?"
+      subtitle="When someone new comes in, how do they set up a time?"
+      choices={BOOKING_CHOICES} value={booking} onChange={setBooking}
+      reveal={booking===BOOKING_ONLINE ? <OnboardingCalendarField calendarLink={calendarLink} setCalendarLink={setCalendarLink} prefilled={hadCalendar} /> : null}
+      dotIndex={1} dotTotal={4}
+      onBack={()=>setWizardStep('intro')} backLabel="← Back"
+      onContinue={()=>setWizardStep('rate')} continueLabel="Continue →"
+      canContinue={booking!=null && (booking!==BOOKING_ONLINE || calendarValid)}
+      gateLabel={booking==null ? 'Pick one to continue' : 'Add your booking link to continue'} />
+  )
+
+  // ── Screen: rate question (shared) ───────────────────────────────────────────
+  if (wizardStep === 'rate') return (
+    <WizardQuestion
+      kicker="Question 2 of 2" title="Should your rate be in the email?"
+      subtitle="Some owners quote their hourly rate up front; others save pricing for the call."
+      choices={RATE_CHOICES} value={rate} onChange={setRate}
+      reveal={rate===RATE_IN_EMAIL ? <OnboardingRateField ratePerHour={ratePerHour} setRatePerHour={setRatePerHour} prefilled={hadRate} /> : null}
+      dotIndex={2} dotTotal={4}
+      onBack={()=>setWizardStep('booking')} backLabel="← Back"
+      onContinue={()=>setWizardStep('preview')} continueLabel="See my emails →"
+      canContinue={rate!=null && (rate!==RATE_IN_EMAIL || rateValid)}
+      gateLabel={rate==null ? 'Pick one to continue' : 'Add your hourly rate to continue'} />
+  )
+
+  // ── Screen: preview (shared) — recap, first email expanded, split checkbox ───
+  if (wizardStep === 'preview') return (
+    <WizardPreview
+      projectLabel="Organizing" steps={stepsFor('organizing', generalStyle)} previewSettings={previewSettings}
+      booking={booking} rate={rate} onChange={()=>setWizardStep('booking')} changeLabel="Change"
+      loading={!pathsLoaded}
+      extra={
+        <label style={{ display:'flex', alignItems:'flex-start', gap:'10px', padding:'12px 14px', background:'white', border:`1.5px solid ${splitMoving?'#1a2e2b':'rgba(0,0,0,0.1)'}`, borderRadius:'12px', cursor:'pointer' }}>
+          <input type="checkbox" checked={splitMoving} onChange={e=>{
+            const on = e.target.checked
+            setSplitMoving(on)
+            if (on) { setMoveBooking(b => b ?? booking); setMoveRate(r => r ?? rate) }
+          }} style={{ marginTop:'2px', width:'16px', height:'16px', flexShrink:0, accentColor:'#1a2e2b' }} />
+          <div>
+            <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Handle moving jobs differently</p>
+            <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>Most owners leave this off. Tick it to answer the two questions again for 📦 Moving only.</p>
+          </div>
+        </label>
+      }
+      dotIndex={3} dotTotal={4}
+      onBack={()=>setWizardStep('rate')} backLabel="← Back"
+      onContinue={()=>{ if (splitMoving) setWizardStep('moveBooking'); else finish() }}
+      continueLabel={splitMoving ? 'Next: set up moving jobs →' : '✓ Finish setup'}
+      canContinue={true} />
+  )
+
+  // ── Screen: booking question (moving only) ───────────────────────────────────
+  if (wizardStep === 'moveBooking') return (
+    <WizardQuestion
+      kicker="📦 Moving jobs · Question 1 of 2" title="How should new moving leads book with you?"
+      subtitle="Just for moving jobs — organizing keeps the answers you already gave."
+      choices={BOOKING_CHOICES} value={moveBooking} onChange={setMoveBooking}
+      reveal={moveBooking===BOOKING_ONLINE ? <OnboardingCalendarField calendarLink={calendarLink} setCalendarLink={setCalendarLink} prefilled={hadCalendar || calendarValid} /> : null}
+      dotIndex={0} dotTotal={3}
+      onBack={()=>setWizardStep('preview')} backLabel="← Back"
+      onContinue={()=>setWizardStep('moveRate')} continueLabel="Continue →"
+      canContinue={moveBooking!=null && (moveBooking!==BOOKING_ONLINE || calendarValid)}
+      gateLabel={moveBooking==null ? 'Pick one to continue' : 'Add your booking link to continue'} />
+  )
+
+  // ── Screen: rate question (moving only) ──────────────────────────────────────
+  if (wizardStep === 'moveRate') return (
+    <WizardQuestion
+      kicker="📦 Moving jobs · Question 2 of 2" title="Should your rate be in the moving email?"
+      subtitle="Just for moving jobs."
+      choices={RATE_CHOICES} value={moveRate} onChange={setMoveRate}
+      reveal={moveRate===RATE_IN_EMAIL ? <OnboardingRateField ratePerHour={ratePerHour} setRatePerHour={setRatePerHour} prefilled={hadRate || rateValid} /> : null}
+      dotIndex={1} dotTotal={3}
+      onBack={()=>setWizardStep('moveBooking')} backLabel="← Back"
+      onContinue={()=>setWizardStep('movePreview')} continueLabel="See my moving emails →"
+      canContinue={moveRate!=null && (moveRate!==RATE_IN_EMAIL || rateValid)}
+      gateLabel={moveRate==null ? 'Pick one to continue' : 'Add your hourly rate to continue'} />
+  )
+
+  // ── Screen: preview (moving only) — the finish gate when split is on ─────────
+  return (
+    <WizardPreview
+      projectLabel="Moving" steps={stepsFor('moving', moveStyle)} previewSettings={previewSettings}
+      booking={moveBooking} rate={moveRate} onChange={()=>setWizardStep('moveBooking')} changeLabel="Change"
+      loading={!pathsLoaded}
+      dotIndex={2} dotTotal={3}
+      onBack={()=>setWizardStep('moveRate')} backLabel="← Back"
+      onContinue={finish} continueLabel="✓ Finish setup"
+      canContinue={true} />
+  )
+}
+
+// issue 194 — Settings → Communications speaks the SAME two questions as
+// onboarding, so the vocabulary matches everywhere and no owner ever meets a
+// path letter. Answering both resolves to a master path via pathStyleFromAnswers
+// (the one shared mapping) and sets it as this project type's default; the
+// per-style rows below stay for owners who want to customize, reset, or read
+// the steps. `currentPathId` is the location path like 'moving-c'.
+function PathTwoQuestionSelector({ currentPathId, filter, accent, onPick }) {
+  const m = /-([a-d])$/.exec(String(currentPathId || ''))
+  const seeded = answersFromPathStyle(m ? 'path-' + m[1] : '')
+  const [booking, setBooking] = useState(seeded.booking)
+  const [rate, setRate]       = useState(seeded.rate)
+  // Re-seed if the default changes from elsewhere (e.g. a style-row radio).
+  React.useEffect(() => { setBooking(seeded.booking); setRate(seeded.rate) }, [currentPathId])
+
+  const choose = (b, r) => {
+    setBooking(b); setRate(r)
+    if (b != null && r != null) onPick(`${filter}-${pathStyleFromAnswers(b, r).replace('path-', '')}`)
+  }
+
+  const Segment = ({ options, value, onChange }) => (
+    <div style={{ display:'flex', gap:'6px' }}>
+      {options.map(o => {
+        const sel = value === o.value
+        return (
+          <button key={o.value} onClick={()=>onChange(o.value)}
+            style={{ flex:1, padding:'9px 10px', borderRadius:'9px', border:`1.5px solid ${sel?accent:'rgba(26,46,43,0.12)'}`, background:sel?accent:'white', color:sel?'white':'#4a5e5a', fontSize:'12px', fontWeight:600, fontFamily:'inherit', cursor:'pointer', textAlign:'left', lineHeight:1.3 }}>
+            {o.label}
+          </button>
+        )
+      })}
     </div>
   )
 
-  // final screen — Organizing confirm doubles as the Save gate.
   return (
-    <div style={{ paddingTop:'12px', display:'grid', gap:'12px' }}>
-      {pathsLoading ? (
-        <BeeLoader label="Gathering your emails…" />
-      ) : generalStyleOptions.length === 0 ? (
-        <div style={{ padding:'14px', background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'10px', fontSize:'12px', color:'#7f1d1d', lineHeight:1.5 }}>
-          No master Organizing emails found. Contact support — at least one <code>organizing-*</code> master must be seeded (see migrations/seed_master_drip_paths.sql).
-        </div>
-      ) : (
-        <OnboardingLeadEmailsConfirm key="organizing" projectLabel="Organizing" emoji="🏠" stepKicker="Step 2 of 2 · Last one" sectionKey="organizing"
-          selected={selectedGeneral} onSelect={setSelectedGeneral} styleOptions={generalStyleOptions} getSteps={getSteps} previewSettings={previewSettings}
-          needsCalendar={allNeedsCalendar} needsRate={allNeedsRate}
-          calendarLink={calendarLink} setCalendarLink={setCalendarLink} ratePerHour={ratePerHour} setRatePerHour={setRatePerHour}
-          continueLabel="✓ Looks good — finish setup"
-          onContinue={()=>onComplete({ moveDefault:selectedMove, generalDefault:selectedGeneral, calendarLink:calendarLink||'', ratePerHour:ratePerHour.trim()||'' })}
-          onBack={()=>setWizardStep('move')} backLabel="← Back to 📦 Moving" />
-      )}
+    <div style={{ padding:'12px 16px', display:'grid', gap:'12px', borderBottom:'0.5px solid rgba(26,46,43,0.08)' }}>
+      <div style={{ display:'grid', gap:'6px' }}>
+        <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>How should new leads book with you?</p>
+        <Segment value={booking} onChange={b=>choose(b, rate)}
+          options={[{ value:BOOKING_REPLY, label:'They reply to me' }, { value:BOOKING_ONLINE, label:'They book online' }]} />
+      </div>
+      <div style={{ display:'grid', gap:'6px' }}>
+        <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>Should your rate be in the email?</p>
+        <Segment value={rate} onChange={r=>choose(booking, r)}
+          options={[{ value:RATE_IN_EMAIL, label:'Yes, in the email' }, { value:RATE_ON_CALL, label:'No, on the call' }]} />
+      </div>
+      <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5 }}>Your answers set the default below. Want to fine-tune the wording or timing? Open a set and edit its steps.</p>
     </div>
   )
 }
@@ -21127,14 +21282,23 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                     {/* The open project type has to be unmistakable — this is
                         the same "which one am I on?" problem as onboarding. */}
                     <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>You're editing: {openSeq.label}</p>
-                    <p style={{ fontSize:'11px', color:'#4a5e5a' }}>Pick what a new {openSeq.label.replace(' projects','').toLowerCase()} lead receives first.</p>
+                    <p style={{ fontSize:'11px', color:'#4a5e5a' }}>Answer two quick questions to set what a new {openSeq.label.replace(' projects','').toLowerCase()} lead receives.</p>
                   </div>
                 </div>
+                {/* issue 194 — the two questions are the primary chooser here,
+                    mirroring onboarding's wording. They resolve to the same
+                    default the style radios below set. */}
+                <PathTwoQuestionSelector
+                  currentPathId={settings.paths[openSeq.key]}
+                  filter={openSeq.filter}
+                  accent={openSeq.accent}
+                  onPick={pathId=>{ setSettings(s=>({...s,paths:{...s.paths,[openSeq.key]:pathId}})); if(openSeq.key==='generalDefault') setDefaultPathId(pathId); if(openSeq.key==='moveDefault') setDefaultMovePathId(pathId); persistDefault(openSeq.key, pathId) }}
+                />
                 <div>
-                  {/* "Build your own" (custom) is cut: its builder never persisted
-                      (commitSteps early-returns for 'custom'), so the row was a
-                      dead end that looked real. PATH_STYLES keeps the entry for
-                      onboarding's "decide later" option. */}
+                  {/* The per-style rows stay for depth: customize, reset to
+                      master, edit steps, and see client counts. "Build your own"
+                      (custom) is cut — its builder never persisted, so the row
+                      was a dead end that looked real. */}
                   {PATH_STYLES.filter(s=>s.id!=='custom').map((style,i,styleRows)=>{
                     const pathId = `${openSeq.filter}-${style.id.replace('path-','')}`
                     const isDefault = settings.paths[openSeq.key]===pathId

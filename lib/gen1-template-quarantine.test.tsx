@@ -114,9 +114,19 @@ describe('onboarding preview reads the DB masters', () => {
     await act(async () => {})   // masters fetch
   }
 
-  it('the confirm screen opens on MASTER content: email 1 body inline, later subjects as row summaries — zero clicks', async () => {
+  // issue 194 — the preview lives at the end of the two-question wizard. Walk
+  // intro → book (reply) → rate (on call) → preview to reach the master content.
+  const toPreview = async () => {
+    await clickText('Get started →')
+    await clickText('They reply to you')
+    await clickText('Continue →')
+    await clickText('No, cover it on the call')
+    await clickText('See my emails →')
+  }
+
+  it('the preview opens on MASTER content: email 1 body inline, later subjects as row summaries', async () => {
     await mount()
-    await clickText('Start with 📦 Moving →')
+    await toPreview()
 
     // Email 1 is open by default: subject AND body render from the master.
     expect(container.textContent).toContain(MASTER_SUBJECT_1)
@@ -127,7 +137,7 @@ describe('onboarding preview reads the DB masters', () => {
 
   it('never renders Gen 1 prototype copy', async () => {
     await mount()
-    await clickText('Start with 📦 Moving →')
+    await toPreview()
     for (const s of GEN1_STRINGS) {
       expect(container.textContent, `Gen 1 string "${s}" leaked into onboarding`).not.toContain(s)
     }
@@ -137,7 +147,7 @@ describe('onboarding preview reads the DB masters', () => {
     routes = {}
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })))
     await mount()
-    await clickText('Start with 📦 Moving →')
+    await toPreview()
     expect(container.textContent).toContain("Couldn't load these emails")
     for (const s of GEN1_STRINGS) {
       expect(container.textContent).not.toContain(s)
