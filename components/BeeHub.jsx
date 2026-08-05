@@ -11395,6 +11395,41 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     window.history.replaceState({}, '', window.location.pathname)
   }, [])
 
+  // issue 199 — return from the Slack "Add to Slack" flow. The callback
+  // redirects to '/?slack=connected|error' (mirroring Jobber's ?jobber=…), so
+  // re-open the Slack step here. On success we DON'T auto-mark it done — the
+  // wizard seeds its screen from slack_connected (now true) and shows the done
+  // confirmation, and the owner clicks Continue there to complete the step. On
+  // error (or abandon at Slack's own screen) slack_connected stays false, so the
+  // wizard reopens at the intro and the owner can retry cleanly.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const result = params.get('slack')
+    if (!result) return
+
+    if (result === 'connected') {
+      const channel = params.get('channel') || ''
+      sessionStorage.setItem('bee.oauth.return', JSON.stringify({
+        kind: 'slack-connected',
+        channel,
+        at: Date.now(),
+      }))
+      setActiveStepOpen('slack')
+      setToast({ kind: 'success', msg: channel ? `Slack connected · #${channel} ✓` : 'Slack connected ✓' })
+    } else if (result === 'error') {
+      const reason = params.get('reason') || 'unknown'
+      sessionStorage.setItem('bee.oauth.return', JSON.stringify({
+        kind: 'slack-error',
+        reason,
+        at: Date.now(),
+      }))
+      setActiveStepOpen('slack')
+      setToast({ kind: 'error', msg: `Couldn't connect Slack: ${reason}` })
+    }
+    window.history.replaceState({}, '', window.location.pathname)
+  }, [])
+
   // issue 163 — return from Stripe hosted checkout. The pay step now
   // navigates the WHOLE tab to Stripe (no window.open), so Stripe's
   // success_url / cancel_url bring the owner right back here on mount:
@@ -11467,6 +11502,14 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     } else if (payload.kind === 'jobber-error') {
       setActiveStepOpen('jobber')
       setToast({ kind: 'error', msg: `Couldn't connect Jobber: ${payload.reason || 'unknown'}` })
+    } else if (payload.kind === 'slack-connected') {
+      // issue 199 — same unmount-before-render safety net as Jobber. Re-open the
+      // Slack step; the wizard seeds itself to the done screen off slack_connected.
+      setActiveStepOpen('slack')
+      setToast({ kind: 'success', msg: payload.channel ? `Slack connected · #${payload.channel} ✓` : 'Slack connected ✓' })
+    } else if (payload.kind === 'slack-error') {
+      setActiveStepOpen('slack')
+      setToast({ kind: 'error', msg: `Couldn't connect Slack: ${payload.reason || 'unknown'}` })
     }
   }, [])
 
@@ -11612,6 +11655,10 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     { id:'jobber',    icon:'⚡', label:'Connect Jobber',          desc:'Link your field service account' },
     { id:'import',    icon:'📋', label:'Import your clients',     desc:'Bring existing clients from Jobber into Bee Hub' },
     { id:'paths',     icon:'📧', label:'New lead emails',        desc:'See what a new lead hears from you first' },
+    // issue 199 — Slack lead alerts. Sits right after paths (both are "how you
+    // handle a new lead") and before invite, which stays last because its
+    // skip-to-launch modal closes onboarding. Owner-only; NON_OWNER_STEPS omits it.
+    { id:'slack',     icon:'💬', label:'Get leads in Slack',      desc:'Post every new lead to your team’s channel' },
     { id:'invite',    icon:'👥', label:'Invite your team',        desc:'Add managers and users to your location' },
   ]
   // Lightweight onboarding for invited team members (lite_user role). Two
@@ -13071,6 +13118,16 @@ const inp = { width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,
       </div>
     )
   }
+  if (step.id==='slack') {
+    // issue 199 — front-end-only Slack wizard. onComplete mirrors the paths
+    // step: mark the step done and collapse the card (skip and done both land
+    // here, so skip advances without connecting).
+    return (
+      <div style={{ paddingTop:'12px' }}>
+        <SlackOnboardingStep onComplete={()=>{ markDone('slack'); setActiveStepOpen(null) }} />
+      </div>
+    )
+  }
   if (step.id==='invite') {
     return (
       <div style={{ paddingTop:'12px', display:'grid', gap:'10px' }}>
@@ -13605,6 +13662,292 @@ export function OnboardingPathsEditor({ onComplete, profileForm = null, location
       onBack={()=>setWizardStep('moveRate')} backLabel="← Back"
       onContinue={finish} continueLabel="✓ Finish setup"
       canContinue={true} />
+  )
+}
+
+// issue 199 — the onboarding "Slack" step is a five-screen wizard in the same
+// plain-language shape as the issue 194 lead-emails wizard: intro, a
+// does-your-team-use-Slack question, a three-task checklist the owner ticks off
+// in one visit to Slack, the connect hand-off, and a done confirmation. It is
+// FRONT-END ONLY — the connect entry point is SlackCard's verbatim
+// (/api/slack/connect?location_id=…), and the callback stores the channel the
+// owner picks inside Slack's own consent screen, so Bee Hub needs no channel
+// picker and asks for no new permissions.
+//
+// The owner does the workspace / invite / channel work inside Slack (Bee Hub
+// can't verify any of it until connect), so the three tasks are MANUAL ticks and
+// Continue is gated until all three are checked — nobody reaches connect with no
+// channel to pick. Skip is genuine: Slack is optional and an owner without it
+// advances via onComplete without connecting.
+//
+// Resume: the connect hand-off leaves and returns to '/?slack=connected|error'.
+// OnboardingScreen's return handler re-opens this step; because the wizard seeds
+// its first screen from slack_connected, a returning owner lands on the done
+// screen with the real stored channel name. An owner who abandons at Slack's
+// own screen returns to '/?slack=error' (or simply never connects) with
+// slack_connected still false and retries cleanly — there is no half-connected
+// state to unwind.
+const SLACK_ADMIN_EMAIL = 'admin@beeorganized.com'
+const SLACK_LEADS_CHANNEL = 'leads'
+
+// One-click copy — copies `value`, flips to a check for ~1.5s. Large tap target
+// and plain wording for the 45-65, non-technical audience.
+function SlackCopyRow({ value }) {
+  const [copied, setCopied] = useState(false)
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch { /* clipboard blocked — the value is still shown to type by hand */ }
+  }
+  return (
+    <div style={{ display:'flex', gap:'7px', alignItems:'stretch', marginTop:'6px' }}>
+      <code style={{ flex:1, minWidth:0, padding:'9px 11px', borderRadius:'9px', border:'1px solid rgba(26,46,43,0.14)', background:'#f7f5f0', fontSize:'13px', fontFamily:'ui-monospace,Menlo,monospace', color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'flex', alignItems:'center' }}>{value}</code>
+      <button onClick={copy}
+        style={{ padding:'9px 14px', background:'white', border:'1px solid rgba(74,21,75,0.30)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:700, color:'#4a154b', cursor:'pointer', flexShrink:0 }}>
+        {copied ? 'Copied ✓' : 'Copy'}
+      </button>
+    </div>
+  )
+}
+
+// A single ticked task row on the checklist screen. Clicking anywhere on the
+// row toggles the tick; `children` carries the copy field / reason when a task
+// has one.
+function SlackTaskRow({ ticked, onToggle, title, children }) {
+  return (
+    <div onClick={onToggle}
+      style={{ background:'white', borderRadius:'12px', border:`1.5px solid ${ticked?'rgba(34,197,94,0.4)':'rgba(0,0,0,0.1)'}`, padding:'13px 14px', cursor:'pointer', display:'flex', gap:'11px', alignItems:'flex-start' }}>
+      <div style={{ width:'22px', height:'22px', borderRadius:'6px', border:`2px solid ${ticked?'#22c55e':'rgba(0,0,0,0.22)'}`, background:ticked?'#22c55e':'white', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, marginTop:'1px' }}>
+        {ticked && <span style={{ color:'white', fontSize:'13px', fontWeight:800, lineHeight:1 }}>✓</span>}
+      </div>
+      <div style={{ flex:1, minWidth:0 }}>
+        <p style={{ fontSize:'13.5px', fontWeight:700, color:'#1a2e2b', lineHeight:1.35 }}>{title}</p>
+        {children && <div onClick={e=>e.stopPropagation()} style={{ cursor:'default' }}>{children}</div>}
+      </div>
+    </div>
+  )
+}
+
+// issue 199 — the Slack onboarding wizard. `onComplete` fires on both the
+// "Skip for now" link and the done screen's Continue, wired by StepContent to
+// markDone('slack') + collapse the card (the same shape the paths step uses).
+export function SlackOnboardingStep({ onComplete = () => {} }) {
+  const currentLocationCtx = useContext(CurrentLocationContext)
+  const locationId  = currentLocationCtx?.id || null
+  const connected   = !!currentLocationCtx?.slack_connected
+  const channelName = currentLocationCtx?.slack_channel_name || ''
+
+  // Seed the first screen from the connection: an owner returning from Slack
+  // (slack_connected now true) lands on the done confirmation; everyone else
+  // starts at the intro. useState's initializer runs once, so a mid-wizard
+  // re-render never yanks the screen out from under them.
+  const [screen, setScreen] = useState(connected ? 'done' : 'intro')
+
+  // Screen 2's answer. It only changes wording downstream (create vs open a
+  // workspace, get-started vs sign-in) — never the flow. null until picked.
+  const [usesSlack, setUsesSlack] = useState(null)
+
+  // Screen 3's three manual ticks. Bee Hub cannot verify any of them until
+  // connect, so the owner confirms each by hand and Continue waits for all three.
+  const [tasks, setTasks] = useState({ workspace:false, invite:false, channel:false })
+  const toggle = k => setTasks(t => ({ ...t, [k]: !t[k] }))
+  const allTicked = tasks.workspace && tasks.invite && tasks.channel
+
+  // Reuse SlackCard's connect entry point verbatim — a full-page redirect into
+  // the "Add to Slack" flow. Slack's own consent screen shows the channel picker.
+  function goConnect() {
+    if (!locationId) return
+    window.location.href = '/api/slack/connect?location_id=' + encodeURIComponent(locationId)
+  }
+
+  // "Open Slack ↗" target — a brand-new team starts at get-started, an existing
+  // one signs in. New tab so the owner keeps this checklist open beside Slack.
+  const openSlackUrl = usesSlack ? 'https://slack.com/signin' : 'https://slack.com/get-started'
+
+  const backBtn = { padding:'10px 16px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }
+
+  // ── Screen: intro ────────────────────────────────────────────────────────
+  if (screen === 'intro') return (
+    <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
+      <WizardDots index={0} total={5} />
+      <div style={{ background:'rgba(74,21,75,0.05)', border:'1px solid rgba(74,21,75,0.15)', borderRadius:'12px', padding:'16px' }}>
+        <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'8px' }}>💬 See new leads in Slack</p>
+        <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'10px' }}>
+          If your team uses Slack, Bee Hub can post every new lead into your
+          team's channel the moment it comes in — right alongside the email.
+        </p>
+        <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6, marginBottom:'10px' }}>
+          Each lead shows up with a <strong>“Log a call”</strong> button, so
+          whoever grabs it can jump on the phone and mark it done without leaving
+          Slack. 🐝
+        </p>
+        <p style={{ fontSize:'12px', color:'#8a9e9a', fontStyle:'italic' }}>💡 This is optional — you can skip it now and set it up later in Settings.</p>
+      </div>
+      <button onClick={()=>setScreen('team')}
+        style={{ width:'100%', padding:'12px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+        Get started →
+      </button>
+      <button onClick={()=>onComplete()}
+        style={{ width:'100%', padding:'8px', background:'transparent', border:'none', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer', textDecoration:'underline' }}>
+        Skip for now
+      </button>
+    </div>
+  )
+
+  // ── Screen: does your team use Slack? ────────────────────────────────────
+  if (screen === 'team') {
+    const CHOICES = [
+      { value:true,  emoji:'✅', title:'Yes, we use Slack',        blurb:'Your team already chats in Slack.' },
+      { value:false, emoji:'🌱', title:"Not yet — we'll set it up", blurb:"No problem. It's free to start, and we'll walk you through it." },
+    ]
+    return (
+      <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
+        <WizardDots index={1} total={5} />
+        <div>
+          <p style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Does your team use Slack?</p>
+          <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.5, marginTop:'4px' }}>Slack is a free app where teams chat. Either answer is fine — it just changes the next few tips.</p>
+        </div>
+        <div style={{ display:'grid', gap:'10px' }}>
+          {CHOICES.map(c => {
+            const sel = usesSlack === c.value
+            return (
+              <div key={String(c.value)} onClick={()=>setUsesSlack(c.value)}
+                style={{ background:'white', borderRadius:'14px', border:`2px solid ${sel?'#1a2e2b':'rgba(0,0,0,0.08)'}`, padding:'14px', display:'flex', alignItems:'center', gap:'12px', cursor:'pointer' }}>
+                <span style={{ fontSize:'24px', flexShrink:0 }}>{c.emoji}</span>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', marginBottom:'2px' }}>{c.title}</p>
+                  <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.4 }}>{c.blurb}</p>
+                </div>
+                <div style={{ width:'22px', height:'22px', borderRadius:'50%', border:`2px solid ${sel?'#1a2e2b':'rgba(0,0,0,0.2)'}`, background:'white', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                  {sel && <div style={{ width:'11px', height:'11px', borderRadius:'50%', background:'#1a2e2b' }} />}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <div style={{ display:'flex', gap:'8px' }}>
+          <button onClick={()=>setScreen('intro')} style={backBtn}>← Back</button>
+          <button onClick={()=>usesSlack!=null&&setScreen('checklist')} disabled={usesSlack==null}
+            style={{ flex:1, padding:'11px', background:usesSlack!=null?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:usesSlack!=null?'white':'#9ca3af', cursor:usesSlack!=null?'pointer':'not-allowed' }}>
+            {usesSlack!=null ? 'Continue →' : 'Pick one to continue'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Screen: the three-task checklist ─────────────────────────────────────
+  if (screen === 'checklist') return (
+    <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
+      <WizardDots index={2} total={5} />
+      <div>
+        <p style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Three quick things in Slack</p>
+        <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.5, marginTop:'4px' }}>
+          Do these in Slack, then tick each one off here. Open Slack in a new tab
+          and keep this list beside it.
+        </p>
+      </div>
+      <a href={openSlackUrl} target="_blank" rel="noreferrer"
+        style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', gap:'7px', width:'100%', padding:'11px', background:'#4a154b', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', textDecoration:'none', boxSizing:'border-box' }}>
+        Open Slack ↗
+      </a>
+
+      <div style={{ display:'grid', gap:'10px' }}>
+        <SlackTaskRow ticked={tasks.workspace} onToggle={()=>toggle('workspace')}
+          title={usesSlack ? '1. Open your Slack workspace' : '1. Create your Slack workspace'}>
+          <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'4px' }}>
+            {usesSlack
+              ? "Sign in to the workspace your team already uses."
+              : "Use the “Open Slack” button above to make one — it's free and takes a minute."}
+          </p>
+        </SlackTaskRow>
+
+        <SlackTaskRow ticked={tasks.invite} onToggle={()=>toggle('invite')}
+          title="2. Invite your team — and add this address">
+          <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'4px' }}>
+            Add your teammates, plus the address below, so our team can help you
+            fix any Slack issues without ever needing your password.
+          </p>
+          <SlackCopyRow value={SLACK_ADMIN_EMAIL} />
+        </SlackTaskRow>
+
+        <SlackTaskRow ticked={tasks.channel} onToggle={()=>toggle('channel')}
+          title="3. Create a public channel called “leads”">
+          <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, marginTop:'4px' }}>
+            Make sure it's <strong>public</strong> (not private) so your leads can
+            post there. Name it exactly:
+          </p>
+          <SlackCopyRow value={SLACK_LEADS_CHANNEL} />
+        </SlackTaskRow>
+      </div>
+
+      <div style={{ display:'flex', gap:'8px' }}>
+        <button onClick={()=>setScreen('team')} style={backBtn}>← Back</button>
+        <button onClick={()=>allTicked&&setScreen('connect')} disabled={!allTicked}
+          style={{ flex:1, padding:'11px', background:allTicked?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:allTicked?'white':'#9ca3af', cursor:allTicked?'pointer':'not-allowed' }}>
+          {allTicked ? 'Continue →' : 'Tick all three to continue'}
+        </button>
+      </div>
+    </div>
+  )
+
+  // ── Screen: connect ──────────────────────────────────────────────────────
+  if (screen === 'connect') return (
+    <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
+      <WizardDots index={3} total={5} />
+      <div>
+        <p style={{ fontSize:'18px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Connect Bee Hub to Slack</p>
+        <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.5, marginTop:'4px' }}>One tap and you're done. Here's exactly what happens.</p>
+      </div>
+      <div style={{ background:'rgba(168,201,196,0.12)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'12px', padding:'14px' }}>
+        <p style={{ fontSize:'13px', color:'#1a2e2b', lineHeight:1.6, marginBottom:'8px' }}>
+          ✅ Bee Hub will <strong>post each new lead</strong> to the channel you
+          choose — and nothing else.
+        </p>
+        <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6 }}>
+          It <strong>cannot</strong> read your other channels or messages. It only
+          posts your leads.
+        </p>
+      </div>
+      <div style={{ background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'12px', padding:'12px 14px' }}>
+        <p style={{ fontSize:'12.5px', color:'#4a5e5a', lineHeight:1.6 }}>
+          ⚠️ Slack will ask <strong>which channel</strong> to use — pick your
+          <strong> “leads”</strong> channel. A private channel won't show up in that
+          list, which is why we made it public.
+        </p>
+      </div>
+      <button onClick={goConnect}
+        style={{ width:'100%', padding:'13px', background:'#4a154b', border:'none', borderRadius:'10px', fontSize:'14px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:'pointer' }}>
+        Add to Slack
+      </button>
+      <button onClick={()=>setScreen('checklist')} style={{ ...backBtn, width:'100%' }}>← Back</button>
+    </div>
+  )
+
+  // ── Screen: done ─────────────────────────────────────────────────────────
+  // Show the ACTUAL channel Slack handed back (the owner may have picked
+  // something other than "leads"), falling back to a plain phrase if it's blank.
+  const channelLabel = channelName
+    ? (channelName.startsWith('#') ? channelName : `#${channelName}`)
+    : 'your channel'
+  return (
+    <div style={{ paddingTop:'12px', display:'grid', gap:'14px' }}>
+      <WizardDots index={4} total={5} />
+      <div style={{ background:'rgba(34,197,94,0.08)', border:'1px solid rgba(34,197,94,0.28)', borderRadius:'14px', padding:'18px', textAlign:'center' }}>
+        <p style={{ fontSize:'34px', marginBottom:'6px' }}>🎉</p>
+        <p style={{ fontSize:'17px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'6px' }}>Slack is connected!</p>
+        <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6 }}>
+          New leads will now post to <strong>{channelLabel}</strong> the moment
+          they come in.
+        </p>
+      </div>
+      <button onClick={()=>onComplete()}
+        style={{ width:'100%', padding:'13px', background:'#1a2e2b', border:'none', borderRadius:'12px', fontSize:'14px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
+        Continue →
+      </button>
+    </div>
   )
 }
 
