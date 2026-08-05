@@ -75,6 +75,11 @@ type JoinedData = {
   // value = Σ won engagements' total_paid (falling back per-row to
   // total_invoiced when nothing is recorded paid).
   won_summary?: { count: number; value: number; lastClosedAt: string | null } | null
+  // issue 187 — total engagements on record for this client (open + closed),
+  // from the same _hub-page.tsx all-engagements sweep that builds won_summary.
+  // deriveClientStatus reads it to keep an all-Closed-Lost client out of the
+  // New/Attempting funnel (and thus the Inbox + nav badge).
+  engagement_count?: number
 }
 
 function fmtCreatedShort(iso: string | null | undefined): string {
@@ -345,6 +350,10 @@ export function mapLeadToPerson(row: LeadRow, joined: JoinedData = {}) {
     // Closed Won engagement roll-up — null when the client has never won.
     // deriveClientStatus reads .count; the directory reads .value/.lastClosedAt.
     wonEngagements: joined.won_summary || null,
+    // issue 187 — count of ALL engagements (open + closed) for this client.
+    // 0 for a raw lead that never had one. deriveClientStatus uses "> 0, past
+    // the open/won/paid checks" to mean "all-Closed-Lost" → settle, not New.
+    engagementCount: joined.engagement_count || 0,
     assessment,
     assessmentType,
     estimateSent,

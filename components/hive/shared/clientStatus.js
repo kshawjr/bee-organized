@@ -30,15 +30,20 @@
 //                paid invoice / import roll-up), not a lifetime sum —
 //                fine as an existence test, do not render it as an
 //                exact lifetime without that caveat.
+//   Settled    — issue 187: no won, no paid, but ≥1 engagement ON RECORD
+//                (person.engagementCount) and none of them OPEN (the Active
+//                check already passed). Every engagement is therefore a
+//                Closed Lost one — a decision someone made — so AGE must
+//                not re-derive them into New/Attempting and drop them back
+//                into the Inbox. They settle to Nurturing (below), off the
+//                front-of-funnel and uncounted by the nav badge, until
+//                something new happens (see the two guards on that rule).
 //   Attempting — none of the above AND a human reach_out touchpoint
 //                within the last 30 days (being actively worked).
 //   New        — none of the above AND created < 30 days ago.
 //   Nurturing  — everyone else: inquired/imported, never booked or went
-//                cold. This is the marketable pool (§5).
-//
-// KNOWN APPROXIMATION: a client whose engagements ALL closed as Lost (no
-// paid history) falls through to Attempting/New/Nurturing by age+activity,
-// which reads correctly on the board anyway.
+//                cold, OR settled-lost (issue 187). This is the marketable
+//                pool (§5) — re-marketable, but not front-of-funnel work.
 //
 // FUTURE (re-engage seam): person.wonEngagements carries { count, value,
 // lastClosedAt } and person.jobs is already client-side — a "quiet won
@@ -61,6 +66,21 @@ export function deriveClientStatus(person, openClientIds, nowMs = Date.now(), wo
   if ((wonClientIds && wonClientIds.has(person.id)) || (person.wonEngagements?.count > 0)) return 'Client'
 
   if ((Number(person.paidAmount) || 0) > 0) return 'Past'
+
+  // issue 187 — settled-lost. Reaching here already means not Active (no OPEN
+  // engagement, else openClientIds returned above), not Client (no won), not
+  // Past (no paid). So if the client has ANY engagement on record, every one
+  // of them is a Closed Lost engagement — a decision someone made. Age must
+  // not override that decision by re-deriving them into New/Attempting and
+  // back into the Inbox/badge. Settle them into the Nurturing pool instead.
+  // Two guards keep this closed-UNTIL-something-new, never closed-forever:
+  //   · engagementCount is 0 for a lead that never had an engagement (a raw
+  //     Inbox lead — untouched, still derives New/Attempting by age below).
+  //   · a NEW or reopened engagement is OPEN, so it lands in openClientIds and
+  //     returns 'Active' above, before this line ever runs.
+  // (engagementCount is the hydration roll-up — the all-engagements sweep in
+  // _hub-page.tsx, same durability profile as person.wonEngagements.)
+  if ((Number(person.engagementCount) || 0) > 0) return 'Nurturing'
 
   const lastReachOut = Math.max(0, ...(person.outreachTimeline || [])
     .filter(t => t.type === 'reach_out')

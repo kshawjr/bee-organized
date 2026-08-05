@@ -45,6 +45,7 @@ const person = (over: any = {}) => ({
   inboxDismissedAt: null,
   jobberRef: null,
   wonEngagements: null,
+  engagementCount: 0, // issue 187: raw lead, no engagement on record (default)
   ...over,
 })
 
@@ -86,7 +87,10 @@ describe('deriveClientStatus — Client (won) status', () => {
     expect(deriveClientStatus(dark, new Set(), now)).toBe('no_contact')
   })
 
-  it('only Closed Lost / no won engagement → existing nurture funnel, unchanged', () => {
+  it('a RAW lead (no engagement on record) still derives by age, unchanged', () => {
+    // engagementCount 0 — the issue-187 settled-lost rule does NOT apply, so a
+    // fresh/worked/cold raw lead buckets exactly as before (Sarah Watts stays
+    // a real Inbox lead — no engagement to close).
     expect(deriveClientStatus(person({ created: daysAgo(3) }), new Set(), now)).toBe('New')
     expect(deriveClientStatus(person({
       outreachTimeline: [{ type: 'reach_out', occurred_at: daysAgo(5) }],

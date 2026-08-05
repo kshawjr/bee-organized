@@ -138,14 +138,20 @@ export async function buildAllOverview(
 
   let touchByLead: Record<string, any[]> = {}
   let wonIds = new Set<string>()
+  // issue 187 — client_ids with ANY engagement on record (open or closed).
+  // A fresh Closed-Lost lead (<30d) is a New-count candidate by age, but
+  // deriveClientStatus settles it to Nurturing when engagementCount > 0, so
+  // this lookup keeps it OUT of the headline just like the won lookup does.
+  let engagedIds = new Set<string>()
   // A FAILED read here does not make the count zero — it makes it WRONG in a
   // specific direction. With no touchpoints every Attempting lead derives as
-  // New, and with no won-lookup every won client does too, so the headline
-  // number silently inflates. Both mark the overview truncated so the page
-  // says so rather than presenting an inflated count as fact.
+  // New, with no won-lookup every won client does too, and with no engagement
+  // lookup every settled-lost lead does too — so the headline number silently
+  // inflates. All three mark the overview truncated so the page says so rather
+  // than presenting an inflated count as fact.
   let derivationInputsComplete = true
   if (candidateIds.length > 0) {
-    const [touchRes, wonRes] = await Promise.all([
+    const [touchRes, wonRes, engagedRes] = await Promise.all([
       (async () => {
         const acc: any[] = []
         for (let i = 0; i < candidateIds.length; i += 200) {
@@ -184,9 +190,28 @@ export async function buildAllOverview(
         }
         return acc
       })(),
+      (async () => {
+        const acc: any[] = []
+        for (let i = 0; i < candidateIds.length; i += 200) {
+          // Any stage — presence, not outcome. issue 187: a client with ≥1
+          // engagement, none open, none won, no paid history is all-Closed-
+          // Lost and must NOT count as a new lead awaiting contact.
+          const { data, error } = await db.from('engagements')
+            .select('client_id')
+            .in('client_id', candidateIds.slice(i, i + 200))
+          if (error) {
+            console.error(`[all-overview] engagement lookup failed: ${error.message} — new-lead count would OVER-count; marking truncated`)
+            derivationInputsComplete = false
+            break
+          }
+          acc.push(...(data || []))
+        }
+        return acc
+      })(),
     ])
     for (const t of touchRes) (touchByLead[t.lead_id] ||= []).push(t)
     wonIds = new Set(wonRes.map((e: any) => e.client_id))
+    engagedIds = new Set(engagedRes.map((e: any) => e.client_id))
   }
 
   const { mapLeadToPerson } = await import('@/lib/people-mapper')
@@ -196,7 +221,12 @@ export async function buildAllOverview(
     // Through the REAL mapper and the REAL derivation — not a re-implementation
     // of "what New means". touchpoints are the only child rows the 'New' branch
     // reads (outreachTimeline), so they are the only ones fetched.
-    const person = mapLeadToPerson(row, { touchpoints: touchByLead[row.id] || [] })
+    const person = mapLeadToPerson(row, {
+      touchpoints: touchByLead[row.id] || [],
+      // issue 187 — presence flips a settled-lost lead to Nurturing in the
+      // derivation, so it drops out of the New count (matches Inbox + badge).
+      engagement_count: engagedIds.has(row.id) ? 1 : 0,
+    })
     if (person.isJunk) continue
     if (person.snoozeUntil && new Date(person.snoozeUntil).getTime() > nowMs) continue
     if (person.inboxDismissedAt) continue

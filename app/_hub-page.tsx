@@ -1209,6 +1209,10 @@ export default async function HubPage({
           lead_assignees:   assigneesByLead[row.id]   || [],
           tag_lookups,
           won_summary:      wonByClient[row.id]       || null,
+          // issue 187 — all-engagements count (open + closed) from the sweep
+          // above; deriveClientStatus reads it to keep an all-Closed-Lost
+          // client out of the New/Attempting funnel (Inbox + nav badge).
+          engagement_count: repeatCounts[row.id]      || 0,
         })
       )
       console.log(`[hub-page] Fetched ${initialPeople.length} leads + joined data for ${hubUser.email}`)
