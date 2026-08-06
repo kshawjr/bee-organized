@@ -105,6 +105,38 @@ export type SendWelcomeResult = {
   error?: string
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Resolve the location's customized copy of the Welcome template (issue 206)
+// ──────────────────────────────────────────────────────────────────────
+// Identical latent constraint to the stage emails (see lib/stage-emails.ts):
+// the Welcome master is Duplicate-able in the Templates tab, which forks a
+// location-scoped copy carrying location_uuid set AND legacy_id NULL — so the
+// fork matches neither of the master's predicates and is reached via
+// cloned_from_id → master.id. Prefer the active fork; fall back to the master
+// on an inactive/deleted fork, no fork, or a DB error. Most-recently-updated
+// active fork wins when Duplicate was pressed more than once.
+async function resolveLocationWelcomeTemplate(
+  masterId: string,
+  locationUuid: string,
+): Promise<{ subject: string | null; body: string | null } | null> {
+  const { data, error } = await supabaseService
+    .from('templates')
+    .select('subject, body')
+    .eq('cloned_from_id', masterId)
+    .eq('location_uuid', locationUuid)
+    .eq('is_active', true)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+
+  if (error) {
+    console.warn('[welcome] fork lookup failed — falling back to master', {
+      masterId, locationUuid, error,
+    })
+    return null
+  }
+  return data && data.length > 0 ? data[0] : null
+}
+
 export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResult> {
   // Lead
   const { data: lead, error: leadErr } = await supabaseService
@@ -161,16 +193,28 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
     return { sent: false, error: `loc_lookup: ${locErr?.message ?? 'missing'}` }
   }
 
-  // Welcome template (master, location_uuid IS NULL)
-  const { data: tpl, error: tplErr } = await supabaseService
+  // Welcome template — the master (location_uuid IS NULL). This is the default
+  // and the fallback; issue 206 prefers the location's customized copy (fork)
+  // below. `id` is selected so the fork can be found via cloned_from_id.
+  const { data: master, error: tplErr } = await supabaseService
     .from('templates')
-    .select('subject, body')
+    .select('id, subject, body')
     .eq('legacy_id', WELCOME_LEGACY_ID)
     .is('location_uuid', null)
     .maybeSingle()
 
-  if (tplErr || !tpl) {
+  if (tplErr || !master) {
     return { sent: false, error: `template_lookup: ${tplErr?.message ?? 'missing'}` }
+  }
+
+  // issue 206 — prefer the owner's customized copy, falling back to the master.
+  // The CAN-SPAM footer below stays unconditional for Welcome (a commercial
+  // email), and the rate / booking-link holds run against this `tpl` — so a
+  // customized body can neither strip the footer nor ship an unfilled token.
+  const fork = await resolveLocationWelcomeTemplate(master.id, loc.id)
+  const tpl = {
+    subject: fork?.subject ?? master.subject,
+    body: fork?.body ?? master.body,
   }
 
   // RATE GUARD: template quotes {{rate_per_hour}} but the location has no
