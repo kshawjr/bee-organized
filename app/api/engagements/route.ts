@@ -35,7 +35,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { isAdmin } from '@/lib/auth'
 import { readOnlyWriteBlock } from '@/lib/read-only-access'
-import { foundManualEngagement } from '@/lib/engagements'
+import { foundManualEngagement, findOpenEngagementForClient } from '@/lib/engagements'
 import { fetchSuppressedLeadIds } from '@/lib/lead-suppression'
 // PURE zero-import module (§8.5) — safe from the server route; ONE
 // source for the terminal stage strings ('Closed Won' / 'Closed Lost').
@@ -325,7 +325,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'forbidden_read_only_role' }, { status: 403 })
   }
 
-  let body: { client_id?: string; title?: string | null }
+  let body: { client_id?: string; title?: string | null; reuse_open?: boolean }
   try { body = await req.json() } catch {
     return NextResponse.json({ error: 'invalid_json_body' }, { status: 400 })
   }
@@ -353,6 +353,40 @@ export async function POST(req: Request) {
   // ─── Read-only guard (868kawwmh) ──────────────────────────────
   const roBlock = await readOnlyWriteBlock(hubUser, lead.location_uuid)
   if (roBlock) return roBlock
+
+  // ─── reuse_open: find-or-create (issue 204) ───────────────────
+  // The "Close — not interested" flow closes a NO-engagement lead by
+  // founding a Closed Lost engagement (System B, which drives the Inbox).
+  // But a lead may already carry an open engagement (webhook/import) the
+  // caller can't see — founding a second here would leave a stray open
+  // card. When reuse_open is set, hand back the existing OPEN engagement
+  // instead of founding: the close then lands on the real deal and never
+  // creates a duplicate. Default (unset) keeps "Start new engagement"'s
+  // always-found behavior (rule 1) untouched.
+  if (body.reuse_open === true) {
+    const existing = await findOpenEngagementForClient(lead.id)
+    if (existing) {
+      const { data: row } = await supabaseService
+        .from('engagements')
+        .select('*')
+        .eq('id', existing.id)
+        .single()
+      const { count: repeatCount } = await supabaseService
+        .from('engagements')
+        .select('id', { count: 'exact', head: true })
+        .eq('client_id', lead.id)
+      return NextResponse.json({
+        engagement: {
+          ...(row ?? { id: existing.id, stage: existing.stage }),
+          client_name: lead.name || 'Unknown',
+          client_phone: lead.phone || null,
+          client_email: lead.email || null,
+          repeat_count: repeatCount ?? 1,
+        },
+        reused: true,
+      }, { status: 200 })
+    }
+  }
 
   const founded = await foundManualEngagement({
     clientId: lead.id,

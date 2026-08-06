@@ -868,6 +868,7 @@ export default function HiveShell({
           specialties={specialties}
           setToast={setToast}
           readOnly={readOnly}
+          closeLostReasons={lookupOptions.closeLostReasons}
           settledSendIds={settledSendIds}
           initialSection={inboxInitialSection}
           onInitialSectionConsumed={() => setInboxInitialSection(null)}

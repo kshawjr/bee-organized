@@ -195,7 +195,9 @@ export async function scheduleStageEmails(args: {
 
 export async function cancelStageEmails(args: {
   leadId: string
-  reason: 'stage_changed' | 'junk' | 'manual' | 'opted_out'
+  // 'closed_lost' — issue 204, a no-engagement lead closed "not interested".
+  // cancelled_reason is free text (no CHECK), so this is a label only.
+  reason: 'stage_changed' | 'junk' | 'manual' | 'opted_out' | 'closed_lost'
 }): Promise<void> {
   try {
     const { leadId, reason } = args

@@ -55,6 +55,7 @@ import OverlayShell from './OverlayShell'
 import TouchpointModal from './TouchpointModal'
 import TransferLeadModal from './TransferLeadModal'
 import NetworkConvertSheet from './NetworkConvertSheet'
+import CloseLostWizard from './shared/CloseLostWizard'
 import ContactField from './shared/ContactField'
 import AddressField from './shared/AddressField'
 import SourceField from './shared/SourceField'
@@ -104,6 +105,11 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
   const [transferOpen, setTransferOpen] = useState(false)
   // "Add to Network" sheet + this client's Network twin, if any.
   const [convertOpen, setConvertOpen] = useState(false)
+  // issue 204 — "Close — not interested" wizard open (card menu).
+  const [closeLostOpen, setCloseLostOpen] = useState(false)
+  // Bumped after a close-lost commits to re-pull the profile so the freshly
+  // Closed Lost engagement (and the client's new status) reflects in place.
+  const [reloadKey, setReloadKey] = useState(0)
   const [busy, setBusy] = useState(false)
   const nowMs = Date.now()
 
@@ -117,7 +123,7 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
       .then(d => { if (!dead) setData(d) })
       .catch(e => { if (!dead) setLoadErr(String(e.message || e)) })
     return () => { dead = true }
-  }, [clientId])
+  }, [clientId, reloadKey])
 
   // ── the Network twin ──
   // The link is one-directional — partners.customer_lead_id → leads.id, with
@@ -726,6 +732,26 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
           }}
         />
       )}
+      {/* issue 204 — Close — not interested. engagementId = this client's OPEN
+          engagement if any (close that rather than found a second); else null,
+          and the wizard find-or-creates (reuse_open). stopLeadDrips fires the
+          lead-side drip/stage-email stop. On success re-pull the profile so the
+          now-closed engagement + new status show without a reload. */}
+      {closeLostOpen && !readOnly && c && (
+        <CloseLostWizard
+          engagementId={open[0]?.id || null}
+          leadId={c.id}
+          reasons={lookupOptions.closeLostReasons || []}
+          isMobile={isMobile}
+          stopLeadDrips
+          setToast={setToast}
+          onCancel={() => setCloseLostOpen(false)}
+          onClosed={() => {
+            setCloseLostOpen(false)
+            setReloadKey(k => k + 1)
+          }}
+        />
+      )}
     </div>
   )
 
@@ -848,6 +874,12 @@ export default function ClientProfile({ clientId, people = [], onClose, onOpenEn
             ...(networkTwin === false
               ? [{ key: 'network', label: 'Add to Network…', onPick: () => setConvertOpen(true) }]
               : []),
+            // issue 204 — "Close — not interested": founds + closes a Closed
+            // Lost engagement for a lead who didn't convert (and stops drips),
+            // instead of mis-filing her as junk. Same gate as junk below:
+            // hidden on Jobber-linked (Jobber owns their lifecycle) and, via
+            // the readOnly wrap above, on read-only surfaces.
+            ...(jobberLinked ? [] : [{ key: 'close-lost', label: 'Close — not interested', onPick: () => setCloseLostOpen(true) }]),
             ...(jobberLinked ? [] : [{ key: 'junk', label: 'Mark as junk', danger: true, onPick: markJunk }]),
           ]),
         ]} />

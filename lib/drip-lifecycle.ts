@@ -32,6 +32,12 @@ export type DripStopReason =
   | 'no_email'
   | 'opted_out'
   | 'client_archived'
+  // issue 204 — a no-engagement lead closed "not interested". Engagement
+  // close (System B) never touches leads.stage, so the lead's live drips
+  // (System A) keep running; the close-not-interested route stops them with
+  // this reason. Distinct from 'junk' so the Notebook/stopped_reason shows
+  // the lead was closed lost, not junked (she was a real lead, not junk).
+  | 'closed_lost'
 
 interface LocationCtx {
   id: string

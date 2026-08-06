@@ -20,6 +20,17 @@
 // NO quoteArchive and no status field on QuoteEditAttributes — closing
 // lost is a Bee Hub sales-layer act with no Jobber side effect, so there
 // is no "also archive the quote" checkbox to offer.
+//
+// LEAD-CLOSE MODE (issue 204): the Inbox row/card menus open this same
+// wizard to close a lead who isn't interested. Those leads may have NO
+// engagement — closing only the lead does nothing to the Inbox (which reads
+// engagements, blind to leads.stage), so the lead derives back by age. So
+// when engagementId is absent the wizard find-or-creates one (POST
+// /api/engagements { reuse_open }) before committing the close, and when
+// stopLeadDrips is set it also fires the lead-side drip/stage-email stop the
+// engagement close deliberately omits (POST …/close-not-interested). Both
+// are no-ops for the engagement-panel usage (engagementId present,
+// stopLeadDrips false), so that path is unchanged.
 // ─────────────────────────────────────────────────────────────
 'use client'
 
@@ -31,7 +42,7 @@ import { T } from './tokens'
 
 const STEPS = [{ key: 'reason', label: 'Reason' }, { key: 'followup', label: 'Follow-up' }]
 
-export default function CloseLostWizard({ engagementId, leadId, reasons = [], isMobile = false, onCancel = () => {}, onClosed = () => {}, setToast = () => {}, readOnly = false }) {
+export default function CloseLostWizard({ engagementId, leadId, reasons = [], isMobile = false, onCancel = () => {}, onClosed = () => {}, setToast = () => {}, readOnly = false, stopLeadDrips = false }) {
   // Admin-configured labels (lookups → HiveShell lookupOptions), with the
   // canonical set as the code-level fallback when the picklist is empty.
   const reasonList = Array.isArray(reasons) && reasons.length > 0 ? reasons : DEFAULT_CLOSE_LOST_REASONS
@@ -49,14 +60,39 @@ export default function CloseLostWizard({ engagementId, leadId, reasons = [], is
   async function confirm() {
     setBusy(true)
     try {
-      const j = await commitEngagementClose(engagementId, { closeAs: CLOSED_LOST, closedReason: reason, closedNote: note })
+      // issue 204 — a no-engagement lead: find-or-create an engagement so the
+      // Closed Lost lands in System B (Inbox/board/admin), which never reads
+      // leads.stage. reuse_open makes the server hand back an existing open
+      // engagement rather than found a second (never a duplicate open card).
+      let engId = engagementId
+      if (!engId) {
+        const r = await fetch('/api/engagements', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ client_id: leadId, reuse_open: true }),
+        })
+        const jj = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(jj?.error || `HTTP ${r.status}`)
+        engId = jj?.engagement?.id
+        if (!engId) throw new Error('could not open an engagement to close')
+      }
+      const j = await commitEngagementClose(engId, { closeAs: CLOSED_LOST, closedReason: reason, closedNote: note })
+      // issue 204 — the engagement close never touches leads.stage, so a
+      // no-engagement lead's live drips/stage-emails keep running. Fire the
+      // lead-side stop the close omits (mirrors markJunk, reason closed_lost).
+      // Non-fatal: the close already committed, and the route is fail-closed.
+      if (stopLeadDrips && leadId) {
+        try {
+          await fetch(`/api/leads/${leadId}/close-not-interested`, { method: 'POST' })
+        } catch { /* drips are secondary — never unwind a committed close */ }
+      }
       // Real follow-up (the current model, not a mock): a persisted
       // touchpoints marker the timeline surfaces and the future nurture
       // scheduler can pick up. Non-fatal — the close already committed.
       if (wantFollowUp && followUpDate && leadId) {
         try {
           await writeEngagementMarker({
-            leadId, engagementId, kind: 'reach_out', method: null,
+            leadId, engagementId: engId, kind: 'reach_out', method: null,
             label: `Follow-up · ${followUpReason.trim() || 'reconnect'}`,
             notes: note.trim() || null,
             occurredAt: new Date(`${followUpDate}T09:00:00`).toISOString(),

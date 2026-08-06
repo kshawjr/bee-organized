@@ -67,6 +67,7 @@ import TouchpointModal, { METHODS } from './TouchpointModal'
 import TransferLeadModal from './TransferLeadModal'
 import NoCoverageModal from './NoCoverageModal'
 import NetworkConvertSheet from './NetworkConvertSheet'
+import CloseLostWizard from './shared/CloseLostWizard'
 import { FilterButton, FilterPopover, FilterSection, CheckRow, TogglePills, SortRows, FilteredEmpty, ClearAllButton } from './shared/FilterPopover'
 import { useStoredState } from './shared/useStoredControls'
 import useIsMobile from './shared/useIsMobile'
@@ -339,7 +340,7 @@ function RowMenu({ anchorId, isMobile, onClose, children }) {
   )
 }
 
-export default function InboxScreen({ people = [], transferPeople = [], locationRequired = false, onOpenLocationPicker = null, engagements = [], settledSendIds = EMPTY_SET, locFilter = 'all', locations = [], locationUsers = [], onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, specialties = [], setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
+export default function InboxScreen({ people = [], transferPeople = [], locationRequired = false, onOpenLocationPicker = null, engagements = [], settledSendIds = EMPTY_SET, locFilter = 'all', locations = [], locationUsers = [], onOpenPerson = () => {}, onSendToJobber = () => {}, onCallLogged = () => {}, onLeadPatched = () => {}, onPartnerCreated = () => {}, specialties = [], closeLostReasons = [], setToast = () => {}, readOnly = false, initialSection = null, onInitialSectionConsumed = () => {} }) {
   // The selected location's NAME, for the New section's header. Half of why
   // the unrouted queue read as this location's leads is that the location's
   // own section wasn't labelled either — both just read as "the inbox". Null
@@ -395,6 +396,17 @@ export default function InboxScreen({ people = [], transferPeople = [], location
   const [junkedIds, setJunkedIds] = useState(() => new Set())
   const [snoozedIds, setSnoozedIds] = useState(() => new Set())
   const [dismissedIds, setDismissedIds] = useState(() => new Set())
+  // issue 204 — a lead just closed "not interested". The durable removal is
+  // issue 187's settled-lost rule (engagementCount>0 → Nurturing, off the
+  // worklist) once the people refetch lands; this session Set covers the
+  // optimistic gap so the row leaves the instant the wizard commits. Kept
+  // LOCAL (not in isSoftRemovedFromInbox) — like the badge, that shared
+  // predicate reconciles on the next refetch via engagementCount.
+  const [closedLostIds, setClosedLostIds] = useState(() => new Set())
+  // The lead whose "Close — not interested" wizard is open. Held as the
+  // person (like touchFor/transferFor) so the wizard's subline survives the
+  // row re-deriving out of its section the instant the close lands.
+  const [closeLostFor, setCloseLostFor] = useState(null)
   const [menuFor, setMenuFor] = useState(null) // row id whose ··· menu is open
   const [confirmJunkId, setConfirmJunkId] = useState(null) // row id awaiting single junk confirm
   // Bulk selection (feedback #5) — the Inbox is the ONLY surface where
@@ -508,6 +520,9 @@ export default function InboxScreen({ people = [], transferPeople = [], location
       // drift again (#89). View filters below are a SEPARATE step — not
       // removals, and deliberately not part of the badge's count.
       if (isSoftRemovedFromInbox(p, nowMs, { junkedIds, snoozedIds, dismissedIds, transferredIds })) continue
+      // issue 204 — a lead closed "not interested" this session leaves the
+      // worklist immediately; the refetch's engagementCount makes it durable.
+      if (closedLostIds.has(p.id)) continue
       if (!passesInboxFilters(p)) continue
       // loc_other rows are EXCLUDED from New/Attempting (a loc_other New lead
       // shows ONLY in the transfer section) but are no longer collected here —
@@ -544,7 +559,7 @@ export default function InboxScreen({ people = [], transferPeople = [], location
     fresh.sort(cmp)
     working.sort(cmp)
     return { transfer, fresh, working }
-  }, [scoped, transferPeople, openClientIds, wonClientIds, junkedIds, snoozedIds, dismissedIds, transferredIds, filters, inboxSort]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scoped, transferPeople, openClientIds, wonClientIds, junkedIds, snoozedIds, dismissedIds, transferredIds, closedLostIds, filters, inboxSort]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // How many badge-countable leads a VIEW filter is keeping off the list.
   // By construction this equals (nav badge) − (visible fresh + working): same
@@ -946,6 +961,17 @@ export default function InboxScreen({ people = [], transferPeople = [], location
                 deletes anything (Move only soft-hides from this list). */}
             <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); setConvertFor(p) }}
               label={<><IconUsers size={13} />Add to Network…</>} />
+            {/* issue 204 — "Close — not interested": the real disposition for
+                a lead who cancelled / went quiet (Sarah Watts). NOT junk (she
+                was a real lead, not spam), NOT snooze/dismiss (those keep her
+                in the funnel). Founds + closes a Closed Lost engagement so she
+                leaves the Inbox by DECISION, and stops her drips. Same gate as
+                junk: hidden on Jobber-linked rows (Jobber owns their
+                lifecycle) and, via the cluster above, on read-only surfaces. */}
+            {!linked && (
+              <MenuRow disabled={busyId === p.id} onPick={() => { setMenuFor(null); setCloseLostFor(p) }}
+                label={<><IconCheck size={13} />Close — not interested</>} />
+            )}
             {/* Jobber-owns-deletion rule: no junk door on linked rows
                 (the API 409s it anyway — this keeps the UI honest). Junk is
                 destructive (stops drips), so it's confirm-first: the first
@@ -1395,6 +1421,28 @@ export default function InboxScreen({ people = [], transferPeople = [], location
               onLeadPatched?.(convertFor.id, res.lead_patch)
               if (res.lead_patch.inbox_dismissed_at) addTo(setDismissedIds, convertFor.id)
             }
+          }}
+        />
+      )}
+
+      {/* issue 204 — Close — not interested. Reuses the engagement CloseLostWizard
+          for the reason picker (labels from lookups closed_lost_reasons, threaded
+          as closeLostReasons). engagementId is this lead's OPEN engagement if the
+          board snapshot carries one — else null, and the wizard find-or-creates
+          (reuse_open) so a lead that already HAS one closes it rather than founding
+          a second. stopLeadDrips fires the lead-side drip/stage-email cancel. */}
+      {closeLostFor && !readOnly && (
+        <CloseLostWizard
+          engagementId={(engagements.find(e => e.client_id === closeLostFor.id && !isTerminal(e.stage)) || {}).id || null}
+          leadId={closeLostFor.id}
+          reasons={closeLostReasons}
+          isMobile={isMobile}
+          stopLeadDrips
+          setToast={setToast}
+          onCancel={() => setCloseLostFor(null)}
+          onClosed={() => {
+            addTo(setClosedLostIds, closeLostFor.id)
+            setCloseLostFor(null)
           }}
         />
       )}

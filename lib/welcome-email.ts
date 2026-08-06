@@ -68,7 +68,8 @@ export async function scheduleWelcomeEmail(leadId: string): Promise<void> {
 
 export async function cancelPendingWelcomeEmail(
   leadId: string,
-  reason: 'junk' | 'opted_out' | 'stage_changed',
+  // 'closed_lost' — issue 204, a no-engagement lead closed "not interested".
+  reason: 'junk' | 'opted_out' | 'stage_changed' | 'closed_lost',
 ): Promise<void> {
   try {
     const { error } = await supabaseService
