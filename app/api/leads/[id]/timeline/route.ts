@@ -85,11 +85,44 @@ export async function GET(
   let templByKey: Record<string, { name: string | null; subject: string | null }> = {}
   if (stageEmails.length > 0) {
     const keys = Array.from(new Set(stageEmails.map(r => r.stage_email_key).filter(Boolean)))
-    const { data: templates } = await supabaseService
+    // Masters carry legacy_id (customs/forks never do). name + subject default
+    // from the master; `id` is selected so issue 206's fork override below can
+    // map a location's copy back to its key via cloned_from_id.
+    const { data: masters } = await supabaseService
       .from('templates')
-      .select('legacy_id, name, subject')
+      .select('id, legacy_id, name, subject')
       .in('legacy_id', keys)
-    for (const t of templates ?? []) templByKey[t.legacy_id] = { name: t.name ?? null, subject: t.subject ?? null }
+    const masterIdToKey: Record<string, string> = {}
+    for (const t of masters ?? []) {
+      templByKey[t.legacy_id] = { name: t.name ?? null, subject: t.subject ?? null }
+      masterIdToKey[t.id] = t.legacy_id
+    }
+
+    // issue 206 — once the sender prefers a location's customized copy, this
+    // preview must show the SAME subject or it actively misleads the owner
+    // watching this tab. A fork carries location_uuid set AND legacy_id NULL,
+    // so it's reached via cloned_from_id → master.id, filtered to this location
+    // and to ACTIVE rows, newest-first so the most-recently-updated fork wins
+    // when Duplicate was pressed more than once. Only the SUBJECT is overridden
+    // — the name (label) stays the master's, mirroring the sender, which keeps
+    // the master name as the touchpoint label once the email actually sends.
+    const masterIds = Object.keys(masterIdToKey)
+    if (masterIds.length > 0 && lead.location_uuid) {
+      const { data: forks } = await supabaseService
+        .from('templates')
+        .select('subject, cloned_from_id, updated_at')
+        .eq('location_uuid', lead.location_uuid)
+        .eq('is_active', true)
+        .in('cloned_from_id', masterIds)
+        .order('updated_at', { ascending: false })
+      const overridden = new Set<string>()
+      for (const f of forks ?? []) {
+        const key = masterIdToKey[f.cloned_from_id]
+        if (!key || overridden.has(key) || !templByKey[key]) continue
+        overridden.add(key)
+        templByKey[key] = { ...templByKey[key], subject: f.subject ?? null }
+      }
+    }
   }
 
   return NextResponse.json({
