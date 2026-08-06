@@ -151,18 +151,58 @@ export async function POST(req: NextRequest) {
     tier, amountTotal, currency, paymentStatus, subscriptionId, customerId,
   } = session
 
-  // Payment failed (async methods like bank debit) — alert, acknowledge.
+  // Payment failed (async methods like ACH bank debit) — issue 197.
+  //
+  // The bank transfer bounced, days after checkout.session.completed fired
+  // as UNPAID. DECISION: never auto-deactivate. An ACH failure is often
+  // transient (insufficient funds today, a retryable R01), and for a
+  // location Kevin already force-activated — or one a prior async success
+  // activated — silently revoking access mid-work would strand a real,
+  // working customer over a bounce that may clear on the next attempt.
+  // So we leave the location exactly as it is and alert a human with its
+  // CURRENT state, who decides whether to chase payment or wind it down.
+  //
+  // Idempotent like every other path: this now runs THROUGH the replay
+  // guard and records the event, so a Stripe redelivery is a silent no-op
+  // instead of a duplicate Slack ping. (It previously returned before the
+  // layer-1 guard and re-alerted on every redelivery.)
   if ((STRIPE_FAILURE_EVENTS as readonly string[]).includes(eventType)) {
+    const replay = await eventAlreadyProcessed(eventId)
+    if (replay.tableError) {
+      return NextResponse.json({ error: 'events_table_unavailable' }, { status: 500 })
+    }
+    if (replay.replay) return NextResponse.json({ ok: true, replay: true })
+
     const loc = isUuid(clientReferenceId) ? await getLocationBilling(clientReferenceId) : null
+    const status = loc?.subscription_status ?? 'unknown'
+    // Active-with-no-money is the state that needs a human: the seat exists
+    // (forced or auto-activated) but the payment never cleared.
+    const activeWithNoMoney = loc?.subscription_status === 'active'
     await logStripeEvent({
       locationSlug: loc?.location_id ?? null,
       sessionId,
       status: 'error',
-      detail: `error=async_payment_failed tier=${tier || 'unknown'} amount=${dollars(amountTotal)}`,
+      detail: `error=async_payment_failed tier=${tier || 'unknown'} amount=${dollars(amountTotal)} location_status=${status} — access retained, no auto-deactivation (issue 197)`,
     })
     await postSlackMessage(
-      `⚠️ Stripe payment FAILED (async): ${dollars(amountTotal)} — ${loc?.name || clientReferenceId || 'unknown location'} — ${tier || '?'} seat. No seat was granted.`,
+      activeWithNoMoney
+        ? `⚠️ Stripe ACH payment FAILED — ${loc?.name || clientReferenceId || 'unknown location'} (${dollars(amountTotal)}, ${tier || '?'} seat). This location is ACTIVE but the bank transfer did NOT clear, so it is running with no collected payment. Access is NOT being revoked automatically — decide whether to have them retry payment or wind it down.`
+        : `⚠️ Stripe ACH payment FAILED — ${loc?.name || clientReferenceId || 'unknown location'} (${dollars(amountTotal)}, ${tier || '?'} seat). The location was NOT activated (status=${status}); no seat granted. They'll need to pay again to proceed.`,
     )
+
+    // Record the event so a redelivery short-circuits at the replay guard
+    // above. location_id is nullable in stripe_webhook_events, so an
+    // unmapped failure still records.
+    await markEventProcessed({
+      event_id: eventId,
+      type: eventType,
+      session_id: sessionId,
+      payment_intent_id: paymentIntentId,
+      location_id: loc?.id ?? null,
+      tier: tier ?? null,
+      amount_cents: amountTotal,
+      payload: event,
+    })
     return NextResponse.json({ ok: true, processed: false, failure: 'async_payment_failed' })
   }
 
@@ -292,6 +332,19 @@ export async function POST(req: NextRequest) {
   const isActiveSubscriptionLink =
     location.subscription_status === 'active' && tier === 'owner' && !!subscriptionId
   const isActivation = location.subscription_status !== 'active' && tier === 'owner'
+  // issue 197: the SAME already-active + owner + subscription shape is reached
+  // by two different events. checkout.session.completed is the issue-182
+  // active-location link (card on file, $0 today). async_payment_succeeded is
+  // an ACH transfer CLEARING on a location Kevin already force-activated — the
+  // money actually arrived. The DB writes are identical (fill in the missing
+  // subscription id; add no seat; do not re-activate), but the operator-facing
+  // messaging must not tell Kevin "no charge today" when a bank payment just
+  // landed. The billing_invoices row for that payment is recorded by the
+  // invoice.paid handler (billing_reason=subscription_create), which maps back
+  // by the subscription id written here — recording it here too would double
+  // the row, since a subscription session's own payment_intent is null and so
+  // can't dedup against invoice.paid's real payment_intent.
+  const isAsyncClearing = eventType === 'checkout.session.async_payment_succeeded'
   try {
     if (isActiveSubscriptionLink) {
       // Resolve the customer id from the session, falling back to the
@@ -321,11 +374,15 @@ export async function POST(req: NextRequest) {
         locationSlug: location.location_id,
         sessionId,
         status: 'success',
-        detail: `tier=owner — subscription linked to already-active location (issue 182) sub=${subscriptionId} anchor=paid_through(${location.paid_through_date || 'n/a'}) — no activation, no seat`,
+        detail: isAsyncClearing
+          ? `tier=owner — ACH cleared on already-active location (issue 197) sub=${subscriptionId} amount=${dollars(amountTotal)} — subscription id filled in, no seat, no re-activation; invoice recorded via invoice.paid`
+          : `tier=owner — subscription linked to already-active location (issue 182) sub=${subscriptionId} anchor=paid_through(${location.paid_through_date || 'n/a'}) — no activation, no seat`,
         landed,
       })
       await postSlackMessage(
-        `🔗 Stripe subscription linked — ${location.name || location.id} — card on file, billing starts ${location.paid_through_date || 'its paid-through date'} (already active; no charge today).`,
+        isAsyncClearing
+          ? `🏦 Stripe ACH payment cleared — ${location.name || location.id} (${dollars(amountTotal)}). This location was already active; subscription is now linked and the invoice is recorded. No second seat, no re-activation.`
+          : `🔗 Stripe subscription linked — ${location.name || location.id} — card on file, billing starts ${location.paid_through_date || 'its paid-through date'} (already active; no charge today).`,
       )
     } else if (isActivation) {
       // Subscription-mode checkout (issue 161): the session created via the
