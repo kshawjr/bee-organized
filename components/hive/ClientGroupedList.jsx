@@ -50,6 +50,25 @@ function StatusDot({ color }) {
   return <span aria-hidden style={{ width: '9px', height: '9px', borderRadius: T.radius.round, background: color, display: 'inline-block', flexShrink: 0 }} />
 }
 
+// issue 207 — one plain-language line under each status name. Owners (45-65,
+// non-technical) read a big Nurturing count off a fresh Jobber import as a pile
+// of neglected people; a muted sub-line says what each band actually means. Copy
+// is deliberately job-state, not import-provenance: Nurturing is the residual
+// "everyone else" bucket (settled-lost per issue 187, aged leads, unconverted
+// imports, organic never-booked), so its share coming from the import is entirely
+// location-dependent and NOT reliably the majority — "no job on the go right now"
+// is the one clause honest for every location. Keyed by the same status keys as
+// CLIENT_STATUS_META; every renderable band has a line so none reads as unlabelled.
+const STATUS_DEFS = {
+  New:        "Just arrived, and nobody's reached out yet. They're in your Inbox.",
+  Attempting: "You've reached out, but nothing's booked yet. Also in your Inbox.",
+  Nurturing:  'No job on the go right now — worth staying in touch with.',
+  Active:     'Working with them now — a request, assessment, quote or job under way. The same people as your Engagements board.',
+  Client:     "You've finished and been paid for work. They can come back for more any time.",
+  Past:       "You've been paid for work together before.",
+  no_contact: "No email or phone on file, so there's no way to reach out.",
+}
+
 export default function ClientGroupedList({ people = [], engagements = [], locFilter = 'all', onOpenClient = () => {}, locations = [] }) {
   const [search, setSearch] = useState('')
   const nowMs = Date.now()
@@ -144,7 +163,7 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
               aria-label={`${meta.label} group`}
               onClick={() => toggle(statusKey)}
               onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(statusKey) } }}
-              style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 4px 8px', cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 4px', cursor: 'pointer' }}
             >
               <StatusDot color={fam.text} />
               <span style={{ fontSize: '13px', fontWeight: 600, color: fam.text, whiteSpace: 'nowrap' }}>{meta.label}</span>
@@ -153,6 +172,20 @@ export default function ClientGroupedList({ people = [], engagements = [], locFi
                 <IconChevronRight size={14} style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
               </span>
             </div>
+            {/* issue 207 — the status definition, a sibling of the header (NOT inside
+                the role=button, so it stays out of the button's aria-label and a
+                screen reader can still read it). In the group's own colour, muted via
+                opacity — fam.text is the band's dark stop from CHIP_STYLES, so no raw
+                hex. Indented 21px to sit under the label (4px header pad + 9px dot +
+                8px gap). 11.5px: STATIC descriptive text, not a focusable input, so the
+                16px iOS zoom-floor doesn't apply — 11.5px matches the muted secondary
+                scale already used in this tree. Rendered whether the band is collapsed
+                (the default) or open, so it explains the count owners are most lost on. */}
+            {STATUS_DEFS[statusKey] && (
+              <p style={{ margin: '3px 4px 8px 21px', fontSize: '11.5px', lineHeight: 1.4, color: fam.text, opacity: 0.72 }}>
+                {STATUS_DEFS[statusKey]}
+              </p>
+            )}
             {expanded && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {rows.map(p => {

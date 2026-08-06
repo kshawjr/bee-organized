@@ -147,6 +147,47 @@ describe('ClientGroupedList — Client band', () => {
   })
 })
 
+// issue 207 — every rendered status band carries its one-line definition, and
+// the copy matches the verified derivation rules (a won client's band says
+// "paid for work", an aged never-booked client's Nurturing band says "no job on
+// the go", and neither claims the row came from the Jobber import).
+describe('ClientGroupedList — status definitions (issue 207)', () => {
+  it('renders the four owner-facing definitions under their bands', () => {
+    // one client in each of New, Nurturing, Active, Client
+    const fresh   = person({ id: 'c-new',  name: 'Ada New',    created: daysAgo(2) })                 // New (recent, untouched)
+    const aged    = person({ id: 'c-nurt', name: 'Bo Nurture', created: daysAgo(200) })               // Nurturing (aged, never booked)
+    const active  = person({ id: 'c-act',  name: 'Cy Active',  created: daysAgo(200) })               // Active (open engagement below)
+    const wonC    = person({ id: 'c-won',  name: 'Di Client',  created: daysAgo(200), wonEngagements: WON }) // Client
+    const html = renderToString(
+      <ClientGroupedList
+        people={[fresh, aged, active, wonC] as any}
+        engagements={[{ id: 'e1', client_id: 'c-act', stage: 'Requested' } as any]}
+        locFilter="all"
+      />
+    )
+    expect(html).toContain('Just arrived, and nobody')                 // New (apostrophe HTML-escaped downstream)
+    expect(html).toContain('No job on the go right now')               // Nurturing
+    expect(html).toContain('The same people as your Engagements board') // Active
+    expect(html).toContain('been paid for work')                      // Client
+    // and the copy stays honest — Nurturing must NOT claim import provenance
+    expect(html).not.toContain('import')
+  })
+
+  it('the Active definition rides the Active band, not Nurturing', () => {
+    const active = person({ id: 'c-act', name: 'Cy Active', created: daysAgo(200) })
+    const html = renderToString(
+      <ClientGroupedList
+        people={[active] as any}
+        engagements={[{ id: 'e1', client_id: 'c-act', stage: 'Quoted' } as any]}
+        locFilter="all"
+      />
+    )
+    expect(html).toContain('aria-label="Active group"')
+    expect(html).toContain('a request, assessment, quote or job under way')
+    expect(html).not.toContain('aria-label="Nurturing group"')
+  })
+})
+
 describe('InboxScreen — won clients are not front-of-funnel', () => {
   it('a recently-created won client does not appear in the worklist', () => {
     const wonFresh = person({ created: daysAgo(2), wonEngagements: WON })
