@@ -225,6 +225,47 @@ export type SendStageEmailResult = {
   error?: string
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Resolve the location's customized copy of a stage template (issue 206)
+// ──────────────────────────────────────────────────────────────────────
+// Owners can Duplicate any of the six masters in the Templates tab, which
+// forks a location-scoped copy and lets them PATCH its subject/body. That
+// fork carries location_uuid = <their location> AND legacy_id = NULL — the
+// legacy_id UNIQUE constraint reserves the six keys for masters — so it is
+// invisible to the master's own predicate (legacy_id = key AND location_uuid
+// IS NULL). It is reached instead via cloned_from_id → master.id.
+//
+// Only an ACTIVE fork in this location wins. An inactive fork (is_active
+// toggled false via PATCH) or a deleted one (row gone) matches nothing here
+// and the caller falls back to the master, never to nothing. A location with
+// no fork likewise gets the master, exactly as before issue 206.
+//
+// Duplicate can be pressed more than once, so a location may hold several
+// active forks of the same master; the most-recently-updated one wins — that
+// is the copy the owner is actively editing. A DB error is swallowed to null
+// so a transient failure degrades to the master rather than dropping the send.
+async function resolveLocationStageTemplate(
+  masterId: string,
+  locationUuid: string,
+): Promise<{ subject: string | null; body: string | null } | null> {
+  const { data, error } = await supabaseService
+    .from('templates')
+    .select('subject, body')
+    .eq('cloned_from_id', masterId)
+    .eq('location_uuid', locationUuid)
+    .eq('is_active', true)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+
+  if (error) {
+    console.warn('[stage-emails] fork lookup failed — falling back to master', {
+      masterId, locationUuid, error,
+    })
+    return null
+  }
+  return data && data.length > 0 ? data[0] : null
+}
+
 export async function sendStageEmail(scheduledRowId: string): Promise<SendStageEmailResult> {
   // Scheduled row
   const { data: row, error: rowErr } = await supabaseService
@@ -239,15 +280,18 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
   if (row.sent_at) return { sent: false, error: 'already_sent' }
   if (row.cancelled_at) return { sent: false, error: 'cancelled' }
 
-  // Template
-  const { data: tpl, error: tplErr } = await supabaseService
+  // Template — the master (location_uuid IS NULL) keyed by legacy_id. This is
+  // both the default and the fallback; issue 206 resolves the location's
+  // customized copy (fork) below, once we know the lead's location. `id` is
+  // selected so the fork can be found via cloned_from_id.
+  const { data: master, error: tplErr } = await supabaseService
     .from('templates')
-    .select('subject, body, name')
+    .select('id, subject, body, name')
     .eq('legacy_id', row.stage_email_key)
     .is('location_uuid', null)
     .maybeSingle()
 
-  if (tplErr || !tpl) {
+  if (tplErr || !master) {
     return { sent: false, error: `template_lookup: ${tplErr?.message ?? 'missing'}` }
   }
 
@@ -279,6 +323,21 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
     return { sent: false, error: 'no_email' }
   }
   if (!lead.location_uuid) return { sent: false, error: 'no_location' }
+
+  // issue 206 — prefer the owner's customized copy of this template, falling
+  // back to the master. ONLY subject + body come from the fork: `name` (the
+  // touchpoint label) stays the master's so the timeline label is stable, and
+  // the branded-wrapper / CAN-SPAM decisions below remain keyed on the
+  // immutable stage_email_key — so an owner editing the body can neither
+  // restyle a commercial email as transactional nor strip its compliance
+  // footer. The rate / booking-link holds run against this `tpl`, so a
+  // customized body referencing an unfilled token holds rather than sends broken.
+  const fork = await resolveLocationStageTemplate(master.id, lead.location_uuid)
+  const tpl = {
+    subject: fork?.subject ?? master.subject,
+    body: fork?.body ?? master.body,
+    name: master.name,
+  }
 
   // Location
   const { data: loc, error: locErr } = await supabaseService
