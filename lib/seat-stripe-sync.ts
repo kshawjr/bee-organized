@@ -31,16 +31,24 @@
 // and quantities it charges are the ones the seat rows recorded, not a second
 // derivation that can drift from them.
 //
-// NOTE ON ISSUE 221 (the seat-tier vs billing-tier lookup): applySeatDeltaToStripe
-// resolves tier_prices by whatever tier string it is handed. Its `tier` is
-// therefore a BILLING tier, and this module's callers must hand it one.
-// applySeatPurchaseToStripe passes line.billingTier — the co-owner rule has
-// already been applied by lib/seat-plan before the line reaches here — so an
-// owner-tier purchase through /api/seats bumps the MANAGER line for its 2nd
-// seat, matching what issue 217 records. That is a caller-side discipline, not
-// a fix: DELETE still passes the SEAT tier (see the call in /api/seats), so
-// removing a co-owner seat still credits the owner line. issue 221 remains
-// open for that path.
+// issue 221 — REMOVING A SEAT CREDITS THE LINE IT WAS CHARGED ON.
+//
+// applySeatDeltaToStripe resolves tier_prices by whatever tier string it is
+// handed. Its `tier` is therefore a BILLING tier, and this module's callers
+// must hand it one. applySeatPurchaseToStripe passes line.billingTier — the
+// co-owner rule has already been applied by lib/seat-plan before the line
+// reaches here — so an owner-tier purchase through /api/seats bumps the MANAGER
+// line for its 2nd seat, matching what issue 217 records.
+//
+// THE BUG THIS HALF EXISTS TO KILL: /api/seats DELETE handed it the SEAT tier.
+// For manager/light/readonly the two strings are identical and removals were
+// always right; a CO-OWNER is an owner-tier seat on a manager-tier price, so
+// removing one credited the $550 owner line for a seat that cost $400 and
+// handed the owner $150 they never paid. applySeatRemovalToStripe below is the
+// removal's entry point and takes the same pre-resolved billing lines a
+// purchase does — from lib/seat-cost's quoteSeatRemoval, which differences
+// planBillingLines in reverse — so neither direction resolves a price tier of
+// its own.
 
 import { supabaseService } from './supabase-service'
 import { stripeConfigured } from './stripe'
@@ -221,6 +229,87 @@ export async function applySeatPurchaseToStripe(args: {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// issue 221 — applying a REMOVAL
+// ─────────────────────────────────────────────────────────────
+
+export type SeatRemovalLineResult = {
+  billingTier: string
+  quantity: number
+  applied: boolean
+  reason?: SeatPurchaseSkipReason
+  detail?: string
+}
+
+export type SeatRemovalStripeResult = {
+  applied: boolean
+  lines: SeatRemovalLineResult[]
+}
+
+// Decrement the location's subscription once per billing line.
+//
+// The mirror of applySeatPurchaseToStripe, with three things held identical on
+// purpose:
+//
+//   • the LINES come from the caller, already resolved through lib/seat-plan's
+//     co-owner rule. This function never looks a tier up itself, which is what
+//     kept the two directions able to disagree.
+//   • a $0 line NEVER REACHES STRIPE. Removing a $0 price credits nothing now
+//     and nothing at renewal, so the call would be pure noise on the invoice
+//     and in the event log — the same rule, and the same reason, as an add.
+//     An unknown rate (null) is not free and still goes, to be refused there as
+//     'no_price'.
+//   • the CREDIT TIMING is untouched. adjustSubscriptionSeatQuantity puts every
+//     decrease on create_prorations — credit at the next invoice, no refund —
+//     which is issue 161's deliberate choice and Kevin's accepted behavior.
+//     Passing a negative delta is all it takes to keep it; nothing here asks
+//     for always_invoice.
+//
+// A removal through /api/seats is one seat and therefore one line. The
+// idempotency anchor still carries the billing tier so a multi-line removal
+// cannot reuse one key for two different prices — Stripe rejects a key replayed
+// with different parameters, and that error would read as a failed credit.
+export async function applySeatRemovalToStripe(args: {
+  locationId: string
+  lines: SeatPurchaseLine[]
+  seatId?: string | null
+}): Promise<SeatRemovalStripeResult> {
+  const { locationId, lines, seatId } = args
+
+  const results: SeatRemovalLineResult[] = []
+
+  for (const line of lines) {
+    if (line.annualUnitCents === 0) {
+      results.push({
+        billingTier: line.billingTier,
+        quantity: line.quantity,
+        applied: false,
+        reason: 'zero_rate',
+      })
+      continue
+    }
+
+    const res = await applySeatDeltaToStripe({
+      locationId,
+      tier: line.billingTier,
+      delta: -line.quantity,
+      seatId: seatId ? `${seatId}:${line.billingTier}` : null,
+    })
+    results.push({
+      billingTier: line.billingTier,
+      quantity: line.quantity,
+      applied: res.applied,
+      ...(res.reason ? { reason: res.reason } : {}),
+      ...(res.detail ? { detail: res.detail } : {}),
+    })
+  }
+
+  return {
+    applied: results.every((r) => r.applied || r.reason === 'zero_rate'),
+    lines: results,
+  }
+}
+
 // ── The reconciliation trail ─────────────────────────────────
 // A seat whose recorded cost and actual charge disagree is the exact failure
 // issue 219 exists to end, so when it happens anyway it is written onto the
@@ -254,6 +343,29 @@ export function unchargedSeatNote(
   detail?: string,
 ): string {
   return `${SEAT_BILLING_MISMATCH_MARKER}: cost recorded but NOT charged — ${skipPhrase(reason, detail)}`
+}
+
+// issue 221 — the removal's version, and it deliberately carries the SAME
+// marker rather than an 'issue 221' one of its own.
+//
+// The marker does not name the bug that produced the row; it names the class of
+// row — a seat whose money and whose ledger disagree. A credit that never
+// reached the subscription is that, in the same way an uncharged seat is, and
+// the reconciliation is the same job. A second marker would mean
+// `notes ilike '%issue 219%'` silently stopped returning half of them, and the
+// person running that query is looking for money, not for issue numbers. The
+// note TEXT is what distinguishes the direction, so one query finds everything
+// and reading the row still tells you which way it went.
+//
+// The caller decides WHEN a removal earns one, and applies it more narrowly
+// than the add side does — see the allowlist in /api/seats DELETE. Only a
+// credit that a live subscription owed and did not take is a disagreement; a
+// location that was never billed through Stripe owes nothing back.
+export function uncreditedSeatNote(
+  reason: SeatPurchaseSkipReason | undefined,
+  detail?: string,
+): string {
+  return `${SEAT_BILLING_MISMATCH_MARKER}: seat removed but the credit was NOT applied — ${skipPhrase(reason, detail)}`
 }
 
 // The mirror image: money moved and no figure was recorded. Reachable only on

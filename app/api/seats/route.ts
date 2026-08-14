@@ -16,12 +16,18 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import {
-  applySeatDeltaToStripe,
   applySeatPurchaseToStripe,
+  applySeatRemovalToStripe,
   unchargedSeatNote,
+  uncreditedSeatNote,
   unrecordedChargeNote,
 } from '@/lib/seat-stripe-sync'
-import { quoteSeatPurchase, seatCostDivergence, unpricedSeatNote } from '@/lib/seat-cost'
+import {
+  quoteSeatPurchase,
+  quoteSeatRemoval,
+  seatCostDivergence,
+  unpricedSeatNote,
+} from '@/lib/seat-cost'
 
 export const runtime = 'nodejs'
 
@@ -472,28 +478,88 @@ export async function DELETE(request: NextRequest) {
   }
 
   // Decrement the matching line on the location's Stripe subscription
-  // (issue 161) — Stripe credits the unused portion. CONDITIONAL + non-fatal:
-  // a no-op when the location has no live subscription, and a Stripe failure
-  // never un-does the seat removal (the seat is inactive; billing reconciles).
+  // (issue 161) — Stripe credits the unused portion at the next invoice
+  // (create_prorations; no refund, Kevin's accepted behavior). CONDITIONAL +
+  // non-fatal: a no-op when the location has no live subscription, and a Stripe
+  // failure never un-does the seat removal (the seat is inactive; billing
+  // reconciles).
   //
-  // ISSUE 221, STILL OPEN HERE: this passes seat.tier — the SEAT tier — where
+  // issue 221 — WHICH LINE. This used to pass seat.tier, the SEAT tier, where
   // applySeatDeltaToStripe wants a BILLING tier. For manager/light/readonly the
-  // two are the same string, so removals of those seats are correct. Removing a
-  // CO-OWNER seat is not: it is an owner-tier seat billed at the manager rate
-  // (lib/seat-plan), so this credits the $550 owner line for a seat that was
-  // charged $400. POST above avoids this by walking the quote's billing lines;
-  // fixing it here needs the same owner-count context POST has and is issue
-  // 221's job, not issue 219's.
+  // two are the same string and removals were always right. A CO-OWNER is not:
+  // it is an owner-tier seat billed at the MANAGER rate (lib/seat-plan), so
+  // removing one credited the $550 owner line for a seat charged $400 and
+  // handed the owner $150 they never paid.
+  //
+  // The line now comes from quoteSeatRemoval, which differences the same
+  // planBillingLines() the purchase path differences, in reverse: the lines the
+  // location has, minus the lines it will have. The quote runs AFTER the row is
+  // inactive because it counts the owner seats that REMAIN — see its contract.
   let billing: any = null
   const seat = data as any
   if (seat?.location_id && seat?.tier) {
-    const res = await applySeatDeltaToStripe({
+    const quote = await quoteSeatRemoval({ locationId: seat.location_id, tier: seat.tier })
+    const res = await applySeatRemovalToStripe({
       locationId: seat.location_id,
-      tier: seat.tier,
-      delta: -1,
+      lines: quote.billingLines,
       seatId: seat.id,
     })
-    billing = { stripe_applied: res.applied, ...(res.reason ? { stripe_skip_reason: res.reason } : {}) }
+    // One seat is one line today, so the first unapplied line is the reason.
+    // Reported per LINE, not per removal, so a $0 tier reads the way it does on
+    // the add side: stripe_applied false with reason 'zero_rate' — nothing was
+    // credited, and nothing was owed back.
+    const skipped = res.lines.find((l) => !l.applied)
+    billing = {
+      stripe_applied: res.lines.length > 0 && !skipped,
+      ...(skipped?.reason ? { stripe_skip_reason: skipped.reason } : {}),
+    }
+
+    // A credit that was owed and did not happen goes ON THE ROW, in issue 219's
+    // convention and under issue 219's marker, so the one query keeps finding
+    // every seat whose money and ledger disagree in either direction:
+    //   select … from subscription_seats where notes ilike '%issue 219%'
+    //
+    // NARROWER THAN THE ADD SIDE, DELIBERATELY (Kevin's call, issue 221). The
+    // purchase path notes every skip because a purchase RECORDS A FIGURE — a
+    // seat that says it cost $400 on a location nobody billed is a real
+    // disagreement. A removal records nothing, so a skip is only a
+    // disagreement when a credit was genuinely owed and failed to land. An
+    // allowlist rather than an exclusion list, so a reason added later has to
+    // be considered rather than silently inheriting a note:
+    //
+    //   stripe_error / no_price / stripe_unconfigured → a live subscription
+    //     should have been credited and was not. That is money.
+    //   no_subscription / non_paying → this location is not billed through
+    //     Stripe at all, so nothing was ever charged for this seat and nothing
+    //     is owed back. A note here would be noise in a query whose whole value
+    //     is that a row means something.
+    //   zero_rate → the tier is free. Nothing owed, nothing owed back.
+    const CREDIT_FAILED_REASONS = ['stripe_error', 'no_price', 'stripe_unconfigured']
+    const uncredited = skipped?.reason && CREDIT_FAILED_REASONS.includes(skipped.reason)
+      ? uncreditedSeatNote(skipped.reason, skipped.detail)
+      : null
+    // A DELETE re-issued against an already-inactive seat recomputes the same
+    // line and the same note; appending it twice would make the row harder to
+    // read, not more informative.
+    if (uncredited && !String(seat.notes || '').includes(uncredited)) {
+      const note = [seat.notes, uncredited]
+        .filter(Boolean)
+        .join(' · ')
+      console.error(`[seats DELETE] ${note} loc=${seat.location_id} seat=${seat.id}`)
+      const { data: updated, error: noteErr } = await supabaseService
+        .from('subscription_seats')
+        .update({ notes: note, updated_at: new Date().toISOString() })
+        .eq('id', seat.id)
+        .select(SEAT_COLS)
+        .single()
+      if (noteErr) {
+        // The log above already carries the evidence; losing the note must not
+        // fail a removal that already landed.
+        console.error('[seats DELETE] issue 221 — could not write the billing note', noteErr)
+      } else if (updated) {
+        return NextResponse.json({ ...updated, billing })
+      }
+    }
   }
 
   return NextResponse.json({ ...data, billing })

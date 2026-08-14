@@ -69,6 +69,12 @@
 // against its own subscription period, we prorate against paid_through_date —
 // which is why the route reports the outcome instead of assuming it.
 //
+// ── issue 221: AND WHAT STRIPE IS TOLD ON THE WAY OUT ────────
+// The co-owner rule was applied to additions and not to removals, so removing
+// a co-owner credited the owner line for a seat charged at the manager rate.
+// quoteSeatRemoval below closes that: it differences the very same billing
+// lines in the opposite direction. See decrementalBillingLines.
+//
 // billingLines is populated on EVERY return path, including the unpriced ones.
 // A location with no paid_through_date records no figure (that rule is issue
 // 217's and is untouched), but Stripe does not need our anchor to bill — it
@@ -134,6 +140,43 @@ export type SeatCostQuote = {
 }
 
 // ── The co-owner rule, differenced ───────────────────────────
+// Both directions difference the SAME two plans; they only disagree about
+// which one is the subtrahend. An add asks "what lines does the location gain",
+// a removal asks "what lines does it lose", and neither restates the co-owner
+// rule — planBillingLines() is still the only place it is written down.
+
+const ownerLine = (count: number): SeatPlan => (count > 0 ? [{ tier: 'owner', count }] : [])
+
+// The two plans a seat change sits between: the location WITHOUT the seats in
+// question, and WITH them. `steadyOwnerSeats` is the owner seats present in
+// both — for an owner-tier change that is the count EXCLUDING the seats being
+// added or removed, which is what makes the pair the same for either direction.
+function planPair(
+  steadyOwnerSeats: number,
+  tier: SeatPlanTier,
+  quantity: number,
+): [SeatPlan, SeatPlan] {
+  const without = ownerLine(steadyOwnerSeats)
+  const withThem: SeatPlan =
+    tier === 'owner'
+      ? ownerLine(steadyOwnerSeats + quantity)
+      : [...ownerLine(steadyOwnerSeats), { tier, count: quantity }]
+  return [without, withThem]
+}
+
+// Lines gained going `from` → `to`. Only positive deltas survive: a caller asks
+// either "what did this add" or "what did this drop", and gets that list as
+// quantities to move the subscription BY, sign supplied by the caller.
+function positiveDelta(from: SeatBillingLine[], to: SeatBillingLine[]): SeatBillingLine[] {
+  const fromQty = new Map<string, number>(from.map((l) => [l.billingTier, l.quantity]))
+  const lines: SeatBillingLine[] = []
+  for (const t of TIER_ORDER) {
+    const delta = (to.find((l) => l.billingTier === t)?.quantity ?? 0) - (fromQty.get(t) ?? 0)
+    if (delta > 0) lines.push({ billingTier: t as SeatPlanTier, quantity: delta })
+  }
+  return lines
+}
+
 // Incremental billing lines for adding `quantity` seats at `tier` to a
 // location that already holds `existingOwnerSeats` active owner seats.
 // Pure, so the rule is testable without a database.
@@ -146,23 +189,58 @@ export function incrementalBillingLines(
   const qty = Math.max(0, Math.trunc(quantity))
   if (qty === 0) return []
 
-  const ownerLine = (count: number): SeatPlan => (count > 0 ? [{ tier: 'owner', count }] : [])
+  // Every existing owner seat stays, so all of them are the steady count.
+  const [without, withThem] = planPair(existing, tier, qty)
+  return positiveDelta(planBillingLines(without), planBillingLines(withThem))
+}
 
-  const before = planBillingLines(ownerLine(existing))
-  const after = planBillingLines(
-    tier === 'owner'
-      ? ownerLine(existing + qty)
-      : [...ownerLine(existing), { tier, count: qty }],
-  )
+// issue 221 — THE SAME DIFFERENCE, RUN BACKWARDS.
+//
+// Removing a seat credits a line, and it must be the line that seat was
+// actually CHARGED on. A flat `tier_prices[seat.tier]` lookup credits the $550
+// owner line for a co-owner that was billed $400 at the manager rate — the
+// owner is handed $150 they never paid. So a removal is priced exactly the way
+// issue 217 priced an addition, with the two plans swapped: the lines the
+// location HAS, minus the lines it WILL have.
+//
+//   existing owner × 2, removing owner × 1
+//     has       = planBillingLines(owner:2)  = owner × 1, manager × 1
+//     will have = planBillingLines(owner:1)  = owner × 1
+//     credit    =                              manager × 1   ← the co-owner rate
+//
+//   existing owner × 1, removing owner × 1
+//     has       = owner × 1
+//     will have = (no seats)                 = (no lines)
+//     credit    = owner × 1
+//
+// `existingOwnerSeats` is the count BEFORE the removal — same meaning as
+// incrementalBillingLines' operand — and it is a COUNT, not an identity. That
+// is the whole answer to "which of the two owner rows was deleted": the
+// arithmetic cannot see which row it was, so removing either one of a
+// location's two owner seats credits the manager line and leaves the survivor
+// on the owner line. Removing both, in either order, credits manager then
+// owner — one credit per line, exactly what was charged.
+//
+// Non-owner tiers difference to themselves (the owner lines cancel on both
+// sides), so a manager/light/readonly removal credits its own line, unchanged.
+export function decrementalBillingLines(
+  existingOwnerSeats: number,
+  tier: SeatPlanTier,
+  quantity: number,
+): SeatBillingLine[] {
+  const existing = Math.max(0, Math.trunc(existingOwnerSeats))
+  const qty = Math.max(0, Math.trunc(quantity))
+  if (qty === 0) return []
 
-  const beforeQty = new Map<string, number>(before.map((l) => [l.billingTier, l.quantity]))
-  const lines: SeatBillingLine[] = []
-  for (const t of TIER_ORDER) {
-    const delta =
-      (after.find((l) => l.billingTier === t)?.quantity ?? 0) - (beforeQty.get(t) ?? 0)
-    if (delta > 0) lines.push({ billingTier: t as SeatPlanTier, quantity: delta })
-  }
-  return lines
+  // The owner seats that SURVIVE the removal are the steady count — for an
+  // owner-tier removal that is the existing count minus what is going. That
+  // operand is the only thing the two directions disagree about: an addition
+  // differences from where the location stands NOW, a removal from where it
+  // will stand AFTER. The difference itself is the same one, taken the same
+  // way round — has (with the seats) minus will-have (without them).
+  const steady = tier === 'owner' ? Math.max(0, existing - qty) : existing
+  const [without, withThem] = planPair(steady, tier, qty)
+  return positiveDelta(planBillingLines(without), planBillingLines(withThem))
 }
 
 // Expand billing lines into one prorated cents figure PER SEAT, in TIER_ORDER
@@ -296,6 +374,72 @@ export async function quoteSeatPurchase(args: {
     paidThroughDate,
     lines: priced.lines,
     billingLines,
+  }
+}
+
+// ── issue 221: quoting a REMOVAL ─────────────────────────────
+// The mirror of quoteSeatPurchase, and deliberately smaller. A removal records
+// no figure — subscription_seats.prorated_cost is the historical record of what
+// that seat cost when it was bought, and a credit does not rewrite history — so
+// there is no renewal anchor to resolve and no per-seat cents to compute. What
+// the removal DOES need is the one thing the old call site got wrong: which
+// price line to credit, and whether that line is worth a Stripe call at all.
+export type SeatRemovalQuote = {
+  // The lines to decrement, with the annual rate so a $0 tier can be skipped
+  // before any Stripe work — same shape and same rule as a purchase's.
+  billingLines: SeatBillingRateLine[]
+}
+
+// CALL ORDER MATTERS, so it is stated here rather than left to the caller to
+// remember: this reads the owner seats that REMAIN ACTIVE and adds the removal
+// back, which means it must run AFTER the seat rows have been marked inactive.
+// /api/seats DELETE writes the row first by design (the seat write is
+// authoritative and is never blocked on billing), so counting what remains is
+// both the natural read and the stable one: re-issuing the same DELETE against
+// an already-inactive seat recomputes the IDENTICAL line, so Stripe replays the
+// first credit through the seat-anchored idempotency key instead of erroring on
+// a key reused with different parameters.
+export async function quoteSeatRemoval(args: {
+  locationId: string
+  tier: SeatPlanTier
+  quantity?: number
+}): Promise<SeatRemovalQuote> {
+  const { locationId, tier } = args
+  const quantity = args.quantity ?? 1
+
+  // Only an owner-tier removal can cross the owner→manager rate boundary, so
+  // every other tier skips this read exactly as quoteSeatPurchase does.
+  let existingOwnerSeats = 0
+  if (tier === 'owner') {
+    const { count } = await supabaseService
+      .from('subscription_seats')
+      .select('id', { count: 'exact', head: true })
+      .eq('location_id', locationId)
+      .eq('tier', 'owner')
+      .eq('status', 'active')
+    // What remains + what we just removed = what the location held.
+    existingOwnerSeats = (count ?? 0) + quantity
+  }
+
+  const lines = decrementalBillingLines(existingOwnerSeats, tier, quantity)
+  if (lines.length === 0) return { billingLines: [] }
+
+  const { data: tierRows } = await supabaseService.from('tier_prices').select('id, price_annual')
+  const annualByTier: Record<string, number> = {}
+  for (const row of (tierRows || []) as any[]) {
+    if (typeof row?.price_annual === 'number') annualByTier[row.id] = row.price_annual
+  }
+
+  return {
+    billingLines: lines.map((l) => {
+      const annual = annualByTier[l.billingTier]
+      const known = typeof annual === 'number' && Number.isFinite(annual) && annual >= 0
+      return {
+        billingTier: l.billingTier,
+        quantity: l.quantity,
+        annualUnitCents: known ? Math.round(annual * 100) : null,
+      }
+    }),
   }
 }
 
