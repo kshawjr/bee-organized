@@ -69,21 +69,33 @@ const ACTIVE_LIFECYCLE = 'active'
  * a paid_through_date of *today* is NOT in the future (isPaidThroughFuture
  * compares strictly, issue 171) — are testable without freezing time.
  *
- * KNOWN FALL-THROUGH, asserted in the tests rather than left to be
- * discovered: a location holding a `stripe_subscription_id` whose
- * `subscription_status` is 'canceled' matches neither `billing_normally`
- * (not active) nor the two no-subscription buckets (it has one), so it lands
- * in `not_live_yet`. Zero rows today; the Stripe webhook does write
- * 'canceled' on customer.subscription.deleted, so it is reachable. Surfacing
- * a canceled subscription as its own state is a product decision, not a
- * derivation one — it needs a sixth chip and belongs with the screen.
+ * A CANCELED subscription is handled by `hasLiveSubscription` above: it falls
+ * to active_not_billing (or owe_money_later inside a prepaid term), not to
+ * the catch-all. See that comment for why it needs no state of its own.
  */
 export function classifyBillingState(
   loc: BillingStateInput,
   now: Date = new Date(),
 ): BillingState {
   const subscriptionStatus = loc.subscription_status ?? null
-  const hasStripeSubscription = !!loc.stripe_subscription_id
+
+  // "Has a subscription" has to mean "has one that will CHARGE", not "has an
+  // id on the row" (issue 226 step 3). A canceled subscription leaves its id
+  // behind — the Stripe webhook writes subscription_status='canceled' on
+  // customer.subscription.deleted and never clears stripe_subscription_id.
+  //
+  // Keyed on the id alone, such a location matched no bucket except the
+  // catch-all, so a live franchise that had just lost its subscription
+  // rendered as "Not live yet" next to a status column reading "Active" —
+  // a self-contradictory row, filed under the one muted chip nobody checks.
+  //
+  // It needs no sixth state. "Live, and nothing is going to charge it" is
+  // precisely what active_not_billing already means, and a canceled
+  // subscription still inside a prepaid term is precisely owe_money_later.
+  // Both buckets now reach it. Zero rows change today — all 15 subscriptions
+  // in production are 'active' — and the test asserts that equivalence.
+  const hasLiveSubscription =
+    !!loc.stripe_subscription_id && subscriptionStatus === 'active'
 
   // 1. The card bounced. Written by the Stripe webhook on
   //    invoice.payment_failed and mirrored from customer.subscription.updated.
@@ -91,9 +103,7 @@ export function classifyBillingState(
   if (subscriptionStatus === 'past_due') return 'payment_failed'
 
   // 2. A live subscription that Stripe reports as active. Nothing to do.
-  if (hasStripeSubscription && subscriptionStatus === 'active') {
-    return 'billing_normally'
-  }
+  if (hasLiveSubscription) return 'billing_normally'
 
   // 3. LIVE, no subscription, but a paid-through date still in the future —
   //    the pre-Stripe cohort and the corporate-sponsored locations. Covered
@@ -109,7 +119,7 @@ export function classifyBillingState(
   //    not_live_yet, and this clause is what puts them there.
   if (
     loc.lifecycle_status === ACTIVE_LIFECYCLE &&
-    !hasStripeSubscription &&
+    !hasLiveSubscription &&
     isPaidThroughFuture(loc.paid_through_date, now)
   ) {
     return 'owe_money_later'
@@ -119,7 +129,7 @@ export function classifyBillingState(
   //    precisely BECAUSE bucket 3 ran first — which is the point: this bucket
   //    fills as prepaid terms expire, one location at a time, and it should
   //    be empty on a healthy day.
-  if (loc.lifecycle_status === ACTIVE_LIFECYCLE && !hasStripeSubscription) {
+  if (loc.lifecycle_status === ACTIVE_LIFECYCLE && !hasLiveSubscription) {
     return 'active_not_billing'
   }
 

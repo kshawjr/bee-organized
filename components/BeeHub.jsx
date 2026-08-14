@@ -100,6 +100,15 @@ import {
 // the one the server writers already agree on (/api/seats POST,
 // addStripePurchasedSeats, /api/admin/invite-owner) instead of restating 2.
 import { MAX_OWNER_SEATS } from "@/lib/seat-plan"
+// issue 226 — billing REALITY (does anything actually charge this location)
+// as opposed to billing intent (payment_source). Ordered classifier; see
+// lib/billing-state.ts for why the order is the design.
+import {
+  BILLING_STATES,
+  BILLING_STATE_LABELS,
+  classifyBillingState,
+  tallyBillingStates,
+} from "@/lib/billing-state"
 // issue 216 — seat availability is defined once, in lib, and mirrors the
 // server gate. Aliased on import so the context methods keep their existing
 // names for every call site while delegating to the shared math.
@@ -185,6 +194,12 @@ const LocationUsersContext = createContext(null)
 //   livePrices: { owner, manager, light, readonly }   // record form for math helpers
 // } or null.
 const TierPricesContext = createContext(null)
+// Exported for tests (issue 226 step 3), same pattern as CurrentUserContext.
+// The Locations table prices from LIVE tier_prices, and the live catalog
+// disagrees with DEFAULT_TIER_PRICES on the Watcher tier — $0 in production,
+// $50 in the fallback — so a test that cannot supply the real prices cannot
+// assert what the screen actually shows.
+export { TierPricesContext }
 
 // Pool-model seat inventory for the current location, populated by App from
 // initialSeats (server-fetched from Supabase subscription_seats via page.tsx).
@@ -24768,35 +24783,237 @@ function fmtMoney(n) { return '$'+n.toLocaleString() }
 //  ADMIN MODULE - Corporate + Super Admin
 // ═══════════════════════════════════════════════════════
 
-function LocationCard({ loc, role, onSelect, onStatusChange, onViewLocation, onDrilldown }) {
-  const sc = CRM_STATUS_CONF[loc.crmStatus]
-  const showRevenue = role==='corporate' || role==='super_admin'
-  // Real per-location user count from the hub_users roster (LocationUsersContext
-  // holds every location's users for elevated viewers); USERS_DATA fallback for
-  // the demo path. Drives the "· N users" subtitle on each location row.
-  const cardUsers = useContext(LocationUsersContext) || USERS_DATA
-  const locUsers = cardUsers.filter(u=>u.locationId===loc.id)
+// ─── LocationsTable (issue 226 step 3) ─────────────────────────────────────
+// Replaces LocationCard's grid. Structure copied from JobberHealthAdmin: a row
+// of count chips over a horizontally-scrolling table, tone-coded pills, one
+// clickable row per record. Deliberately the same shape — an operator who has
+// read one of these screens can read the other.
+//
+// The chips report BILLING REALITY, from lib/billing-state. They are not a
+// second filter axis alongside the old CRM-status chips: lifecycle status is
+// now a COLUMN, because "is this franchise live" and "is anyone charging it"
+// are different questions and the old chip strip could only ask the first.
+
+const BILLING_TONE = {
+  // Two alarms, distinguishable: a failed charge is money lost, an unbilled
+  // active location is money that was never asked for.
+  payment_failed:     { color:'#ef4444', bg:'rgba(239,68,68,0.10)',   border:'rgba(239,68,68,0.28)'   },
+  active_not_billing: { color:'#f97316', bg:'rgba(249,115,22,0.10)',  border:'rgba(249,115,22,0.28)'  },
+  owe_money_later:    { color:'#d97706', bg:'rgba(217,119,6,0.12)',   border:'rgba(217,119,6,0.30)'   },
+  billing_normally:   { color:'#22c55e', bg:'rgba(34,197,94,0.10)',   border:'rgba(34,197,94,0.25)'   },
+  // Muted by request: the largest bucket, and the one that never needs acting
+  // on. Counted so the chips account for every row, styled so it recedes.
+  not_live_yet:       { color:'#8a9e9a', bg:'rgba(138,158,154,0.10)', border:'rgba(138,158,154,0.22)' },
+}
+
+// A location's annual figure comes from calculateSeatTotal over seatLines.
+// ONE way, never a multiply — the co-owner rule (a location's 2nd owner seat
+// bills at the MANAGER rate) lives in lib/seat-plan and is the reason
+// price × count is wrong for any location with two owners. Four separate
+// surfaces restated that arithmetic and all four were wrong; this one asks.
+//
+// seatLines arrives from the server feed (app/_hub-page.tsx via
+// deriveSeatComposition) already in calculateSeatTotal's input shape, so
+// there is nothing to translate and nothing to get wrong.
+function locationAnnualTotal(loc, prices) {
+  const lines = Array.isArray(loc?.seatLines) ? loc.seatLines : []
+  if (lines.length === 0) return null          // no seats ≠ $0/yr — see below
+  return calculateSeatTotal(lines, prices)
+}
+
+// Renewal date for the LIST. Deliberately NOT resolveLocationRenewalDate:
+// that helper falls back to legacyFixedRenewalDate (March 1) when a location
+// has no paid_through_date, which is correct for pricing a seat on a legacy
+// location and would be a fabrication here — it would stamp a confident
+// renewal date on all 34 locations that have never paid for anything.
+// An absent date renders as absent.
+function locationRenewalLabel(loc) {
+  const d = parsePaidThroughDate(loc?.paid_through_date)
+  return d ? formatRenewalDate(d) : null
+}
+
+const seatCompositionTitle = (loc) =>
+  (Array.isArray(loc?.seatLines) ? loc.seatLines : [])
+    .map(l => `${l.count} ${l.tier}${l.count === 1 ? '' : 's'}`)
+    .join(' · ')
+
+// `statusFilter` is the CRM lifecycle status (active / onboarding / pastdue /
+// inactive) and exists ONLY to serve the Dashboard's Locations Overview
+// deep-link — clicking "Onboarding · 34" there has always landed here
+// pre-filtered, and deleting the chip strip would have silently killed that
+// button. It is not a second permanent filter axis: there is no control to
+// SET it here, only a visible pill to clear it, so the screen never holds a
+// filter the operator cannot see.
+export function LocationsTable({
+  locations,
+  onSelect,
+  statusFilter = '',
+  onClearStatusFilter = null,
+  emptyLabel = 'No locations found',
+}) {
+  const [search, setSearch]           = useState('')
+  const [stateFilter, setStateFilter] = useState('')   // '' = all
+  const tierPricesCtx = useContext(TierPricesContext)
+  const livePrices    = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
+
+  // Classify once per location, not once per cell. The chips and the column
+  // read the same map, so a chip count can never disagree with the rows it
+  // filters to — the failure mode that made the old Billing Snapshot wrong.
+  const stateById = useMemo(() => {
+    const m = {}
+    for (const l of locations) m[l.id] = classifyBillingState(l)
+    return m
+  }, [locations])
+
+  const counts = useMemo(() => tallyBillingStates(locations), [locations])
+
+  const filtered = locations.filter(l => {
+    const q = search.trim().toLowerCase()
+    const matchSearch = !q
+      || (l.name || '').toLowerCase().includes(q)
+      || (l.owner || '').toLowerCase().includes(q)
+    const matchState  = !stateFilter  || stateById[l.id] === stateFilter
+    const matchStatus = !statusFilter || l.crmStatus === statusFilter
+    return matchSearch && matchState && matchStatus
+  })
+
+  const statusConf = statusFilter ? CRM_STATUS_CONF[statusFilter] : null
+
+  const TH = { padding:'9px 12px', fontWeight:600, whiteSpace:'nowrap' }
+  const TD = { padding:'10px 12px', verticalAlign:'middle' }
 
   return (
-    <div onClick={()=>onSelect(loc)}
-      style={{ background:'white', borderRadius:'10px', border:`1px solid ${loc.crmStatus==='pastdue'?'rgba(239,68,68,0.2)':loc.crmStatus==='inactive'?'rgba(138,158,154,0.15)':'rgba(0,0,0,0.07)'}`, cursor:'pointer', display:'flex', alignItems:'center', gap:'12px', padding:'11px 14px' }}>
-      {/* Status dot */}
-      <div style={{ width:'8px', height:'8px', borderRadius:'50%', background:sc.color, flexShrink:0 }} />
-      {/* Name + owner */}
-      <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ display:'flex', alignItems:'baseline', gap:'5px' }}>
-          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{loc.name}</p>
-          <span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{loc.state}</span>
+    <div>
+      {/* Count chips — click to filter, click again to clear. */}
+      <div style={{ display:'flex', flexWrap:'wrap', gap:'8px', marginBottom:'14px' }}>
+        {BILLING_STATES.map(key => {
+          const t        = BILLING_TONE[key]
+          const selected = stateFilter === key
+          const muted    = key === 'not_live_yet'
+          return (
+            <button
+              key={key}
+              onClick={()=>setStateFilter(selected ? '' : key)}
+              title={selected ? 'Showing only these — click to clear' : `Show only ${BILLING_STATE_LABELS[key]}`}
+              style={{
+                padding:'8px 12px', borderRadius:'10px', cursor:'pointer', textAlign:'left',
+                fontFamily:'inherit', minWidth:'118px',
+                background: selected ? t.color : t.bg,
+                border:`1px solid ${selected ? t.color : t.border}`,
+                opacity: muted && !selected ? 0.72 : 1,
+              }}
+            >
+              <div style={{ fontSize:'20px', fontWeight:700, lineHeight:1.1, color: selected ? 'white' : t.color }}>
+                {counts[key]}
+              </div>
+              <div style={{ fontSize:'11px', marginTop:'2px', color: selected ? 'rgba(255,255,255,0.92)' : '#5a6e6a' }}>
+                {BILLING_STATE_LABELS[key]}
+              </div>
+            </button>
+          )
+        })}
+        <div style={{ marginLeft:'auto', alignSelf:'flex-end', display:'flex', alignItems:'center', gap:'10px' }}>
+          <span style={{ fontSize:'11px', color:'#8a9e9a' }}>
+            {filtered.length === locations.length
+              ? `${locations.length} location${locations.length === 1 ? '' : 's'}`
+              : `${filtered.length} of ${locations.length}`}
+          </span>
+          {stateFilter && (
+            <button onClick={()=>setStateFilter('')} style={{ padding:'6px 12px', background:'white', border:'1px solid rgba(0,0,0,0.15)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:'pointer' }}>Clear filter</button>
+          )}
         </div>
-        <p style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-          {loc.owner||'No owner'}{locUsers.length>0?` · ${locUsers.length} user${locUsers.length>1?'s':''}`:''}{showRevenue&&loc.collected>0?` · ${fmtMoney(loc.collected)}`:''} 
-        </p>
       </div>
-      {/* Right side */}
-      <div style={{ display:'flex', alignItems:'center', gap:'6px', flexShrink:0 }}>
-        {!loc.jobberConnected&&loc.crmStatus==='active'&&<span style={{ fontSize:'10px', color:'#f59e0b' }}>⚡!</span>}
-        <span style={{ fontSize:'10px', padding:'2px 7px', borderRadius:'20px', background:sc.bg, color:sc.color, fontWeight:600, border:`1px solid ${sc.border}` }}>{sc.icon} {sc.label}</span>
-        <span style={{ fontSize:'14px', color:'#c8d8d4' }}>›</span>
+
+      {/* Arrived from the Dashboard's Locations Overview. Visible, and one
+          click to drop — a filter the operator can't see is a filter that
+          makes the table lie about how many locations exist. */}
+      {statusConf && (
+        <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'12px', padding:'8px 12px', borderRadius:'10px', background:statusConf.bg, border:`1px solid ${statusConf.border}` }}>
+          <span style={{ fontSize:'12px', color:'#4a5e5a' }}>
+            Showing <strong style={{ color:statusConf.color }}>{statusConf.icon} {statusConf.label}</strong> locations only
+          </span>
+          {onClearStatusFilter && (
+            <button onClick={onClearStatusFilter} style={{ marginLeft:'auto', padding:'4px 10px', background:'white', border:'1px solid rgba(0,0,0,0.15)', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:'pointer' }}>Show all</button>
+          )}
+        </div>
+      )}
+
+      <input
+        value={search}
+        onChange={e=>setSearch(e.target.value)}
+        placeholder="Search locations or owners..."
+        style={{ width:'100%', padding:'9px 14px', marginBottom:'12px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', background:'#f7f5f0', outline:'none', boxSizing:'border-box' }}
+      />
+
+      <div style={{ overflowX:'auto', borderRadius:'12px', border:'1px solid rgba(0,0,0,0.08)', background:'white' }}>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'12.5px', minWidth:'760px' }}>
+          <thead>
+            <tr style={{ background:'rgba(0,0,0,0.02)', textAlign:'left', color:'#8a9e9a' }}>
+              <th style={TH}>Location</th>
+              <th style={TH}>Status</th>
+              <th style={TH}>Billing</th>
+              <th style={{ ...TH, textAlign:'right' }}>Seats</th>
+              <th style={TH}>Renews</th>
+              <th style={{ ...TH, textAlign:'right' }}>Per year</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(loc => {
+              const sc      = CRM_STATUS_CONF[loc.crmStatus] || CRM_STATUS_CONF.onboarding
+              const bState  = stateById[loc.id]
+              const bt      = BILLING_TONE[bState]
+              const seats   = Number(loc.seatCount) || 0
+              const annual  = locationAnnualTotal(loc, livePrices)
+              const renews  = locationRenewalLabel(loc)
+              return (
+                <tr
+                  key={loc.id}
+                  onClick={()=>onSelect(loc)}
+                  style={{ borderTop:'1px solid rgba(0,0,0,0.05)', cursor:'pointer' }}
+                >
+                  <td style={TD}>
+                    <div style={{ fontWeight:600, color:'#1a2e2b' }}>
+                      {loc.name}
+                      {loc.state && <span style={{ fontSize:'11px', color:'#8a9e9a', fontWeight:400, marginLeft:'6px' }}>{loc.state}</span>}
+                    </div>
+                    <div style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'1px' }}>
+                      {loc.owner || 'No owner'}
+                    </div>
+                  </td>
+                  <td style={TD}>
+                    <span style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:sc.bg, color:sc.color, border:`1px solid ${sc.border}`, fontWeight:600, whiteSpace:'nowrap' }}>{sc.icon} {sc.label}</span>
+                  </td>
+                  <td style={TD}>
+                    <span style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:bt.bg, color:bt.color, border:`1px solid ${bt.border}`, fontWeight:600, whiteSpace:'nowrap' }}>{BILLING_STATE_LABELS[bState]}</span>
+                  </td>
+                  {/* A location with no seat rows shows an em dash, not 0/$0.
+                      Zero is a MEASUREMENT ("this location bills nothing"),
+                      and it is one a location can genuinely have — an
+                      all-Watcher roster totals $0 because tier_prices prices
+                      Watcher at $0. Printing 0 for "no seats yet" would make
+                      those two indistinguishable on the only screen where
+                      the difference matters. */}
+                  <td style={{ ...TD, textAlign:'right', color: seats ? '#1a2e2b' : '#b0c0bc' }} title={seatCompositionTitle(loc)}>
+                    {seats || '—'}
+                  </td>
+                  <td style={{ ...TD, whiteSpace:'nowrap', color: renews ? '#5a6e6a' : '#b0c0bc' }}>
+                    {renews || '—'}
+                  </td>
+                  <td style={{ ...TD, textAlign:'right', fontWeight: annual === null ? 400 : 600, color: annual === null ? '#b0c0bc' : '#1a2e2b' }}>
+                    {annual === null ? '—' : formatCurrency(annual, { showCents:'never' })}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        {filtered.length === 0 && (
+          <div style={{ padding:'40px', textAlign:'center', color:'#b0c0bc' }}>
+            <div style={{ fontSize:'36px', marginBottom:'12px' }}>🏢</div>
+            <p style={{ fontSize:'15px', fontWeight:500, marginBottom:'4px' }}>{emptyLabel}</p>
+            <p style={{ fontSize:'13px' }}>Try adjusting your search or filter</p>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -31275,7 +31492,11 @@ function SuperAdminLayout({
   const [locations, setLocations] = useState(initialLocations || ALL_LOCATIONS)
   const [selectedLoc, setSelectedLoc]     = useState(null)
   const [drillLoc, setDrillLoc]           = useState(null)
-  const [search, setSearch]               = useState('')
+  // issue 226 step 3: the locations search and the CRM-status chips moved
+  // INTO LocationsTable, which owns both. `statusFilter` survives for one
+  // reason only — the Dashboard's Locations Overview navigates here with a
+  // lifecycle status, and that button predates this screen. LocationsTable
+  // renders it as a clearable pill; nothing here can set it but navigateTo.
   const [statusFilter, setStatusFilter]   = useState('')
   const [showInvite, setShowInvite]       = useState(false)
   const [showAddLocation, setShowAddLocation] = useState(false)
@@ -31320,22 +31541,17 @@ function SuperAdminLayout({
     setSelectedLoc(prev => prev && prev.id === id ? { ...prev, ...fields } : prev)
   }
 
-  const filtered = locations.filter(l => {
-    const q = search.toLowerCase()
-    const matchSearch = !search || l.name.toLowerCase().includes(q) || (l.owner || '').toLowerCase().includes(q)
-    const matchStatus = !statusFilter || l.crmStatus === statusFilter
-    return matchSearch && matchStatus
-  })
-
   // Navigate to a section, optionally triggering a quick action
   function navigateTo(section, action) {
     setActiveSection(section)
     setSidebarOpen(false)
     if (action === 'add')    setShowAddLocation(true)
     if (action === 'invite') setShowInvite(true)
-    if (action && action !== 'add' && action !== 'invite') {
-      setStatusFilter(action)
-    }
+    // A lifecycle status from the Dashboard's Locations Overview. An
+    // action-less navigation CLEARS it, so "View all locations →" means all —
+    // otherwise a stale filter would survive the trip and the table would
+    // quietly show a subset (issue 226 step 3).
+    setStatusFilter(action && action !== 'add' && action !== 'invite' ? action : '')
   }
 
   // === Sidebar config ===
@@ -31484,7 +31700,7 @@ function SuperAdminLayout({
             <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:'20px', gap:'12px' }}>
               <div>
                 <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'3px' }}>Locations</h1>
-                <p style={{ fontSize:'13px', color:'#8a9e9a' }}>{filtered.length} of {locations.length} shown</p>
+                <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Who is being billed, and for what</p>
               </div>
               <div style={{ display:'flex', gap:'8px', flexShrink:0 }}>
                 {canAddLocation && <button onClick={()=>setShowAddLocation(true)} style={ADMIN_BTN_PRIMARY}>+ Add Location</button>}
@@ -31492,41 +31708,12 @@ function SuperAdminLayout({
               </div>
             </div>
 
-            <div style={ADMIN_CARD}>
-              <div style={{ padding:'16px 20px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
-                <input value={search} onChange={e=>{ setSearch(e.target.value); setStatusFilter('') }} placeholder="Search locations or owners..." style={{ width:'100%', padding:'9px 14px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', background:'#f7f5f0', outline:'none', boxSizing:'border-box' }} />
-                <div style={{ display:'flex', gap:'6px', marginTop:'10px', flexWrap:'wrap' }}>
-                  {[{key:'',label:'All'},
-                    ...Object.entries(CRM_STATUS_CONF).map(([k,v])=>({key:k,label:`${v.icon} ${v.label}`}))
-                  ].map(f => (
-                    <button key={f.key} onClick={()=>setStatusFilter(f.key)} style={{ padding:'4px 12px', borderRadius:'20px', cursor:'pointer', border:'1.5px solid', borderColor:statusFilter===f.key?'#1a2e2b':'rgba(0,0,0,0.08)', background:statusFilter===f.key?'#1a2e2b':'white', fontSize:'12px', fontFamily:'inherit', fontWeight:statusFilter===f.key?600:400, color:statusFilter===f.key?'white':'#4a5e5a', flexShrink:0 }}>
-                      {f.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div style={{ padding:'8px' }}>
-                {filtered.length === 0 ? (
-                  <div style={{ padding:'40px', textAlign:'center', color:'#b0c0bc' }}>
-                    <div style={{ fontSize:'36px', marginBottom:'12px' }}>🏢</div>
-                    <p style={{ fontSize:'15px', fontWeight:500, marginBottom:'4px' }}>No locations found</p>
-                    <p style={{ fontSize:'13px' }}>Try adjusting your search or filters</p>
-                  </div>
-                ) : (
-                  <div style={{ display:'grid', gap:'4px' }}>
-                    {filtered.map(loc => (
-                      <LocationCard
-                        key={loc.id} loc={loc} role={role}
-                        onSelect={l=>setSelectedLoc(l)}
-                        onStatusChange={updateStatus}
-                        onViewLocation={onViewLocation}
-                        onDrilldown={()=>setDrillLoc(loc)}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+            <LocationsTable
+              locations={locations}
+              onSelect={l=>setSelectedLoc(l)}
+              statusFilter={statusFilter}
+              onClearStatusFilter={()=>setStatusFilter('')}
+            />
           </div>
         )
 
@@ -31827,8 +32014,8 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
   const [locations, setLocations] = useState(initialLocations || ALL_LOCATIONS)
   const [selectedLoc, setSelectedLoc] = useState(null)
   const [drillLoc, setDrillLoc]   = useState(null)
-  const [search, setSearch]       = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
+  // issue 226 step 3: the locations search + CRM-status chips moved into
+  // LocationsTable, which owns both. Nothing else here filtered locations.
   const [showInvite, setShowInvite] = useState(false)
   const [showAddLocation, setShowAddLocation] = useState(false)
   // Set to a freshly-created location when the operator clicks "Invite Owner
@@ -31884,12 +32071,8 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
     setSelectedLoc(prev=>prev&&prev.id===id?{...prev,...fields}:prev)
   }
 
-  const filtered = locations.filter(l=>{
-    const q = search.toLowerCase()
-    const matchSearch = !search||l.name.toLowerCase().includes(q)||(l.owner||'').toLowerCase().includes(q)
-    const matchStatus = !statusFilter||l.crmStatus===statusFilter
-    return matchSearch&&matchStatus
-  })
+  // issue 226 step 3: `filtered` went with LocationCard — LocationsTable owns
+  // the search and the filter now, in both shells.
 
   const totalRevenue   = locations.reduce((s,l)=>s+l.revenue,0)
   const totalCollected = locations.reduce((s,l)=>s+l.collected,0)
@@ -31936,7 +32119,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
                   className="bee-tab-select"
                   aria-label="Admin section"
                   value={adminTab}
-                  onChange={e=>{ setAdminTab(e.target.value); setSearch('') }}
+                  onChange={e=>setAdminTab(e.target.value)}
                   style={{ width:'100%', padding:'12px 38px 12px 14px', marginTop:'4px', borderRadius:'10px', border:'none', background:'white', color:'#1a2e2b', fontFamily:'inherit', fontWeight:600, cursor:'pointer', appearance:'none', backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%231a2e2b' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat:'no-repeat', backgroundPosition:'right 14px center' }}>
                   {adminTabs.map(t=>(
                     <option key={t.key} value={t.key}>{t.key==='feedback'&&feedbackPending>0?`${t.label} (${feedbackPending})`:t.label}</option>
@@ -31944,7 +32127,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
                 </select>
                 <div className="bee-tab-pills" style={{ display:'flex', gap:'4px', background:'rgba(0,0,0,0.15)', borderRadius:'10px', padding:'3px', marginTop:'4px' }}>
                   {adminTabs.map(t=>(
-                    <button key={t.key} onClick={()=>{ setAdminTab(t.key); setSearch('') }} style={{ position:'relative', flex:1, padding:'7px', borderRadius:'8px', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', fontWeight:adminTab===t.key?600:400, background:adminTab===t.key?'white':'transparent', color:adminTab===t.key?'#1a2e2b':'rgba(168,201,196,0.7)', display:'inline-flex', alignItems:'center', justifyContent:'center', gap:'5px' }}>
+                    <button key={t.key} onClick={()=>setAdminTab(t.key)} style={{ position:'relative', flex:1, padding:'7px', borderRadius:'8px', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', fontWeight:adminTab===t.key?600:400, background:adminTab===t.key?'white':'transparent', color:adminTab===t.key?'#1a2e2b':'rgba(168,201,196,0.7)', display:'inline-flex', alignItems:'center', justifyContent:'center', gap:'5px' }}>
                       <span>{t.label}</span>
                       {t.key==='feedback'&&feedbackPending>0&&(
                         <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', minWidth:'16px', height:'16px', padding:'0 4px', borderRadius:'8px', background:'#ef4444', color:'white', fontSize:'10px', fontWeight:700, lineHeight:1 }}>{feedbackPending}</span>
@@ -32051,39 +32234,13 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
         ) : adminTab==='bin' ? (
           <RecycleBinTab binPeople={binPeople} setBinPeople={setBinPeople} setPeople={setPeople} partners={partners} setPartners={setPartners} locations={initialLocations} />
         ) : (
-        <div style={{ padding:'0 1.25rem 1rem', display:'grid', gap:'10px' }}>
-          {/* Search */}
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search locations or owners..." style={{ width:'100%', padding:'10px 14px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none', boxSizing:'border-box' }} />
-
-          {/* Status filter */}
-          <div style={{ display:'flex', gap:'6px' }}>
-            {[{key:'',label:'All'},
-              ...Object.entries(CRM_STATUS_CONF).map(([k,v])=>({key:k,label:`${v.icon} ${v.label}`}))
-            ].map(f=>(
-              <button key={f.key} onClick={()=>setStatusFilter(f.key)} style={{ padding:'5px 12px', borderRadius:'20px', cursor:'pointer', border:'1.5px solid', borderColor:statusFilter===f.key?'#1a2e2b':'rgba(0,0,0,0.08)', background:statusFilter===f.key?'#1a2e2b':'white', fontSize:'12px', fontFamily:'inherit', fontWeight:statusFilter===f.key?600:400, color:statusFilter===f.key?'white':'#4a5e5a', flexShrink:0 }}>
-                {f.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Location list - compact */}
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'2px' }}>
-            <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{filtered.length} location{filtered.length!==1?'s':''}</p>
-          </div>
-          <div style={{ display:'grid', gap:'4px' }}>
-            {filtered.map(loc=>(
-              <LocationCard
-                key={loc.id}
-                loc={loc}
-                role={role}
-                onSelect={l=>setSelectedLoc(l)}
-                onStatusChange={updateStatus}
-                onViewLocation={onViewLocation}
-                onDrilldown={()=>setDrillLoc(loc)}
-              />
-            ))}
-            {filtered.length===0&&<div style={{ padding:'3rem', textAlign:'center', color:'#b0c0bc' }}>No locations found.</div>}
-          </div>
+        <div style={{ padding:'0 1.25rem 1rem' }}>
+          {/* issue 226 step 3 — the same LocationsTable the elevated shell
+              renders. This screen is the non-elevated /admin fallback and is
+              not expected to be reached, but it must not be the last home of
+              a deleted component: LocationCard, the search box and the
+              CRM-status chips all lived here too, and all three are gone. */}
+          <LocationsTable locations={locations} onSelect={l=>setSelectedLoc(l)} />
         </div>
         )}
     </div>

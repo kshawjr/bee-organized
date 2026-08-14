@@ -235,6 +235,55 @@ describe('owe_money_later vs active_not_billing', () => {
   })
 })
 
+// ── A canceled subscription is not a live one ─────────────────
+// The Stripe webhook writes subscription_status='canceled' and leaves
+// stripe_subscription_id on the row. Keyed on the id alone, such a location
+// fell to not_live_yet — a live franchise rendering as "Not live yet" beside
+// a status column reading "Active". It needs no sixth state: both
+// no-live-subscription buckets reach it correctly.
+describe('canceled subscriptions', () => {
+  const canceled = {
+    lifecycle_status: 'active',
+    subscription_status: 'canceled',
+    stripe_subscription_id: 'sub_x',
+    paid_through_date: null,
+  }
+
+  it('is the alarm when nothing covers it', () => {
+    expect(classifyBillingState(canceled, NOW)).toBe('active_not_billing')
+  })
+
+  it('is a worklist item while a prepaid term still covers it', () => {
+    expect(classifyBillingState({ ...canceled, paid_through_date: '2027-05-01' }, NOW))
+      .toBe('owe_money_later')
+  })
+
+  it('never reads as billing_normally or not_live_yet', () => {
+    for (const paid of [null, '2027-05-01', '2020-01-01']) {
+      const state = classifyBillingState({ ...canceled, paid_through_date: paid }, NOW)
+      expect(state).not.toBe('billing_normally')
+      expect(state).not.toBe('not_live_yet')
+    }
+  })
+
+  it("classifies the same as if the id had been cleared — the id isn't the signal", () => {
+    expect(classifyBillingState(canceled, NOW))
+      .toBe(classifyBillingState({ ...canceled, stripe_subscription_id: null }, NOW))
+  })
+
+  // The change is a no-op on production today: every one of the 15
+  // subscriptions is 'active', so nothing moves bucket.
+  it('changes nothing about the real distribution', () => {
+    expect(tallyBillingStates(FLEET, NOW)).toEqual({
+      payment_failed: 0,
+      billing_normally: 15,
+      owe_money_later: 5,
+      active_not_billing: 0,
+      not_live_yet: 34,
+    })
+  })
+})
+
 describe('order of precedence', () => {
   it('past_due wins over a live, otherwise-healthy subscription', () => {
     const loc = { ...FLEET.find((l) => l.name === 'Boston')!, subscription_status: 'past_due' }
@@ -280,14 +329,6 @@ describe('not_live_yet', () => {
     expect(classifyBillingState(okc, NOW)).toBe('not_live_yet')
     expect(classifyBillingState({ ...okc, lifecycle_status: 'active' }, NOW))
       .toBe('owe_money_later')
-  })
-
-  // KNOWN FALL-THROUGH. A canceled subscription matches neither
-  // billing_normally (not active) nor either no-subscription bucket (it has
-  // one). Zero rows today; the Stripe webhook does write 'canceled'.
-  it('catches a canceled subscription — documented, not intended', () => {
-    const canceled = { lifecycle_status: 'active', subscription_status: 'canceled', stripe_subscription_id: 'sub_x', paid_through_date: null }
-    expect(classifyBillingState(canceled, NOW)).toBe('not_live_yet')
   })
 
   it('handles an empty or field-less input without throwing', () => {
