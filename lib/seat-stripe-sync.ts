@@ -463,14 +463,43 @@ export function unchargedSeatNote(
 // and reading the row still tells you which way it went.
 //
 // The caller decides WHEN a removal earns one, and applies it more narrowly
-// than the add side does — see the allowlist in /api/seats DELETE. Only a
-// credit that a live subscription owed and did not take is a disagreement; a
-// location that was never billed through Stripe owes nothing back.
+// than the add side does — see creditWasOwed() below. Only a credit that a
+// live subscription owed and did not take is a disagreement; a location that
+// was never billed through Stripe owes nothing back.
 export function uncreditedSeatNote(
   reason: SeatPurchaseSkipReason | undefined,
   detail?: string,
 ): string {
   return `${SEAT_BILLING_MISMATCH_MARKER}: seat removed but the credit was NOT applied — ${skipPhrase(reason, detail)}`
+}
+
+// issue 222 — WHICH SKIPS ARE MONEY, DECIDED ONCE.
+//
+// The allowlist was written inline in /api/seats DELETE, where it was the only
+// caller. It no longer is: the scheduled-removal processor credits the same way
+// an immediate removal does, and a second copy of this list is how the two doors
+// start disagreeing about what counts as a lost credit — the exact drift issues
+// 217 through 221 exist to prevent. So the rule moves next to the note it
+// governs and both callers read it here.
+//
+// An ALLOWLIST rather than an exclusion list, so a reason added later has to be
+// considered rather than silently inheriting a note:
+//
+//   stripe_error / no_price / stripe_unconfigured → a live subscription should
+//     have been credited and was not. That is money.
+//   no_subscription / non_paying → this location is not billed through Stripe at
+//     all, so nothing was ever charged for the seat and nothing is owed back. A
+//     note here would be noise in a query whose whole value is that a row in it
+//     means something.
+//   zero_rate → the tier is free. Nothing owed, nothing owed back.
+export const CREDIT_FAILED_REASONS: readonly SeatPurchaseSkipReason[] = [
+  'stripe_error',
+  'no_price',
+  'stripe_unconfigured',
+]
+
+export function creditWasOwed(reason: SeatPurchaseSkipReason | undefined): boolean {
+  return !!reason && CREDIT_FAILED_REASONS.includes(reason)
 }
 
 // The mirror image: money moved and no figure was recorded. Reachable only on

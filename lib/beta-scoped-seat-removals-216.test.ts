@@ -39,6 +39,14 @@ const h = vi.hoisted(() => {
       if (table === 'hub_users') return { data: { role: state.role }, error: null }
       return { data: null, error: null }
     }
+    // issue 222 — the route now credits Stripe after the UPDATE, which reads
+    // the location through getLocationBilling(). Nothing here has a
+    // subscription, so every credit stops at 'no_subscription' and these stay
+    // tests about SCOPE. The credit itself is pinned in the issue 222 file.
+    b.maybeSingle = async () => {
+      state.calls.push({ ...ctx })
+      return { data: null, error: null }
+    }
     // terminal for the UPDATE …select('id')
     b.then = (resolve: any) => {
       state.calls.push({ ...ctx })
@@ -66,6 +74,10 @@ const req = (body: any) =>
 
 const updateCall = () => h.state.calls.find((c: any) => c.op === 'update')
 
+// issue 222 — the UPDATE now returns the columns the credit needs, so the rows
+// these tests hand back carry them too.
+const SEAT_ROW = (id: string) => ({ id, location_id: 'loc-ftl', tier: 'manager', notes: null })
+
 beforeEach(() => { h.reset() })
 
 describe('issue 216 E — the removals processor is scoped', () => {
@@ -84,7 +96,10 @@ describe('issue 216 E — the removals processor is scoped', () => {
   })
 
   it('scopes the UPDATE to exactly the confirmed seat ids', async () => {
-    h.state.updateResult = { data: [{ id: 's1' }, { id: 's2' }], error: null }
+    h.state.updateResult = {
+      data: [SEAT_ROW('s1'), SEAT_ROW('s2')],
+      error: null,
+    }
     const res = await POST(req({ seat_ids: ['s1', 's2'] }))
     expect(res.status).toBe(200)
     const c = updateCall()
@@ -102,7 +117,7 @@ describe('issue 216 E — the removals processor is scoped', () => {
 
   it('reports seats that were requested but not eligible', async () => {
     // asked for three, only one was actually due
-    h.state.updateResult = { data: [{ id: 's1' }], error: null }
+    h.state.updateResult = { data: [SEAT_ROW('s1')], error: null }
     const res = await POST(req({ seat_ids: ['s1', 's2', 's3'] }))
     const j = await res.json()
     expect(j.removed_count).toBe(1)

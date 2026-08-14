@@ -18,6 +18,7 @@ import { supabaseService } from '@/lib/supabase-service'
 import {
   applySeatPurchaseToStripe,
   applySeatRemovalToStripe,
+  creditWasOwed,
   unchargedSeatNote,
   uncreditedSeatNote,
   unrecordedChargeNote,
@@ -523,20 +524,13 @@ export async function DELETE(request: NextRequest) {
     // purchase path notes every skip because a purchase RECORDS A FIGURE — a
     // seat that says it cost $400 on a location nobody billed is a real
     // disagreement. A removal records nothing, so a skip is only a
-    // disagreement when a credit was genuinely owed and failed to land. An
-    // allowlist rather than an exclusion list, so a reason added later has to
-    // be considered rather than silently inheriting a note:
+    // disagreement when a credit was genuinely owed and failed to land.
     //
-    //   stripe_error / no_price / stripe_unconfigured → a live subscription
-    //     should have been credited and was not. That is money.
-    //   no_subscription / non_paying → this location is not billed through
-    //     Stripe at all, so nothing was ever charged for this seat and nothing
-    //     is owed back. A note here would be noise in a query whose whole value
-    //     is that a row means something.
-    //   zero_rate → the tier is free. Nothing owed, nothing owed back.
-    const CREDIT_FAILED_REASONS = ['stripe_error', 'no_price', 'stripe_unconfigured']
-    const uncredited = skipped?.reason && CREDIT_FAILED_REASONS.includes(skipped.reason)
-      ? uncreditedSeatNote(skipped.reason, skipped.detail)
+    // issue 222 — the allowlist itself moved to lib/seat-stripe-sync, next to
+    // the note it governs, because the scheduled-removal processor now applies
+    // the same rule and a second copy is how the two doors start disagreeing.
+    const uncredited = creditWasOwed(skipped?.reason)
+      ? uncreditedSeatNote(skipped!.reason, skipped!.detail)
       : null
     // A DELETE re-issued against an already-inactive seat recomputes the same
     // line and the same note; appending it twice would make the row harder to

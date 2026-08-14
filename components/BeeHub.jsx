@@ -30122,7 +30122,7 @@ export function ProcessRemovalsCard() {
                   style={{ padding:'10px 18px', background: selectedCount === 0 ? '#e5e7eb' : '#d97706', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color: selectedCount === 0 ? '#9ca3af' : 'white', cursor: selectedCount === 0 ? 'not-allowed' : 'pointer' }}>
                   {selectedCount === 0 ? 'Select seats to remove' : `Remove ${selectedCount} selected seat${selectedCount !== 1 ? 's' : ''}`}
                 </button>
-                <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'8px' }}>Marks the selected seats as inactive. Anyone holding one loses access. No mid-cycle credits.</p>
+                <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'8px' }}>Marks the selected seats as inactive. Anyone holding one loses access. The location&rsquo;s subscription is credited on its next invoice &mdash; no mid-cycle refund.</p>
               </>
             )
           )}
@@ -30153,11 +30153,23 @@ export function ProcessRemovalsCard() {
                       {result.skipped_ids.length} selected seat{result.skipped_ids.length !== 1 ? 's were' : ' was'} skipped — no longer due or already removed.
                     </p>
                   )}
+                  {/* issue 222 — the removal credits the location's Stripe
+                      subscription, and the seat row is written before that
+                      call. A credit that was owed and did not land leaves the
+                      seat gone and the money not returned, so the operator is
+                      told here rather than finding out at renewal. The seat
+                      rows also carry the issue 219 note:
+                      select … from subscription_seats where notes ilike '%issue 219%' */}
+                  {result.billing?.uncredited_seat_ids?.length > 0 && (
+                    <p style={{ fontSize:'12px', color:'#b91c1c', lineHeight:1.5, marginTop:'8px', fontWeight:600 }}>
+                      ⚠ {result.billing.uncredited_seat_ids.length} seat{result.billing.uncredited_seat_ids.length !== 1 ? 's were' : ' was'} removed but the Stripe credit did not apply. The seats are gone; the billing line still needs fixing.
+                    </p>
+                  )}
                 </>
               ) : (
                 <>
                   <p style={{ fontSize:'13px', color:'#4a5e5a', marginBottom:'14px', lineHeight:1.55 }}>
-                    This will mark the seats below as inactive. Anyone holding one loses access to Bee Hub. This action cannot be undone — seats can be re-added later if needed.
+                    This will mark the seats below as inactive. Anyone holding one loses access to Bee Hub. This action cannot be undone — seats can be re-added later if needed. Each location&rsquo;s subscription is credited for what its seats were charged; Stripe applies it to the next invoice.
                   </p>
                   <div style={{ background:'rgba(0,0,0,0.03)', border:'1px solid rgba(0,0,0,0.08)', borderRadius:'10px', overflow:'hidden', marginBottom:'14px' }}>
                     {selectedItems.map((item, idx) => (
