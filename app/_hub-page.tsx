@@ -29,9 +29,9 @@ import {
 } from '@/lib/hub-scope'
 import { buildAllOverview } from '@/lib/hub-all-overview'
 import { applyLeadActiveFilter, fetchSuppressedLeadIds } from '@/lib/lead-suppression'
-// issue 226 step 1 — the catalog's tier order, so per-location seat lines are
-// emitted in the same order every pricing surface already uses. Pure constant.
-import { TIER_ORDER } from '@/lib/seat-plan'
+// issue 226 step 2 — per-location seat composition. The derivation moved to
+// lib/billing-state.ts so it could be tested; this is its only caller.
+import { deriveSeatComposition } from '@/lib/billing-state'
 import { originalEngagementIds } from '@/components/hive/shared/engagementStatus'
 import BeeHub from '@/components/BeeHub'
 
@@ -822,6 +822,23 @@ export default async function HubPage({
         // may have been open for an hour. Both readers are deliberate.
         'id, name, address, city, state, zip, phone, email, timezone, reviews_link, calendar_link, rate_per_hour, sender_name, send_from_email, reply_to_email, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, stripe_customer_id, stripe_subscription_id, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, token_expiry, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at, corporate_sponsorship_started_at, corporate_sponsorship_ends_at, slack_connected, slack_team_name, slack_channel_name'
       )
+      // issue 226 step 2 — loc_other is a ROUTING BUCKET, not a franchise. It
+      // holds leads that arrived without a resolvable location until someone
+      // routes them; it has no owner, no seats, no invites, and will never be
+      // billed. The default-scope query above already refuses to land an
+      // elevated user in it (:457); this stops it appearing in the roster at
+      // all, so it cannot be counted, filtered, sorted or acted on as though
+      // it were a location. 55 rows become 54.
+      //
+      // Verified before removing (read-only, 2026-08-14): 0 hub_users, 0
+      // subscription_seats, 0 pending_invites. Its 8 leads are UNAFFECTED —
+      // the needs-transfer queue fetches them by slug in its own query
+      // (see LOC_OTHER_SLUG below), not from this roster.
+      //
+      // Known consequence, accepted: 'Other' disappears from the location
+      // PICKER too, so an elevated user can no longer scope into it. The
+      // transfer queue is the surface for those leads and does not require it.
+      .neq('location_id', LOC_OTHER_SLUG)
       .order('name', { ascending: true })
 
     if (locsErr) {
@@ -882,34 +899,12 @@ export default async function HubPage({
       primaryByUserId[s.user_id] = !!s.is_primary
     })
 
-    // Per-location seat composition, emitted in lib/subscription-math's
-    // SeatLine shape ({ tier, count }) so calculateSeatTotal can price it
-    // without a translation step, and ordered by TIER_ORDER so the rows are
-    // stable across renders. Nothing reads this yet — it is the data the
-    // consolidated locations table (issue 226 step 3) is built on.
-    const seatTierCountByLoc: Record<string, Record<string, number>> = {}
-    ;(seatRows || []).forEach((s: any) => {
-      if (!s.location_id || !s.tier) return
-      const byTier = (seatTierCountByLoc[s.location_id] ||= {})
-      byTier[s.tier] = (byTier[s.tier] || 0) + 1
-    })
-    const seatLinesByLoc: Record<string, { tier: string; count: number }[]> = {}
-    const seatCountByLoc: Record<string, number> = {}
-    Object.entries(seatTierCountByLoc).forEach(([locId, byTier]) => {
-      seatLinesByLoc[locId] = Object.entries(byTier)
-        .sort(([a], [b]) => {
-          // Known tiers in catalog order; anything unrecognised sorts last,
-          // alphabetically, rather than vanishing.
-          const ia = TIER_ORDER.indexOf(a)
-          const ib = TIER_ORDER.indexOf(b)
-          if (ia === -1 && ib === -1) return a.localeCompare(b)
-          if (ia === -1) return 1
-          if (ib === -1) return -1
-          return ia - ib
-        })
-        .map(([tier, count]) => ({ tier, count }))
-      seatCountByLoc[locId] = Object.values(byTier).reduce((n, c) => n + c, 0)
-    })
+    // Per-location seat composition, in calculateSeatTotal's input shape and
+    // ordered by the tier catalog. The derivation itself lives in
+    // lib/billing-state.ts (issue 226 step 2) — it was inline here in step 1,
+    // where being inside a server component made it untestable.
+    const { seatLinesByLocation, seatCountByLocation } =
+      deriveSeatComposition(seatRows || [])
 
     // ownersByLoc now holds the full owner roster per location (up to 2),
     // each marked with is_primary, plus a resolved `primary` and display
@@ -988,8 +983,8 @@ export default async function HubPage({
         // ones. `seatLines` is calculateSeatTotal's input shape. No consumer
         // yet — a location with no seat rows gets [] / 0, not undefined, so
         // the eventual reader never needs a null check.
-        seatLines: seatLinesByLoc[row.id] || [],
-        seatCount: seatCountByLoc[row.id] || 0,
+        seatLines: seatLinesByLocation[row.id] || [],
+        seatCount: seatCountByLocation[row.id] || 0,
         // DB stores address parts separately; combine for display in the admin
         // location cards. The Settings editor reads street/city/state/zip
         // below instead — it persists each to its own column (#93), so it must
