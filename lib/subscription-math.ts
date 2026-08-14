@@ -16,6 +16,45 @@ export const DAYS_PER_YEAR = 365
 
 export type PaymentSource = 'direct' | 'prepaid_corporate' | 'corporate_sponsored'
 
+// issue 216 — the payment_source values locations.payment_source actually
+// stores, plus 'none' for a location corporate hasn't classified yet.
+//
+// The admin Billing Snapshot kept its own bucket keys — corporate / direct /
+// sponsored / none — and none of the corporate ones matched the column. Both
+// corporate flavours failed the key lookup and fell into 'none', so a card
+// that hides zero rows had never once rendered "Corporate-funded" or
+// "Sponsored", and every corporate location was reported as unconfigured.
+// Counting lives here now so a display can't invent its own vocabulary.
+export const PAYMENT_SOURCE_KEYS = [
+  'prepaid_corporate',
+  'corporate_sponsored',
+  'direct',
+  'none',
+] as const
+
+export type PaymentSourceKey = (typeof PAYMENT_SOURCE_KEYS)[number]
+
+// Tally locations by payment_source. Anything absent, null, or unrecognised
+// counts as 'none' — an unknown value is genuinely unconfigured, and the
+// fallback must never silently absorb a value we DO know (which is exactly
+// what the old four-key object did).
+export function bucketByPaymentSource(
+  locations: Array<{ payment_source?: string | null }>,
+): Record<PaymentSourceKey, number> {
+  const counts = {
+    prepaid_corporate: 0,
+    corporate_sponsored: 0,
+    direct: 0,
+    none: 0,
+  } as Record<PaymentSourceKey, number>
+  for (const l of locations || []) {
+    const key = (l?.payment_source || 'none') as PaymentSourceKey
+    if (Object.prototype.hasOwnProperty.call(counts, key)) counts[key]++
+    else counts.none++
+  }
+  return counts
+}
+
 export type SeatLine = { tier: TierKey; count: number }
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24

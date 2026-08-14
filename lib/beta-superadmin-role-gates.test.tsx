@@ -66,7 +66,11 @@ describe('role gates — Content restored for corporate', () => {
   })
 })
 
-describe('role gates — Renewals decision (KEEP corporate access)', () => {
+// issue 216 renamed this section: it never processed renewals — Stripe does
+// that — it retires seats an owner scheduled for removal. Key and label both
+// moved to 'removals' / 'Seat Removals'. The ROLE DECISION below is unchanged
+// and still the point of these assertions: corporate keeps access to it.
+describe('role gates — Seat Removals decision (KEEP corporate access)', () => {
   const billing = groups.slice(
     groups.indexOf("header: 'Billing'"),
     groups.indexOf("header: 'My Account'"),
@@ -78,9 +82,9 @@ describe('role gates — Renewals decision (KEEP corporate access)', () => {
     )
   })
 
-  it('Renewals is NOT super_admin-wrapped; Conversions and Pricing are', () => {
-    // Renewals: a bare item, visible to corporate.
-    expect(billing).toMatch(/^\s*\{ key:'renewals',\s*label:'Renewals',\s*icon:'🕐' \},\s*$/m)
+  it('Seat Removals is NOT super_admin-wrapped; Conversions and Pricing are', () => {
+    // Seat Removals: a bare item, visible to corporate.
+    expect(billing).toMatch(/^\s*\{ key:'removals',\s*label:'Seat Removals',\s*icon:'🕐' \},\s*$/m)
     // Conversions / Pricing: individually gated.
     expect(billing).toMatch(/\.\.\.\(role === 'super_admin' \? \[\{ key:'conversions',/)
     expect(billing).toMatch(/\.\.\.\(role === 'super_admin' \? \[\{ key:'pricing',/)

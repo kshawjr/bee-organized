@@ -93,7 +93,22 @@ import {
   prorateToRenewal,
   isPaidThroughFuture,
   parsePaidThroughDate,
+  bucketByPaymentSource,
 } from "@/lib/subscription-math"
+// issue 216 — the owner-seat cap is a billing rule, not a UI constant. Import
+// the one the server writers already agree on (/api/seats POST,
+// addStripePurchasedSeats, /api/admin/invite-owner) instead of restating 2.
+import { MAX_OWNER_SEATS } from "@/lib/seat-plan"
+// issue 216 — seat availability is defined once, in lib, and mirrors the
+// server gate. Aliased on import so the context methods keep their existing
+// names for every call site while delegating to the shared math.
+import {
+  seatCountsByTier as seatCounts,
+  availableSeatsForTier,
+  availableSeatRows,
+  pendingInviteCount as pendingInvitesAtTier,
+  invitableSeatIds as invitableIds,
+} from "@/lib/seat-availability"
 import { importEstimateLine, SAMPLE_MODE_MIN_CLIENTS } from "@/lib/import-estimate"
 // Pure phase/park vocabulary shared with the import route — lib/import-phase
 // only (never lib/jobber-import here: that module instantiates the
@@ -180,10 +195,15 @@ const TierPricesContext = createContext(null)
 //   setSeats: (next) => void,
 //   pendingInvites: Array<{ id, tier, accepted_at, ... }>,
 //   setPendingInvites: (next) => void,
-//   seatCountsByTier: () => Record<tier, { total, assigned, available }>,
+//   seatCountsByTier: () => Record<tier, { total, assigned, available, scheduled, pending }>,
+//     `available` is pending-aware (issue 216) — it means "seatable today",
+//     matching the server gate; `pending` is how many paid seats are held by
+//     an outstanding invite, so a surface can explain the difference.
 //   availableSeatsByTierWithPending: (tier) => number  // unassigned active - pending at tier
+//   pendingInviteCount: (tier) => number
+//   invitableSeatIds: () => Set<seatId>   // the rows an invite may target now
 // } or null.
-const SeatsContext = createContext(null)
+export const SeatsContext = createContext(null)
 
 // Partners + Contacts CRM (Supabase partners table), populated by App from
 // initialPartners. State ownership stays in App's useState + prop threading to
@@ -18981,7 +19001,7 @@ function SmsVoiceInfoModal({ onClose }) {
 }
 
 
-function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, profile=null, onGoToLocation=()=>{}, dbLocationIdOverride=null }) {
+export function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, profile=null, onGoToLocation=()=>{}, dbLocationIdOverride=null, paidThroughOverride=null }) {
   // Real hub_users from context when page.tsx populates it; otherwise mock.
   // Initializer reads context once (snapshot at mount) — subsequent invites
   // mutate local state via addUser/removeUser, which is the existing pattern.
@@ -18996,6 +19016,15 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
   // design) — dbLocationIdOverride carries the switcher-picked location's
   // uuid so invite/remove/roster controls work for them too.
   const dbLocationId     = currentLocationCtx?.id || dbLocationIdOverride || null
+  // issue 216 — the location's OWN renewal anchor, resolved the same way and
+  // for the same reason as dbLocationId above: currentLocationCtx is null by
+  // design in a super_admin view, so without the override the seat modals
+  // below fell through to legacyFixedRenewalDate() — the next fixed March 1 —
+  // and prorated a mid-year seat against a date the location does not renew
+  // on. Fort Lauderdale renews 2027-08-14; that fallback quoted $219 against
+  // Mar 1 where the correct figure is $400. This is money on screen, so the
+  // anchor travels with the id it belongs to.
+  const dbPaidThrough    = currentLocationCtx?.paid_through_date ?? paidThroughOverride ?? null
   const [removing, setRemoving]         = useState(null)
   const [users, setUsers] = useState(()=>{
     const fromData = usersSource.filter(u=>u.locationId===locationId)
@@ -19259,27 +19288,52 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
           )
         })}
         {/* Ghost rows — pooled seats nobody occupies yet. One row per open
-            seat so "what am I paying for" is answered on the roster itself;
-            Invite opens the modal with this tier preselected. Scheduled
-            seats are excluded (they're not invitable — see seat helpers). */}
-        {(seatsCtx?.seats || [])
-          .filter(sr => sr.status === 'active' && !sr.user_id && !sr.scheduled_removal_at)
-          .map(sr => {
-            const meta = SUBSCRIPTION_TIER_META.find(m=>m.key===sr.tier)
-            return (
-              <div key={sr.id} style={{ background:'rgba(26,46,43,0.02)', borderRadius:'10px', marginBottom:'6px', border:'1px dashed rgba(0,0,0,0.14)', display:'flex', alignItems:'center', gap:'12px', padding:'11px 14px' }}>
-                <div style={{ width:'36px', height:'36px', borderRadius:'50%', border:'1.5px dashed rgba(138,158,154,0.6)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'15px', flexShrink:0 }}>{meta?.icon || '🪑'}</div>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <p style={{ fontSize:'13px', fontWeight:600, color:'#4a5e5a', marginBottom:'2px' }}>Open {meta?.name || sr.tier} seat</p>
-                  <p style={{ fontSize:'10.5px', color:'#8a9e9a' }}>Paid for and ready — invite someone to fill it</p>
+            seat so "what am I paying for" is answered on the roster itself.
+            Scheduled seats are excluded (they're not invitable — see seat
+            helpers).
+
+            issue 216 — a seat held by an outstanding invite is still PAID
+            FOR but is NOT seatable: /api/hub_users/invite counts the same
+            pending invites and 409s. The row therefore stays visible (the
+            owner is paying for it and deserves to see it) but loses its
+            Invite button and says who is holding it. Subtracting the row
+            entirely would have matched the server's number while hiding a
+            seat the owner bought — a different lie, not a fix. */}
+        {(() => {
+          const invitable = seatsCtx?.invitableSeatIds?.() ?? null
+          return (seatsCtx?.seats || [])
+            .filter(sr => sr.status === 'active' && !sr.user_id && !sr.scheduled_removal_at)
+            .map(sr => {
+              const meta = SUBSCRIPTION_TIER_META.find(m=>m.key===sr.tier)
+              // No context (storybook / mock harness) → behave as before.
+              const canInvite = invitable ? invitable.has(sr.id) : true
+              return (
+                <div key={sr.id}
+                  data-testid={canInvite ? 'open-seat-row' : 'reserved-seat-row'}
+                  style={{ background: canInvite ? 'rgba(26,46,43,0.02)' : 'rgba(245,158,11,0.05)', borderRadius:'10px', marginBottom:'6px', border:`1px dashed ${canInvite ? 'rgba(0,0,0,0.14)' : 'rgba(245,158,11,0.35)'}`, display:'flex', alignItems:'center', gap:'12px', padding:'11px 14px' }}>
+                  <div style={{ width:'36px', height:'36px', borderRadius:'50%', border:`1.5px dashed ${canInvite ? 'rgba(138,158,154,0.6)' : 'rgba(245,158,11,0.5)'}`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'15px', flexShrink:0 }}>{canInvite ? (meta?.icon || '🪑') : '📬'}</div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <p style={{ fontSize:'13px', fontWeight:600, color:'#4a5e5a', marginBottom:'2px' }}>Open {meta?.name || sr.tier} seat</p>
+                    <p style={{ fontSize:'10.5px', color: canInvite ? '#8a9e9a' : '#92400e' }}>
+                      {canInvite
+                        ? 'Paid for and ready — invite someone to fill it'
+                        : 'Held by an invitation that hasn’t been accepted yet'}
+                    </p>
+                  </div>
+                  {canInvite ? (
+                    <button onClick={()=>{ setInvitePresetTier(sr.tier); setShowInvite(true) }}
+                      style={{ flexShrink:0, padding:'5px 12px', background:'white', border:'1px solid rgba(26,46,43,0.2)', borderRadius:'7px', fontSize:'11px', fontWeight:600, color:'#1a2e2b', cursor:'pointer', fontFamily:'inherit' }}>
+                      Invite →
+                    </button>
+                  ) : (
+                    <span style={{ flexShrink:0, padding:'3px 9px', background:'rgba(245,158,11,0.12)', border:'1px solid rgba(245,158,11,0.3)', borderRadius:'10px', fontSize:'10px', fontWeight:700, color:'#92400e', textTransform:'uppercase', letterSpacing:'0.4px' }}>
+                      Invite pending
+                    </span>
+                  )}
                 </div>
-                <button onClick={()=>{ setInvitePresetTier(sr.tier); setShowInvite(true) }}
-                  style={{ flexShrink:0, padding:'5px 12px', background:'white', border:'1px solid rgba(26,46,43,0.2)', borderRadius:'7px', fontSize:'11px', fontWeight:600, color:'#1a2e2b', cursor:'pointer', fontFamily:'inherit' }}>
-                  Invite →
-                </button>
-              </div>
-            )
-          })}
+              )
+            })
+        })()}
       </div>
 
       {/* One-shot follow-through after "Remove access": the seat is free but
@@ -19309,6 +19363,7 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
         <ScheduleRemovalModal
           seat={freedSeat}
           tierMeta={SUBSCRIPTION_TIER_META.find(m=>m.key===freedSeat.tier)}
+          paidThroughDate={dbPaidThrough}
           onClose={()=>setSchedulingFreedSeat(false)}
           onScheduled={(updated)=>{ seatsCtx?.setSeats?.(prev=>prev.map(sr=>sr.id===updated.id?updated:sr)); setSchedulingFreedSeat(false); setFreedSeat(null) }}
         />
@@ -19318,6 +19373,7 @@ function TeamSection({ locationId='loc1', settings=null, updateLocation=()=>{}, 
         <InviteTeamMemberModal
           locationId={dbLocationId}
           initialTier={invitePresetTier}
+          paidThroughDate={dbPaidThrough}
           onClose={()=>{ setShowInvite(false); setInvitePresetTier(null) }}
           onInviteCreated={()=>{ /* no-op: invite is pending until accept, so don't add to users list yet */ }}
         />
@@ -21367,10 +21423,19 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           // (Dispatch 1). Falls back to a single owner seat if context isn't
           // mounted — keeps SettingsScreen renderable in isolation (storybook,
           // legacy mock harnesses) where SeatsContext.Provider isn't wrapped.
-          const seatCountsByTier = seatsCtx?.seatCountsByTier?.() ?? { owner:{ total:1, assigned:1, available:0 } }
+          const seatCountsByTier = seatsCtx?.seatCountsByTier?.() ?? { owner:{ total:1, assigned:1, available:0, pending:0 } }
           const tierKeysWithSeats = SUBSCRIPTION_TIER_META.map(m=>m.key).filter(k => (seatCountsByTier[k]?.total||0) > 0)
           const hasAnySeats = tierKeysWithSeats.length > 0
-          const billingAnnual = Object.entries(seatCountsByTier).reduce((sum, [tier, c]) => sum + getTierPrice(tier) * (c?.total||0), 0)
+          // issue 216 — this was a flat tier × price reduce, which ignored the
+          // co-owner rule and overcharged the display by the owner/manager
+          // spread on any location with two owner seats (550×2 + 400 = $1,500
+          // where the truth is 550 + 400 + 400 = $1,350 — and $400 is already
+          // what sits in that seat's prorated_cost). calculateSeatTotal owns
+          // that rule for every other pricing surface; it owns it here now too.
+          const billingAnnual = calculateSeatTotal(
+            Object.entries(seatCountsByTier).map(([tier, c]) => ({ tier, count: c?.total || 0 })),
+            livePrices,
+          )
           // issue 162: renewal reflects the location's OWN anniversary
           // (paid_through_date, the mirror of Stripe's period end), not a
           // fixed March 1. Legacy fallback only when no paid_through exists.
@@ -21425,7 +21490,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               </div>
 
               {/* Roster hero — TeamSection renders its own header + invite. */}
-              <TeamSection locationId={locationId} settings={settings} updateLocation={updateLocation} profile={settings.profile} onGoToLocation={()=>setActiveSection('location')} dbLocationIdOverride={resolvedBillingLocationId} />
+              {/* issue 216 — paidThroughOverride rides alongside
+                  dbLocationIdOverride for the same super_admin reason: the
+                  seat modals TeamSection owns price against it. */}
+              <TeamSection locationId={locationId} settings={settings} updateLocation={updateLocation} profile={settings.profile} onGoToLocation={()=>setActiveSection('location')} dbLocationIdOverride={resolvedBillingLocationId} paidThroughOverride={billingPaidThrough} />
 
               {/* Billing details footer — collapsed so the roster stays the
                   hero; a legacy 'billing' deep-link opens it expanded. Gated
@@ -21473,8 +21541,13 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                             <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>
                               {c.total} {meta.name}{c.total !== 1 ? 's' : ''}
                             </p>
+                            {/* issue 216 — `available` is now pending-aware,
+                                so it agrees with the roster, the invite modal
+                                and the server. `pending` is broken out beside
+                                it so a paid seat held by an unaccepted invite
+                                reads as reserved rather than vanishing. */}
                             <p style={{ fontSize:'10.5px', color:'#8a9e9a' }}>
-                              {c.assigned} assigned · {c.available} available{c.scheduled ? <span style={{ color:'#d97706' }}> · {c.scheduled} ending at removal date</span> : ''}
+                              {c.assigned} assigned · {c.available} available{c.pending ? <span style={{ color:'#92400e' }}> · {c.pending} awaiting an invite reply</span> : ''}{c.scheduled ? <span style={{ color:'#d97706' }}> · {c.scheduled} ending at removal date</span> : ''}
                             </p>
                           </div>
                         </div>
@@ -29924,7 +29997,7 @@ function VariableReference() {
 // Super_admin UI for the scheduled seat removal job (Phase 3A).
 // GET /api/admin/scheduled-removals → preview list.
 // POST /api/admin/process-scheduled-removals → execute removal.
-function ProcessRemovalsCard() {
+export function ProcessRemovalsCard() {
   const [preview, setPreview]       = React.useState(null)
   const [loading, setLoading]       = React.useState(false)
   const [error, setError]           = React.useState('')
@@ -29932,6 +30005,12 @@ function ProcessRemovalsCard() {
   const [processing, setProcessing] = React.useState(false)
   const [result, setResult]         = React.useState(null)
   const [procError, setProcError]   = React.useState('')
+  // issue 216 — the operator picks the rows. Selection starts as "everything
+  // currently due" (the common case is still process-them-all) but every row
+  // can be declined, and only the checked ids are sent. The seat ids leaving
+  // here are the ones that were on screen, so the preview is a contract
+  // rather than an estimate of what a re-derived server-side sweep will hit.
+  const [selectedIds, setSelectedIds] = React.useState([])
 
   const load = React.useCallback(async () => {
     setLoading(true)
@@ -29941,6 +30020,7 @@ function ProcessRemovalsCard() {
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`)
       setPreview(j)
+      setSelectedIds((j.items || []).map(it => it.seat_id))
     } catch (err) {
       setError(err?.message || 'Could not load preview')
     } finally {
@@ -29950,13 +30030,24 @@ function ProcessRemovalsCard() {
 
   React.useEffect(() => { load() }, [load])
 
+  function toggleSeat(seatId) {
+    setSelectedIds(prev =>
+      prev.includes(seatId) ? prev.filter(id => id !== seatId) : [...prev, seatId]
+    )
+  }
+
   async function runProcess() {
+    if (selectedIds.length === 0) return
     setProcessing(true)
     setProcError('')
     try {
-      const res = await fetch('/api/admin/process-scheduled-removals', { method: 'POST' })
+      const res = await fetch('/api/admin/process-scheduled-removals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seat_ids: selectedIds }),
+      })
       const j = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`)
+      if (!res.ok) throw new Error(j.message || j.error || `HTTP ${res.status}`)
       setResult(j)
       load()
     } catch (err) {
@@ -29968,6 +30059,8 @@ function ProcessRemovalsCard() {
 
   const count = preview?.count ?? 0
   const items = preview?.items ?? []
+  const selectedItems = items.filter(it => selectedIds.includes(it.seat_id))
+  const selectedCount = selectedItems.length
   const TIER_LABELS = { owner: 'Owner', manager: 'Hive Manager', light: 'Worker Bee', readonly: 'Honey Watcher' }
 
   return (
@@ -29977,7 +30070,7 @@ function ProcessRemovalsCard() {
           <span style={{ fontSize:'20px' }}>🕐</span>
           <div style={{ flex:1 }}>
             <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b' }}>Scheduled Seat Removals</p>
-            <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'1px' }}>Process any seats scheduled for removal up to today's date (UTC)</p>
+            <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'1px' }}>Retire seats an owner scheduled for removal, up to today (UTC). Stripe handles renewals — this doesn’t.</p>
           </div>
           <button onClick={load} title="Refresh" style={{ background:'none', border:'none', cursor:'pointer', fontSize:'16px', color:'#8a9e9a', padding:'4px 6px' }}>↻</button>
         </div>
@@ -29996,24 +30089,39 @@ function ProcessRemovalsCard() {
               <>
                 <p style={{ fontSize:'13px', color:'#1a2e2b', marginBottom:'10px' }}>
                   <strong>{count}</strong> seat{count !== 1 ? 's' : ''} scheduled for removal on or before today.
+                  {' '}<span style={{ color:'#8a9e9a' }}>{selectedCount} of {count} selected.</span>
                 </p>
+                {/* issue 216 — one checkbox per seat. Removing a seat logs its
+                    holder out, so the operator gets a per-row decision rather
+                    than one button that acts on everything due everywhere. */}
                 <div style={{ background:'rgba(217,119,6,0.05)', border:'1px solid rgba(217,119,6,0.2)', borderRadius:'10px', overflow:'hidden', marginBottom:'14px' }}>
-                  {items.map((item, idx) => (
-                    <div key={item.seat_id} style={{ padding:'9px 12px', borderBottom: idx < items.length-1 ? '1px solid rgba(217,119,6,0.1)' : 'none', display:'flex', alignItems:'center', gap:'10px' }}>
+                  {items.map((item, idx) => {
+                    const checked = selectedIds.includes(item.seat_id)
+                    return (
+                    <label key={item.seat_id} style={{ padding:'9px 12px', borderBottom: idx < items.length-1 ? '1px solid rgba(217,119,6,0.1)' : 'none', display:'flex', alignItems:'center', gap:'10px', cursor:'pointer', opacity: checked ? 1 : 0.5 }}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleSeat(item.seat_id)}
+                        aria-label={`Process ${item.location_name} ${TIER_LABELS[item.tier] || item.tier} seat`}
+                        style={{ flexShrink:0, width:'15px', height:'15px', accentColor:'#d97706', cursor:'pointer' }}
+                      />
                       <span style={{ fontSize:'14px', flexShrink:0 }}>🕐</span>
                       <div style={{ flex:1, minWidth:0 }}>
                         <p style={{ fontSize:'12.5px', fontWeight:600, color:'#1a2e2b' }}>{item.location_name} · {TIER_LABELS[item.tier] || item.tier}</p>
                         <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{item.user_email ? `Assigned to ${item.user_email}` : 'Unassigned'} · removal date: {item.scheduled_removal_at}</p>
                       </div>
-                    </div>
-                  ))}
+                    </label>
+                    )
+                  })}
                 </div>
                 <button
                   onClick={() => { setShowModal(true); setResult(null); setProcError('') }}
-                  style={{ padding:'10px 18px', background:'#d97706', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color:'white', cursor:'pointer' }}>
-                  Process Pending Removals
+                  disabled={selectedCount === 0}
+                  style={{ padding:'10px 18px', background: selectedCount === 0 ? '#e5e7eb' : '#d97706', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:700, color: selectedCount === 0 ? '#9ca3af' : 'white', cursor: selectedCount === 0 ? 'not-allowed' : 'pointer' }}>
+                  {selectedCount === 0 ? 'Select seats to remove' : `Remove ${selectedCount} selected seat${selectedCount !== 1 ? 's' : ''}`}
                 </button>
-                <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'8px' }}>Marks listed seats as inactive. No mid-cycle credits.</p>
+                <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'8px' }}>Marks the selected seats as inactive. Anyone holding one loses access. No mid-cycle credits.</p>
               </>
             )
           )}
@@ -30025,7 +30133,7 @@ function ProcessRemovalsCard() {
           <div style={{ background:'white', borderRadius:'18px', width:'100%', maxWidth:'480px', maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 24px 80px rgba(0,0,0,0.25)', overflow:'hidden' }}>
             <div style={{ background:'#1a2e2b', padding:'14px 18px', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
               <span style={{ fontSize:'14px', fontWeight:700, color:'white' }}>
-                {result ? '✓ Removal complete' : `Process ${count} pending removal${count !== 1 ? 's' : ''}?`}
+                {result ? '✓ Removal complete' : `Remove ${selectedCount} seat${selectedCount !== 1 ? 's' : ''}?`}
               </span>
               <button onClick={() => setShowModal(false)} style={{ background:'none', border:'none', color:'rgba(255,255,255,0.75)', cursor:'pointer', fontSize:'22px', padding:0, lineHeight:1, fontFamily:'inherit' }}>×</button>
             </div>
@@ -30036,15 +30144,23 @@ function ProcessRemovalsCard() {
                   <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.5 }}>
                     {result.removed_count} seat{result.removed_count !== 1 ? 's have' : ' has'} been marked inactive. The seat pool for each affected location has been reduced.
                   </p>
+                  {/* issue 216 — a requested seat the server found ineligible
+                      (already inactive, unscheduled, or not yet due) is named,
+                      not silently dropped from the count. */}
+                  {result.skipped_ids?.length > 0 && (
+                    <p style={{ fontSize:'12px', color:'#92400e', lineHeight:1.5, marginTop:'8px' }}>
+                      {result.skipped_ids.length} selected seat{result.skipped_ids.length !== 1 ? 's were' : ' was'} skipped — no longer due or already removed.
+                    </p>
+                  )}
                 </>
               ) : (
                 <>
                   <p style={{ fontSize:'13px', color:'#4a5e5a', marginBottom:'14px', lineHeight:1.55 }}>
-                    This will mark the following seats as inactive. This action cannot be undone — seats can be re-added later if needed.
+                    This will mark the seats below as inactive. Anyone holding one loses access to Bee Hub. This action cannot be undone — seats can be re-added later if needed.
                   </p>
                   <div style={{ background:'rgba(0,0,0,0.03)', border:'1px solid rgba(0,0,0,0.08)', borderRadius:'10px', overflow:'hidden', marginBottom:'14px' }}>
-                    {items.map((item, idx) => (
-                      <div key={item.seat_id} style={{ padding:'9px 12px', borderBottom: idx < items.length-1 ? '1px solid rgba(0,0,0,0.06)' : 'none' }}>
+                    {selectedItems.map((item, idx) => (
+                      <div key={item.seat_id} style={{ padding:'9px 12px', borderBottom: idx < selectedItems.length-1 ? '1px solid rgba(0,0,0,0.06)' : 'none' }}>
                         <p style={{ fontSize:'12.5px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>{item.location_name} — {TIER_LABELS[item.tier] || item.tier}</p>
                         <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{item.user_email ? `Assigned: ${item.user_email}` : 'Unassigned'} · scheduled: {item.scheduled_removal_at}</p>
                       </div>
@@ -30788,12 +30904,11 @@ function AdminDashboard({ locations, users, role, onNavigate }) {
     else if (s === 'inactive') byStatus.inactive++
   })
 
-  const bySrc = { corporate: 0, direct: 0, sponsored: 0, none: 0 }
-  locations.forEach(l => {
-    const s = l.payment_source || 'none'
-    if (bySrc[s] !== undefined) bySrc[s]++
-    else bySrc.none++
-  })
+  // issue 216 — the keys must be the payment_source values the DATABASE
+  // stores. This card kept its own set (corporate/direct/sponsored/none) and
+  // neither corporate flavour matched, so both fell into 'none'. Counting is
+  // bucketByPaymentSource's job now, next to the PaymentSource type itself.
+  const bySrc = bucketByPaymentSource(locations)
 
   const allCounted = actionCounts.feedback !== null
   const totalActions = (actionCounts.conversions || 0) + (actionCounts.removals || 0) + (actionCounts.feedback || 0)
@@ -30840,10 +30955,10 @@ function AdminDashboard({ locations, users, role, onNavigate }) {
           </div>
           <div style={{ padding:'16px 20px' }}>
             {[
-              { label:'Corporate-funded', value:bySrc.corporate, color:'#6366f1' },
-              { label:'Direct billing',   value:bySrc.direct,    color:'#10b981' },
-              { label:'Sponsored',        value:bySrc.sponsored, color:'#f59e0b' },
-              { label:'Not configured',   value:bySrc.none,      color:'#d1d5db' },
+              { label:'Corporate-funded', value:bySrc.prepaid_corporate,   color:'#6366f1' },
+              { label:'Direct billing',   value:bySrc.direct,              color:'#10b981' },
+              { label:'Sponsored',        value:bySrc.corporate_sponsored, color:'#f59e0b' },
+              { label:'No payment source',value:bySrc.none,                color:'#d1d5db' },
             ].filter(r => r.value > 0).map(r => (
               <div key={r.label} style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'10px' }}>
                 <div style={{ width:'10px', height:'10px', borderRadius:'50%', background:r.color, flexShrink:0 }} />
@@ -30851,7 +30966,7 @@ function AdminDashboard({ locations, users, role, onNavigate }) {
                 <span style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b' }}>{r.value}</span>
               </div>
             ))}
-            {bySrc.corporate === 0 && bySrc.direct === 0 && bySrc.sponsored === 0 && bySrc.none === 0 && (
+            {bySrc.prepaid_corporate === 0 && bySrc.direct === 0 && bySrc.corporate_sponsored === 0 && bySrc.none === 0 && (
               <p style={{ fontSize:'13px', color:'#b0c0bc', textAlign:'center', padding:'12px 0' }}>No billing data</p>
             )}
           </div>
@@ -30891,10 +31006,10 @@ function AdminDashboard({ locations, users, role, onNavigate }) {
                 <div style={{ display:'flex', alignItems:'center', gap:'12px', padding:'12px 14px', background:'#fef3c7', borderRadius:'10px', border:'1px solid #fde68a' }}>
                   <span style={{ fontSize:'18px' }}>🕐</span>
                   <div style={{ flex:1 }}>
-                    <p style={{ fontSize:'13px', fontWeight:600, color:'#92400e', marginBottom:'2px' }}>{actionCounts.removals} removal{actionCounts.removals !== 1 ? 's' : ''} to process</p>
-                    <p style={{ fontSize:'11px', color:'#b45309' }}>Scheduled for processing</p>
+                    <p style={{ fontSize:'13px', fontWeight:600, color:'#92400e', marginBottom:'2px' }}>{actionCounts.removals} seat{actionCounts.removals !== 1 ? 's' : ''} due for removal</p>
+                    <p style={{ fontSize:'11px', color:'#b45309' }}>Scheduled by an owner, on or before today</p>
                   </div>
-                  <button onClick={() => onNavigate('renewals')} style={{ padding:'5px 10px', background:'#f59e0b', border:'none', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Process</button>
+                  <button onClick={() => onNavigate('removals')} style={{ padding:'5px 10px', background:'#f59e0b', border:'none', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Process</button>
                 </div>
               )}
               {(actionCounts.feedback || 0) > 0 && (
@@ -30921,7 +31036,7 @@ function AdminDashboard({ locations, users, role, onNavigate }) {
             {[
               { label:'+ Add Location',  fn:()=>onNavigate('locations','add'),    icon:'🏢' },
               { label:'+ Invite Owner',  fn:()=>onNavigate('locations','invite'),  icon:'✉️' },
-              { label:'Process Renewals',fn:()=>onNavigate('renewals'),            icon:'🕐' },
+              { label:'Seat Removals',   fn:()=>onNavigate('removals'),            icon:'🕐' },
               { label:'View Pricing',    fn:()=>onNavigate('pricing'),             icon:'🔧' },
             ].map(a => (
               <button key={a.label} onClick={a.fn} style={{ padding:'14px 12px', background:'#f7f5f0', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'12px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:'#1a2e2b', cursor:'pointer', textAlign:'left', display:'flex', alignItems:'center', gap:'8px' }}>
@@ -31238,7 +31353,7 @@ function SuperAdminLayout({
       header: 'Billing',
       items: [
         ...(role === 'super_admin' ? [{ key:'conversions', label:'Conversions Due', icon:'💳' }] : []),
-        { key:'renewals', label:'Renewals', icon:'🕐' },
+        { key:'removals', label:'Seat Removals', icon:'🕐' },
         ...(role === 'super_admin' ? [{ key:'pricing', label:'Pricing', icon:'🔧' }] : []),
       ],
     }] : []),
@@ -31270,7 +31385,7 @@ function SuperAdminLayout({
     feedback:    { label:'Feedback',       cluster:'Operations'   },
     notifications: { label:'Notifications', cluster:'Operations'  },
     conversions: { label:'Conversions Due',cluster:'Billing'      },
-    renewals:    { label:'Renewals',       cluster:'Billing'      },
+    removals:    { label:'Seat Removals', cluster:'Billing'      },
     pricing:     { label:'Pricing',        cluster:'Billing'      },
     content:     { label:'Content',        cluster:'Operations'   },
     profile:     { label:'Profile',        cluster:'My Account'   },
@@ -31433,12 +31548,14 @@ function SuperAdminLayout({
           </div>
         )
 
-      case 'renewals':
+      case 'removals':
         return (
           <div style={{ padding:'28px 28px 48px' }}>
             <div style={{ marginBottom:'20px' }}>
-              <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'3px' }}>Renewals</h1>
-              <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Process scheduled seat removals at renewal</p>
+              {/* issue 216 — was "Renewals". Nothing here processes a
+                  renewal; Stripe does that on each location's own cycle. */}
+              <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'3px' }}>Seat Removals</h1>
+              <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Retire seats owners scheduled for removal. Renewals are billed by Stripe.</p>
             </div>
             <ProcessRemovalsCard />
           </div>
@@ -31796,7 +31913,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
 
           {/* Sub-tabs — native <select> on mobile (<768px), pill row at ≥768px. */}
           {(()=>{
-            const adminTabs = [{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'content',label:'✏️ Content'}]:[]),...(showFeedbackTab?[{key:'feedback',label:'🐛 Feedback'}]:[]),...(showWebhooksTab?[{key:'webhooks',label:'🔌 Webhooks'}]:[]),...(showNotificationsTab?[{key:'notifications',label:'✉️ Notifications'}]:[]),...(role==='super_admin'?[{key:'conversions',label:'Conversions Due'},{key:'renewals',label:'🕐 Renewals'},{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])]
+            const adminTabs = [{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'content',label:'✏️ Content'}]:[]),...(showFeedbackTab?[{key:'feedback',label:'🐛 Feedback'}]:[]),...(showWebhooksTab?[{key:'webhooks',label:'🔌 Webhooks'}]:[]),...(showNotificationsTab?[{key:'notifications',label:'✉️ Notifications'}]:[]),...(role==='super_admin'?[{key:'conversions',label:'Conversions Due'},{key:'removals',label:'🕐 Seat Removals'},{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])]
             return (
               <>
                 <select
@@ -31909,7 +32026,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
           <AdminNotificationsScreen locations={locations} />
         ) : adminTab==='conversions' ? (
           <ConversionsDueTab onOpenLocation={loc=>setSelectedLoc(loc)} />
-        ) : adminTab==='renewals' ? (
+        ) : adminTab==='removals' ? (
           <ProcessRemovalsCard />
         ) : adminTab==='pricing' ? (
           <PricingManagementTab />
@@ -32364,7 +32481,7 @@ function StripeCheckoutWait({ locationId, until, onPaid, onBack, payUrl }) {
 // ─── ScheduleRemovalModal ──────────────────────────────────────────────────
 // Owner schedules a seat for removal at renewal. No mid-cycle credits.
 // PATCH /api/seats/[id] with { scheduled_removal_at: 'YYYY-MM-DD' }.
-function ScheduleRemovalModal({ seat, tierMeta, onClose, onScheduled, paidThroughDate=null }) {
+export function ScheduleRemovalModal({ seat, tierMeta, onClose, onScheduled, paidThroughDate=null }) {
   const currentLocationCtx = useContext(CurrentLocationContext)
   // issue 162: removal defaults to the LOCATION'S OWN renewal date
   // (paid_through_date — the anniversary its seat is billed through), not a
@@ -32545,6 +32662,11 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null
   // doesn't touch them.
   const TIER_OPTIONS = SUBSCRIPTION_TIER_META.filter(t => t.key !== 'owner')
 
+  // issue 216 — flat price × quantity is CORRECT here, and only because
+  // TIER_OPTIONS above excludes 'owner'. The co-owner rule (2nd owner seat
+  // bills at the manager rate) is the sole reason seat pricing can't be a
+  // multiply, and it can never apply to a tier that isn't owner. If an owner
+  // tier is ever added to this picker, this must move to calculateSeatTotal.
   const annualEach   = getTierPrice(tier)
   const proratedEach = prorateToRenewal(annualEach, seatRenewalDate)
   const totalProrated = proratedEach * quantity
@@ -32768,7 +32890,7 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null
 //
 // AddSeatsModal still exists for pre-buying ahead of inviting — see
 // Settings > Billing.
-function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTier=null, paidThroughDate=null }) {
+export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTier=null, paidThroughDate=null }) {
   const seatsCtx = useContext(SeatsContext)
   const tierPricesCtx = useContext(TierPricesContext)
   const currentUserCtx = useContext(CurrentUserContext)
@@ -32783,17 +32905,49 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTi
   const [step, setStep] = useState('form') // form | paymentConfirm | stripeWait | success
   const [email, setEmail] = useState('')
   const [fullName, setFullName] = useState('')
-  // All 3 employee tiers always selectable — owner tier is special-cased
-  // (created during onboarding co-owner flow, capped at 2) and intentionally
-  // not invitable from here.
+  // PURCHASABLE tiers. Owner is deliberately absent and must stay absent:
+  // /api/seats/buy-and-invite rejects it, and lib/seat-stripe-sync maps a
+  // tier to its own price 1:1 — so buying a co-owner seat would charge the
+  // owner rate ($550) where the co-owner rule says manager rate ($400).
+  // Selling an owner seat from here is therefore never correct (issue 216).
   const TIER_OPTIONS = SUBSCRIPTION_TIER_META.filter(t => t.key !== 'owner')
+
+  // issue 216 — FILLING an existing owner seat is a different operation from
+  // BUYING one, and only the second is unsafe. A location that already paid
+  // for a co-owner seat has an unassigned owner row sitting in the pool; the
+  // ghost row hands us initialTier='owner' for exactly that seat, and
+  // /api/hub_users/invite has always accepted tier 'owner'.
+  //
+  // The old guard tested initialTier against TIER_OPTIONS — a list that
+  // exists to describe what may be SOLD — so 'owner' failed a purchase test
+  // it was never meant to take and silently fell through to TIER_OPTIONS[0],
+  // Hive Manager. That made a paid co-owner seat uninvitable and put a wrong
+  // -tier purchase prompt behind its Invite button.
+  //
+  // So owner is honoured here, and ONLY here, under three conditions:
+  //   1. it was handed to us (never user-selectable — owner is not in the picker),
+  //   2. a free owner seat actually exists right now, pending-aware,
+  //   3. the location is within the 2-owner cap.
+  // Every purchase seam below re-checks tier !== 'owner' independently.
+  const counts = seatsCtx?.seatCountsByTier?.() || {}
+  const freeOwnerSeats = seatsCtx?.availableSeatsByTierWithPending?.('owner') ?? 0
+  const withinOwnerCap = (counts.owner?.total ?? 0) <= MAX_OWNER_SEATS
+  const fillingOwnerSeat =
+    initialTier === 'owner' && freeOwnerSeats >= 1 && withinOwnerCap
+
   // initialTier: preselect when opened from an open-seat ghost row. Ignored
   // if it isn't a real selectable tier (deferred tiers stay unselectable).
   const [tier, setTier] = useState(
-    initialTier && TIER_OPTIONS.some(t => t.key === initialTier) && !isDeferredTier(initialTier)
-      ? initialTier
-      : (TIER_OPTIONS[0]?.key || 'manager')
+    fillingOwnerSeat
+      ? 'owner'
+      : initialTier && TIER_OPTIONS.some(t => t.key === initialTier) && !isDeferredTier(initialTier)
+        ? initialTier
+        : (TIER_OPTIONS[0]?.key || 'manager')
   )
+  // In owner-fill mode the tier is locked. Re-opening the picker would let a
+  // click turn "fill the seat I own" into "buy a different seat" — the exact
+  // confusion this fix removes.
+  const tierLocked = fillingOwnerSeat && tier === 'owner'
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [createdInvite, setCreatedInvite] = useState(null)
@@ -32818,7 +32972,6 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTi
   // the server-side invite check uses (unassigned active seats minus
   // pending invites) so the UI never claims a seat is free when the API
   // would 409.
-  const counts = seatsCtx?.seatCountsByTier?.() || {}
   const availableForTier = seatsCtx?.availableSeatsByTierWithPending?.(tier) ?? 0
   const isAvailable = availableForTier >= 1
 
@@ -32849,6 +33002,17 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTi
     setError('')
 
     if (!isAvailable) {
+      // issue 216 — PURCHASE GATE 1 of 3. Owner seats are fillable, never
+      // buyable, from this modal. If the seat that got us here is gone (a
+      // co-owner accepted while this was open, or someone else claimed it),
+      // fail with an explanation rather than sliding into a purchase the
+      // co-owner rule would misprice.
+      if (tier === 'owner') {
+        setError(
+          'That co-owner seat is no longer free. Owner seats can be filled here but not bought — ask a Bee Organized admin to add one.',
+        )
+        return
+      }
       setStep('paymentConfirm')
       return
     }
@@ -32922,6 +33086,16 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTi
   // on partial failure.
   async function runBuyAndInvite() {
     if (submitting) return
+    // issue 216 — PURCHASE GATE 2 of 3. The last client-side thing standing
+    // between an owner tier and a charge. /api/seats/buy-and-invite already
+    // refuses tier 'owner' (its VALID_TIERS is manager/light/readonly), so
+    // this is belt-and-braces — but it keeps the refusal legible here rather
+    // than surfacing as an opaque 400 after a confirm click.
+    if (tier === 'owner') {
+      setError('Owner seats cannot be purchased here.')
+      setStep('form')
+      return
+    }
     setSubmitting(true)
     setError('')
     try {
@@ -33020,6 +33194,22 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTi
                 style={{ width:'100%', padding:'10px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'9px', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', boxSizing:'border-box', marginBottom:'14px' }}
               />
               <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Tier *</p>
+              {/* issue 216 — owner-fill mode. The seat is already bought and
+                  already the right tier; showing a picker here would only
+                  offer ways to turn filling it into buying something else.
+                  Render the seat being filled instead. */}
+              {tierLocked ? (
+                <div
+                  data-testid="invite-tier-locked"
+                  style={{ padding:'11px 12px', background:'rgba(26,46,43,0.04)', border:'2px solid #1a2e2b', borderRadius:'10px', display:'flex', alignItems:'center', gap:'10px', marginBottom:'10px' }}>
+                  <span style={{ fontSize:'18px' }}>{tierMeta?.icon || '👑'}</span>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{tierMeta?.name || 'Zee Bee'}</p>
+                    <p style={{ fontSize:'10.5px', color:'#8a9e9a' }}>Filling the open co-owner seat you already pay for</p>
+                  </div>
+                  <span style={{ fontSize:'9px', fontWeight:700, color:'#15803d', background:'rgba(34,197,94,0.1)', border:'1px solid rgba(34,197,94,0.28)', padding:'2px 8px', borderRadius:'10px', textTransform:'uppercase', letterSpacing:'0.4px', flexShrink:0 }}>Paid</span>
+                </div>
+              ) : (
               <div style={{ display:'grid', gap:'8px', marginBottom:'10px' }}>
                 {TIER_OPTIONS.map(t => {
                   const isSelected = tier === t.key
@@ -33050,6 +33240,7 @@ function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTi
                   )
                 })}
               </div>
+              )}
 
               {/* Live status line — recalculates as the tier changes. Green
                   when a seat is already pooled, amber when a purchase is
@@ -33422,32 +33613,26 @@ export default function App({
   // access on the removal date. They count toward total (and `scheduled`),
   // never toward available. Mirrors the server gates in /api/hub_users/invite
   // and /api/hub_users/accept.
+  // issue 216 — every one of these delegates to lib/seat-availability, which
+  // is the single definition of "is a seat free at this tier?" and mirrors
+  // the server gate in /api/hub_users/invite. The roster, the seat card and
+  // the invite modal previously each answered that question their own way
+  // and disagreed about the same rows; keeping the math in one tested module
+  // is what stops that recurring.
   function seatCountsByTier() {
-    return seats.reduce((acc, s) => {
-      if (s.status && s.status !== 'active') return acc
-      acc[s.tier] = acc[s.tier] || { total: 0, assigned: 0, available: 0, scheduled: 0 }
-      acc[s.tier].total++
-      if (s.scheduled_removal_at) acc[s.tier].scheduled++
-      if (s.user_id) acc[s.tier].assigned++
-      else if (!s.scheduled_removal_at) acc[s.tier].available++
-      return acc
-    }, {})
+    return seatCounts(seats, pendingInvites)
   }
   function availableSeatsByTier() {
-    return seats.filter(s => !s.user_id && !s.scheduled_removal_at && (s.status === 'active' || !s.status))
+    return availableSeatRows(seats, pendingInvites)
   }
   function availableSeatsByTierWithPending(tier) {
-    const total = seats.filter(
-      s => s.tier === tier && !s.user_id && !s.scheduled_removal_at && (s.status === 'active' || !s.status)
-    ).length
-    // Expired invites can never be accepted (the accept route 410s them), so
-    // they must not reserve a seat forever. Null expiry = non-expiring.
-    const now = Date.now()
-    const pending = pendingInvites.filter(p =>
-      p.tier === tier && !p.accepted_at &&
-      (!p.invite_expires_at || new Date(p.invite_expires_at).getTime() > now)
-    ).length
-    return Math.max(0, total - pending)
+    return availableSeatsForTier(seats, pendingInvites, tier)
+  }
+  function pendingInviteCount(tier) {
+    return pendingInvitesAtTier(pendingInvites, tier)
+  }
+  function invitableSeatIds() {
+    return invitableIds(seats, pendingInvites)
   }
   const seatsValue = {
     seats,
@@ -33457,6 +33642,8 @@ export default function App({
     seatCountsByTier,
     availableSeatsByTier,
     availableSeatsByTierWithPending,
+    pendingInviteCount,
+    invitableSeatIds,
   }
   const [franchiseRole, setFranchiseRole]   = useState(initialFranchiseRole ?? 'owner') // owner|manager|light|readonly
   const [activeNav, setActiveNav]           = useState(ROUTE_TO_NAV[initialRoute] || 'home')
