@@ -52,6 +52,28 @@
 // A tier priced at 0 is DIFFERENT from an unpriced one and is honestly free:
 // prod currently carries price_annual = 0 for light and readonly, so those
 // seats correctly record 0, not null.
+//
+// ── issue 219: THIS MODULE ALSO DECIDES WHAT STRIPE IS TOLD ──
+// /api/seats POST now charges (see the route). "The amount charged and the
+// amount recorded are the same number" is not a thing you can assert with a
+// test alone — it has to be true by construction, so the quote carries BOTH
+// halves and the route has nothing left to compute:
+//
+//   billingLines  → what Stripe's subscription is bumped by (price tier +
+//                   quantity + the annual rate that price is supposed to be)
+//   perSeatCents  → what each seat row records
+//
+// perSeatCents is billingLines PRICED. One list, two consumers, so the charge
+// and the ledger cannot pick different tiers or different quantities. What
+// they can still disagree about is the proration arithmetic — Stripe prorates
+// against its own subscription period, we prorate against paid_through_date —
+// which is why the route reports the outcome instead of assuming it.
+//
+// billingLines is populated on EVERY return path, including the unpriced ones.
+// A location with no paid_through_date records no figure (that rule is issue
+// 217's and is untouched), but Stripe does not need our anchor to bill — it
+// has the real subscription period — so "we can't price it" must not silently
+// become "nobody is charged".
 // ─────────────────────────────────────────────────────────────
 
 import { supabaseService } from './supabase-service'
@@ -75,6 +97,23 @@ export type SeatCostLine = {
   proratedUnitCents: number
 }
 
+// issue 219 — one entry per PRICE LINE the location's Stripe subscription must
+// be bumped by. This is the unpriced-safe half of a quote: it exists even when
+// no figure can be recorded, because what to charge for is knowable from the
+// seat plan alone.
+//
+// annualUnitCents distinguishes the two kinds of "no money":
+//   0     → the tier is genuinely free (prod prices light and readonly at 0).
+//           Bumping Stripe by a $0 line would move nothing now and nothing at
+//           renewal, so the route skips the call outright.
+//   null  → the tier has no tier_prices row at all. We don't know the rate;
+//           that is a misconfiguration, not a free seat.
+export type SeatBillingRateLine = {
+  billingTier: string
+  quantity: number
+  annualUnitCents: number | null
+}
+
 export type SeatCostQuote = {
   // One entry per seat about to be inserted, IN INSERT ORDER. null means no
   // honest figure exists — the caller must leave prorated_cost unset rather
@@ -87,6 +126,10 @@ export type SeatCostQuote = {
   paidThroughDate: string | null
   // The billing lines the figure came from (empty when unpriced).
   lines: SeatCostLine[]
+  // issue 219 — the SAME lines, un-priced, and therefore present even when
+  // `lines` is empty. This is what the Stripe bump iterates, so the charge and
+  // the record are structurally the same tiers at the same quantities.
+  billingLines: SeatBillingRateLine[]
   unpricedReason?: SeatCostUnpricedReason
 }
 
@@ -154,12 +197,16 @@ const UNPRICED = (
   reason: SeatCostUnpricedReason,
   paidThroughDate: string | null,
   renewalDate: Date | null,
+  // issue 219 — an unpriced quote still knows WHAT was bought. Dropping the
+  // lines here is what would turn "no figure" into "no charge".
+  billingLines: SeatBillingRateLine[] = [],
 ): SeatCostQuote => ({
   perSeatCents: null,
   totalCents: null,
   renewalDate,
   paidThroughDate,
   lines: [],
+  billingLines,
   unpricedReason: reason,
 })
 
@@ -187,9 +234,6 @@ export async function quoteSeatPurchase(args: {
 
   const paidThroughDate = (location as any)?.paid_through_date ?? null
   const renewalDate = parsePaidThroughDate(paidThroughDate)
-  if (!renewalDate) {
-    return UNPRICED('no_renewal_anchor', paidThroughDate, null)
-  }
 
   // 2. The owner seats already held — the co-owner rule's other operand. Only
   //    an owner-tier buy can cross the owner→manager rate boundary, so this
@@ -207,19 +251,43 @@ export async function quoteSeatPurchase(args: {
 
   const lines = incrementalBillingLines(existingOwnerSeats, tier, quantity)
   if (lines.length === 0) {
-    return { perSeatCents: [], totalCents: 0, renewalDate, paidThroughDate, lines: [] }
+    return { perSeatCents: [], totalCents: 0, renewalDate, paidThroughDate, lines: [], billingLines: [] }
   }
 
   // 3. The live rates. tier_prices.price_annual is whole dollars and NOT NULL
   //    in schema, so a tier is unpriced only when its ROW is missing.
+  //
+  //    issue 219 — this read used to sit BELOW the renewal-anchor check, so a
+  //    location with no paid_through_date never learned its rates. Now that the
+  //    quote also tells the route what to charge, the rates are needed on every
+  //    path: a $0 tier must be recognisable as free even when no figure can be
+  //    recorded, otherwise a readonly seat would mint a pointless Stripe call
+  //    on exactly the locations we know least about.
   const { data: tierRows } = await supabaseService.from('tier_prices').select('id, price_annual')
   const annualByTier: Record<string, number> = {}
   for (const row of (tierRows || []) as any[]) {
     if (typeof row?.price_annual === 'number') annualByTier[row.id] = row.price_annual
   }
 
+  const billingLines: SeatBillingRateLine[] = lines.map((l) => {
+    const annual = annualByTier[l.billingTier]
+    const known = typeof annual === 'number' && Number.isFinite(annual) && annual >= 0
+    return {
+      billingTier: l.billingTier,
+      quantity: l.quantity,
+      annualUnitCents: known ? Math.round(annual * 100) : null,
+    }
+  })
+
+  // 4. The anchor. Missing means no HONEST FIGURE — issue 217's rule, unchanged
+  //    — but the billing lines above survive, because whether the seat is
+  //    chargeable was never a question the anchor answered.
+  if (!renewalDate) {
+    return UNPRICED('no_renewal_anchor', paidThroughDate, null, billingLines)
+  }
+
   const priced = perSeatCentsFromLines(lines, annualByTier, renewalDate, from)
-  if (!priced) return UNPRICED('tier_not_priced', paidThroughDate, renewalDate)
+  if (!priced) return UNPRICED('tier_not_priced', paidThroughDate, renewalDate, billingLines)
 
   return {
     perSeatCents: priced.perSeatCents,
@@ -227,6 +295,7 @@ export async function quoteSeatPurchase(args: {
     renewalDate,
     paidThroughDate,
     lines: priced.lines,
+    billingLines,
   }
 }
 

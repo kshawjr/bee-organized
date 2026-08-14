@@ -63,8 +63,35 @@ vi.mock('@/lib/supabase-server', () => ({
     from: (t: string) => h.makeBuilder(t),
   })),
 }))
+// issue 219 gave both purchase routes a Stripe leg. These tests are about what
+// gets RECORDED, so the charge is stubbed out entirely — but it has to be
+// stubbed with the whole surface the routes now import, and with a result that
+// exercises the "recorded but not charged" branch (a location with no
+// subscription), because that branch appends a note and these tests read notes.
 vi.mock('@/lib/seat-stripe-sync', () => ({
   applySeatDeltaToStripe: vi.fn(async () => ({ applied: false, reason: 'no_subscription' })),
+  applySeatPurchaseToStripe: vi.fn(async (args: any) => {
+    let cursor = 0
+    const lines = (args.lines || []).map((l: any) => {
+      const seatIds = (args.seatIds || []).slice(cursor, cursor + l.quantity)
+      cursor += l.quantity
+      return {
+        billingTier: l.billingTier,
+        quantity: l.quantity,
+        seatIds,
+        applied: false,
+        reason: l.annualUnitCents === 0 ? 'zero_rate' : 'no_subscription',
+      }
+    })
+    return {
+      applied: false,
+      lines,
+      unbilledSeatIds: lines.filter((l: any) => l.reason !== 'zero_rate').flatMap((l: any) => l.seatIds),
+    }
+  }),
+  unchargedSeatNote: () => 'issue 219: cost recorded but NOT charged — stub',
+  unrecordedChargeNote: () => 'issue 219: charged but no cost figure was recorded — stub',
+  SEAT_BILLING_MISMATCH_MARKER: 'issue 219',
 }))
 vi.mock('@/lib/resend', () => ({
   sendEmailDirect: vi.fn(async () => ({ success: true })),

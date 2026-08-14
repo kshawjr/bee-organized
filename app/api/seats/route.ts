@@ -15,7 +15,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
-import { applySeatDeltaToStripe } from '@/lib/seat-stripe-sync'
+import {
+  applySeatDeltaToStripe,
+  applySeatPurchaseToStripe,
+  unchargedSeatNote,
+  unrecordedChargeNote,
+} from '@/lib/seat-stripe-sync'
 import { quoteSeatPurchase, seatCostDivergence, unpricedSeatNote } from '@/lib/seat-cost'
 
 export const runtime = 'nodejs'
@@ -120,6 +125,23 @@ export async function GET(request: NextRequest) {
 // rule. The field is still ACCEPTED — a stale client must not start 400ing —
 // but only so a value that disagrees can be logged; it never reaches the
 // table. See seatCostDivergence() for where that lands.
+//
+// issue 219 — THIS ROUTE NOW CHARGES. It inserted a seat and never called
+// Stripe, while /api/seats/buy-and-invite charged for the identical seat, so
+// which of two buttons an owner clicked decided whether the seat was free.
+// issue 217 then gave the free button an accurate prorated_cost, which made
+// the ledger assert money was owed that nobody moved. Kevin's rule: the TIER
+// decides whether a seat is free — a readonly seat costs nothing because
+// tier_prices prices it at $0, not because a route skipped Stripe.
+//
+// The bump runs AFTER the insert, on the same terms buy-and-invite established
+// (issue 161): conditional, never a gate, and NEVER fatal. A location with no
+// Stripe subscription — 32 of 55 today — is a no-op, the seat is still created,
+// and the fact that a recorded cost went unbilled is written onto the row (see
+// unchargedSeatNote) rather than left to be discovered on an invoice that never
+// arrives. The free-grant comp rail is /api/admin/grant-seat and does not come
+// through here at all; neither does the Stripe webhook, which writes its seats
+// through addStripePurchasedSeats, so nothing double-charges.
 export async function POST(request: NextRequest) {
   const supabase = await createServerSupabaseClient()
   const caller = await loadCaller(supabase)
@@ -253,15 +275,107 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
+  // ─── Stripe seat lines (issue 219) ───
+  // The seats are real; now bill them. The lines come off the SAME quote that
+  // priced the rows, so the tiers and quantities Stripe is bumped by are the
+  // ones the rows recorded — the charge cannot pick a different tier than the
+  // ledger did. What the two can still disagree about is the proration
+  // arithmetic (Stripe prorates against its own subscription period; we prorate
+  // against paid_through_date), which is why the outcome is reported per seat
+  // instead of assumed.
+  //
+  // Non-fatal by design, exactly as in buy-and-invite: the rows are already
+  // written, and a Stripe failure must not strand a seat the owner can see.
+  const insertedRows = (data || []) as any[]
+  const seatIds = insertedRows.map((r) => r.id)
+
+  const billing = await applySeatPurchaseToStripe({
+    locationId: location_id,
+    lines: quote.billingLines,
+    seatIds,
+  })
+
+  // Per-seat outcome, because a single purchase can straddle two lines: an
+  // owner buy that crosses the co-owner boundary bills one owner-rate seat and
+  // one manager-rate seat, and either could fare differently.
+  const outcomeBySeat = new Map<string, { applied: boolean; reason?: string }>()
+  for (const line of billing.lines) {
+    for (const id of line.seatIds) {
+      outcomeBySeat.set(id, {
+        applied: line.applied,
+        ...(line.reason ? { reason: line.reason } : {}),
+      })
+    }
+  }
+
+  // Where the money and the ledger disagree, say so ON THE ROW. A recorded cost
+  // that was never charged, and a charge with no recorded cost, are the two
+  // halves of the same defect and both are findable with one query:
+  //   select … from subscription_seats where notes ilike '%issue 219%'
+  const noteBySeat = new Map<string, string>()
+  for (const line of billing.lines) {
+    // A $0 tier is not a disagreement — nothing was owed and nothing moved.
+    if (!line.applied && line.reason !== 'zero_rate') {
+      const note = unchargedSeatNote(line.reason, line.detail)
+      for (const id of line.seatIds) noteBySeat.set(id, note)
+    } else if (line.applied && quote.perSeatCents === null) {
+      const note = unrecordedChargeNote(quote.unpricedReason)
+      for (const id of line.seatIds) noteBySeat.set(id, note)
+    }
+  }
+
+  if (noteBySeat.size > 0) {
+    // Grouped so the common case (every seat in the purchase skipped for the
+    // same reason) is one UPDATE, not one per seat.
+    const idsByNote = new Map<string, string[]>()
+    for (const [id, note] of Array.from(noteBySeat.entries())) {
+      const full = [sharedNote, note].filter(Boolean).join(' · ')
+      idsByNote.set(full, [...(idsByNote.get(full) || []), id])
+    }
+    for (const [note, ids] of Array.from(idsByNote.entries())) {
+      console.error(`[seats POST] ${note} loc=${location_id} seats=${ids.join(',')}`)
+      const { data: updated, error: noteErr } = await supabaseService
+        .from('subscription_seats')
+        .update({ notes: note, updated_at: new Date().toISOString() })
+        .in('id', ids)
+        .select(SEAT_COLS)
+      if (noteErr) {
+        // The log above already carries the evidence; losing the note must not
+        // cost the owner the seat.
+        console.error('[seats POST] issue 219 — could not write the billing note', noteErr)
+        continue
+      }
+      for (const row of (updated || []) as any[]) {
+        const i = insertedRows.findIndex((r) => r.id === row.id)
+        if (i >= 0) insertedRows[i] = row
+      }
+    }
+  }
+
   // issue 217 — the response shape is unchanged (bare seat object at qty=1, an
   // array above it) because SeatsContext and the onboarding Activate path both
   // consume it directly. No `cost` envelope is added here: the authoritative
   // figure is already on each returned row as prorated_cost, and any reason it
   // could not be computed is on that row's notes.
+  //
+  // issue 219 adds `billing` PER ROW rather than one block for the request, for
+  // the same reason the notes are per row — one purchase can straddle two rate
+  // lines. Mirrors the shape DELETE already returns.
+  const rows = insertedRows.map((r) => {
+    const outcome = outcomeBySeat.get(r.id)
+    return {
+      ...r,
+      billing: {
+        stripe_applied: outcome?.applied ?? false,
+        ...(outcome?.reason ? { stripe_skip_reason: outcome.reason } : {}),
+      },
+    }
+  })
+
   if (qty === 1) {
-    return NextResponse.json((data && data[0]) || null, { status: 201 })
+    return NextResponse.json(rows[0] || null, { status: 201 })
   }
-  return NextResponse.json(data || [], { status: 201 })
+  return NextResponse.json(rows, { status: 201 })
 }
 
 // PATCH /api/seats — assign or unassign a user to a seat.
@@ -361,6 +475,15 @@ export async function DELETE(request: NextRequest) {
   // (issue 161) — Stripe credits the unused portion. CONDITIONAL + non-fatal:
   // a no-op when the location has no live subscription, and a Stripe failure
   // never un-does the seat removal (the seat is inactive; billing reconciles).
+  //
+  // ISSUE 221, STILL OPEN HERE: this passes seat.tier — the SEAT tier — where
+  // applySeatDeltaToStripe wants a BILLING tier. For manager/light/readonly the
+  // two are the same string, so removals of those seats are correct. Removing a
+  // CO-OWNER seat is not: it is an owner-tier seat billed at the manager rate
+  // (lib/seat-plan), so this credits the $550 owner line for a seat that was
+  // charged $400. POST above avoids this by walking the quote's billing lines;
+  // fixing it here needs the same owner-count context POST has and is issue
+  // 221's job, not issue 219's.
   let billing: any = null
   const seat = data as any
   if (seat?.location_id && seat?.tier) {

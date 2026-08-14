@@ -24,7 +24,11 @@ import {
   INVITE_FROM_NAME,
   INVITE_REPLY_TO_EMAIL,
 } from '@/lib/invite-email'
-import { applySeatDeltaToStripe } from '@/lib/seat-stripe-sync'
+import {
+  applySeatPurchaseToStripe,
+  unchargedSeatNote,
+  unrecordedChargeNote,
+} from '@/lib/seat-stripe-sync'
 import {
   quoteSeatPurchase,
   seatCostDivergence,
@@ -243,12 +247,47 @@ export async function POST(request: NextRequest) {
   // the location has no live subscription, so the free-grant invite path
   // keeps working. NEVER rolls back the seat/invite: a Stripe failure is
   // logged and reported, not fatal (the seat is real; billing reconciles).
-  const billing = await applySeatDeltaToStripe({
+  //
+  // issue 219 — this drives off the quote's billing lines, the same way
+  // /api/seats POST now does, for two reasons. It keeps the charge and the
+  // recorded figure derived from ONE list; and it stops a $0 tier (prod prices
+  // readonly and light at 0) from minting a Stripe line that moves no money
+  // now and none at renewal. Both buttons must behave the same or issue 219 is
+  // only half fixed — a Watcher seat would be a silent no-op through "+ Add
+  // seats" and a pointless Stripe write through here.
+  const purchase = await applySeatPurchaseToStripe({
     locationId: location_id,
-    tier,
-    delta: 1,
-    seatId: insertedSeat.id,
+    lines: quote.billingLines,
+    seatIds: [insertedSeat.id],
   })
+  const billingLine = purchase.lines[0]
+
+  // Same reconciliation trail /api/seats POST writes: a recorded cost nobody
+  // charged, or a charge with no recorded cost, lands on the seat row so
+  //   select … from subscription_seats where notes ilike '%issue 219%'
+  // finds every one of them regardless of which button made the seat.
+  const mismatchNote = !billingLine
+    ? null
+    : !billingLine.applied && billingLine.reason !== 'zero_rate'
+      ? unchargedSeatNote(billingLine.reason, billingLine.detail)
+      : billingLine.applied && quote.perSeatCents === null
+        ? unrecordedChargeNote(quote.unpricedReason)
+        : null
+
+  if (mismatchNote) {
+    const full = [seatRow.notes, mismatchNote].filter(Boolean).join(' · ')
+    console.error(`[buy-and-invite] ${mismatchNote} loc=${location_id} seat=${insertedSeat.id}`)
+    const { data: noted, error: noteErr } = await supabaseService
+      .from('subscription_seats')
+      .update({ notes: full, updated_at: new Date().toISOString() })
+      .eq('id', insertedSeat.id)
+      .select(SEAT_COLS)
+      .single()
+    // The log above already carries the evidence; losing the note must not
+    // cost the invitee their seat.
+    if (noteErr) console.error('[buy-and-invite] issue 219 — could not write the billing note', noteErr)
+    else if (noted) Object.assign(insertedSeat, noted)
+  }
 
   const origin =
     process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
@@ -330,7 +369,10 @@ export async function POST(request: NextRequest) {
       // than assuming the number it sent was accepted.
       cost: seatCostResponse(quote),
       ...(email_error ? { email_error } : {}),
-      billing: { stripe_applied: billing.applied, ...(billing.reason ? { stripe_skip_reason: billing.reason } : {}) },
+      billing: {
+        stripe_applied: billingLine?.applied ?? false,
+        ...(billingLine?.reason ? { stripe_skip_reason: billingLine.reason } : {}),
+      },
     },
     { status: 201 }
   )
