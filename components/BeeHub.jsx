@@ -32621,9 +32621,7 @@ function CancelScheduledRemovalModal({ seat, tierMeta, onClose, onCanceled }) {
 // "Pay" just records the prorated_cost on each seat row.
 function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null }) {
   const tierPricesCtx  = useContext(TierPricesContext)
-  const currentUserCtx = useContext(CurrentUserContext)
   const currentLocationCtx = useContext(CurrentLocationContext)
-  const seatsCtx       = useContext(SeatsContext)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
   // issue 162: a mid-year seat add prorates to the LOCATION'S OWN renewal
   // date — paid_through_date, the mirror of the Stripe subscription's period
@@ -32634,22 +32632,21 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null
     paidThroughDate: paidThroughDate ?? currentLocationCtx?.paid_through_date ?? null,
   })
 
-  const [step, setStep]         = useState('form') // form | paymentConfirm | stripeWait
+  const [step, setStep]         = useState('form') // form | paymentConfirm
   const [tier, setTier]         = useState('manager')
   const [quantity, setQuantity] = useState(1)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]       = useState('')
-  // Stripe path: when a Payment Link is configured for the tier, the
-  // confirm step becomes a real "Pay with Stripe" and the seat is created
-  // by the webhook — /api/seats 402s for owners on these tiers.
-  const [serverPayUrl, setServerPayUrl] = useState(null)
-  const baselineRef = useRef(null) // active seat count at tier before checkout opened
-  const stripePayUrl =
-    buildStripePayUrl(tierPricesCtx?.getTierLink?.(tier), locationId, currentUserCtx?.email) ||
-    serverPayUrl
-  // Quantity on the Stripe path is chosen ON the checkout page (links are
-  // quantity-adjustable; Payment Links don't accept a quantity URL param),
-  // so the in-modal picker hides and the webhook grants amount ÷ price.
+  // issue 218 — this modal used to carry a second, parallel Stripe branch
+  // built on Payment Links: a per-tier tier_prices.payment_link_url that
+  // turned the confirm step into "Pay with Stripe", plus a stripeWait step
+  // polling for the webhook's seat. Neither end of it was ever wired —
+  // no tier has a link set, and /api/seats never returned the 402 + pay_url
+  // that was its other trigger — so it was unreachable UI. It is gone
+  // rather than wired because Payment Links compete with the Checkout
+  // Sessions the live paths already use (onboarding, the issue 182 admin
+  // link); one way to charge for a seat, not two. Seats bought here are
+  // charged as subscription lines by /api/seats (issues 161/219).
 
   React.useEffect(() => {
     const prev = document.body.style.overflow
@@ -32698,12 +32695,6 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null
         }),
       })
       const json = await res.json().catch(() => ({}))
-      // Server says this tier is Stripe-only (the client context missed the
-      // link) — flip the confirm step into Stripe mode instead of erroring.
-      if (res.status === 402 && json?.pay_url) {
-        setServerPayUrl(json.pay_url)
-        return
-      }
       if (!res.ok) throw new Error(json.error || 'Failed to add seats')
       const inserted = Array.isArray(json) ? json : [json]
       onSeatsAdded(inserted)
@@ -32715,36 +32706,6 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null
     }
   }
 
-  // Snapshot the current active seat count at the tier, then show the
-  // waiting screen — "paid" = the webhook made the count go up.
-  async function beginStripeWait() {
-    baselineRef.current = null
-    try {
-      const res = await fetch(`/api/locations/${locationId}/activation-status`, { cache:'no-store' })
-      if (res.ok) {
-        const j = await res.json().catch(() => null)
-        baselineRef.current = j?.active_seats_by_tier?.[tier] ?? 0
-      }
-    } catch {}
-    setStep('stripeWait')
-  }
-
-  async function finishStripePurchase() {
-    try {
-      const res = await fetch(`/api/seats?location_id=${locationId}`, { cache:'no-store' })
-      if (res.ok) {
-        const rows = await res.json().catch(() => null)
-        if (Array.isArray(rows)) {
-          const known = new Set((seatsCtx?.seats || []).map(s => s.id))
-          const fresh = rows.filter(r => !known.has(r.id))
-          if (fresh.length > 0) onSeatsAdded(fresh)
-          else if (seatsCtx?.setSeats) seatsCtx.setSeats(rows)
-        }
-      }
-    } catch {}
-    onClose()
-  }
-
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10020, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
       <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={onClose} />
@@ -32753,14 +32714,10 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
             <div>
               <h2 style={{ fontSize:'18px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>
-                {step === 'stripeWait' ? 'Waiting for payment' : step === 'paymentConfirm' ? 'Confirm payment' : 'Add seats to your plan'}
+                {step === 'paymentConfirm' ? 'Confirm payment' : 'Add seats to your plan'}
               </h2>
               <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
-                {step === 'stripeWait'
-                  ? `Your ${tierMeta?.name || tier} seats appear on the roster as soon as Stripe confirms the payment.`
-                  : step === 'paymentConfirm' && stripePayUrl
-                  ? `Pick the number of ${tierMeta?.name || tier} seats on the Stripe checkout page — each lands as an open seat on the team roster, ready to invite into.`
-                  : step === 'paymentConfirm'
+                {step === 'paymentConfirm'
                   ? `Adds ${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'} to your pool. Each appears as an open seat on the team roster, ready to invite into.`
                   : `Billed annually, prorated to your renewal date (${renewalLabel}). Once added, you can invite team members anytime.`}
               </p>
@@ -32773,37 +32730,16 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null
           {step === 'paymentConfirm' && (
             <PaymentConfirmStep
               title="Confirm pre-buy"
-              lineItems={stripePayUrl
-                ? [{
-                    label: `${tierMeta?.name || tier} seat — quantity chosen at checkout`,
-                    amount: annualEach,
-                  }]
-                : [{
-                    label: `${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'} (prorated to ${renewalLabel})`,
-                    amount: totalProrated,
-                  }]}
-              total={stripePayUrl ? annualEach : totalProrated}
+              lineItems={[{
+                label: `${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'} (prorated to ${renewalLabel})`,
+                amount: totalProrated,
+              }]}
+              total={totalProrated}
               confirmLabel="Confirm & Add Seats"
               onConfirm={runAddSeats}
               onCancel={() => { setError(''); setStep('form') }}
               isProcessing={submitting}
               error={error || null}
-              stripePayUrl={stripePayUrl}
-              onStripeOpen={beginStripeWait}
-            />
-          )}
-
-          {step === 'stripeWait' && (
-            <StripeCheckoutWait
-              locationId={locationId}
-              payUrl={stripePayUrl}
-              until={(status) => {
-                const n = status.active_seats_by_tier?.[tier] ?? 0
-                if (baselineRef.current == null) { baselineRef.current = n; return false }
-                return n > baselineRef.current
-              }}
-              onPaid={finishStripePurchase}
-              onBack={() => setStep('paymentConfirm')}
             />
           )}
 
@@ -32833,11 +32769,6 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null
           </div>
 
           <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'8px' }}>Quantity</p>
-          {stripePayUrl ? (
-            <p style={{ fontSize:'11px', color:'#8a9e9a', marginBottom:'18px' }}>
-              You'll pick the number of seats on the Stripe checkout page.
-            </p>
-          ) : (
           <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'18px' }}>
             <button onClick={()=>setQuantity(q=>Math.max(1, q-1))} disabled={quantity<=1}
               style={{ width:'36px', height:'36px', borderRadius:'9px', background:'white', border:'1.5px solid rgba(0,0,0,0.1)', fontSize:'18px', color:quantity<=1?'#c8d8d4':'#1a2e2b', cursor:quantity<=1?'not-allowed':'pointer', fontFamily:'inherit' }}>−</button>
@@ -32846,7 +32777,6 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null
               style={{ width:'36px', height:'36px', borderRadius:'9px', background:'white', border:'1.5px solid rgba(0,0,0,0.1)', fontSize:'18px', color:quantity>=10?'#c8d8d4':'#1a2e2b', cursor:quantity>=10?'not-allowed':'pointer', fontFamily:'inherit' }}>+</button>
             <span style={{ fontSize:'11px', color:'#b0c0bc', marginLeft:'6px' }}>Cap 10 per request</span>
           </div>
-          )}
 
           <div style={{ background:'rgba(26,46,43,0.03)', border:'1px solid rgba(0,0,0,0.06)', borderRadius:'10px', padding:'12px 14px' }}>
             <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'6px' }}>
@@ -32893,7 +32823,6 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null
 export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTier=null, paidThroughDate=null }) {
   const seatsCtx = useContext(SeatsContext)
   const tierPricesCtx = useContext(TierPricesContext)
-  const currentUserCtx = useContext(CurrentUserContext)
   const currentLocationCtx = useContext(CurrentLocationContext)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
   // issue 162: buy-and-invite prorates the purchased seat to the LOCATION'S
@@ -32902,7 +32831,7 @@ export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, in
     paidThroughDate: paidThroughDate ?? currentLocationCtx?.paid_through_date ?? null,
   })
 
-  const [step, setStep] = useState('form') // form | paymentConfirm | stripeWait | success
+  const [step, setStep] = useState('form') // form | paymentConfirm | success
   const [email, setEmail] = useState('')
   const [fullName, setFullName] = useState('')
   // PURCHASABLE tiers. Owner is deliberately absent and must stay absent:
@@ -32952,15 +32881,13 @@ export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, in
   const [error, setError] = useState('')
   const [createdInvite, setCreatedInvite] = useState(null)
   const [copied, setCopied] = useState(false)
-  // Stripe path (buy-and-invite becomes pay → seat lands → invite): when a
-  // Payment Link exists for the tier, the purchase half runs on Stripe's
-  // checkout and the webhook creates the seat; the invite then fires
-  // against the now-available seat.
-  const [serverPayUrl, setServerPayUrl] = useState(null)
-  const baselineRef = useRef(null)
-  const stripePayUrl =
-    buildStripePayUrl(tierPricesCtx?.getTierLink?.(tier), locationId, currentUserCtx?.email) ||
-    serverPayUrl
+  // issue 218 — the Payment-Link Stripe branch (pay → webhook seat →
+  // invite, with a stripeWait step polling for the seat) is gone. It could
+  // never run: no tier carries a payment_link_url, and
+  // /api/seats/buy-and-invite never returned the 402 + pay_url that was its
+  // other trigger. Deleted rather than wired — Payment Links are a second
+  // charging mechanism competing with the Checkout Sessions the live paths
+  // use. buy-and-invite bills the seat as a subscription line (issue 161).
 
   React.useEffect(() => {
     const prev = document.body.style.overflow
@@ -33020,8 +32947,8 @@ export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, in
     await sendInvite()
   }
 
-  // The invite half, against an available seat. Reused by the direct path
-  // (seat already pooled) and the Stripe path (webhook just landed one).
+  // The invite half, against an available seat — the direct path, where
+  // the seat is already pooled.
   async function sendInvite() {
     setSubmitting(true)
     try {
@@ -33045,40 +32972,12 @@ export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, in
       if (onInviteCreated) onInviteCreated(json)
     } catch (err) {
       setError(err?.message || 'Could not complete invite')
-      // Coming from the Stripe wait, the seat is paid and pooled but the
-      // invite failed — drop back to the form; the availability line now
-      // shows the seat, so retrying takes the direct-invite path.
+      // Back to the form so the error is shown beside the fields that can
+      // fix it, with the availability line re-read on the retry.
       setStep('form')
     } finally {
       setSubmitting(false)
     }
-  }
-
-  // Snapshot the tier's active seat count, then wait for the webhook to
-  // raise it — that's the "payment landed" signal.
-  async function beginStripeWait() {
-    baselineRef.current = null
-    try {
-      const res = await fetch(`/api/locations/${locationId}/activation-status`, { cache:'no-store' })
-      if (res.ok) {
-        const j = await res.json().catch(() => null)
-        baselineRef.current = j?.active_seats_by_tier?.[tier] ?? 0
-      }
-    } catch {}
-    setStep('stripeWait')
-  }
-
-  async function finishStripeBuy() {
-    // Refresh the seat pool so availability math sees the webhook's seat,
-    // then send the invite against it.
-    try {
-      const res = await fetch(`/api/seats?location_id=${locationId}`, { cache:'no-store' })
-      if (res.ok) {
-        const rows = await res.json().catch(() => null)
-        if (Array.isArray(rows)) seatsCtx?.setSeats?.(rows)
-      }
-    } catch {}
-    await sendInvite()
   }
 
   // Runs from PaymentConfirmStep's onConfirm. Single combined endpoint
@@ -33111,13 +33010,6 @@ export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, in
         }),
       })
       const json = await res.json().catch(() => ({}))
-      // Server says this tier is Stripe-only — flip the confirm step into
-      // Stripe mode (Pay with Stripe → webhook seat → invite).
-      if (res.status === 402 && json?.pay_url) {
-        setServerPayUrl(json.pay_url)
-        setSubmitting(false)
-        return
-      }
       if (!res.ok) throw new Error(json.error || 'Failed to buy seat and invite')
       if (json.seat) {
         seatsCtx?.setSeats?.(prev => [...prev, json.seat])
@@ -33285,34 +33177,16 @@ export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, in
           {step === 'paymentConfirm' && (
             <PaymentConfirmStep
               title="Confirm seat purchase"
-              lineItems={stripePayUrl
-                ? [{ label: `1 ${tierMeta?.name || tier} seat`, amount: annualPrice }]
-                : [{
-                    label: `1 ${tierMeta?.name || tier} seat (prorated to ${renewalLabel})`,
-                    amount: proratedDollars,
-                  }]}
-              total={stripePayUrl ? annualPrice : proratedDollars}
+              lineItems={[{
+                label: `1 ${tierMeta?.name || tier} seat (prorated to ${renewalLabel})`,
+                amount: proratedDollars,
+              }]}
+              total={proratedDollars}
               confirmLabel="Confirm & Send Invite"
               onConfirm={runBuyAndInvite}
               onCancel={() => { setError(''); setStep('form') }}
               isProcessing={submitting}
               error={error || null}
-              stripePayUrl={stripePayUrl}
-              onStripeOpen={beginStripeWait}
-            />
-          )}
-
-          {step === 'stripeWait' && (
-            <StripeCheckoutWait
-              locationId={locationId}
-              payUrl={stripePayUrl}
-              until={(status) => {
-                const n = status.active_seats_by_tier?.[tier] ?? 0
-                if (baselineRef.current == null) { baselineRef.current = n; return false }
-                return n > baselineRef.current
-              }}
-              onPaid={finishStripeBuy}
-              onBack={() => setStep('paymentConfirm')}
             />
           )}
 
