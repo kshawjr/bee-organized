@@ -18,6 +18,15 @@
 // closing the free path server-side is a separate step once the paid
 // path is proven.
 //
+// issue 220 — THIS ROUTE CHARGES NOTHING, AND NOW SAYS SO IN THE LEDGER.
+// `prorated_cost` in the body is no longer written to the owner's activation
+// seat; it is compared against the server's decision and, on disagreement,
+// recorded as a note. Every case that gets this far owes nothing today —
+// prepaid (issue 171), non-paying source, unconfigured tier, or super_admin
+// acting on someone's behalf — so the seat records 0 when the owner tier's
+// rate is known and nothing at all when it is not. See lib/seat-cost's
+// quoteActivationSeat.
+//
 // Auth:
 //   - super_admin: any location
 //   - owner: their own location only
@@ -34,6 +43,12 @@ import {
 } from '@/lib/subscription-activation'
 import { isPaidThroughFuture } from '@/lib/subscription-math'
 import { normalizeSeatPlan } from '@/lib/seat-plan'
+import {
+  activationCostResponse,
+  activationSeatNote,
+  quoteActivationSeat,
+  seatCostDivergence,
+} from '@/lib/seat-cost'
 
 export const runtime = 'nodejs'
 
@@ -94,10 +109,6 @@ export async function POST(
   }
 
   const body = await req.json().catch(() => ({}))
-  const proratedCostCents =
-    Number.isInteger(body?.prorated_cost) && body.prorated_cost >= 0
-      ? body.prorated_cost
-      : null
 
   // issue 212 — this is the ZERO-CHARGE activation path: a prepaid location
   // (issue 171), a corporate/sponsored source, or a genuinely unconfigured
@@ -112,17 +123,58 @@ export async function POST(
     return NextResponse.json({ error: planResult.error, message: planResult.detail }, { status })
   }
 
+  // issue 220 — THE SERVER DECIDES WHAT THE ACTIVATION SEAT RECORDS. The
+  // body's `prorated_cost` used to travel straight through to the seat row, so
+  // the browser's arithmetic became the permanent record of what activating
+  // cost — the third instance of the defect issues 217 and 219 closed on the
+  // two /api/seats routes.
+  //
+  // What replaces it is not the client's number made server-side. This route
+  // charges nothing (it never talks to Stripe, and issue 167's gate above has
+  // already sent every location that CAN be charged to checkout instead), so
+  // the honest figure is 0 — not a proration of what a seat would have cost.
+  // lib/seat-cost decides between 0 and nothing at all; see quoteActivationSeat
+  // for why the anchor does not gate it and why an unpriced tier records null.
+  const activationQuote = await quoteActivationSeat({ locationId: params.id })
+  const noteParts: string[] = [activationSeatNote(activationQuote)]
+
+  // The client still sends its figure on the direct-payment branch. It is never
+  // written, but a disagreement is worth keeping: on this route it means the
+  // screen quoted an amount for an activation that cost nothing, which is
+  // precisely the gap issue 223's copy exists to close. Same marker as issue
+  // 217, so one query finds every surface still doing money math:
+  //   select id, tier, prorated_cost, notes from subscription_seats
+  //   where notes ilike '%issue 217 cost divergence%'
+  const divergence = seatCostDivergence(
+    body?.prorated_cost,
+    activationQuote.recordedCents === null ? null : [activationQuote.recordedCents],
+  )
+  if (divergence.diverged) {
+    console.error(`[complete-onboarding] ${divergence.note} loc=${params.id}`)
+    noteParts.push(divergence.note)
+  }
+
   try {
     const result = await activateLocationSubscription({
       locationId: params.id,
       ownerUserId: isOwnerOfTarget ? user.id : null,
-      proratedCostCents,
+      proratedCostCents: activationQuote.recordedCents,
+      // Applied only when a seat is INSERTED — a claimed pre-allocated seat
+      // keeps the note it was created with.
+      seatNotes: noteParts.join(' · '),
     })
 
     // Seats beyond the owner's own. prorated_cost is left unset — nothing was
     // charged for these, and writing a price would misrepresent a free seat as
     // a paid one. Keyed on the location id: one onboarding per location, so a
     // retried confirm finds its own marker and adds nothing twice.
+    //
+    // issue 220 deliberately leaves these alone. They were never the client's
+    // number — issue 212 has always written them server-side — so they are not
+    // the defect this closes, and their "no charge" note already says what
+    // happened. Whether they should record 0 rather than nothing, the way the
+    // activation seat now does, is issue 212's convention to change, not this
+    // one's.
     const planned = await addSeatsForPlan({
       locationId: params.id,
       plan: planResult.plan,
@@ -139,6 +191,9 @@ export async function POST(
       location: result.location,
       seat: result.seat,
       extra_seats: planned.seats,
+      // issue 220 — what the server decided, so a caller can see it rather than
+      // assume its own figure was accepted.
+      cost: activationCostResponse(activationQuote),
       ...(planned.ownerCapHit ? { warning: 'max_owners_reached — extra owner seat not created' } : {}),
     })
   } catch (err: any) {

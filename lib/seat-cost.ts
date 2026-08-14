@@ -377,6 +377,118 @@ export async function quoteSeatPurchase(args: {
   }
 }
 
+// ── issue 220: quoting an ACTIVATION, which charges nothing ──
+//
+// THE THIRD AND LAST SITE. /api/locations/[id]/complete-onboarding took
+// `prorated_cost` out of the request body and handed it to
+// activateLocationSubscription, which wrote it verbatim to the owner's
+// activation seat — the same column and the same defect issues 217 and 219
+// closed on /api/seats and /api/seats/buy-and-invite.
+//
+// DOES THE INCREMENT MACHINERY FIT AN ACTIVATION? Its two halves answer
+// differently, and that is the whole design here.
+//
+//   The LINES half fits exactly. An activation is the increment from zero:
+//   quoteSeatPurchase(tier 'owner', quantity 1) on a location with no owner
+//   seat differences planBillingLines([]) against planBillingLines(owner:1),
+//   which is owner × 1. Nothing about planPair/positiveDelta needs a special
+//   case for an empty "before" — an empty plan produces an empty line list and
+//   the delta is simply the whole "after". So this does NOT restate the rule.
+//
+//   The PRICED half does not fit, and must not be used. perSeatCents answers
+//   "what does buying this seat cost today", prorated from now to the
+//   location's renewal. Every caller that reaches this route is buying
+//   nothing: issue 167's gate sends any owner-pays location that CAN be
+//   charged to Stripe instead, so what is left is prepaid (issue 171),
+//   corporate/non-paying, an unconfigured tier, or super_admin acting on
+//   someone's behalf. Worse, the case where the proration is most confidently
+//   computable is the one where it is most wrong: an issue-171 prepaid
+//   location HAS a future paid_through_date, so quoteSeatPurchase returns a
+//   healthy positive figure for a seat that was charged $0. Recording it would
+//   swap one fabrication (the client's) for another (ours).
+//
+// So this composes quoteSeatPurchase and consumes the half issue 219 built for
+// exactly this shape — billingLines, which is populated on every return path
+// including the unpriced ones, because "what tier is this seat billed on" was
+// never a question the renewal anchor answered. That leaves one question worth
+// asking: do we know a rate for that tier at all?
+//
+//   rate known (0 included) → the seat records 0. We charged nothing, and we
+//                             can say so because we know what it would have
+//                             cost. A tier priced at 0 is honestly free.
+//   no tier_prices row      → the seat records NOTHING. Without a rate, "free"
+//                             and "we could not work it out" are the same
+//                             silence, and issue 217's rule stands: an absent
+//                             figure is true, a fabricated one is not.
+//
+// The distinction survives in the column itself — 0 versus null — which is
+// what issue 223's copy leans on, and it is repeated in the seat's note so a
+// row read on its own still explains itself.
+//
+// The renewal anchor is deliberately NOT a reason to withhold the figure here,
+// unlike in a purchase. A purchase with no anchor cannot be prorated; an
+// activation is not prorated at all, so a missing paid_through_date has no
+// bearing on whether $0 is the honest record. It is.
+export type ActivationSeatQuote = {
+  // What the activation seat's prorated_cost records. 0 = charged nothing,
+  // rate known. null = no rate, so nothing is written.
+  recordedCents: number | null
+  unpricedReason?: SeatCostUnpricedReason
+  // The underlying purchase quote. NEVER written — reported so a caller can
+  // see what the seat would have cost had it been bought, and so the annual
+  // rate (which is knowable even here) stays available to the response.
+  quote: SeatCostQuote
+}
+
+export async function quoteActivationSeat(args: {
+  locationId: string
+  from?: Date
+}): Promise<ActivationSeatQuote> {
+  // quantity 1: activateLocationSubscription creates exactly ONE owner seat,
+  // and every seat beyond it is addSeatsForPlan's (issue 212).
+  const quote = await quoteSeatPurchase({
+    locationId: args.locationId,
+    tier: 'owner',
+    quantity: 1,
+    from: args.from,
+  })
+
+  // One line, because one seat. On a fresh location that line is owner × 1.
+  // A location that already holds an owner seat differences to the manager
+  // line instead (the co-owner rule) — harmless, because activation CLAIMS a
+  // pre-allocated owner seat rather than inserting one, so nothing is recorded
+  // on that path at all.
+  const line = quote.billingLines[0]
+  if (!line || line.annualUnitCents === null) {
+    return { recordedCents: null, unpricedReason: 'tier_not_priced', quote }
+  }
+  return { recordedCents: 0, quote }
+}
+
+// The note that keeps the two kinds of "no money" apart on the row itself.
+export function activationSeatNote(q: ActivationSeatQuote): string {
+  return q.recordedCents === null
+    ? 'issue 220: no cost recorded for this activation — the owner tier has no tier_prices row, so a free seat and an unknown one could not be told apart'
+    : 'issue 220: activation charged nothing — $0 recorded'
+}
+
+// The `cost` block for the activation response, deliberately NOT
+// seatCostResponse(): that reports a purchase's prorated figure, and this route
+// makes no purchase. What a caller needs here is what was recorded, the fact
+// that nothing was charged, and the annual rate this location renews at.
+export function activationCostResponse(q: ActivationSeatQuote) {
+  return {
+    recorded_cents: q.recordedCents,
+    // This route does not touch Stripe. Stated rather than implied, so a
+    // recorded 0 is never read as "we charged and it came to zero".
+    charged_cents: 0,
+    annual_total_cents: annualTotalCents(q.quote),
+    paid_through_date: q.quote.paidThroughDate,
+    ...(q.unpricedReason ? { unpriced_reason: q.unpricedReason } : {}),
+    source: 'server' as const,
+  }
+}
+
 // ── issue 221: quoting a REMOVAL ─────────────────────────────
 // The mirror of quoteSeatPurchase, and deliberately smaller. A removal records
 // no figure — subscription_seats.prorated_cost is the historical record of what
