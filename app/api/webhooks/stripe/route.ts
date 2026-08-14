@@ -51,16 +51,19 @@ import {
 } from '@/lib/stripe-webhook'
 import {
   activateLocationSubscription,
+  addSeatsForPlan,
   addStripePurchasedSeats,
   advancePaidThroughDate,
   getLocationBilling,
   getLocationByStripeSubscriptionId,
   annualRenewalFromSignupString,
   recordStripeInvoice,
+  seatPlanMarker,
   setLocationSubscriptionStatus,
   writeLocationStripeIds,
   type LocationBillingRow,
 } from '@/lib/subscription-activation'
+import { decodeSeatPlan, planBillingLines } from '@/lib/seat-plan'
 import { stripeConfigured } from '@/lib/stripe'
 import {
   retrieveSubscription,
@@ -149,6 +152,7 @@ export async function POST(req: NextRequest) {
   const {
     eventId, eventType, sessionId, paymentIntentId, clientReferenceId,
     tier, amountTotal, currency, paymentStatus, subscriptionId, customerId,
+    seatPlan: encodedSeatPlan,
   } = session
 
   // Payment failed (async methods like ACH bank debit) — issue 197.
@@ -444,6 +448,64 @@ export async function POST(req: NextRequest) {
         seatNotes: sessionId ? `Paid via Stripe checkout (stripe_session=${sessionId})` : 'Paid via Stripe checkout',
       })
 
+      // ── issue 212: create the seats this session actually billed ──
+      // activateLocationSubscription made exactly ONE owner seat. If the owner
+      // bought more than that, the rest come from the plan the checkout route
+      // stamped on the SESSION — not from client state, which is gone by now,
+      // and not from dividing amount_total by a unit price, which cannot tell
+      // a co-owner (owner seat on the manager price) from a Hive Manager.
+      // Absent metadata (a pre-212 session, a Payment Link) → no add-ons, i.e.
+      // exactly today's behavior.
+      let seatPlanNote = ''
+      const decodedPlan = decodeSeatPlan(encodedSeatPlan)
+      if (decodedPlan) {
+        // Price each add-on row at the rate it was billed, from the same
+        // tier_prices catalog the checkout route priced the session with.
+        const { data: allTierRows } = await supabaseService.from('tier_prices').select('*')
+        const unitCentsByTier: Record<string, number> = {}
+        for (const r of allTierRows || []) {
+          const annual = (r as any)?.price_annual
+          if (typeof annual === 'number') unitCentsByTier[(r as any).id] = annual * 100
+        }
+        try {
+          const planned = await addSeatsForPlan({
+            locationId: location.id,
+            plan: decodedPlan,
+            marker: seatPlanMarker('session', sessionId || location.id),
+            unitCentsByTier,
+            noteLabel: 'Purchased via Stripe checkout (issue 212 seat plan)',
+          })
+          const billed = planBillingLines(decodedPlan)
+            .map((l) => `${l.billingTier}×${l.quantity}`)
+            .join(' + ')
+          seatPlanNote = planned.deduped
+            ? ` seat_plan=${encodedSeatPlan} (replay — seats already created)`
+            : planned.ownerCapHit
+              ? ` ⚠️ seat_plan=${encodedSeatPlan} REFUSED — would exceed the 2-owner cap; seats NOT created`
+              : ` seat_plan=${encodedSeatPlan} billed=[${billed}] extra_seats=${planned.seats.length}`
+          if (planned.ownerCapHit) {
+            await postSlackMessage(
+              `⚠️ ${location.name || location.id} paid for ${encodedSeatPlan} but the extra owner seat would exceed the 2-owner cap — the seat was NOT created. Money was collected; reconcile by hand.`,
+            )
+          }
+        } catch (e: any) {
+          // The payment landed and the location is active. Returning 500 here
+          // makes Stripe retry, and every write above is idempotent, so the
+          // retry converges rather than double-charging or double-seating.
+          console.error('[stripe-webhook] issue 212 seat plan insert failed —', e?.message || e)
+          await logStripeEvent({
+            locationSlug: location.location_id,
+            sessionId,
+            status: 'error',
+            detail: `error=seat_plan_insert_failed seat_plan=${encodedSeatPlan} — ${String(e?.message || e).slice(0, 200)}`,
+          })
+          await postSlackMessage(
+            `🚨 ${location.name || location.id} paid for ${encodedSeatPlan} but the extra seats could not be created. Stripe will retry; if this persists the owner is short seats she paid for.`,
+          )
+          return NextResponse.json({ error: 'seat_plan_insert_failed' }, { status: 500 })
+        }
+      }
+
       // Landed = the location actually reads back active.
       const after = await getLocationBilling(location.id)
       const landed = after?.subscription_status === 'active' ? 'landed' : 'not_landed'
@@ -452,13 +514,13 @@ export async function POST(req: NextRequest) {
         locationSlug: location.location_id,
         sessionId,
         status: 'success',
-        detail: `tier=owner amount=${dollars(amountTotal)} — activation${result.alreadyActive ? ' (already active)' : ''}${hasSubscription ? ` sub=${subscriptionId}` : ''}${invoiceOutcome === 'duplicate' ? ' invoice=duplicate' : ''}${amountNote}`,
+        detail: `tier=owner amount=${dollars(amountTotal)} — activation${result.alreadyActive ? ' (already active)' : ''}${hasSubscription ? ` sub=${subscriptionId}` : ''}${invoiceOutcome === 'duplicate' ? ' invoice=duplicate' : ''}${seatPlanNote}${amountNote}`,
         landed,
       })
       await postSlackMessage(
         result.alreadyActive && !hasSubscription && invoiceOutcome === 'inserted'
           ? `⚠️ Stripe payment ${dollars(amountTotal)} from ${location.name || location.id} — location was ALREADY active. Possible duplicate activation payment; refund from the Stripe dashboard if so.`
-          : `💰 Stripe payment: ${dollars(amountTotal)} — ${location.name || location.id} — subscription activated (paid through ${paidThrough}).${amountNote}`,
+          : `💰 Stripe payment: ${dollars(amountTotal)} — ${location.name || location.id} — subscription activated (paid through ${paidThrough}).${seatPlanNote}${amountNote}`,
       )
     } else {
       const invoiceOutcome = await recordStripeInvoice({

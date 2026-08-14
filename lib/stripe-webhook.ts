@@ -95,6 +95,12 @@ export type StripeCheckoutSession = {
   // Payment-Link path (mode='payment').
   subscriptionId: string | null
   customerId: string | null
+  // issue 212: the encoded seat plan the checkout route stamped on the session
+  // when it built the line items ("owner:2,manager:1"). This is the signal the
+  // activation branch creates seats from — see the route for why it beats
+  // dividing amount_total by a unit price. Null on any session minted before
+  // issue 212, on a Payment-Link session, or on a plain owner-only checkout.
+  seatPlan: string | null
 }
 
 export const STRIPE_ACTIVATING_EVENTS = [
@@ -127,6 +133,8 @@ export function extractCheckoutSession(event: any): StripeCheckoutSession | null
     // subscription/customer arrive as a string id or an expanded object.
     subscriptionId: str(session.subscription) ?? str(session.subscription?.id),
     customerId: str(session.customer) ?? str(session.customer?.id),
+    // issue 212 — stamped by /api/locations/[id]/checkout at session creation.
+    seatPlan: str(session.metadata?.seat_plan),
   }
 }
 

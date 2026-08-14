@@ -175,6 +175,13 @@ export async function createOwnerCheckoutSession(args: {
   // ONE invoice on the anchor date. When omitted (the onboarding path), the
   // subscription is created with just the single owner line — unchanged.
   lineItems?: Array<{ price: string; quantity: number }>
+  // issue 212: the encoded seat plan these line items were built from
+  // (lib/seat-plan.ts encodeSeatPlan — e.g. "owner:2,manager:1"). Stamped on
+  // the session AND the subscription so the checkout.session.completed webhook
+  // can create exactly the seats that were billed, reading the SESSION rather
+  // than client state that no longer exists by then. Omitted → the webhook
+  // keeps its pre-212 owner-only behavior.
+  seatPlan?: string | null
 }): Promise<Stripe.Checkout.Session> {
   const { customerId, priceId, locationId, successUrl, cancelUrl } = args
   const tier = args.tier || 'owner'
@@ -187,8 +194,13 @@ export async function createOwnerCheckoutSession(args: {
       ? args.lineItems
       : [{ price: priceId, quantity: 1 }]
 
+  // issue 212: carried on both the session and the subscription. Only added
+  // when present, so a session without a plan is byte-identical to today's.
+  const seatPlanMeta: Record<string, string> =
+    typeof args.seatPlan === 'string' && args.seatPlan ? { seat_plan: args.seatPlan } : {}
+
   const subscriptionData: Stripe.Checkout.SessionCreateParams.SubscriptionData = {
-    metadata: { tier, location_id: locationId },
+    metadata: { tier, location_id: locationId, ...seatPlanMeta },
   }
   // issue 182: an already-active location has been paid for (by corporate)
   // through paid_through_date. Its checkout link exists only to put a card on
@@ -211,7 +223,7 @@ export async function createOwnerCheckoutSession(args: {
       customer: customerId,
       line_items: lineItems,
       client_reference_id: locationId,
-      metadata: { tier, location_id: locationId },
+      metadata: { tier, location_id: locationId, ...seatPlanMeta },
       subscription_data: subscriptionData,
       success_url: successUrl,
       cancel_url: cancelUrl,
@@ -259,16 +271,18 @@ export async function createOwnerCheckoutSessionResilient(args: {
   // (unchanged: no anchor, single owner line).
   billingCycleAnchor?: number
   lineItems?: Array<{ price: string; quantity: number }>
+  // issue 212: forwarded verbatim to createOwnerCheckoutSession.
+  seatPlan?: string | null
   persistCustomerId: (customerId: string) => Promise<void>
 }): Promise<{ session: Stripe.Checkout.Session; customerId: string; recovered: boolean }> {
-  const { locationId, name, email, existingCustomerId, priceId, successUrl, cancelUrl, tier, nowMs, billingCycleAnchor, lineItems, persistCustomerId } = args
+  const { locationId, name, email, existingCustomerId, priceId, successUrl, cancelUrl, tier, nowMs, billingCycleAnchor, lineItems, seatPlan, persistCustomerId } = args
 
   const first = await getOrCreateStripeCustomer({ locationId, name, email, existingCustomerId, nowMs })
   let customerId = first.customerId
   if (customerId !== existingCustomerId) await persistCustomerId(customerId)
 
   try {
-    const session = await createOwnerCheckoutSession({ customerId, priceId, locationId, tier, successUrl, cancelUrl, nowMs, billingCycleAnchor, lineItems })
+    const session = await createOwnerCheckoutSession({ customerId, priceId, locationId, tier, successUrl, cancelUrl, nowMs, billingCycleAnchor, lineItems, seatPlan })
     return { session, customerId, recovered: false }
   } catch (err: any) {
     if (!isNoSuchCustomerError(err)) throw err
@@ -285,7 +299,7 @@ export async function createOwnerCheckoutSessionResilient(args: {
     await persistCustomerId(customerId)
 
     const session = await createOwnerCheckoutSession({
-      customerId, priceId, locationId, tier, successUrl, cancelUrl, billingCycleAnchor, lineItems,
+      customerId, priceId, locationId, tier, successUrl, cancelUrl, billingCycleAnchor, lineItems, seatPlan,
       // Fresh customer ⇒ a different request body ⇒ a fresh session key.
       idempotencyKey: `${ownerCheckoutIdempotencyKey(locationId, nowMs)}_recover_${staleId}`,
     })
@@ -324,6 +338,26 @@ export function subscriptionPeriodEndUnix(
   const item = sub?.items?.data?.[0] as any
   const end = item?.current_period_end
   return typeof end === 'number' && Number.isFinite(end) ? end : null
+}
+
+// ── Price reads (issue 212) ───────────────────────────────────
+// The annual unit amount, in cents, that Stripe will actually charge for a
+// price id. The onboarding checkout route reads this for every line it is
+// about to create and refuses to mint the session if any of them disagrees
+// with tier_prices.price_annual — the number the pay step quotes.
+//
+// This is the seam that makes "the screen quotes what Stripe charges" a
+// checked fact rather than a convention. Without it, an owner editing a price
+// in the Stripe dashboard (or a tier_prices row edited in Admin > Pricing
+// without a matching Stripe change) silently reintroduces exactly the
+// quote-vs-charge divergence issue 212 exists to close.
+export async function retrievePriceUnitAmountCents(
+  priceId: string,
+): Promise<number | null> {
+  const stripe = getStripe()
+  const price = await stripe.prices.retrieve(priceId)
+  const amount = (price as any)?.unit_amount
+  return typeof amount === 'number' && Number.isFinite(amount) ? amount : null
 }
 
 export function unixToDateString(sec: number | null | undefined): string | null {

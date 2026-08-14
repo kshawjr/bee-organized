@@ -24,6 +24,7 @@ import { supabaseService } from './supabase-service'
 import { buildStripePayUrl } from './stripe-links'
 import { stripeConfigured } from './stripe'
 import { annualRenewalFromSignup, legacyFixedRenewalDate } from './subscription-math'
+import { planAddOnRows, MAX_OWNER_SEATS, type SeatPlan } from './seat-plan'
 
 const SEAT_COLS =
   'id, location_id, tier, user_id, status, added_at, removed_at, prorated_cost, added_by, notes, is_primary, scheduled_removal_at'
@@ -359,6 +360,102 @@ export async function addManuallyGrantedSeats(args: {
     .select(SEAT_COLS)
   if (error) throw new Error(`manual seat insert failed: ${error.message}`)
   return { seats: seats || [], ownerCapHit: false }
+}
+
+// ── Seats for a paid seat plan (issue 212) ───────────────────
+// activateLocationSubscription() creates (or claims) exactly ONE owner seat.
+// That was the whole story before issue 212, which is why a location whose
+// owner selected a co-owner and a Hive Manager activated with a single seat.
+// This adds the REST of the plan — every seat beyond that first owner one —
+// so the pool matches what was billed.
+//
+// WHERE THE PLAN COMES FROM: the caller passes a plan decoded from the Stripe
+// SESSION's metadata (the webhook) or from a validated request body on a
+// zero-charge activation (the prepaid / record-only path). Never from client
+// state at write time — by the time Stripe calls us the browser that made the
+// selection may be long gone.
+//
+// IDEMPOTENCY, two layers deep:
+//   • `marker` is stamped into every row's notes and checked first, so a
+//     webhook redelivery that got past the event-id guard (a delivery that
+//     died mid-way is re-run in full) finds its own rows and no-ops.
+//   • the rows go in as ONE insert, so the marker check can never see a
+//     half-written batch — either every row is there or none is.
+// The marker is deliberately distinct from the owner seat's
+// "stripe_session=…" note: that note is written by activateLocationSubscription
+// for a DIFFERENT row, and sharing the string would make this function think
+// its work was already done and skip every add-on seat.
+export const SEAT_PLAN_MARKER_PREFIX = 'seat_plan'
+
+export function seatPlanMarker(kind: 'session' | 'onboarding', id: string): string {
+  return `${SEAT_PLAN_MARKER_PREFIX}_${kind}=${id}`
+}
+
+export async function addSeatsForPlan(args: {
+  locationId: string
+  plan: SeatPlan
+  // Stable per-activation id (a Stripe session id, or the location id for the
+  // record-only path). Makes the whole batch replay-safe.
+  marker: string
+  // Annual unit price in cents per BILLING tier, so each row records the rate
+  // it was actually billed at — a co-owner row is tier 'owner' carrying the
+  // manager rate, which is the honest record of that seat.
+  unitCentsByTier?: Record<string, number | null | undefined>
+  noteLabel: string
+}): Promise<{ seats: any[]; deduped: boolean; ownerCapHit: boolean }> {
+  const { locationId, plan, marker, unitCentsByTier, noteLabel } = args
+
+  const rows = planAddOnRows(plan)
+  if (rows.length === 0) return { seats: [], deduped: false, ownerCapHit: false }
+
+  // Layer 1: has this exact activation already written its seats?
+  const { data: prior } = await supabaseService
+    .from('subscription_seats')
+    .select('id')
+    .eq('location_id', locationId)
+    .like('notes', `%${marker}%`)
+    .limit(1)
+  if (prior && prior.length > 0) return { seats: [], deduped: true, ownerCapHit: false }
+
+  // The 2-owner cap, counted against what already exists. The plan was capped
+  // at validation, but a pre-allocated owner seat (the invite-owner path) can
+  // already be sitting here, so re-check against live rows before inserting.
+  const ownerRows = rows.filter((r) => r.tier === 'owner').length
+  if (ownerRows > 0) {
+    const { count } = await supabaseService
+      .from('subscription_seats')
+      .select('id', { count: 'exact', head: true })
+      .eq('location_id', locationId)
+      .eq('tier', 'owner')
+      .eq('status', 'active')
+    if ((count ?? 0) + ownerRows > MAX_OWNER_SEATS) {
+      return { seats: [], deduped: false, ownerCapHit: true }
+    }
+  }
+
+  const insertRows = rows.map((r) => {
+    const row: Record<string, any> = {
+      location_id: locationId,
+      tier: r.tier,
+      user_id: null,
+      notes:
+        r.tier === 'owner'
+          ? `${noteLabel} — co-owner seat, billed at the ${r.billingTier} rate (${marker})`
+          : `${noteLabel} (${marker})`,
+    }
+    const cents = unitCentsByTier?.[r.billingTier]
+    if (typeof cents === 'number' && Number.isInteger(cents) && cents >= 0) {
+      row.prorated_cost = cents
+    }
+    return row
+  })
+
+  const { data: seats, error } = await supabaseService
+    .from('subscription_seats')
+    .insert(insertRows)
+    .select(SEAT_COLS)
+  if (error) throw new Error(`seat plan insert failed: ${error.message}`)
+  return { seats: seats || [], deduped: false, ownerCapHit: false }
 }
 
 // ── Stripe invoice recording ──────────────────────────────────

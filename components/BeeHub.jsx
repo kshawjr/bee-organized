@@ -10961,6 +10961,18 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   // unmount, which is acceptable: once 'pay' is marked done the user
   // doesn't return to this step.
   const [selectedSeats, setSelectedSeats] = useState([{ tier:'owner', count:1 }])
+  // issue 212 — the selection is now an INPUT to checkout, not just a display.
+  // selectedPlanKey is its canonical encoding (the same "owner:2,manager:1"
+  // shape the server stamps on the Stripe session), used to tell whether a
+  // cached checkout session still matches what the owner has picked.
+  const selectedPlanKey = selectedSeats
+    .filter(s => s.count > 0)
+    .map(s => `${s.tier}:${s.count}`)
+    .join(',')
+  // An owner-only selection is the one shape a single-line Stripe Payment Link
+  // can still express correctly; anything more must go through a session.
+  const isOwnerOnlySelection =
+    selectedSeats.filter(s => s.count > 0).every(s => s.tier === 'owner' && s.count === 1)
   const paymentSourceForPay =
     currentLocationCtx?.payment_source === 'prepaid_corporate' || currentLocationCtx?.payment_source === 'corporate_sponsored'
       ? currentLocationCtx.payment_source
@@ -11034,6 +11046,14 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
   // Stripe checkout URL returned by a 402 payment_required response —
   // backstop for when the server has a link the client context missed.
   const [serverPayUrl, setServerPayUrl]     = useState(null)
+  // issue 212 — the server's authoritative amount due today, in cents, for the
+  // session serverPayUrl points at, plus the plan key that session was minted
+  // for. The confirm step displays serverQuoteCents rather than recomputing a
+  // total client-side, so the quote and the charge are the same number and not
+  // merely two calculations that ought to agree. serverPlanKey invalidates the
+  // cached session the moment the selection changes.
+  const [serverQuoteCents, setServerQuoteCents] = useState(null)
+  const [serverPlanKey, setServerPlanKey]   = useState(null)
   // issue 167 BUG 2 — the outcome of asking the server for a checkout session.
   // 'idle' | 'loading' | 'ready' | 'unconfigured' | 'error'. A FAILED checkout
   // ('error') must NOT fall back to the record-only "no charge" confirm; only
@@ -11071,23 +11091,45 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
     // the pay step shows the "paid through …" surface, not "Pay with Stripe".
     if (prepaidThroughFuture) { setCheckoutState('prepaid'); return }
     // A configured Payment Link already gives us a URL — no session needed.
-    if (buildStripePayUrl(tierPricesCtx?.getTierLink?.('owner'), locId, currentUserCtx?.email)) {
+    // issue 212: ONLY for a plain owner-only selection. A Payment Link is a
+    // single fixed line and cannot express a co-owner or a Hive Manager, so
+    // taking this short-circuit for a multi-seat plan would charge for one
+    // seat again — the very bug issue 212 fixes. Multi-seat plans fall through
+    // to the checkout session, which bills every line.
+    if (isOwnerOnlySelection &&
+        buildStripePayUrl(tierPricesCtx?.getTierLink?.('owner'), locId, currentUserCtx?.email)) {
       setCheckoutState('ready'); return
     }
-    if (serverPayUrl) { setCheckoutState('ready'); return }
+    // issue 212: a cached session is only reusable for the SAME selection.
+    // Going back to pricing, adding a seat and returning must re-mint, or the
+    // owner would be sent to a session that bills her previous selection.
+    if (serverPayUrl && serverPlanKey === selectedPlanKey) { setCheckoutState('ready'); return }
     let cancelled = false
     setCheckoutState('loading')
     ;(async () => {
       try {
+        // issue 212: the selection travels with the request. This body used to
+        // be a literal '{}', which is why every onboarding checkout billed one
+        // owner seat regardless of what was picked.
         const res = await fetch(`/api/locations/${locId}/checkout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: '{}',
+          body: JSON.stringify({ seats: selectedSeats.filter(s => s.count > 0) }),
         })
         const j = await res.json().catch(() => ({}))
         if (cancelled) return
         const state = classifyCheckoutResponse(res.status, j)
-        if (state === 'ready') { setServerPayUrl(j.url); setCheckoutState('ready'); return }
+        if (state === 'ready') {
+          setServerPayUrl(j.url)
+          // The server's quote is authoritative — the pay step renders THIS
+          // number, so what she confirms is the arithmetic of the session.
+          setServerQuoteCents(
+            Number.isInteger(j.quoted_total_cents) ? j.quoted_total_cents : null,
+          )
+          setServerPlanKey(selectedPlanKey)
+          setCheckoutState('ready')
+          return
+        }
         if (state === 'already_active') { setCheckoutState('ready'); setPayStep('stripe_wait'); return }
         setCheckoutState(state) // 'unconfigured' | 'error'
       } catch {
@@ -11095,7 +11137,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
       }
     })()
     return () => { cancelled = true }
-  }, [payStep, paymentSourceForPay, currentLocationCtx?.id, serverPayUrl, checkoutNonce, prepaidThroughFuture])
+  }, [payStep, paymentSourceForPay, currentLocationCtx?.id, serverPayUrl, serverPlanKey, selectedPlanKey, isOwnerOnlySelection, checkoutNonce, prepaidThroughFuture])
 
   // Per-step forms - prefilled from invite data, or from DB on remount (Pass 2)
   const [profileForm, setProfileForm] = useState({
@@ -11722,11 +11764,19 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
       // the owner seat's recorded cost is $0, not the full annual it would carry
       // for a fresh self-paying franchise.
       const proratedCostCents = prepaidThroughFuture ? 0 : Math.round(proration.prorated * 100)
+      // issue 212 — the seat selection rides along on the zero-charge path too.
+      // A prepaid or corporate location is charged nothing, but the owner still
+      // picked a team, and activation alone only ever creates her own owner
+      // seat. Sent on every source so "charges nothing" never means "receives
+      // nothing"; the server re-validates it and enforces the 2-owner cap.
+      const seatsForActivation = selectedSeats.filter(s => s.count > 0)
       const subRes = await fetch(`/api/locations/${locId}/complete-onboarding`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
-          isDirect ? { prorated_cost: proratedCostCents } : {}
+          isDirect
+            ? { prorated_cost: proratedCostCents, seats: seatsForActivation }
+            : { seats: seatsForActivation }
         ),
       })
       const subJson = await subRes.json().catch(() => ({}))
@@ -11748,10 +11798,17 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
       }
       if (!subRes.ok) throw new Error(subJson.error || 'Failed to activate subscription')
 
-      if (subJson.seat && seatsCtx?.setSeats) {
-        seatsCtx.setSeats(prev =>
-          prev.some(s => s.id === subJson.seat.id) ? prev : [...prev, subJson.seat]
-        )
+      // issue 212 — fold in the owner seat AND the selection's extra seats, so
+      // Settings sees the pool immediately instead of after a reload.
+      const activatedSeats = [
+        ...(subJson.seat ? [subJson.seat] : []),
+        ...(Array.isArray(subJson.extra_seats) ? subJson.extra_seats : []),
+      ]
+      if (activatedSeats.length > 0 && seatsCtx?.setSeats) {
+        seatsCtx.setSeats(prev => {
+          const seen = new Set(prev.map(s => s.id))
+          return [...prev, ...activatedSeats.filter(s => s?.id && !seen.has(s.id))]
+        })
       }
       markDone('pay')
       setPayStep('pricing')
@@ -12016,7 +12073,18 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                   amount: s.count * annualEach,
                 }]
               })
-            const confirmTotal = confirmLineItems.reduce((sum, li) => sum + li.amount, 0)
+            // issue 212 — the total the owner confirms. When a Stripe session
+            // exists, its server-computed quote WINS over this client sum: the
+            // server priced the exact line items it sent Stripe and verified
+            // every unit amount against Stripe's own prices, so its number is
+            // the charge, not an estimate of it. The client sum remains for the
+            // record-only / unconfigured path, where there is no session and so
+            // nothing to be authoritative about.
+            const clientConfirmTotal = confirmLineItems.reduce((sum, li) => sum + li.amount, 0)
+            const confirmTotal =
+              Number.isInteger(serverQuoteCents) && serverPlanKey === selectedPlanKey
+                ? serverQuoteCents / 100
+                : clientConfirmTotal
 
             // issue 167 — decide which confirm surface the owner-pays path shows.
             // A configured Stripe checkout (link or session) → "Pay with Stripe".
@@ -12097,7 +12165,7 @@ function OnboardingScreen({ ownerName='there', ownerEmail='', franchiseRole='own
                           style={{ flex:1, padding:'12px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>
                           ← Back
                         </button>
-                        <button onClick={() => { setServerPayUrl(null); setCheckoutState('loading'); setCheckoutNonce(n => n + 1) }}
+                        <button onClick={() => { setServerPayUrl(null); setServerQuoteCents(null); setServerPlanKey(null); setCheckoutState('loading'); setCheckoutNonce(n => n + 1) }}
                           style={{ flex:2, padding:'12px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
                           Try again
                         </button>

@@ -27,10 +27,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import {
   activateLocationSubscription,
+  addSeatsForPlan,
   getLocationBilling,
   ownerCheckoutConfigured,
+  seatPlanMarker,
 } from '@/lib/subscription-activation'
 import { isPaidThroughFuture } from '@/lib/subscription-math'
+import { normalizeSeatPlan } from '@/lib/seat-plan'
 
 export const runtime = 'nodejs'
 
@@ -96,6 +99,19 @@ export async function POST(
       ? body.prorated_cost
       : null
 
+  // issue 212 — this is the ZERO-CHARGE activation path: a prepaid location
+  // (issue 171), a corporate/sponsored source, or a genuinely unconfigured
+  // tier. Nothing is billed here, but the owner still picked a team on the pay
+  // step, and activateLocationSubscription only ever makes the ONE owner seat.
+  // So the selection is validated the same way the paid path validates it (the
+  // 2-owner cap included) and the remaining seats are created. Charging
+  // nothing must not mean receiving nothing.
+  const planResult = normalizeSeatPlan(body?.seats)
+  if (!planResult.ok) {
+    const status = planResult.error === 'max_owners_reached' ? 409 : 400
+    return NextResponse.json({ error: planResult.error, message: planResult.detail }, { status })
+  }
+
   try {
     const result = await activateLocationSubscription({
       locationId: params.id,
@@ -103,11 +119,28 @@ export async function POST(
       proratedCostCents,
     })
 
+    // Seats beyond the owner's own. prorated_cost is left unset — nothing was
+    // charged for these, and writing a price would misrepresent a free seat as
+    // a paid one. Keyed on the location id: one onboarding per location, so a
+    // retried confirm finds its own marker and adds nothing twice.
+    const planned = await addSeatsForPlan({
+      locationId: params.id,
+      plan: planResult.plan,
+      marker: seatPlanMarker('onboarding', params.id),
+      noteLabel: 'Onboarding seat selection — no charge',
+    })
+
     // (Previously seeded default drip paths here. With master drip_paths
     // replacing the old per-location bootstrap, locations don't need their
     // own copies until an owner clicks "Customize" in Settings → Paths.)
 
-    return NextResponse.json({ ok: true, location: result.location, seat: result.seat })
+    return NextResponse.json({
+      ok: true,
+      location: result.location,
+      seat: result.seat,
+      extra_seats: planned.seats,
+      ...(planned.ownerCapHit ? { warning: 'max_owners_reached — extra owner seat not created' } : {}),
+    })
   } catch (err: any) {
     console.error('[complete-onboarding]', err)
     return NextResponse.json({ error: String(err?.message || err) }, { status: 500 })
