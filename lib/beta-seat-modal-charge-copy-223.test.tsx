@@ -170,7 +170,28 @@ describe('issue 223 — a seat that will be charged', () => {
     it(`${name} puts the amount on the confirm button`, async () => {
       view = await open()
       const labels = Array.from(view.container.querySelectorAll('button')).map(b => b.textContent || '')
-      expect(labels.some(l => l.includes('Confirm & Pay $219.45'))).toBe(true)
+      // issue 225 — "about", because Stripe does this arithmetic, not us.
+      expect(labels.some(l => l.includes('Confirm & Pay about $219.45'))).toBe(true)
+    })
+
+    it(`${name} shows the SAME figure in the order summary and the notice`, async () => {
+      // issue 225 — the order-summary rows rendered with showCents:'auto',
+      // which drops cents above $100. A $372.60 seat printed "$373" one row
+      // above a notice reading "about $372.60": two numbers, one purchase, on
+      // the screen where someone commits. Both halves now carry the cents.
+      quoteResponse = {
+        cost: { total_cents: 37260, per_seat_cents: [37260], renewal_date: '2027-08-14', source: 'server' },
+        billing: { will_charge: true, reason: null, lines: [] },
+      }
+      view = await open()
+      const txt = view.container.textContent || ''
+      expect(txt).toContain('$372.60')
+      // The rounded figure must appear nowhere on the screen.
+      expect(txt).not.toMatch(/\$373\b/)
+      // And it is on the total row specifically, not only inside the notice.
+      const total = Array.from(view.container.querySelectorAll('span'))
+        .find(s => (s.previousElementSibling?.textContent || '') === 'Order total')
+      expect(total?.textContent?.trim()).toBe('$372.60')
     })
 
     it(`${name} asked the server rather than computing it`, async () => {

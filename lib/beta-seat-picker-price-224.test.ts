@@ -36,7 +36,10 @@ const price = (over: Partial<Parameters<typeof seatPickerPrice>[0]['quote']> = {
 
 describe('issue 224 — a paid seat on a live subscription', () => {
   it('names the amount charged today', () => {
-    expect(price().today).toBe('$372.60 today')
+    // issue 225 — "About", because Stripe settles this sum per-second against
+    // its own period while we work it out in whole days. The figure is still
+    // named; it is no longer promised.
+    expect(price().today).toBe('About $372.60 today')
   })
 
   it('names the annual price and the date it starts renewing', () => {
@@ -59,7 +62,7 @@ describe('issue 224 — a paid seat on a live subscription', () => {
   it('shows cents — the ceiling in formatCurrency\'s auto mode would overstate the charge', () => {
     // $219.45 would render as "$220" under 'auto'. That is a number the owner
     // never agreed to.
-    expect(price({ totalCents: 21945 }).today).toBe('$219.45 today')
+    expect(price({ totalCents: 21945 }).today).toBe('About $219.45 today')
   })
 
   it('does not round the annual figure up when it carries cents', () => {

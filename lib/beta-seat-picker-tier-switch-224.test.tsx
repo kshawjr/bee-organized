@@ -151,6 +151,10 @@ const SURFACES: Array<[string, () => Promise<ReturnType<typeof mount>>]> = [
 ]
 
 // ── both numbers, on the picker ───────────────────────────────────────
+// issue 225 — the today figure now reads "About $372.60 today". Stripe
+// settles that sum to the second against its own period while we work it out
+// in whole days, so the picker forecasts it rather than quoting it. The
+// annual line is untouched: it is the catalog price, which nothing prorates.
 describe('issue 224 — the picker names what is charged today AND what renews', () => {
   let view: ReturnType<typeof mount> | null = null
   afterEach(() => { view?.unmount(); view = null })
@@ -158,7 +162,7 @@ describe('issue 224 — the picker names what is charged today AND what renews',
   for (const [name, open] of SURFACES) {
     it(`${name} shows the server's figure for the selected tier`, async () => {
       view = await open()
-      expect(pickerToday(view.container)).toBe('$372.60 today')
+      expect(pickerToday(view.container)).toBe('About $372.60 today')
     })
 
     it(`${name} shows the annual price with the renewal date`, async () => {
@@ -197,7 +201,7 @@ describe('issue 224 — no figure is computed client-side', () => {
     // figure on screen can therefore only have come from the server.
     repliesByTier.manager = paidQuote(13337, 99900)
     view = await openAddSeats()
-    expect(pickerToday(view.container)).toBe('$133.37 today')
+    expect(pickerToday(view.container)).toBe('About $133.37 today')
     expect(pickerRenews(view.container)).toContain('$999')
   })
 
@@ -229,7 +233,7 @@ describe('issue 224 — switching tiers never shows the previous tier\'s number'
   it('the old figure is gone the instant the new tier is selected', async () => {
     heldTiers = ['readonly']           // Watcher's quote will not answer yet
     view = await openAddSeats()
-    expect(pickerToday(view.container)).toBe('$372.60 today')
+    expect(pickerToday(view.container)).toBe('About $372.60 today')
 
     clickText(view.container, 'Honey Watcher')
     await settle()
@@ -253,7 +257,7 @@ describe('issue 224 — switching tiers never shows the previous tier\'s number'
     act(() => { held.readonly({ body: repliesByTier.readonly.body }) })
     await settle()
 
-    expect(pickerToday(view.container)).toBe('$46.57 today')
+    expect(pickerToday(view.container)).toBe('About $46.57 today')
     expect(pickerRenews(view.container)).toBe('Then $50 a year, starting Aug 10, 2027')
   })
 
@@ -264,13 +268,13 @@ describe('issue 224 — switching tiers never shows the previous tier\'s number'
 
     clickText(view.container, 'Honey Watcher')
     await settle()
-    expect(pickerToday(view.container)).toBe('$46.57 today')
+    expect(pickerToday(view.container)).toBe('About $46.57 today')
 
     // Manager's slow quote finally arrives — for a tier that is no longer
     // selected. It is filed, not displayed.
     act(() => { held.manager({ body: repliesByTier.manager.body }) })
     await settle()
-    expect(pickerToday(view.container)).toBe('$46.57 today')
+    expect(pickerToday(view.container)).toBe('About $46.57 today')
     expect(view.container.textContent || '').not.toContain('$372.60')
   })
 
@@ -286,7 +290,7 @@ describe('issue 224 — switching tiers never shows the previous tier\'s number'
     await settle()
     // No third round trip, and no wait state on the way back.
     expect(quoteUrls.length).toBe(2)
-    expect(pickerToday(view.container)).toBe('$372.60 today')
+    expect(pickerToday(view.container)).toBe('About $372.60 today')
   })
 
   it('only the tier actually selected is quoted — the picker does not ask for all three', async () => {
@@ -304,7 +308,7 @@ describe('issue 224 — the six cases stay six on the picker', () => {
   afterEach(() => { view?.unmount(); view = null })
 
   const CASES: Array<[string, any, RegExp, RegExp]> = [
-    ['charge', paidQuote(37260, 40000).body, /^\$372\.60 today$/, /Then \$400 a year, starting Aug 10, 2027/],
+    ['charge', paidQuote(37260, 40000).body, /^About \$372\.60 today$/, /Then \$400 a year, starting Aug 10, 2027/],
     ['charge_unpriced', {
       cost: { total_cents: null, annual_total_cents: 40000, per_seat_cents: null, renewal_date: null, unpriced_reason: 'no_renewal_anchor', source: 'server' },
       billing: { will_charge: true, reason: null, lines: [] },
@@ -463,7 +467,7 @@ describe('issue 224 — the confirm step agrees with the picker', () => {
 
   it('shows the same figure the picker showed, without asking twice', async () => {
     view = await openAddSeats()
-    expect(pickerToday(view.container)).toBe('$372.60 today')
+    expect(pickerToday(view.container)).toBe('About $372.60 today')
     const asked = quoteUrls.length
 
     clickText(view.container, 'Review order')

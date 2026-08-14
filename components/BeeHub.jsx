@@ -32589,16 +32589,25 @@ function PaymentConfirmStep({
                 <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:'10px', fontSize:'12.5px', color:'#4a5e5a' }}>
                   <span style={{ flex:1, minWidth:0 }}>{li.label}</span>
                   <span style={{ fontWeight:600, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>
-                    {formatCurrency(li.amount, { showCents:'auto' })}
+                    {formatCurrency(li.amount, { showCents:'always' })}
                   </span>
                 </div>
               ))}
             </div>
           )}
+          {/* issue 225 — showCents:'always', for the reason issue 223 gave the
+              notice: 'auto' drops cents above $100, so a $372.60 seat printed
+              "$373" here while the notice under it said "about $372.60". Two
+              different numbers for one purchase, on the screen where someone
+              commits, and the rounded one was the bigger lie — 40c of Stripe
+              proration is the gap this issue hedges, where this was 40c the
+              other way from a display rule. 'auto' stays right for a headline
+              annual price (see the confirm button below, and the onboarding
+              hero); it is wrong for an amount about to be taken. */}
           <div style={{ borderTop:'1px solid rgba(0,0,0,0.08)', marginTop:'10px', paddingTop:'10px', display:'flex', justifyContent:'space-between', alignItems:'baseline' }}>
             <span style={{ fontSize:'13px', color:'#1a2e2b', fontWeight:700 }}>Order total</span>
             <span style={{ fontSize:'19px', fontWeight:700, color:'#d4a046', fontFamily:'Georgia,serif' }}>
-              {formatCurrency(total, { showCents:'auto' })}
+              {formatCurrency(total, { showCents:'always' })}
             </span>
           </div>
         </div>
@@ -32677,6 +32686,14 @@ function PaymentConfirmStep({
                    last thing read before committing, so "Confirm & Pay
                    $219.45" and "Confirm & Add" must not look alike. */
                 ? `${notice.confirmLabel} →`
+                /* issue 225 — 'auto' KEPT here, deliberately. This branch runs
+                   only when no notice is supplied, i.e. the onboarding pay
+                   step, whose total is a full-year annual (issue 162: no
+                   proration at signup) summed from whole-dollar tier_prices.
+                   'auto' drops nothing from a whole-dollar figure, and forcing
+                   ".00" onto a headline price is the churn this rule exists to
+                   avoid. The seat modals reach the branch above instead, where
+                   the cents are real and the label already carries them. */
                 : `${confirmLabel} ${formatCurrency(total, { showCents:'auto' })} →`}
           </button>
         )}

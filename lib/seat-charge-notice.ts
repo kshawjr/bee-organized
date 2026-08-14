@@ -42,6 +42,18 @@
 // AUDIENCE. Owners are 45-65 and non-technical. No "prorated line item", no
 // "subscription quantity", no "proration" — the idea is expressed as the
 // part of the year that is left before renewal, which is what it means.
+//
+// issue 225 — WHICH FIGURES ARE PROMISES AND WHICH ARE FORECASTS.
+// One case names a number that Stripe, not this codebase, ultimately
+// computes: the `charge` case, where our whole-day proration against
+// paid_through_date is settled per-second by Stripe against its own
+// subscription period. That figure is hedged ("about"), in both this
+// module's functions. Nothing else is: an invoiced amount is one WE bill,
+// a $0 tier is exactly free, charge_zero_today is exactly nothing today,
+// charge_unpriced names no figure at all, and the annual line is the
+// catalog rate rather than a proration. Hedging those would be its own
+// small dishonesty — a hedge on an exact number reads as doubt about a
+// fact we actually know.
 // ─────────────────────────────────────────────────────────────
 
 import { formatCurrency, formatRenewalDate, parsePaidThroughDate } from './subscription-math'
@@ -153,19 +165,44 @@ export function seatChargeNotice(args: {
       }
     }
 
+    // issue 225 — "ABOUT", BECAUSE STRIPE DOES THIS SUM, NOT US.
+    //
+    // We work the figure out in whole days against the location's own
+    // paid_through_date. Stripe works it out to the SECOND against its own
+    // subscription period. The two agree to within cents, never exactly: a
+    // screen that says $372.60 can produce an invoice reading $372.19.
+    //
+    // Kevin's call is NOT to close that gap — an upcoming-invoice call on
+    // every tier selection is a round trip we would pay on every keystroke,
+    // it has no answer at all on the 32-of-55 locations with no
+    // subscription, and the disagreement is pennies. So the words carry it
+    // instead: this is the one case where the number on screen is a forecast
+    // of somebody else's arithmetic, and it says so rather than promising an
+    // amount we do not control.
+    //
+    // ONLY THIS CASE, AND ONLY THE TODAY FIGURE. The invoiced case names an
+    // amount WE will bill, so our number is the number; a $0 tier is exactly
+    // free; charge_zero_today is exactly nothing; charge_unpriced names no
+    // figure to hedge. And the annual figure below is the catalog price, not
+    // a proration — nothing prorates it, so nothing softens it.
     const amount = money(quote.totalCents)
     return {
       kind: 'charge',
       tone: 'charge',
-      heading: `You'll be charged ${amount} today`,
-      body: renewal
-        ? `This is for the part of your year that's left, up to your renewal ` +
-          `on ${renewal}. It goes on the card you already have on file, and ` +
-          `after that this ${seatWord} is included in your usual renewal.`
-        : `This is for the part of your year that's left. It goes on the card ` +
-          `you already have on file, and after that this ${seatWord} is ` +
-          `included in your usual renewal.`,
-      confirmLabel: `Confirm & Pay ${amount}`,
+      heading: `You'll be charged about ${amount} today`,
+      body:
+        (renewal
+          ? `This is for the part of your year that's left, up to your renewal ` +
+            `on ${renewal}. It goes on the card you already have on file. `
+          : `This is for the part of your year that's left. It goes on the ` +
+            `card you already have on file. `) +
+        `The exact amount is settled when the payment goes through, so it may ` +
+        `come out a few cents either side of ${amount} — your receipt shows ` +
+        `what was actually taken. After that, this ${seatWord} is included in ` +
+        `your usual renewal.`,
+      // The button is the last thing read before committing, which makes it
+      // the worst place to state a figure more precisely than we know it.
+      confirmLabel: `Confirm & Pay about ${amount}`,
     }
   }
 
@@ -316,10 +353,15 @@ export function seatPickerPrice(args: {
       }
     }
 
+    // issue 225 — the same hedge as the confirm notice, for the same reason:
+    // Stripe prorates to the second against its own period and we prorate in
+    // whole days against paid_through_date, so this figure is a close forecast
+    // rather than a quoted price. `renews` is untouched — the annual figure is
+    // the catalog rate, which nothing prorates and nothing rounds.
     return {
       kind: 'charge',
       tone: 'charge',
-      today: `${money(quote.totalCents)} today`,
+      today: `About ${money(quote.totalCents)} today`,
       renews: renewsAnnually,
     }
   }

@@ -78,7 +78,9 @@ describe('issue 223 — a seat that will be charged', () => {
   })
 
   it('puts the amount on the confirm button too', () => {
-    expect(n.confirmLabel).toBe('Confirm & Pay $219.45')
+    // issue 225 — "about": Stripe settles this figure per-second against its
+    // own period, so the button names it without promising it.
+    expect(n.confirmLabel).toBe('Confirm & Pay about $219.45')
   })
 
   it('a small charge under $100 still shows cents', () => {

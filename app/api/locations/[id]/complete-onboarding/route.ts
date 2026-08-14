@@ -27,6 +27,11 @@
 // rate is known and nothing at all when it is not. See lib/seat-cost's
 // quoteActivationSeat.
 //
+// issue 225 — AND SO DO THE REST OF THE SEATS. The extras from the owner's
+// selection recorded null where the activation seat recorded 0, so one
+// activation wrote "no charge" two ways. They now agree: 0 on a priced tier,
+// unset on an unpriced one. See zeroChargeUnitCentsByTier.
+//
 // Auth:
 //   - super_admin: any location
 //   - owner: their own location only
@@ -48,6 +53,7 @@ import {
   activationSeatNote,
   quoteActivationSeat,
   seatCostDivergence,
+  zeroChargeUnitCentsByTier,
 } from '@/lib/seat-cost'
 
 export const runtime = 'nodejs'
@@ -164,21 +170,25 @@ export async function POST(
       seatNotes: noteParts.join(' · '),
     })
 
-    // Seats beyond the owner's own. prorated_cost is left unset — nothing was
-    // charged for these, and writing a price would misrepresent a free seat as
-    // a paid one. Keyed on the location id: one onboarding per location, so a
-    // retried confirm finds its own marker and adds nothing twice.
+    // Seats beyond the owner's own. Still no proration written — issue 212's
+    // rule that a free seat must not be recorded as a paid one is unchanged.
+    // Keyed on the location id: one onboarding per location, so a retried
+    // confirm finds its own marker and adds nothing twice.
     //
-    // issue 220 deliberately leaves these alone. They were never the client's
-    // number — issue 212 has always written them server-side — so they are not
-    // the defect this closes, and their "no charge" note already says what
-    // happened. Whether they should record 0 rather than nothing, the way the
-    // activation seat now does, is issue 212's convention to change, not this
-    // one's.
+    // issue 225 — THESE NOW RECORD 0, THE SAME AS THE ACTIVATION SEAT ABOVE.
+    // They used to record null, so one zero-charge activation wrote "no
+    // charge" two different ways and a query had to know which route made
+    // each row. 0 says "this cost nothing"; null says "we could not work out
+    // what this cost". These seats are the first — they are free on a priced
+    // tier, which is a thing we know, not a thing we failed to compute. A
+    // tier with no tier_prices row is absent from the map below and its rows
+    // stay unset, so the second meaning is preserved exactly where it is
+    // true. See zeroChargeUnitCentsByTier for why this overrides issue 212.
     const planned = await addSeatsForPlan({
       locationId: params.id,
       plan: planResult.plan,
       marker: seatPlanMarker('onboarding', params.id),
+      unitCentsByTier: await zeroChargeUnitCentsByTier(),
       noteLabel: 'Onboarding seat selection — no charge',
     })
 

@@ -397,9 +397,17 @@ export async function addSeatsForPlan(args: {
   // Stable per-activation id (a Stripe session id, or the location id for the
   // record-only path). Makes the whole batch replay-safe.
   marker: string
-  // Annual unit price in cents per BILLING tier, so each row records the rate
-  // it was actually billed at — a co-owner row is tier 'owner' carrying the
-  // manager rate, which is the honest record of that seat.
+  // What each row records, in cents, per BILLING tier — a co-owner row is
+  // tier 'owner' and reads the manager entry, which is the honest record of
+  // that seat. The paid path (the Stripe webhook) passes the annual unit rate
+  // the seat was billed at. The zero-charge path passes 0 for every priced
+  // tier (issue 225), because a free seat on a priced tier cost nothing and
+  // that is a fact we know.
+  //
+  // A tier ABSENT from this map leaves prorated_cost unset, and that is the
+  // only thing that should ever produce a null here: no rate, so "free" and
+  // "we couldn't work it out" cannot be told apart. Callers must omit an
+  // unpriced tier rather than pass it as 0.
   unitCentsByTier?: Record<string, number | null | undefined>
   noteLabel: string
 }): Promise<{ seats: any[]; deduped: boolean; ownerCapHit: boolean }> {

@@ -282,7 +282,7 @@ describe('issue 220 — the guards around it are untouched', () => {
     expect(h.state.location.subscription_status).toBe('deferred')
   })
 
-  it("issue 212: the selection's extra seats are still created, still unpriced", async () => {
+  it("issue 212: the selection's extra seats are still created, and now agree with the owner's", async () => {
     h.state.location.paid_through_date = '2027-02-27'
     const res = await completeOnboarding({
       prorated_cost: 135000,
@@ -291,12 +291,12 @@ describe('issue 220 — the guards around it are untouched', () => {
     expect(res.status).toBe(200)
     expect(activeSeats()).toHaveLength(3)
 
-    // The activation seat carries issue 220's 0; the add-ons keep issue 212's
-    // unset, which this change deliberately does not touch.
+    // issue 225 — the activation seat's 0 and the add-ons' now match. issue
+    // 220 left this inconsistent on purpose and said so; this closes it.
     expect(ownerSeat().prorated_cost).toBe(0)
     const extras = activeSeats().filter(s => s.user_id === null)
     expect(extras).toHaveLength(2)
-    for (const s of extras) expect(s.prorated_cost).toBeNull()
+    for (const s of extras) expect(s.prorated_cost).toBe(0)
   })
 
   it('a retried confirm neither re-records nor duplicates', async () => {

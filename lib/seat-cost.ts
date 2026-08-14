@@ -465,6 +465,53 @@ export async function quoteActivationSeat(args: {
   return { recordedCents: 0, quote }
 }
 
+// ── issue 225: the SAME rule, for the seats beyond the owner's ──
+//
+// Within one zero-charge activation the owner's seat recorded 0 (above) and
+// addSeatsForPlan's extras recorded null. Both meant "no charge"; a query
+// asking "what did this location's seats cost" had to know which of two code
+// paths minted each row to read either answer. That is not a distinction, it
+// is a seam.
+//
+// 0 and null ARE different facts, and issue 220 leaned on the difference:
+//   0     this cost nothing, and we know that because we know the rate
+//   null  we could not work out what this cost
+// A free seat on a priced tier is the first, so it records 0 — the same
+// answer the activation seat gives, on the same activation, for the same
+// reason.
+//
+// WHAT issue 212 ACTUALLY DECIDED, since this overrides it. Its rule was
+// "prorated_cost is left unset — nothing was charged for these, and writing a
+// price would misrepresent a free seat as a paid one", and that rule is kept
+// whole: no proration is written here, and 0 is not a price. 212 was refusing
+// the FIGURE, not choosing null as a value with meaning — mechanically, the
+// null came from simply not passing addSeatsForPlan a rate map. issue 220 saw
+// the inconsistency and deliberately left it ("issue 212's convention to
+// change, not this one's"); this is that change. Three other writers already
+// record 0 for a free seat — comp grants, pre-allocated invite-owner seats,
+// and issue 220's activation seat — so 0 is the convention and the extras
+// were the outlier.
+//
+// THE UNPRICED HALF SURVIVES INTACT. A tier with no tier_prices row is absent
+// from this map, so addSeatsForPlan leaves its rows unset and null keeps
+// meaning "no rate, so free and unknown could not be told apart" — exactly
+// what quoteActivationSeat does one seat over. A blanket 0 would have bought
+// consistency by destroying the distinction it is supposed to express.
+//
+// Keyed by BILLING tier, which is what addSeatsForPlan looks rows up by: a
+// co-owner row is tier 'owner' on the manager price, so it reads the manager
+// entry and records 0 only if the manager tier is priced.
+export async function zeroChargeUnitCentsByTier(): Promise<Record<string, number>> {
+  const { data: tierRows } = await supabaseService.from('tier_prices').select('id, price_annual')
+  const map: Record<string, number> = {}
+  for (const row of (tierRows || []) as any[]) {
+    if (typeof row?.price_annual === 'number' && Number.isFinite(row.price_annual)) {
+      map[row.id] = 0
+    }
+  }
+  return map
+}
+
 // The note that keeps the two kinds of "no money" apart on the row itself.
 export function activationSeatNote(q: ActivationSeatQuote): string {
   return q.recordedCents === null

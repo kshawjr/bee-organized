@@ -331,9 +331,13 @@ describe('issue 212 — a prepaid location charges nothing and still gets its se
     expect(h.state.location.subscription_status).toBe('active')
 
     // Nothing was charged for the extra seats, so nothing is recorded as paid.
+    // issue 225 — that is now written as 0 rather than null: the tiers are
+    // priced, so "this cost nothing" is a fact we know, and it is the same
+    // answer the activation seat on this very activation records. null is
+    // reserved for the case where no rate exists to judge by.
     const extras = activeSeats().filter(s => s.user_id === null)
     expect(extras).toHaveLength(2)
-    for (const s of extras) expect(s.prorated_cost).toBeNull()
+    for (const s of extras) expect(s.prorated_cost).toBe(0)
   })
 
   it('a retried confirm adds no duplicate seats', async () => {
