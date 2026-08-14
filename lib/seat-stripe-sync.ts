@@ -68,6 +68,54 @@ export type SeatStripeResult = {
   detail?: string
 }
 
+// issue 223 — EVERY REASON A LINE MIGHT NOT BE CHARGED, DECIDED ONCE.
+//
+// The seat modals have to tell an owner what will happen BEFORE they
+// confirm, which means something has to answer "will this actually charge?"
+// without charging. That answer must not be a second opinion: a preview that
+// reasons independently is exactly how a screen ends up promising one thing
+// and the server doing another — which is the bug issue 223 exists to fix.
+//
+// So the gate is lifted out of applySeatDeltaToStripe verbatim and both
+// callers read it. Everything up to (and not including) the Stripe call
+// lives here; the caller that charges gets the subscription and price ids it
+// needs out the far side, and the caller that only previews stops at the
+// verdict. Adding a new skip reason changes both surfaces at once, because
+// there is only one place to add it.
+export type SeatBillingGate =
+  | { chargeable: true; subscriptionId: string; priceId: string }
+  | { chargeable: false; reason: NonNullable<SeatStripeResult['reason']> }
+
+export async function resolveSeatBillingGate(args: {
+  locationId: string
+  tier: string
+}): Promise<SeatBillingGate> {
+  const { locationId, tier } = args
+
+  const location = await getLocationBilling(locationId)
+  if (!location) return { chargeable: false, reason: 'no_subscription' }
+
+  // Corporate / prepaid never bill through Stripe.
+  if (NON_PAYING_SOURCES.includes(location.payment_source || '')) {
+    return { chargeable: false, reason: 'non_paying' }
+  }
+  // No live subscription → free-grant location; skip Stripe entirely.
+  if (!location.stripe_subscription_id) {
+    return { chargeable: false, reason: 'no_subscription' }
+  }
+  if (!stripeConfigured()) return { chargeable: false, reason: 'stripe_unconfigured' }
+
+  const { data: tierRow } = await supabaseService
+    .from('tier_prices')
+    .select('*')
+    .eq('id', tier)
+    .maybeSingle()
+  const priceId = (tierRow as any)?.stripe_price_id ?? null
+  if (!priceId) return { chargeable: false, reason: 'no_price' }
+
+  return { chargeable: true, subscriptionId: location.stripe_subscription_id, priceId }
+}
+
 // Apply a seat quantity delta for one tier to the location's live
 // subscription. seatId (when known) anchors the Stripe idempotency key so
 // a retry of the SAME seat change is a replay, not a double charge.
@@ -80,33 +128,16 @@ export async function applySeatDeltaToStripe(args: {
   const { locationId, tier, delta, seatId } = args
   if (!delta) return { applied: false, reason: 'no_subscription' }
 
-  const location = await getLocationBilling(locationId)
-  if (!location) return { applied: false, reason: 'no_subscription' }
-
-  // Corporate / prepaid never bill through Stripe.
-  if (NON_PAYING_SOURCES.includes(location.payment_source || '')) {
-    return { applied: false, reason: 'non_paying' }
-  }
-  // No live subscription → free-grant location; skip Stripe entirely.
-  if (!location.stripe_subscription_id) {
-    return { applied: false, reason: 'no_subscription' }
-  }
-  if (!stripeConfigured()) return { applied: false, reason: 'stripe_unconfigured' }
-
-  const { data: tierRow } = await supabaseService
-    .from('tier_prices')
-    .select('*')
-    .eq('id', tier)
-    .maybeSingle()
-  const priceId = (tierRow as any)?.stripe_price_id ?? null
-  if (!priceId) return { applied: false, reason: 'no_price' }
+  const gate = await resolveSeatBillingGate({ locationId, tier })
+  if (!gate.chargeable) return { applied: false, reason: gate.reason }
+  const { subscriptionId, priceId } = gate
 
   const direction = delta > 0 ? 'add' : 'remove'
   const idempotencyKey = `bh_seat_${direction}_${seatId || `${tier}_${locationId}_${delta}`}`
 
   try {
     const res = await adjustSubscriptionSeatQuantity({
-      subscriptionId: location.stripe_subscription_id,
+      subscriptionId,
       priceId,
       delta,
       idempotencyKey,
@@ -226,6 +257,80 @@ export async function applySeatPurchaseToStripe(args: {
     applied: results.every((r) => r.applied || r.reason === 'zero_rate'),
     lines: results,
     unbilledSeatIds,
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// issue 223 — the same walk, WITHOUT charging
+// ─────────────────────────────────────────────────────────────
+// What applySeatPurchaseToStripe would do, decided but not done. This is
+// what lets the confirm screen name the outcome before the owner commits to
+// it, and it is deliberately the same shape of loop over the same lines,
+// consulting the same gate, in the same order — the only thing it does not
+// do is call Stripe.
+//
+// Two things are knowable without the call and one is not. Knowable: that a
+// $0 line is skipped before any API work (the annual-rate rule, not the
+// prorated one — see applySeatPurchaseToStripe), and every gate reason, all
+// of which are decided from our own database. Not knowable: whether a
+// chargeable line will actually succeed at Stripe. A prediction of
+// `willCharge: true` therefore means "we will attempt this charge and
+// nothing on our side prevents it", which is the honest claim — a card
+// declining afterwards is Stripe's answer, not ours to promise. That is why
+// the route reports 'stripe_error' after the fact and this never predicts it.
+export type SeatPurchaseLinePreview = {
+  billingTier: string
+  quantity: number
+  willCharge: boolean
+  reason?: SeatPurchaseSkipReason
+}
+
+export type SeatPurchasePreview = {
+  // True when at least one line will actually move money. A purchase made
+  // entirely of $0 lines is `willCharge: false` with reason 'zero_rate' —
+  // nothing is owed, which is a different sentence from "nothing was billed".
+  willCharge: boolean
+  lines: SeatPurchaseLinePreview[]
+  // The single reason to explain, when nothing will be charged and every
+  // line agrees why. Mixed reasons leave this null and the caller falls back
+  // to per-line detail rather than picking a winner.
+  reason: SeatPurchaseSkipReason | null
+}
+
+export async function previewSeatPurchaseBilling(args: {
+  locationId: string
+  lines: SeatPurchaseLine[]
+}): Promise<SeatPurchasePreview> {
+  const { locationId, lines } = args
+
+  const results: SeatPurchaseLinePreview[] = []
+  for (const line of lines) {
+    if (line.annualUnitCents === 0) {
+      results.push({
+        billingTier: line.billingTier,
+        quantity: line.quantity,
+        willCharge: false,
+        reason: 'zero_rate',
+      })
+      continue
+    }
+    // line.billingTier, NOT the seat tier — same rule as the charging walk.
+    const gate = await resolveSeatBillingGate({ locationId, tier: line.billingTier })
+    results.push({
+      billingTier: line.billingTier,
+      quantity: line.quantity,
+      willCharge: gate.chargeable,
+      ...(gate.chargeable ? {} : { reason: gate.reason }),
+    })
+  }
+
+  const willCharge = results.some((r) => r.willCharge)
+  const reasons = results.filter((r) => !r.willCharge).map((r) => r.reason)
+  const distinct = reasons.filter((r, i) => reasons.indexOf(r) === i)
+  return {
+    willCharge,
+    lines: results,
+    reason: !willCharge && distinct.length === 1 ? distinct[0] ?? null : null,
   }
 }
 

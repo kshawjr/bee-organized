@@ -106,16 +106,18 @@ describe('issue 218 — seat modals have no dead Stripe branch', () => {
     expect(body).not.toMatch(/pick the number of seats on the Stripe checkout page/i)
   })
 
-  it('AddSeatsModal quotes the prorated total unconditionally', () => {
-    const body = sliceComponent('AddSeatsModal')
-    // The removed branch swapped the quote to the un-prorated annual price.
-    expect(body).toMatch(/total=\{totalProrated\}/)
-  })
-
-  it('InviteTeamMemberModal quotes the prorated total unconditionally', () => {
-    const body = sliceComponent('InviteTeamMemberModal')
-    expect(body).toMatch(/total=\{proratedDollars\}/)
-  })
+  // The removed Stripe branch swapped the confirm step's quote to the
+  // un-prorated ANNUAL price via a `stripePayUrl ? annual : prorated`
+  // ternary. issue 223 then moved the figure itself to the server, so the
+  // local totals these once named are gone — but the property is the same
+  // one, and stronger: there is no branch, and the amount is the quote's.
+  for (const modal of SEAT_MODALS) {
+    it(`${modal} passes one unconditional total, taken from the server quote`, () => {
+      const body = codeOnly(sliceComponent(modal))
+      expect(body).toMatch(/total=\{quoteView\.totalDollars \?\? 0\}/)
+      expect(body).not.toMatch(/total=\{[^}]*\?[^}]*:/)
+    })
+  }
 })
 
 // ── B) the LIVE onboarding Checkout-Session path is untouched ─────────

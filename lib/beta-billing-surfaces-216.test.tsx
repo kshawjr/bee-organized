@@ -299,7 +299,12 @@ describe('issue 216 C — proration anchors to the real paid_through_date', () =
     ))
     clickText(view.container, '+ Invite')
     const txt = view.container.textContent || ''
-    expect(txt).toContain('Prorated to Aug 14, 2027')
+    // issue 223 replaced the "Prorated to <date>" summary row (which quoted a
+    // client-computed figure) with prose, and the confirm step now gets the
+    // amount from the server. The property THIS test pins is unchanged and is
+    // the second assertion: the anchor is the location's own renewal date,
+    // arriving via the prop, and never the legacy fixed March 1.
+    expect(txt).toContain('Aug 14, 2027')
     expect(txt).not.toContain('Mar 1, 2027')
   })
 

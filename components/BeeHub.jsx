@@ -29,6 +29,7 @@ import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
+import { seatChargeNotice } from "@/lib/seat-charge-notice"
 // issue 185 — copy/format helpers for the "Get payment link" button
 import { translatePaymentLinkError, formatCheckoutLines, formatProjectedAnnual } from "@/lib/payment-link-copy"
 import { navigateToStripeCheckout, payStepForCheckoutReturn, initialPayStepFromReturn, classifyCheckoutResponse, CHECKOUT_RETURN_PARAM, CHECKOUT_INFLIGHT_KEY } from "@/lib/stripe-checkout-return"
@@ -32275,6 +32276,116 @@ function BackOfficeScreen() {
 //  ROOT APP - Role-aware shell
 // ═══════════════════════════════════════════════════════
 
+// ─── useSeatQuote ──────────────────────────────────────────────────────────
+// issue 223 — ASK THE SERVER WHAT THIS SEAT COSTS AND WHETHER IT CHARGES.
+//
+// The confirm screen used to state both facts from client-side arithmetic and
+// a hardcoded sentence, and it got both wrong: it multiplied the rate itself,
+// and it claimed no card would be charged when /api/seats charges. Neither is
+// the client's to know. issue 217 moved the figure to the server on purpose,
+// so this fetches it rather than recomputing it — that recomputation is the
+// class of bug issue 216 fixed and issue 217 closed.
+//
+// THE WAIT IS HANDLED BY NOT SHOWING A PRICE UNTIL IT ARRIVES. This is one
+// round trip, entered when the owner leaves the form for the confirm step, so
+// the modal shows a brief "working out your cost" state and no Confirm button
+// at all until it resolves. There is no optimistic figure and no default
+// notice, because every wrong guess available here is a guess about money.
+//
+// A FAILED QUOTE BLOCKS THE PURCHASE. If the server can't say what this
+// costs, the honest move is to refuse to take the confirmation, not to fall
+// back to a cheerful default — falling back to a cheerful default is exactly
+// what issue 223 is.
+function useSeatQuote({ locationId, tier, quantity = 1, active }) {
+  const [state, setState] = useState({ loading: false, error: '', cost: null, billing: null })
+
+  useEffect(() => {
+    if (!active || !locationId || !tier) return
+    // A tier switch while a quote is in flight must not let the old answer
+    // land on the new selection — the figure would be for a seat the owner
+    // is no longer buying.
+    let live = true
+    setState({ loading: true, error: '', cost: null, billing: null })
+    ;(async () => {
+      try {
+        const qs = new URLSearchParams({ location_id: locationId, tier, quantity: String(quantity) })
+        const res = await fetch(`/api/seats/quote?${qs}`, { cache: 'no-store' })
+        const json = await res.json().catch(() => ({}))
+        if (!live) return
+        if (!res.ok) throw new Error(json.error || 'Could not work out the cost')
+        setState({ loading: false, error: '', cost: json.cost, billing: json.billing })
+      } catch (err) {
+        if (!live) return
+        setState({
+          loading: false,
+          error: err?.message || 'Could not work out the cost',
+          cost: null,
+          billing: null,
+        })
+      }
+    })()
+    return () => { live = false }
+  }, [active, locationId, tier, quantity])
+
+  return state
+}
+
+// Turn a resolved quote into the notice + the authoritative figure. Returns
+// null until both halves are in hand, which is what gates the Confirm button.
+function seatQuoteView(quoteState, seatWord) {
+  if (!quoteState.cost || !quoteState.billing) return null
+  const totalCents = quoteState.cost.total_cents
+  return {
+    totalCents,
+    // Dollars, for the order-summary row. Straight from the server figure —
+    // never re-derived from a rate and a quantity on this side.
+    totalDollars: typeof totalCents === 'number' ? totalCents / 100 : null,
+    renewalDate: quoteState.cost.renewal_date,
+    notice: seatChargeNotice({
+      quote: { totalCents, renewalDate: quoteState.cost.renewal_date },
+      preview: { willCharge: quoteState.billing.will_charge, reason: quoteState.billing.reason },
+      seatWord,
+    }),
+  }
+}
+
+// The two non-answer states, rendered the same way in both modals.
+function SeatQuotePending({ onCancel }) {
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:'14px', width:'100%', textAlign:'center', padding:'14px 0' }}>
+      <div style={{ fontSize:'30px' }}>🧮</div>
+      <div>
+        <h3 style={{ fontSize:'16px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>Working out your cost…</h3>
+        <p style={{ fontSize:'12.5px', color:'#8a9e9a', lineHeight:1.5 }}>One moment while we check what this will cost you.</p>
+      </div>
+      <button onClick={onCancel}
+        style={{ padding:'10px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>
+        ← Back
+      </button>
+    </div>
+  )
+}
+
+function SeatQuoteFailed({ message, onCancel }) {
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:'14px', width:'100%' }}>
+      <div>
+        <h3 style={{ fontSize:'16px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'4px' }}>We couldn’t work out the cost</h3>
+        <p style={{ fontSize:'12.5px', color:'#8a9e9a', lineHeight:1.5 }}>
+          Nothing has been added and nothing has been charged. Please try again in a moment — if it keeps happening, contact Bee Organized and we’ll sort it out.
+        </p>
+      </div>
+      {message && (
+        <p style={{ padding:'8px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.18)', borderRadius:'9px', color:'#b91c1c', fontSize:'12px' }}>{message}</p>
+      )}
+      <button onClick={onCancel}
+        style={{ padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.12)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>
+        ← Back
+      </button>
+    </div>
+  )
+}
+
 // ─── PaymentConfirmStep ────────────────────────────────────────────────────
 // Reusable payment-confirmation interstitial. Drops in between any
 // "buy seats" form and its actual API call. Renders a heading, an
@@ -32301,6 +32412,13 @@ function BackOfficeScreen() {
 //                  card field ever renders in Bee Hub — checkout is
 //                  entirely Stripe-hosted.
 //   onStripeOpen — fired after window.open on the Stripe link
+//   notice       — issue 223. A {kind,tone,heading,body,confirmLabel} from
+//                  lib/seat-charge-notice: what will ACTUALLY happen when
+//                  this is confirmed, decided server-side. When supplied it
+//                  replaces the fixed notice below and supplies the confirm
+//                  button's whole label, so a screen that charges says so on
+//                  the button itself. Omitted by the onboarding pay step,
+//                  which keeps the original two-branch behaviour untouched.
 function PaymentConfirmStep({
   title = 'Confirm payment',
   lineItems = [],
@@ -32312,7 +32430,17 @@ function PaymentConfirmStep({
   error = null,
   stripePayUrl = null,
   onStripeOpen = null,
+  notice = null,
 }) {
+  // issue 223 — colour follows the TONE, never the wording: money leaving
+  // now reads differently at a glance from nothing owed and from a bill
+  // arriving later.
+  const NOTICE_TONE = {
+    charge: { border:'rgba(212,160,70,0.45)', bg:'rgba(212,160,70,0.07)', icon:'💳' },
+    free:   { border:'rgba(34,197,94,0.35)',  bg:'rgba(34,197,94,0.07)',  icon:'✅' },
+    later:  { border:'rgba(99,116,139,0.35)', bg:'rgba(99,116,139,0.07)', icon:'🧾' },
+  }
+  const noticeTone = notice ? (NOTICE_TONE[notice.tone] || NOTICE_TONE.later) : null
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:'14px', width:'100%' }}>
       <div>
@@ -32351,7 +32479,19 @@ function PaymentConfirmStep({
         </div>
       </div>
 
-      {stripePayUrl ? (
+      {notice ? (
+        /* issue 223 — the server's verdict, in the owner's words. */
+        <div data-testid={`seat-notice-${notice.kind}`}
+          style={{ borderRadius:'12px', border:`1.5px solid ${noticeTone.border}`, background:noticeTone.bg, padding:'12px 14px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px' }}>
+            <span style={{ fontSize:'18px' }}>{noticeTone.icon}</span>
+            <p style={{ fontSize:'11px', fontWeight:700, color:'#1a2e2b', textTransform:'uppercase', letterSpacing:'0.6px' }}>
+              {notice.heading}
+            </p>
+          </div>
+          <p style={{ fontSize:'12.5px', color:'#4a5e5a', lineHeight:1.5 }}>{notice.body}</p>
+        </div>
+      ) : stripePayUrl ? (
         /* Real Stripe checkout — the honest replacement for the fake card
            form. Bee Hub never sees card details; the webhook activates the
            purchase when Stripe confirms payment. */
@@ -32405,7 +32545,14 @@ function PaymentConfirmStep({
         ) : (
           <button onClick={onConfirm} disabled={isProcessing}
             style={{ flex:2, padding:'12px', background:isProcessing?'#8a9e9a':'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:isProcessing?'wait':'pointer' }}>
-            {isProcessing ? 'Processing…' : `${confirmLabel} ${formatCurrency(total, { showCents:'auto' })} →`}
+            {isProcessing
+              ? 'Processing…'
+              : notice
+                /* issue 223 — the button carries the outcome too. It is the
+                   last thing read before committing, so "Confirm & Pay
+                   $219.45" and "Confirm & Add" must not look alike. */
+                ? `${notice.confirmLabel} →`
+                : `${confirmLabel} ${formatCurrency(total, { showCents:'auto' })} →`}
           </button>
         )}
       </div>
@@ -32619,7 +32766,9 @@ function CancelScheduledRemovalModal({ seat, tierMeta, onClose, onCanceled }) {
 // to /api/seats. On success, pushes the new seats into SeatsContext so
 // the billing card refreshes without a reload. No real Stripe yet —
 // "Pay" just records the prorated_cost on each seat row.
-function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null }) {
+// Exported for the issue 223 component tests, the way issue 216 exported
+// ScheduleRemovalModal — a screen that quotes money is mounted for real.
+export function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null }) {
   const tierPricesCtx  = useContext(TierPricesContext)
   const currentLocationCtx = useContext(CurrentLocationContext)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
@@ -32664,12 +32813,28 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null
   // bills at the manager rate) is the sole reason seat pricing can't be a
   // multiply, and it can never apply to a tier that isn't owner. If an owner
   // tier is ever added to this picker, this must move to calculateSeatTotal.
+  //
+  // issue 223 — this is now the ANNUAL RATE ONLY, and deliberately. A rate is
+  // a fact about the tier and fine to state here; what this seat will cost
+  // TODAY is a different figure, and the client no longer computes it. The
+  // prorated amount comes from the server on the confirm step (see
+  // useSeatQuote), so exactly one prorated number exists in this flow and it
+  // is the one the seat is actually priced at.
   const annualEach   = getTierPrice(tier)
-  const proratedEach = prorateToRenewal(annualEach, seatRenewalDate)
-  const totalProrated = proratedEach * quantity
-  const totalAnnual   = annualEach * quantity
+  const totalAnnual  = annualEach * quantity
   const tierMeta     = SUBSCRIPTION_TIER_META.find(t => t.key === tier)
   const renewalLabel = formatRenewalDate(seatRenewalDate)
+
+  const quoteState = useSeatQuote({
+    locationId,
+    tier,
+    quantity,
+    active: step === 'paymentConfirm',
+  })
+  const seatWord = quantity === 1
+    ? `${tierMeta?.name || tier} seat`
+    : `${quantity} ${tierMeta?.name || tier} seats`
+  const quoteView = seatQuoteView(quoteState, seatWord)
 
   // Triggered by the form-step Pay button. Just transitions to the
   // payment-confirmation interstitial; the real /api/seats POST runs
@@ -32687,11 +32852,13 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null
       const res = await fetch('/api/seats', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // issue 223 — no prorated_cost. issue 217 already ignored the client's
+        // figure; now the client doesn't have one to send. The server prices
+        // the seat and the confirm screen showed that same price.
         body: JSON.stringify({
           location_id: locationId,
           tier,
           quantity,
-          prorated_cost: Math.round(proratedEach * 100),
         }),
       })
       const json = await res.json().catch(() => ({}))
@@ -32719,7 +32886,9 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null
               <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
                 {step === 'paymentConfirm'
                   ? `Adds ${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'} to your pool. Each appears as an open seat on the team roster, ready to invite into.`
-                  : `Billed annually, prorated to your renewal date (${renewalLabel}). Once added, you can invite team members anytime.`}
+                  /* issue 223 — "prorated to your renewal date" is the jargon
+                     this screen's audience doesn't use. Same fact, plainly. */
+                  : `Billed once a year. Today you'd only pay for what's left before your renewal on ${renewalLabel}. Once added, you can invite team members anytime.`}
               </p>
             </div>
             <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', lineHeight:1, padding:'0 0 0 8px' }}>×</button>
@@ -32728,19 +32897,29 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null
 
         <div style={{ padding:'14px 22px', overflowY:'auto', flex:1 }}>
           {step === 'paymentConfirm' && (
-            <PaymentConfirmStep
-              title="Confirm pre-buy"
-              lineItems={[{
-                label: `${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'} (prorated to ${renewalLabel})`,
-                amount: totalProrated,
-              }]}
-              total={totalProrated}
-              confirmLabel="Confirm & Add Seats"
-              onConfirm={runAddSeats}
-              onCancel={() => { setError(''); setStep('form') }}
-              isProcessing={submitting}
-              error={error || null}
-            />
+            quoteState.loading ? (
+              <SeatQuotePending onCancel={() => { setError(''); setStep('form') }} />
+            ) : !quoteView ? (
+              <SeatQuoteFailed message={quoteState.error} onCancel={() => { setError(''); setStep('form') }} />
+            ) : (
+              <PaymentConfirmStep
+                title="Confirm pre-buy"
+                lineItems={[{
+                  label: quoteView.totalDollars === null
+                    ? `${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'}`
+                    : `${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'} (rest of your year)`,
+                  // The SERVER's figure, not a client multiply — issue 223.
+                  amount: quoteView.totalDollars ?? 0,
+                }]}
+                total={quoteView.totalDollars ?? 0}
+                confirmLabel="Confirm & Add Seats"
+                onConfirm={runAddSeats}
+                onCancel={() => { setError(''); setStep('form') }}
+                isProcessing={submitting}
+                error={error || null}
+                notice={quoteView.notice}
+              />
+            )
           )}
 
           {step === 'form' && (
@@ -32778,15 +32957,20 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null
             <span style={{ fontSize:'11px', color:'#b0c0bc', marginLeft:'6px' }}>Cap 10 per request</span>
           </div>
 
+          {/* issue 223 — the RATE, which is a fact about the tier. The old
+              second row stated a client-computed "prorated to <date>"
+              figure: a claim about what this purchase would cost, made by
+              the browser, that could disagree with what the server priced
+              and charged. What it costs today is now shown once, on the next
+              step, from the server. */}
           <div style={{ background:'rgba(26,46,43,0.03)', border:'1px solid rgba(0,0,0,0.06)', borderRadius:'10px', padding:'12px 14px' }}>
             <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'6px' }}>
               <span style={{ fontSize:'12px', color:'#4a5e5a' }}>Annual cost</span>
               <span style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{formatCurrency(totalAnnual, { showCents:'never' })}</span>
             </div>
-            <div style={{ display:'flex', justifyContent:'space-between' }}>
-              <span style={{ fontSize:'12px', color:'#4a5e5a' }}>Prorated to {renewalLabel}</span>
-              <span style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b' }}>{formatCurrency(totalProrated, { showCents:'auto' })}</span>
-            </div>
+            <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5 }}>
+              You only pay for the part of the year that’s left before your renewal on {renewalLabel}. We’ll show you that exact amount on the next step, before anything is charged.
+            </p>
           </div>
 
           {error && (
@@ -32799,9 +32983,12 @@ function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null
         {step === 'form' && (
           <div style={{ padding:'12px 22px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'flex', gap:'8px' }}>
             <button onClick={onClose} style={{ flex:1, padding:'11px', background:'transparent', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
+            {/* issue 223 — no figure on this button. It used to quote a
+                client-computed prorated total; the real one is on the next
+                step and comes from the server. */}
             <button onClick={handleProceedToConfirm}
               style={{ flex:2, padding:'11px', background:'#1a2e2b', border:'none', borderRadius:'10px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
-              {`Review order — ${formatCurrency(totalProrated, { showCents:'auto' })} →`}
+              Review order →
             </button>
           </div>
         )}
@@ -32903,10 +33090,21 @@ export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, in
   const isAvailable = availableForTier >= 1
 
   const tierMeta = SUBSCRIPTION_TIER_META.find(t => t.key === tier)
+  // issue 223 — the annual RATE only. The prorated figure this modal used to
+  // compute (and quote on a button, in a summary row and on the confirm step)
+  // is the server's to state; see useSeatQuote below.
   const annualPrice = getTierPrice(tier)
-  const proratedDollars = prorateToRenewal(annualPrice, seatRenewalDate)
-  const proratedCents = Math.round(proratedDollars * 100)
   const renewalLabel = formatRenewalDate(seatRenewalDate)
+
+  // Only quoted when a seat must actually be BOUGHT. Filling a free seat
+  // costs nothing and never reaches the confirm step.
+  const quoteState = useSeatQuote({
+    locationId,
+    tier,
+    quantity: 1,
+    active: step === 'paymentConfirm',
+  })
+  const quoteView = seatQuoteView(quoteState, `${tierMeta?.name || tier} seat`)
 
   function isValidEmail(s) {
     return typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim())
@@ -33001,12 +33199,13 @@ export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, in
       const res = await fetch('/api/seats/buy-and-invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // issue 223 — no prorated_cost. The server prices the seat (issue
+        // 217) and the confirm screen showed that same price.
         body: JSON.stringify({
           location_id: locationId,
           tier,
           email: email.trim().toLowerCase(),
           full_name: fullName.trim() || null,
-          prorated_cost: proratedCents,
         }),
       })
       const json = await res.json().catch(() => ({}))
@@ -33044,7 +33243,9 @@ export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, in
     ? (isAvailable ? 'Sending…' : 'Buying…')
     : isAvailable
       ? 'Send Invite →'
-      : `Buy & Send Invite — ${formatCurrency(proratedDollars, { showCents:'auto' })} →`
+      // issue 223 — no client-computed figure on the button; the real one is
+      // on the confirm step, from the server.
+      : 'Buy & Send Invite →'
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:10020, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
@@ -33116,11 +33317,15 @@ export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, in
                       <div style={{ flex:1, minWidth:0 }}>
                         <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{t.name}</p>
                         <p style={{ fontSize:'10.5px', color:'#8a9e9a' }}>
+                          {/* issue 223 — the RATE, not a prorated figure.
+                              This quoted a browser-computed amount for a
+                              purchase the server prices; the real cost is
+                              shown on the confirm step. */}
                           {deferred
                             ? 'Coming soon'
                             : availAtT > 0
                               ? `${availAtT} available`
-                              : `none available — +${formatCurrency(prorateToRenewal(getTierPrice(t.key), seatRenewalDate), { showCents:'auto' })} prorated`}
+                              : `none available — ${formatCurrency(getTierPrice(t.key), { showCents:'never' })}/yr`}
                         </p>
                       </div>
                       {deferred ? (
@@ -33156,10 +33361,12 @@ export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, in
                       <span style={{ fontSize:'12px', color:'#4a5e5a' }}>1 {tierMeta?.name || tier} seat</span>
                       <span style={{ fontSize:'12.5px', fontWeight:600, color:'#1a2e2b' }}>{formatCurrency(annualPrice, { showCents:'never' })}/yr</span>
                     </div>
-                    <div style={{ display:'flex', justifyContent:'space-between' }}>
-                      <span style={{ fontSize:'12px', color:'#4a5e5a' }}>Prorated to {renewalLabel}</span>
-                      <span style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{formatCurrency(proratedDollars, { showCents:'auto' })}</span>
-                    </div>
+                    {/* issue 223 — the rate above is a fact about the tier;
+                        what this seat costs today comes from the server on
+                        the next step, so it is stated once and correctly. */}
+                    <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, marginTop:'2px' }}>
+                      You only pay for the part of the year that’s left before your renewal on {renewalLabel}. We’ll show you that amount before anything is charged.
+                    </p>
                   </div>
 
                   <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, marginBottom:'8px' }}>
@@ -33175,19 +33382,29 @@ export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, in
           )}
 
           {step === 'paymentConfirm' && (
-            <PaymentConfirmStep
-              title="Confirm seat purchase"
-              lineItems={[{
-                label: `1 ${tierMeta?.name || tier} seat (prorated to ${renewalLabel})`,
-                amount: proratedDollars,
-              }]}
-              total={proratedDollars}
-              confirmLabel="Confirm & Send Invite"
-              onConfirm={runBuyAndInvite}
-              onCancel={() => { setError(''); setStep('form') }}
-              isProcessing={submitting}
-              error={error || null}
-            />
+            quoteState.loading ? (
+              <SeatQuotePending onCancel={() => { setError(''); setStep('form') }} />
+            ) : !quoteView ? (
+              <SeatQuoteFailed message={quoteState.error} onCancel={() => { setError(''); setStep('form') }} />
+            ) : (
+              <PaymentConfirmStep
+                title="Confirm seat purchase"
+                lineItems={[{
+                  label: quoteView.totalDollars === null
+                    ? `1 ${tierMeta?.name || tier} seat`
+                    : `1 ${tierMeta?.name || tier} seat (rest of your year)`,
+                  // The SERVER's figure — issue 223.
+                  amount: quoteView.totalDollars ?? 0,
+                }]}
+                total={quoteView.totalDollars ?? 0}
+                confirmLabel="Confirm & Send Invite"
+                onConfirm={runBuyAndInvite}
+                onCancel={() => { setError(''); setStep('form') }}
+                isProcessing={submitting}
+                error={error || null}
+                notice={quoteView.notice}
+              />
+            )
           )}
 
           {step === 'success' && createdInvite && (
