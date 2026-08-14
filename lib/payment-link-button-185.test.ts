@@ -172,8 +172,31 @@ describe('the duplicate-subscription guard', () => {
     // needsConfirm blocks the direct generate() path.
     expect(comp).toMatch(/needsConfirm\s*=\s*!!existingSubId\s*\|\|\s*metaError/)
     expect(comp).toMatch(/if\s*\(needsConfirm\)\s*\{\s*setConfirming\(true\);\s*return\s*\}/)
-    // The confirm panel warns about a duplicate before the danger action.
-    expect(comp).toMatch(/duplicate subscription/i)
+    // The confirm panel names the OUTCOME before the danger action. issue 226
+    // step 7 replaced "risks a duplicate subscription" with what a duplicate
+    // actually does to the franchisee, since that is the fact the operator is
+    // deciding on.
+    expect(comp).toMatch(/two<\/strong> subscriptions/i)
+    expect(comp).toMatch(/charged twice every year/i)
     expect(comp).toMatch(/Generate anyway/)
+  })
+
+  // issue 226 step 7 — the component was the ONLY guard; a second tab, a
+  // retry or a direct call minted a duplicate. The route refuses by default
+  // now, and the override is sent only from behind this confirmation.
+  it('sends the server-side override only once confirmed', () => {
+    expect(comp).toMatch(/confirm_replace_existing/)
+    expect(comp).toMatch(/needsConfirm\s*\?\s*\{\s*confirm_replace_existing:\s*true\s*\}/)
+    expect(comp).toMatch(/server refuses this by default/i)
+  })
+
+  it('the ROUTE refuses a duplicate without the override', () => {
+    const route = readFileSync('app/api/admin/subscription-checkout-link/route.ts', 'utf8')
+    expect(route).toMatch(/location\.stripe_subscription_id\s*&&\s*body\?\.confirm_replace_existing\s*!==\s*true/)
+    expect(route).toMatch(/subscription_exists/)
+    // …and it does so BEFORE anything is minted.
+    const guardAt = route.indexOf('subscription_exists')
+    const mintAt = route.indexOf('stripe.checkout')
+    if (mintAt > -1) expect(guardAt).toBeLessThan(mintAt)
   })
 })

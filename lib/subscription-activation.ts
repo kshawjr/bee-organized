@@ -29,10 +29,12 @@ import { planAddOnRows, MAX_OWNER_SEATS, type SeatPlan } from './seat-plan'
 const SEAT_COLS =
   'id, location_id, tier, user_id, status, added_at, removed_at, prorated_cost, added_by, notes, is_primary, scheduled_removal_at'
 
-// payment_source values that mean "Bee Organized/corporate pays, not the
-// owner" — these locations never go through Stripe checkout. Everything
-// else ('direct', 'stripe', 'none', null) is an owner-pays location.
-export const NON_PAYING_SOURCES = ['prepaid_corporate', 'corporate_sponsored', 'corporate']
+// Moved to lib/subscription-math (issue 226 step 7) so a CLIENT surface can
+// read it without importing this module, which instantiates a service-role
+// supabase client at import time. Re-exported here so every existing
+// server-side consumer keeps its import path.
+import { NON_PAYING_SOURCES } from './subscription-math'
+export { NON_PAYING_SOURCES }
 
 export type LocationBillingRow = {
   id: string

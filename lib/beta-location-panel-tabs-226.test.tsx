@@ -182,6 +182,11 @@ describe('each half saves only its own fields', () => {
       select.dispatchEvent(new Event('change', { bubbles: true }))
     })
     await click(buttonByText('Save changes')!)
+    // issue 226 step 7 — Save opens the Careful confirmation; the write
+    // happens only after it names the fields and is accepted.
+    expect(patches).toHaveLength(0)
+    expect(container.textContent).toContain('payment_source')
+    await click(buttonByText('Write these changes')!)
 
     expect(patches).toHaveLength(1)
     expect(Object.keys(patches[0].body).sort()).toEqual(['paid_through_date', 'payment_source'])
@@ -201,6 +206,7 @@ describe('each half saves only its own fields', () => {
       select.dispatchEvent(new Event('change', { bubbles: true }))
     })
     await click(buttonByText('Save changes')!)
+    await click(buttonByText('Write these changes')!)
     expect(patches[0].body.paid_through_date).toBeNull()
   })
 
@@ -209,5 +215,56 @@ describe('each half saves only its own fields', () => {
     expect((buttonByText('Save changes') as HTMLButtonElement).disabled).toBe(true)
     await gotoSettings()
     expect((buttonByText('Save notes') as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+// ── issue 226 step 7 / issue 228 — the confirmation names the fields ───────
+describe('the Careful confirmation', () => {
+  const selectSource = async (value: string) => {
+    await act(async () => {
+      const select = container.querySelector('select') as HTMLSelectElement
+      Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!.call(select, value)
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+  }
+
+  it('names the field, the value now and the value after — not "are you sure"', async () => {
+    await open()
+    await selectSource('direct')
+    await click(buttonByText('Save changes')!)
+
+    expect(container.textContent).toContain('payment_source')
+    expect(container.textContent).toContain('Corporate (prepaid)')
+    expect(container.textContent).toContain('Franchisee (direct)')
+    expect(container.textContent).not.toMatch(/are you sure/i)
+  })
+
+  // issue 228. The fixture is prepaid_corporate with paid_through 2027-05-01;
+  // switching to anything else force-nulls it.
+  it('says out loud that the renewal date will be erased, and names it', async () => {
+    await open()
+    await selectSource('none')
+    await click(buttonByText('Save changes')!)
+
+    expect(container.textContent).toContain('paid_through_date')
+    expect(container.textContent).toContain('2027-05-01')
+    expect(container.textContent).toContain('(nothing)')
+    expect(container.textContent).toContain('Erased')
+    expect(container.textContent).toContain('nothing will anchor its next renewal')
+  })
+
+  it('warns when the new source stops seat changes reaching Stripe', async () => {
+    await open()
+    await selectSource('corporate_sponsored')
+    await click(buttonByText('Save changes')!)
+    expect(container.textContent).toContain('stop sending seat changes to Stripe')
+  })
+
+  it('writes nothing if it is cancelled', async () => {
+    await open()
+    await selectSource('none')
+    await click(buttonByText('Save changes')!)
+    await click(buttonByText('Cancel')!)
+    expect(patches).toHaveLength(0)
   })
 })

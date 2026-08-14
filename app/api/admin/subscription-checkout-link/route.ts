@@ -93,6 +93,35 @@ export async function POST(req: NextRequest) {
   const location = await getLocationBilling(locationId)
   if (!location) return NextResponse.json({ error: 'location_not_found' }, { status: 404 })
 
+  // ─── issue 226 step 7 — THE DUPLICATE-SUBSCRIPTION GUARD ───
+  //
+  // This check existed only in GetPaymentLinkButton, which fetched the id and
+  // replaced its primary action with a red confirmation. That is good design
+  // and it is not a guard: anything reaching this route directly — a second
+  // tab, a retried request, a script, a future caller — minted a second
+  // subscription and the location was billed twice. A guard in a component is
+  // not a guard.
+  //
+  // WARN-AND-CONFIRM, NOT HARD-REFUSE, deliberately: a genuinely canceled or
+  // failed subscription still needs to be re-mintable without a code change.
+  // So the route refuses BY DEFAULT and accepts an explicit acknowledgement —
+  // the server-side twin of the button's "generate anyway", which now sends
+  // it. The default is the safe one, which is the half that was missing.
+  //
+  // stripe_subscription_id is already on the row getLocationBilling reads; the
+  // route simply never looked at it.
+  if (location.stripe_subscription_id && body?.confirm_replace_existing !== true) {
+    return NextResponse.json(
+      {
+        error: 'subscription_exists',
+        stripe_subscription_id: location.stripe_subscription_id,
+        message:
+          'This location already has a Stripe subscription. Minting another would bill it twice. Resend with confirm_replace_existing:true only if that subscription is known to be canceled or failed.',
+      },
+      { status: 409 },
+    )
+  }
+
   // Corporate / non-paying locations never pay through Stripe.
   if (NON_PAYING_SOURCES.includes(location.payment_source || '')) {
     return NextResponse.json({ error: 'non_paying_source' }, { status: 409 })

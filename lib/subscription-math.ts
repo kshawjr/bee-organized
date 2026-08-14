@@ -25,6 +25,23 @@ export type PaymentSource = 'direct' | 'prepaid_corporate' | 'corporate_sponsore
 // that hides zero rows had never once rendered "Corporate-funded" or
 // "Sponsored", and every corporate location was reported as unconfigured.
 // Counting lives here now so a display can't invent its own vocabulary.
+// payment_source values that mean "Bee Organized/corporate pays, not the
+// owner" — these locations never go through Stripe checkout. Everything else
+// ('direct', 'stripe', 'none', null) is an owner-pays location.
+//
+// issue 226 step 7 — this lives HERE, in the pure module, because a client
+// surface needs it too: the Careful confirmation has to say "Bee Hub will stop
+// sending seat changes to Stripe" and must read the same list the gate reads.
+// It used to live in lib/subscription-activation, which instantiates a
+// SERVICE-ROLE supabase client at import time — importing it from a component
+// dragged that client into the browser bundle. lib/subscription-activation
+// re-exports this, so every existing server-side consumer is unchanged.
+export const NON_PAYING_SOURCES: readonly string[] = [
+  'prepaid_corporate',
+  'corporate_sponsored',
+  'corporate',
+]
+
 export const PAYMENT_SOURCE_KEYS = [
   'prepaid_corporate',
   'corporate_sponsored',

@@ -95,6 +95,12 @@ import {
   isPaidThroughFuture,
   parsePaidThroughDate,
   bucketByPaymentSource,
+  // issue 226 step 7 — the sources Bee Hub does NOT bill through Stripe.
+  // Imported rather than restated: seat-stripe-sync gates on this exact list,
+  // so the Careful confirmation and the behaviour it describes read the same
+  // constant. It lives in this PURE module, not subscription-activation,
+  // which instantiates a service-role client at import time.
+  NON_PAYING_SOURCES,
 } from "@/lib/subscription-math"
 // issue 216 — the owner-seat cap is a billing rule, not a UI constant. Import
 // the one the server writers already agree on (/api/seats POST,
@@ -112,6 +118,7 @@ import {
 // issue 226 step 5 — seats as PEOPLE. Three states (held / invited / empty)
 // and the per-seat ANNUAL rate, which honours the co-owner rule.
 import { buildSeatRoster, tallySeatStates } from "@/lib/seat-roster"
+
 // issue 216 — seat availability is defined once, in lib, and mirrors the
 // server gate. Aliased on import so the context methods keep their existing
 // names for every call site while delegating to the shared math.
@@ -25333,6 +25340,75 @@ export function SeatRosterSection({ location, role }) {
   )
 }
 
+// ─── FieldChangeConfirm (issue 226 step 7) ─────────────────────────────────
+// "Are you sure?" asks a question the operator cannot answer, because the
+// thing they would need to know — WHAT is about to change — is exactly what
+// the dialog withheld. This names it: one row per field, the value now, the
+// value after, and a sentence saying what that means in the world.
+//
+// Every action in the Careful section goes through it.
+function FieldChangeConfirm({
+  title,
+  intro = null,
+  changes = [],          // [{ field, from, to, consequence?, severity? }]
+  consequence = null,    // the one-sentence "what this means" line
+  confirmLabel,
+  onConfirm,
+  onCancel,
+  busy = false,
+  error = null,
+}) {
+  const NOTHING = '(nothing)'
+  const show = (v) =>
+    v === null || v === undefined || v === '' ? NOTHING : String(v)
+
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:10002, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.5)' }} onClick={busy ? undefined : onCancel} />
+      <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'440px', borderRadius:'16px', zIndex:1, maxHeight:'85vh', overflowY:'auto', padding:'16px' }}>
+        <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', marginBottom:'4px' }}>{title}</p>
+        {intro && <p style={{ fontSize:'12px', color:'#8a9e9a', marginBottom:'12px', lineHeight:1.5 }}>{intro}</p>}
+
+        {/* The fields, named. Not a summary of them. */}
+        <div style={{ borderRadius:'10px', border:'1px solid rgba(0,0,0,0.09)', overflow:'hidden', marginBottom:'12px' }}>
+          {changes.map((c, i) => (
+            <div key={c.field} style={{ padding:'10px 12px', borderBottom: i < changes.length - 1 ? '1px solid rgba(0,0,0,0.06)' : 'none', background: c.severity === 'destructive' ? 'rgba(239,68,68,0.05)' : 'white' }}>
+              <p style={{ fontSize:'11px', fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace', color:'#8a9e9a', marginBottom:'3px' }}>{c.field}</p>
+              <p style={{ fontSize:'12.5px', color:'#1a2e2b', margin:0 }}>
+                <span style={{ color:'#8a9e9a' }}>{show(c.from)}</span>
+                <span style={{ margin:'0 7px', color:'#b0c0bc' }}>→</span>
+                <strong style={{ color: c.severity === 'destructive' ? '#b91c1c' : '#1a2e2b' }}>{show(c.to)}</strong>
+              </p>
+              {c.consequence && (
+                <p style={{ fontSize:'11px', color: c.severity === 'destructive' ? '#b91c1c' : '#8a9e9a', margin:'4px 0 0', lineHeight:1.45 }}>{c.consequence}</p>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {consequence && (
+          <div style={{ padding:'10px 12px', borderRadius:'9px', background:'rgba(217,119,6,0.07)', border:'1px solid rgba(217,119,6,0.3)', marginBottom:'12px' }}>
+            <p style={{ fontSize:'12px', color:'#92400e', margin:0, lineHeight:1.5 }}>{consequence}</p>
+          </div>
+        )}
+
+        {error && <p style={{ fontSize:'11px', color:'#b91c1c', marginBottom:'10px' }}>{error}</p>}
+
+        <div style={{ display:'flex', gap:'8px' }}>
+          <button onClick={onCancel} disabled={busy} style={{ flex:1, padding:'10px', background:'white', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor: busy ? 'wait' : 'pointer' }}>Cancel</button>
+          {/* The button names the act, never "Confirm" — it is the last thing
+              read before the write. */}
+          <button
+            onClick={onConfirm}
+            disabled={busy}
+            style={{ flex:1, padding:'10px', background:'#b45309', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1 }}
+          >{busy ? 'Working…' : confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── AdminInviteToSeatModal (issue 226 step 6) ─────────────────────────────
 // FILLS A SEAT THAT ALREADY EXISTS. No purchase, no quote, no charge — the
 // seat is already on the plan and already being billed for, which is exactly
@@ -25751,6 +25827,8 @@ export function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUp
   // Activity was cut because nothing writes a billing-activity trail (the
   // location's payment history is its own sheet, reached from Billing & team).
   const [sheetTab, setSheetTab] = useState('billing')
+  // issue 226 step 7 — the pending Careful action awaiting confirmation.
+  const [carefulConfirm, setCarefulConfirm] = useState(null)
 
   // issue 226 step 4 — one dirty flag became two, because the fields moved to
   // different tabs. Payment source and paid-through decide WHETHER someone is
@@ -25833,6 +25911,50 @@ export function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUp
     payment_source: paymentSource,
     paid_through_date: paymentSource === 'prepaid_corporate' ? (paidThrough || null) : null,
   })
+
+  // ─── issue 226 step 7 / issue 228 — WHAT THIS WILL SET ───
+  //
+  // The field list the confirmation shows is built from the SAME expression
+  // saveBillingModel sends, so the dialog cannot describe a write that differs
+  // from the one that happens.
+  //
+  // issue 228 is the second row. Saving anything except prepaid_corporate
+  // force-nulls paid_through_date — switching a direct location to "None"
+  // erases its renewal date. That is preserved behaviour (step 4 kept it, with
+  // a test asserting it still happens) and it is the single most destructive
+  // thing this panel can do quietly, because the field it destroys is the one
+  // every renewal, proration and billing-state calculation reads. It now says
+  // so out loud, in red, naming the date it is about to erase.
+  function billingModelChanges() {
+    const nextPaidThrough =
+      paymentSource === 'prepaid_corporate' ? (paidThrough || null) : null
+    const currentPaidThrough = currentLoc.paid_through_date || null
+    const rows = []
+    if (paymentSource !== initialPaymentSource) {
+      rows.push({
+        field: 'payment_source',
+        from: PAYMENT_SOURCE_LABELS[initialPaymentSource] || initialPaymentSource,
+        to: PAYMENT_SOURCE_LABELS[paymentSource] || paymentSource,
+        consequence:
+          NON_PAYING_SOURCES.includes(paymentSource)
+            ? 'Bee Hub will stop sending seat changes to Stripe for this location. An existing subscription keeps billing.'
+            : null,
+      })
+    }
+    if (nextPaidThrough !== currentPaidThrough) {
+      const erasing = currentPaidThrough && !nextPaidThrough
+      rows.push({
+        field: 'paid_through_date',
+        from: currentPaidThrough,
+        to: nextPaidThrough,
+        severity: erasing ? 'destructive' : undefined,
+        consequence: erasing
+          ? `Erased. ${currentLoc.name} currently reads as paid through ${currentPaidThrough}; with no date it will read as active and not billing, and nothing will anchor its next renewal.`
+          : null,
+      })
+    }
+    return rows
+  }
 
   const saveNotes = () => patchSubscription({
     billing_notes: billingNotes.trim() || null,
@@ -26159,7 +26281,15 @@ export function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUp
                     style={{ flex:1, padding:'9px', background:'white', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:(!billingModelDirty||subSaving)?'not-allowed':'pointer', opacity:(!billingModelDirty||subSaving)?0.5:1 }}
                   >Cancel</button>
                   <button
-                    onClick={saveBillingModel}
+                    onClick={()=>setCarefulConfirm({
+                      kind: 'billing_model',
+                      title: 'Change how this location is billed',
+                      intro: `These fields will be written to ${currentLoc.name}.`,
+                      changes: billingModelChanges(),
+                      consequence: 'Nothing about the location’s Stripe subscription changes here. If one exists it keeps billing on its own schedule.',
+                      confirmLabel: 'Write these changes',
+                      run: saveBillingModel,
+                    })}
                     disabled={!billingModelDirty || subSaving}
                     style={{ flex:1, padding:'9px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:(!billingModelDirty||subSaving)?'not-allowed':'pointer', opacity:(!billingModelDirty||subSaving)?0.5:1 }}
                   >{subSaving ? 'Saving\u2026' : 'Save changes'}</button>
@@ -26172,7 +26302,21 @@ export function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUp
                 {(currentLoc.payment_source === 'prepaid_corporate' || currentLoc.payment_source === 'corporate_sponsored') && (
                   <div style={{ borderTop:'1px dashed rgba(217,119,6,0.25)', paddingTop:'10px', marginTop:'2px' }}>
                     <button
-                      onClick={()=>setShowConvertBilling(true)}
+                      onClick={()=>setCarefulConfirm({
+                        kind: 'convert',
+                        title: 'Convert to direct billing',
+                        intro: `${currentLoc.name} is currently funded by corporate. Converting moves the bill to the franchisee.`,
+                        changes: [
+                          { field: 'payment_source', from: PAYMENT_SOURCE_LABELS[currentLoc.payment_source] || currentLoc.payment_source, to: PAYMENT_SOURCE_LABELS.direct },
+                          { field: 'subscription_status', from: currentLoc.subscription_status || 'deferred', to: 'active' },
+                          { field: 'paid_through_date', from: currentLoc.paid_through_date, to: 'the date you enter next' },
+                          { field: 'billing_invoices', from: '—', to: 'one new row recording the payment' },
+                          { field: 'billing_notes', from: 'existing notes', to: 'an audit line appended' },
+                        ],
+                        consequence: 'The next screen asks for the amount, the payment date and the new paid-through date. Nothing is written until you complete it.',
+                        confirmLabel: 'Continue to conversion',
+                        run: async () => { setShowConvertBilling(true) },
+                      })}
                       style={{ width:'100%', padding:'10px', background:'white', border:'1.5px solid #d4a046', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#b07a20', cursor:'pointer' }}
                     >💳 Convert to Direct Billing</button>
                     <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'6px', lineHeight:1.45 }}>
@@ -26311,6 +26455,23 @@ export function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUp
           onClose={()=>setShowInviteOwner(false)}
         />
       )}
+      {carefulConfirm && (
+        <FieldChangeConfirm
+          title={carefulConfirm.title}
+          intro={carefulConfirm.intro}
+          changes={carefulConfirm.changes}
+          consequence={carefulConfirm.consequence}
+          confirmLabel={carefulConfirm.confirmLabel}
+          busy={subSaving}
+          error={subError || null}
+          onCancel={()=>setCarefulConfirm(null)}
+          onConfirm={async ()=>{
+            const run = carefulConfirm.run
+            setCarefulConfirm(null)
+            await run()
+          }}
+        />
+      )}
       {showConvertBilling && (
         <ConvertBillingModal
           location={currentLoc}
@@ -26414,7 +26575,15 @@ function GetPaymentLinkButton({ location }) {
       const res = await fetch('/api/admin/subscription-checkout-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ location_id: location.id }),
+        body: JSON.stringify({
+          location_id: location.id,
+          // issue 226 step 7 — the route refuses a duplicate by default now.
+          // This is the server-side twin of the red confirmation above: it is
+          // sent ONLY once the operator has explicitly clicked through it, so
+          // the default path (and anything reaching the route directly) still
+          // gets the refusal.
+          ...(needsConfirm ? { confirm_replace_existing: true } : {}),
+        }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -26468,8 +26637,15 @@ function GetPaymentLinkButton({ location }) {
           <p style={{ fontSize:'12px', fontWeight:700, color:'#b91c1c', margin:'0 0 5px' }}>⚠️ This location already has a subscription</p>
           <p style={{ fontSize:'11px', color:'#7f1d1d', margin:'0 0 4px', lineHeight:1.5 }}>
             {existingSubId
-              ? <>A Stripe subscription (<code style={{ fontSize:'10px' }}>{existingSubId}</code>) already exists. Generating another link risks a <strong>duplicate subscription</strong> and double billing. Only continue if this one is canceled/failed and must be re-created.</>
-              : <>Couldn’t verify whether a subscription already exists. Continue only if you’re sure this location has never completed checkout — otherwise you risk a <strong>duplicate subscription</strong>.</>}
+              ? <>A Stripe subscription (<code style={{ fontSize:'10px' }}>{existingSubId}</code>) already exists. If the owner completes the link you generate, this location will hold <strong>two</strong> subscriptions and be <strong>charged twice every year</strong> — the existing one is not canceled or replaced by this. Only continue if you know that subscription is already canceled or failed.</>
+              : <>Couldn’t verify whether a subscription already exists. If one does and the owner completes this link, the location holds two subscriptions and is <strong>charged twice every year</strong>. Continue only if you’re sure it has never completed checkout.</>}
+          </p>
+          {/* issue 226 step 7 — this warning is no longer the only thing
+              standing in the way. The route refuses a duplicate by default and
+              accepts confirm_replace_existing only after this click, so a
+              second tab, a retry, or a direct call gets the refusal too. */}
+          <p style={{ fontSize:'10.5px', color:'#7f1d1d', margin:'0 0 4px', lineHeight:1.45, opacity:0.85 }}>
+            The server refuses this by default; continuing sends an explicit override.
           </p>
           <div style={{ display:'flex', gap:'8px', marginTop:'8px' }}>
             <button

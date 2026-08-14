@@ -22,6 +22,12 @@ export interface CheckoutLine {
 // token. These are the ones he will actually hit for the ten legacy locations;
 // the rest fall through to translatePaymentLinkError's framed fallback.
 export const PAYMENT_LINK_ERROR_COPY: Record<string, string> = {
+  // issue 226 step 7 — the route now refuses a duplicate by default. This is
+  // the SERVER saying no, not the component's pre-flight warning, so it can
+  // be reached by a second tab or a retried request as well as by the button.
+  subscription_exists:
+    'This location already has a Stripe subscription. Minting another would bill it twice — nothing was created. Only continue if you know that subscription is canceled or failed.',
+
   location_not_active:
     'This location isn’t active yet, so it can’t be billed here. Active locations only — an inactive one activates through onboarding’s pay step, not this button.',
   paid_through_not_future:
