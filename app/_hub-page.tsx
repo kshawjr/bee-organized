@@ -29,6 +29,9 @@ import {
 } from '@/lib/hub-scope'
 import { buildAllOverview } from '@/lib/hub-all-overview'
 import { applyLeadActiveFilter, fetchSuppressedLeadIds } from '@/lib/lead-suppression'
+// issue 226 step 1 — the catalog's tier order, so per-location seat lines are
+// emitted in the same order every pricing surface already uses. Pure constant.
+import { TIER_ORDER } from '@/lib/seat-plan'
 import { originalEngagementIds } from '@/components/hive/shared/engagementStatus'
 import BeeHub from '@/components/BeeHub'
 
@@ -804,7 +807,20 @@ export default async function HubPage({
       .from('locations')
       .select(
         // slack_bot_token intentionally omitted — display fields only.
-        'id, name, address, city, state, zip, phone, email, timezone, reviews_link, calendar_link, rate_per_hour, sender_name, send_from_email, reply_to_email, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, token_expiry, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at, corporate_sponsorship_started_at, corporate_sponsorship_ends_at, slack_connected, slack_team_name, slack_channel_name'
+        //
+        // issue 226 step 1: stripe_customer_id + stripe_subscription_id added.
+        // They are the difference between what a location is CONFIGURED to do
+        // (payment_source) and what will actually happen when its renewal date
+        // arrives — the four active `direct` locations with no Stripe customer
+        // at all read as perfectly healthy without them. Two nullable TEXT
+        // columns on the same query over the same 55 rows; the columns already
+        // exist (migrations/locations_stripe_columns.sql).
+        //
+        // NOT a replacement for GetPaymentLinkButton's own per-location fetch.
+        // This is a server-render snapshot for the LIST; the duplicate-
+        // subscription guard must read the id at click time, off a page that
+        // may have been open for an hour. Both readers are deliberate.
+        'id, name, address, city, state, zip, phone, email, timezone, reviews_link, calendar_link, rate_per_hour, sender_name, send_from_email, reply_to_email, lifecycle_status, subscription_status, subscription_plan, payment_source, paid_through_date, billing_notes, stripe_customer_id, stripe_subscription_id, jobber_account_id, jobber_account_name, jobber_initial_import_completed_at, jobber_team_roster, jobber_team_roster_synced_at, last_sync_status, token_expiry, created_at, onboarding_state, default_drip_path, default_move_drip_path, activated_at, corporate_sponsorship_started_at, corporate_sponsorship_ends_at, slack_connected, slack_team_name, slack_channel_name'
       )
       .order('name', { ascending: true })
 
@@ -841,16 +857,58 @@ export default async function HubPage({
     // owner seat's user_id → is_primary so the location list can mark the
     // primary owner. Owners predating the seat model have no seat row; they
     // fall back to "first owner = primary" below (mirrors the resolver).
-    const { data: ownerSeatRows, error: ownerSeatsErr } = await supabaseService
+    //
+    // issue 226 step 1: this used to filter tier='owner' AND user_id IS NOT
+    // NULL and select three columns. It now reads EVERY active seat, because
+    // the admin locations list needs each location's seat count and annual
+    // total and the feed carried neither — `initialSeats` above is scoped to
+    // one location, so per-location seat facts were unavailable for the list.
+    //
+    // The two filters are moved off the query and onto the primaryByUserId
+    // derivation below, unchanged, so that map is byte-for-byte what it was.
+    // UNASSIGNED seats are deliberately included in the new derivation — a
+    // paid, empty seat is billed, so it counts toward the total.
+    //
+    // Cost: 26 rows today across all 55 locations, one query either way.
+    const { data: seatRows, error: ownerSeatsErr } = await supabaseService
       .from('subscription_seats')
-      .select('user_id, location_id, is_primary')
-      .eq('tier', 'owner')
+      .select('user_id, location_id, tier, is_primary')
       .eq('status', 'active')
-      .not('user_id', 'is', null)
-    if (ownerSeatsErr) console.error('[hub-page] owner seats fetch error:', ownerSeatsErr.message)
+    if (ownerSeatsErr) console.error('[hub-page] active seats fetch error:', ownerSeatsErr.message)
     const primaryByUserId: Record<string, boolean> = {}
-    ;(ownerSeatRows || []).forEach((s: any) => {
-      if (s.user_id) primaryByUserId[s.user_id] = !!s.is_primary
+    ;(seatRows || []).forEach((s: any) => {
+      // The old query's WHERE clause, now a guard. Same rows, same result.
+      if (s.tier !== 'owner' || !s.user_id) return
+      primaryByUserId[s.user_id] = !!s.is_primary
+    })
+
+    // Per-location seat composition, emitted in lib/subscription-math's
+    // SeatLine shape ({ tier, count }) so calculateSeatTotal can price it
+    // without a translation step, and ordered by TIER_ORDER so the rows are
+    // stable across renders. Nothing reads this yet — it is the data the
+    // consolidated locations table (issue 226 step 3) is built on.
+    const seatTierCountByLoc: Record<string, Record<string, number>> = {}
+    ;(seatRows || []).forEach((s: any) => {
+      if (!s.location_id || !s.tier) return
+      const byTier = (seatTierCountByLoc[s.location_id] ||= {})
+      byTier[s.tier] = (byTier[s.tier] || 0) + 1
+    })
+    const seatLinesByLoc: Record<string, { tier: string; count: number }[]> = {}
+    const seatCountByLoc: Record<string, number> = {}
+    Object.entries(seatTierCountByLoc).forEach(([locId, byTier]) => {
+      seatLinesByLoc[locId] = Object.entries(byTier)
+        .sort(([a], [b]) => {
+          // Known tiers in catalog order; anything unrecognised sorts last,
+          // alphabetically, rather than vanishing.
+          const ia = TIER_ORDER.indexOf(a)
+          const ib = TIER_ORDER.indexOf(b)
+          if (ia === -1 && ib === -1) return a.localeCompare(b)
+          if (ia === -1) return 1
+          if (ib === -1) return -1
+          return ia - ib
+        })
+        .map(([tier, count]) => ({ tier, count }))
+      seatCountByLoc[locId] = Object.values(byTier).reduce((n, c) => n + c, 0)
     })
 
     // ownersByLoc now holds the full owner roster per location (up to 2),
@@ -921,6 +979,17 @@ export default async function HubPage({
         payment_source: row.payment_source || 'none',
         paid_through_date: row.paid_through_date || null,
         billing_notes: row.billing_notes || null,
+        // issue 226 step 1 — billing REALITY, alongside the billing INTENT
+        // above. Null means Stripe will charge this location nothing on its
+        // renewal date, whatever payment_source claims. No consumer yet.
+        stripe_customer_id: row.stripe_customer_id || null,
+        stripe_subscription_id: row.stripe_subscription_id || null,
+        // Active seats at this location, including unassigned (paid, empty)
+        // ones. `seatLines` is calculateSeatTotal's input shape. No consumer
+        // yet — a location with no seat rows gets [] / 0, not undefined, so
+        // the eventual reader never needs a null check.
+        seatLines: seatLinesByLoc[row.id] || [],
+        seatCount: seatCountByLoc[row.id] || 0,
         // DB stores address parts separately; combine for display in the admin
         // location cards. The Settings editor reads street/city/state/zip
         // below instead — it persists each to its own column (#93), so it must
