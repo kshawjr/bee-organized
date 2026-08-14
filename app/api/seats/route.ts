@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { applySeatDeltaToStripe } from '@/lib/seat-stripe-sync'
+import { quoteSeatPurchase, seatCostDivergence, unpricedSeatNote } from '@/lib/seat-cost'
 
 export const runtime = 'nodejs'
 
@@ -110,6 +111,15 @@ export async function GET(request: NextRequest) {
 //   their UI picker at 10, the 50 ceiling is just a server-side sanity guard).
 //   When quantity > 1, returns an array of inserted seats; quantity = 1 keeps
 //   the legacy single-object shape so the onboarding Activate path doesn't break.
+//
+// issue 217 — `prorated_cost` IN THE BODY IS NO LONGER WRITTEN. It used to be
+// copied into the row verbatim, shape-checked but never value-checked, which
+// made the browser's arithmetic the permanent record of what a seat cost. The
+// figure is now computed by lib/seat-cost from the location's own
+// paid_through_date, the live tier_prices rates and lib/seat-plan's co-owner
+// rule. The field is still ACCEPTED — a stale client must not start 400ing —
+// but only so a value that disagrees can be logged; it never reaches the
+// table. See seatCostDivergence() for where that lands.
 export async function POST(request: NextRequest) {
   const supabase = await createServerSupabaseClient()
   const caller = await loadCaller(supabase)
@@ -132,6 +142,11 @@ export async function POST(request: NextRequest) {
   if (user_id !== undefined && user_id !== null && typeof user_id !== 'string') {
     return NextResponse.json({ error: 'user_id must be a uuid string or null' }, { status: 400 })
   }
+  // issue 217 — this shape check is all that remains of the client's
+  // prorated_cost. The value is NOT written; it is kept in the contract only so
+  // today's clients don't start failing, and so a value that disagrees with the
+  // server's can be recorded as divergence. Drop the field from the body once
+  // the divergence notes stop appearing.
   if (
     prorated_cost !== undefined &&
     prorated_cost !== null &&
@@ -195,14 +210,38 @@ export async function POST(request: NextRequest) {
     user_id: user_id ?? null,
     added_by: caller.userId,
   }
-  if (prorated_cost !== undefined && prorated_cost !== null) {
-    baseRow.prorated_cost = prorated_cost
-  }
-  if (typeof notes === 'string' && notes.trim()) {
-    baseRow.notes = notes.trim()
+
+  // issue 217 — THE SERVER COMPUTES THE FIGURE. `prorated_cost` from the body
+  // is deliberately absent from baseRow: what the client believes a seat costs
+  // has no bearing on what we record. The quote resolves the renewal anchor
+  // from this location's real paid_through_date and prices the increment
+  // through lib/seat-plan's co-owner rule, so a 2nd owner seat records the
+  // manager rate rather than the owner rate a flat lookup would have written.
+  const quote = await quoteSeatPurchase({ locationId: location_id, tier, quantity: qty })
+  const noteParts: string[] = []
+  if (typeof notes === 'string' && notes.trim()) noteParts.push(notes.trim())
+  if (quote.unpricedReason) noteParts.push(unpricedSeatNote(quote.unpricedReason))
+
+  const divergence = seatCostDivergence(prorated_cost, quote.perSeatCents)
+  if (divergence.diverged) {
+    console.error(
+      `[seats POST] ${divergence.note} loc=${location_id} tier=${tier} qty=${qty}`,
+    )
+    noteParts.push(divergence.note)
   }
 
-  const rowsToInsert = Array.from({ length: qty }, () => ({ ...baseRow }))
+  const sharedNote = noteParts.join(' · ')
+  const rowsToInsert = Array.from({ length: qty }, (_, i) => {
+    const row: Record<string, any> = { ...baseRow }
+    // Per-seat, not per-request: an owner buy that crosses the co-owner
+    // boundary produces one owner-rate seat and one manager-rate seat, and
+    // writing a single flat figure to both would misprice one of them. A null
+    // entry means no honest figure exists — the column is left unset.
+    const cents = quote.perSeatCents?.[i]
+    if (typeof cents === 'number') row.prorated_cost = cents
+    if (sharedNote) row.notes = sharedNote
+    return row
+  })
 
   const { data, error } = await supabaseService
     .from('subscription_seats')
@@ -214,6 +253,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
+  // issue 217 — the response shape is unchanged (bare seat object at qty=1, an
+  // array above it) because SeatsContext and the onboarding Activate path both
+  // consume it directly. No `cost` envelope is added here: the authoritative
+  // figure is already on each returned row as prorated_cost, and any reason it
+  // could not be computed is on that row's notes.
   if (qty === 1) {
     return NextResponse.json((data && data[0]) || null, { status: 201 })
   }

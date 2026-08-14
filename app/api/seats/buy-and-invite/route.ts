@@ -25,9 +25,21 @@ import {
   INVITE_REPLY_TO_EMAIL,
 } from '@/lib/invite-email'
 import { applySeatDeltaToStripe } from '@/lib/seat-stripe-sync'
+import {
+  quoteSeatPurchase,
+  seatCostDivergence,
+  seatCostResponse,
+  unpricedSeatNote,
+} from '@/lib/seat-cost'
 
 export const runtime = 'nodejs'
 
+// issue 217 note on the co-owner rule: 'owner' is absent from this whitelist,
+// so this route CANNOT receive an owner tier — a tier='owner' body is a 400
+// before any pricing runs. The cost quote still goes through lib/seat-plan's
+// planBillingLines rather than a flat tier lookup, because a whitelist is a
+// gate that can be widened and the co-owner rule must not have to be
+// remembered on the day it is.
 const VALID_TIERS = ['manager', 'light', 'readonly'] as const
 type Tier = (typeof VALID_TIERS)[number]
 
@@ -89,6 +101,11 @@ export async function POST(request: NextRequest) {
   if (!isValidEmail(email)) {
     return NextResponse.json({ error: 'valid email required' }, { status: 400 })
   }
+  // issue 217 — this shape check is all that remains of the client's
+  // prorated_cost. The value is NOT written; it is kept in the contract only so
+  // today's clients don't start failing, and so a value that disagrees with the
+  // server's can be recorded as divergence. Drop the field from the body once
+  // the divergence notes stop appearing.
   if (
     prorated_cost !== undefined &&
     prorated_cost !== null &&
@@ -131,15 +148,33 @@ export async function POST(request: NextRequest) {
   }
 
   // ─── Seat insert ───
+  // issue 217 — the server computes the figure. `prorated_cost` from the body
+  // is never written: it was shape-checked but never value-checked, so the
+  // browser's arithmetic was the permanent record of what this seat cost. The
+  // quote resolves the renewal anchor from this location's real
+  // paid_through_date and prices the increment through lib/seat-plan.
+  const quote = await quoteSeatPurchase({ locationId: location_id, tier, quantity: 1 })
+
   const seatRow: Record<string, any> = {
     location_id,
     tier,
     user_id: null,
     added_by: caller.id,
   }
-  if (prorated_cost !== undefined && prorated_cost !== null) {
-    seatRow.prorated_cost = prorated_cost
+  const serverCents = quote.perSeatCents?.[0]
+  if (typeof serverCents === 'number') seatRow.prorated_cost = serverCents
+
+  const noteParts: string[] = []
+  if (quote.unpricedReason) noteParts.push(unpricedSeatNote(quote.unpricedReason))
+
+  const divergence = seatCostDivergence(prorated_cost, quote.perSeatCents)
+  if (divergence.diverged) {
+    console.error(
+      `[buy-and-invite] ${divergence.note} loc=${location_id} tier=${tier}`,
+    )
+    noteParts.push(divergence.note)
   }
+  if (noteParts.length > 0) seatRow.notes = noteParts.join(' · ')
 
   const { data: insertedSeat, error: seatErr } = await supabaseService
     .from('subscription_seats')
@@ -290,6 +325,10 @@ export async function POST(request: NextRequest) {
       invite,
       invite_url,
       email_sent,
+      // issue 217 — what the SERVER decided this seat cost, so a caller can
+      // see the authoritative figure (and any reason there isn't one) rather
+      // than assuming the number it sent was accepted.
+      cost: seatCostResponse(quote),
       ...(email_error ? { email_error } : {}),
       billing: { stripe_applied: billing.applied, ...(billing.reason ? { stripe_skip_reason: billing.reason } : {}) },
     },
