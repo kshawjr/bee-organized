@@ -487,12 +487,45 @@ export function unpricedSeatNote(reason: SeatCostUnpricedReason): string {
     : 'issue 217: no prorated cost recorded — the tier has no tier_prices row'
 }
 
+// ── issue 224: the OTHER figure the screen needs ─────────────
+// The tier picker names two amounts — what is charged today and what renews
+// every year after. The first has been the server's since issue 217. The
+// second was still the browser's: the modals read tier_prices out of a React
+// context and, in the add-seats case, multiplied it by the quantity. That is
+// the same shape of client money math issue 216 fixed and issue 217 closed,
+// and it disagrees with the charge in exactly the case the co-owner rule
+// exists for — a 2nd owner seat renews at the MANAGER rate, so a
+// `tier_prices[tier] × quantity` lookup overstates it by $150.
+//
+// So the annual figure is differenced from the SAME billingLines the charge
+// walks and the per-seat record is priced from. One list, now three
+// consumers, and none of them can pick a different tier or quantity.
+//
+// null when ANY billed line has no known rate (`annualUnitCents: null` — a
+// missing tier_prices row). A partial sum would read as the whole year's
+// price while silently omitting a line, so there is no partial sum. Note this
+// is orthogonal to totalCents being null: a location with no
+// paid_through_date cannot be quoted a figure for today (issue 217 refuses to
+// invent an anchor) but its annual rate is perfectly knowable, and the picker
+// says so rather than going blank on both halves.
+export function annualTotalCents(quote: SeatCostQuote): number | null {
+  let total = 0
+  for (const line of quote.billingLines) {
+    if (line.annualUnitCents === null) return null
+    total += line.annualUnitCents * line.quantity
+  }
+  return total
+}
+
 // Compact `cost` block for a route response, so a caller can see what the
 // server decided instead of assuming its own number was accepted.
 export function seatCostResponse(quote: SeatCostQuote) {
   return {
     per_seat_cents: quote.perSeatCents,
     total_cents: quote.totalCents,
+    // issue 224 — what this purchase adds to the location's yearly bill from
+    // its renewal onward. Present even when total_cents is null.
+    annual_total_cents: annualTotalCents(quote),
     renewal_date: quote.renewalDate ? quote.renewalDate.toISOString().slice(0, 10) : null,
     paid_through_date: quote.paidThroughDate,
     lines: quote.lines,

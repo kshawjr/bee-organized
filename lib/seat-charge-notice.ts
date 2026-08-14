@@ -214,3 +214,150 @@ export function seatChargeNotice(args: {
       }
   }
 }
+
+// ─────────────────────────────────────────────────────────────
+// issue 224 — THE SAME SIX ANSWERS, ONE STEP EARLIER.
+//
+// WHAT KEVIN SAW: the tier picker offered "Hive Manager — $400/yr" and then
+// said underneath, in effect, "that isn't what you'll pay; we'll tell you the
+// real number on the next screen." Asking someone to choose between tiers
+// while withholding the price of each is a strange thing to do, and the fact
+// that the withheld number was correct doesn't redeem it.
+//
+// So the picker names both figures: what leaves the account today, and what
+// the seat costs every year from the renewal onward. Both come from the
+// server's quote (see lib/seat-cost) — the picker computes neither, which is
+// the rule issue 216 fixed and issue 217 closed.
+//
+// WHY THIS IS A SEPARATE FUNCTION FROM seatChargeNotice. Same six outcomes,
+// different job. seatChargeNotice is the last thing read before committing:
+// it explains, in sentences, what confirming will do. This is a price label
+// on a choice — two short lines beside a tier the owner has not committed to
+// — and the pressure on it is that a glance must land on the right number.
+// Writing it as a "shorter notice" would mean one function with a verbosity
+// flag and six cases that quietly drift toward each other, which is the
+// collapse issue 223 exists to prevent. The taxonomy is shared; the words are
+// not.
+//
+// EVERY CASE ANSWERS BOTH QUESTIONS, INCLUDING THE ONES WHERE THE ANSWER IS
+// "NOTHING" OR "WE CAN'T SAY YET". A blank second line would read as free.
+// ─────────────────────────────────────────────────────────────
+
+export type SeatPickerQuote = SeatChargeQuote & {
+  // issue 224 — whole cents added to the yearly bill at renewal, from the
+  // server's `cost.annual_total_cents`. null when a rate is unknown; that is
+  // NOT the same as zero and must never render as free.
+  annualTotalCents: number | null
+}
+
+export type SeatPickerPrice = {
+  // Same taxonomy as the confirm notice, so the two screens cannot classify
+  // one purchase differently.
+  kind: SeatChargeNoticeKind
+  tone: 'charge' | 'free' | 'later'
+  // The prominent line: what happens to money TODAY.
+  today: string
+  // The quiet line under it: what it costs each year afterwards. Always says
+  // something.
+  renews: string
+}
+
+// Annual rates are whole dollars (tier_prices.price_annual is a dollar
+// integer), so cents are noise on this line — but formatCurrency's 'never'
+// mode ROUNDS UP, so a non-whole figure would be overstated. Only drop the
+// cents when there are none to drop.
+const wholeMoney = (cents: number): string =>
+  cents % 100 === 0
+    ? formatCurrency(cents / 100, { showCents: 'never' })
+    : formatCurrency(cents / 100, { showCents: 'always' })
+
+// The price label for one tier the owner is considering.
+export function seatPickerPrice(args: {
+  quote: SeatPickerQuote
+  preview: SeatChargePreview
+}): SeatPickerPrice {
+  const { quote, preview } = args
+  const renewal = renewalPhrase(quote.renewalDate)
+  const annual = quote.annualTotalCents === null ? null : wholeMoney(quote.annualTotalCents)
+
+  // The yearly half, shared by every case that has a yearly cost. "Then"
+  // carries the whole contrast with the line above it — this is the number
+  // that is NOT being charged now.
+  const renewsAnnually = annual
+    ? renewal
+      ? `Then ${annual} a year, starting ${renewal}`
+      : `Then ${annual} a year at your renewal`
+    : renewal
+      ? `Then the full year's price from ${renewal}`
+      : `Then the full year's price at each renewal`
+
+  if (preview.willCharge) {
+    // No renewal date of our own to work from, so there is no figure for
+    // today — issue 217 refuses to invent an anchor. The yearly price is
+    // still perfectly knowable, so only the first line goes quiet.
+    if (quote.totalCents === null) {
+      return {
+        kind: 'charge_unpriced',
+        tone: 'charge',
+        today: 'Amount worked out when you pay',
+        renews: renewsAnnually,
+      }
+    }
+
+    // A paid tier added on (or effectively on) the renewal date: there is no
+    // part of this year left to pay for. Not free — it is on the plan from
+    // the renewal onward, which is what the second line is for.
+    if (quote.totalCents === 0) {
+      return {
+        kind: 'charge_zero_today',
+        tone: 'later',
+        today: 'Nothing to pay today',
+        renews: renewsAnnually,
+      }
+    }
+
+    return {
+      kind: 'charge',
+      tone: 'charge',
+      today: `${money(quote.totalCents)} today`,
+      renews: renewsAnnually,
+    }
+  }
+
+  switch (preview.reason) {
+    // The only genuinely free case: a $0 tier. Free now AND at renewal, and
+    // the second line has to say the second half or this reads like every
+    // other "nothing today".
+    case 'zero_rate':
+      return {
+        kind: 'free_tier',
+        tone: 'free',
+        today: 'Free',
+        renews: 'Free at renewal too — it adds nothing to your yearly bill',
+      }
+
+    // Corporate / prepaid. Nothing is owed by this owner in either column,
+    // which is different from the seat being free.
+    case 'non_paying':
+      return {
+        kind: 'covered',
+        tone: 'free',
+        today: 'Nothing to pay',
+        renews: 'Your account is billed separately, not by card',
+      }
+
+    // Owed but not collectable by card. NAMES the amount — this is the
+    // 32-of-55 no-subscription case, and a blank or cheerful line here is
+    // the original issue 223 lie one screen earlier.
+    default:
+      return {
+        kind: 'invoiced',
+        tone: 'later',
+        today:
+          quote.totalCents !== null && quote.totalCents > 0
+            ? `${money(quote.totalCents)} — we'll invoice you`
+            : "We'll invoice you for this",
+        renews: renewsAnnually,
+      }
+  }
+}

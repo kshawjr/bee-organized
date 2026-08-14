@@ -72,10 +72,22 @@ function seatsValue(seats = SEATS, pendingInvites = INVITES) {
 
 let fetchCalls: Array<{ url: string; body: any }> = []
 
+// issue 224 — the seat modals ask GET /api/seats/quote from the form step now,
+// because the tier picker names the price. C below drives the renewal date
+// through this rather than through a prop.
+let quoteReply: any = null
+
 beforeEach(() => {
   document.body.innerHTML = ''
   fetchCalls = []
+  quoteReply = {
+    cost: { total_cents: 4657, annual_total_cents: 5000, per_seat_cents: [4657], renewal_date: '2027-08-14', source: 'server' },
+    billing: { will_charge: true, reason: null, lines: [] },
+  }
   ;(globalThis as any).fetch = vi.fn(async (url: string, init?: any) => {
+    if (String(url).includes('/api/seats/quote')) {
+      return { ok: true, status: 200, json: async () => quoteReply }
+    }
     fetchCalls.push({ url: String(url), body: init?.body ? JSON.parse(init.body) : null })
     return {
       ok: true,
@@ -84,6 +96,11 @@ beforeEach(() => {
     }
   }) as any
 })
+
+// Let the form-step quote's promise chain settle before reading the screen.
+async function settle() {
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve() })
+}
 
 function mount(node: React.ReactElement) {
   const container = document.createElement('div')
@@ -250,25 +267,48 @@ describe('issue 216 C — proration anchors to the real paid_through_date', () =
   let view: ReturnType<typeof mount> | null = null
   afterEach(() => { view?.unmount(); view = null })
 
-  // A super_admin view has no CurrentLocationContext, so the prop is the only
-  // source. Pick a tier with NO free seat so the prorated quote renders.
-  it('quotes against paid_through_date, not the legacy fixed March 1', () => {
+  // ── issue 224 moved WHERE the anchor comes from, not WHAT it must be ──
+  // These three used to drive the date through InviteTeamMemberModal's
+  // paidThroughDate prop, because the modal formatted the renewal date itself
+  // to write "…before your renewal on <date>". The tier picker now names the
+  // date beside the figure and both arrive together on the server's quote, so
+  // the prop is gone and the date is driven through the quote instead.
+  //
+  // THE TEETH ARE UNCHANGED AND ARE THE POINT: the date on screen is the
+  // location's OWN renewal date and is never the legacy fixed March 1. What
+  // changed is that a client with no anchor can no longer produce March 1 at
+  // all — see the inverted test below, which is the same guarantee made
+  // stronger. resolveLocationRenewalDate's fallback still exists and is still
+  // pinned, on ScheduleRemovalModal, which still legitimately uses it.
+  it('shows the location’s own renewal date, not the legacy fixed March 1', async () => {
+    // A super_admin view has no CurrentLocationContext. Pick a tier with NO
+    // free seat, so a PURCHASE is quoted and the price block renders.
     view = mount(withSeats(
       <InviteTeamMemberModal
         locationId="loc-ftl"
         initialTier="readonly"
-        paidThroughDate="2027-08-14"
         onClose={() => {}}
         onInviteCreated={() => {}}
       />,
       seatsValue(SEATS, []),
     ))
+    await settle()
     const txt = view.container.textContent || ''
     expect(txt).toContain('Aug 14, 2027')
     expect(txt).not.toContain('Mar 1, 2027')
   })
 
-  it('without the anchor it would fall back to the legacy date — the bug', () => {
+  it('with no anchor it names NO date, rather than falling back to the legacy one', async () => {
+    // The old shape of this test asserted that a modal with no anchor
+    // rendered "Mar 1" — the legacy fallback — to prove the prop carried the
+    // fix. issue 217 refuses to invent that anchor server-side and issue 224
+    // stopped the screen inventing one too, so the honest assertion is now
+    // the opposite: a location with no paid_through_date is told the price
+    // renews "at your renewal" and is shown no date at all.
+    quoteReply = {
+      cost: { total_cents: null, annual_total_cents: 5000, per_seat_cents: null, renewal_date: null, unpriced_reason: 'no_renewal_anchor', source: 'server' },
+      billing: { will_charge: true, reason: null, lines: [] },
+    }
     view = mount(withSeats(
       <InviteTeamMemberModal
         locationId="loc-ftl"
@@ -278,15 +318,20 @@ describe('issue 216 C — proration anchors to the real paid_through_date', () =
       />,
       seatsValue(SEATS, []),
     ))
-    // proves the prop is what carries the fix (legacy fallback is Mar 1)
-    expect(view.container.textContent || '').toContain('Mar 1')
+    await settle()
+    const txt = view.container.textContent || ''
+    expect(txt).not.toContain('Mar 1')
+    expect(txt).toContain('at your renewal')
   })
 
-  it('TeamSection threads paidThroughOverride into the invite modal', () => {
+  it('TeamSection opens the invite modal against the right location', async () => {
     // The renewal date only renders where a PURCHASE is quoted, so drop the
-    // free manager seat: "+ Invite" then opens on manager with none available
-    // and must prorate to the location's own date. This is the super_admin
-    // path — no CurrentLocationContext, so the prop is the only anchor.
+    // free manager seat: "+ Invite" then opens on manager with none available.
+    // paidThroughOverride no longer reaches this modal (the two
+    // ScheduleRemovalModal tests below still pin that it reaches the modal
+    // that needs it), so what this pins now is the thing the quote is keyed
+    // on: dbLocationIdOverride, without which the server would price and
+    // anchor against the wrong location entirely.
     const noFreeManager = SEATS.filter(s => s.id !== 'mgr-open')
     view = mount(withSeats(
       <TeamSection
@@ -298,12 +343,13 @@ describe('issue 216 C — proration anchors to the real paid_through_date', () =
       seatsValue(noFreeManager, []),
     ))
     clickText(view.container, '+ Invite')
+    await settle()
+    const quotes = ((globalThis as any).fetch as any).mock.calls
+      .map((c: any[]) => String(c[0]))
+      .filter((u: string) => u.includes('/api/seats/quote'))
+    expect(quotes.length).toBeGreaterThan(0)
+    expect(quotes[0]).toContain('location_id=loc-ftl')
     const txt = view.container.textContent || ''
-    // issue 223 replaced the "Prorated to <date>" summary row (which quoted a
-    // client-computed figure) with prose, and the confirm step now gets the
-    // amount from the server. The property THIS test pins is unchanged and is
-    // the second assertion: the anchor is the location's own renewal date,
-    // arriving via the prop, and never the legacy fixed March 1.
     expect(txt).toContain('Aug 14, 2027')
     expect(txt).not.toContain('Mar 1, 2027')
   })

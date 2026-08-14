@@ -29,7 +29,7 @@ import { deriveJobberStatus, jobberStatusView } from "@/lib/jobber-status"
 import { buildPreviewVars, applyPreviewVars } from "@/lib/preview-vars"
 import { financialsVisible } from "@/lib/financial-access"
 import { buildStripePayUrl } from "@/lib/stripe-links"
-import { seatChargeNotice } from "@/lib/seat-charge-notice"
+import { seatChargeNotice, seatPickerPrice } from "@/lib/seat-charge-notice"
 // issue 185 — copy/format helpers for the "Get payment link" button
 import { translatePaymentLinkError, formatCheckoutLines, formatProjectedAnnual } from "@/lib/payment-link-copy"
 import { navigateToStripeCheckout, payStepForCheckoutReturn, initialPayStepFromReturn, classifyCheckoutResponse, CHECKOUT_RETURN_PARAM, CHECKOUT_INFLIGHT_KEY } from "@/lib/stripe-checkout-return"
@@ -19374,7 +19374,9 @@ export function TeamSection({ locationId='loc1', settings=null, updateLocation=(
         <InviteTeamMemberModal
           locationId={dbLocationId}
           initialTier={invitePresetTier}
-          paidThroughDate={dbPaidThrough}
+          /* issue 224 — no paidThroughDate: the renewal date the modal shows
+             now rides on the server's quote for the seat being bought.
+             dbPaidThrough still feeds ScheduleRemovalModal above. */
           onClose={()=>{ setShowInvite(false); setInvitePresetTier(null) }}
           onInviteCreated={()=>{ /* no-op: invite is pending until accept, so don't add to users list yet */ }}
         />
@@ -22424,7 +22426,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       {showAddSeatsModal && resolvedBillingLocationId && (
         <AddSeatsModal
           locationId={resolvedBillingLocationId}
-          paidThroughDate={currentLocationCtx?.paid_through_date ?? selectedLoc?.paid_through_date ?? null}
+          /* issue 224 — no paidThroughDate: the renewal date this modal shows
+             rides on the server's quote for the seats being bought. */
           onClose={()=>setShowAddSeatsModal(false)}
           onSeatsAdded={(rows)=>{ seatsCtx?.setSeats?.(prev=>[...prev, ...rows]) }}
         />
@@ -32308,38 +32311,84 @@ function BackOfficeScreen() {
 // costs, the honest move is to refuse to take the confirmation, not to fall
 // back to a cheerful default — falling back to a cheerful default is exactly
 // what issue 223 is.
+//
+// ── issue 224: THE PICKER ASKS TOO, SO THE ASKING IS CACHED ────────────────
+// The price now sits beside each tier the owner is choosing between, not only
+// on the confirm step, so the quote is fetched on the form step as well. That
+// turns one round trip per purchase into one per tier considered, and an owner
+// comparing Manager against Watcher will go back and forth.
+//
+// ONE AT A TIME, AND KEPT. Not all three up front: two of the picker's tiers
+// are never looked at in most sessions (one is deferred and unselectable at
+// all), most opens of this modal end without a purchase, and firing three
+// billing reads — each of which walks the seat plan and the location's Stripe
+// gate — to answer a question nobody asked is work spent on the wrong side of
+// the trade. So a tier is quoted when it is first selected and the answer is
+// held for the life of the modal. First visit to a tier waits; every visit
+// after is instant; a tier never selected is never quoted.
+//
+// A LATE ANSWER CANNOT LAND ON THE WRONG TIER. Responses are filed under the
+// key they were asked for and rendering reads only the CURRENT key, so a slow
+// quote for Manager arriving after the owner has switched to Watcher lands in
+// Manager's slot and is not on screen. The previous tier's figure is not
+// merely overwritten — it is never addressable from the new selection, which
+// is the property that matters: the thing this whole arc has been about is a
+// wrong number on screen.
+//
+// Errors are cached too but do NOT block a re-ask: switching away and back
+// re-fetches, because a failed quote is usually transient and a permanently
+// stuck modal is worse than a second request.
+const SEAT_QUOTE_IDLE    = { loading: false, error: '', cost: null, billing: null }
+const SEAT_QUOTE_PENDING = { loading: true,  error: '', cost: null, billing: null }
+
 function useSeatQuote({ locationId, tier, quantity = 1, active }) {
-  const [state, setState] = useState({ loading: false, error: '', cost: null, billing: null })
+  const [byKey, setByKey] = useState({})
+  // The cache the effect reads. Mirrored into state for rendering; the ref is
+  // what makes "have I already asked this?" answerable without listing every
+  // cached key as a dependency.
+  const cacheRef   = useRef({})
+  const inFlightRef = useRef({})
+  const mountedRef  = useRef(true)
+  useEffect(() => () => { mountedRef.current = false }, [])
+
+  const key = active && locationId && tier ? `${locationId}|${tier}|${quantity}` : null
 
   useEffect(() => {
-    if (!active || !locationId || !tier) return
-    // A tier switch while a quote is in flight must not let the old answer
-    // land on the new selection — the figure would be for a seat the owner
-    // is no longer buying.
-    let live = true
-    setState({ loading: true, error: '', cost: null, billing: null })
+    if (!key) return
+    const held = cacheRef.current[key]
+    if (held && !held.error) return
+    if (inFlightRef.current[key]) return
+    inFlightRef.current[key] = true
+
+    const put = (entry) => {
+      cacheRef.current[key] = entry
+      if (mountedRef.current) setByKey(prev => ({ ...prev, [key]: entry }))
+    }
+    put(SEAT_QUOTE_PENDING)
     ;(async () => {
       try {
         const qs = new URLSearchParams({ location_id: locationId, tier, quantity: String(quantity) })
         const res = await fetch(`/api/seats/quote?${qs}`, { cache: 'no-store' })
         const json = await res.json().catch(() => ({}))
-        if (!live) return
         if (!res.ok) throw new Error(json.error || 'Could not work out the cost')
-        setState({ loading: false, error: '', cost: json.cost, billing: json.billing })
+        put({ loading: false, error: '', cost: json.cost, billing: json.billing })
       } catch (err) {
-        if (!live) return
-        setState({
+        put({
           loading: false,
           error: err?.message || 'Could not work out the cost',
           cost: null,
           billing: null,
         })
+      } finally {
+        inFlightRef.current[key] = false
       }
     })()
-    return () => { live = false }
-  }, [active, locationId, tier, quantity])
+  }, [key, locationId, tier, quantity])
 
-  return state
+  if (!key) return SEAT_QUOTE_IDLE
+  // No entry yet means the effect has not run for this key — which is a wait,
+  // not an answer. Never the previous key's entry.
+  return byKey[key] || SEAT_QUOTE_PENDING
 }
 
 // Turn a resolved quote into the notice + the authoritative figure. Returns
@@ -32359,6 +32408,70 @@ function seatQuoteView(quoteState, seatWord) {
       seatWord,
     }),
   }
+}
+
+// ─── SeatPickerPriceBlock ──────────────────────────────────────────────────
+// issue 224 — THE PRICE OF THE TIER YOU ARE CHOOSING, BESIDE THE CHOICE.
+//
+// This replaces the block that named the annual rate and then said the real
+// figure would appear on the next screen. Both figures are here now: what is
+// charged today, prominently, and what renews each year, quietly underneath.
+// Both come from the server's quote for the CURRENTLY SELECTED tier — this
+// component multiplies nothing and looks no rate up.
+//
+// THE IN-BETWEEN STATE SHOWS NO NUMBER AT ALL. While a newly-selected tier is
+// being quoted there is no honest figure to display, and the one figure that
+// is conveniently to hand — the tier the owner just switched away from — is
+// the single worst thing that could be on screen. So the amount slot carries
+// the wait itself. Same rule as the confirm step (issue 223), same reason.
+function SeatPickerPriceBlock({ quoteState, label }) {
+  const price =
+    quoteState.cost && quoteState.billing
+      ? seatPickerPrice({
+          quote: {
+            totalCents: quoteState.cost.total_cents ?? null,
+            annualTotalCents: quoteState.cost.annual_total_cents ?? null,
+            renewalDate: quoteState.cost.renewal_date ?? null,
+          },
+          preview: {
+            willCharge: quoteState.billing.will_charge,
+            reason: quoteState.billing.reason,
+          },
+        })
+      : null
+
+  // Colour follows the tone, exactly as the confirm notice does, so the two
+  // screens agree at a glance as well as in words.
+  const TONE = {
+    charge: '#1a2e2b',
+    free:   '#15803d',
+    later:  '#4a5e5a',
+  }
+  const today  = price ? price.today  : quoteState.loading ? 'Working out your cost…' : 'We couldn’t work this out'
+  const renews = price
+    ? price.renews
+    : quoteState.loading
+      ? 'One moment — we’ll show what you pay today and what it costs each year.'
+      : 'You’ll see the amount before anything is charged.'
+  const kind = price ? price.kind : quoteState.loading ? 'pending' : 'error'
+
+  return (
+    <div
+      data-testid={`seat-picker-price-${kind}`}
+      style={{ background:'rgba(26,46,43,0.03)', border:'1px solid rgba(0,0,0,0.06)', borderRadius:'10px', padding:'10px 12px' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:'10px' }}>
+        <span style={{ fontSize:'12px', color:'#4a5e5a' }}>{label}</span>
+        <span
+          data-testid="seat-picker-today"
+          style={{ fontSize: price ? '14px' : '12px', fontWeight:700, fontFamily: price ? 'Georgia,serif' : 'inherit', color: price ? TONE[price.tone] || TONE.later : '#8a9e9a', textAlign:'right' }}>
+          {today}
+        </span>
+      </div>
+      <p data-testid="seat-picker-renews" style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, marginTop:'4px' }}>
+        {renews}
+      </p>
+    </div>
+  )
 }
 
 // The two non-answer states, rendered the same way in both modals.
@@ -32780,18 +32893,28 @@ function CancelScheduledRemovalModal({ seat, tierMeta, onClose, onCanceled }) {
 // "Pay" just records the prorated_cost on each seat row.
 // Exported for the issue 223 component tests, the way issue 216 exported
 // ScheduleRemovalModal — a screen that quotes money is mounted for real.
-export function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDate=null }) {
+// issue 224 — THE LAST CLIENT-SIDE RENEWAL DATE IN THE SEAT FLOW, REMOVED.
+//
+// This modal resolved the date itself, exactly as InviteTeamMemberModal did,
+// and inherited the same fabrication: resolveLocationRenewalDate falls back to
+// legacyFixedRenewalDate — March 1 — when a location has no paid_through_date.
+// That fallback belongs to the pre-Stripe cohort and is nobody's default, so a
+// location without an anchor was reading a renewal date that was not its own.
+//
+// That fallback has now been found in four places across issues 216, 217, 223
+// and 224, which is three more times than a fallback should need finding. The
+// rule is settled: NOTHING IN THE SEAT FLOW DERIVES A RENEWAL DATE. The server
+// reads locations.paid_through_date when it prices the seat and returns it on
+// the quote (cost.renewal_date), and the screen either states that date or
+// states no date at all — never an invented one. resolveLocationRenewalDate
+// keeps its one legitimate caller, ScheduleRemovalModal, which needs a
+// pre-filled default in a date input before any quote exists.
+//
+// The paidThroughDate prop goes with it, as InviteTeamMemberModal's did. A
+// prop whose only consumer is gone is an invitation to grow a second one.
+export function AddSeatsModal({ locationId, onClose, onSeatsAdded }) {
   const tierPricesCtx  = useContext(TierPricesContext)
-  const currentLocationCtx = useContext(CurrentLocationContext)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
-  // issue 162: a mid-year seat add prorates to the LOCATION'S OWN renewal
-  // date — paid_through_date, the mirror of the Stripe subscription's period
-  // end that Stripe itself prorates against — not a fixed March 1. Prop wins
-  // (super_admin managing another location); else the owner's own context;
-  // else the legacy fixed fallback inside resolveLocationRenewalDate.
-  const seatRenewalDate = resolveLocationRenewalDate({
-    paidThroughDate: paidThroughDate ?? currentLocationCtx?.paid_through_date ?? null,
-  })
 
   const [step, setStep]         = useState('form') // form | paymentConfirm
   const [tier, setTier]         = useState('manager')
@@ -32826,23 +32949,33 @@ export function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDa
   // multiply, and it can never apply to a tier that isn't owner. If an owner
   // tier is ever added to this picker, this must move to calculateSeatTotal.
   //
-  // issue 223 — this is now the ANNUAL RATE ONLY, and deliberately. A rate is
-  // a fact about the tier and fine to state here; what this seat will cost
-  // TODAY is a different figure, and the client no longer computes it. The
-  // prorated amount comes from the server on the confirm step (see
-  // useSeatQuote), so exactly one prorated number exists in this flow and it
-  // is the one the seat is actually priced at.
-  const annualEach   = getTierPrice(tier)
-  const totalAnnual  = annualEach * quantity
+  // issue 224 — the client's last money multiply is gone. This was the annual
+  // RATE × quantity, which issue 223 left standing as "a fact about the tier".
+  // It is a fact about the tier only for one seat: multiplying it is a claim
+  // about a purchase, and it is the claim the co-owner rule contradicts. Both
+  // figures the summary block names now come from the server's quote for the
+  // selected tier (annual_total_cents and total_cents), so this modal derives
+  // no money at all. The per-row "$400 /yr each" labels below are untouched —
+  // those are the price list, one rate per tier, not a total.
   const tierMeta     = SUBSCRIPTION_TIER_META.find(t => t.key === tier)
-  const renewalLabel = formatRenewalDate(seatRenewalDate)
 
+  // issue 224 — quoted from the form step now, not only on the way to confirm,
+  // because the picker names the figure. Cached per tier + quantity inside the
+  // hook, so the confirm step almost always has its answer already.
   const quoteState = useSeatQuote({
     locationId,
     tier,
     quantity,
-    active: step === 'paymentConfirm',
+    active: step === 'form' || step === 'paymentConfirm',
   })
+  // issue 224 — the renewal date for the header subtitle, from the SAME quote
+  // that priced the seats. null until it lands, and null forever for a
+  // location with no paid_through_date — in both cases the subtitle drops the
+  // clause rather than naming a date nobody chose.
+  const quotedRenewalLabel = (() => {
+    const parsed = parsePaidThroughDate(quoteState.cost?.renewal_date ?? null)
+    return parsed ? formatRenewalDate(parsed) : null
+  })()
   const seatWord = quantity === 1
     ? `${tierMeta?.name || tier} seat`
     : `${quantity} ${tierMeta?.name || tier} seats`
@@ -32899,8 +33032,13 @@ export function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDa
                 {step === 'paymentConfirm'
                   ? `Adds ${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'} to your pool. Each appears as an open seat on the team roster, ready to invite into.`
                   /* issue 223 — "prorated to your renewal date" is the jargon
-                     this screen's audience doesn't use. Same fact, plainly. */
-                  : `Billed once a year. Today you'd only pay for what's left before your renewal on ${renewalLabel}. Once added, you can invite team members anytime.`}
+                     this screen's audience doesn't use. Same fact, plainly.
+                     issue 224 — the date is the QUOTE's, and the clause is
+                     dropped entirely when there isn't one: before the quote
+                     lands, and for a location with no paid_through_date. The
+                     sentence reads fine without it, which is the whole reason
+                     it is safe to omit rather than fill in. */
+                  : `Billed once a year. Today you'd only pay for what's left before your renewal${quotedRenewalLabel ? ` on ${quotedRenewalLabel}` : ''}. Once added, you can invite team members anytime.`}
               </p>
             </div>
             <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'22px', color:'#8a9e9a', cursor:'pointer', lineHeight:1, padding:'0 0 0 8px' }}>×</button>
@@ -32969,21 +33107,15 @@ export function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDa
             <span style={{ fontSize:'11px', color:'#b0c0bc', marginLeft:'6px' }}>Cap 10 per request</span>
           </div>
 
-          {/* issue 223 — the RATE, which is a fact about the tier. The old
-              second row stated a client-computed "prorated to <date>"
-              figure: a claim about what this purchase would cost, made by
-              the browser, that could disagree with what the server priced
-              and charged. What it costs today is now shown once, on the next
-              step, from the server. */}
-          <div style={{ background:'rgba(26,46,43,0.03)', border:'1px solid rgba(0,0,0,0.06)', borderRadius:'10px', padding:'12px 14px' }}>
-            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'6px' }}>
-              <span style={{ fontSize:'12px', color:'#4a5e5a' }}>Annual cost</span>
-              <span style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{formatCurrency(totalAnnual, { showCents:'never' })}</span>
-            </div>
-            <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5 }}>
-              You only pay for the part of the year that’s left before your renewal on {renewalLabel}. We’ll show you that exact amount on the next step, before anything is charged.
-            </p>
-          </div>
+          {/* issue 224 — both numbers, here, where the tier is chosen. This
+              used to state the annual rate and promise the real figure on
+              the next screen; the promise was kept, but choosing a tier
+              against a price that isn't the price is the confusion Kevin
+              hit. The server answers for the selected tier and quantity. */}
+          <SeatPickerPriceBlock
+            quoteState={quoteState}
+            label={`${quantity} ${tierMeta?.name || tier} seat${quantity === 1 ? '' : 's'}`}
+          />
 
           {error && (
             <p style={{ marginTop:'12px', padding:'8px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.15)', borderRadius:'8px', color:'#ef4444', fontSize:'12px' }}>{error}</p>
@@ -33019,16 +33151,24 @@ export function AddSeatsModal({ locationId, onClose, onSeatsAdded, paidThroughDa
 //
 // AddSeatsModal still exists for pre-buying ahead of inviting — see
 // Settings > Billing.
-export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTier=null, paidThroughDate=null }) {
+// issue 224 — THE paidThroughDate PROP IS GONE, AND ITS ABSENCE IS THE POINT.
+// This modal used to resolve the location's renewal date itself, to write the
+// sentence "…before your renewal on <date>". The picker now names the date
+// beside the figure, and both arrive together on the server's quote
+// (cost.renewal_date, from the same read that priced the seat), so the date
+// and the amount cannot come from different places.
+//
+// It also drops a fabrication. resolveLocationRenewalDate falls back to
+// legacyFixedRenewalDate — March 1 — when a location has no
+// paid_through_date, so a location with no anchor was shown a renewal date
+// that is not its own. issue 217 refuses to invent that anchor server-side;
+// the screen now refuses too, and says "at your renewal" with no date rather
+// than naming the wrong one. issue 162's rule is unchanged and now lives in
+// exactly one place.
+export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, initialTier=null }) {
   const seatsCtx = useContext(SeatsContext)
   const tierPricesCtx = useContext(TierPricesContext)
-  const currentLocationCtx = useContext(CurrentLocationContext)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
-  // issue 162: buy-and-invite prorates the purchased seat to the LOCATION'S
-  // OWN renewal date (paid_through_date — Stripe's period end), not March 1.
-  const seatRenewalDate = resolveLocationRenewalDate({
-    paidThroughDate: paidThroughDate ?? currentLocationCtx?.paid_through_date ?? null,
-  })
 
   const [step, setStep] = useState('form') // form | paymentConfirm | success
   const [email, setEmail] = useState('')
@@ -33102,19 +33242,18 @@ export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, in
   const isAvailable = availableForTier >= 1
 
   const tierMeta = SUBSCRIPTION_TIER_META.find(t => t.key === tier)
-  // issue 223 — the annual RATE only. The prorated figure this modal used to
-  // compute (and quote on a button, in a summary row and on the confirm step)
-  // is the server's to state; see useSeatQuote below.
-  const annualPrice = getTierPrice(tier)
-  const renewalLabel = formatRenewalDate(seatRenewalDate)
 
-  // Only quoted when a seat must actually be BOUGHT. Filling a free seat
-  // costs nothing and never reaches the confirm step.
+  // issue 224 — a seat must actually be BOUGHT for a price to be worth
+  // naming. Filling a free seat costs nothing and never reaches the confirm
+  // step, and an owner seat can be filled here but never bought (issue 216),
+  // so neither is quoted: a price beside a tier that cannot be purchased is a
+  // question nobody asked answered wrongly.
+  const needsPurchase = !isAvailable && tier !== 'owner'
   const quoteState = useSeatQuote({
     locationId,
     tier,
     quantity: 1,
-    active: step === 'paymentConfirm',
+    active: needsPurchase || step === 'paymentConfirm',
   })
   const quoteView = seatQuoteView(quoteState, `${tierMeta?.name || tier} seat`)
 
@@ -33368,18 +33507,19 @@ export function InviteTeamMemberModal({ locationId, onClose, onInviteCreated, in
                     </p>
                   </div>
 
-                  <div style={{ background:'rgba(26,46,43,0.03)', border:'1px solid rgba(0,0,0,0.06)', borderRadius:'10px', padding:'10px 12px', marginBottom:'10px' }}>
-                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'4px' }}>
-                      <span style={{ fontSize:'12px', color:'#4a5e5a' }}>1 {tierMeta?.name || tier} seat</span>
-                      <span style={{ fontSize:'12.5px', fontWeight:600, color:'#1a2e2b' }}>{formatCurrency(annualPrice, { showCents:'never' })}/yr</span>
+                  {/* issue 224 — THE BLOCK KEVIN WAS LOOKING AT. It read
+                      "1 Hive Manager seat / $400/yr" over "you only pay for
+                      the part of the year that's left … we'll show you that
+                      amount before anything is charged": a price that was
+                      not the price, attached to a choice, with the real
+                      figure held back a screen. Now it names what is charged
+                      today and what renews each year, both from the server's
+                      quote for THIS tier. */}
+                  {needsPurchase && (
+                    <div style={{ marginBottom:'10px' }}>
+                      <SeatPickerPriceBlock quoteState={quoteState} label={`1 ${tierMeta?.name || tier} seat`} />
                     </div>
-                    {/* issue 223 — the rate above is a fact about the tier;
-                        what this seat costs today comes from the server on
-                        the next step, so it is stated once and correctly. */}
-                    <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, marginTop:'2px' }}>
-                      You only pay for the part of the year that’s left before your renewal on {renewalLabel}. We’ll show you that amount before anything is charged.
-                    </p>
-                  </div>
+                  )}
 
                   <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, marginBottom:'8px' }}>
                     Pays for 1 seat and sends the invitation in one step. Seat returns to your pool if the invitation expires or is removed.
