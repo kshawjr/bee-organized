@@ -234,3 +234,59 @@ describe('the dashboard status deep-link', () => {
     expect(container.querySelectorAll('tbody tr')).toHaveLength(FLEET.length)
   })
 })
+
+// ── issue 226 step 8 — sorting is what Conversions Due became ─────────────
+// That screen's job was ordering locations by when money is next due. Deleting
+// it without this would have deleted the capability.
+describe('sorting', () => {
+  // Raw first-cell text (name + state + owner); assertions use toContain.
+  const names = () =>
+    Array.from(container.querySelectorAll('tbody tr'))
+      .map(tr => tr.querySelector('td')?.textContent || '')
+
+  const header = (label: string) =>
+    Array.from(container.querySelectorAll('th')).find(th => th.textContent?.includes(label))!
+
+  const click = async (el: Element) => {
+    await act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+  }
+
+  it('defaults to name order', async () => {
+    render()
+    expect(names()[0]).toContain('Fort Lauderdale')
+  })
+
+  it('sorts by renewal date — the Conversions Due question', async () => {
+    render()
+    await click(header('Renews'))
+    // Earliest renewal first: KC and Omaha are 2027-05-01, then Watcher Only
+    // 2027-09-01. Fresh Franchise has NO date and must not lead.
+    expect(names()[0]).not.toContain('Fresh Franchise')
+    expect(names().at(-1)).toContain('Fresh Franchise')
+  })
+
+  it('keeps a missing value last in BOTH directions', async () => {
+    render()
+    await click(header('Renews'))
+    expect(names().at(-1)).toContain('Fresh Franchise')
+    await click(header('Renews'))          // flip to descending
+    expect(names().at(-1)).toContain('Fresh Franchise')
+  })
+
+  it('sorts by annual total', async () => {
+    render()
+    await click(header('Per year'))
+    // Watcher Only is a real $0; Fresh Franchise has no seats and sorts last.
+    expect(names()[0]).toContain('Watcher Only')
+    expect(names().at(-1)).toContain('Fresh Franchise')
+  })
+
+  it('sorts within the active filter, not across it', async () => {
+    render()
+    const chip = Array.from(container.querySelectorAll('button'))
+      .find(b => b.textContent?.includes('Billing normally'))!
+    await click(chip)
+    await click(header('Per year'))
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(3)
+  })
+})

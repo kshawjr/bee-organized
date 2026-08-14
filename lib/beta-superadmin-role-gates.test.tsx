@@ -67,27 +67,46 @@ describe('role gates — Content restored for corporate', () => {
 })
 
 // issue 216 renamed this section: it never processed renewals — Stripe does
-// that — it retires seats an owner scheduled for removal. Key and label both
-// moved to 'removals' / 'Seat Removals'. The ROLE DECISION below is unchanged
-// and still the point of these assertions: corporate keeps access to it.
+// that — it retires seats an owner scheduled for removal.
+//
+// issue 226 step 8 RETIRED the Billing cluster entirely. Seat Removals is a
+// fleet-wide ACTION with per-row confirmation, not a way to find locations, so
+// it could not become a filter or a sort the way Conversions Due did; it moved
+// to the Dashboard, beside the Action Required count that was already sending
+// people to look for it.
+//
+// THE ROLE DECISION IS UNCHANGED AND STILL THE POINT OF THESE ASSERTIONS:
+// corporate keeps access. It is now carried by WHERE the card renders rather
+// than by a nav gate — AdminDashboard mounts for super_admin and corporate
+// alike, and ProcessRemovalsCard sits inside it unwrapped.
 describe('role gates — Seat Removals decision (KEEP corporate access)', () => {
-  const billing = groups.slice(
-    groups.indexOf("header: 'Billing'"),
-    groups.indexOf("header: 'My Account'"),
-  )
-
-  it('Billing cluster renders for both elevated roles', () => {
-    expect(groups).toMatch(
-      /\.\.\.\(role === 'super_admin' \|\| role === 'corporate' \? \[\{\s*header: 'Billing',/,
-    )
+  it('the Billing cluster is gone', () => {
+    expect(groups).not.toContain("header: 'Billing'")
+    expect(groups).not.toContain("key:'conversions'")
+    expect(groups).not.toContain("key:'removals'")
   })
 
-  it('Seat Removals is NOT super_admin-wrapped; Conversions and Pricing are', () => {
-    // Seat Removals: a bare item, visible to corporate.
-    expect(billing).toMatch(/^\s*\{ key:'removals',\s*label:'Seat Removals',\s*icon:'🕐' \},\s*$/m)
-    // Conversions / Pricing: individually gated.
-    expect(billing).toMatch(/\.\.\.\(role === 'super_admin' \? \[\{ key:'conversions',/)
-    expect(billing).toMatch(/\.\.\.\(role === 'super_admin' \? \[\{ key:'pricing',/)
+  it('Pricing survives, in Advanced, still super_admin-only', () => {
+    expect(advanced).toContain("key:'pricing'")
+    expect(groups.match(/key:'pricing'/g)).toHaveLength(1)
+  })
+
+  it('ProcessRemovalsCard renders on the Dashboard, unwrapped by any role check', () => {
+    const dash = beehub.slice(
+      beehub.indexOf('function AdminDashboard'),
+      beehub.indexOf('function SuperAdminProfile'),
+    )
+    expect(dash).toContain('<ProcessRemovalsCard />')
+    // The mount is not inside a super_admin branch — corporate sees it, which
+    // is the decision issue 216 made and this step preserves.
+    const mountIdx = dash.indexOf('<ProcessRemovalsCard />')
+    const before = dash.slice(Math.max(0, mountIdx - 600), mountIdx)
+    expect(before).not.toMatch(/role === 'super_admin' &&\s*\($/)
+  })
+
+  // AdminDashboard itself is the gate, and it is the elevated pair.
+  it('the Dashboard is reachable by both elevated roles', () => {
+    expect(layout).toMatch(/case 'dashboard':/)
   })
 })
 
@@ -104,5 +123,41 @@ describe('role gates — feedback deep link for elevated users', () => {
 
   it("renderContent has a 'feedback' case for the deep link to land on", () => {
     expect(layout).toMatch(/case 'feedback':/)
+  })
+})
+
+// ── issue 226 step 8 — retired keys must land somewhere ───────────────────
+// 'conversions' and 'removals' still arrive from ?adminTab= deep links and
+// bookmarks. Falling through to the switch would render a blank frame under a
+// breadcrumb naming a section that no longer exists — which reads as the app
+// being broken, not as the section having moved.
+describe('retired section keys resolve, never blank', () => {
+  it('maps each retired key to where its FUNCTION went', () => {
+    expect(layout).toMatch(
+      /RETIRED_SECTIONS = \{ conversions: 'locations', removals: 'dashboard' \}/,
+    )
+  })
+
+  it('resolves on first render AND on every navigate', () => {
+    expect(layout).toMatch(/useState\(resolveRetiredSection\(initialSection \|\| 'dashboard'\)\)/)
+    expect(layout).toMatch(/setActiveSection\(resolveRetiredSection\(section\)\)/)
+  })
+
+  it('the deep-link parser maps them too, for both elevated roles', () => {
+    expect(app).toMatch(/t === 'conversions' && \(role === 'super_admin' \|\| role === 'corporate'\)\) setAdminDeepLinkSection\('locations'\)/)
+    expect(app).toMatch(/t === 'removals' && \(role === 'super_admin' \|\| role === 'corporate'\)\) setAdminDeepLinkSection\('dashboard'\)/)
+  })
+
+  it('neither key has a section to render any more', () => {
+    expect(layout).not.toMatch(/case 'conversions':/)
+    expect(layout).not.toMatch(/case 'removals':/)
+    // …and both targets exist.
+    expect(layout).toMatch(/case 'locations':/)
+    expect(layout).toMatch(/case 'dashboard':/)
+  })
+
+  it('ConversionsDueTab is deleted, not orphaned', () => {
+    expect(beehub).not.toMatch(/function ConversionsDueTab/)
+    expect(beehub).not.toMatch(/<ConversionsDueTab/)
   })
 })

@@ -24878,6 +24878,14 @@ export function LocationsTable({
 }) {
   const [search, setSearch]           = useState('')
   const [stateFilter, setStateFilter] = useState('')   // '' = all
+  // issue 226 step 8 — SORTING, which is what Conversions Due became.
+  //
+  // That screen's whole job was finding corporate-funded locations whose
+  // sponsorship was ending, i.e. ordering locations by when money is next
+  // due. Deleting it without this would have deleted the capability and left
+  // "sort the table" as advice about a table that could not be sorted.
+  // Default is by name, matching the feed's own order.
+  const [sort, setSort] = useState({ key: 'name', dir: 'asc' })
   const tierPricesCtx = useContext(TierPricesContext)
   const livePrices    = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
 
@@ -24903,6 +24911,46 @@ export function LocationsTable({
   })
 
   const statusConf = statusFilter ? CRM_STATUS_CONF[statusFilter] : null
+
+  // Sort AFTER filtering, on the same derived values the cells render, so the
+  // order always matches what is on screen. A location with no renewal date or
+  // no seats sorts LAST in either direction — an absent value is not a small
+  // value, and floating "unknown" to the top of an ascending sort is how a
+  // renewal worklist starts with rows that have no renewal.
+  const sorted = (() => {
+    const dir = sort.dir === 'asc' ? 1 : -1
+    const val = (l) => {
+      switch (sort.key) {
+        case 'status':  return l.crmStatus || ''
+        case 'billing': return BILLING_STATES.indexOf(stateById[l.id])
+        case 'seats':   return Number(l.seatCount) || 0
+        case 'renews':  return l.paid_through_date || null
+        case 'annual':  return locationAnnualTotal(l, livePrices)
+        default:        return (l.name || '').toLowerCase()
+      }
+    }
+    const missing = (v) => v === null || v === undefined || v === ''
+    return [...filtered].sort((a, b) => {
+      const av = val(a), bv = val(b)
+      if (missing(av) && missing(bv)) return (a.name || '').localeCompare(b.name || '')
+      if (missing(av)) return 1
+      if (missing(bv)) return -1
+      if (av === bv) return (a.name || '').localeCompare(b.name || '')
+      return (av < bv ? -1 : 1) * dir
+    })
+  })()
+
+  const toggleSort = (key) =>
+    setSort(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' })
+
+  const SortHeader = ({ label, sortKey, align = 'left' }) => (
+    <th style={{ ...TH, textAlign: align, cursor:'pointer', userSelect:'none' }} onClick={()=>toggleSort(sortKey)}>
+      {label}
+      <span style={{ marginLeft:'4px', opacity: sort.key === sortKey ? 1 : 0.25 }}>
+        {sort.key === sortKey && sort.dir === 'desc' ? '▾' : '▴'}
+      </span>
+    </th>
+  )
 
   const TH = { padding:'9px 12px', fontWeight:600, whiteSpace:'nowrap' }
   const TD = { padding:'10px 12px', verticalAlign:'middle' }
@@ -24974,16 +25022,16 @@ export function LocationsTable({
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'12.5px', minWidth:'760px' }}>
           <thead>
             <tr style={{ background:'rgba(0,0,0,0.02)', textAlign:'left', color:'#8a9e9a' }}>
-              <th style={TH}>Location</th>
-              <th style={TH}>Status</th>
-              <th style={TH}>Billing</th>
-              <th style={{ ...TH, textAlign:'right' }}>Seats</th>
-              <th style={TH}>Renews</th>
-              <th style={{ ...TH, textAlign:'right' }}>Per year</th>
+              <SortHeader label="Location" sortKey="name" />
+              <SortHeader label="Status"   sortKey="status" />
+              <SortHeader label="Billing"  sortKey="billing" />
+              <SortHeader label="Seats"    sortKey="seats"  align="right" />
+              <SortHeader label="Renews"   sortKey="renews" />
+              <SortHeader label="Per year" sortKey="annual" align="right" />
             </tr>
           </thead>
           <tbody>
-            {filtered.map(loc => {
+            {sorted.map(loc => {
               const sc      = CRM_STATUS_CONF[loc.crmStatus] || CRM_STATUS_CONF.onboarding
               const bState  = stateById[loc.id]
               const bt      = BILLING_TONE[bState]
@@ -31321,144 +31369,17 @@ export function ProcessRemovalsCard() {
   )
 }
 
-// Admin → Conversions Due tab — lists corporate-funded locations whose
-// sponsorship is ending soon, sorted by urgency. Each row has a
-// "Convert to Direct Billing" action that opens the existing modal.
-function ConversionsDueTab({ onOpenLocation = () => {} }) {
-  const [daysAhead, setDaysAhead] = React.useState(30)
-  const [includeUndated, setIncludeUndated] = React.useState(false)
-  const [items, setItems] = React.useState(null)
-  const [loading, setLoading] = React.useState(false)
-  const [error, setError] = React.useState('')
-  const [convertLoc, setConvertLoc] = React.useState(null)
-
-  const load = React.useCallback(async (days, undated) => {
-    setLoading(true)
-    setError('')
-    try {
-      const params = new URLSearchParams({ days_ahead: String(days) })
-      if (undated) params.set('include_undated', 'true')
-      const res = await fetch(`/api/admin/conversions-due?${params}`)
-      const json = await res.json()
-      if (!res.ok) { setError(json.error || 'Failed to load'); setItems([]); return }
-      setItems(json.items || [])
-    } catch (e) {
-      setError(e.message || 'Failed to load')
-      setItems([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  React.useEffect(() => { load(daysAhead, includeUndated) }, [load, daysAhead, includeUndated])
-
-  function urgencyColor(days) {
-    if (days === null) return '#8a9e9a'
-    if (days < 0) return '#ef4444'
-    if (days < 7) return '#f97316'
-    if (days < 30) return '#eab308'
-    return '#8a9e9a'
-  }
-
-  function fmtDate(iso) {
-    if (!iso) return '—'
-    try { return new Date(iso).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }) }
-    catch { return iso }
-  }
-
-  const sourceLabel = s => s === 'prepaid_corporate' ? 'Prepaid' : 'Sponsored'
-
-  return (
-    <div style={{ padding:'0 1.25rem 2rem', display:'grid', gap:'12px' }}>
-      <div>
-        <p style={{ fontSize:'11px', color:'rgba(168,201,196,0.7)', marginBottom:'4px' }}>Locations with corporate sponsorship ending soon</p>
-        <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', alignItems:'center' }}>
-          <select
-            value={daysAhead}
-            onChange={e=>setDaysAhead(Number(e.target.value))}
-            style={{ padding:'7px 10px', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.1)', fontSize:'12px', fontFamily:'inherit', color:'#1a2e2b', background:'white', cursor:'pointer' }}
-          >
-            <option value={0}>Past Due only</option>
-            <option value={30}>Next 30 days</option>
-            <option value={60}>Next 60 days</option>
-            <option value={90}>Next 90 days</option>
-          </select>
-          <label style={{ display:'flex', alignItems:'center', gap:'5px', fontSize:'12px', color:'rgba(168,201,196,0.8)', cursor:'pointer' }}>
-            <input type="checkbox" checked={includeUndated} onChange={e=>setIncludeUndated(e.target.checked)} />
-            Include sponsored without end date
-          </label>
-        </div>
-      </div>
-
-      {loading && <p style={{ fontSize:'12px', color:'rgba(168,201,196,0.7)', margin:0 }}>Loading…</p>}
-      {error && <p style={{ fontSize:'12px', color:'#ef4444', margin:0 }}>{error}</p>}
-
-      {!loading && items !== null && items.length === 0 && (
-        <div style={{ padding:'2rem', textAlign:'center', color:'rgba(168,201,196,0.5)', fontSize:'13px' }}>
-          No conversions due in the selected period. ✓
-        </div>
-      )}
-
-      {!loading && items && items.length > 0 && (
-        <div style={{ display:'grid', gap:'8px' }}>
-          {items.map(item => {
-            const color = urgencyColor(item.days_until_end)
-            return (
-              <div key={item.location_id} style={{ background:'rgba(168,201,196,0.07)', border:'1px solid rgba(168,201,196,0.15)', borderRadius:'10px', padding:'12px 14px', display:'grid', gap:'6px' }}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'8px' }}>
-                  <button
-                    onClick={()=>onOpenLocation({ id: item.location_id, name: item.name })}
-                    style={{ background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'14px', fontWeight:600, color:'white', textAlign:'left', padding:0 }}
-                  >{item.name}</button>
-                  <span style={{ flexShrink:0, padding:'2px 8px', borderRadius:'10px', background:'rgba(168,201,196,0.12)', color:'rgba(168,201,196,0.8)', fontSize:'10px', fontWeight:600 }}>
-                    {sourceLabel(item.payment_source)}
-                  </span>
-                </div>
-                <div style={{ display:'flex', gap:'12px', flexWrap:'wrap', alignItems:'center' }}>
-                  <span style={{ fontSize:'11px', color:'#8a9e9a' }}>
-                    Ends: <strong style={{ color:'white' }}>{fmtDate(item.sponsorship_ends_at)}</strong>
-                  </span>
-                  {item.days_until_end !== null && (
-                    <span style={{ fontSize:'11px', fontWeight:700, color }}>
-                      {item.days_until_end < 0
-                        ? `${Math.abs(item.days_until_end)}d past due`
-                        : item.days_until_end === 0
-                        ? 'Due today'
-                        : `${item.days_until_end}d left`}
-                    </span>
-                  )}
-                  {item.days_until_end === null && (
-                    <span style={{ fontSize:'11px', color:'#8a9e9a' }}>No end date</span>
-                  )}
-                </div>
-                {(item.owner_name || item.owner_email) && (
-                  <p style={{ fontSize:'11px', color:'#8a9e9a', margin:0 }}>
-                    {item.owner_name || ''}{item.owner_name && item.owner_email ? ' · ' : ''}{item.owner_email || ''}
-                  </p>
-                )}
-                <button
-                  onClick={()=>setConvertLoc({ id: item.location_id, name: item.name, payment_source: item.payment_source })}
-                  style={{ alignSelf:'flex-start', marginTop:'2px', padding:'7px 12px', background:'white', border:'1.5px solid #d4a046', borderRadius:'7px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'#b07a20', cursor:'pointer' }}
-                >💳 Convert to Direct Billing</button>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {convertLoc && (
-        <ConvertBillingModal
-          location={convertLoc}
-          onClose={()=>setConvertLoc(null)}
-          onConverted={()=>{
-            setConvertLoc(null)
-            load(daysAhead, includeUndated)
-          }}
-        />
-      )}
-    </div>
-  )
-}
+// ConversionsDueTab was DELETED here (issue 226 step 8).
+//
+// It listed corporate-funded locations whose sponsorship was ending, sorted by
+// urgency, each row opening ConvertBillingModal. That was a WORKLIST — a way
+// to FIND locations — and finding locations is what the Locations table does
+// now: every location, its billing state, sortable by renewal date. The
+// conversion itself is untouched and still opens from the location panel's
+// Careful section, which is the only place it ever wrote from.
+//
+// It was also nearly empty: two corporate-funded locations in production, for
+// a whole sidebar section and a dashboard alert.
 
 // ── Admin Webhooks tab — Jobber webhook sync-log observability ──────
 //
@@ -32131,7 +32052,13 @@ function AdminDashboard({ locations, users, role, onNavigate }) {
                     <p style={{ fontSize:'13px', fontWeight:600, color:'#92400e', marginBottom:'2px' }}>{actionCounts.conversions} conversion{actionCounts.conversions !== 1 ? 's' : ''} due</p>
                     <p style={{ fontSize:'11px', color:'#b45309' }}>Within next 30 days</p>
                   </div>
-                  <button onClick={() => onNavigate('conversions')} style={{ padding:'5px 10px', background:'#f59e0b', border:'none', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Review</button>
+                  {/* issue 226 step 8 — the worklist became the table.
+                      Conversions Due had one job: find corporate-funded
+                      locations whose sponsorship is ending. Locations lists
+                      every location with its billing state and sorts by
+                      renewal date, so this lands there. The conversion itself
+                      is unchanged, in the location panel's Careful section. */}
+                  <button onClick={() => onNavigate('locations')} style={{ padding:'5px 10px', background:'#f59e0b', border:'none', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Review</button>
                 </div>
               )}
               {(actionCounts.removals || 0) > 0 && (
@@ -32141,7 +32068,9 @@ function AdminDashboard({ locations, users, role, onNavigate }) {
                     <p style={{ fontSize:'13px', fontWeight:600, color:'#92400e', marginBottom:'2px' }}>{actionCounts.removals} seat{actionCounts.removals !== 1 ? 's' : ''} due for removal</p>
                     <p style={{ fontSize:'11px', color:'#b45309' }}>Scheduled by an owner, on or before today</p>
                   </div>
-                  <button onClick={() => onNavigate('removals')} style={{ padding:'5px 10px', background:'#f59e0b', border:'none', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Process</button>
+                  {/* issue 226 step 8 — nowhere to navigate to; the
+                      processor is a card on this page now. */}
+                  <span style={{ fontSize:'11px', color:'#b45309', fontWeight:600 }}>Below ↓</span>
                 </div>
               )}
               {(actionCounts.feedback || 0) > 0 && (
@@ -32168,8 +32097,13 @@ function AdminDashboard({ locations, users, role, onNavigate }) {
             {[
               { label:'+ Add Location',  fn:()=>onNavigate('locations','add'),    icon:'🏢' },
               { label:'+ Invite Owner',  fn:()=>onNavigate('locations','invite'),  icon:'✉️' },
-              { label:'Seat Removals',   fn:()=>onNavigate('removals'),            icon:'🕐' },
-              { label:'View Pricing',    fn:()=>onNavigate('pricing'),             icon:'🔧' },
+              { label:'All locations',   fn:()=>onNavigate('locations'),           icon:'🏢' },
+              // issue 226 step 8 — "Seat Removals" pointed at a section that
+              // no longer exists (the processor is a card below), and "View
+              // Pricing" pointed at a super_admin-only section a CORPORATE
+              // user could reach from here and land on nothing. Pricing is in
+              // the sidebar for the role that has it.
+              ...(role === 'super_admin' ? [{ label:'Pricing', fn:()=>onNavigate('pricing'), icon:'🔧' }] : []),
             ].map(a => (
               <button key={a.label} onClick={a.fn} style={{ padding:'14px 12px', background:'#f7f5f0', border:'1px solid rgba(0,0,0,0.07)', borderRadius:'12px', fontSize:'13px', fontFamily:'inherit', fontWeight:500, color:'#1a2e2b', cursor:'pointer', textAlign:'left', display:'flex', alignItems:'center', gap:'8px' }}>
                 <span style={{ fontSize:'17px' }}>{a.icon}</span>
@@ -32178,6 +32112,19 @@ function AdminDashboard({ locations, users, role, onNavigate }) {
             ))}
           </div>
         </div>
+
+        {/* ── Seat Removals (issue 226 step 8) ──────────────────────────────
+            Moved here from the retired Billing cluster. It is a fleet-wide
+            ACTION with per-row confirmation, not a way to find locations, so
+            it could not become a filter or a sort the way Conversions Due
+            did — there is no single location to filter to.
+
+            It belongs on the Dashboard because the Action Required count
+            above was already the thing that sent you looking for it; now the
+            count and the processor are on the same page. The card renders its
+            own empty state ("No pending removals today"), which is the normal
+            case, so it costs nothing when there is nothing to do. */}
+        <ProcessRemovalsCard />
 
       </div>
     </div>
@@ -32354,7 +32301,21 @@ function SuperAdminLayout({
 }) {
   const currentUser = useContext(CurrentUserContext)
 
-  const [activeSection, setActiveSection] = useState(initialSection || 'dashboard')
+  // ─── issue 226 step 8 — RETIRED SECTION KEYS ───
+  //
+  // 'conversions' and 'removals' stopped being sections. Both keys still
+  // arrive: from ?adminTab= deep links, from a bookmark, and from any caller
+  // that has not been rewired. Falling through to the switch would render a
+  // blank frame under a breadcrumb naming a section that no longer exists —
+  // which reads as the app being broken, not as the section having moved.
+  //
+  // Each redirects to where its FUNCTION went, not to a generic landing page:
+  //   conversions → locations   the table that replaced the worklist
+  //   removals    → dashboard   where the processor card now lives
+  const RETIRED_SECTIONS = { conversions: 'locations', removals: 'dashboard' }
+  const resolveRetiredSection = (key) => RETIRED_SECTIONS[key] || key
+
+  const [activeSection, setActiveSection] = useState(resolveRetiredSection(initialSection || 'dashboard'))
   // When parent changes initialSection (e.g. switching from admin→settings route),
   // sync the active section without remounting.
   const prevInitialSection = useRef(initialSection)
@@ -32442,7 +32403,7 @@ function SuperAdminLayout({
 
   // Navigate to a section, optionally triggering a quick action
   function navigateTo(section, action) {
-    setActiveSection(section)
+    setActiveSection(resolveRetiredSection(section))
     setSidebarOpen(false)
     if (action === 'add')    setShowAddLocation(true)
     if (action === 'invite') setShowInvite(true)
@@ -32480,14 +32441,28 @@ function SuperAdminLayout({
         ...(role === 'super_admin' || role === 'corporate' ? [{ key:'content', label:'Content', icon:'✏️' }] : []),
       ],
     },
-    ...(role === 'super_admin' || role === 'corporate' ? [{
-      header: 'Billing',
-      items: [
-        ...(role === 'super_admin' ? [{ key:'conversions', label:'Conversions Due', icon:'💳' }] : []),
-        { key:'removals', label:'Seat Removals', icon:'🕐' },
-        ...(role === 'super_admin' ? [{ key:'pricing', label:'Pricing', icon:'🔧' }] : []),
-      ],
-    }] : []),
+    // issue 226 step 8 — THE BILLING CLUSTER IS GONE.
+    //
+    // Conversions Due and Seat Removals were both here because the location
+    // panel had nowhere to put them, and a sidebar section is what you build
+    // when a thing needs a home rather than when it needs a section.
+    //
+    //   Conversions Due  was a WORKLIST — a way to FIND corporate-funded
+    //                    locations whose sponsorship was ending. Finding
+    //                    locations is what the Locations table does now, so
+    //                    it became a sort. The conversion itself is unchanged
+    //                    and still lives in the location panel's Careful
+    //                    section, which is the only place it ever wrote from.
+    //   Seat Removals    was never a worklist. It is a fleet-wide ACTION with
+    //                    per-row confirmation, spanning locations, so there is
+    //                    no location to filter to and it could not become a
+    //                    sort. It moved to the Dashboard, beside the count
+    //                    that was already telling you to run it.
+    //   Pricing          survives as its own screen. It is the price catalog,
+    //                    genuinely cross-location, and it is super_admin-only
+    //                    — which is exactly the Advanced cluster's gate, so
+    //                    that is where it sits rather than alone under a
+    //                    one-item header.
     {
       header: 'My Account',
       items: [{ key:'profile', label:'Profile', icon:'👤' }],
@@ -32495,6 +32470,9 @@ function SuperAdminLayout({
     ...(role === 'super_admin' ? [{
       header: 'Advanced',
       items: [
+        // The price catalog (issue 226 step 8). First, because it is the one
+        // here that touches money.
+        { key:'pricing',   label:'Pricing',     icon:'🔧' },
         { key:'configure', label:'Configure',   icon:'⚙️' },
         // Webhook observability is operational/sensitive — super_admin only,
         // matching the legacy AdminScreen gate (corporate stays out).
@@ -32515,9 +32493,7 @@ function SuperAdminLayout({
     users:       { label:'Users',          cluster:'Operations'   },
     feedback:    { label:'Feedback',       cluster:'Operations'   },
     notifications: { label:'Notifications', cluster:'Operations'  },
-    conversions: { label:'Conversions Due',cluster:'Billing'      },
-    removals:    { label:'Seat Removals', cluster:'Billing'      },
-    pricing:     { label:'Pricing',        cluster:'Billing'      },
+    pricing:     { label:'Pricing',        cluster:'Advanced'     },
     content:     { label:'Content',        cluster:'Operations'   },
     profile:     { label:'Profile',        cluster:'My Account'   },
     configure:   { label:'Configure',      cluster:'Advanced'     },
@@ -32639,29 +32615,10 @@ function SuperAdminLayout({
           </div>
         )
 
-      case 'conversions':
-        return (
-          <div style={{ padding:'28px 28px 48px' }}>
-            <div style={{ marginBottom:'20px' }}>
-              <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'3px' }}>Conversions Due</h1>
-              <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Locations approaching the end of their corporate sponsorship period</p>
-            </div>
-            <ConversionsDueTab onOpenLocation={loc=>setSelectedLoc(loc)} />
-          </div>
-        )
-
-      case 'removals':
-        return (
-          <div style={{ padding:'28px 28px 48px' }}>
-            <div style={{ marginBottom:'20px' }}>
-              {/* issue 216 — was "Renewals". Nothing here processes a
-                  renewal; Stripe does that on each location's own cycle. */}
-              <h1 style={{ fontSize:'24px', fontFamily:'Georgia,serif', color:'#1a2e2b', marginBottom:'3px' }}>Seat Removals</h1>
-              <p style={{ fontSize:'13px', color:'#8a9e9a' }}>Retire seats owners scheduled for removal. Renewals are billed by Stripe.</p>
-            </div>
-            <ProcessRemovalsCard />
-          </div>
-        )
+      // issue 226 step 8 — 'conversions' and 'removals' are no longer
+      // sections. Both keys still ARRIVE here, from ?adminTab= deep links and
+      // from any bookmark, so they redirect rather than falling through to a
+      // blank frame. See resolveRetiredSection.
 
       case 'pricing':
         return (
@@ -33011,7 +32968,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
 
           {/* Sub-tabs — native <select> on mobile (<768px), pill row at ≥768px. */}
           {(()=>{
-            const adminTabs = [{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'content',label:'✏️ Content'}]:[]),...(showFeedbackTab?[{key:'feedback',label:'🐛 Feedback'}]:[]),...(showWebhooksTab?[{key:'webhooks',label:'🔌 Webhooks'}]:[]),...(showNotificationsTab?[{key:'notifications',label:'✉️ Notifications'}]:[]),...(role==='super_admin'?[{key:'conversions',label:'Conversions Due'},{key:'removals',label:'🕐 Seat Removals'},{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])]
+            const adminTabs = [{key:'locations',label:'Locations'},{key:'users',label:'Users'},...((role==='super_admin'||role==='corporate')?[{key:'content',label:'✏️ Content'}]:[]),...(showFeedbackTab?[{key:'feedback',label:'🐛 Feedback'}]:[]),...(showWebhooksTab?[{key:'webhooks',label:'🔌 Webhooks'}]:[]),...(showNotificationsTab?[{key:'notifications',label:'✉️ Notifications'}]:[]),...(role==='super_admin'?[{key:'pricing',label:'Pricing 🔧'},{key:'configure',label:'⚙️ Configure'},{key:'bin',label:'🗑 Bin'}]:[])]
             return (
               <>
                 <select
@@ -33122,10 +33079,6 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
           <AdminWebhookLogScreen />
         ) : adminTab==='notifications' ? (
           <AdminNotificationsScreen locations={locations} />
-        ) : adminTab==='conversions' ? (
-          <ConversionsDueTab onOpenLocation={loc=>setSelectedLoc(loc)} />
-        ) : adminTab==='removals' ? (
-          <ProcessRemovalsCard />
         ) : adminTab==='pricing' ? (
           <PricingManagementTab />
         ) : adminTab==='configure' ? (
@@ -34972,7 +34925,15 @@ export default function App({
   useEffect(() => {
     try {
       const t = new URLSearchParams(window.location.search).get('adminTab')
-      if (t === 'webhooks' && role === 'super_admin') setAdminDeepLinkSection('webhooks')
+      // issue 226 step 8 — the retired keys are mapped explicitly rather than
+      // left to fall through to the dashboard default. 'conversions' lands on
+      // Locations, where finding those locations now happens; 'removals' on
+      // the Dashboard, where the processor card lives. SuperAdminLayout
+      // re-resolves these too, so a stale value from anywhere is caught.
+      if (t === 'conversions' && (role === 'super_admin' || role === 'corporate')) setAdminDeepLinkSection('locations')
+      else if (t === 'removals' && (role === 'super_admin' || role === 'corporate')) setAdminDeepLinkSection('dashboard')
+      else if (t === 'pricing' && role === 'super_admin') setAdminDeepLinkSection('pricing')
+      else if (t === 'webhooks' && role === 'super_admin') setAdminDeepLinkSection('webhooks')
       // Feedback is a broader surface than webhooks — both elevated roles,
       // mirroring the legacy AdminScreen showFeedbackTab gate.
       else if (t === 'feedback' && (role === 'super_admin' || role === 'corporate')) setAdminDeepLinkSection('feedback')
