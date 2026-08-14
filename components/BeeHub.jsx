@@ -109,6 +109,9 @@ import {
   classifyBillingState,
   tallyBillingStates,
 } from "@/lib/billing-state"
+// issue 226 step 5 — seats as PEOPLE. Three states (held / invited / empty)
+// and the per-seat ANNUAL rate, which honours the co-owner rule.
+import { buildSeatRoster, tallySeatStates } from "@/lib/seat-roster"
 // issue 216 — seat availability is defined once, in lib, and mirrors the
 // server gate. Aliased on import so the context methods keep their existing
 // names for every call site while delegating to the shared math.
@@ -181,6 +184,10 @@ export const CurrentLocationContext = createContext(null)
 // keep working.
 // Value shape: Array<{ id, name, initials, email, locationId, role, status, joined }> or null.
 const LocationUsersContext = createContext(null)
+// Exported for tests (issue 226 step 5) — the seat roster resolves a seat's
+// user_id to a name and email through this, so a test that cannot provide it
+// can only assert that seats render, not that they name the right person.
+export { LocationUsersContext }
 
 // Single source of truth for subscription seat pricing. Populated by App
 // from initialTierPrices (server-fetched from Supabase tier_prices table)
@@ -25031,6 +25038,416 @@ export function LocationsTable({
 }
 
 
+// ─── SeatRosterSection (issue 226 step 5) ──────────────────────────────────
+// Seats as PEOPLE. Every seat row says who holds it, what it costs per year,
+// and which of three states it is in — held, invited, or empty.
+//
+// The derivation is lib/seat-roster.ts; this renders it and owns the fetches.
+// It reads its own data rather than taking it as props because it has to
+// refetch after every mutation, and threading three refresh callbacks through
+// the sheet to achieve that would put the roster's freshness in the sheet's
+// hands rather than its own.
+
+const SEAT_STATE_META = {
+  held: {
+    label: 'Holding this seat',
+    tone:  { color:'#15803d', bg:'rgba(34,197,94,0.10)', border:'rgba(34,197,94,0.25)' },
+    chip:  'Active',
+  },
+  invited: {
+    label: 'Invited — not accepted yet',
+    tone:  { color:'#92400e', bg:'rgba(245,158,11,0.10)', border:'rgba(245,158,11,0.28)' },
+    chip:  'Invited',
+  },
+  // The state worth having on its own. Rolled in with `invited` it would read
+  // as "waiting on someone" — a story that ends by itself. On its own it
+  // reads as what it is: a seat being billed for that nobody is using and
+  // nobody is on their way to using. That is an admin action, not a wait.
+  empty: {
+    label: 'Nobody invited yet — still billed',
+    tone:  { color:'#8a9e9a', bg:'rgba(138,158,154,0.10)', border:'rgba(138,158,154,0.25)' },
+    chip:  'Empty',
+  },
+}
+
+const fmtInviteDate = (iso) => {
+  if (!iso) return null
+  const d = new Date(iso)
+  return isNaN(d.getTime()) ? null : d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })
+}
+
+export function SeatRosterSection({ location, role }) {
+  const [seats, setSeats]     = useState(null)   // null = loading
+  const [invites, setInvites] = useState([])
+  const [error, setError]     = useState('')
+  const [openDetail, setOpenDetail] = useState(null)  // seatId
+  const [resendingId, setResendingId] = useState('')
+  const [resendMsg, setResendMsg]     = useState('')
+  const [showAddSeat, setShowAddSeat] = useState(false)
+  const [showGrant, setShowGrant]     = useState(false)
+
+  const tierPricesCtx = useContext(TierPricesContext)
+  const livePrices    = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
+  const rosterUsersCtx = useContext(LocationUsersContext)
+
+  const load = React.useCallback(async () => {
+    if (!location?.id) return
+    setError('')
+    try {
+      const [seatRes, inviteRes] = await Promise.all([
+        fetch(`/api/seats?location_id=${encodeURIComponent(location.id)}`),
+        fetch(`/api/pending_invites?location_id=${encodeURIComponent(location.id)}`),
+      ])
+      const seatJson   = await seatRes.json().catch(() => [])
+      const inviteJson = await inviteRes.json().catch(() => [])
+      setSeats(Array.isArray(seatJson) ? seatJson : [])
+      setInvites(Array.isArray(inviteJson) ? inviteJson : [])
+    } catch (err) {
+      setSeats([])
+      setError(err?.message || 'Could not load the seat roster')
+    }
+  }, [location?.id])
+
+  useEffect(() => { load() }, [load])
+
+  // The user roster for name/email resolution. The elevated page feed already
+  // holds every location's users, so this is a lookup, not a fetch.
+  //
+  // useMemo, NOT state-plus-effect. `useContext(X) || []` allocates a fresh
+  // array on every render, so an effect keyed on it re-fires every render,
+  // and one that calls setState re-renders — an infinite loop that hangs the
+  // browser rather than erroring. Derive; do not synchronise.
+  const users = useMemo(
+    () => (rosterUsersCtx || []).map(u => ({ id: u.id, full_name: u.name, email: u.email })),
+    [rosterUsersCtx],
+  )
+
+  const entries = useMemo(
+    () => (seats ? buildSeatRoster({ seats, pendingInvites: invites, users, prices: livePrices }) : []),
+    [seats, invites, users, livePrices],
+  )
+  const tally = useMemo(() => tallySeatStates(entries), [entries])
+
+  async function resend(inviteId) {
+    if (!inviteId || resendingId) return
+    setResendingId(inviteId); setResendMsg('')
+    try {
+      const res = await fetch(`/api/pending_invites/${inviteId}/resend`, { method:'POST' })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || 'Could not resend')
+      setResendMsg('Invitation resent.')
+      load()
+    } catch (err) {
+      setResendMsg(err?.message || 'Could not resend')
+    } finally {
+      setResendingId('')
+    }
+  }
+
+  if (seats === null) {
+    return (
+      <div>
+        <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Seats</p>
+        <div style={{ background:'#f7f5f0', borderRadius:'10px', padding:'12px' }}>
+          <p style={{ fontSize:'12px', color:'#8a9e9a' }}>Loading seats…</p>
+        </div>
+      </div>
+    )
+  }
+
+  const annualTotal = entries.reduce((n, e) => n + e.annualRate, 0)
+
+  return (
+    <div>
+      <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:'6px' }}>
+        <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px' }}>Seats</p>
+        <p style={{ fontSize:'11px', color:'#8a9e9a' }}>
+          {entries.length === 0
+            ? 'No seats'
+            : `${tally.held} held · ${tally.invited} invited · ${tally.empty} empty · ${formatCurrency(annualTotal, { showCents:'never' })}/yr`}
+        </p>
+      </div>
+
+      <div style={{ background:'#f7f5f0', borderRadius:'10px', overflow:'hidden' }}>
+        {error && (
+          <p style={{ fontSize:'11px', color:'#b91c1c', padding:'10px 12px', margin:0 }}>{error}</p>
+        )}
+
+        {entries.length === 0 && !error && (
+          <p style={{ fontSize:'12px', color:'#8a9e9a', padding:'12px', margin:0 }}>
+            This location has no seats yet. Adding one is what puts its owner and team into Bee Hub.
+          </p>
+        )}
+
+        {entries.map((e, i) => {
+          const meta = SEAT_STATE_META[e.state]
+          const tierMeta = SUBSCRIPTION_TIER_META.find(t => t.key === e.tier)
+          const open = openDetail === e.seatId
+          const invitedOn = fmtInviteDate(e.invite?.createdAt)
+          return (
+            <div key={e.seatId} style={{ borderBottom: i < entries.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
+              <div
+                onClick={()=>setOpenDetail(open ? null : e.seatId)}
+                style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 12px', cursor:'pointer' }}
+              >
+                {/* Who */}
+                <div style={{ width:'30px', height:'30px', borderRadius:'50%', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'11px', fontWeight:700, color:'white',
+                  background: e.state === 'held' ? 'linear-gradient(135deg,#a8c9c4,#7ab5af)'
+                            : e.state === 'invited' ? 'rgba(245,158,11,0.18)'
+                            : 'transparent',
+                  border: e.state === 'empty' ? '1.5px dashed rgba(138,158,154,0.5)' : 'none' }}>
+                  {e.state === 'held'
+                    ? (e.holder?.name || e.holder?.email || '?').split(/\s+/).map(w=>w[0]).join('').slice(0,2).toUpperCase()
+                    : e.state === 'invited' ? '📬' : ''}
+                </div>
+
+                <div style={{ flex:1, minWidth:0 }}>
+                  <p style={{ fontSize:'12.5px', fontWeight:600, color: e.state === 'empty' ? '#8a9e9a' : '#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    {e.state === 'held'    ? (e.holder?.name || e.holder?.email || 'Unknown user')
+                     : e.state === 'invited' ? (e.invite?.fullName || e.invite?.email || 'Invited')
+                     : 'Nobody in this seat'}
+                    {e.isPrimary && <span style={{ fontSize:'9px', marginLeft:'6px', padding:'1px 6px', borderRadius:'8px', background:'rgba(212,160,70,0.15)', color:'#b07a20', fontWeight:700 }}>★ PRIMARY</span>}
+                  </p>
+                  <p style={{ fontSize:'10.5px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    {tierMeta?.name || e.tier}
+                    {' · '}
+                    {e.state === 'invited' && invitedOn ? `Invited ${invitedOn} — not accepted yet` : meta.label}
+                  </p>
+                </div>
+
+                {/* A scheduled removal is a MODIFIER, not a fourth state — the
+                    seat is still held (or still empty) until it actually goes. */}
+                {e.scheduledRemovalAt && (
+                  <span title={`Scheduled for removal on ${e.scheduledRemovalAt}`} style={{ fontSize:'12px', flexShrink:0 }}>🕐</span>
+                )}
+
+                <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'10px', background:meta.tone.bg, color:meta.tone.color, border:`1px solid ${meta.tone.border}`, fontWeight:600, flexShrink:0 }}>{meta.chip}</span>
+
+                {/* THE HEADLINE FIGURE IS THE ANNUAL RATE. prorated_cost is a
+                    historical fact about the year the seat was bought in — a
+                    seat added a month before renewal carries a tiny number
+                    that says nothing about what it costs to keep. It is in
+                    the detail row below. */}
+                <span style={{ fontSize:'11.5px', fontWeight:700, color:'#1a2e2b', flexShrink:0, minWidth:'62px', textAlign:'right' }}>
+                  {formatCurrency(e.annualRate, { showCents:'never' })}/yr
+                </span>
+              </div>
+
+              {open && (
+                <div style={{ padding:'0 12px 11px 52px', display:'grid', gap:'6px' }}>
+                  {e.state === 'held' && e.holder?.email && (
+                    <p style={{ fontSize:'11px', color:'#8a9e9a', margin:0 }}>{e.holder.email}</p>
+                  )}
+                  {e.state === 'invited' && (
+                    <>
+                      <p style={{ fontSize:'11px', color:'#8a9e9a', margin:0 }}>
+                        {e.invite?.email}
+                        {e.invite?.expiresAt ? ` · expires ${fmtInviteDate(e.invite.expiresAt)}` : ''}
+                      </p>
+                      <div>
+                        <button
+                          onClick={(ev)=>{ ev.stopPropagation(); resend(e.invite.id) }}
+                          disabled={!!resendingId}
+                          style={{ padding:'5px 11px', background:'white', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#1a2e2b', cursor:resendingId?'wait':'pointer', opacity:resendingId?0.6:1 }}
+                        >{resendingId === e.invite.id ? 'Resending…' : 'Resend invitation'}</button>
+                        {resendMsg && <span style={{ fontSize:'11px', color:'#4a5e5a', marginLeft:'8px' }}>{resendMsg}</span>}
+                      </div>
+                    </>
+                  )}
+                  {e.state === 'empty' && (
+                    <p style={{ fontSize:'11px', color:'#8a9e9a', margin:0, lineHeight:1.45 }}>
+                      Paid for, and billed at {formatCurrency(e.annualRate, { showCents:'never' })}/yr whether or not anyone uses it.
+                      The owner can invite someone into it from their own Settings.
+                    </p>
+                  )}
+                  <p style={{ fontSize:'11px', color:'#8a9e9a', margin:0 }}>
+                    {typeof e.proratedCostCents === 'number'
+                      ? `Charged when added: ${formatCurrency(e.proratedCostCents / 100, { showCents:'always' })}`
+                      : 'Charged when added: not recorded'}
+                  </p>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      <div style={{ display:'flex', gap:'8px', marginTop:'8px' }}>
+        <button
+          onClick={()=>setShowAddSeat(true)}
+          style={{ flex:1, padding:'9px', background:'white', border:'1.5px solid #1a2e2b', borderRadius:'8px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:600, color:'#1a2e2b', cursor:'pointer' }}
+        >+ Add a seat</button>
+        {role === 'super_admin' && (
+          <button
+            onClick={()=>setShowGrant(true)}
+            style={{ flex:1, padding:'9px', background:'white', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'8px', fontSize:'12.5px', fontFamily:'inherit', fontWeight:600, color:'#4a5e5a', cursor:'pointer' }}
+          >🎁 Give a free seat</button>
+        )}
+      </div>
+
+      {showAddSeat && (
+        <AdminAddSeatModal
+          location={location}
+          onClose={()=>setShowAddSeat(false)}
+          onAdded={()=>{ setShowAddSeat(false); load() }}
+        />
+      )}
+      {showGrant && (
+        <div style={{ position:'fixed', inset:0, zIndex:10001, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
+          <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={()=>setShowGrant(false)} />
+          <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'440px', borderRadius:'16px', zIndex:1, maxHeight:'85vh', overflowY:'auto', padding:'16px' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'10px' }}>
+              <p style={{ flex:1, fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Give a free seat</p>
+              <button onClick={()=>setShowGrant(false)} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>×</button>
+            </div>
+            <GrantSeatCard locationId={location?.id} onGranted={load} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── AdminAddSeatModal (issue 226 step 5) ──────────────────────────────────
+// THE FIRST ADMIN SURFACE THAT CAN MOVE MONEY.
+//
+// It reuses the owner path's machinery wholesale rather than growing a second
+// one: useSeatQuote asks the server what this will cost and whether it will
+// actually be charged (issue 223's /api/seats/quote), SeatPickerPriceBlock
+// shows the selected tier's price beside the choice (issue 224), and
+// PaymentConfirmStep renders the SAME seatChargeNotice the owner sees. This
+// component multiplies nothing and looks no rate up.
+//
+// ONE ADDITION, AND ONLY ONE: a line naming WHOSE card. The notice copy is
+// written in the second person — "you'll be charged", "the card you have on
+// file" — because it was written for the owner reading it about themselves.
+// An admin acting on a franchisee's location must not read "your card" and
+// think it means theirs. Rather than fork those strings (a second set of
+// money copy is exactly what issue 223 spent itself removing), the notice is
+// reproduced verbatim and preceded by a sentence saying whose account it
+// describes.
+export function AdminAddSeatModal({ location, onClose, onAdded }) {
+  const TIER_OPTIONS = SUBSCRIPTION_TIER_META.filter(t => t.key !== 'owner' && !isDeferredTier(t.key))
+  const [tier, setTier]     = useState(TIER_OPTIONS[0]?.key || 'manager')
+  const [qty, setQty]       = useState(1)
+  const [step, setStep]     = useState('form')     // form | confirm
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError]   = useState('')
+
+  const seatWord = qty === 1 ? 'seat' : `${qty} seats`
+  const quoteState = useSeatQuote({ locationId: location?.id, tier, quantity: qty, active: true })
+  const quoteView  = seatQuoteView(quoteState, seatWord)
+
+  async function runAddSeats() {
+    setSubmitting(true); setError('')
+    try {
+      const res = await fetch('/api/seats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location_id: location.id, tier, quantity: qty }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || json.message || 'Could not add the seat')
+      onAdded && onAdded()
+    } catch (err) {
+      setError(err?.message || 'Could not add the seat')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:10001, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'440px', borderRadius:'16px', zIndex:1, maxHeight:'85vh', overflowY:'auto', padding:'16px' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'12px' }}>
+          <div style={{ flex:1 }}>
+            <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Add a seat</p>
+            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{location?.name}</p>
+          </div>
+          <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>×</button>
+        </div>
+
+        {/* Whose money. Stated on BOTH steps — an admin who skims the form and
+            reads only the confirm screen still sees it, and vice versa. */}
+        <div style={{ padding:'9px 11px', borderRadius:'9px', background:'rgba(99,116,139,0.07)', border:'1px solid rgba(99,116,139,0.28)', marginBottom:'12px' }}>
+          <p style={{ fontSize:'11.5px', color:'#334155', margin:0, lineHeight:1.5 }}>
+            This adds a seat to <strong>{location?.name}</strong> and bills <strong>their</strong> account, not yours.
+            Everything below describes what happens to the franchisee.
+          </p>
+        </div>
+
+        {step === 'form' && (
+          <>
+            <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'8px' }}>Seat tier</p>
+            <div style={{ display:'grid', gap:'8px', marginBottom:'14px' }}>
+              {TIER_OPTIONS.map(t => {
+                const on = tier === t.key
+                return (
+                  <button key={t.key} onClick={()=>setTier(t.key)}
+                    style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 12px', borderRadius:'10px', cursor:'pointer', textAlign:'left', fontFamily:'inherit', background: on ? 'rgba(26,46,43,0.04)' : 'white', border:`1.5px solid ${on ? '#1a2e2b' : 'rgba(0,0,0,0.09)'}` }}>
+                    <span style={{ fontSize:'16px' }}>{t.icon}</span>
+                    <span style={{ flex:1 }}>
+                      <span style={{ display:'block', fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>{t.name}</span>
+                      <span style={{ display:'block', fontSize:'11px', color:'#8a9e9a' }}>{t.detail}</span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'14px' }}>
+              <span style={{ fontSize:'12px', color:'#4a5e5a' }}>How many</span>
+              <button onClick={()=>setQty(q=>Math.max(1, q-1))} style={{ width:'30px', height:'30px', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.12)', background:'white', fontSize:'15px', cursor:'pointer', fontFamily:'inherit' }}>−</button>
+              <span style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', minWidth:'20px', textAlign:'center' }}>{qty}</span>
+              <button onClick={()=>setQty(q=>Math.min(10, q+1))} style={{ width:'30px', height:'30px', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.12)', background:'white', fontSize:'15px', cursor:'pointer', fontFamily:'inherit' }}>+</button>
+            </div>
+
+            {/* issue 224 — the price of the tier being chosen, beside the
+                choice, from the server's quote for THAT tier. */}
+            <SeatPickerPriceBlock quoteState={quoteState} label={`${qty} × ${SUBSCRIPTION_TIER_META.find(t=>t.key===tier)?.name || tier}`} />
+
+            <div style={{ display:'flex', gap:'8px', marginTop:'14px' }}>
+              <button onClick={onClose} style={{ flex:1, padding:'10px', background:'white', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
+              <button
+                onClick={()=>setStep('confirm')}
+                disabled={!quoteView}
+                style={{ flex:1, padding:'10px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor: quoteView ? 'pointer' : 'not-allowed', opacity: quoteView ? 1 : 0.5 }}
+              >Review</button>
+            </div>
+          </>
+        )}
+
+        {step === 'confirm' && (
+          quoteState.loading ? (
+            <BeeLoader size="inline" label="Working out what this costs…" />
+          ) : !quoteView ? (
+            <SeatQuoteFailed message={quoteState.error} onCancel={()=>{ setError(''); setStep('form') }} />
+          ) : (
+            <PaymentConfirmStep
+              title="Confirm this seat"
+              lineItems={[{
+                label: quoteView.totalDollars === null
+                  ? `${qty} × ${SUBSCRIPTION_TIER_META.find(t=>t.key===tier)?.name || tier}`
+                  : `${qty} × ${SUBSCRIPTION_TIER_META.find(t=>t.key===tier)?.name || tier}`,
+                // The SERVER's figure — issue 223. Never a client multiply.
+                amount: quoteView.totalDollars ?? 0,
+              }]}
+              total={quoteView.totalDollars ?? 0}
+              confirmLabel={quoteView.notice.confirmLabel}
+              onConfirm={runAddSeats}
+              onCancel={()=>{ setError(''); setStep('form') }}
+              isProcessing={submitting}
+              error={error || null}
+              notice={quoteView.notice}
+            />
+          )
+        )}
+      </div>
+    </div>
+  )
+}
+
 // Exported for tests (issue 226 step 4) — the tab split moved fields between
 // surfaces and split one save into two, and both claims are worth pinning.
 export function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, onViewLocation, onDrilldown, role, users=[], locations=[] }) {
@@ -25482,6 +25899,13 @@ export function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUp
                 )}
               </div>
             </div>
+          )}
+
+          {/* Seats as people (issue 226 step 5) — who holds each seat, what it
+              costs per year, and the three states. Replaces the mock block
+              deleted in step 4 with the thing it was pretending to be. */}
+          {sheetTab === 'billing' && canEditSubscription && (
+            <SeatRosterSection location={currentLoc} role={role} />
           )}
 
           {/* The mock "Team · $X/yr" block was DELETED here (issue 226 step 4).
@@ -28287,7 +28711,20 @@ function ConfigureTab() {
 // enforces super_admin, reuses the shared activation function, and marks every
 // grant as manual (comp) in the seat's notes. The route is the real gate; this
 // UI is convenience only.
-function GrantSeatCard() {
+// issue 226 step 5 — RELOCATED from the Pricing tab into the location panel.
+// It was a fleet-wide card with a cross-location owner dropdown, which is a
+// way to FIND a location; the panel is where you already are when you decide
+// to comp a seat. Passing `locationId` narrows the dropdown to that
+// location's owners and drops the "· <Location>" suffix from each label,
+// since the location is the sheet you are standing in.
+//
+// THE ROUTE IS UNTOUCHED. GET and POST /api/admin/grant-seat still resolve the
+// owner's location SERVER-SIDE from owner_user_id — it never trusts a
+// client-sent location_id, deliberately — and the POST is still super_admin
+// only. `locationId` filters what this component OFFERS; it is not sent, and
+// it is not a permission. The button that opens this is gated on
+// role === 'super_admin' to match, but the route remains the gate.
+function GrantSeatCard({ locationId = null, onGranted = null }) {
   const [owners, setOwners]   = useState(null)   // null = loading, [] = none
   const [loadErr, setLoadErr] = useState('')
   const [ownerId, setOwnerId] = useState('')
@@ -28304,13 +28741,21 @@ function GrantSeatCard() {
         const res = await fetch('/api/admin/grant-seat')
         if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error || `HTTP ${res.status}`)
         const data = await res.json()
-        if (alive) setOwners(Array.isArray(data) ? data : [])
+        const all = Array.isArray(data) ? data : []
+        // Scoped mount: only this location's owners are grantable from here.
+        const scoped = locationId ? all.filter(o => String(o.location_id) === String(locationId)) : all
+        if (alive) {
+          setOwners(scoped)
+          // One owner and no ambiguity — preselect, so the operator confirms a
+          // grant rather than first restating which location they are on.
+          if (locationId && scoped.length === 1) setOwnerId(scoped[0].owner_user_id)
+        }
       } catch (e) {
         if (alive) { setOwners([]); setLoadErr(e.message || 'Failed to load owners') }
       }
     })()
     return () => { alive = false }
-  }, [])
+  }, [locationId])
 
   const selected = (owners || []).find(o => o.owner_user_id === ownerId) || null
   // Owner tier on an inactive location activates the subscription; otherwise
@@ -28340,6 +28785,9 @@ function GrantSeatCard() {
         setOwners(prev => (prev || []).map(o => o.location_id === selected?.location_id ? { ...o, subscription_status: 'active' } : o))
       }
       setReason('')
+      // Scoped mount: let the roster that opened this refetch, so the granted
+      // seat appears where the operator is looking rather than on a reload.
+      onGranted && onGranted()
     } catch (e) {
       setResult({ ok: false, msg: e.message || 'Grant failed' })
     } finally {
@@ -28656,9 +29104,12 @@ function PricingManagementTab() {
         </div>
       </div>
 
-      {/* Grant Seat (comp / no payment) — super_admin lever, next to the
-          paid Stripe path. */}
-      <GrantSeatCard />
+      {/* GrantSeatCard MOVED to the location panel (issue 226 step 5).
+          Comping a seat is a per-location act; this tab is the price catalog,
+          which is genuinely cross-location. It lived here because the panel
+          had nowhere to put it — Billing & team now does, and the card opens
+          from the seat roster with the location already chosen. Route
+          untouched, super_admin gate untouched. */}
 
       {/* Add-ons */}
       <div>
