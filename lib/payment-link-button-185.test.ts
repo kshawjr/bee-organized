@@ -116,15 +116,21 @@ describe('GetPaymentLinkButton exists and is wired to the issue-182 route', () =
 
 describe('renders only for canEditSubscription', () => {
   it('is mounted inside the sheet’s canEditSubscription gate', () => {
-    // The whole Subscription section opens with `canEditSubscription && (`; the
-    // mount sits inside it. Confirm the gate wraps the mount.
-    const gateIdx = sheet.indexOf('canEditSubscription && (')
+    // issue 226 step 4 — the sheet is tabbed now and opens SEVERAL
+    // `canEditSubscription && (` blocks (Subscription, Careful, Billing
+    // notes). The button moved into Careful. The guarantee is unchanged and
+    // still worth pinning, so anchor on the LAST gate before the mount rather
+    // than counting every gate in the file.
     const mountIdx = sheet.indexOf('<GetPaymentLinkButton')
+    expect(mountIdx).toBeGreaterThan(-1)
+    const gateIdx = sheet.lastIndexOf('canEditSubscription && (', mountIdx)
     expect(gateIdx).toBeGreaterThan(-1)
-    expect(mountIdx).toBeGreaterThan(gateIdx)
-    // canEditSubscription is the only gate opened before the mount (no nested
-    // conditional re-opens between them), so the mount lives directly under it.
-    expect(sheet.slice(gateIdx, mountIdx).match(/canEditSubscription && \(/g)).toHaveLength(1)
+    // Nothing re-opens the gate between it and the mount, so the mount lives
+    // directly under it.
+    expect(sheet.slice(gateIdx + 1, mountIdx)).not.toContain('canEditSubscription && (')
+    // …and that gate is the Careful block, which is where anything that can
+    // charge a location belongs.
+    expect(sheet.slice(gateIdx - 400, mountIdx)).toContain('Careful')
     // The component renders no gate of its own — it trusts the call-site gate.
     expect(comp).not.toMatch(/role\s*===\s*'super_admin'/)
   })

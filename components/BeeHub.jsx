@@ -24770,6 +24770,17 @@ const ALL_LOCATIONS = [
   }
 ]
 
+// issue 226 step 4 — "who pays", in words. The Subscription block reads the
+// SAVED payment_source; the picker that changes it lives in Careful. The two
+// corporate values are the ones nobody can read off the raw column, which is
+// how a card once bucketed both of them as "not configured".
+const PAYMENT_SOURCE_LABELS = {
+  none:                'Not set',
+  direct:              'Franchisee (direct)',
+  prepaid_corporate:   'Corporate (prepaid)',
+  corporate_sponsored: 'Corporate (sponsored)',
+}
+
 const CRM_STATUS_CONF = {
   active:     { label:'Active',     icon:'✅', color:'#22c55e', bg:'rgba(34,197,94,0.08)',   border:'rgba(34,197,94,0.2)'   },
   onboarding: { label:'Onboarding', icon:'🐣', color:'#f59e0b', bg:'rgba(245,158,11,0.08)',  border:'rgba(245,158,11,0.2)'  },
@@ -25020,7 +25031,9 @@ export function LocationsTable({
 }
 
 
-function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, onViewLocation, onDrilldown, role, users=[], locations=[] }) {
+// Exported for tests (issue 226 step 4) — the tab split moved fields between
+// surfaces and split one save into two, and both claims are worth pinning.
+export function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, onViewLocation, onDrilldown, role, users=[], locations=[] }) {
   const router = useRouter()
   React.useEffect(() => {
     const prev = document.body.style.overflow
@@ -25198,10 +25211,26 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
   const [subError, setSubError]           = useState('')
   const [subSuccess, setSubSuccess]       = useState(false)
 
-  const subDirty =
+  // issue 226 step 4 — the tab this sheet is showing. Two tabs, not three:
+  // Activity was cut because nothing writes a billing-activity trail (the
+  // location's payment history is its own sheet, reached from Billing & team).
+  const [sheetTab, setSheetTab] = useState('billing')
+
+  // issue 226 step 4 — one dirty flag became two, because the fields moved to
+  // different tabs. Payment source and paid-through decide WHETHER someone is
+  // billed and WHEN, so they sit in Careful; billing notes are an internal
+  // memo and sit in Settings.
+  //
+  // Each half saves only its own fields. PATCH /api/locations/[id]/subscription
+  // already builds its update object field-by-field (`'billing_notes' in body`
+  // etc.) and 400s only on an empty body, so a partial payload is what it was
+  // built for — no route change. It also means saving a note no longer
+  // rewrites payment_source as a side effect, which is what a single shared
+  // save did.
+  const billingModelDirty =
     paymentSource !== initialPaymentSource ||
-    paidThrough   !== initialPaidThrough ||
-    billingNotes  !== initialBillingNotes
+    paidThrough   !== initialPaidThrough
+  const notesDirty = billingNotes !== initialBillingNotes
 
   function selectPaymentSource(next) {
     setPaymentSource(next)
@@ -25212,15 +25241,22 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
     setSubError('')
   }
 
-  function resetSubscription() {
+  function resetBillingModel() {
     setPaymentSource(initialPaymentSource)
     setPaidThrough(initialPaidThrough)
+    setSubError('')
+    setSubSuccess(false)
+  }
+
+  function resetNotes() {
     setBillingNotes(initialBillingNotes)
     setSubError('')
     setSubSuccess(false)
   }
 
-  async function saveSubscription() {
+  // Shared transport for both saves. `patch` carries only the fields the
+  // calling tab owns; the route merges field-by-field.
+  async function patchSubscription(patch) {
     setSubSaving(true)
     setSubError('')
     setSubSuccess(false)
@@ -25228,16 +25264,15 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
       const res = await fetch('/api/locations/' + currentLoc.id + '/subscription', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          payment_source: paymentSource,
-          paid_through_date: paymentSource === 'prepaid_corporate' ? (paidThrough || null) : null,
-          billing_notes: billingNotes.trim() || null,
-        }),
+        body: JSON.stringify(patch),
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json.error || 'Save failed')
+      // Read every field back off the response rather than off local state —
+      // the route is the authority on what landed, and paid_through_date in
+      // particular is rewritten server-side.
       const nextFields = {
-        payment_source:    json.location?.payment_source    ?? paymentSource,
+        payment_source:    json.location?.payment_source    ?? currentLoc.payment_source,
         paid_through_date: json.location?.paid_through_date ?? null,
         billing_notes:     json.location?.billing_notes     ?? null,
       }
@@ -25251,6 +25286,21 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
       setSubSaving(false)
     }
   }
+
+  // PRESERVED EXACTLY, including the sharp edge: paid_through_date is
+  // force-nulled for every source except prepaid_corporate, so switching a
+  // direct location to "None" erases its renewal date. That is today's
+  // behaviour and step 4 is a re-layout, not a fix — the confirmation that
+  // names this consequence out loud belongs with the Careful section's
+  // confirmations, which are still to come.
+  const saveBillingModel = () => patchSubscription({
+    payment_source: paymentSource,
+    paid_through_date: paymentSource === 'prepaid_corporate' ? (paidThrough || null) : null,
+  })
+
+  const saveNotes = () => patchSubscription({
+    billing_notes: billingNotes.trim() || null,
+  })
 
   function changeStatus(key) {
     setCurrentLoc(prev=>({...prev, crmStatus:key}))
@@ -25270,6 +25320,27 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
           </div>
           <span style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'20px', background:sc.bg, color:sc.color, border:`1px solid ${sc.border}`, fontWeight:600, flexShrink:0 }}>{sc.icon} {sc.label}</span>
           <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer', flexShrink:0, lineHeight:1 }}>×</button>
+        </div>
+
+        {/* Tabs (issue 226 step 4). Two, not three — Activity was cut. The
+            split is by consequence, not by subject: everything that decides
+            whether someone is billed, and when, is on the Billing & team side
+            (inside Careful); Settings holds the notes, the sponsorship dates
+            and the ways in. */}
+        <div style={{ display:'flex', gap:'4px', padding:'8px 12px 0', flexShrink:0, borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
+          {[
+            { key:'billing',  label:'Billing & team' },
+            { key:'settings', label:'Settings' },
+          ].map(t => {
+            const on = sheetTab === t.key
+            return (
+              <button
+                key={t.key}
+                onClick={()=>setSheetTab(t.key)}
+                style={{ padding:'8px 14px', border:'none', background:'none', cursor:'pointer', fontFamily:'inherit', fontSize:'13px', fontWeight: on ? 700 : 500, color: on ? '#1a2e2b' : '#8a9e9a', borderBottom:`2px solid ${on ? '#1a2e2b' : 'transparent'}`, marginBottom:'-1px' }}
+              >{t.label}</button>
+            )
+          })}
         </div>
 
         {/* Scrollable body */}
@@ -25310,7 +25381,7 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
               pending owner invite, and an invite CTA while under the cap.
               Only renders for super_admin/corporate; owners managing their
               own team have a different surface in Settings → Team. */}
-          {canInviteOwner && (
+          {sheetTab === 'billing' && canInviteOwner && (
             <div>
               <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>{(ownerStatus?.count || 0) > 1 ? 'Owners' : 'Owner'}</p>
               <div style={{ background:'#f7f5f0', borderRadius:'10px', padding:'12px' }}>
@@ -25413,28 +25484,18 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
             </div>
           )}
 
-          {/* Team */}
-          {locUsers.length>0&&(
-            <div>
-              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Team · ${calcRenewalTotal(currentLoc.id, false, livePrices).total.toLocaleString()}/yr</p>
-              <div style={{ background:'#f7f5f0', borderRadius:'10px', overflow:'hidden' }}>
-                {locUsers.map((u,i,arr)=>{
-                  const rc = FRANCHISE_ROLES.find(r=>r.key===u.role)
-                  return (
-                    <div key={u.id} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'9px 12px', borderBottom:i<arr.length-1?'1px solid rgba(0,0,0,0.05)':'none' }}>
-                      <div style={{ width:'28px', height:'28px', borderRadius:'50%', background:'linear-gradient(135deg,#a8c9c4,#7ab5af)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'10px', fontWeight:700, color:'white', flexShrink:0 }}>{u.initials}</div>
-                      <p style={{ flex:1, fontSize:'12px', fontWeight:600, color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.name}</p>
-                      <span style={{ fontSize:'10px', color:rc?.color, background:rc?.bg, padding:'1px 7px', borderRadius:'20px', fontWeight:600, flexShrink:0 }}>{rc?.label}</span>
-                      <span style={{ fontSize:'10px', color:'#8a9e9a', flexShrink:0 }}>{isDeferredTier(u.role) ? 'TBD' : `$${getTierPrice(u.role).toLocaleString()}/yr`}</span>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
+          {/* The mock "Team · $X/yr" block was DELETED here (issue 226 step 4).
+              It filtered USERS_DATA by a mock location id and priced the result
+              with calcRenewalTotal, so it rendered in demo contexts only and
+              showed a figure no real location ever had. Its sibling
+              realLocUserCount — the truthful count, in the quick-info row
+              above — exists precisely because of it. Seats as PEOPLE, which is
+              what this block pretended to be, is step 5. */}
 
-          {/* Subscription editor (super_admin / corporate only) */}
-          {canEditSubscription && (
+          {/* Subscription — the read-only state, plus the money that has
+              already moved. Nothing here changes how the location is billed;
+              everything that does is in Careful below. */}
+          {sheetTab === 'billing' && canEditSubscription && (
             <div>
               <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Subscription</p>
               <div style={{ background:'#f7f5f0', borderRadius:'10px', padding:'12px', display:'grid', gap:'10px' }}>
@@ -25445,6 +25506,62 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
                     {currentLoc.subscription_status || 'deferred'}
                   </span>
                 </div>
+
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:'11px', color:'#8a9e9a' }}>Who pays</span>
+                  <span style={{ fontSize:'11px', color:'#1a2e2b', fontWeight:600 }}>
+                    {PAYMENT_SOURCE_LABELS[currentLoc.payment_source || 'none']}
+                  </span>
+                </div>
+
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:'11px', color:'#8a9e9a' }}>Paid through</span>
+                  <span style={{ fontSize:'11px', color: currentLoc.paid_through_date ? '#1a2e2b' : '#b0c0bc', fontWeight:600 }}>
+                    {currentLoc.paid_through_date || '\u2014'}
+                  </span>
+                </div>
+
+                {/* Recent — the payments already recorded against this
+                    location, and the way to record one more. This is the
+                    "recent" the panel has data for; there is no
+                    billing-activity trail in the schema, which is why the
+                    Activity tab was cut rather than faked. */}
+                <div style={{ borderTop:'1px dashed rgba(0,0,0,0.1)', paddingTop:'10px', marginTop:'2px' }}>
+                  <div style={{ display:'flex', gap:'8px' }}>
+                    <button
+                      onClick={()=>setShowBillingHistory(true)}
+                      style={{ flex:1, padding:'10px', background:'white', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#1a2e2b', cursor:'pointer' }}
+                    >🧾 View billing history</button>
+                    <button
+                      onClick={()=>setShowRecordPayment(true)}
+                      style={{ flex:1, padding:'10px', background:'white', border:'1.5px solid #1a2e2b', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#1a2e2b', cursor:'pointer' }}
+                    >+ Record Payment</button>
+                  </div>
+                  <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'6px', lineHeight:1.45 }}>
+                    Record a payment outside of a billing conversion (extra seat, renewal, adjustment).
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Careful ────────────────────────────────────────────────────
+              Everything that changes HOW a location is billed, or that can
+              charge it. Grouped and visually separated so the difference
+              between reading a subscription and rewriting one is a thing you
+              can see before you click.
+
+              NOTE: the per-action confirmations naming exactly what each one
+              will change are still to come \u2014 step 4 is a re-layout, and
+              introducing new guards here would make it something else. Today
+              these behave exactly as they did in the flat sheet. */}
+          {sheetTab === 'billing' && canEditSubscription && (
+            <div>
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#b45309', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Careful</p>
+              <div style={{ background:'rgba(217,119,6,0.05)', border:'1px solid rgba(217,119,6,0.25)', borderRadius:'10px', padding:'12px', display:'grid', gap:'10px' }}>
+                <p style={{ fontSize:'11px', color:'#92400e', margin:0, lineHeight:1.45 }}>
+                  These decide whether this location is billed, and when.
+                </p>
 
                 <div>
                   <label style={{ display:'block', fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Payment source</label>
@@ -25472,65 +25589,32 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
                   </div>
                 )}
 
-                <div>
-                  <label style={{ display:'block', fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Billing notes</label>
-                  <textarea
-                    rows={3}
-                    value={billingNotes}
-                    onChange={e=>{ setBillingNotes(e.target.value); setSubSuccess(false); setSubError('') }}
-                    placeholder="Internal notes (visible to super_admins only)"
-                    style={{ width:'100%', padding:'9px 11px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none', boxSizing:'border-box', resize:'vertical' }}
-                  />
-                </div>
-
-                {subError && (
+                {subError && !notesDirty && (
                   <p style={{ fontSize:'11px', color:'#ef4444', margin:0 }}>{subError}</p>
                 )}
-                {subSuccess && !subDirty && (
+                {subSuccess && !billingModelDirty && (
                   <p style={{ fontSize:'11px', color:'#22c55e', margin:0 }}>Saved.</p>
                 )}
 
                 <div style={{ display:'flex', gap:'8px' }}>
                   <button
-                    onClick={resetSubscription}
-                    disabled={!subDirty || subSaving}
-                    style={{ flex:1, padding:'9px', background:'white', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:(!subDirty||subSaving)?'not-allowed':'pointer', opacity:(!subDirty||subSaving)?0.5:1 }}
+                    onClick={resetBillingModel}
+                    disabled={!billingModelDirty || subSaving}
+                    style={{ flex:1, padding:'9px', background:'white', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:(!billingModelDirty||subSaving)?'not-allowed':'pointer', opacity:(!billingModelDirty||subSaving)?0.5:1 }}
                   >Cancel</button>
                   <button
-                    onClick={saveSubscription}
-                    disabled={!subDirty || subSaving}
-                    style={{ flex:1, padding:'9px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:(!subDirty||subSaving)?'not-allowed':'pointer', opacity:(!subDirty||subSaving)?0.5:1 }}
-                  >{subSaving ? 'Saving…' : 'Save changes'}</button>
+                    onClick={saveBillingModel}
+                    disabled={!billingModelDirty || subSaving}
+                    style={{ flex:1, padding:'9px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:(!billingModelDirty||subSaving)?'not-allowed':'pointer', opacity:(!billingModelDirty||subSaving)?0.5:1 }}
+                  >{subSaving ? 'Saving\u2026' : 'Save changes'}</button>
                 </div>
 
-                {/* Sponsorship period — shown for corp-funded locations */}
-                {(currentLoc.payment_source === 'prepaid_corporate' || currentLoc.payment_source === 'corporate_sponsored') && currentLoc.corporate_sponsorship_started_at && (()=>{
-                  const startedAt = new Date(currentLoc.corporate_sponsorship_started_at)
-                  const endsAt = currentLoc.corporate_sponsorship_ends_at ? new Date(currentLoc.corporate_sponsorship_ends_at) : null
-                  const fmtD = d => d.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'})
-                  const daysLeft = endsAt ? Math.round((endsAt.getTime()-Date.now())/(1000*60*60*24)) : null
-                  const nearEnd = daysLeft !== null && daysLeft < 30
-                  return (
-                    <div style={{ padding:'10px 12px', borderRadius:'8px', background: nearEnd ? 'rgba(234,179,8,0.1)' : 'rgba(168,201,196,0.06)', border: `1px solid ${nearEnd ? 'rgba(234,179,8,0.3)' : 'rgba(168,201,196,0.15)'}` }}>
-                      <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Sponsorship Period</p>
-                      <p style={{ fontSize:'11px', color:'#1a2e2b', margin:0, lineHeight:1.5 }}>
-                        Started: {fmtD(startedAt)} · Ends: {endsAt ? fmtD(endsAt) : 'no end date'}
-                        {daysLeft !== null && (
-                          <span style={{ marginLeft:'8px', fontWeight:700, color: daysLeft < 0 ? '#ef4444' : daysLeft < 7 ? '#f97316' : '#eab308' }}>
-                            {daysLeft < 0 ? `(${Math.abs(daysLeft)}d past due)` : daysLeft === 0 ? '(due today)' : `(${daysLeft}d left)`}
-                          </span>
-                        )}
-                      </p>
-                    </div>
-                  )
-                })()}
-
-                {/* Convert to Direct Billing — only while the location is still
+                {/* Convert to Direct Billing \u2014 only while the location is still
                     on a corporate-funded source. Reads the SAVED payment_source
                     (currentLoc), not the unsaved dropdown edit state, so the CTA
                     reflects what's actually persisted. Auto-hides once converted. */}
                 {(currentLoc.payment_source === 'prepaid_corporate' || currentLoc.payment_source === 'corporate_sponsored') && (
-                  <div style={{ borderTop:'1px dashed rgba(0,0,0,0.1)', paddingTop:'10px', marginTop:'2px' }}>
+                  <div style={{ borderTop:'1px dashed rgba(217,119,6,0.25)', paddingTop:'10px', marginTop:'2px' }}>
                     <button
                       onClick={()=>setShowConvertBilling(true)}
                       style={{ width:'100%', padding:'10px', background:'white', border:'1.5px solid #d4a046', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#b07a20', cursor:'pointer' }}
@@ -25544,37 +25628,85 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
                   </div>
                 )}
 
-                {/* Billing history + Record Payment — available for ALL
-                    locations regardless of payment_source. Record Payment logs
-                    an off-cycle payment (extra seat, renewal, adjustment)
-                    without changing the billing model. */}
-                <div style={{ borderTop:'1px dashed rgba(0,0,0,0.1)', paddingTop:'10px', marginTop:'2px' }}>
-                  <div style={{ display:'flex', gap:'8px' }}>
-                    <button
-                      onClick={()=>setShowBillingHistory(true)}
-                      style={{ flex:1, padding:'10px', background:'white', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#1a2e2b', cursor:'pointer' }}
-                    >🧾 View billing history</button>
-                    <button
-                      onClick={()=>setShowRecordPayment(true)}
-                      style={{ flex:1, padding:'10px', background:'white', border:'1.5px solid #1a2e2b', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#1a2e2b', cursor:'pointer' }}
-                    >+ Record Payment</button>
-                  </div>
-                  <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'6px', lineHeight:1.45 }}>
-                    Record a payment outside of a billing conversion (extra seat, renewal, adjustment).
-                  </p>
-                </div>
-
-                {/* issue 185 — "Get payment link" for an already-active location.
+                {/* issue 185 \u2014 "Get payment link" for an already-active location.
                     Mints a Stripe Checkout URL (issue 182 route) Kevin copies to
-                    the owner. Lives inside the canEditSubscription gate with the
-                    billing buttons above; guards against minting a DUPLICATE
-                    subscription when one already exists. */}
+                    the owner. Guards against minting a DUPLICATE subscription
+                    when one already exists \u2014 the route does not, so the guard
+                    travelling with the button is load-bearing. */}
                 <GetPaymentLinkButton location={currentLoc} />
               </div>
             </div>
           )}
 
+          {/* ── Settings ──────────────────────────────────────────────────
+              The internal memo, the sponsorship dates, and the ways in.
+              Nothing here decides whether money moves. */}
+
+          {/* Billing notes — super_admin-visible internal memo. Saves ON ITS
+              OWN now (issue 226 step 4): it shared a Save button with the
+              payment-source picker, which meant editing a note rewrote
+              payment_source too. Same route, its own field. */}
+          {sheetTab === 'settings' && canEditSubscription && (
+            <div>
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Billing notes</p>
+              <div style={{ background:'#f7f5f0', borderRadius:'10px', padding:'12px', display:'grid', gap:'10px' }}>
+                <textarea
+                  rows={4}
+                  value={billingNotes}
+                  onChange={e=>{ setBillingNotes(e.target.value); setSubSuccess(false); setSubError('') }}
+                  placeholder="Internal notes (visible to super_admins only)"
+                  style={{ width:'100%', padding:'9px 11px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none', boxSizing:'border-box', resize:'vertical' }}
+                />
+                {subError && !billingModelDirty && (
+                  <p style={{ fontSize:'11px', color:'#ef4444', margin:0 }}>{subError}</p>
+                )}
+                {subSuccess && !notesDirty && (
+                  <p style={{ fontSize:'11px', color:'#22c55e', margin:0 }}>Saved.</p>
+                )}
+                <div style={{ display:'flex', gap:'8px' }}>
+                  <button
+                    onClick={resetNotes}
+                    disabled={!notesDirty || subSaving}
+                    style={{ flex:1, padding:'9px', background:'white', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'#4a5e5a', cursor:(!notesDirty||subSaving)?'not-allowed':'pointer', opacity:(!notesDirty||subSaving)?0.5:1 }}
+                  >Cancel</button>
+                  <button
+                    onClick={saveNotes}
+                    disabled={!notesDirty || subSaving}
+                    style={{ flex:1, padding:'9px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:(!notesDirty||subSaving)?'not-allowed':'pointer', opacity:(!notesDirty||subSaving)?0.5:1 }}
+                  >{subSaving ? 'Saving…' : 'Save notes'}</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Sponsorship period — read-only, shown for corp-funded locations.
+              Moved here from inside the Subscription editor: it reports dates,
+              it does not set them. */}
+          {sheetTab === 'settings' && canEditSubscription
+            && (currentLoc.payment_source === 'prepaid_corporate' || currentLoc.payment_source === 'corporate_sponsored')
+            && currentLoc.corporate_sponsorship_started_at && (()=>{
+            const startedAt = new Date(currentLoc.corporate_sponsorship_started_at)
+            const endsAt = currentLoc.corporate_sponsorship_ends_at ? new Date(currentLoc.corporate_sponsorship_ends_at) : null
+            const fmtD = d => d.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'})
+            const daysLeft = endsAt ? Math.round((endsAt.getTime()-Date.now())/(1000*60*60*24)) : null
+            const nearEnd = daysLeft !== null && daysLeft < 30
+            return (
+              <div style={{ padding:'10px 12px', borderRadius:'8px', background: nearEnd ? 'rgba(234,179,8,0.1)' : 'rgba(168,201,196,0.06)', border: `1px solid ${nearEnd ? 'rgba(234,179,8,0.3)' : 'rgba(168,201,196,0.15)'}` }}>
+                <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Sponsorship Period</p>
+                <p style={{ fontSize:'11px', color:'#1a2e2b', margin:0, lineHeight:1.5 }}>
+                  Started: {fmtD(startedAt)} · Ends: {endsAt ? fmtD(endsAt) : 'no end date'}
+                  {daysLeft !== null && (
+                    <span style={{ marginLeft:'8px', fontWeight:700, color: daysLeft < 0 ? '#ef4444' : daysLeft < 7 ? '#f97316' : '#eab308' }}>
+                      {daysLeft < 0 ? `(${Math.abs(daysLeft)}d past due)` : daysLeft === 0 ? '(due today)' : `(${daysLeft}d left)`}
+                    </span>
+                  )}
+                </p>
+              </div>
+            )
+          })()}
+
           {/* Status picker */}
+          {sheetTab === 'settings' && (
           <div>
             <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'6px' }}>Location Status</p>
             <div style={{ display:'flex', gap:'6px' }}>
@@ -25586,8 +25718,10 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
               ))}
             </div>
           </div>
+          )}
 
           {/* Actions */}
+          {sheetTab === 'settings' && (
           <div style={{ display:'flex', gap:'8px' }}>
             {onViewLocation&&(
               <button onClick={()=>{ onViewLocation(currentLoc.id); onClose() }}
@@ -25602,6 +25736,7 @@ function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUpdate, o
               </button>
             )}
           </div>
+          )}
         </div>
       </div>
       {showInviteOwner && (

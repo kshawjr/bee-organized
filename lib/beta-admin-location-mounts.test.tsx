@@ -125,12 +125,23 @@ describe('LocationDetailSheet mounts with pricing bound', () => {
 
     // The sheet is open (its header renders "Bee Organized <name>")…
     expect(host.textContent).toContain('Bee Organized Kansas City')
-    // …and the demo Team list rendered: its header interpolates
-    // calcRenewalTotal(…, livePrices) and each row calls getTierPrice(role) —
-    // the two identifiers 36c2183 left unbound. Before the fix this click
-    // threw `ReferenceError: livePrices is not defined`.
-    expect(host.textContent).toMatch(/Team · \$[\d,]+\/yr/)
-    expect(host.textContent).toMatch(/\$[\d,]+\/yr|TBD/)
+
+    // …on the Billing & team tab, with Settings alongside it (issue 226
+    // step 4 — two tabs; Activity was cut for want of a data source).
+    expect(host.textContent).toContain('Billing & team')
+    expect(host.textContent).toContain('Settings')
+    expect(host.textContent).toContain('Subscription')
+
+    // The mock "Team · $X/yr" list this test used to assert is GONE. It
+    // filtered USERS_DATA by a mock location id and priced the result with
+    // calcRenewalTotal, so it rendered in demo contexts only and quoted a
+    // figure no real location had. What survives from that regression is the
+    // reason this test exists: the click must not throw. It renders.
+    expect(host.textContent).not.toMatch(/Team · \$/)
+
+    // The two identifiers 36c2183 left unbound (livePrices, getTierPrice)
+    // were the original bug; a ReferenceError would have failed the mount
+    // above rather than reaching here.
   })
 })
 
