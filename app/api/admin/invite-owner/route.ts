@@ -237,6 +237,30 @@ export async function POST(request: NextRequest) {
     force,
   } = body || {}
 
+  // ─── issue 226 step 6 — THE MODE ───
+  //
+  // This route did three unrelated jobs: rewrite the location's billing
+  // config, create or reuse an owner seat, and send the invite. Provisioning a
+  // NEW franchise needs all three. Adding a co-owner needs only the last two —
+  // and doing all three to a live location nulls its paid_through_date, knocks
+  // it back to onboarding, blanks its checklist, and leaves its Stripe
+  // subscription untouched and still billing.
+  //
+  //   provision     the original behaviour, minus the escape hatch
+  //   add_co_owner  seat + invite ONLY. Never touches `locations`.
+  //
+  // Default is 'provision' so an older client that sends no mode gets exactly
+  // what it got before — the safety change for that path is the hard 409
+  // below, which applies to it too.
+  const mode: string = typeof body?.mode === 'string' ? body.mode : 'provision'
+  if (mode !== 'provision' && mode !== 'add_co_owner') {
+    return NextResponse.json(
+      { error: "invalid mode — must be 'provision' or 'add_co_owner'" },
+      { status: 400 }
+    )
+  }
+  const rewritesLocation = mode === 'provision'
+
   // ─── Validation ───
   if (typeof location_id !== 'string' || !location_id) {
     return NextResponse.json({ error: 'location_id required' }, { status: 400 })
@@ -247,17 +271,35 @@ export async function POST(request: NextRequest) {
   if (typeof full_name !== 'string' || !full_name.trim()) {
     return NextResponse.json({ error: 'full_name required' }, { status: 400 })
   }
-  if (!VALID_PAYMENT_SOURCES.includes(payment_source)) {
+  // Billing fields are provisioning inputs. add_co_owner writes none of them,
+  // so it must not be able to send them either — accepting-and-ignoring is how
+  // a caller comes to believe it set something it did not.
+  if (rewritesLocation) {
+    if (!VALID_PAYMENT_SOURCES.includes(payment_source)) {
+      return NextResponse.json(
+        {
+          error: `invalid payment_source — must be one of: ${VALID_PAYMENT_SOURCES.join(', ')}`,
+        },
+        { status: 400 }
+      )
+    }
+    if (!isValidDateOrEmpty(paid_through_date)) {
+      return NextResponse.json(
+        { error: 'paid_through_date must be YYYY-MM-DD or empty' },
+        { status: 400 }
+      )
+    }
+  } else if (
+    payment_source !== undefined ||
+    paid_through_date !== undefined ||
+    billing_notes !== undefined
+  ) {
     return NextResponse.json(
       {
-        error: `invalid payment_source — must be one of: ${VALID_PAYMENT_SOURCES.join(', ')}`,
+        error: 'billing_fields_not_allowed',
+        message:
+          "mode 'add_co_owner' adds a seat and an invitation; it does not change how the location is billed. Send no payment_source, paid_through_date or billing_notes.",
       },
-      { status: 400 }
-    )
-  }
-  if (!isValidDateOrEmpty(paid_through_date)) {
-    return NextResponse.json(
-      { error: 'paid_through_date must be YYYY-MM-DD or empty' },
       { status: 400 }
     )
   }
@@ -347,6 +389,35 @@ export async function POST(request: NextRequest) {
     .limit(1)
     .maybeSingle()
 
+  // ─── issue 226 step 6 — THE HARD REFUSAL ───
+  //
+  // A LIVE location is never re-provisioned from a button. This used to be a
+  // warning on the way to a button: `force: true` proceeded, and the write
+  // below then nulled paid_through_date, set subscription_status='deferred',
+  // lifecycle_status='onboarding' and onboarding_state={} — while leaving
+  // stripe_subscription_id untouched, so the app believed the location was
+  // onboarding while Stripe kept billing it, and the owner would be walked
+  // back through a pay step that mints a SECOND subscription.
+  //
+  // Verified against Fort Lauderdale before this change: lifecycle=active,
+  // subscription=active, paid_through=2027-08-14, sub_1U4KtuG6R4Z90Upn6vyN8Dgu
+  // live. Exactly the state that must not be reachable from here.
+  //
+  // NO force OVERRIDE. If a live location genuinely has to be re-provisioned
+  // that is a deliberate database operation, not a click. The other warnings
+  // below stay overridable — they are about who is being invited, not about
+  // destroying a live location's billing.
+  if (rewritesLocation && priorLoc.lifecycle_status === 'active') {
+    return NextResponse.json(
+      {
+        error: 'location_is_live',
+        message:
+          'This location is already launched. Provisioning would reset it to onboarding and clear its paid-through date, while its Stripe subscription kept billing. To add a second owner, add an owner seat instead.',
+      },
+      { status: 409 }
+    )
+  }
+
   // ─── Safety gate: surface all blocking conditions at once. Caller
   //     resubmits with { force: true } to proceed. ───
   if (!force) {
@@ -364,13 +435,9 @@ export async function POST(request: NextRequest) {
         message: `An owner invitation is already outstanding (${pendingOwnerInvite.email}). Continuing will create another.`,
       })
     }
-    if (priorLoc.lifecycle_status === 'active') {
-      warnings.push({
-        code: 'already_active',
-        message:
-          'This location is already launched (lifecycle_status=active). Continuing resets it to the onboarding state.',
-      })
-    }
+    // The 'already_active' warning that stood here is gone: for provision it
+    // is now a hard 409 above, and add_co_owner does not care — it writes
+    // nothing to `locations`, so a live location is its NORMAL case.
     if (warnings.length > 0) {
       return NextResponse.json(
         { requires_confirmation: true, warnings },
@@ -389,30 +456,48 @@ export async function POST(request: NextRequest) {
   const sponsorshipEndsAt =
     source === 'prepaid_corporate' ? (paidThrough ?? null) : null
 
-  const { error: locUpdateErr } = await supabaseService
-    .from('locations')
-    .update({
-      payment_source: source,
-      paid_through_date: paidThrough,
-      subscription_status: 'deferred',
-      lifecycle_status: 'onboarding',
-      subscription_plan: 'owner_annual',
-      billing_notes: notes,
-      onboarding_state: {},
-      corporate_sponsorship_started_at: sponsorshipStartedAt,
-      corporate_sponsorship_ends_at: sponsorshipEndsAt,
-      updated_at: now,
-    })
-    .eq('id', location_id)
-  if (locUpdateErr) {
-    console.error('[invite-owner location update]', locUpdateErr)
-    return NextResponse.json({ error: locUpdateErr.message }, { status: 500 })
+  // issue 226 step 6 — THE WRITE add_co_owner SKIPS ENTIRELY.
+  //
+  // This is the whole difference between the two modes, and it is the write
+  // that made adding a co-owner destructive: it is unconditional, it resets
+  // four fields the location depends on, and it never touched Stripe, so the
+  // subscription carried on billing a location the app had just declared to be
+  // onboarding.
+  //
+  // add_co_owner does not skip it conditionally inside the update — it does
+  // not run it at all, so there is no payload to get wrong and nothing to roll
+  // back.
+  if (rewritesLocation) {
+    const { error: locUpdateErr } = await supabaseService
+      .from('locations')
+      .update({
+        payment_source: source,
+        paid_through_date: paidThrough,
+        subscription_status: 'deferred',
+        lifecycle_status: 'onboarding',
+        subscription_plan: 'owner_annual',
+        billing_notes: notes,
+        onboarding_state: {},
+        corporate_sponsorship_started_at: sponsorshipStartedAt,
+        corporate_sponsorship_ends_at: sponsorshipEndsAt,
+        updated_at: now,
+      })
+      .eq('id', location_id)
+    if (locUpdateErr) {
+      console.error('[invite-owner location update]', locUpdateErr)
+      return NextResponse.json({ error: locUpdateErr.message }, { status: 500 })
+    }
   }
 
   // Restores the location's pre-update billing fields. Used by every rollback
   // path below. Logs (doesn't throw) if the restore itself fails — at that
   // point the best we can do is leave a breadcrumb.
   async function rollbackLocation() {
+    // Nothing was written, so there is nothing to restore. Running the restore
+    // anyway would WRITE priorLoc's values back over a location this request
+    // never touched — turning a no-op rollback into the exact clobber the mode
+    // exists to prevent.
+    if (!rewritesLocation) return
     const { error: rbErr } = await supabaseService
       .from('locations')
       .update({

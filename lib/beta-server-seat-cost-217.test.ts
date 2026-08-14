@@ -473,15 +473,45 @@ describe('issue 217 — the co-owner rate is applied through lib/seat-plan', () 
     expect(costs[0]).not.toBe(costs[1])
   })
 
-  it('/api/seats/buy-and-invite cannot receive an owner tier at all (400 before pricing)', async () => {
+  // issue 226 step 6 — this used to assert buy-and-invite REFUSED an owner
+  // tier (400 before pricing), which was right while an owner-tier buy would
+  // have been charged $550. Issue 217 — the very change this file tests —
+  // removed that reason: quoteSeatPurchase counts existing owner seats and
+  // prices the increment through incrementalBillingLines, so the second owner
+  // seat is charged the MANAGER rate on this route exactly as it is on
+  // /api/seats POST. The route now accepts owner, and the assertion moves
+  // from "it is refused" to "it is priced correctly and capped".
+  it('/api/seats/buy-and-invite prices a co-owner seat at the MANAGER rate', async () => {
     h.enqueue('hub_users', OWNER_CALLER)
+    h.enqueueCount('subscription_seats', 1)   // owner cap check — one owner held
+    h.enqueue('hub_users', [])                // no existing hub_user at this email
+    h.enqueue('pending_invites', [])          // no outstanding invite
+    h.enqueue('locations', { id: LOC, paid_through_date: '2027-02-27' })
+    h.enqueueCount('subscription_seats', 1)   // quote — existing owner seats
+    h.enqueue('tier_prices', TIER_ROWS)
+    h.enqueue('subscription_seats', { id: 's-co' })
+
+    await buyCall({ location_id: LOC, tier: 'owner', email: 'coowner@x.com', full_name: 'Co Owner' })
+
+    const row = seatRows()[0]
+    expect(row).toBeDefined()
+    expect(row.tier).toBe('owner')
+    // $400, not $550 — the co-owner rate, prorated to the location's own date.
+    expect(row.prorated_cost).toBe(centsFor(400, '2027-02-27'))
+    expect(row.prorated_cost).not.toBe(centsFor(550, '2027-02-27'))
+  })
+
+  it('/api/seats/buy-and-invite refuses a THIRD owner seat', async () => {
+    h.enqueue('hub_users', OWNER_CALLER)
+    h.enqueueCount('subscription_seats', 2)   // already at the ceiling
 
     const res = await buyCall({
       location_id: LOC,
       tier: 'owner',
-      email: 'coowner@x.com',
+      email: 'third@x.com',
+      full_name: 'Third Owner',
     })
-    expect(res.status).toBe(400)
+    expect(res.status).toBe(409)
     expect(seatInsert()).toBeUndefined()
   })
 

@@ -25085,6 +25085,8 @@ export function SeatRosterSection({ location, role }) {
   const [resendMsg, setResendMsg]     = useState('')
   const [showAddSeat, setShowAddSeat] = useState(false)
   const [showGrant, setShowGrant]     = useState(false)
+  // issue 226 step 6 — the seat an admin is inviting somebody into.
+  const [inviteSeat, setInviteSeat]   = useState(null)
 
   const tierPricesCtx = useContext(TierPricesContext)
   const livePrices    = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
@@ -25255,10 +25257,25 @@ export function SeatRosterSection({ location, role }) {
                     </>
                   )}
                   {e.state === 'empty' && (
-                    <p style={{ fontSize:'11px', color:'#8a9e9a', margin:0, lineHeight:1.45 }}>
-                      Paid for, and billed at {formatCurrency(e.annualRate, { showCents:'never' })}/yr whether or not anyone uses it.
-                      The owner can invite someone into it from their own Settings.
-                    </p>
+                    <>
+                      <p style={{ fontSize:'11px', color:'#8a9e9a', margin:0, lineHeight:1.45 }}>
+                        Paid for, and billed at {formatCurrency(e.annualRate, { showCents:'never' })}/yr whether or not anyone uses it.
+                      </p>
+                      {/* issue 226 step 6 — THE POINT OF THE WHOLE WEEK.
+                          A paid, idle seat with no way to fill it is what
+                          started this: Fort Lauderdale had two paid seats and
+                          an owner who could not invite into either. This
+                          invites into the seat that already exists — no
+                          purchase, no pricing, no charge — via
+                          /api/hub_users/invite, which has accepted tier
+                          'owner' all along. */}
+                      <div>
+                        <button
+                          onClick={(ev)=>{ ev.stopPropagation(); setInviteSeat(e) }}
+                          style={{ padding:'5px 11px', background:'white', border:'1.5px solid #1a2e2b', borderRadius:'8px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#1a2e2b', cursor:'pointer' }}
+                        >Invite someone into this seat</button>
+                      </div>
+                    </>
                   )}
                   <p style={{ fontSize:'11px', color:'#8a9e9a', margin:0 }}>
                     {typeof e.proratedCostCents === 'number'
@@ -25285,6 +25302,14 @@ export function SeatRosterSection({ location, role }) {
         )}
       </div>
 
+      {inviteSeat && (
+        <AdminInviteToSeatModal
+          location={location}
+          seat={inviteSeat}
+          onClose={()=>setInviteSeat(null)}
+          onInvited={()=>{ setInviteSeat(null); load() }}
+        />
+      )}
       {showAddSeat && (
         <AdminAddSeatModal
           location={location}
@@ -25304,6 +25329,100 @@ export function SeatRosterSection({ location, role }) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── AdminInviteToSeatModal (issue 226 step 6) ─────────────────────────────
+// FILLS A SEAT THAT ALREADY EXISTS. No purchase, no quote, no charge — the
+// seat is already on the plan and already being billed for, which is exactly
+// why leaving it empty is the thing worth fixing.
+//
+// It posts /api/hub_users/invite, which has accepted tier 'owner' since long
+// before this issue; what was missing was a surface that offered it. Fort
+// Lauderdale is the case: two paid seats, an owner who could not invite into
+// either, because the only owner-invite button in the app went to
+// /api/admin/invite-owner and would have reset her live location.
+//
+// The tier is the SEAT's tier and is not selectable. A seat's tier is what it
+// is billed at; letting an invitation change it would silently re-price a seat
+// that has already been charged.
+function AdminInviteToSeatModal({ location, seat, onClose, onInvited }) {
+  const [email, setEmail]   = useState('')
+  const [name, setName]     = useState('')
+  const [busy, setBusy]     = useState(false)
+  const [error, setError]   = useState('')
+  const tierMeta = SUBSCRIPTION_TIER_META.find(t => t.key === seat?.tier)
+  const canSend = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && !!name.trim() && !busy
+
+  async function send() {
+    if (!canSend) return
+    setBusy(true); setError('')
+    try {
+      const res = await fetch('/api/hub_users/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location_id: location.id,
+          tier: seat.tier,
+          email: email.trim().toLowerCase(),
+          full_name: name.trim(),
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.message || json.error || 'Could not send the invitation')
+      onInvited && onInvited()
+    } catch (err) {
+      setError(err?.message || 'Could not send the invitation')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const field = { width:'100%', padding:'9px 11px', border:'1.5px solid rgba(0,0,0,0.09)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none', boxSizing:'border-box' }
+
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:10001, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px' }}>
+      <div style={{ position:'absolute', inset:0, background:'rgba(26,46,43,0.45)' }} onClick={onClose} />
+      <div style={{ position:'relative', background:'white', width:'100%', maxWidth:'420px', borderRadius:'16px', zIndex:1, padding:'16px' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'12px' }}>
+          <div style={{ flex:1 }}>
+            <p style={{ fontSize:'15px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>Invite into this seat</p>
+            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{location?.name} · {tierMeta?.name || seat?.tier}</p>
+          </div>
+          <button onClick={onClose} style={{ background:'none', border:'none', fontSize:'20px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>×</button>
+        </div>
+
+        {/* Nothing is charged. Saying so is as important here as naming the
+            figure is on the purchase path — an admin who has just read a
+            confirm screen that moves money should not have to guess that this
+            one does not. */}
+        <div style={{ padding:'9px 11px', borderRadius:'9px', background:'rgba(34,197,94,0.07)', border:'1px solid rgba(34,197,94,0.3)', marginBottom:'12px' }}>
+          <p style={{ fontSize:'11.5px', color:'#15803d', margin:0, lineHeight:1.5 }}>
+            <strong>Nothing is charged.</strong> This seat is already on {location?.name}&rsquo;s plan and already billed at {formatCurrency(seat?.annualRate ?? 0, { showCents:'never' })}/yr. You are filling it, not buying it.
+          </p>
+        </div>
+
+        <div style={{ display:'grid', gap:'10px' }}>
+          <div>
+            <label style={{ display:'block', fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Full name</label>
+            <input value={name} onChange={e=>{ setName(e.target.value); setError('') }} style={field} placeholder="Jane Smith" />
+          </div>
+          <div>
+            <label style={{ display:'block', fontSize:'11px', fontWeight:600, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Email</label>
+            <input value={email} onChange={e=>{ setEmail(e.target.value); setError('') }} style={field} placeholder="jane@example.com" />
+          </div>
+          {error && <p style={{ fontSize:'11px', color:'#b91c1c', margin:0 }}>{error}</p>}
+          <div style={{ display:'flex', gap:'8px' }}>
+            <button onClick={onClose} style={{ flex:1, padding:'10px', background:'white', border:'1px solid rgba(0,0,0,0.12)', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', color:'#4a5e5a', cursor:'pointer' }}>Cancel</button>
+            <button
+              onClick={send}
+              disabled={!canSend}
+              style={{ flex:1, padding:'10px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor: canSend ? 'pointer' : 'not-allowed', opacity: canSend ? 1 : 0.5 }}
+            >{busy ? 'Sending…' : 'Send invitation'}</button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -25884,18 +26003,31 @@ export function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUp
                     </div>
                   </div>
                 )}
-                {ownerStatus && !ownerStatus.pending_invite && (ownerStatus.count || 0) < 2 && (
+                {/* issue 226 step 6 — INVITE OWNER IS A PROVISIONING ACTION,
+                    and this gate is what keeps the button and the route's mode
+                    from ever disagreeing. It renders ONLY at zero owners,
+                    which is the definition of a location that still needs
+                    provisioning, and the modal posts mode:'provision'.
+
+                    "Invite Co-Owner" is gone. Adding a co-owner is adding a
+                    seat — it is an owner-tier seat on the roster below, priced
+                    at the co-owner rate, and it never goes near the route that
+                    rewrites a location's billing. */}
+                {ownerStatus && !ownerStatus.pending_invite && (ownerStatus.count || 0) === 0 && (
                   <div>
                     <p style={{ fontSize:'12px', color:'#4a5e5a', marginBottom:'10px' }}>
-                      {(ownerStatus.count || 0) === 0
-                        ? 'Owner seat unclaimed. Send an invitation to bring the franchise owner onboard.'
-                        : 'Add a co-owner with full access alongside the current owner (up to 2 owners).'}
+                      Owner seat unclaimed. Send an invitation to bring the franchise owner onboard.
                     </p>
                     <button
                       onClick={()=>setShowInviteOwner(true)}
                       style={{ width:'100%', padding:'10px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}
-                    >{(ownerStatus.count || 0) === 0 ? '✉️ Invite Owner' : '✉️ Invite Co-Owner'}</button>
+                    >✉️ Invite Owner</button>
                   </div>
+                )}
+                {ownerStatus && !ownerStatus.pending_invite && (ownerStatus.count || 0) === 1 && (
+                  <p style={{ fontSize:'12px', color:'#8a9e9a', margin:0, lineHeight:1.5 }}>
+                    To add a co-owner, add an <strong>owner seat</strong> in Seats below — it bills at the co-owner rate and invites them into it.
+                  </p>
                 )}
               </div>
             </div>
@@ -27151,6 +27283,11 @@ export function InviteOwnerModal({ location, onSuccess, onClose }) {
     setWarnings(null)
 
     const payload = {
+      // issue 226 step 6 — this modal PROVISIONS. It is mounted only where
+      // ownerStatus.count === 0, and it says so explicitly rather than relying
+      // on the route's default, so the button and the mode cannot drift apart
+      // in either direction.
+      mode: 'provision',
       location_id: location.id,
       email: email.trim().toLowerCase(),
       full_name: `${firstName.trim()} ${lastName.trim()}`,

@@ -35,16 +35,39 @@ import {
   seatCostResponse,
   unpricedSeatNote,
 } from '@/lib/seat-cost'
+// issue 226 step 6 — the two-owner ceiling, imported rather than restated.
+// The same constant /api/seats POST and /api/admin/invite-owner enforce.
+import { MAX_OWNER_SEATS } from '@/lib/seat-plan'
 
 export const runtime = 'nodejs'
 
-// issue 217 note on the co-owner rule: 'owner' is absent from this whitelist,
-// so this route CANNOT receive an owner tier — a tier='owner' body is a 400
-// before any pricing runs. The cost quote still goes through lib/seat-plan's
-// planBillingLines rather than a flat tier lookup, because a whitelist is a
-// gate that can be widened and the co-owner rule must not have to be
-// remembered on the day it is.
-const VALID_TIERS = ['manager', 'light', 'readonly'] as const
+// issue 226 step 6 — 'owner' IS accepted here now.
+//
+// The note this replaces ended "a whitelist is a gate that can be widened and
+// the co-owner rule must not have to be remembered on the day it is." This is
+// that day, and it did not have to be remembered.
+//
+// Issue 216 excluded owner correctly: at that time an owner-tier buy would
+// have been charged $550, because lib/seat-stripe-sync mapped tier to price
+// 1:1 and nothing applied the co-owner rule to a PURCHASE. That reason expired
+// at issue 217 (dcad926).
+//
+// WHAT PRICES IT CORRECTLY NOW: quoteSeatPurchase(), which this route already
+// calls below. It counts the location's existing owner seats and asks
+// incrementalBillingLines(existingOwnerSeats, 'owner', 1), which differences
+// planBillingLines(owner:N) against planBillingLines(owner:N+1). With one
+// owner seat already held that returns [{ billingTier: 'manager' }] — $400,
+// the co-owner rate — and the SAME list drives both the recorded
+// prorated_cost and the Stripe charge (issue 219's applySeatPurchaseToStripe).
+// The rule is stated once, in planBillingLines; nothing on this path restates
+// it. Pinned since issue 217 by beta-server-seat-cost-217.test.ts, "the 2nd
+// owner seat bills at the MANAGER rate".
+//
+// The owner cap comes with it. Until now the two-owner ceiling was unreachable
+// here because the whitelist refused owner first; it is now the only thing
+// between this route and a third owner seat, so it is enforced explicitly
+// below, off the same constant every other writer imports.
+const VALID_TIERS = ['owner', 'manager', 'light', 'readonly'] as const
 type Tier = (typeof VALID_TIERS)[number]
 
 const INVITE_TTL_DAYS = 7
@@ -62,9 +85,13 @@ function isValidEmail(s: string): boolean {
 
 // tier='manager' carries the real 'manager' role (operational lead). Worker Bee
 // (light) and Honey Watcher (readonly) are the genuine read-only tiers and stay
-// 'lite_user'. Owner seats are created during the onboarding co-owner flow, not
-// via this path, so 'owner' isn't a valid tier here. See migrations/manager_role.sql.
+// 'lite_user'. See migrations/manager_role.sql.
+//
+// issue 226 step 6 — tier='owner' carries the 'owner' role, matching what
+// /api/hub_users/invite has always done for an owner-tier invite. A co-owner
+// is a full owner, not an elevated manager; only the RATE is the manager's.
 function roleForTier(tier: Tier): string {
+  if (tier === 'owner') return 'owner'
   return tier === 'manager' ? 'manager' : 'lite_user'
 }
 
@@ -125,6 +152,37 @@ export async function POST(request: NextRequest) {
     caller.role === 'owner' && caller.location_id === location_id
   if (!isElevated(caller.role) && !isOwnerOfLocation) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  }
+
+  // issue 226 step 6 — THE OWNER CEILING, newly reachable on this route.
+  //
+  // Counts ACTIVE owner seats whether or not they are claimed: a paid,
+  // unclaimed owner seat is one of the two, and a location holding one does
+  // not need to BUY another — it needs someone invited into the one it has.
+  // Buying past that is the mistake this refuses.
+  //
+  // Mirrors /api/seats POST's cap exactly, including counting the seat this
+  // request would create, so neither route can leapfrog the other.
+  if (tier === 'owner') {
+    const { count, error: capErr } = await supabaseService
+      .from('subscription_seats')
+      .select('id', { count: 'exact', head: true })
+      .eq('location_id', location_id)
+      .eq('tier', 'owner')
+      .eq('status', 'active')
+    if (capErr) {
+      console.error('[buy-and-invite owner cap]', capErr)
+      return NextResponse.json({ error: capErr.message }, { status: 500 })
+    }
+    if ((count ?? 0) + 1 > MAX_OWNER_SEATS) {
+      return NextResponse.json(
+        {
+          error: 'max_owners_reached',
+          message: `A location can have at most ${MAX_OWNER_SEATS} owner seats. If one is already open, invite into it instead of buying another.`,
+        },
+        { status: 409 }
+      )
+    }
   }
 
   // NOTE (milestone 1, Kevin's call): no Stripe gate here — the free

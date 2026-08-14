@@ -225,3 +225,67 @@ describe('Add a seat', () => {
     expect(post.body).not.toHaveProperty('prorated_cost')
   })
 })
+
+// ── issue 226 step 6 — filling a seat that already exists ──────────────────
+// The case that started the week: Fort Lauderdale had two paid seats and an
+// owner who could not invite into either, because the only owner-invite button
+// went to /api/admin/invite-owner and would have reset her live location.
+describe('inviting into an empty seat', () => {
+  // No invites at all, so both open seats read as empty.
+  const noInvites = () => {
+    ;(globalThis as any).fetch = vi.fn(async (url: string, init?: any) => {
+      const u = String(url)
+      if (init?.method === 'POST') {
+        posts.push({ url: u, body: init.body ? JSON.parse(init.body) : null })
+        return { ok: true, json: async () => ({ ok: true }) }
+      }
+      if (u.includes('/api/seats/quote')) return { ok: true, json: async () => QUOTE }
+      if (u.includes('/api/seats')) return { ok: true, json: async () => SEATS }
+      if (u.includes('/api/pending_invites')) return { ok: true, json: async () => [] }
+      return { ok: true, json: async () => [] }
+    })
+  }
+
+  it('offers an Invite action on an empty seat', async () => {
+    noInvites()
+    await roster()
+    await click(seatRowFor('Nobody in this seat')!)
+    expect(buttonByText('Invite someone into this seat')).toBeTruthy()
+  })
+
+  it('says plainly that nothing is charged — the seat is already billed', async () => {
+    noInvites()
+    await roster()
+    await click(seatRowFor('Nobody in this seat')!)
+    await click(buttonByText('Invite someone into this seat')!)
+    expect(container.textContent).toContain('Nothing is charged')
+    expect(container.textContent).toContain('already billed at')
+  })
+
+  // The whole point: filling an OWNER seat goes to the invite route, never to
+  // the provisioning route that rewrites a live location's billing.
+  it('posts to /api/hub_users/invite at the SEAT’s tier, and never to invite-owner', async () => {
+    noInvites()
+    await roster()
+    await click(seatRowFor('Nobody in this seat')!)
+    await click(buttonByText('Invite someone into this seat')!)
+
+    const setVal = (el: Element, v: string) => {
+      const d = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+      d.call(el, v)
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    const inputs = Array.from(container.querySelectorAll('input'))
+    await act(async () => { setVal(inputs[0], 'Jack Doe'); setVal(inputs[1], 'jack@x.com') })
+    await click(buttonByText('Send invitation')!)
+
+    const post = posts.find(p => p.url === '/api/hub_users/invite')!
+    expect(post).toBeTruthy()
+    // The first empty row is the OWNER seat — a co-owner invite, with no
+    // purchase and no pricing anywhere in it.
+    expect(post.body.tier).toBe('owner')
+    expect(post.body.email).toBe('jack@x.com')
+    expect(posts.some(p => p.url.includes('invite-owner'))).toBe(false)
+    expect(posts.some(p => p.url === '/api/seats')).toBe(false)
+  })
+})
