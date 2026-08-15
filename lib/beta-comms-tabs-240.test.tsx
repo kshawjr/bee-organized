@@ -113,7 +113,7 @@ describe('the three tabs exist and render', () => {
     // because every tab name also appears in the nav strip.
     expect(await mount('emails')).toContain('What a client receives automatically')
     expect(await mount('yourteam')).toContain('Who your emails come from')
-    expect(await mount('texts')).toContain('Text messaging needs the add-on')
+    expect(await mount('texts')).toContain('Texts are on their way')
   })
 
   it('no tab lands on the no-access guard', async () => {
@@ -149,7 +149,10 @@ describe('nothing that worked before is unreachable', () => {
     expect(emails).not.toContain('Call Scripts')
 
     const texts = await mount('texts')
-    expect(texts).toContain('Text Templates')
+    // 'Text Templates' was an empty accordion locked behind a chip that could
+    // never be earned; issue 240 step 6 replaced it with an inert preview.
+    expect(texts).toContain('Text messages')
+    expect(texts).not.toContain('Text Templates')
     expect(texts).toContain('Call Scripts')
     expect(texts).not.toContain('Email Templates')
   })

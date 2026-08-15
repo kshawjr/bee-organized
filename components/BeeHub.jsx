@@ -16595,8 +16595,19 @@ function TemplateEditorPopup({ template, isNew=false, isMasterEdit=false, defaul
               {/* Type */}
               <div>
                 <label style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', textTransform:'uppercase', letterSpacing:'0.5px', display:'block', marginBottom:'5px' }}>Type</label>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'8px' }}>
-                  {[['email','📧','Email'],['sms','💬','SMS'],['call','📞','Call Script']].map(([v,icon,label])=>(
+                {/* SMS is not offerable while it cannot send (issue 240 step
+                    6). The picker used to list it unconditionally, so an owner
+                    could open this from the unlocked Call Scripts section,
+                    choose SMS, and save — POST /api/templates has no add-on
+                    gate, so the row persisted. It then rendered only inside
+                    the locked Text Templates accordion, where it could not be
+                    edited or deleted. Step 6 removes that accordion, which
+                    would have made such a row invisible outright, so the trap
+                    is closed at the door instead. */}
+                <div style={{ display:'grid', gridTemplateColumns:(settings?.location?.smsEnabled ? '1fr 1fr 1fr' : '1fr 1fr'), gap:'8px', maxWidth:CONTROL_W.field }}>
+                  {[['email','📧','Email'],['sms','💬','SMS'],['call','📞','Call Script']]
+                    .filter(([v])=> v!=='sms' || settings?.location?.smsEnabled)
+                    .map(([v,icon,label])=>(
                     <button key={v} onClick={()=>setType(v)} style={{ padding:'10px', borderRadius:'9px', cursor:'pointer', border:'2px solid', borderColor:type===v?typeConf[v].color:'rgba(0,0,0,0.08)', background:type===v?`${typeConf[v].color}12`:'white', fontFamily:'inherit', display:'flex', flexDirection:'column', alignItems:'center', gap:'4px' }}>
                       <span style={{ fontSize:'18px' }}>{icon}</span>
                       <span style={{ fontSize:'11px', fontWeight:type===v?600:400, color:type===v?typeConf[v].color:'#4a5e5a' }}>{label}</span>
@@ -18287,6 +18298,56 @@ function RecipientTypePicker({ category, projectTypes, readOnly, onChange }) {
 //    ADDS the type to them; it never strips it from anyone else. Whoever
 //    else is notified is disclosed in the "also told" line rather than
 //    silently dropped.
+// ─── issue 240 step 6 — Text messages, not yet a feature ───
+//
+// A PREVIEW, deliberately inert: no button, no input, no toggle, nothing
+// focusable. It exists so an owner can see what a text will say before it
+// is a thing, not so they can configure one.
+//
+// Greying this out disables nothing, because nothing works today:
+//   • no SMS provider dependency in package.json, and no SMS/Twilio env var
+//     referenced anywhere in lib, app or components
+//   • lib/drip-send.ts skips any step whose channel is not 'email'
+//     ("Non-email channel → advance past it (sms/call not wired yet)")
+//   • drip_path_steps in production: 77 rows, every one channel='email'
+//   • templates of type 'sms' in production: 3 rows, ALL is_active=false —
+//     the quarantined Gen 1 prototypes (t5/t6/t7), so the section this
+//     replaces rendered an empty locked accordion for every location
+//   • there is no sms_enabled column on locations, so the smsEnabled flag
+//     that locked it can never be true for a real franchise owner
+//
+// The copy below is the approved wording, held here rather than in the
+// database on purpose: seeding a real template row would make it look
+// configurable and would put unreviewed content in the send path the day
+// SMS is wired up.
+const TEXT_PREVIEW = "Hi {{first_name}}, it's {{owner_name}} from Bee Organized — thanks for reaching out! I'll follow up by email too, but happy to answer anything here."
+
+export function TextsComingSoon() {
+  // A GSM-7 message is 160 characters; past that it bills as two. Merge tags
+  // expand at send time, so this is indicative, not a promise — hence "about".
+  const chars = TEXT_PREVIEW.length
+  return (
+    <div style={{ margin:'0 12px 18px' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:'8px', margin:'0 2px 6px', flexWrap:'wrap' }}>
+        <p style={{ fontSize:'11px', fontWeight:700, color:'#6b7c79', textTransform:'uppercase', letterSpacing:'0.6px', margin:0 }}>💬 Text messages</p>
+        {/* "Not sending yet" rather than "Coming soon" (issue 240 step 6):
+            the first is a fact about today that we can stand behind, the
+            second is a promise about a roadmap this screen cannot verify. */}
+        <span style={{ fontSize:'10px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.1)', border:'1px solid rgba(212,160,70,0.2)', padding:'2px 9px', borderRadius:'20px', whiteSpace:'nowrap' }}>Not sending yet</span>
+      </div>
+      <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5, margin:'0 2px 9px', maxWidth:'560px' }}>
+        When this arrives, a text will go out alongside the first email — but only to a lead who gave a mobile number. Nothing sends today, and there is nothing to switch on yet.
+      </p>
+      {/* aria-hidden: it is a picture of a message, not content to act on. */}
+      <div aria-hidden="true" style={{ borderRadius:'12px', background:'white', boxShadow:'0 1px 4px rgba(26,46,43,0.07)', padding:'14px 16px', opacity:0.55, filter:'saturate(0.4)', maxWidth:'560px' }}>
+        <p style={{ fontSize:'11px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'7px' }}>First contact</p>
+        <p style={{ fontSize:'13px', color:'#4a5e5a', lineHeight:1.6, whiteSpace:'pre-line' }}>{TEXT_PREVIEW}</p>
+        <p style={{ fontSize:'11px', color:'#b0c0bc', marginTop:'8px' }}>about {chars} characters · one message</p>
+      </div>
+    </div>
+  )
+}
+
 export function TeamRouting({ realLocId, readOnly = false }) {
   const [types, setTypes] = React.useState(null)      // [{label, dripCategory}]
   const [senders, setSenders] = React.useState(null)
@@ -21282,7 +21343,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   const TEMPLATE_TYPE_SECTIONS = {
     email: { type:'email', heading:'Email Templates', sub:'Subject lines and bodies for client emails' },
     sms:   { type:'sms',   heading:'Text Templates',  sub:'SMS message templates' },
-    call:  { type:'call',  heading:'Call Scripts',    sub:'Phone call talking points' },
+    // "Nothing is sent to anyone" is the distinction the app has never drawn
+    // (issue 240 step 6). Every other template type on this screen leaves the
+    // building; a call script is a note the owner reads aloud.
+    call:  { type:'call',  heading:'Call Scripts',    sub:'Talking points for you — nothing here is sent to anyone' },
   }
   function renderTemplateTypeSections(TYPE_SECTIONS) {
     const masters = templates.filter(t => t.isMaster && t.isActive)
@@ -21431,7 +21495,18 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                   <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b', padding:'14px 4px 6px' }}>✏️ Your Custom Templates <span style={{ fontWeight:400, color:'#8a9e9a' }}>· only your location uses these</span></p>
                   {typeCustoms.length===0 ? (
                     <div style={{ background:'white', padding:'16px 14px', borderRadius:'12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)', textAlign:'center' }}>
-                      <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>No custom {heading.toLowerCase()} yet. Duplicate a master above or create one from scratch.</p>
+                      {/* "Duplicate a master above" only holds when there IS
+                          one. Every call master in production is a quarantined
+                          Gen 1 row (is_active=false), so for call scripts the
+                          masters group renders nothing and that sentence sent
+                          the owner looking for a button that is not there
+                          (issue 240 step 6). */}
+                      <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>
+                        No {heading.toLowerCase()} yet.{' '}
+                        {typeMasters.length > 0
+                          ? 'Duplicate a master above or create one from scratch.'
+                          : 'Create one from scratch below.'}
+                      </p>
                     </div>
                   ) : renderRowsCard(typeCustoms, customActions)}
                   <button onClick={()=>setEditingTemplate('new')} style={{ width:'100%', maxWidth:CONTROL_W.action, marginTop:'8px', padding:'10px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>+ Create Template</button>
@@ -22214,10 +22289,20 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
 
             <div style={{ padding:'18px 16px 2px' }}>
               <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Texts &amp; scripts</h1>
-              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Text messaging needs the add-on. Call scripts are notes for you.</p>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Texts are on their way. Call scripts are notes for you — nothing on this tab is sent to a client today.</p>
             </div>
 
-            {renderTemplateTypeSections([TEMPLATE_TYPE_SECTIONS.sms, TEMPLATE_TYPE_SECTIONS.call])}
+            {/* Texts first, inert (issue 240 step 6). This REPLACES the locked
+                "Text Templates" accordion that step 4 moved here. Nothing is
+                lost: its three sms templates are the quarantined Gen 1 rows,
+                all is_active=false, so it rendered an empty accordion behind
+                an "Add-on needed" chip that could never be earned — there is
+                no sms_enabled column for the flag to read. */}
+            <TextsComingSoon />
+
+            {/* Call scripts stay exactly as they were: create, edit, delete
+                through the same renderer, now given only the call section. */}
+            {renderTemplateTypeSections([TEMPLATE_TYPE_SECTIONS.call])}
 
           </div>
         )}
