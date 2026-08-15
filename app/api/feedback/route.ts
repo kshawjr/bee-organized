@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { buildSafeContext, insertFeedbackRow } from '@/lib/feedback-context'
+import { withInternalFallback } from '@/lib/feedback-internal'
 
 export const runtime = 'nodejs'
 
@@ -37,26 +38,43 @@ export async function GET(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
+  // The caller's role is read on EVERY call now, not only when ?user_id= is
+  // present: it decides both the override AND whether internal items are
+  // filtered (issue 247 step 1). One single-row read by primary key — the same
+  // lookup POST already does unconditionally.
+  const { data: caller } = await supabase
+    .from('hub_users')
+    .select('role')
+    .eq('id', user.id)
+    .single()
+  const isElevatedCaller = !!caller && ELEVATED_ROLES.includes(caller.role)
+
   let targetUserId = user.id
   const override = req.nextUrl.searchParams.get('user_id')
-  if (override && override !== user.id) {
-    const { data: caller } = await supabase
-      .from('hub_users')
-      .select('role')
-      .eq('id', user.id)
-      .single()
-    if (caller && ELEVATED_ROLES.includes(caller.role)) targetUserId = override
-  }
+  if (override && override !== user.id && isElevatedCaller) targetUserId = override
 
-  const { data, error } = await supabaseService
-    .from('feedback_items')
-    .select('*')
-    .eq('user_id', targetUserId)
-    .order('created_at', { ascending: false })
+  const { data, error } = await withInternalFallback<any[]>(
+    async (filterInternal) => {
+      let query = supabaseService
+        .from('feedback_items')
+        .select('*')
+        .eq('user_id', targetUserId)
+        .order('created_at', { ascending: false })
+      // Defence in depth. This list is ALREADY scoped to a single user_id, so
+      // an internal item filed by engineering cannot surface here regardless.
+      // The filter earns its place by making the invariant uniform — no
+      // non-elevated caller receives an internal row from ANY endpoint — and by
+      // keeping this tab in step with the owner screen if one of an owner's own
+      // reports is ever reclassified internal. Without it the item would vanish
+      // from "What you've told us" and linger here.
+      if (filterInternal && !isElevatedCaller) query = query.eq('is_internal', false)
+      return await query
+    },
+  )
 
   if (error) {
     console.error('[feedback GET]', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ error: (error as { message?: string })?.message }, { status: 500 })
   }
 
   return NextResponse.json({ items: data || [] })

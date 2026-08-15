@@ -15,10 +15,19 @@
 //
 // Reads go through supabaseService (service role); location scoping is enforced
 // in app code here (we add the location_id filter for non-elevated callers).
+//
+// ─── INTERNAL ITEMS ARE NEVER RETURNED TO AN OWNER (issue 247 step 1) ──
+// feedback_items is now the single tracker: owner reports AND internally-found
+// bugs. An internal item may be TAGGED with a location — that tag is how an
+// overlap becomes visible ("Kevin logged this, then Ankur reported it") — so
+// the old location-only predicate is no longer sufficient. owner/manager reads
+// also filter is_internal=false. Elevated callers (super_admin/admin) are
+// unchanged and still see everything, internal included.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
+import { withInternalFallback } from '@/lib/feedback-internal'
 
 export const runtime = 'nodejs'
 
@@ -49,40 +58,67 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
-  // Disambiguate the embeds by FK column — feedback_items has exactly one FK
-  // into hub_users (user_id) and one into locations (location_id).
-  let query = supabaseService
-    .from('feedback_items')
-    .select(`
-      *,
-      submitter:hub_users!user_id ( id, full_name, first_name, email ),
-      location:locations!location_id ( id, name )
-    `)
-    .order('created_at', { ascending: false })
-
   const status = req.nextUrl.searchParams.get('status')
-  if (status && VALID_STATUSES.has(status)) query = query.eq('status', status)
-
   const type = req.nextUrl.searchParams.get('type')
-  if (type && VALID_TYPES.has(type)) query = query.eq('type', type)
+  const userId = req.nextUrl.searchParams.get('user_id')
 
-  // owner/manager are hard-scoped to their own location, ignoring any
-  // ?location_id= override. Elevated callers may filter by an arbitrary
-  // location_id (or omit it to see everything).
-  if (isLocationScopedCaller) {
-    query = query.eq('location_id', caller!.location_id)
-  } else {
-    const locationId = req.nextUrl.searchParams.get('location_id')
-    if (locationId) query = query.eq('location_id', locationId)
+  // Built as a FUNCTION, not a chain, so the whole query can be re-run with the
+  // is_internal predicate dropped when that column has not been migrated yet
+  // (lib/feedback-internal). Everything except that one predicate is identical
+  // between the two passes — that is what makes the retry safe to reason about.
+  const buildQuery = (filterInternal: boolean) => {
+    // Disambiguate the embeds by FK column — feedback_items has exactly one FK
+    // into hub_users (user_id) and one into locations (location_id).
+    let query = supabaseService
+      .from('feedback_items')
+      .select(`
+        *,
+        submitter:hub_users!user_id ( id, full_name, first_name, email ),
+        location:locations!location_id ( id, name )
+      `)
+      .order('created_at', { ascending: false })
+
+    if (status && VALID_STATUSES.has(status)) query = query.eq('status', status)
+    if (type && VALID_TYPES.has(type)) query = query.eq('type', type)
+
+    // owner/manager are hard-scoped to their own location, ignoring any
+    // ?location_id= override. Elevated callers may filter by an arbitrary
+    // location_id (or omit it to see everything).
+    if (isLocationScopedCaller) {
+      query = query.eq('location_id', caller!.location_id)
+      // THE OWNER GUARD (issue 247 step 1). location_id alone is no longer
+      // enough: it means "submitted from here", and an INTERNAL item tagged
+      // with this owner's location would otherwise match — which is precisely
+      // the case the tag exists to create. Server-side, on the query, never a
+      // client filter: the rows must not reach the browser at all.
+      //
+      // This is the ONLY owner-facing list read of feedback_items. The owner
+      // screen's header count, its four tab counts and its subtitle are all
+      // derived from this response (components/feedback/OwnerFeedbackScreen
+      // `counts`), so filtering here fixes every number an owner can see —
+      // there is no second place to keep in step.
+      if (filterInternal) query = query.eq('is_internal', false)
+    } else {
+      const locationId = req.nextUrl.searchParams.get('location_id')
+      if (locationId) query = query.eq('location_id', locationId)
+    }
+
+    if (userId) query = query.eq('user_id', userId)
+    return query
   }
 
-  const userId = req.nextUrl.searchParams.get('user_id')
-  if (userId) query = query.eq('user_id', userId)
-
-  const { data, error } = await query
+  const { data, error, internalSupported } = await withInternalFallback<any[]>(
+    async (filterInternal) => await buildQuery(filterInternal),
+  )
   if (error) {
     console.error('[admin feedback GET]', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ error: (error as { message?: string })?.message }, { status: 500 })
+  }
+  if (!internalSupported && isLocationScopedCaller) {
+    // Pre-migration breadcrumb. Not a warning about a leak: with no column, no
+    // row can be internal, so the unfiltered read and the filtered one return
+    // the same rows.
+    console.warn('[admin feedback GET] is_internal column missing — owner read unfiltered (migration pending)')
   }
 
   // ── record context: resolve the pointer to a NAME (issue 233) ──────

@@ -180,12 +180,18 @@ describe('view-as feedback identity parity (mine tab)', () => {
     expect(userRoute).toContain('let targetUserId = user.id')
     // …and the only reassignment is gated on the caller's own hub_users role
     // being elevated (role looked up by session id, never from the request).
-    const overrideBlock = userRoute.slice(
-      userRoute.indexOf("searchParams.get('user_id')"),
-      userRoute.indexOf('targetUserId = override') + 'targetUserId = override'.length
-    )
-    expect(overrideBlock).toContain(".eq('id', user.id)")
-    expect(overrideBlock).toMatch(/if \(caller && ELEVATED_ROLES\.includes\(caller\.role\)\) targetUserId = override/)
+    //
+    // SHAPE CHANGED, INVARIANT DID NOT (issue 247 step 1). The role lookup was
+    // hoisted ABOVE the override block, because it now decides two things
+    // rather than one: whether the override is honored, and whether internal
+    // items are filtered out of the list. So the guard is a named flag instead
+    // of an inline check, and the three assertions below pin the same chain the
+    // sliced block used to — role read by SESSION id, elevated computed from
+    // ELEVATED_ROLES, and that flag being the only thing that unlocks the
+    // override.
+    expect(userRoute).toMatch(/\.from\('hub_users'\)\s*\.select\('role'\)\s*\.eq\('id', user\.id\)/)
+    expect(userRoute).toMatch(/const isElevatedCaller = !!caller && ELEVATED_ROLES\.includes\(caller\.role\)/)
+    expect(userRoute).toMatch(/if \(override && override !== user\.id && isElevatedCaller\) targetUserId = override/)
     expect(userRoute.split('targetUserId = override').length).toBe(2) // exactly one assignment site
     // The query binds to the resolved target, not raw input.
     expect(userRoute).toContain(".eq('user_id', targetUserId)")

@@ -2,7 +2,11 @@
 //
 // PATCH /api/admin/feedback/[id] — triage update. Body: { status?, admin_response? }.
 //   - super_admin / admin: can patch any feedback item.
-//   - owner / manager: can patch ONLY items belonging to their own location.
+//   - owner / manager: can patch ONLY items belonging to their own location,
+//     and ONLY items that are not internal (issue 247 step 1 — an internal item
+//     may carry their location tag, so the location test alone would let them
+//     mark our own engineering backlog Fixed). Internal ids answer 404, not
+//     403, so a guessed id cannot even confirm the row exists.
 //   - everyone else: 403.
 //
 // When admin_response is provided (non-empty), admin_response_at is stamped to
@@ -69,11 +73,15 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { sendFeedbackReplyEmail } from '@/lib/feedback-reply-email'
 import { FEEDBACK_STATUS_PLAIN } from '@/lib/feedback-queues'
+import { isInternalItem, withInternalFallback } from '@/lib/feedback-internal'
 
 export const runtime = 'nodejs'
 
 const ELEVATED_ROLES = ['super_admin', 'admin']
 const LOCATION_SCOPED_ROLES = ['owner', 'manager']
+// The BEFORE-state columns, named once so the pre-migration fallback select
+// (without is_internal) and the normal one cannot drift apart.
+const TARGET_COLS = 'id, location_id, user_id, type, title, status, admin_response'
 const VALID_STATUSES = new Set([
   'submitted', 'under_review', 'planned', 'in_progress', 'shipped', 'declined',
 ])
@@ -118,12 +126,30 @@ export async function PATCH(
   // location-scoped ones. The ownership check still needs it, and so does the
   // send decision: "is this reply new?" is only answerable against the reply
   // that was already there.
-  const { data: target } = await supabaseService
-    .from('feedback_items')
-    .select('id, location_id, user_id, type, title, status, admin_response')
-    .eq('id', id)
-    .single()
+  const { data: target } = await withInternalFallback<any>(
+    async (withInternal) =>
+      await supabaseService
+        .from('feedback_items')
+        .select(withInternal ? `${TARGET_COLS}, is_internal` : TARGET_COLS)
+        .eq('id', id)
+        .single(),
+  )
   if (!target) return NextResponse.json({ error: 'not_found' }, { status: 404 })
+
+  // ─── INTERNAL ITEMS DO NOT EXIST FOR AN OWNER (issue 247 step 1) ────
+  // Checked BEFORE the location test, and the order is load-bearing: an
+  // internal item is very likely tagged with THIS owner's location — that tag
+  // is the point, it is how an overlap becomes visible — so the location test
+  // would PASS it through and hand them a status control and a reply box on our
+  // own engineering backlog.
+  //
+  // 404, not 403. A 403 would confirm that an item exists here which they may
+  // not touch, i.e. that internal work about their location exists — the exact
+  // fact this flag hides. An unknown id and an internal id must be
+  // indistinguishable. Elevated callers never reach this branch.
+  if (isLocationScopedCaller && isInternalItem(target)) {
+    return NextResponse.json({ error: 'not_found' }, { status: 404 })
+  }
 
   // owner/manager may only touch feedback for their own location.
   if (isLocationScopedCaller && target.location_id !== caller!.location_id) {
