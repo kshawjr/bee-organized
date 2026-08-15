@@ -3,20 +3,26 @@
 // Per-project-type drip SENDER routing config for one location.
 //
 // GET    /api/locations/:id/project-type-senders
-//   → { enabled, base_sender_email, base_sender_domain, project_types,
-//       assignments:[{ project_type, sender_name, sender_email, ...,
-//       domain_warning }], people:[{ id, name, email, role, domain_warning }] }
+//   → { base_sender_email, base_sender_domain, project_types,
+//       project_type_groups, assignments:[{ project_type, sender_name,
+//       sender_email, ..., domain_warning }],
+//       people:[{ id, name, email, role, domain_warning }] }
 //   Assignable people are read LIVE from hub_users (owner/manager) for the
 //   picker; domain_warning flags a sender whose email domain differs from the
 //   location's base sender (likely not verified → won't deliver).
 //
-// PATCH  Body: { enabled: boolean } — flip the split master toggle.
-//
-// POST   Body: { sender_name, sender_email, sender_reply_to?, source_user_id?,
-//                project_types: string[] } — assign a sender to a set of project
-//   types (upsert, one-per-type). Reassigning a type moves it to this sender.
+// POST   Body: { sender_name, sender_email, sender_reply_to?, source_user_id,
+//                project_types: string[] } — assign a handler to a set of project
+//   types (upsert, one-per-type). Reassigning a type moves it to this handler.
+//   source_user_id is REQUIRED (issue 246 step 2): a handler is a person.
 //
 // DELETE Body: { project_types: string[] } — unassign types → base sender.
+//
+// THERE IS NO MASTER TOGGLE, and no PATCH. Both went with
+// locations.split_senders_enabled in issue 246 step 2: "no handler row for this
+// type" IS the off state, said per type. The only UI is the per-type dropdown
+// in NewLeadsSection — picking a person POSTs, choosing "The location owner"
+// DELETEs. Issue 246 step 3 deleted the last caller of the retired PATCH.
 //
 // Auth: super_admin/admin (any location) or the franchise OWNER of THIS
 // location ONLY — enforced server-side on EVERY verb (incl. GET). A MANAGER or

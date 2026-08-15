@@ -348,11 +348,32 @@ describe('UI — placement in the owner+super_admin-only Communication tab', () 
   it('renders in the Communication tab, wired to the real location UUID', () => {
     expect(beehub).toContain('<NewLeadsSection realLocId={realLocId}')
   })
-  it('lives under the composed "Who hears about new leads" tier alongside the sending-identity hero', () => {
-    // The unified new-lead emails block moved out of My Location into the
-    // Communication tab (activeSection==='paths'), composed in tiers.
-    expect(beehub).toContain('Who hears about new leads')
+  it('carries BOTH of its tiers, and they are inside the component', () => {
+    // WAS: expect(beehub).toContain('Who hears about new leads'), a raw
+    // whole-file grep for the tier name this section used to sit under.
+    //
+    // That card was retired in issue 246 step 2 — NewLeadsSection replaced it
+    // with two independent tiers — so the assertion should have failed then.
+    // It did not: a COMMENT on the Emails tab still quoted "Who hears about new
+    // leads" in prose, and a whole-file toContain cannot tell rendered UI from
+    // a comment about UI. It passed on the comment for two commits, and only
+    // failed when issue 246 step 3 deleted that comment along with the orphaned
+    // sender toggle it described.
+    //
+    // Now asserted against `comp` — the NewLeadsSection slice — so a label has
+    // to be IN the component, not merely somewhere in a 36k-line file.
+    expect(comp).toContain('Who handles what')
+    expect(comp).toContain('Who is told about a new lead')
+    // And the string it used to grep for is genuinely gone, comment included.
+    expect(beehub).not.toContain('Who hears about new leads')
+  })
+
+  it('the sending identity stayed on Emails and did not follow this section', () => {
+    // Issue 246 step 1 split them: identity → Emails, routing + notification →
+    // New leads. Pinned because they read as one feature and a later tidy-up
+    // could plausibly re-merge them.
     expect(beehub).toContain('Sending identity')
+    expect(comp).not.toContain('Sending identity')
   })
   it('the tab hosting this component is OWNER-allowlisted (hidden from manager AND lite_user)', () => {
     // The section list is an allowlist on franchiseRole==='owner' — the old

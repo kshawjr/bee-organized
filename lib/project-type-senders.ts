@@ -6,12 +6,14 @@
 // config UI/API read and write.
 //
 // MODEL (see migrations/location_project_type_senders.sql):
-//   • locations.split_senders_enabled — master toggle. false (default) = the
-//     base sender handles every project type.
-//   • location_project_type_senders — one row per (location, project_type)
-//     assigned to a sender (name+email copied from a picked hub_user, or typed).
-//     A sender may own many types; a type maps to at most one sender.
-//   • Unassigned types / disabled split → base sender (enforced at send time).
+//   • location_project_type_senders — one row per (location, project_type),
+//     assigned to a HANDLER: a person on the location's team, name+email copied
+//     from their hub_users row. One person may hold many types; a type maps to
+//     at most one person.
+//   • NO MASTER FLAG. locations.split_senders_enabled was retired in issue 246
+//     step 2 and is read by nothing — "no row for this type" IS the off state,
+//     said per type. A type with no row falls back to the base sender, enforced
+//     at send time. The column itself survives until Part 3 drops it.
 //
 // Owner + super_admin/admin only — the API route gates every verb with
 // notificationRecipientsManageableServer (same predicate as B1 recipients).
