@@ -7,13 +7,12 @@
 //     opp_closed_job_3mo               (now + 90d)
 //     opp_closed_job_12mo              (now + 365d)
 //
-//   Estimate Sent + organizing project →
-//     opp_organizing_estimate_3d       (now + 3d)
-//     opp_organizing_estimate_30d      (now + 30d)
-//
-//   Estimate Sent + moving project →
-//     opp_moving_estimate_3d           (now + 3d)
-//     opp_moving_estimate_30d          (now + 30d)
+// RETIRED (issue 240) — Estimate Sent no longer schedules anything:
+//     opp_organizing_estimate_3d / _30d
+//     opp_moving_estimate_3d     / _30d
+//   Jobber sends its own estimate follow-ups; ours arrived alongside them.
+//   The four keys remain defined and renderable so that any row still
+//   pending at retirement is handled correctly rather than erroring.
 //
 // Persistence: scheduled_stage_emails (one row per (lead, stage_email_key))
 // — see drip_followup_infrastructure.sql. Insertion uses UPSERT so a
@@ -138,7 +137,10 @@ export async function scheduleStageEmails(args: {
   projectType: string | null
 }): Promise<void> {
   try {
-    const { leadId, newStage, projectType } = args
+    // args.projectType is deliberately not destructured: it only ever fed the
+    // retired Estimate Sent branch. Kept on the signature because callers
+    // already thread it and re-enabling would need it back.
+    const { leadId, newStage } = args
 
     // Cheap scheduling-time opt-out gate — don't queue what can never
     // send. sendStageEmail re-checks at send time (authoritative: the
@@ -157,10 +159,16 @@ export async function scheduleStageEmails(args: {
 
     if (newStage === 'Closed Won') {
       triggers = CLOSED_WON_TRIGGERS
-    } else if (newStage === 'Estimate Sent') {
-      const cat = await resolveDripCategory(projectType)
-      triggers = cat === 'move' ? ESTIMATE_MOVING_TRIGGERS : ESTIMATE_ORGANIZING_TRIGGERS
     } else {
+      // 'Estimate Sent' branched here until issue 240 and queued the four
+      // opp_*_estimate_* follow-ups. Retired: Jobber sends its own estimate
+      // follow-ups and ours duplicated them for the client. 67 had already
+      // gone out. Nothing schedules those four keys any more.
+      //
+      // The keys stay defined below — ALL_STAGE_EMAIL_KEYS still scopes
+      // cancellation over them, TRANSACTIONAL_STAGE_EMAIL_KEYS still picks
+      // their wrapper, and sendStageEmail must keep rendering correctly for
+      // any pending row that outlives the retirement sweep.
       return
     }
 

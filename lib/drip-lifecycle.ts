@@ -360,10 +360,19 @@ export async function applyDripSideEffects(args: {
   const { leadId, locationUuid, prevStage, patch } = args
   const tasks: Promise<void>[] = []
 
-  // Stages that trigger opportunity-stage scheduled emails. Used to decide
-  // whether to fire scheduleStageEmails on entry and cancelStageEmails on
-  // exit.
+  // Stages that PROTECT pending opportunity-stage emails: leaving one cancels
+  // whatever is still queued. 'Estimate Sent' stays here after issue 240 even
+  // though it no longer schedules anything — dropping it would make a
+  // Closed Won → Estimate Sent move newly cancel the pending 3mo/12mo rows,
+  // which is a live change to 220 scheduled emails and has nothing to do with
+  // retiring the estimate follow-ups.
   const STAGE_EMAIL_TRIGGER_STAGES = new Set(['Closed Won', 'Estimate Sent'])
+
+  // Stages whose ENTRY still queues emails. 'Estimate Sent' was removed by
+  // issue 240 (Jobber duplicates those follow-ups). Kept as a separate set so
+  // the call site says which stages actually send, rather than implying all
+  // protected stages do.
+  const STAGE_EMAIL_SCHEDULE_STAGES = new Set(['Closed Won'])
 
   if ('stage' in patch && typeof patch.stage === 'string' && patch.stage !== prevStage) {
     const newStage = patch.stage
@@ -391,7 +400,10 @@ export async function applyDripSideEffects(args: {
     // them. Fresh creates can still trigger entry (a lead imported as
     // already-Closed-Won gets the 3mo/12mo follow-ups scheduled).
     if (STAGE_EMAIL_TRIGGER_STAGES.has(newStage)) {
-      tasks.push(scheduleStageEmailsForLead(leadId, newStage, patch))
+      // Entering a protected stage never cancels. Only some of them schedule.
+      if (STAGE_EMAIL_SCHEDULE_STAGES.has(newStage)) {
+        tasks.push(scheduleStageEmailsForLead(leadId, newStage, patch))
+      }
     } else if (
       !isFreshCreate &&
       prevStage &&
