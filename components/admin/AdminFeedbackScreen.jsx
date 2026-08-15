@@ -185,7 +185,12 @@ function ContextCard({ item }) {
 // changing an item's status re-files it into another queue, and a list that
 // re-sorts under you mid-triage would jump you to a different item every time
 // you saved. Next/previous therefore walk a stable order and stop at both ends.
-function AdminFeedbackDetailModal({ item, walkLabel, position, total, onPrev, onNext, onClose, onSaved }) {
+// `isOwnItem` — the viewer filed this one themselves. Route rule 4 skips the
+// send in that case, so the composer must not promise an email (issue 235
+// defect B). This stayed wrong on the admin mount too, not just the franchise
+// one: a super_admin who files feedback and later answers it is the same case,
+// just rarer than the owner screen where it was every single item.
+function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem = false, onPrev, onNext, onClose, onSaved }) {
   const [status, setStatus]     = useState(item.status)
   const [response, setResponse] = useState('')
   const [composing, setComposing] = useState(!item.admin_response)
@@ -205,6 +210,10 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, onPrev, on
   }, [item.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const dirty = status !== item.status || response.trim().length > 0
+  // Does Save actually send? The button used to read "Save and send" whenever
+  // anything was typed, including the two cases the route refuses to mail —
+  // your own item (rule 4) and a submitter with no address on file.
+  const willSend = response.trim().length > 0 && !isOwnItem && !!item.submitter_email
 
   async function save() {
     setSaving(true)
@@ -399,9 +408,11 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, onPrev, on
                     was "shown to the submitter" while nothing was sent. */}
                 <p style={{ fontSize: '11px', color: T.ink.muted, marginTop: '6px', lineHeight: 1.5 }}>
                   {response.trim()
-                    ? (item.submitter_email
-                        ? `Saving emails this to ${item.submitter_email}.`
-                        : 'No email on file for this person — saving stores the reply but sends nothing.')
+                    ? (isOwnItem
+                        ? 'This is your own report — saving stores the reply, but no email is sent.'
+                        : item.submitter_email
+                          ? `Saving emails this to ${item.submitter_email}.`
+                          : 'No email on file for this person — saving stores the reply but sends nothing.')
                     : 'Saving with the box empty changes the status only. No email is sent.'}
                 </p>
               </>
@@ -419,7 +430,7 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, onPrev, on
         <div style={{ padding: '14px 20px', borderTop: T.border.divider, display: 'flex', justifyContent: 'flex-end', gap: '10px', flexShrink: 0 }}>
           <button onClick={onClose} style={{ padding: '10px 16px', background: 'transparent', border: T.border.control, borderRadius: T.radius.control, fontSize: '13px', fontFamily: 'inherit', fontWeight: 600, color: T.ink.secondary, cursor: 'pointer' }}>Close</button>
           <button onClick={save} disabled={saving || !dirty} style={{ padding: '10px 18px', background: T.accent.fg, border: 'none', borderRadius: T.radius.control, fontSize: '13px', fontFamily: 'inherit', fontWeight: 700, color: T.accent.onFill, cursor: (saving || !dirty) ? 'default' : 'pointer', opacity: (saving || !dirty) ? 0.6 : 1 }}>
-            {saving ? 'Saving…' : (response.trim() ? 'Save and send' : 'Save')}
+            {saving ? 'Saving…' : (willSend ? 'Save and send' : 'Save')}
           </button>
         </div>
       </div>
@@ -802,6 +813,7 @@ export default function AdminFeedbackScreen({
           walkLabel={walkLabel}
           position={walk.index + 1}
           total={walk.ids.length}
+          isOwnItem={!!myId && selectedItem.user_id === myId}
           onPrev={() => step(-1)}
           onNext={() => step(1)}
           onClose={() => setWalk(null)}

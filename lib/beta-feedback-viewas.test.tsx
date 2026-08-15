@@ -86,10 +86,13 @@ describe('feedback composer affordance (franchise mount only)', () => {
     await un2()
   })
 
-  it('the franchise feedback mount passes onReportFeedback → the EXISTING FeedbackModal (setShowFeedback), landing on the Submit tab', () => {
-    expect(franchiseMount).toContain("onReportFeedback={() => setShowFeedback('submit')}")
-    // Reuse contract: showFeedback mounts the one existing modal; the
-    // 'submit' intent rides through as initialTab.
+  it('the franchise feedback mount passes onReportSomething → the EXISTING FeedbackModal (setShowFeedback), landing on the Submit tab', () => {
+    // ISSUE 235: the franchise mount is OwnerFeedbackScreen now, not the triage
+    // screen, and the composer prop is named onReportSomething. What has NOT
+    // changed — and is the reason this assertion survives at all — is the reuse
+    // contract underneath it: the composer is still the one existing
+    // FeedbackModal, opened on its Submit tab. No second composer was built.
+    expect(franchiseMount).toContain("onReportSomething={() => setShowFeedback('submit')}")
     expect(beehub).toContain("{showFeedback && <FeedbackModal initialTab={showFeedback === 'submit' ? 'submit' : 'mine'} viewAsUserId={viewAsUser?.id || null} seed={feedbackSeed} onClose={() => { setShowFeedback(false); setFeedbackSeed(null) }} />}")
   })
 

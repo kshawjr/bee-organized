@@ -19,6 +19,9 @@ import { useStoredState } from "@/components/hive/shared/useStoredControls"
 import BeeLoader from "@/components/hive/shared/BeeLoader"
 import ComingSoonPlaceholder from "@/components/hive/ComingSoonPlaceholder"
 import FeedbackModal from "@/components/feedback/FeedbackModal"
+// The owner/manager feedback screen (issue 235). Franchise roles no longer
+// mount AdminFeedbackScreen — see the activeNav==='feedback' branch.
+import OwnerFeedbackScreen from "@/components/feedback/OwnerFeedbackScreen"
 import { feedbackTimeAgo } from "@/components/feedback/feedbackShared"
 import { CurrentUserContext } from "@/components/hive/shared/currentUserContext"
 // Scope cookie — the client writes it, app/_hub-page.tsx reads it back. Pure
@@ -35472,11 +35475,14 @@ if (Array.isArray(initialPeople)) return
     // 'Manual' moved out of the nav — the Guide and the Manual both open
     // from the Ask Bee Hub panel footer (issue 132).
     ...(isElevated ? [{ key:'admin', icon:'🏢', label:role==='super_admin'?'Admin':'Corp' }] : []),
-    // Franchise owner + manager get a location-scoped feedback triage view
-    // (AdminFeedbackScreen, server-scoped to their location_id). Elevated users
-    // reach feedback via the Admin screen's Feedback tab instead.
+    // Franchise owner + manager get their own read-only history of what they
+    // have reported (OwnerFeedbackScreen, server-scoped to their location_id).
+    // Elevated users reach the triage console via the Admin screen's Feedback
+    // tab instead. The label is the issue 235 point: nothing in the product was
+    // named for "what happened to the things I reported", so the one nav item
+    // that could have said it said "Feedback" and opened a triage queue.
     ...(role==='franchise' && ['owner','manager'].includes(franchiseRole)
-      ? [{ key:'feedback', icon:'💬', label:'Feedback' }]
+      ? [{ key:'feedback', icon:'💬', label:"What you've told us" }]
       : []),
   ]
 
@@ -35876,23 +35882,25 @@ const allLocs = (initialLocations || ALL_LOCATIONS).filter(l =>
         {toast && <InlineToast {...toast} />}
       </div>
     )
-    // Franchise owner/manager feedback triage. AdminFeedbackScreen calls
-    // /api/admin/feedback, which the server auto-scopes to the caller's
-    // location_id for owner/manager — so this view only ever shows their own
-    // location's feedback. Elevated users use the Admin screen's Feedback tab.
-    // Under view-as the session is still the super_admin (elevated →
-    // org-wide), so pass the IMPERSONATED owner's location for parity with
-    // what they'd really see; the route honors ?location_id= for elevated
-    // callers and ignores it for real owners (hard-scoped anyway).
-    // onReportFeedback surfaces the composer here (franchise mount only).
-    // 'submit' lands the modal on the Submit tab — the button says
-    // "report", so it opens the form; the Ask Bee Hub footer path keeps
-    // the My Items default.
+    // Franchise owner/manager: "What you've told us" (issue 235). This used to
+    // mount AdminFeedbackScreen — the corp triage console — with one prop
+    // flipped, so an owner saw our queue metrics and could mark their own bug
+    // Fixed. OwnerFeedbackScreen is read-only and built for the person who
+    // filed the report; the triage screen keeps every control this one drops.
+    //
+    // It reads the same location-scoped /api/admin/feedback list, which the
+    // server auto-scopes to the caller's location_id for owner/manager — so
+    // this view only ever shows their own location's items. Under view-as the
+    // session is still the super_admin (elevated → org-wide), so pass the
+    // IMPERSONATED owner's location for parity; the route honors
+    // ?location_id= for elevated callers and ignores it for real owners.
+    // onReportSomething opens the existing composer on its Submit tab — that
+    // entry point, and the record-menu "Report a problem" one, are unchanged.
     if (activeNav==='feedback') return (
       <div style={pageStyle}>
-        <AdminFeedbackScreen
+        <OwnerFeedbackScreen
           locationId={viewAsUser?.locationId || null}
-          onReportFeedback={() => setShowFeedback('submit')}
+          onReportSomething={() => setShowFeedback('submit')}
         />
       </div>
     )

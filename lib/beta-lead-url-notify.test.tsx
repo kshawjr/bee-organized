@@ -159,10 +159,25 @@ describe('threading: logged-out cold arrival returns to the deep-link', () => {
   })
   it('_hub-page computes returnTo from a /clients/[id] deep-link', () => {
     const src = readFileSync('app/_hub-page.tsx', 'utf8')
-    // returnTo now also carries the optional ?e=<engagementId> so a logged-out
-    // engagement deep-link returns to the engagement, not just the client.
-    expect(src).toMatch(/initialSelectedLeadId\s*\n?\s*\?\s*`\/clients\/\$\{initialSelectedLeadId\}\$\{initialSelectedEngagementId \? `\?e=\$\{initialSelectedEngagementId\}` : ''\}`/)
+    // ISSUE 235 MOVED THE DERIVATION into lib/safe-next (hubReturnTo) so the
+    // home-with-a-query-string case could be unit-tested — see
+    // lib/beta-feedback-deeplink-235.test.ts, which asserts every branch
+    // including the /clients/[id] + ?e=<engagementId> shape this used to pin
+    // as a source regex. What _hub-page still owes is calling it and handing
+    // the result to requireAuth.
+    expect(src).toContain("import { hubReturnTo } from '@/lib/safe-next'")
+    expect(src).toMatch(/const returnTo = hubReturnTo\(\{/)
+    expect(src).toContain('initialSelectedLeadId,')
+    expect(src).toContain('initialSelectedEngagementId,')
     expect(src).toContain('await requireAuth(returnTo)')
+  })
+
+  it('hubReturnTo still returns the engagement-carrying lead deep-link', async () => {
+    // The behaviour the regex above used to guard, now asserted for real.
+    const { hubReturnTo } = await import('./safe-next')
+    expect(hubReturnTo({ initialSelectedLeadId: 'lead-1', initialSelectedEngagementId: 'eng-2' }))
+      .toBe('/clients/lead-1?e=eng-2')
+    expect(hubReturnTo({ initialSelectedLeadId: 'lead-1' })).toBe('/clients/lead-1')
   })
   it('login page forwards a sanitized next into the OAuth callback', () => {
     const src = readFileSync('app/auth/login/page.tsx', 'utf8')

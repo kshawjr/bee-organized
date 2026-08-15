@@ -8,7 +8,10 @@ export type HubRole = 'super_admin' | 'admin' | 'owner' | 'manager' | 'lite_user
 // knows where the user was headed (e.g. a /clients/<id> deep-link from a lead
 // notification email). `returnTo` is sanitized to a same-origin relative path
 // (open-redirect guard) before it becomes ?next=…; the callback reads it back.
-function loginRedirectTarget(returnTo?: string | null): string {
+// Exported for the issue 235 defect A test — the email → login → reply chain is
+// only worth asserting end to end, and this is the link in it that decides
+// whether ?feedback=1 survives the bounce.
+export function loginRedirectTarget(returnTo?: string | null): string {
   if (!returnTo) return '/auth/login'
   const safe = safeNextPath(returnTo)
   if (safe === '/') return '/auth/login'

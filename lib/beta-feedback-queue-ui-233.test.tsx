@@ -333,18 +333,46 @@ describe('the detail modal', () => {
     await unmount()
   })
 
+  async function typeReply(host: HTMLElement, text: string) {
+    const ta = host.querySelector('textarea') as HTMLTextAreaElement
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!
+      setter.call(ta, text)
+      ta.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+
   it('tells the admin what Save will do before they press it', async () => {
     const { host, unmount } = await screenFor()
     await click(buttons(host).find(b => (b.textContent || '').startsWith('Snooze Button'))!)
     expect(host.textContent).toContain('Saving with the box empty changes the status only. No email is sent.')
+    await unmount()
+  })
 
-    const ta = host.querySelector('textarea') as HTMLTextAreaElement
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!
-      setter.call(ta, 'Good idea — adding it.')
-      ta.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-    expect(host.textContent).toContain('Saving emails this to ankur@pb.com.')
+  // issue 235 defect B. The viewer here is u1 and "Snooze Button" is u1's OWN
+  // item, so route rule 4 skips the send. The screen used to promise
+  // "Saving emails this to ankur@pb.com." under a button reading "Save and
+  // send" — a promise the route guaranteed it would not keep. This test
+  // previously asserted that wrong copy; it now asserts the truth.
+  it('does not promise an email when replying to your OWN item', async () => {
+    const { host, unmount } = await screenFor()
+    await click(buttons(host).find(b => (b.textContent || '').startsWith('Snooze Button'))!)
+    await typeReply(host, 'Good idea — adding it.')
+    expect(host.textContent).toContain('This is your own report — saving stores the reply, but no email is sent.')
+    expect(host.textContent).not.toContain('Saving emails this to ankur@pb.com.')
+    expect(byText(host, 'Save and send')).toBeFalsy()
+    expect(byText(host, 'Save')).toBeTruthy()
+    await unmount()
+  })
+
+  it('still promises the email when replying to SOMEONE ELSE', async () => {
+    const { host, unmount } = await screenFor()
+    // n2 is Lynette's (u2) and already carries a reply, so the composer opens
+    // behind "Write a new reply".
+    await click(buttons(host).find(b => (b.textContent || '').startsWith('Client not moving'))!)
+    await click(byText(host, 'Write a new reply')!)
+    await typeReply(host, 'Fixed in this week release.')
+    expect(host.textContent).toContain('Saving emails this to lynette@kc.com.')
     expect(byText(host, 'Save and send')).toBeTruthy()
     await unmount()
   })

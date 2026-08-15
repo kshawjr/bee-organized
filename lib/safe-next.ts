@@ -15,6 +15,47 @@
 // whitespace. Anything not clearly safe collapses to "/".
 // ─────────────────────────────────────────────────────────────
 
+// Serialize a Next.js `searchParams` object back into a query string ("?a=1"),
+// or "" when there is nothing to carry. Issue 235 defect A: the root route's
+// query string is part of where a logged-out visitor was actually headed — the
+// feedback reply email links to /?feedback=1 — and it was being thrown away
+// before the login bounce, so the reply the email promised never opened.
+// Repeated keys are preserved; undefined values are skipped.
+export function queryStringFrom(
+  params: Record<string, string | string[] | undefined> | undefined | null,
+): string {
+  if (!params) return ''
+  const usp = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue
+    if (Array.isArray(value)) for (const v of value) usp.append(key, v)
+    else usp.append(key, value)
+  }
+  const qs = usp.toString()
+  return qs ? `?${qs}` : ''
+}
+
+// Where a logged-OUT Hub visitor was actually headed, as a relative path, or
+// null when "nowhere in particular" (a bare visit to the domain). Extracted
+// from app/_hub-page so the issue 235 defect A case is testable: the feedback
+// reply email links to /?feedback=1, and the home branch used to return null
+// unconditionally, dropping the one param that made the link mean anything.
+export function hubReturnTo(args: {
+  initialRoute?: string
+  initialSelectedLeadId?: string
+  initialSelectedEngagementId?: string
+  searchParams?: Record<string, string | string[] | undefined> | null
+}): string | null {
+  const { initialRoute, initialSelectedLeadId, initialSelectedEngagementId, searchParams } = args
+  if (initialSelectedLeadId) {
+    return `/clients/${initialSelectedLeadId}${initialSelectedEngagementId ? `?e=${initialSelectedEngagementId}` : ''}`
+  }
+  if (initialRoute && initialRoute !== 'home') return `/${initialRoute}`
+  // Home WITH a query string is a real destination; home without one is not.
+  const search = queryStringFrom(searchParams)
+  return search ? `/${search}` : null
+}
+
 export function safeNextPath(next: string | null | undefined): string {
   if (!next || typeof next !== 'string') return '/'
   // Must be a rooted relative path.

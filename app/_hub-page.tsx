@@ -11,6 +11,7 @@
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { requireAuth, getHubUser } from '@/lib/auth'
+import { hubReturnTo } from '@/lib/safe-next'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
 import { PARTNER_COLS, COMPANY_COLS, mapPartnerRow, mapCompanyRow } from '@/lib/crm'
@@ -328,11 +329,15 @@ export default async function HubPage({
   initialSelectedLeadId,
   initialSelectedEngagementId,
   notFoundToast = false,
+  initialSearchParams,
 }: {
   initialRoute?: string
   initialSelectedLeadId?: string
   initialSelectedEngagementId?: string
   notFoundToast?: boolean
+  // Passed by the ROOT route only (app/page.tsx). See the home branch of
+  // returnTo below — issue 235 defect A.
+  initialSearchParams?: Record<string, string | string[] | undefined>
 } = {}) {
   // Where a logged-OUT visitor was actually headed, so login can send them
   // back (e.g. a /clients/<leadId> deep-link from a lead notification email
@@ -340,11 +345,20 @@ export default async function HubPage({
   // lead id (+ optional ?e=<engagementId>); other Hub routes fall back to the
   // tab. requireAuth sanitizes it (same-origin relative only) before it
   // becomes ?next=… (safeNextPath permits the query string).
-  const returnTo = initialSelectedLeadId
-    ? `/clients/${initialSelectedLeadId}${initialSelectedEngagementId ? `?e=${initialSelectedEngagementId}` : ''}`
-    : initialRoute && initialRoute !== 'home'
-      ? `/${initialRoute}`
-      : null
+  //
+  // HOME IS NOT ALWAYS "nowhere in particular" (issue 235 defect A). The
+  // feedback reply email links to /?feedback=1, and that param is the entire
+  // instruction — it opens the reply the email was written to show them.
+  // Returning null here sent them to a bare /auth/login, and after signing in
+  // they landed on Home with no modal and no mention of the reply. So home with
+  // a query string returns "/?…"; home with none stays null, which is still the
+  // right answer for someone who just typed the domain.
+  const returnTo = hubReturnTo({
+    initialRoute,
+    initialSelectedLeadId,
+    initialSelectedEngagementId,
+    searchParams: initialSearchParams,
+  })
   const authUser = await requireAuth(returnTo)
   const hubUser = await getHubUser()
 

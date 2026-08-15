@@ -117,8 +117,16 @@ describe('token sweep — the extracted screen carries no color literal of its o
   })
 })
 
-// ── B) the three mount sites stay wired in BeeHub ──────────────────
-describe('the three BeeHub mount sites pass the shapes mounted in this file', () => {
+// ── B) the mount sites stay wired in BeeHub ────────────────────────
+//
+// ISSUE 235 TOOK THE FRANCHISE MOUNT AWAY. There used to be three mounts of
+// this screen and the third was a franchise owner/manager — the corp triage
+// console with one prop flipped. That is the whole defect issue 235 exists to
+// fix, so what is pinned here now is that the triage screen is mounted by
+// ELEVATED ROLES ONLY, and that the franchise nav mounts OwnerFeedbackScreen
+// instead. The component still ACCEPTS the franchise props (they are exercised
+// further down this file); nothing in the app passes them any more.
+describe('the BeeHub mount sites pass the shapes mounted in this file', () => {
   it('BeeHub imports the extracted module and defines no local copy', () => {
     expect(BEEHUB_SRC).toContain('import AdminFeedbackScreen from "@/components/admin/AdminFeedbackScreen"')
     expect(BEEHUB_SRC).not.toContain('function AdminFeedbackScreen(')
@@ -135,9 +143,20 @@ describe('the three BeeHub mount sites pass the shapes mounted in this file', ()
     }
   })
 
-  it('ONE franchise mount: locationId (view-as parity) + the composer callback', () => {
-    expect(BEEHUB_SRC).toContain('locationId={viewAsUser?.locationId || null}')
-    expect(BEEHUB_SRC).toContain("onReportFeedback={() => setShowFeedback('submit')}")
+  it('and those two are the ONLY mounts — no franchise role reaches triage', () => {
+    const mounts = BEEHUB_SRC.match(/<AdminFeedbackScreen[^/]*\/>/g) || []
+    expect(mounts.length).toBe(2)
+    expect(BEEHUB_SRC).not.toContain("onReportFeedback={() => setShowFeedback('submit')}")
+  })
+
+  it('the franchise nav mounts the owner screen instead, with view-as parity', () => {
+    expect(BEEHUB_SRC).toContain('import OwnerFeedbackScreen from "@/components/feedback/OwnerFeedbackScreen"')
+    expect(BEEHUB_SRC).toMatch(/<OwnerFeedbackScreen[\s\S]*?locationId=\{viewAsUser\?\.locationId \|\| null\}/)
+    expect(BEEHUB_SRC).toContain("onReportSomething={() => setShowFeedback('submit')}")
+  })
+
+  it('the nav item is named for what it shows, not for the database table', () => {
+    expect(BEEHUB_SRC).toContain(`label:"What you've told us"`)
   })
 })
 
