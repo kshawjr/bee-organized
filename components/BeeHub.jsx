@@ -22057,12 +22057,50 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     }
   }
 
-  // Persist the caller's OWN booking link to hub_users.booking_link. Unlike
-  // the other Profile rows (First/Last/Email/Phone, which are local-only in
-  // this screen), this one MUST reach the DB: it is what {{owner_booking_link}}
-  // renders into client emails, and a link saved only into session state would
-  // leave booking sends held forever. Empty string clears to null — which
-  // means "fall back to the location link", not "no link".
+  // Persist a single hub_users column through PATCH /api/hub_users/me — the
+  // same route persistBookingLink uses and the one the onboarding profile step
+  // already writes through (first_name / last_name / phone). Every editable
+  // Profile row routes through here so the tab stops accepting edits it
+  // silently discards (#246a): updateProfile on its own is setSettings and
+  // nothing else, so a name or phone survived until the next reload and no
+  // further, while the visually identical Location rows persisted correctly.
+  //
+  // Guard on currentUserCtx BEFORE any fetch or paint. Without a real signed-in
+  // hub user these rows are demo/lookup data — USERS_DATA fallbacks with
+  // fabricated @beehub.io addresses — and the route writes the CALLER's own
+  // row, so a save from that state would stamp someone else's placeholder onto
+  // the real account. And — unlike an optimistic paint — we paint ONLY after
+  // the write lands: on a server error the field keeps its old value and the
+  // user is told plainly, never a silent success (mirrors persistLocationField).
+  async function persistProfileField(stateKey, column, v, noun) {
+    if (!currentUserCtx?.id) {
+      alert(`You're viewing this profile, not signed in as this person — open your own account to change the ${noun}.`)
+      return
+    }
+    try {
+      const res = await fetch('/api/hub_users/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [column]: v }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(()=>({}))
+        throw new Error(j?.error || `HTTP ${res.status}`)
+      }
+      updateProfile(stateKey, v)
+    } catch (e) {
+      console.error(`[settings] ${column} save failed`, e)
+      alert(`Could not save your ${noun}: ` + (e?.message || e))
+    }
+  }
+
+  // Persist the caller's OWN booking link to hub_users.booking_link. Like the
+  // First/Last/Phone rows above it, this one MUST reach the DB: it is what
+  // {{owner_booking_link}} renders into client emails, and a link saved only
+  // into session state would leave booking sends held forever. Empty string
+  // clears to null — which means "fall back to the location link", not "no
+  // link".
   async function persistBookingLink(v) {
     updateProfile('bookingLink', v)
     try {
@@ -22487,10 +22525,19 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           <>
             <SectionHeader title="Your Profile" desc="How you appear in the system" />
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-              <SettingsEditRow label="First Name" value={settings.profile.firstName} onSave={v=>updateProfile('firstName',v)} />
-              <SettingsEditRow label="Last Name"  value={settings.profile.lastName}  onSave={v=>updateProfile('lastName',v)} />
-              <SettingsEditRow label="Email"      value={settings.profile.email}     onSave={v=>updateProfile('email',v)} type="email" />
-              <SettingsEditRow label="Phone"      value={settings.profile.phone}     onSave={v=>updateProfile('phone',v)} type="tel" />
+              <SettingsEditRow label="First Name" value={settings.profile.firstName} onSave={v=>persistProfileField('firstName','first_name',v,'first name')} />
+              <SettingsEditRow label="Last Name"  value={settings.profile.lastName}  onSave={v=>persistProfileField('lastName','last_name',v,'last name')} />
+              {/* Read-only by design, not by omission. Sign-in is Google OAuth
+                  (signInWithOAuth provider:'google') and the authoritative
+                  address lives in Supabase Auth; hub_users.email is a copy
+                  written at invite-accept time, where the accept refuses unless
+                  the Google email matches exactly. Editing it here would change
+                  the copy and not the credential — the owner would "save" a new
+                  address and still have to sign in with the old one, with
+                  notifications now pointed at an address auth doesn't know.
+                  PATCH /api/hub_users/me deliberately does not accept email. */}
+              <SettingsEditRow label="Email"      value={settings.profile.email}     readOnly hint="You sign in with Google — this is your Google account address. Changing it here wouldn't change your sign-in." />
+              <SettingsEditRow label="Phone"      value={settings.profile.phone}     onSave={v=>persistProfileField('phone','phone',v,'phone number')} type="tel" />
               <SettingsEditRow label="Role"       value={settings.profile.role}      readOnly hint="Contact your franchisor to change your role" />
             </div>
 
@@ -22510,10 +22557,23 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             <SectionHeader title="Account" />
             <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
               {[
-                { label:'Change Password',  icon:'🔑', color:'#1a2e2b' },
-                { label:'Sign Out',         icon:'🚪', color:'#ef4444' },
+                // There is no Bee Organized password to change: sign-in is
+                // Google OAuth only (app/auth/login/page.tsx calls
+                // signInWithOAuth provider:'google'; nothing in the app calls
+                // signInWithPassword or resetPasswordForEmail). Saying so is
+                // the honest row — a real password change would mean adding an
+                // email/password identity to Supabase Auth and a reset flow,
+                // which is a new auth surface, not a button.
+                { label:'Change Password',  icon:'🔑', color:'#1a2e2b',
+                  onClick:()=>alert("You sign in with Google, so there's no separate Bee Organized password. To change how you sign in, update your Google Account security settings.") },
+                // The route the sidebar's IdentityScopeControl already links
+                // to: it calls supabase.auth.signOut() server-side and 303s to
+                // /auth/login. A full navigation (not fetch) so the cleared
+                // auth cookies land and no stale client state survives.
+                { label:'Sign Out',         icon:'🚪', color:'#ef4444',
+                  onClick:()=>{ window.location.href = '/api/auth/signout' } },
               ].map(item=>(
-                <button key={item.label} onClick={()=>alert(`${item.label} - coming soon`)} style={{ width:'100%', padding:'14px 16px', background:'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
+                <button key={item.label} onClick={item.onClick} style={{ width:'100%', padding:'14px 16px', background:'white', border:'none', borderBottom:'1px solid rgba(0,0,0,0.05)', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
                   <span style={{ fontSize:'18px' }}>{item.icon}</span>
                   <span style={{ fontSize:'14px', fontWeight:500, color:item.color }}>{item.label}</span>
                   <span style={{ marginLeft:'auto', color:'#c8d8d4' }}>›</span>
