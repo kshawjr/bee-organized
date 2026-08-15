@@ -183,7 +183,12 @@ describe('onboarding intro describes the real cadence', () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
-describe('Settings → Communications customization clones the master', () => {
+// RETARGETED by issue 240 step 11: the clone-on-first-customize guard is
+// unchanged and still load-bearing (a NULL-bodied step falls through to
+// master_template_id at send time — that is how Gen 1 copy reached a live
+// drip). Only the trigger moved, from the tiles' delay chip to the Emails
+// list's timing pencil. Both land on the same ensureOwnedThen.
+describe('Settings → Emails customization clones the master', () => {
   const selectedLoc = {
     id: LOC_UUID, name: 'Testville', address: '1 Main', phone: '', bookingLink: '',
     reviewsLink: '', ratePerHour: '', serviceRadius: '', timezone: 'America/Chicago',
@@ -194,11 +199,19 @@ describe('Settings → Communications customization clones the master', () => {
 
   const mountPaths = async () => {
     await act(async () => {
-      root.render(<SettingsScreen selectedLoc={selectedLoc} initialSection="paths" />)
+      root.render(<SettingsScreen selectedLoc={selectedLoc} initialSection="emails" />)
     })
     await act(async () => {})
-    await clickText('Moving projects')   // open the move sequence
-    await clickText('Booking link · rate on the call')  // expand the moving-d row
+    await clickText('Moving')            // the moving half of the step 7b toggle
+  }
+
+  const pencils = () => Array.from(container.querySelectorAll('button'))
+    .filter(b => (b.textContent ?? '').includes('\u270e')) as HTMLElement[]
+
+  const setNumber = async (v: string) => {
+    const el = container.querySelector('input[type="number"]') as HTMLInputElement
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    await act(async () => { setter.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })) })
   }
 
   // Stage 2: the batch Save button is gone — every mutation auto-commits
@@ -206,16 +219,22 @@ describe('Settings → Communications customization clones the master', () => {
   // pin are unchanged; the trigger is now the first edit itself (here, a
   // delay tweak confirmed through the fork-on-edit dialog).
   const firstMutation = async () => {
-    await clickText('🕐 Immediately')                    // open step 1's delay editor
-    await clickText('✓')                                 // save → fork confirm
-    await clickText('Create my copy & edit')             // confirm the fork
-    await act(async () => {})                            // clone + reload + commit
+    await act(async () => { pencils()[1].click() })      // step 2's timing
+    await setNumber('7')
+    await clickText('Save')                              // → fork gate
+    await act(async () => {})
+    // On an unowned path the gate is a confirm; on an owned one it commits
+    // straight through. Take the confirm only if it is actually up.
+    const confirmBtn = Array.from(container.querySelectorAll('button'))
+      .find(b => b.textContent?.trim() === 'Create my copy & edit')
+    if (confirmBtn) await act(async () => { (confirmBtn as HTMLElement).click() })
+    await act(async () => {})
     await act(async () => {})
   }
 
   it('a first-time save CLONES from the master — never POSTs a bare path row', async () => {
     routes = {
-      [`GET /api/locations/${LOC_UUID}/drip-paths`]: { paths: [], default_drip_path: null, default_move_drip_path: null },
+      [`GET /api/locations/${LOC_UUID}/drip-paths`]: { paths: [], default_drip_path: null, default_move_drip_path: 'moving-d' },
       [`POST /api/locations/${LOC_UUID}/drip-paths/clone`]: { path: { id: 'new-copy-id', name: 'Move d', is_default: false } },
     }
     await mountPaths()
@@ -234,7 +253,7 @@ describe('Settings → Communications customization clones the master', () => {
 
   it('the saved steps carry the MASTER subject/body — not a NULL-bodied t* pointer', async () => {
     routes = {
-      [`GET /api/locations/${LOC_UUID}/drip-paths`]: { paths: [], default_drip_path: null, default_move_drip_path: null },
+      [`GET /api/locations/${LOC_UUID}/drip-paths`]: { paths: [], default_drip_path: null, default_move_drip_path: 'moving-d' },
       [`POST /api/locations/${LOC_UUID}/drip-paths/clone`]: { path: { id: 'new-copy-id', name: 'Move d', is_default: false } },
     }
     await mountPaths()
@@ -253,8 +272,10 @@ describe('Settings → Communications customization clones the master', () => {
     expect(steps[0].master_template_id).toBeNull()
     expect(steps.every((s: any) => s.body)).toBe(true)
 
-    // Cadence survives the round trip.
-    expect(steps.map((s: any) => s.delay_days)).toEqual([0, 5, 30])
+    // Cadence survives the round trip. 7 is the edit under test (step 2, moved
+    // off its master day of 5); 0 and 30 are its untouched neighbours, and
+    // those are the point — a clone that nulled its steps would lose them.
+    expect(steps.map((s: any) => s.delay_days)).toEqual([0, 7, 30])
   })
 
   it('re-saving an ALREADY customized path preserves its content (no NULL wipe)', async () => {
@@ -273,10 +294,11 @@ describe('Settings → Communications customization clones the master', () => {
       },
     }
     await mountPaths()
-    // Already-customized path: a delay tweak commits directly — no fork
+    // Already-customized path: a timing tweak commits directly — no fork
     // confirm, no clone.
-    await clickText('🕐 Immediately')
-    await clickText('✓')
+    await act(async () => { pencils()[1].click() })
+    await setNumber('7')
+    await clickText('Save')
     await act(async () => {})
 
     // No clone — the copy already exists.
@@ -296,7 +318,14 @@ describe('Settings → Communications customization clones the master', () => {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // §E — quarantine is a display gate, not a delete. Inert until the DB flip.
-describe('quarantined templates disappear from the Templates tab', () => {
+//
+// RETARGETED by issue 240 step 11. The gate itself (masters are filtered on
+// isActive) is one expression in renderTemplateTypeSections, still called with
+// the call slice on Texts & scripts — so it is pinned here on the surface that
+// still renders it. What retired with the email section is the Gen 2
+// welcome/opp GROUPING assertion; master-template-grouping carries what is
+// left of that.
+describe('quarantined templates disappear from the template sections', () => {
   const selectedLoc = {
     id: LOC_UUID, name: 'Testville', address: '', phone: '', bookingLink: '',
     reviewsLink: '', ratePerHour: '', serviceRadius: '', timezone: 'America/Chicago',
@@ -306,34 +335,34 @@ describe('quarantined templates disappear from the Templates tab', () => {
   }
 
   const TEMPLATES = [
-    // A quarantined Gen 1 row.
-    { id: 'tpl-td1', legacy_id: 'td1', name: 'GEN1 Move · Avail + Calendar + Phone', type: 'email', tag: 'cta', subject: 'gen1 subj', body: 'gen1 body', is_active: false, location_uuid: null, is_master: true, is_own_custom: false },
-    // A live Gen 2 standalone master — must survive the same pass.
-    { id: 'tpl-welcome', legacy_id: 'welcome', name: 'GEN2 Welcome Email', type: 'email', tag: 'welcome', subject: 'w subj', body: 'w body', is_active: true, location_uuid: null, is_master: true, is_own_custom: false },
-    { id: 'tpl-opp', legacy_id: 'opp_closed_job_3mo', name: 'GEN2 Opportunity 3mo', type: 'email', tag: 'opportunity-stage', subject: 'o subj', body: 'o body', is_active: true, location_uuid: null, is_master: true, is_own_custom: false },
+    // A quarantined row.
+    { id: 'tpl-td1', legacy_id: 'td1', name: 'GEN1 Script · Avail + Calendar + Phone', type: 'call', tag: 'cta', subject: null, body: 'gen1 body', is_active: false, location_uuid: null, is_master: true, is_own_custom: false },
+    // Live masters — must survive the same pass.
+    { id: 'tpl-live1', legacy_id: 'call_intro', name: 'GEN2 Intro Script', type: 'call', tag: 'welcome', subject: null, body: 'w body', is_active: true, location_uuid: null, is_master: true, is_own_custom: false },
+    { id: 'tpl-live2', legacy_id: 'call_followup', name: 'GEN2 Follow-up Script', type: 'call', tag: 'opportunity-stage', subject: null, body: 'o body', is_active: true, location_uuid: null, is_master: true, is_own_custom: false },
   ]
 
-  it('hides is_active=false masters but keeps the Gen 2 welcome/opp rows', async () => {
+  it('hides is_active=false masters but keeps the live ones', async () => {
     routes = { '/api/templates': { templates: TEMPLATES } }
     await act(async () => {
-      root.render(<SettingsScreen selectedLoc={selectedLoc} initialSection="templates" />)
+      root.render(<SettingsScreen selectedLoc={selectedLoc} initialSection="texts" />)
     })
     await act(async () => {})
-    // The email section starts collapsed and its header is a plain div, so
-    // walk up from the sub-label and click ancestors until the list opens.
+    // The section starts collapsed and its header is a plain div, so walk up
+    // from the sub-label and click ancestors until the list opens.
     const sub = Array.from(container.querySelectorAll('*')).find(
-      el => el.textContent?.trim().startsWith('Subject lines and bodies for client emails'),
+      el => el.textContent?.trim().startsWith('Talking points for you'),
     )
-    expect(sub, 'the Email Templates section header').toBeTruthy()
+    expect(sub, 'the Call Scripts section header').toBeTruthy()
     for (let el = sub as HTMLElement | null; el && el !== container; el = el.parentElement) {
       await act(async () => { el!.click() })
-      if ((container.textContent || '').includes('GEN2 Welcome Email')) break
+      if ((container.textContent || '').includes('GEN2 Intro Script')) break
     }
 
     const t = container.textContent || ''
-    expect(t, 'quarantined Gen 1 row should be hidden').not.toContain('GEN1 Move · Avail + Calendar + Phone')
-    // The load-bearing Gen 2 rows must NOT be collateral damage.
-    expect(t).toContain('GEN2 Welcome Email')
-    expect(t).toContain('GEN2 Opportunity 3mo')
+    expect(t, 'quarantined row should be hidden').not.toContain('GEN1 Script · Avail + Calendar + Phone')
+    // The live rows must NOT be collateral damage.
+    expect(t).toContain('GEN2 Intro Script')
+    expect(t).toContain('GEN2 Follow-up Script')
   })
 })

@@ -134,17 +134,22 @@ describe('nothing that worked before is unreachable', () => {
   })
 
   it('Emails still carries both project-type sequences', async () => {
+    // Same guarantee, different carrier: issue 240 step 11 retired the two
+    // tiles and step 7b put the pair behind a toggle. Neither sequence may
+    // become unreachable — 4 locations hold a fork on moving alone.
     const text = await mount('emails')
-    expect(text).toContain('New lead emails')
-    expect(text).toContain('Moving projects')
-    expect(text).toContain('Organizing projects')
+    expect(text).toContain('Every email a client can receive')
+    expect(text).toContain('Organizing')
+    expect(text).toContain('Moving')
   })
 
-  it('Emails owns the email templates and Texts & scripts owns the other two', async () => {
+  it('Emails owns no template section at all, and Texts & scripts owns its two', async () => {
+    // Issue 240 step 11: the email template section is gone from this tab.
+    // Creating and deleting a reusable email template is corporate's, in
+    // Admin → Content. The list above is the only email surface left here.
     const emails = await mount('emails')
-    expect(emails).toContain('Email Templates')
-    // The other two types must NOT also appear here — that would mean the
-    // renderer was handed every section instead of its slice.
+    expect(emails).not.toContain('Email Templates')
+    // And it certainly must not have inherited the other two slices.
     expect(emails).not.toContain('Text Templates')
     expect(emails).not.toContain('Call Scripts')
 
@@ -160,15 +165,17 @@ describe('nothing that worked before is unreachable', () => {
 
 describe('deep links to the old sections still resolve', () => {
   it('?section=paths lands on Emails, not the no-access guard', async () => {
+    // The landmark moved with step 11 — an old bookmark must still arrive at
+    // the surface that replaced what it pointed at.
     const text = await mount('paths')
     expect(text).not.toContain(NO_ACCESS)
-    expect(text).toContain('New lead emails')
+    expect(text).toContain('Every email a client can receive')
   })
 
   it('?section=templates lands on Emails too', async () => {
     const text = await mount('templates')
     expect(text).not.toContain(NO_ACCESS)
-    expect(text).toContain('Email Templates')
+    expect(text).toContain('Every email a client can receive')
   })
 
   it('?section=billing still lands on Team & Billing (the older alias survives)', async () => {

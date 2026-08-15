@@ -1,7 +1,15 @@
 // @vitest-environment happy-dom
 //
-// The own-custom template chip in Settings → Communications actually OPENS
-// the editor when clicked.
+// An own-custom template's Edit control actually OPENS the editor when
+// clicked.
+//
+// RETARGETED by issue 240 step 11, which deleted the step-row chip this
+// originally clicked. The identical handler shape — setEditingTemplate({
+// master: tpl, tpl }) — is still live on the own-custom rows in
+// renderTemplateTypeSections, which Texts & scripts still renders, so the
+// regression click moves there rather than being dropped. The standing
+// unbound-identifier sweep would also now catch this particular typo, but a
+// sweep proves the name resolves, not that the click opens anything.
 //
 // The unbound-identifier sweep found `tpl` in the chip's onClick:
 //     setEditingTemplate({ master: tmpl, tpl })
@@ -38,7 +46,7 @@ const LOC_UUID = 'dca50888-949f-436d-b24e-b6c8a4984905'
   if (u.includes('/api/templates')) {
     return { ok: true, status: 200, json: async () => ({ templates: [{
       id: 'db-tpl-1', legacy_id: 'tpl_custom_1', name: 'My Custom Welcome',
-      type: 'email', tag: '', subject: 'Welcome from us', body: 'Hello there, thanks for reaching out to Bee Organized!',
+      type: 'call', tag: '', subject: null, body: 'Hello there, thanks for reaching out to Bee Organized!',
       is_active: true, location_uuid: LOC_UUID, is_master: false, is_own_custom: true, cloned_from_id: null,
     }] }) }
   }
@@ -79,8 +87,8 @@ async function clickByText(host: HTMLElement, text: string) {
   await flush(4)
 }
 
-describe('Settings → Communications own-custom template chip', () => {
-  it('clicking the chip opens the template editor (was: ReferenceError tpl)', async () => {
+describe('own-custom template Edit opens the editor', () => {
+  it('clicking Edit opens the template editor (was: ReferenceError tpl)', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
     const root = createRoot(host)
@@ -90,22 +98,22 @@ describe('Settings → Communications own-custom template chip', () => {
     await act(async () => {
       root.render(
         <CurrentLocationContext.Provider value={{ id: LOC_UUID, name: 'Kansas City' } as any}>
-          <SettingsScreen initialSection="paths" franchiseRole="owner" />
+          <SettingsScreen initialSection="texts" franchiseRole="owner" />
         </CurrentLocationContext.Provider>
       )
     })
     await flush()
 
-    // Open the Organizing sequence, then expand Path A's steps.
-    await clickByText(host, 'Organizing projects')
-    await clickByText(host, 'Reply to schedule · rate included')
-
-    // The step row resolved its template (chip shows the template name).
+    // The type section starts collapsed; open it from its sub-label.
+    await clickByText(host, 'Talking points for you')
     expect(host.textContent).toContain('My Custom Welcome')
 
-    // THE regression click: own-custom chip → editor. Before the fix this
-    // threw `ReferenceError: tpl is not defined` inside the onClick.
-    await clickByText(host, 'My Custom Welcome')
+    // THE regression click: own-custom row → editor. Before the fix the
+    // equivalent onClick threw `ReferenceError: tpl is not defined`.
+    const editBtn = Array.from(host.querySelectorAll('button'))
+      .find(b => b.textContent?.trim() === 'Edit')
+    expect(editBtn, 'the own-custom Edit control').toBeTruthy()
+    await act(async () => { (editBtn as HTMLElement).click() })
     expect(host.textContent).toContain('Template Name')
   })
 })

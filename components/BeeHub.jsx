@@ -3873,58 +3873,6 @@ function JobberIcon({ size=16, style={} }) {
 }
 
 
-// ─── Editable Delay ───────────────────────────────────────────────────────────
-function EditableDelay({ step, pathId, setPathSteps, onCommit=null }) {
-  const [editing, setEditing] = React.useState(false)
-  // Parse the delay number from strings like "1 day later", "3 days later", "Immediately"
-  const parseDelay = (s) => {
-    if (!s || s.toLowerCase().includes('immediately') || s.toLowerCase().includes('right away')) return 0
-    const m = s.match(/(\d+)/)
-    return m ? parseInt(m[1]) : 1
-  }
-  const [days, setDays] = React.useState(parseDelay(step.delay))
-
-  function save() {
-    const label = days === 0 ? 'Immediately' : `${days} day${days !== 1 ? 's' : ''} after sign-up`
-    if (onCommit) {
-      // Settings → Communications: the parent owns persistence (fork-gate +
-      // commitSteps auto-commit). No local write here — a failed commit must
-      // leave the row exactly as it was.
-      onCommit(step, days, label)
-    } else {
-      setPathSteps(prev => ({
-        ...prev,
-        [pathId]: (prev[pathId] || []).map(s => s.id === step.id ? { ...s, delay: label } : s)
-      }))
-    }
-    setEditing(false)
-  }
-
-  if (editing) return (
-    <div style={{ display:'flex', alignItems:'center', gap:'4px', marginBottom: '3px' }}>
-      <input
-        autoFocus
-        type='number' min='0' max='90'
-        value={days}
-        onChange={e => setDays(Math.max(0, parseInt(e.target.value)||0))}
-        onKeyDown={e => { if(e.key==='Enter') save(); if(e.key==='Escape') setEditing(false) }}
-        style={{ width:'44px', padding:'2px 6px', border:'1.5px solid #a8c9c4', borderRadius:'5px', fontSize:'11px', fontFamily:'inherit', textAlign:'center', outline:'none' }}
-      />
-      <span style={{ fontSize:'10px', color:'#8a9e9a' }}>days after sign-up</span>
-      <button onClick={save} style={{ fontSize:'10px', color:'white', background:'#1a2e2b', border:'none', borderRadius:'4px', padding:'2px 7px', cursor:'pointer', fontFamily:'inherit' }}>✓</button>
-      <button onClick={()=>setEditing(false)} style={{ fontSize:'10px', color:'#8a9e9a', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit' }}>✕</button>
-    </div>
-  )
-
-  return (
-    <button onClick={()=>setEditing(true)} style={{ display:'flex', alignItems:'center', gap:'3px', background:'rgba(0,0,0,0.03)', border:'1px dashed rgba(0,0,0,0.1)', borderRadius:'5px', padding:'1px 6px', cursor:'pointer', fontFamily:'inherit', marginBottom:'3px' }}>
-      <span style={{ fontSize:'10px', color:'#8a9e9a' }}>🕐 {step.delay}</span>
-      <span style={{ fontSize:'9px', color:'#c8d8d4' }}>✏️</span>
-    </button>
-  )
-}
-
-
 // ─── Date Formatter ──────────────────────────────────────────────────────────
 function fmtDate(d) {
   if (!d) return ''
@@ -14094,57 +14042,6 @@ export function SlackOnboardingStep({ onComplete = () => {} }) {
   )
 }
 
-// issue 194 — Settings → Communications speaks the SAME two questions as
-// onboarding, so the vocabulary matches everywhere and no owner ever meets a
-// path letter. Answering both resolves to a master path via pathStyleFromAnswers
-// (the one shared mapping) and sets it as this project type's default; the
-// per-style rows below stay for owners who want to customize, reset, or read
-// the steps. `currentPathId` is the location path like 'moving-c'.
-function PathTwoQuestionSelector({ currentPathId, filter, accent, onPick }) {
-  const m = /-([a-d])$/.exec(String(currentPathId || ''))
-  const seeded = answersFromPathStyle(m ? 'path-' + m[1] : '')
-  const [booking, setBooking] = useState(seeded.booking)
-  const [rate, setRate]       = useState(seeded.rate)
-  // Re-seed if the default changes from elsewhere (e.g. a style-row radio).
-  React.useEffect(() => { setBooking(seeded.booking); setRate(seeded.rate) }, [currentPathId])
-
-  const choose = (b, r) => {
-    setBooking(b); setRate(r)
-    if (b != null && r != null) onPick(`${filter}-${pathStyleFromAnswers(b, r).replace('path-', '')}`)
-  }
-
-  const Segment = ({ options, value, onChange }) => (
-    <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
-      {options.map(o => {
-        const sel = value === o.value
-        return (
-          <button key={o.value} onClick={()=>onChange(o.value)}
-            style={{ flex:'0 1 auto', maxWidth:CONTROL_W.select, padding:'9px 12px', borderRadius:'9px', border:`1.5px solid ${sel?accent:'rgba(26,46,43,0.12)'}`, background:sel?accent:'white', color:sel?'white':'#4a5e5a', fontSize:'12px', fontWeight:600, fontFamily:'inherit', cursor:'pointer', textAlign:'left', lineHeight:1.3 }}>
-            {o.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-
-  return (
-    <div style={{ padding:'12px 16px', display:'grid', gap:'12px', borderBottom:'0.5px solid rgba(26,46,43,0.08)' }}>
-      <div style={{ display:'grid', gap:'6px' }}>
-        <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>How should new leads book with you?</p>
-        <Segment value={booking} onChange={b=>choose(b, rate)}
-          options={[{ value:BOOKING_REPLY, label:'They reply to me' }, { value:BOOKING_ONLINE, label:'They book online' }]} />
-      </div>
-      <div style={{ display:'grid', gap:'6px' }}>
-        <p style={{ fontSize:'12px', fontWeight:700, color:'#1a2e2b' }}>Should your rate be in the email?</p>
-        <Segment value={rate} onChange={r=>choose(booking, r)}
-          options={[{ value:RATE_IN_EMAIL, label:'Yes, in the email' }, { value:RATE_ON_CALL, label:'No, on the call' }]} />
-      </div>
-      <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5 }}>Your answers set the default below. Want to fine-tune the wording or timing? Open a set and edit its steps.</p>
-    </div>
-  )
-}
-
-
 function OnboardingInviteSheet({ onClose, onDone, locationId }) {
   const tierPricesCtx = useContext(TierPricesContext)
   const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
@@ -17050,77 +16947,6 @@ function prettyPathName(name, pathKey) {
   return hit ? hit.name : name
 }
 
-// ─── Add Step Inline ──────────────────────────────────────────────────────────
-const DELAY_OPTIONS_SHORT = ['Immediately','1 day later','2 days later','3 days later','4 days later','5 days later','7 days later','10 days later','14 days later']
-
-function AddStepInline({ pathId, order, templates, onSave, onCancel, smsEnabled }) {
-  const [type, setType]               = useState('email')
-  const [delay, setDelay]             = useState('Immediately')
-  const [templateId, setTemplateId]   = useState(null)
-  const [pickingTemplate, setPickingTemplate] = useState(false)
-
-  const tmpl = templates.find(t=>t.id===templateId)
-  const tc = { email:{icon:'📧',color:'#6366f1'}, sms:{icon:'💬',color:'#10b981'}, call:{icon:'📞',color:'#f59e0b'} }
-  // A template is REQUIRED: a step without one saves with no content at all
-  // (subject/body null, no linked row), and the old free-typed name was
-  // discarded on reload anyway (reload derives it from the template/subject).
-  const canSave = !!tmpl
-
-  function save() {
-    if (!canSave) return
-    onSave({ id:`s${Date.now()}`, order, name:tmpl.name, type, delay, templateId })
-  }
-
-  return (
-    <>
-      <div style={{ marginTop:'4px', padding:'10px 12px', background:'rgba(168,201,196,0.06)', border:'1.5px dashed rgba(168,201,196,0.4)', borderRadius:'10px', display:'grid', gap:'8px' }}>
-        {/* Type + Delay row */}
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px' }}>
-          {/* Type picker */}
-          <div style={{ display:'flex', gap:'4px' }}>
-            {Object.entries(tc).filter(([v])=> v!=='sms'||smsEnabled).map(([v,conf])=>(
-              <button key={v} onClick={()=>{ setType(v); setTemplateId(null) }} style={{ flex:1, padding:'6px', borderRadius:'6px', cursor:'pointer', border:'1.5px solid', borderColor:type===v?conf.color:'rgba(0,0,0,0.08)', background:type===v?`${conf.color}12`:'white', fontSize:'14px', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                {conf.icon}
-              </button>
-            ))}
-          </div>
-          {/* Delay */}
-          <select value={delay} onChange={e=>setDelay(e.target.value)} style={{ padding:'6px 8px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'11px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none', appearance:'none' }}>
-            {DELAY_OPTIONS_SHORT.map(d=><option key={d}>{d}</option>)}
-          </select>
-        </div>
-
-        {/* Template picker */}
-        <button onClick={()=>setPickingTemplate(true)} style={{ width:'100%', padding:'7px 10px', background:tmpl?'rgba(99,102,241,0.07)':'white', border:`1.5px solid ${tmpl?'rgba(99,102,241,0.2)':'rgba(0,0,0,0.1)'}`, borderRadius:'7px', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'6px', textAlign:'left' }}>
-          <span style={{ fontSize:'13px' }}>{tc[type].icon}</span>
-          <span style={{ fontSize:'11px', color:tmpl?'#6366f1':'#8a9e9a', fontWeight:tmpl?600:400, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
-            {tmpl ? tmpl.name : 'Tap to assign a template'}
-          </span>
-          <span style={{ fontSize:'10px', color:'#c8d8d4', flexShrink:0 }}>›</span>
-        </button>
-
-        {/* Actions */}
-        <div style={{ display:'flex', gap:'6px' }}>
-          <button onClick={onCancel} style={{ flex:1, padding:'7px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'12px', fontFamily:'inherit', color:'#8a9e9a', cursor:'pointer' }}>Cancel</button>
-          <button onClick={save} disabled={!canSave} style={{ flex:2, padding:'7px', background:canSave?'#1a2e2b':'#e5e7eb', border:'none', borderRadius:'7px', fontSize:'12px', fontFamily:'inherit', fontWeight:500, color:canSave?'white':'#9ca3af', cursor:canSave?'pointer':'not-allowed' }}>
-            ✓ Add Step
-          </button>
-        </div>
-      </div>
-
-      {pickingTemplate&&(
-        <StepTemplatePicker
-          step={{ type, templateId }}
-          templates={templates}
-          smsEnabled={smsEnabled}
-          onSelect={id=>{ setTemplateId(id); setPickingTemplate(false) }}
-          onClose={()=>setPickingTemplate(false)}
-        />
-      )}
-    </>
-  )
-}
-
 
 // ─── Jobber connection status derivation ──────────────────────────────────────
 // The canonical three-state derivation now lives in lib/jobber-status.ts (pure,
@@ -19204,9 +19030,10 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
   return (
     <div style={{ margin:'0 12px' }}>
       {/* issue 240 step 9c — the two questions, as ONE sentence with a Change
-          link. This is the replacement for the sequence tiles' variant picker
-          (persistDefault), which step 11 retires; without it an owner would
-          have no way left to choose what their clients receive. */}
+          link. This replaced the sequence tiles' variant picker, retired in
+          step 11; without it an owner would have no way left to choose what
+          their clients receive. persistDefault itself is very much alive —
+          confirmVariant is now its only caller. */}
       {/* issue 240 step 7b — the sequence toggle. A control: capped, sitting
           left, not a full-width segmented bar. */}
       {hasMoving && (
@@ -20818,20 +20645,6 @@ function SettingsEditRow({ label, value, onSave, readOnly, hint, type='text', re
   )
 }
 
-function SettingsToggle({ label, desc, value, onChange }) {
-  return (
-    <div style={{ padding:'12px 16px', borderBottom:'1px solid rgba(0,0,0,0.05)', background:'white', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px' }}>
-      <div>
-        <p style={{ fontSize:'14px', color:'#1a2e2b', fontWeight:500, marginBottom:'2px' }}>{label}</p>
-        {desc&&<p style={{ fontSize:'12px', color:'#8a9e9a' }}>{desc}</p>}
-      </div>
-      <div onClick={()=>onChange(!value)} style={{ width:'44px', height:'24px', borderRadius:'12px', background:value?'#1a2e2b':'rgba(0,0,0,0.12)', position:'relative', flexShrink:0, cursor:'pointer', transition:'background 0.2s' }}>
-        <div style={{ position:'absolute', top:'3px', left:value?'23px':'3px', width:'18px', height:'18px', borderRadius:'50%', background:'white', boxShadow:'0 1px 3px rgba(0,0,0,0.2)', transition:'left 0.2s' }} />
-      </div>
-    </div>
-  )
-}
-
 // ─── Saved Views ──────────────────────────────────────────────────────────────
 function SavedViews({ views, onApply, onDelete, onSave, hasActiveFilters, activeViewId }) {
   const [naming, setNaming] = useState(false)
@@ -21255,7 +21068,7 @@ function TemplatePreviewModal({ template, settings, onClose }) {
 // Caps, not a layout system — spread them at the call site next to the
 // existing style. Sizes follow the two controls in this file that were
 // already right: the 120px delay input in DripPathStepEditor and the 44px
-// one in EditableDelay.
+// one in the delay chip issue 240 step 11 removed.
 const CONTROL_W = {
   field:  '360px',   // text / email inputs
   select: '260px',   // dropdowns
@@ -21593,28 +21406,17 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // for any path this location has not customized, and what "Reset to master"
   // repaints locally after the DB copy is deleted.
   const [masterSteps, setMasterSteps] = useState({})
-  const [pathsSaving, setPathsSaving] = useState(null) // pathId currently being saved
   const [pathsErr, setPathsErr] = useState(null)
   const [editingTemplate, setEditingTemplate] = useState(null) // template obj or 'new'
   const [previewTemplate, setPreviewTemplate] = useState(null)
-  // Quick-peek for the Paths overview step rows — read-only subject+body peek
-  // (no selection) shared with StepTemplatePicker. null = closed.
-  const [peekTemplate, setPeekTemplate] = useState(null)
-  const [editingStep, setEditingStep]         = useState(null) // { pathId, step }
   // Edit-in-place: the step whose subject/body is open in DripPathStepEditor.
   const [stepContentEditor, setStepContentEditor] = useState(null) // { pathId, step }
   // Fork-on-edit confirm for master-backed paths: { pathId, proceed } where
   // proceed(steps) continues the pending mutation on the freshly-cloned copy.
   const [forkConfirm, setForkConfirm] = useState(null)
-  const [expandedPath, setExpandedPath]       = useState(null)
-  // Communication tab — which follow-up sequence's step editor is open (null = none).
-  const [openSequence, setOpenSequence]       = useState(null)
-  // Communication tab — Templates tile opens a center modal previewing that
-  // type's templates in-place (null | 'email' | 'sms' | 'call'), no tab change.
   // Templates tab: one collapse state per type section (email/sms/call), all closed by default.
   const [tplTypeExpanded, setTplTypeExpanded] = useState({ email:false, sms:false, call:false })
   const [tplTypeHover, setTplTypeHover]       = useState(null)
-  const [addingStepToPath, setAddingStepToPath] = useState(null)
 
   // Real franchise location? settings.location.locId will be a Supabase UUID.
   // Demo / view-as paths get string ids like 'loc_kc' — skip DB writes there.
@@ -21622,9 +21424,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   const realLocId = UUID_RE.test(settings.location.locId || '') ? settings.location.locId : null
 
   // Translate the UI's delay strings ("3 days later", "Immediately") into
-  // an integer day count for the DB. We accept anything with a number; the
-  // EditableDelay save() emits "N days after sign-up" which has the same
-  // shape, so this catches both formats.
+  // an integer day count for the DB. We accept anything with a number, which
+  // also covers the "N days after sign-up" shape the retired delay chip wrote
+  // (issue 240 step 11) and that older rows still carry.
   function delayToDays(s) {
     if (!s) return 0
     const lower = String(s).toLowerCase()
@@ -21726,72 +21528,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realLocId])
 
-  // Clone a corp master into a location-owned copy. After success refreshes
-  // the per-location paths so the new copy + its steps populate dbPaths /
-  // pathSteps and the row UI flips into "Customized" mode.
-  async function customizeFromMaster(pathId) {
-    if (!realLocId) return
-    const master = dbMasters[pathId]
-    if (!master) {
-      alert(`No master found for ${pathId}.`)
-      return
-    }
-    setPathsSaving(pathId)
-    try {
-      const res = await fetch(`/api/locations/${realLocId}/drip-paths/clone`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ master_id: master.id }),
-      })
-      const j = await res.json().catch(()=>({}))
-      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      await loadLocationPaths()
-    } catch (e) {
-      alert('Could not customize these emails: ' + (e?.message || e))
-    } finally {
-      setPathsSaving(null)
-    }
-  }
-
-  // Delete the location-owned copy → location falls back to rendering the
-  // corp master. Asks for confirmation since customizations are lost.
-  async function resetPathToMaster(pathId) {
-    if (!realLocId) return
-    const copy = dbPaths[pathId]
-    if (!copy) return
-    if (!confirm('Reset these emails to the Bee Organized HQ version? Any changes you made here will be lost.')) return
-    setPathsSaving(pathId)
-    try {
-      const res = await fetch(`/api/locations/${realLocId}/drip-paths/${copy.id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      })
-      const j = await res.json().catch(()=>({}))
-      if (!res.ok) {
-        // 409 means active progress — surface the detail message.
-        throw new Error(j?.detail || j?.error || `HTTP ${res.status}`)
-      }
-      // Drop from local state and repaint from the MASTER we just fell back to,
-      // so the panel shows the content that will now send.
-      setDbPaths(prev => {
-        const next = { ...prev }
-        delete next[pathId]
-        return next
-      })
-      setPathSteps(prev => {
-        const next = { ...prev }
-        if (masterSteps[pathId]) next[pathId] = masterSteps[pathId]
-        else delete next[pathId]
-        return next
-      })
-    } catch (e) {
-      alert('Could not reset these emails: ' + (e?.message || e))
-    } finally {
-      setPathsSaving(null)
-    }
-  }
-
   // commitSteps — THE single write seam for the owner's step edits.
   //
   // Every mutation on this panel (content edit, delay tweak, add step,
@@ -21824,7 +21560,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     }
     const prevSteps = pathSteps[pathId] || []
     setPathSteps(prev => ({ ...prev, [pathId]: nextSteps }))
-    setPathsSaving(pathId)
     try {
       let dbPath = dbPaths[pathId]
       if (!dbPath) {
@@ -21880,7 +21615,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       setPathsErr(String(e?.message || e))
       throw e
     } finally {
-      setPathsSaving(null)
     }
   }
 
@@ -21891,9 +21625,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // location's own rows when they exist, else the freshly-cloned copy.
   // ─── issue 240 step 9c — set the variant from the two answers ───
   //
-  // WHAT THIS REPLACES: persistDefault, reachable only from the sequence tiles
-  // that step 11 retires. Without this an owner loses the ability to choose
-  // what their clients receive at all.
+  // WHAT THIS REPLACES: the sequence tiles' radios and two-question selector,
+  // retired in step 11. They were persistDefault's only other callers, so this
+  // is now the sole way an owner chooses what their clients receive.
   //
   // ENROLMENT IS PINNED. startDripForLead resolves the path at enrolment and
   // stores drip_path_id on lead_drip_progress; nothing re-resolves it. So a
@@ -22185,7 +21919,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       alert(`No master found for ${pathId}.`)
       return
     }
-    setPathsSaving(pathId)
     try {
       const res = await fetch(`/api/locations/${realLocId}/drip-paths/clone`, {
         method: 'POST',
@@ -22197,10 +21930,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
       const fresh = await loadLocationPaths()
       const clonedSteps = fresh?.steps?.[pathId]
-      setPathsSaving(null)
       proceed(clonedSteps && clonedSteps.length ? clonedSteps : (pathSteps[pathId] || []))
     } catch (e) {
-      setPathsSaving(null)
       alert('Could not customize these emails: ' + (e?.message || e))
     }
   }
@@ -22237,28 +21968,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       : s)
     await commitSteps(pathId, nextSteps)
     setStepContentEditor(null)
-  }
-
-  // Delay tweak from the step row — same gate + commit seam.
-  function commitDelayChange(pathId, step, days, label) {
-    ensureOwnedThen(pathId, (steps) => {
-      const nextSteps = steps.map(s => s.order === step.order
-        ? { ...s, delay: label, delay_days: days }
-        : s)
-      commitSteps(pathId, nextSteps).catch(e => {
-        alert('Could not save this delay: ' + (e?.message || e))
-      })
-    })
-  }
-
-  // + Add step — appends then commits through the same seam.
-  function commitAddStep(pathId, newStep) {
-    ensureOwnedThen(pathId, (steps) => {
-      const order = steps.length + 1
-      commitSteps(pathId, [...steps, { ...newStep, order }]).catch(e => {
-        alert('Could not add this step: ' + (e?.message || e))
-      })
-    })
   }
 
   // Persist a default selection to the location row in DB.
@@ -22434,39 +22143,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     setEditingTemplate(null)
   }
 
-  // Inline create from the step picker. Mirrors saveTemplate's POST branch but
-  // returns the new template's id so the picker can auto-select it, and leaves
-  // editingTemplate untouched (the picker hosts its own editor popup).
-  async function createTemplateFromPicker(data) {
-    try {
-      const payload = { name: data.name, type: data.type, subject: data.subject || null, body: data.body, tag: data.tag || 'custom' }
-      const res = await fetch('/api/templates', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      const j = await res.json().catch(()=>({}))
-      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`)
-      const r = j.template
-      const newId = r.legacy_id || r.id
-      setTemplates(prev => [...prev, {
-        id: newId, dbId: r.id, legacyId: r.legacy_id,
-        name: r.name, type: r.type, tag: r.tag || '', subject: r.subject || '', body: r.body || '',
-        isActive: r.is_active !== false,
-        locationUuid: r.location_uuid || null,
-        isMaster: r.is_master === true,
-        isOwnCustom: r.is_own_custom === true,
-        clonedFromId: r.cloned_from_id || null,
-        usedIn: [],
-      }])
-      return newId
-    } catch (e) {
-      alert('Could not create template: ' + (e?.message || e))
-      return null
-    }
-  }
-
   async function deleteTemplate(tpl) {
     if (!confirm(`Delete template "${tpl.name}"? This cannot be undone.`)) return
     const refId = tpl.dbId || tpl.legacyId || tpl.id
@@ -22513,25 +22189,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     } catch (e) {
       alert('Could not duplicate template: ' + (e?.message || e))
     }
-  }
-
-  // Pointing a step at a template row makes that row the content source, so
-  // any inline subject/body the step was carrying (e.g. copied from the master)
-  // is cleared — otherwise the inline copy would keep winning at send time
-  // (drip-send.ts: step.subject ?? linkedTpl.subject) and the owner's pick
-  // would appear to do nothing. Routed through the fork gate + commitSteps
-  // like every other step mutation on this panel.
-  function assignTemplate(pathId, step, templateId) {
-    const tmpl = templates.find(t => t.id === templateId)
-    setEditingStep(null)
-    ensureOwnedThen(pathId, (steps) => {
-      const nextSteps = steps.map(s => s.order === step.order
-        ? { ...s, templateId, masterTemplateId: tmpl?.dbId ?? null, subject: null, body: null, name: tmpl?.name || s.name }
-        : s)
-      commitSteps(pathId, nextSteps).catch(e => {
-        alert('Could not save this template choice: ' + (e?.message || e))
-      })
-    })
   }
 
   // Team management (invite/remove/role change → billable seats) is owner-only.
@@ -23262,16 +22919,11 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           )
         })()}
 
-        {/* ── Emails (issue 240 step 4) — the new-lead sequences moved from
-            the old Communication tab, followed by the email half of the old
-            Templates tab. Both verbatim. */}
-        {activeSection==='emails'&&(()=>{
-          const SEQUENCES = [
-            { key:'moveDefault',    label:'Moving projects',     sub:'Move-in & move-out',           filter:'moving',     projectType:'move',    icon:'box',  accent:'#4f46e5', tint:'rgba(99,102,241,0.10)' },
-            { key:'generalDefault', label:'Organizing projects', sub:'Closets, kitchens, whole home', filter:'organizing', projectType:'general', icon:'home', accent:'#0f8f6f', tint:'rgba(16,185,129,0.12)' },
-          ]
-          const openSeq = SEQUENCES.find(s=>s.key===openSequence) || null
-          return (
+        {/* ── Emails (issue 240) — one list, and it is the only place an
+            email can be read or edited. Step 4 moved the old Communication
+            and Templates content here; steps 7–10 rebuilt it as the list
+            below; step 11 removed what it replaced. */}
+        {activeSection==='emails'&&(
           <div style={{ paddingBottom:'12px' }}>
 
             <div style={{ padding:'18px 16px 2px' }}>
@@ -23279,11 +22931,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>What a client receives automatically, and the templates behind it.</p>
             </div>
 
-            {/* ── issue 240 step 7 — every email a client can receive, one list ──
-                Read-only. The sequence tiles and the Email Templates section
-                below are untouched and still own every write; step 11 retires
-                them once this list can do the same work. Until then both are
-                deliberately present, showing the same emails two ways. */}
+            {/* ── issue 240 — every email a client can receive, one list.
+                Organizing and moving are separate sequences behind the toggle
+                (step 7b); each row reads, edits, resets, retimes and pauses
+                through this component alone. ─────────────────────────────── */}
             <CommsLabel>Every email a client can receive</CommsLabel>
             <EmailsList
               pathSteps={pathSteps}
@@ -23306,227 +22957,37 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               }}
             />
 
-            {/* ── TIER 3 · PAIRED — new lead emails, one set per project type ── */}
-            <CommsLabel>New lead emails</CommsLabel>
-            <p style={{ fontSize:'11px', color:'#8a9e9a', margin:'-4px 16px 9px', lineHeight:1.5 }}>What a lead automatically receives when they come in. Each project type has its own set — pick the one you want below.</p>
-            <div style={{ margin:'0 12px', display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
-              {SEQUENCES.map(seq=>{
-                const defId = settings.paths[seq.key]
-                const defStyle = PATH_STYLES.find(s => (s.id==='custom' ? 'custom' : `${seq.filter}-${s.id.replace('path-','')}`) === defId)
-                const stepCount = (pathSteps[defId]||[]).length
-                const active = openSequence===seq.key
-                return (
-                  <button key={seq.key} onClick={()=>setOpenSequence(active?null:seq.key)}
-                    style={{ textAlign:'left', padding:'13px', borderRadius:'14px', background:'white', border:`0.5px solid ${active?seq.accent:'rgba(26,46,43,0.10)'}`, boxShadow: active ? `0 0 0 1px ${seq.accent}` : '0 1px 5px rgba(26,46,43,0.05)', cursor:'pointer', fontFamily:'inherit', display:'flex', flexDirection:'column', gap:'11px' }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:'9px', minWidth:0 }}>
-                      <div style={{ width:'32px', height:'32px', borderRadius:'9px', background:seq.tint, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                        <CommsIcon name={seq.icon} size={18} color={seq.accent} />
-                      </div>
-                      <div style={{ minWidth:0 }}>
-                        <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>{seq.label}</p>
-                        <p style={{ fontSize:'10px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{seq.sub}</p>
-                      </div>
-                    </div>
-                    <div>
-                      <p style={{ fontSize:'11px', fontWeight:600, color:'#4a5e5a', marginBottom:'6px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                        {defStyle ? defStyle.label : 'No default set'} · {stepCount} step{stepCount===1?'':'s'}
-                      </p>
-                      {/* Progress-bar rhythm — one graduated segment per step. */}
-                      <div style={{ display:'flex', gap:'3px' }}>
-                        {Array.from({ length: Math.max(stepCount,1) }).map((_,i)=>(
-                          <div key={i} style={{ flex:1, height:'4px', borderRadius:'2px', background: stepCount>0 ? seq.accent : 'rgba(26,46,43,0.08)', opacity: stepCount>0 ? (0.32 + 0.68*((i+1)/stepCount)) : 1 }} />
-                        ))}
-                      </div>
-                    </div>
-                    <span style={{ fontSize:'10px', fontWeight:600, color:seq.accent }}>{active?'Hide steps ▲':'Edit steps ▼'}</span>
-                  </button>
-                )
-              })}
-            </div>
+            {/* ── issue 240 step 11 — RETIRED HERE ───────────────────────
+                Removed from this tab: the two sequence tiles and everything
+                inside them — the path-style radios, Customize, Reset to
+                master, the step rows with Preview/Edit/Change, + Add step,
+                the delay chips — and the Email Templates section
+                (renderTemplateTypeSections with the email slice).
 
-            {/* Full-width step editor for the open sequence (behavior preserved). */}
-            {openSeq && (
-              <div style={{ margin:'12px 12px 0', borderRadius:'14px', overflow:'hidden', border:`0.5px solid ${openSeq.accent}`, background:'white', boxShadow:'0 1px 5px rgba(26,46,43,0.05)' }}>
-                <div style={{ padding:'11px 14px', display:'flex', alignItems:'center', gap:'8px', background:openSeq.tint, borderBottom:'0.5px solid rgba(26,46,43,0.07)' }}>
-                  <CommsIcon name={openSeq.icon} size={16} color={openSeq.accent} />
-                  <div>
-                    {/* The open project type has to be unmistakable — this is
-                        the same "which one am I on?" problem as onboarding. */}
-                    <p style={{ fontSize:'13px', fontWeight:700, color:'#1a2e2b' }}>You're editing: {openSeq.label}</p>
-                    <p style={{ fontSize:'11px', color:'#4a5e5a' }}>Answer two quick questions to set what a new {openSeq.label.replace(' projects','').toLowerCase()} lead receives.</p>
-                  </div>
-                </div>
-                {/* issue 194 — the two questions are the primary chooser here,
-                    mirroring onboarding's wording. They resolve to the same
-                    default the style radios below set. */}
-                <PathTwoQuestionSelector
-                  currentPathId={settings.paths[openSeq.key]}
-                  filter={openSeq.filter}
-                  accent={openSeq.accent}
-                  onPick={pathId=>{ setSettings(s=>({...s,paths:{...s.paths,[openSeq.key]:pathId}})); if(openSeq.key==='generalDefault') setDefaultPathId(pathId); if(openSeq.key==='moveDefault') setDefaultMovePathId(pathId); persistDefault(openSeq.key, pathId) }}
-                />
-                <div>
-                  {/* The per-style rows stay for depth: customize, reset to
-                      master, edit steps, and see client counts. "Build your own"
-                      (custom) is cut — its builder never persisted, so the row
-                      was a dead end that looked real. */}
-                  {PATH_STYLES.filter(s=>s.id!=='custom').map((style,i,styleRows)=>{
-                    const pathId = `${openSeq.filter}-${style.id.replace('path-','')}`
-                    const isDefault = settings.paths[openSeq.key]===pathId
-                    const steps = pathSteps[pathId]||[]
-                    return (
-                      <div key={style.id} style={{ background:isDefault?'rgba(168,201,196,0.15)':'white', boxShadow:isDefault?'inset 3px 0 0 '+openSeq.accent:'none', borderBottom:i<styleRows.length-1?'0.5px solid rgba(26,46,43,0.06)':'none' }}>
-                        <div style={{ padding:'12px 16px', display:'flex', alignItems:'center', gap:'12px', cursor:'pointer' }}
-                          onClick={()=>setExpandedPath(expandedPath===pathId?null:pathId)}>
-                          {/* Radio */}
-                          <div onClick={e=>{e.stopPropagation();setSettings(s=>({...s,paths:{...s.paths,[openSeq.key]:pathId}})); if(openSeq.key==='generalDefault') setDefaultPathId(pathId); if(openSeq.key==='moveDefault') setDefaultMovePathId(pathId); persistDefault(openSeq.key, pathId)}}
-                            style={{ width:'22px', height:'22px', borderRadius:'50%', border:`2px solid ${isDefault?'#1a2e2b':'rgba(0,0,0,0.15)'}`, background:isDefault?'#1a2e2b':'white', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, cursor:'pointer' }}>
-                            {isDefault&&<div style={{ width:'8px', height:'8px', borderRadius:'50%', background:'white' }} />}
-                          </div>
-                          <span style={{ fontSize:'20px' }}>{style.icon}</span>
-                          <div style={{ flex:1, minWidth:0 }}>
-                            <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'2px', flexWrap:'wrap' }}>
-                              <p style={{ fontSize:'13px', fontWeight:isDefault?700:600, color:'#1a2e2b' }}>{style.label}</p>
-                              {isDefault&&<span style={{ fontSize:'10px', color:'#3a5e58', background:'rgba(168,201,196,0.22)', padding:'2px 8px', borderRadius:'6px', fontWeight:600 }}>Default</span>}
-                              {dbPaths[pathId]
-                                ? <span style={{ fontSize:'10px', color:'#b45309', background:'rgba(245,158,11,0.14)', padding:'2px 8px', borderRadius:'6px', fontWeight:600 }}>Customized</span>
-                                : dbMasters[pathId] && <span style={{ fontSize:'10px', color:'#6b7c79', background:'rgba(26,46,43,0.05)', padding:'2px 8px', borderRadius:'6px', fontWeight:600 }}>Master template</span>
-                              }
-                            </div>
-                            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{style.cta}</p>
-                          </div>
-                          {(()=>{ const count = people ? people.filter(p=>p.path===pathId&&!p.isJunk).length : 0; return count>0 ? <span style={{ fontSize:'10px', padding:'2px 8px', borderRadius:'6px', background:'rgba(168,201,196,0.14)', color:'#4a5e5a', fontWeight:600, flexShrink:0 }}>{count} client</span> : null })()}
-                          <span style={{ fontSize:'12px', color:'#c8d8d4' }}>{expandedPath===pathId?'▲':'▼'}</span>
-                        </div>
-                        {/* Steps preview */}
-                        {expandedPath===pathId&&(
-                          <div style={{ background:'rgba(0,0,0,0.02)', borderTop:'0.5px solid rgba(26,46,43,0.06)', padding:'8px 12px' }}>
-                            {/* Customize / Reset banner — only for master-backed paths when a real location is loaded */}
-                            {realLocId && dbMasters[pathId] && (
-                              dbPaths[pathId] ? (
-                                <div style={{ padding:'8px 10px', background:'rgba(245,158,11,0.08)', border:'0.5px solid rgba(245,158,11,0.30)', borderRadius:'8px', marginBottom:'8px' }}>
-                                  <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-                                    <span style={{ fontSize:'12px', color:'#7a5d24', flex:1 }}>This set is <strong>customized</strong> for your location. Resetting will restore the corp master content.</span>
-                                    <button onClick={()=>resetPathToMaster(pathId)} disabled={pathsSaving===pathId}
-                                      style={{ padding:'5px 10px', background:'transparent', border:'0.5px solid rgba(180,83,9,0.5)', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'#7a5d24', cursor: pathsSaving===pathId ? 'wait' : 'pointer', flexShrink:0 }}>
-                                      {pathsSaving===pathId ? 'Resetting…' : 'Reset to master'}
-                                    </button>
-                                  </div>
-                                  {/* Snapshot semantics, said out loud: a copy is frozen at the
-                                      moment it was made. Owners should not have to discover that
-                                      HQ revisions stop reaching them once they customize. */}
-                                  <p style={{ fontSize:'11px', color:'#8a6a2e', lineHeight:1.5, marginTop:'6px' }}>
-                                    📌 Your copy is a <strong>snapshot</strong>. If Bee Organized HQ updates this set later, those changes <strong>won't</strong> reach your version — reset to pick up the newest master content.
-                                  </p>
-                                </div>
-                              ) : (
-                                <div style={{ padding:'8px 10px', background:'rgba(168,201,196,0.12)', border:'0.5px solid rgba(168,201,196,0.35)', borderRadius:'8px', marginBottom:'8px' }}>
-                                  <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-                                    <span style={{ fontSize:'12px', color:'#4a5e5a', flex:1 }}>Using the corp <strong>master template</strong> — you'll automatically get HQ's latest content.</span>
-                                    <button onClick={()=>customizeFromMaster(pathId)} disabled={pathsSaving===pathId}
-                                      style={{ padding:'5px 10px', background:'#1a2e2b', border:'none', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor: pathsSaving===pathId ? 'wait' : 'pointer', flexShrink:0 }}>
-                                      {pathsSaving===pathId ? 'Customizing…' : 'Customize'}
-                                    </button>
-                                  </div>
-                                  <p style={{ fontSize:'11px', color:'#5f7a75', lineHeight:1.5, marginTop:'6px' }}>
-                                    Customizing forks a copy you can edit for this location only. That copy is a <strong>snapshot</strong> — later HQ updates won't reach it.
-                                  </p>
-                                </div>
-                              )
-                            )}
-                            {steps.length>0 ? (
-                              <div style={{ display:'grid', gap:'5px' }}>
-                                {steps.map(step=>{
-                                  const tmpl = templates.find(t=>t.id===step.templateId)
-                                  // Steps carrying their own subject/body (master-derived, or
-                                  // edited here) are the content themselves — there is no
-                                  // template row behind them, and that's the healthy shape.
-                                  const inline = !tmpl && step.body
-                                    ? { type: step.type, name: step.name, subject: step.subject, body: step.body }
-                                    : null
-                                  const peek = tmpl || inline
-                                  const stepIcon = {email:'mail',sms:'message',call:'phone'}[step.type] || 'mail'
-                                  const stepColor = {email:'#4f46e5',sms:'#0a7d5f',call:'#b45309'}[step.type] || '#4f46e5'
-                                  if (step.type==='sms'&&!settings.location.smsEnabled) return null
-                                  return (
-                                    <div key={step.id} style={{ display:'flex', alignItems:'center', flexWrap:'wrap', gap:'8px', padding:'8px 10px', background:'white', borderRadius:'8px', border:'0.5px solid rgba(26,46,43,0.09)' }}>
-                                      <CommsIcon name={stepIcon} size={14} color={stepColor} />
-                                      <div style={{ flex:1, minWidth:0 }}>
-                                        <p style={{ fontSize:'11px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>Step {step.order} · {step.name}</p>
-                                        <EditableDelay step={step} pathId={pathId} setPathSteps={setPathSteps} onCommit={(s,days,label)=>commitDelayChange(pathId, s, days, label)} />
-                                        {tmpl&&(
-                                          // Own customs open the editor ({master, tpl} is the shape
-                                          // TemplateEditorPopup + saveTemplate expect). Masters and
-                                          // legacy unflagged rows are not owner-editable — preview.
-                                          <button onClick={()=>{ if (tmpl.isOwnCustom) setEditingTemplate({ master: tmpl, tpl: tmpl }); else setPreviewTemplate(tmpl) }} style={{ display:'flex', alignItems:'center', gap:'4px', padding:'3px 8px', background:'rgba(99,102,241,0.07)', border:'0.5px solid rgba(99,102,241,0.25)', borderRadius:'6px', cursor:'pointer', fontFamily:'inherit', overflow:'hidden' }}>
-                                            <span style={{ fontSize:'10px', fontWeight:600, color:'#4f46e5', whiteSpace:'nowrap' }}>{tmpl.name}</span>
-                                            {tmpl.type==='email'&&tmpl.subject&&<span style={{ fontSize:'10px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>— {tmpl.subject}</span>}
-                                            {tmpl.type!=='email'&&<span style={{ fontSize:'10px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{tmpl.body.slice(0,40)}…</span>}
-                                          </button>
-                                        )}
-                                        {inline&&step.type==='email'&&step.subject&&(
-                                          <p style={{ fontSize:'10px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{step.subject}</p>
-                                        )}
-                                        {!peek&&<span style={{ fontSize:'10px', color:'#e5a0a0' }}>No content yet</span>}
-                                      </div>
-                                      {peek&&(
-                                        <button onClick={()=>setPeekTemplate(peek)} title="Preview this email" style={{ fontSize:'10px', fontWeight:600, color:'#4f46e5', background:'rgba(99,102,241,0.08)', border:'0.5px solid rgba(99,102,241,0.30)', borderRadius:'6px', padding:'3px 8px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>Preview</button>
-                                      )}
-                                      {/* Edit-in-place: subject/body editor. On a master-backed
-                                          path this forks first (confirm carries the snapshot
-                                          warning) and edits the CLONE — never the master. */}
-                                      <button onClick={()=>openStepEditor(pathId, step)} title="Edit this email's wording" style={{ fontSize:'10px', fontWeight:600, color:'white', background:'#1a2e2b', border:'none', borderRadius:'6px', padding:'3px 10px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>Edit</button>
-                                      <button onClick={()=>setEditingStep({pathId,step})} style={{ fontSize:'10px', color:'#3a5e58', background:'rgba(168,201,196,0.14)', border:'0.5px solid rgba(168,201,196,0.4)', borderRadius:'6px', padding:'3px 8px', cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>Change</button>
-                                    </div>
-                                  )
-                                })}
-                              </div>
-                            ) : (
-                              <p style={{ fontSize:'12px', color:'#b0c0bc', textAlign:'center', padding:'8px' }}>No steps yet - add one below</p>
-                            )}
+                Each email now has exactly ONE place it can be edited: the
+                list above. What the tiles used to do lives there —
+                  wording        step 8b   Edit, forking behind the scenes
+                  put it back    step 8b   per-row reset
+                  timing         step 10   the pencil on drip rows
+                  add an email   step 9b   + Add another email
+                  which variant  step 9c   the two questions
+                Creating or deleting a reusable email template is corporate's,
+                in Admin → Content → Email Templates (Master).
 
-                            {/* Add Step inline */}
-                            {addingStepToPath===pathId ? (
-                              <AddStepInline
-                                pathId={pathId}
-                                order={(pathSteps[pathId]||[]).length+1}
-                                templates={templates}
-                                smsEnabled={settings.location.smsEnabled}
-                                onSave={(step)=>{
-                                  commitAddStep(pathId, step)
-                                  setAddingStepToPath(null)
-                                }}
-                                onCancel={()=>setAddingStepToPath(null)}
-                              />
-                            ) : (
-                              <button
-                                onClick={()=>setAddingStepToPath(pathId)}
-                                style={{ width:'100%', maxWidth:CONTROL_W.action, padding:'8px', background:'transparent', border:'0.5px dashed rgba(168,201,196,0.6)', borderRadius:'8px', cursor:'pointer', fontFamily:'inherit', fontSize:'12px', color:'#4a7a74', fontWeight:600, marginTop:'4px' }}
-                              >
-                                + Add step
-                              </button>
-                            )}
-                            {/* No batch Save button: every change commits itself through
-                                commitSteps the moment it's made. A visible saving state +
-                                the alert on failure are the whole feedback loop. */}
-                            {pathsSaving===pathId && (
-                              <p style={{ fontSize:'11px', color:'#8a9e9a', textAlign:'center', marginTop:'6px' }}>Saving…</p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-            <p style={{ fontSize:'11px', color:'#b0c0bc', margin:'9px 16px 0', lineHeight:1.5 }}>Pick a sequence above to review its steps. Edit a step's wording, tap its delay to change timing, tap the radio to set the default — changes save automatically.</p>
+                TWO THINGS WERE DELIBERATELY LOST, not overlooked:
+                  repointing a step at a different template. 13 production
+                    steps point at one; they keep resolving and sending. Only
+                    the affordance to CHANGE which template goes.
+                  whole-path reset. 8b's per-row reset covers the real need,
+                    and the whole-path version deleted an owner's entire fork
+                    in one click that never said so.
 
-            {renderTemplateTypeSections([TEMPLATE_TYPE_SECTIONS.email])}
+                Texts & scripts is untouched: renderTemplateTypeSections is
+                still called there with the call slice, so call scripts stay
+                creatable, editable and deletable. ───────────────────── */}
 
           </div>
-          )
-        })()}
+        )}
 
         {/* ── Texts & scripts (issue 240 step 4) — the sms + call halves of
             the old Templates tab, same renderer as the email half. */}
@@ -23608,9 +23069,13 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           }}
         />
       )}
+      {/* Preview a template — restored in issue 240 step 11. Step 4's splice
+          took this mount out with the tab rewrite while leaving the Preview
+          buttons and setPreviewTemplate in place, so Preview has silently done
+          nothing since. The unbound sweep cannot see this class: the state
+          still resolves, it just has no reader. */}
+      {previewTemplate&&<TemplatePreviewModal template={previewTemplate} settings={settings} onClose={()=>setPreviewTemplate(null)} />}
       {/* Template editor popup */}
-      {/* Quick-peek from the Paths overview step rows — Close-only, no selection. */}
-      <TemplateQuickPeekModal template={peekTemplate} settings={settings} onClose={()=>setPeekTemplate(null)} />
       {editingTemplate&&(
         <TemplateEditorPopup
           template={editingTemplate==='new' ? null : editingTemplate.tpl}
@@ -23642,16 +23107,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           }}
           onSave={saveStepContent}
           onClose={()=>setStepContentEditor(null)}
-        />
-      )}
-      {editingStep&&(
-        <StepTemplatePicker
-          step={editingStep.step}
-          templates={templates}
-          smsEnabled={settings.location.smsEnabled}
-          onSelect={tid=>assignTemplate(editingStep.pathId, editingStep.step, tid)}
-          onCreateTemplate={createTemplateFromPicker}
-          onClose={()=>setEditingStep(null)}
         />
       )}
 

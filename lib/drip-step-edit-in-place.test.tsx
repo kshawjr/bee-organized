@@ -1,8 +1,16 @@
 // @vitest-environment happy-dom
 //
 // Template/Communications merge STAGE 2 — edit-in-place + preview parity.
-// MOUNT tests against SettingsScreen (Settings → Communication → New lead
-// emails), pinning behaviour, not source:
+//
+// RETARGETED by issue 240 step 11. These pinned behaviour that is still very
+// much alive — fork-on-edit, the snapshot confirm, the per-step
+// master_template_id drop, bulk-replace-only writes, failure rollback — but
+// reached it through the sequence tiles, which step 11 deleted. Only the
+// ENTRY POINT moved: Settings → Emails, the list, its Edit and its timing
+// pencil. Nothing here was weakened to make it pass; emailsRowEdit hands rail
+// A straight to the same ensureOwnedThen the tiles used.
+//
+// MOUNT tests against SettingsScreen, pinning behaviour, not source:
 //
 //   1. Editing a master-backed step FORKS first (existing clone route), then
 //      opens the editor on the CLONED step — the master is never written.
@@ -16,8 +24,12 @@
 //      batch Save button exists.
 //   5. A commit failure leaves the sequence unchanged — no partial
 //      application, for content edits and delay edits alike.
-//   6. The step-row Preview renders ALL 14 send-time variables — no empty
-//      hole for rate, owner name, or either booking tag.
+//   6. Preview renders ALL 14 send-time variables — no empty hole for rate,
+//      owner name, or either booking tag. Now driven from Texts & scripts:
+//      both preview modals delegate to the same RenderedTemplatePreview, and
+//      that surface is where a Preview button still lives. It doubles as the
+//      regression guard for the TemplatePreviewModal mount step 4 dropped and
+//      step 11 put back.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -72,6 +84,14 @@ const CUSTOMIZED_PATH = {
   ],
 }
 
+// A call script carrying every tag — the preview-parity fixture on the
+// surface that still has a Preview button.
+const TEMPLATES = [
+  { id: 'call-all', legacy_id: null, name: 'All Tags Script', type: 'call', tag: 'custom',
+    subject: null, body: ALL_TAGS_BODY, is_active: true, location_uuid: null,
+    is_master: true, is_own_custom: false, cloned_from_id: null },
+]
+
 const selectedLoc = {
   id: LOC_UUID, name: 'Testville', owner: 'Pat Owner', address: '1 Main', phone: '(111) 222-3333',
   bookingLink: 'https://cal.example/loc', reviewsLink: 'https://g.page/testville',
@@ -96,6 +116,9 @@ function makeFetch() {
     try { body = init?.body ? JSON.parse(init.body) : undefined } catch { /* non-JSON */ }
     calls.push({ url: u, method, body })
 
+    if (u.includes('/api/templates')) {
+      return { ok: true, status: 200, json: async () => ({ templates: TEMPLATES }) }
+    }
     if (u.includes('/api/drip-paths/masters')) {
       return { ok: true, status: 200, json: async () => ({ masters: MASTERS }) }
     }
@@ -156,15 +179,23 @@ const setNativeValue = async (el: HTMLInputElement | HTMLTextAreaElement, value:
 
 const mountPaths = async () => {
   await act(async () => {
-    root.render(<SettingsScreen selectedLoc={selectedLoc} initialSection="paths" />)
+    root.render(<SettingsScreen selectedLoc={selectedLoc} initialSection="emails" />)
   })
-  await act(async () => {})   // masters + location paths fetches
-  await clickText('Moving projects')
-  await clickText('Booking link · rate on the call')   // expand the moving-d row
+  await act(async () => {})   // masters + location paths + templates fetches
+  // The fixture location's default is moving-d, so the moving half of the
+  // step 7b toggle is the one carrying these steps.
+  await clickText('Moving')
 }
 
+// The list's own Edit, one per row.
 const editButtons = () =>
-  Array.from(container.querySelectorAll('button[title="Edit this email\'s wording"]')) as HTMLElement[]
+  Array.from(container.querySelectorAll('button')).filter(
+    b => b.textContent?.trim() === 'Edit') as HTMLElement[]
+
+// The timing pencil on a drip row (step 10) — what replaced the delay chip.
+const pencils = () =>
+  Array.from(container.querySelectorAll('button')).filter(
+    b => (b.textContent ?? '').includes('\u270e')) as HTMLElement[]
 
 const stepsPatches = () => calls.filter(c => c.method === 'PATCH' && /\/api\/drip-paths\/[^/]+\/steps/.test(c.url))
 const perStepCalls = () => calls.filter(c => c.url.includes('/api/drip-path-steps/'))
@@ -269,16 +300,17 @@ describe('inline edit on an already-customized path', () => {
     await clickText('Save')
     await act(async () => {})
 
-    // Delay edit auto-commits too.
-    await clickText('🕐 Immediately')
+    // Timing edit commits through the same seam (step 10 replaced the delay
+    // chip with the pencil; the write path underneath is unchanged).
+    await act(async () => { pencils()[1].click() })
     const num = container.querySelector('input[type="number"]') as HTMLInputElement
     await setNativeValue(num, '3')
-    await clickText('✓')
+    await clickText('Save')
     await act(async () => {})
 
     expect(stepsPatches().length).toBeGreaterThanOrEqual(2)
     const delayPatch = stepsPatches()[1]
-    expect(delayPatch.body.steps[0].delay_days).toBe(3)
+    expect(delayPatch.body.steps[1].delay_days).toBe(3)
 
     expect(perStepCalls()).toHaveLength(0)
     const t = container.textContent || ''
@@ -311,28 +343,44 @@ describe('a commit failure leaves the sequence unchanged', () => {
     expect(t).not.toContain('SHOULD-NOT-PERSIST')
   })
 
-  it('failed delay edit: the delay label reverts', async () => {
+  it('failed timing edit: the row keeps the day it had', async () => {
     await mountPaths()
     stepsPatchStatus = 500
 
-    await clickText('🕐 Immediately')
-    const num = container.querySelector('input[type="number"]') as HTMLInputElement
-    await setNativeValue(num, '9')
-    await clickText('✓')
+    await act(async () => { pencils()[1].click() })
+    await setNativeValue(container.querySelector('input[type="number"]') as HTMLInputElement, '9')
+    await clickText('Save')
     await act(async () => {})
 
+    // Attempted, refused, and nothing moved: step 2 is still on day 5.
     expect(stepsPatches()).toHaveLength(1)
-    const t = container.textContent || ''
-    expect(t).toContain('🕐 Immediately')
-    expect(t).not.toContain('9 days after sign-up')
+    expect(container.textContent).toContain('Day 5')
+    expect(container.textContent).not.toContain('Day 9')
   })
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
 describe('preview parity — all 14 send-time variables render', () => {
-  it('the step-row Preview fills rate, owner name, and both booking tags — no holes, no literal {{…}}', async () => {
-    await mountPaths()
-    await clickText('Preview')   // step 1 carries the all-14-tags body
+  it('Preview fills rate, owner name, and both booking tags — no holes, no literal {{…}}', async () => {
+    // Texts & scripts, whose Preview button is the one still standing. It
+    // opens TemplatePreviewModal, which shares RenderedTemplatePreview (and
+    // therefore applyPreviewVars) with the peek modal the tiles used — so this
+    // pins the same fill, and additionally proves the modal is MOUNTED. It was
+    // not: step 4's splice dropped the mount while leaving the buttons, and
+    // step 11 restored it.
+    await act(async () => {
+      root.render(<SettingsScreen selectedLoc={selectedLoc} initialSection="texts" />)
+    })
+    await act(async () => {})
+    // The type sections start collapsed. The header is a div with onClick, so
+    // clicking any descendant bubbles to it.
+    // The DEEPEST match: the outermost wrapper shares the same text but holds
+    // no handler, and a click on a parent does not reach the child.
+    const hdr = Array.from(container.querySelectorAll('div'))
+      .filter(d => (d.textContent || '').startsWith('\u25b6\ud83d\udcde Call Scripts')).pop()
+    expect(hdr, 'the Call Scripts section header').toBeTruthy()
+    await act(async () => { (hdr as HTMLElement).click() })
+    await clickText('Preview')
     await act(async () => {})
 
     // Scoped to the PREVIEW MODAL, which is what this test is about. It used
@@ -342,10 +390,13 @@ describe('preview parity — all 14 send-time variables render', () => {
     // them rather than filling them, because a settings list has no lead to
     // fill them from. A screen-wide scrape would now fail on that, testing the
     // wrong surface.
-    // TemplatePreviewModal carries no role attribute, so scope by its own
-    // caption: everything from there on is the modal.
+    // The modal carries no role attribute, so scope by its own header: it
+    // names the template and states who the mail is from.
+    // lastIndexOf, not indexOf: the LIST row above names the template too, and
+    // it shows the body with its {{tokens}} intact on purpose. Anchoring to
+    // the first occurrence would scrape the unfilled copy and always fail.
     const all = container.textContent || ''
-    const at = all.indexOf('variables filled the way a real send fills them')
+    const at = all.lastIndexOf('All Tags Script')
     expect(at, 'the preview modal is open').toBeGreaterThan(-1)
     const t = all.slice(at)
     // Every one of the 14 rendered as key=[value]; a hole would read key=[].

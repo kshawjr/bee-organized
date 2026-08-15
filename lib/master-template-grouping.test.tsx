@@ -1,7 +1,16 @@
 // @vitest-environment happy-dom
 //
-// Settings → Templates — the Master Templates list groups the Gen 2 rows into
-// their own labeled sections.
+// Settings → the Master Templates list groups the Gen 2 rows into their own
+// labeled sections.
+//
+// RETARGETED by issue 240 step 11, which deleted the EMAIL section from what
+// is now the Emails tab. The grouping code is untouched and still live —
+// renderTemplateTypeSections runs on Texts & scripts with the call slice — so
+// these mount there instead. The fixtures are call-typed for that reason; the
+// grouping filters on the legacy_id family and then on type, so the bug this
+// file exists for (reading `legacy_id` off a row that was mapped to
+// `legacyId`) is pinned exactly as before. Read-only master handling is live
+// on this surface for real.
 //
 // The tab renders three sub-groups under "📚 Master Templates":
 //   💛 Welcome Email        → legacy_id 'welcome'
@@ -35,8 +44,8 @@ const selectedLoc = {
 }
 
 const master = (legacy_id: string, name: string, tag: string) => ({
-  id: `tpl-${legacy_id}`, legacy_id, name, type: 'email', tag,
-  subject: `${legacy_id} subj`, body: `${legacy_id} body`,
+  id: `tpl-${legacy_id}`, legacy_id, name, type: 'call', tag,
+  subject: null, body: `${legacy_id} body`,
   is_active: true, location_uuid: null, is_master: true, is_own_custom: false,
 })
 
@@ -71,22 +80,22 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-// Open the collapsed Email Templates section by walking up from its sub-label.
+// Open the collapsed Call Scripts section by walking up from its sub-label.
 async function openEmailSection() {
   const sub = Array.from(container.querySelectorAll('*')).find(
-    el => el.textContent?.trim().startsWith('Subject lines and bodies for client emails'),
+    el => el.textContent?.trim().startsWith('Talking points for you'),
   )
-  expect(sub, 'the Email Templates section header').toBeTruthy()
+  expect(sub, 'the Call Scripts section header').toBeTruthy()
   for (let el = sub as HTMLElement | null; el && el !== container; el = el.parentElement) {
     await act(async () => { el!.click() })
     if ((container.textContent || '').includes('GEN2 Welcome Email')) break
   }
 }
 
-describe('Templates tab — Gen 2 master grouping', () => {
+describe('template sections — Gen 2 master grouping', () => {
   it('renders the Welcome and Opportunity Stages headings', async () => {
     await act(async () => {
-      root.render(<SettingsScreen selectedLoc={selectedLoc} initialSection="templates" />)
+      root.render(<SettingsScreen selectedLoc={selectedLoc} initialSection="texts" />)
     })
     await act(async () => {})
     await openEmailSection()
@@ -100,7 +109,7 @@ describe('Templates tab — Gen 2 master grouping', () => {
 
   it('files each master under the right heading', async () => {
     await act(async () => {
-      root.render(<SettingsScreen selectedLoc={selectedLoc} initialSection="templates" />)
+      root.render(<SettingsScreen selectedLoc={selectedLoc} initialSection="texts" />)
     })
     await act(async () => {})
     await openEmailSection()
@@ -130,7 +139,7 @@ describe('Templates tab — Gen 2 master grouping', () => {
 
   it('keeps masters read-only — Preview + Duplicate, never Edit or Delete', async () => {
     await act(async () => {
-      root.render(<SettingsScreen selectedLoc={selectedLoc} initialSection="templates" />)
+      root.render(<SettingsScreen selectedLoc={selectedLoc} initialSection="texts" />)
     })
     await act(async () => {})
     await openEmailSection()
