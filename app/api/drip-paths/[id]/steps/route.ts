@@ -85,7 +85,7 @@ export async function PATCH(
   }
 
   // Validate + normalize step payload
-  type StepIn = { id?: string; step_order: number; delay_days: number; channel: string; master_template_id: string | null; subject: string | null; body: string | null }
+  type StepIn = { id?: string; step_order: number; delay_days: number; channel: string; master_template_id: string | null; subject: string | null; body: string | null; origin: 'master' | 'added' }
   const stepsIn: StepIn[] = []
   for (const raw of body.steps as Array<Record<string, unknown>>) {
     if (typeof raw !== 'object' || raw === null) {
@@ -111,6 +111,15 @@ export async function PATCH(
       master_template_id: typeof raw.master_template_id === 'string' ? raw.master_template_id : null,
       subject: typeof raw.subject === 'string' ? raw.subject : null,
       body: typeof raw.body === 'string' ? raw.body : null,
+      // issue 240 step 9b — THIS VALIDATOR DROPS UNKNOWN KEYS WITHOUT ERROR.
+      // If origin is not named here it never reaches the database, the shape
+      // guard falls back to comparing whole step_order sets, and reset returns
+      // to guessing by position — the exact bug the column was bought to
+      // prevent, while appearing to work. Anything but 'added' is 'master':
+      // the CHECK constraint allows only the two, and defaulting the unknown
+      // case to 'master' keeps a malformed payload from inventing an
+      // unresettable step.
+      origin: raw.origin === 'added' ? 'added' : 'master',
     })
   }
 
@@ -140,12 +149,14 @@ export async function PATCH(
     subject: s.subject,
     body: s.body,
     is_active: true,
+    // Validated-but-not-inserted is the same silent failure as above.
+    origin: s.origin,
   }))
 
   const { data: inserted, error: insErr } = await supabaseService
     .from('drip_path_steps')
     .insert(insertRows)
-    .select('id, step_order, delay_days, channel, subject, body, master_template_id, is_active')
+    .select('id, step_order, delay_days, channel, subject, body, master_template_id, is_active, origin')
 
   if (insErr) {
     console.error('[/api/drip-paths/[id]/steps PATCH] insert error:', insErr.message)

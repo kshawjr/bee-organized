@@ -83,7 +83,7 @@ export async function POST(
   // Load master's steps
   const { data: masterSteps, error: stepsErr } = await supabaseService
     .from('drip_path_steps')
-    .select('step_order, delay_days, channel, subject, body, master_template_id, is_active')
+    .select('step_order, delay_days, channel, subject, body, master_template_id, is_active, origin')
     .eq('drip_path_id', master.id)
     .order('step_order', { ascending: true })
 
@@ -122,6 +122,11 @@ export async function POST(
       body: s.body,
       master_template_id: s.master_template_id,
       is_active: s.is_active,
+      // issue 240 step 9b — every cloned step is master-derived. Written
+      // explicitly rather than left to the column default so the clone states
+      // what it is doing; the first owner-added step after a fork would
+      // otherwise mislabel the whole path.
+      origin: 'master',
     }))
     const { error: insErr } = await supabaseService.from('drip_path_steps').insert(stepRows)
     if (insErr) {

@@ -16339,6 +16339,7 @@ function masterStepsToUi(master) {
         subject: s.subject ?? null,
         body: s.body ?? null,
         fromMaster: true,
+        origin: 'master',
       }
     })
     .sort((a, b) => a.order - b.order)
@@ -18451,6 +18452,7 @@ export function buildEmailList({ pathSteps = {}, templates = [], generalDefault 
         // is which map the row came from: masterStepsToUi stamps fromMaster,
         // loadLocationPaths gives real location rows a dbId.
         wording: s.fromMaster ? 'master' : 'yours',
+        origin: s.origin === 'added' ? 'added' : 'master',
         contentMissing: !subject && !body,
       }
     })
@@ -18511,11 +18513,16 @@ function EmailReadModal({ rows, index, onClose, onStep, onEdit, onReset, resetBl
           {row.wording === 'yours' && (
             <div style={{ background:'#fdf6e3', borderRadius:'9px', padding:'11px 14px', marginBottom:'15px', fontSize:'13px', color:'#8a6a0e', display:'flex', gap:'9px', alignItems:'center', flexWrap:'wrap' }}>
               <span>You've changed this one.</span>
-              {onReset && (
-                resetBlockedReason
-                  ? <span title={resetBlockedReason} style={{ marginLeft:'auto', opacity:0.6, fontSize:'12px', whiteSpace:'nowrap' }}>Can't undo this — {resetBlockedReason}</span>
-                  : <button onClick={onReset} style={{ marginLeft:'auto', background:'none', border:'none', color:'#8a6a0e', textDecoration:'underline', cursor:'pointer', font:'inherit', fontSize:'12.5px', padding:0, whiteSpace:'nowrap' }}>Put the Bee Organized wording back</button>
-              )}
+              {/* issue 240 step 9b — the REASON is not gated on onReset. It used
+                  to be, which meant a step with no master counterpart (an added
+                  one) showed neither the control nor an explanation: it just
+                  silently lacked reset, which is the thing we said we would
+                  never do. Reason first, control only when there is one. */}
+              {resetBlockedReason
+                ? <span title={resetBlockedReason} style={{ marginLeft:'auto', opacity:0.6, fontSize:'12px', lineHeight:1.45 }}>Can't undo this — {resetBlockedReason}</span>
+                : onReset
+                  ? <button onClick={onReset} style={{ marginLeft:'auto', background:'none', border:'none', color:'#8a6a0e', textDecoration:'underline', cursor:'pointer', font:'inherit', fontSize:'12.5px', padding:0, whiteSpace:'nowrap' }}>Put the Bee Organized wording back</button>
+                  : null}
             </div>
           )}
           <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 6px' }}>Subject</p>
@@ -18579,6 +18586,91 @@ function EmailTemplateEditor({ row, onCancel, onSave }) {
             disabled={busy || !changed}
             style={{ background: (busy || !changed) ? '#c3cfcc' : '#1a2e2b', border:'none', borderRadius:'9px', padding:'9px 17px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'white', cursor:(busy || !changed) ? 'not-allowed' : 'pointer', maxWidth:CONTROL_W.action }}>
             {busy ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── issue 240 step 9b — add an email to the end of the sequence ───
+//
+// APPEND ONLY. There is no mid-sequence insert and none should be added: an
+// insert shifts every step_order after it, and lead_drip_progress tracks
+// position AS a step_order, so in-flight leads would silently start receiving
+// different content than the one they were scheduled for.
+//
+// The confirmation states two DIFFERENT truths depending on whether this
+// location already owns its path, both computed live at confirm time:
+//   owns it      leads mid-sequence on this path row WILL receive the new
+//                email, because advanceOrComplete looks for current_step + 1
+//                and will now find one.
+//   does not     nobody currently in the sequence gets it. lead_drip_progress
+//                pins the path ROW at enrolment, so leads enrolled on the
+//                shared version stay on it. And adding forks the path, which
+//                stops corp's future wording changes flowing through —
+//                permanently.
+export function AddEmailModal({ templates, steps, ownsPath, liveLeadCount, busy, err, onCancel, onConfirm }) {
+  const [pick, setPick] = React.useState('blank')
+  const offerable = React.useMemo(() => offerableStartingTemplates(templates), [templates])
+  const pos = appendedStepPosition(steps)
+  const chosen = offerable.find(t => t.dbId === pick) || null
+  const btn = { background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'9px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', maxWidth:CONTROL_W.action }
+  const card = on => ({ border:`1.5px solid ${on ? '#1a2e2b' : 'rgba(26,46,43,0.12)'}`, borderRadius:'11px', padding:'12px 14px', marginBottom:'8px', cursor:'pointer', background: on ? '#fafcfb' : 'white', maxWidth:CONTROL_W.field, textAlign:'left', width:'100%', font:'inherit', fontFamily:'inherit' })
+  return (
+    <div onClick={onCancel} style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:80 }}>
+      <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Add another email"
+        style={{ maxWidth:'640px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
+        <div style={{ padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)', fontSize:'12px', color:'#8a9e9a' }}>Add another email</div>
+        <div style={{ padding:'20px 24px 22px' }}>
+          <p style={{ fontSize:'14px', color:'#1a2e2b', margin:'0 0 4px', lineHeight:1.55 }}>
+            It goes at the <b>end</b> of the sequence, {pos.delay_days} days after someone first gets in touch — {ADD_STEP_INTERVAL_DAYS} days after the last one.
+          </p>
+          <p style={{ fontSize:'12.5px', color:'#8a9e9a', margin:'0 0 16px', lineHeight:1.55 }}>
+            You can change when it sends later. It can’t be slotted in between the others.
+          </p>
+
+          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 8px' }}>Start from</p>
+          <button onClick={() => setPick('blank')} style={card(pick === 'blank')}>
+            <b style={{ display:'block', fontSize:'14px', fontWeight:600, color:'#1a2e2b' }}>A blank email</b>
+            <span style={{ fontSize:'12.5px', color:'#4a5f5b' }}>Write it yourself.</span>
+          </button>
+          {offerable.map(t => (
+            <button key={t.dbId} onClick={() => setPick(t.dbId)} style={card(pick === t.dbId)}>
+              <b style={{ display:'block', fontSize:'14px', fontWeight:600, color:'#1a2e2b' }}>{t.name}</b>
+              <span style={{ fontSize:'12.5px', color:'#4a5f5b' }}>{(t.subject || '').slice(0, 80)}</span>
+            </button>
+          ))}
+          {offerable.length === 0 && (
+            <p style={{ fontSize:'12.5px', color:'#8a9e9a', margin:'0 0 12px', maxWidth:CONTROL_W.field, lineHeight:1.55 }}>
+              There aren’t any ready-made emails to start from yet. New ones will show up here as they’re written.
+            </p>
+          )}
+          {chosen && (
+            <p style={{ fontSize:'12.5px', color:'#4a5f5b', margin:'8px 0 0', maxWidth:CONTROL_W.field, lineHeight:1.55 }}>
+              This stays linked to the Bee Organized version — if they improve the wording, yours updates too. It isn’t a copy. Editing it yourself breaks that link.
+            </p>
+          )}
+
+          {/* The two truths. Computed live, never baked in. */}
+          <div style={{ background:'#fdf6e3', borderRadius:'10px', padding:'13px 15px', marginTop:'18px', fontSize:'13px', color:'#8a6a0e', lineHeight:1.6 }}>
+            {ownsPath ? (
+              liveLeadCount > 0
+                ? <>Right now <b>{liveLeadCount} {liveLeadCount === 1 ? 'person is' : 'people are'}</b> partway through this sequence. They’ll get this new email too, when they reach the end.</>
+                : <>Nobody is partway through this sequence at the moment, so this will only go to people who come in from now on.</>
+            ) : (
+              <>Nobody partway through this sequence will get this one — they’ll finish on the shared version they started on.
+              <br /><br />
+              Adding your own email also means this sequence stops following Bee Organized’s. If they improve the standard wording later, yours won’t change with it. <b>That can’t be undone.</b></>
+            )}
+          </div>
+          {err && <p style={{ marginTop:'10px', fontSize:'12.5px', color:'#c0554e' }}>{err}</p>}
+        </div>
+        <div style={{ display:'flex', gap:'9px', padding:'15px 24px', borderTop:'1px solid rgba(26,46,43,0.10)', background:'#faf8f3', flexWrap:'wrap' }}>
+          <button onClick={onCancel} disabled={busy} style={btn}>Cancel</button>
+          <button onClick={() => onConfirm(pick === 'blank' ? null : chosen)} disabled={busy}
+            style={{ ...btn, background: busy ? '#c3cfcc' : '#1a2e2b', color:'white', border:'none', cursor: busy ? 'not-allowed' : 'pointer' }}>
+            {busy ? 'Adding…' : 'Add this email'}
           </button>
         </div>
       </div>
@@ -18704,10 +18796,76 @@ export function blockedSentence(reasons) {
 // The master is found by path_key where is_master — NOT by cloned_from_id.
 // Two live Seattle defaults have no cloned_from_id and must still resolve.
 export function dripShapeMatchesMaster(forkSteps, masterStepsForKey) {
-  const f = (forkSteps || []).map(s => Number(s.order)).sort((a, b) => a - b)
+  // issue 240 step 9b — steps the owner ADDED have no master counterpart and
+  // must not count against the comparison, or a single append would disable
+  // reset for the whole path. This is what the origin column was bought for:
+  // before it, an appended step and a mid-sequence insert produced identical
+  // step_order sets and were indistinguishable.
+  const f = (forkSteps || []).filter(s => s.origin !== 'added')
+    .map(s => Number(s.order)).sort((a, b) => a - b)
   const m = (masterStepsForKey || []).map(s => Number(s.order)).sort((a, b) => a - b)
   if (!m.length) return false          // no master to restore from
   return JSON.stringify(f) === JSON.stringify(m)
+}
+
+// An added step has nothing to be put back TO.
+export function rowHasMasterCounterpart(row) {
+  return row?.rail !== 'drip' || row?.origin !== 'added'
+}
+
+// ─── issue 240 step 9b — what may be offered as a starting point ───
+//
+// Master, email, active — minus anything that would let an owner duplicate a
+// row that already exists on this screen, or resurrect content that was
+// deliberately retired.
+//
+// EXCLUDED BY legacy_id, and this list must not be re-added:
+//   welcome, opp_closed_job_3mo, opp_closed_job_12mo
+//     already render as their own rows here. Picking one would put a second
+//     copy of the same email into the sequence.
+//   opp_organizing_estimate_3d / _30d, opp_moving_estimate_3d / _30d
+//     RETIRED in issue 240 step 3 (ec04aee) because Jobber sends its own
+//     estimate follow-ups and ours duplicated them for the client. 67 had
+//     already gone out and 80 pending were cancelled on Kevin's instruction.
+//     Offering them here would re-introduce cancelled content through a side
+//     door. Do not put these back.
+//
+// Deliberately a DENY list, not an allow list: anything added to the library
+// later appears automatically without a code change.
+export const ADD_STEP_EXCLUDED_LEGACY_IDS = [
+  'welcome',
+  'opp_closed_job_3mo',
+  'opp_closed_job_12mo',
+  'opp_organizing_estimate_3d',
+  'opp_organizing_estimate_30d',
+  'opp_moving_estimate_3d',
+  'opp_moving_estimate_30d',
+]
+
+export function offerableStartingTemplates(templates) {
+  return (templates || []).filter(t =>
+    t.isMaster && t.isActive && t.type === 'email' &&
+    !ADD_STEP_EXCLUDED_LEGACY_IDS.includes(t.legacyId))
+}
+
+// Where an appended step lands, and when it may send.
+//
+// Both send-path invariants live here:
+//   step_order must stay CONTIGUOUS — advanceOrComplete looks for exactly
+//   current + 1, so a gap silently stamps the drip complete.
+//   delay_days must be >= its predecessor's — the gap to the next send is
+//   next.delay_days - current.delay_days, floored at 0, so a lower value
+//   sends on the next hourly tick.
+// Owners cannot set timing here (step 10 owns it), so the default is stated
+// in the UI rather than chosen.
+export const ADD_STEP_INTERVAL_DAYS = 14
+
+export function appendedStepPosition(steps) {
+  const rows = (steps || [])
+  const maxOrder = rows.reduce((a, s) => Math.max(a, Number(s.order) || 0), 0)
+  const prevDelay = rows.reduce((a, s) =>
+    Number(s.order) === maxOrder ? Number(s.delay_days ?? 0) : a, 0)
+  return { order: maxOrder + 1, delay_days: prevDelay + ADD_STEP_INTERVAL_DAYS, prevDelay }
 }
 
 export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null, sendConfig = {} }) {
@@ -18734,7 +18892,13 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
       ? 'these emails have been added to or reordered, so we can no longer tell which one to put back'
       : null
   const canEdit = !!actions
-  const canReset = row => !!actions && row.wording === 'yours'
+  const canReset = row => !!actions && row.wording === 'yours' && rowHasMasterCounterpart(row)
+  // An added step has nothing to be put back TO. Say so rather than render a
+  // dead control or silently omit one.
+  const noCounterpartFor = row =>
+    row.rail === 'drip' && row.origin === 'added'
+      ? 'you added this one, so there is no Bee Organized version to go back to'
+      : null
   // issue 240 step 9a — computed per row from the row's own wording, because
   // the guards read the template text and step 8b lets an owner change it.
   const blockedFor = row => blockedSentence(emailRowBlockers(row, sendConfig))
@@ -18759,12 +18923,20 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
 
   return (
     <div style={{ margin:'0 12px' }}>
+      {/* Append only, and only on the sequence group — the closed-job pair is
+          not a sequence and has nothing to append to. */}
       <Group id="new" title="When someone new gets in touch"
         count={`${withNotes.length} email${withNotes.length === 1 ? '' : 's'}`}
         note={moveDefault && moveDefault !== generalDefault
           ? 'These are the organizing emails. Moving leads follow a different set — you can see it on the old Communication tab until this screen covers both.'
           : null}
         rows={withNotes} />
+      {actions && actions.add && (
+        <button onClick={actions.add}
+          style={{ width:'100%', maxWidth:CONTROL_W.action, padding:'9px', marginTop:'-14px', marginBottom:'22px', background:'transparent', border:'1px dashed rgba(26,46,43,0.22)', borderRadius:'10px', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#4a5f5b', cursor:'pointer' }}>
+          + Add another email
+        </button>
+      )}
       <Group id="job" title="After a job is finished"
         count={`${afterJob.length} email${afterJob.length === 1 ? '' : 's'}`}
         note="These go out long after the work is done, so they're easy to forget about. Counted from the day the job closes, not from when the lead arrived."
@@ -18775,7 +18947,7 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
           onStep={i => setOpen(o => ({ ...o, index: Math.max(0, Math.min(openRows.length - 1, i)) }))}
           onEdit={canEdit ? () => { const r = openRows[open.index]; setOpen(null); actions.edit(r) } : null}
           onReset={canReset(openRows[open.index]) ? () => { const r = openRows[open.index]; setOpen(null); actions.reset(r) } : null}
-          resetBlockedReason={resetBlockedFor(openRows[open.index])}
+          resetBlockedReason={noCounterpartFor(openRows[open.index]) || resetBlockedFor(openRows[open.index])}
           blockedReason={blockedFor(openRows[open.index])} />
       )}
     </div>
@@ -21192,6 +21364,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           delay_days: s.delay_days,
           templateId: s.template_legacy_id || s.master_template_id,
           masterTemplateId: s.master_template_id,
+          // issue 240 step 9b — commitSteps sends back what THIS map holds, so
+          // a round trip that fails to read origin nulls it on the next save.
+          origin: s.origin === 'added' ? 'added' : 'master',
         }))
       }
       setDbPaths(newDbPaths)
@@ -21378,6 +21553,9 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
           // send null here and resolve through master_template_id at send time.
           subject: s.subject ?? null,
           body: s.body ?? null,
+          // The validator names this explicitly; anything it does not name is
+          // dropped without error.
+          origin: s.origin === 'added' ? 'added' : 'master',
         }
       })
       const res2 = await fetch(`/api/drip-paths/${dbPath.id}/steps`, {
@@ -21407,6 +21585,62 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // point — so the confirm modal states it, not just the standing banner.
   // proceed(steps) receives the steps the mutation should build on: the
   // location's own rows when they exist, else the freshly-cloned copy.
+  // ─── issue 240 step 9b — append an email ───
+  //
+  // The live count is read AT CONFIRM TIME, never baked in, and it is scoped to
+  // the exact path ROW the append will land on. lead_drip_progress pins that
+  // row at enrolment, so a location that has not forked yet has its leads on
+  // the MASTER row — and they will never see the fork's append. That is why
+  // the modal states two different things rather than one sentence with a
+  // number swapped in.
+  const [addEmailState, setAddEmailState] = useState(null)
+
+  async function openAddEmail(pathKey) {
+    const owned = !!dbPaths[pathKey]
+    let liveLeadCount = 0
+    try {
+      if (owned && dbPaths[pathKey]?.id) {
+        const res = await fetch(`/api/drip-paths/${dbPaths[pathKey].id}/active-lead-count`)
+        if (res.ok) liveLeadCount = (await res.json())?.count ?? 0
+      }
+    } catch { /* a count we cannot read is reported as unknown, not as zero */ }
+    setAddEmailState({ pathKey, ownsPath: owned, liveLeadCount, busy: false, err: '' })
+  }
+
+  async function confirmAddEmail(template) {
+    const { pathKey } = addEmailState
+    setAddEmailState(st => ({ ...st, busy: true, err: '' }))
+    try {
+      await new Promise((resolve, reject) => {
+        ensureOwnedThen(pathKey, async (steps) => {
+          try {
+            const pos = appendedStepPosition(steps)
+            const next = [...steps, {
+              id: `new_${Date.now()}`,
+              order: pos.order,
+              type: 'email',
+              delay: daysToDelayLabel(pos.delay_days),
+              delay_days: pos.delay_days,
+              // A picked template is a LIVE LINK: master_template_id set,
+              // subject/body null, resolved fresh at send time. Not a copy.
+              templateId: template ? template.legacyId || template.dbId : null,
+              masterTemplateId: template ? template.dbId : null,
+              subject: template ? null : '',
+              body: template ? null : '',
+              name: template ? template.name : 'New email',
+              origin: 'added',
+            }]
+            await commitSteps(pathKey, next)
+            resolve()
+          } catch (e) { reject(e) }
+        })
+      })
+      setAddEmailState(null)
+    } catch (e) {
+      setAddEmailState(st => st && ({ ...st, busy: false, err: 'Could not add it: ' + (e?.message || e) }))
+    }
+  }
+
   // ─── issue 240 step 8b — Edit and reset for the Emails list ───
   //
   // TWO RAILS, and they fork differently. Getting this wrong makes an owner's
@@ -22630,7 +22864,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               masterSteps={masterSteps}
               generalDefault={settings.paths.generalDefault}
               moveDefault={settings.paths.moveDefault}
-              actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset } : null}
+              actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset, add: () => openAddEmail(settings.paths.generalDefault) } : null}
               // issue 240 step 9a — mirrors what the guards read at send time.
               // The owner link is the signed-in owner's; the send path also
               // consults the assigned user's, which has no meaning without a
@@ -22893,6 +23127,19 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
 
       </div>
 
+      {/* issue 240 step 9b — append an email. */}
+      {addEmailState && (
+        <AddEmailModal
+          templates={templates}
+          steps={pathSteps[addEmailState.pathKey] || []}
+          ownsPath={addEmailState.ownsPath}
+          liveLeadCount={addEmailState.liveLeadCount}
+          busy={addEmailState.busy}
+          err={addEmailState.err}
+          onCancel={() => setAddEmailState(null)}
+          onConfirm={confirmAddEmail}
+        />
+      )}
       {/* issue 240 step 8b — rail B/C edit (welcome, closed job). */}
       {emailTemplateEditor && (
         <EmailTemplateEditor

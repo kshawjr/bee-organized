@@ -74,7 +74,7 @@ export async function GET(
       .order('name', { ascending: true }),
     supabaseService
       .from('drip_path_steps')
-      .select('id, drip_path_id, step_order, delay_days, channel, subject, body, master_template_id, is_active, templates:master_template_id(name, legacy_id, subject, body)')
+      .select('id, drip_path_id, step_order, delay_days, channel, subject, body, master_template_id, is_active, origin, templates:master_template_id(name, legacy_id, subject, body)')
       .order('step_order', { ascending: true }),
     supabaseService
       .from('locations')
@@ -115,6 +115,9 @@ export async function GET(
           template_name: tpl?.name ?? null,
           template_legacy_id: tpl?.legacy_id ?? null,
           is_active: s.is_active,
+          // issue 240 step 9b — selecting the column is not enough; this
+          // mapper is a fixed shape and would drop it silently.
+          origin: (s as any).origin ?? 'master',
         }
       }),
   }))
