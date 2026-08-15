@@ -34,6 +34,28 @@
 // cannot assign a lead to one. A handler whose account is disabled or
 // deactivated is treated as ABSENT (the type falls to the owner) — the FK's
 // ON DELETE CASCADE only covers hard deletes, and offboarding here is soft.
+//
+// WHAT A TYPE SENDS AS IS A SEPARATE FACT (issue 296). sender_is_custom=true
+// means the row sends as a hand-typed identity — a shared mailbox — rather than
+// as its handler. That matters HERE because liveness applies to a person and a
+// shared mailbox has none:
+//
+//   person mode + active handler  → assigns to them, sends as them.
+//   person mode + dead handler    → dropped entirely. Assignment falls to the
+//                                   owner, the send falls to the base sender.
+//                                   Unchanged: sending as someone who has been
+//                                   offboarded is exactly what we don't want.
+//   typed mode  + active handler  → assigns to them, sends as the typed address.
+//   typed mode  + dead handler    → hub_user_id null so the assignment falls to
+//                                   the owner, but THE IDENTITY SURVIVES. A
+//                                   mailbox does not stop existing because a
+//                                   person left, and dropping the row would
+//                                   silently revert a location's group-inbox
+//                                   mail to the base sender the day someone is
+//                                   offboarded — a config change nobody made.
+//
+// So hub_user_id is nullable on the way out and every consumer must say what it
+// does with null. lib/lead-assignment.ts falls through to the location owner.
 // ─────────────────────────────────────────────────────────────
 
 import { supabaseService } from './supabase-service'
@@ -45,18 +67,27 @@ import {
 
 export type ProjectTypeHandler = {
   project_type: string
-  hub_user_id: string
+  // WHO HANDLES IT — null when the row's person is disabled, deactivated or
+  // gone. Null means "assign to the location owner instead"; it does NOT mean
+  // the row is dead, because a typed identity outlives its handler (see the
+  // header table). Nullable so that consumers cannot use it without deciding.
+  hub_user_id: string | null
+  // WHAT IT SENDS AS — always populated and always usable.
   name: string
   email: string
   reply_to: string | null
+  is_custom: boolean
 }
 
 // Every handler row at a location, keyed by canonical project-type label.
 //
-// ACTIVE HANDLERS ONLY. A row whose hub_user is disabled (disabled_at set) or
-// deactivated (is_active false) is dropped here, so the type falls through to
-// the location owner rather than assigning work to someone who has been
-// offboarded — and rather than sending client email as them.
+// LIVENESS IS A FACT ABOUT THE PERSON, NOT THE ROW (issue 296). A row whose
+// hub_user is disabled (disabled_at set) or deactivated (is_active false) can
+// no longer receive an assignment, so hub_user_id comes back null and the type
+// falls through to the location owner. Whether the ROW survives depends on what
+// it sends as: a person-mode row is dropped completely (we must not keep
+// sending client mail as someone who has been offboarded), while a typed-mode
+// row is KEPT so its shared mailbox keeps sending. See the header table.
 //
 // FAIL-SOFT: any read error returns an empty map, i.e. "no handlers", i.e.
 // everything goes to the owner and the base sender. A config read must never
@@ -69,35 +100,47 @@ export async function getLocationHandlers(
   try {
     const { data, error } = await supabaseService
       .from('location_project_type_senders')
-      .select('project_type, sender_name, sender_email, sender_reply_to, source_user_id')
+      .select('project_type, sender_name, sender_email, sender_reply_to, sender_is_custom, source_user_id')
       .eq('location_id', locationId)
     if (error || !data || data.length === 0) return out
 
     const ids = Array.from(
       new Set(data.map((r: any) => r.source_user_id).filter(Boolean)),
     ) as string[]
-    if (ids.length === 0) return out
 
-    const { data: users } = await supabaseService
-      .from('hub_users')
-      .select('id, is_active, disabled_at')
-      .in('id', ids)
-    const usable = new Set(
-      (users || [])
-        .filter((u: any) => u.is_active !== false && !u.disabled_at)
-        .map((u: any) => u.id),
-    )
+    // No early return on an empty id list. source_user_id is NOT NULL so this
+    // should be unreachable, but bailing out here would drop every typed-sender
+    // row at the location — the precise silent revert this issue exists to
+    // prevent. Skipping the lookup leaves `usable` empty, which correctly reads
+    // as "nobody is assignable" rather than "there are no senders".
+    let usable = new Set<string>()
+    if (ids.length > 0) {
+      const { data: users } = await supabaseService
+        .from('hub_users')
+        .select('id, is_active, disabled_at')
+        .in('id', ids)
+      usable = new Set(
+        (users || [])
+          .filter((u: any) => u.is_active !== false && !u.disabled_at)
+          .map((u: any) => u.id),
+      )
+    }
 
     for (const r of data as any[]) {
-      if (!r.source_user_id || !usable.has(r.source_user_id)) continue
+      const isCustom = r.sender_is_custom === true
+      const live = !!r.source_user_id && usable.has(r.source_user_id)
+      // A person-mode row with no live person has nothing left to offer: its
+      // identity IS that person. A typed-mode row still has its mailbox.
+      if (!live && !isCustom) continue
       const key = String(r.project_type || '').trim()
       if (!key) continue
       out.set(key.toLowerCase(), {
         project_type: key,
-        hub_user_id: r.source_user_id,
+        hub_user_id: live ? r.source_user_id : null,
         name: r.sender_name,
         email: r.sender_email,
         reply_to: r.sender_reply_to ?? null,
+        is_custom: isCustom,
       })
     }
     return out

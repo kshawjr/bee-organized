@@ -3,10 +3,13 @@
 // Per-project-type SENDER routing — CONFIG layer (data access, domain warning,
 // one-per-type, access gate).
 //
-// Pins: getSenderConfig shape + verified-domain warnings; assignSenderToTypes
+// Pins: getSenderConfig shape + verified-domain warnings; setHandlerForTypes
 // upserts one row per type on the (location_id, project_type) key (so a type is
-// never on two senders — one-per-type); unassignTypes deletes; the split toggle
-// write; and the owner+elevated-only access predicate (manager rejected).
+// never on two senders — one-per-type) WITHOUT disturbing what the type sends
+// as; setSenderIdentityForType sets the sending identity WITHOUT reassigning;
+// getPickableHandler refuses a person who is not pickable here; unassignTypes
+// deletes; nothing writes a split_* flag; and the owner+elevated-only access
+// predicate (manager rejected).
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const h = vi.hoisted(() => {
@@ -45,7 +48,9 @@ import {
   emailDomain,
   senderDomainWarning,
   getSenderConfig,
-  assignSenderToTypes,
+  setHandlerForTypes,
+  setSenderIdentityForType,
+  getPickableHandler,
   unassignTypes,
 } from '@/lib/project-type-senders'
 import { notificationRecipientsManageableServer } from '@/lib/notification-access'
@@ -118,7 +123,9 @@ describe('getSenderConfig', () => {
   })
 })
 
-describe('assignSenderToTypes — one-per-type upsert', () => {
+const BREE = { source_user_id: 'u1', name: 'Bree', email: 'bree@x.com' }
+
+describe('setHandlerForTypes — one-per-type upsert', () => {
   it('upserts ONE row per type on the (location_id, project_type) conflict key', async () => {
     // issue 246 step 2 — labels are canonicalized against lookups before the
     // write, so the stored value is exactly what lookups spells.
@@ -126,29 +133,28 @@ describe('assignSenderToTypes — one-per-type upsert', () => {
       { label: 'Local Move', sort_order: 10, attrs: { drip_category: 'move' } },
       { label: 'Long-Distance Move', sort_order: 20, attrs: { drip_category: 'move' } },
     ])
+    h.enqueue('location_project_type_senders', [])   // existing-rows read
     h.enqueue('location_project_type_senders', null) // upsert result
-    await assignSenderToTypes(
-      LOC,
-      { sender_name: 'Bree', sender_email: 'bree@x.com', sender_reply_to: null, source_user_id: 'u1' },
-      ['Local Move', 'Long-Distance Move'],
-    )
+    await setHandlerForTypes(LOC, BREE, ['Local Move', 'Long-Distance Move'])
     const payloads = h.upsertPayloads('location_project_type_senders')
     expect(payloads).toHaveLength(1)
     const rows = payloads[0]
     expect(rows).toHaveLength(2)
     expect(rows.map((r: any) => r.project_type)).toEqual(['Local Move', 'Long-Distance Move'])
-    // every row carries the same sender + the location.
+    // every row carries the same handler + the location, and person mode.
     for (const r of rows) {
-      expect(r).toMatchObject({ location_id: LOC, sender_email: 'bree@x.com', source_user_id: 'u1' })
+      expect(r).toMatchObject({
+        location_id: LOC, sender_email: 'bree@x.com', source_user_id: 'u1', sender_is_custom: false,
+      })
     }
     // onConflict target enforces one-per-type.
-    const call = h.callsFor('location_project_type_senders')[0]
-    const upsertArgs = call.ops.find(o => o[0] === 'upsert')![1]
+    const upsertCall = h.callsFor('location_project_type_senders').find(c => c.ops.some(o => o[0] === 'upsert'))!
+    const upsertArgs = upsertCall.ops.find(o => o[0] === 'upsert')![1]
     expect(upsertArgs[1]).toMatchObject({ onConflict: 'location_id,project_type' })
   })
 
   it('no-ops on an empty type list', async () => {
-    await assignSenderToTypes(LOC, { sender_name: 'x', sender_email: 'x@x.com', sender_reply_to: null, source_user_id: 'u1' }, [])
+    await setHandlerForTypes(LOC, BREE, [])
     expect(h.callsFor('location_project_type_senders')).toHaveLength(0)
   })
 
@@ -157,31 +163,133 @@ describe('assignSenderToTypes — one-per-type upsert', () => {
     // Without it the DB's ..._loc_type_ci_idx would be the only thing between
     // two case-variant handler rows and a silently broken one-per-type rule.
     h.enqueue('lookups', [{ label: 'Local Move', sort_order: 10, attrs: { drip_category: 'move' } }])
+    h.enqueue('location_project_type_senders', [])
     h.enqueue('location_project_type_senders', null)
-    await assignSenderToTypes(
-      LOC,
-      { sender_name: 'Bree', sender_email: 'bree@x.com', sender_reply_to: null, source_user_id: 'u1' },
-      ['  local MOVE '],
-    )
+    await setHandlerForTypes(LOC, BREE, ['  local MOVE '])
     expect(h.upsertPayloads('location_project_type_senders')[0][0].project_type).toBe('Local Move')
   })
 
   it('REJECTS an unknown project type rather than storing an unmatchable row', async () => {
     h.enqueue('lookups', [{ label: 'Local Move', sort_order: 10, attrs: { drip_category: 'move' } }])
-    await expect(assignSenderToTypes(
-      LOC,
-      { sender_name: 'Bree', sender_email: 'bree@x.com', sender_reply_to: null, source_user_id: 'u1' },
-      ['Nonsense Type'],
-    )).rejects.toThrow(/unknown project type/)
+    await expect(setHandlerForTypes(LOC, BREE, ['Nonsense Type']))
+      .rejects.toThrow(/unknown project type/)
     expect(h.callsFor('location_project_type_senders')).toHaveLength(0)
   })
 
   it('REJECTS a handler with no person — an assignee cannot be an email address', async () => {
-    await expect(assignSenderToTypes(
-      LOC,
-      { sender_name: 'Bree', sender_email: 'bree@x.com', sender_reply_to: null, source_user_id: '' as any },
-      ['Local Move'],
-    )).rejects.toThrow(/must be a person/)
+    await expect(setHandlerForTypes(LOC, { ...BREE, source_user_id: '' }, ['Local Move']))
+      .rejects.toThrow(/must be a person/)
+  })
+
+  // ── THE SILENT WIPE (issue 296) ───────────────────────────────────────────
+  // The regression this whole split exists to prevent. The old combined writer
+  // rebuilt the whole row from a payload the UI never populated, so every save
+  // wrote sender_reply_to: null — which is why the column had a validator, a
+  // persist path and zero non-null rows in production for its entire life.
+  it('re-picking a handler does NOT wipe a typed sender or its reply-to', async () => {
+    h.enqueue('lookups', [{ label: 'Local Move', sort_order: 10, attrs: { drip_category: 'move' } }])
+    h.enqueue('location_project_type_senders', [
+      {
+        project_type: 'Local Move',
+        sender_name: 'Bee Organized Moving',
+        sender_email: 'moving@beeorganized-kc.com',
+        sender_reply_to: 'carol@beeorganized.com',
+        sender_is_custom: true,
+      },
+    ])
+    h.enqueue('location_project_type_senders', null)
+
+    // Move the type from Carol to Bree. The From line is not part of that.
+    await setHandlerForTypes(LOC, BREE, ['Local Move'])
+
+    const row = h.upsertPayloads('location_project_type_senders')[0][0]
+    expect(row).toMatchObject({
+      source_user_id: 'u1',                            // the handler DID change
+      sender_is_custom: true,                          // and the identity did NOT
+      sender_name: 'Bee Organized Moving',
+      sender_email: 'moving@beeorganized-kc.com',
+      sender_reply_to: 'carol@beeorganized.com',
+    })
+  })
+
+  it('re-picking a handler DOES re-snapshot a person-mode row', async () => {
+    // The other half of the same rule: person mode means "send as the handler",
+    // so a new handler must bring their own name and address with them.
+    h.enqueue('lookups', [{ label: 'Local Move', sort_order: 10, attrs: { drip_category: 'move' } }])
+    h.enqueue('location_project_type_senders', [
+      {
+        project_type: 'Local Move',
+        sender_name: 'Carol', sender_email: 'carol@x.com',
+        sender_reply_to: null, sender_is_custom: false,
+      },
+    ])
+    h.enqueue('location_project_type_senders', null)
+    await setHandlerForTypes(LOC, BREE, ['Local Move'])
+    expect(h.upsertPayloads('location_project_type_senders')[0][0]).toMatchObject({
+      source_user_id: 'u1', sender_name: 'Bree', sender_email: 'bree@x.com', sender_is_custom: false,
+    })
+  })
+})
+
+describe('setSenderIdentityForType — WHAT IT SENDS AS, and only that', () => {
+  it('stores a typed name, address and reply-to without touching the handler', async () => {
+    h.enqueue('lookups', [{ label: 'Local Move', sort_order: 10, attrs: { drip_category: 'move' } }])
+    h.enqueue('location_project_type_senders', { id: 'row1', source_user_id: 'u1' })
+    h.enqueue('location_project_type_senders', null)
+    await setSenderIdentityForType(LOC, 'Local Move', {
+      sender_is_custom: true,
+      sender_name: 'Bee Organized Moving',
+      sender_email: 'moving@beeorganized-kc.com',
+      sender_reply_to: 'carol@beeorganized.com',
+    })
+    const patch = h.updatePayloads('location_project_type_senders')[0]
+    expect(patch).toMatchObject({
+      sender_is_custom: true,
+      sender_name: 'Bee Organized Moving',
+      sender_email: 'moving@beeorganized-kc.com',
+      sender_reply_to: 'carol@beeorganized.com',
+    })
+    // The mirror of setHandlerForTypes' rule: this writer never reassigns.
+    expect(patch).not.toHaveProperty('source_user_id')
+  })
+
+  it('going back to person mode re-reads the identity from hub_users, not the caller', async () => {
+    h.enqueue('lookups', [{ label: 'Local Move', sort_order: 10, attrs: { drip_category: 'move' } }])
+    h.enqueue('location_project_type_senders', { id: 'row1', source_user_id: 'u1' })
+    h.enqueue('hub_users', { full_name: 'Bree Mover', first_name: 'Bree', last_name: 'Mover', email: 'bree@x.com' })
+    h.enqueue('location_project_type_senders', null)
+    await setSenderIdentityForType(LOC, 'Local Move', { sender_is_custom: false })
+    expect(h.updatePayloads('location_project_type_senders')[0]).toMatchObject({
+      sender_is_custom: false,
+      sender_name: 'Bree Mover',
+      sender_email: 'bree@x.com',
+      // Person mode has no reply-to of its own — replies follow the location's.
+      sender_reply_to: null,
+    })
+  })
+
+  it('REJECTS a type with no handler row — there is nowhere to keep a sender', async () => {
+    h.enqueue('lookups', [{ label: 'Local Move', sort_order: 10, attrs: { drip_category: 'move' } }])
+    h.enqueue('location_project_type_senders', null) // maybeSingle → no row
+    await expect(setSenderIdentityForType(LOC, 'Local Move', { sender_is_custom: false }))
+      .rejects.toThrow(/no handler for/)
+  })
+})
+
+describe('getPickableHandler — the identity comes from hub_users, not the request', () => {
+  it('resolves a pickable person at this location', async () => {
+    h.enqueue('hub_users', { id: 'u1', full_name: 'Bree Mover', email: 'bree@x.com', role: 'manager', location_id: LOC })
+    await expect(getPickableHandler(LOC, 'u1')).resolves.toEqual({
+      source_user_id: 'u1', name: 'Bree Mover', email: 'bree@x.com',
+    })
+  })
+  it('refuses a person at ANOTHER location', async () => {
+    h.enqueue('hub_users', { id: 'u9', full_name: 'Elsewhere', email: 'e@x.com', role: 'owner', location_id: 'other-loc' })
+    await expect(getPickableHandler(LOC, 'u9')).resolves.toBeNull()
+  })
+  it('refuses a role the picker does not offer', async () => {
+    h.enqueue('hub_users', { id: 'u3', full_name: 'Lite', email: 'l@x.com', role: 'lite_user', location_id: LOC })
+    await expect(getPickableHandler(LOC, 'u3')).resolves.toBeNull()
   })
 })
 

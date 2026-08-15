@@ -378,7 +378,7 @@ describe('the New leads section', () => {
       { label: 'Other',                     drip_category: 'general' },
     ],
     assignments: [
-      { id: 'a1', project_type: 'Moving/Relocation', sender_name: 'Carol Kern', sender_email: 'carol@bee.test', sender_reply_to: null, source_user_id: 'u-carol', domain_warning: false },
+      { id: 'a1', project_type: 'Moving/Relocation', sender_name: 'Carol Kern', sender_email: 'carol@bee.test', sender_reply_to: null, sender_is_custom: false, source_user_id: 'u-carol', domain_warning: false },
     ],
     people: [
       { id: 'u-owner', name: 'Lynette Ewy', email: 'lynette@bee.test', role: 'owner',   domain_warning: false },
@@ -429,8 +429,11 @@ describe('the New leads section', () => {
     const txt = container.textContent || ''
     expect(txt).toContain('Organizing')
     expect(txt).toContain('Moving')
-    // ONE select per row now, not two — sender and assignee are one choice.
-    expect(container.querySelectorAll('select').length).toBe(4)
+    // TWO selects per row (issue 296): who handles it, and what it sends as.
+    // 246 step 2 fused these into one choice; 296 separates them again, because
+    // a job type very commonly sends from a shared mailbox while a person still
+    // works the lead. Four types × two questions.
+    expect(container.querySelectorAll('select').length).toBe(8)
   })
 
   it('the handler selects are capped and sit left, never stretched', async () => {

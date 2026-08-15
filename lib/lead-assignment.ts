@@ -131,8 +131,15 @@ export async function resolveLeadAssignees(args: {
   if (!resolvedProjectType) return ownerFallback(partial)
 
   // Rule 1 — the handler for this type, if there is one and they are usable.
+  //
+  // hub_user_id is null when the row's person is disabled, deactivated or gone.
+  // Since issue 296 such a row can still EXIST — a type sending as a shared
+  // mailbox keeps its identity when its handler is offboarded — so the presence
+  // of a handler row no longer implies somebody assignable. Assignment follows
+  // the person and falls to the owner; the mailbox is the send path's business,
+  // not ours.
   const handler = handlers.get(resolvedProjectType.trim().toLowerCase())
-  if (handler) {
+  if (handler?.hub_user_id) {
     return { ...partial, hubUserIds: [handler.hub_user_id], basis: 'project_type' }
   }
 

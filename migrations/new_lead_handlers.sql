@@ -1,7 +1,12 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Issue 246 step 2 — NEW LEADS, REBUILT. Part 1: the migration.
 --
--- Schema only. NOT YET APPLIED — run manually in the Supabase SQL editor after
+-- APPLIED TO PRODUCTION 2026-08-15 — verified in the catalog: source_user_id is
+-- NOT NULL, the FK is ON DELETE CASCADE, and ..._loc_type_ci_idx exists. Do NOT
+-- run it again; it is idempotent but the optional backfill below is not part of
+-- it and is still Kevin's separate call.
+--
+-- Schema only. Run manually in the Supabase SQL editor after
 -- review (standing migration-files-need-review rule). Wrapped in a single
 -- transaction: the whole block rolls back if any statement errors. Idempotent
 -- on re-run (IF NOT EXISTS / DROP ... IF EXISTS / guarded pre-checks).

@@ -211,7 +211,15 @@ export async function sendEmail(args: SendEmailArgs): Promise<SendResult> {
   })
 }
 
-// Resolve a location's HANDLER for a project type, and send as them.
+// Resolve what a location's project type SENDS AS.
+//
+// issue 296 — "as them" is no longer the only answer. A handler row carries an
+// identity that is either the handler's own (the default) or a hand-typed name
+// and address such as a shared mailbox, with its own reply-to. This resolver
+// does not care which: it reads the identity the row holds. The one thing that
+// changed here is what survives an offboarding — a typed identity outlives its
+// handler, so lib/project-type-handlers.ts keeps that row and nulls only the
+// assignee. See its header table.
 //
 // issue 246 step 2 — two changes, both about ending a fusion:
 //

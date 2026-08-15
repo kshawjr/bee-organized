@@ -212,3 +212,124 @@ describe('sendEmail — per-project-type sender', () => {
     expect(h.callsFor('locations')).toHaveLength(1)
   })
 })
+
+// ─── issue 296 · WHAT A JOB TYPE SENDS AS ────────────────────────────────────
+//
+// A row's identity used to be, by convention, a copy of its handler's hub_users
+// record. sender_is_custom lets it be a hand-typed one instead — a shared
+// mailbox — with its own reply-to, while source_user_id still names the person
+// who HANDLES the type. These pin the two facts staying apart on the send path.
+//
+// Real shape being modelled: loc_kc's Moving/Relocation is handled by Carol but
+// should send from moving@beeorganized-kc.com, with replies reaching Carol. Six
+// of the twenty configured locations already do this at LOCATION level, and
+// loc_lakenorman runs exactly this From/Reply-To split today.
+describe('sendEmail — a typed sending identity (issue 296)', () => {
+  const groupInbox = {
+    project_type: 'Local Move',
+    sender_name: 'Bee Organized Moving',
+    sender_email: 'moving@boulder.beeorganized.com',
+    sender_reply_to: 'bree@boulder.beeorganized.com',
+    sender_is_custom: true,
+    source_user_id: 'u-bree',
+  }
+
+  it('person mode sends as the handler, exactly as before', async () => {
+    // The default, stated explicitly rather than left to the absence of a flag.
+    enqueueBase(); enqueueVocab()
+    h.enqueue('location_project_type_senders', [{ ...movingSender, sender_is_custom: false }])
+    h.enqueue('hub_users', BREE)
+
+    await sendEmail({ ...sendArgs, senderProjectType: 'Local Move' })
+
+    expect(sendSpy.mock.calls[0][0]).toMatchObject({
+      from: 'Bree Mover <bree@boulder.beeorganized.com>',
+      replyTo: 'bree-reply@boulder.beeorganized.com',
+    })
+  })
+
+  it('typed mode sends as the typed name and address, not the handler', async () => {
+    enqueueBase(); enqueueVocab()
+    h.enqueue('location_project_type_senders', [groupInbox])
+    h.enqueue('hub_users', BREE)
+
+    await sendEmail({ ...sendArgs, senderProjectType: 'Local Move' })
+
+    expect(sendSpy.mock.calls[0][0]).toMatchObject({
+      from: 'Bee Organized Moving <moving@boulder.beeorganized.com>',
+    })
+  })
+
+  it("typed mode's reply-to reaches the person, NOT the location default", async () => {
+    // The whole reason sender_reply_to had to become writable. Before issue 296
+    // every row's reply_to was null, so replies to Carol's moving emails went to
+    // the location's reply_to_email — Lynette — which is live and wrong.
+    enqueueBase(); enqueueVocab()
+    h.enqueue('location_project_type_senders', [groupInbox])
+    h.enqueue('hub_users', BREE)
+
+    await sendEmail({ ...sendArgs, senderProjectType: 'Local Move' })
+
+    expect(sendSpy.mock.calls[0][0]).toMatchObject({
+      replyTo: 'bree@boulder.beeorganized.com',
+    })
+    expect(sendSpy.mock.calls[0][0].replyTo).not.toBe(base.reply_to_email)
+  })
+
+  it('a typed reply-to left blank still falls back to the location default', async () => {
+    enqueueBase(); enqueueVocab()
+    h.enqueue('location_project_type_senders', [{ ...groupInbox, sender_reply_to: null }])
+    h.enqueue('hub_users', BREE)
+
+    await sendEmail({ ...sendArgs, senderProjectType: 'Local Move' })
+
+    expect(sendSpy.mock.calls[0][0]).toMatchObject({
+      from: 'Bee Organized Moving <moving@boulder.beeorganized.com>',
+      replyTo: base.reply_to_email,
+    })
+  })
+
+  // ── THE LIVENESS SPLIT ────────────────────────────────────────────────────
+  // A shared mailbox has no liveness to lose. Dropping the row when its handler
+  // is offboarded would silently revert a location's group-inbox mail to the
+  // base sender on the day someone leaves — a config change nobody made.
+  it('a DISABLED handler does NOT drop a typed sender — the mailbox survives', async () => {
+    enqueueBase(); enqueueVocab()
+    h.enqueue('location_project_type_senders', [groupInbox])
+    h.enqueue('hub_users', [{ id: 'u-bree', is_active: true, disabled_at: '2026-08-01T00:00:00Z' }])
+
+    await sendEmail({ ...sendArgs, senderProjectType: 'Local Move' })
+
+    expect(sendSpy.mock.calls[0][0]).toMatchObject({
+      from: 'Bee Organized Moving <moving@boulder.beeorganized.com>',
+      replyTo: 'bree@boulder.beeorganized.com',
+    })
+  })
+
+  it('a DEACTIVATED handler does NOT drop a typed sender either', async () => {
+    enqueueBase(); enqueueVocab()
+    h.enqueue('location_project_type_senders', [groupInbox])
+    h.enqueue('hub_users', [{ id: 'u-bree', is_active: false, disabled_at: null }])
+
+    await sendEmail({ ...sendArgs, senderProjectType: 'Local Move' })
+
+    expect(sendSpy.mock.calls[0][0]).toMatchObject({
+      from: 'Bee Organized Moving <moving@boulder.beeorganized.com>',
+    })
+  })
+
+  it('but a DISABLED handler in PERSON mode still falls back to base', async () => {
+    // The contrast that makes the rule a rule rather than "keep everything":
+    // a person-mode row's identity IS the person, so an offboarded handler must
+    // not keep sending client mail under their own name.
+    enqueueBase(); enqueueVocab()
+    h.enqueue('location_project_type_senders', [{ ...movingSender, sender_is_custom: false }])
+    h.enqueue('hub_users', [{ id: 'u-bree', is_active: true, disabled_at: '2026-08-01T00:00:00Z' }])
+
+    await sendEmail({ ...sendArgs, senderProjectType: 'Local Move' })
+
+    expect(sendSpy.mock.calls[0][0]).toMatchObject({
+      from: `${base.sender_name} <${base.send_from_email}>`,
+    })
+  })
+})

@@ -18882,13 +18882,21 @@ export function MailchimpNotConnected() {
 // which leads they were assigned, and two per-location split_* flags gated the
 // whole thing. This section is the un-fusing, and it is deliberately two lists:
 //
-//   WHO HANDLES WHAT — one person per job type, single-select. Their name goes
-//     on that type's client emails AND a new lead of that type is assigned to
-//     them. Writes location_project_type_senders. Nothing set → the owner.
+//   WHO HANDLES WHAT — one person per job type, single-select. A new lead of
+//     that type is assigned to them. Writes location_project_type_senders.
+//     Nothing set → the owner.
 //
 //   WHO IS TOLD — per person, on/off, nothing to do with job types. Writes
 //     lead_notification_prefs.subscribed for team members and
 //     lead_notification_externals.subscribed for outside addresses.
+//
+// AND, PER TYPE, WHAT IT SENDS AS (issue 296). Whose name and address the
+// client sees used to be welded to whoever handled the type. It is a separate
+// question, asked separately: the handler's own identity, or a typed name and
+// address — usually a shared mailbox like moving@beeorganized-kc.com — with its
+// own reply-to. Six of the twenty configured locations already send from a
+// shared mailbox at LOCATION level, so this is a normal answer and is presented
+// as one of two equal choices, not as an advanced override behind a toggle.
 //
 // NO MASTER TOGGLE. Both split_* flags are retired: "no handler row" is the off
 // state and it says so per type, which is both simpler and truthful — the old
@@ -18902,6 +18910,11 @@ export function NewLeadsSection({ realLocId, readOnly = false }) {
   const [form, setForm] = React.useState({ first_name:'', last_name:'', email:'', phone:'' })
   const [formErr, setFormErr] = React.useState('')
   const [addBusy, setAddBusy] = React.useState(false)
+  // Which job type's typed sender is open for editing, and its draft. Held per
+  // type rather than globally so opening one editor cannot discard another's
+  // half-typed address.
+  const [senderEdit, setSenderEdit] = React.useState(null)
+  const [senderErr, setSenderErr] = React.useState('')
 
   const load = React.useCallback(async () => {
     if (!realLocId) return
@@ -18953,28 +18966,63 @@ export function NewLeadsSection({ realLocId, readOnly = false }) {
   const typesHandledBy = hubUserId =>
     assignments.filter(a => a.source_user_id === hubUserId).map(a => a.project_type)
 
+  // WHO HANDLES IT. The body carries the person and nothing else — the server
+  // reads their name and address from hub_users, and leaves a typed sender on
+  // the type untouched (issue 296). Changing who handles Moving does not change
+  // that Moving sends from the shared mailbox.
   async function pickHandler(label, personId) {
     setBusy(`h:${label}`); setErr('')
     try {
       const url = `/api/locations/${realLocId}/project-type-senders`
       const res = personId
-        ? await (async () => {
-            const p = people.find(x => x.id === personId)
-            return fetch(url, {
-              method:'POST', credentials:'include', headers:{ 'Content-Type':'application/json' },
-              body: JSON.stringify({
-                sender_name: p.name, sender_email: p.email,
-                source_user_id: p.id, project_types: [label],
-              }),
-            })
-          })()
+        ? await fetch(url, {
+            method:'POST', credentials:'include', headers:{ 'Content-Type':'application/json' },
+            body: JSON.stringify({ source_user_id: personId, project_types: [label] }),
+          })
         : await fetch(url, {
             method:'DELETE', credentials:'include', headers:{ 'Content-Type':'application/json' },
             body: JSON.stringify({ project_types: [label] }),
           })
       if (!res.ok) throw new Error()
+      setSenderEdit(null)
       await load()
     } catch { setErr('That did not save. Try again.') } finally { setBusy(null) }
+  }
+
+  // WHAT IT SENDS AS. Separate verb, separate columns — this never names a
+  // person, so it cannot reassign the type by accident.
+  async function saveSenderIdentity(label, identity) {
+    setBusy(`s:${label}`); setSenderErr('')
+    try {
+      const res = await fetch(`/api/locations/${realLocId}/project-type-senders`, {
+        method:'PUT', credentials:'include', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ project_type: label, ...identity }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        setSenderErr(
+          j?.error === 'sender_reply_to must be a valid email' ? 'That reply-to address is not valid.'
+          : j?.error === 'sender_email must be a valid email' ? 'That sending address is not valid.'
+          : j?.error === 'no_handler_for_type' ? 'Choose who handles this job type first.'
+          : 'That did not save. Try again.',
+        )
+        return
+      }
+      setSenderEdit(null)
+      await load()
+    } catch { setSenderErr('That did not save. Try again.') } finally { setBusy(null) }
+  }
+
+  // Opening the editor seeds it from the row, so switching to a typed sender
+  // starts from the handler's own details rather than an empty pair of boxes.
+  function openSenderEditor(label, h) {
+    setSenderErr('')
+    setSenderEdit({
+      label,
+      sender_name: h?.sender_is_custom ? (h.sender_name || '') : '',
+      sender_email: h?.sender_is_custom ? (h.sender_email || '') : '',
+      sender_reply_to: h?.sender_is_custom ? (h.sender_reply_to || '') : (h?.sender_email || ''),
+    })
   }
 
   async function toggleUser(u) {
@@ -19051,6 +19099,12 @@ export function NewLeadsSection({ realLocId, readOnly = false }) {
     border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px',
     fontFamily:'inherit', color:'#1a2e2b', outline:'none',
   }
+  // Caption above each of the two per-type questions. They are equals, so they
+  // are labelled identically — neither reads as the other's exception.
+  const qLabel = {
+    display:'block', fontSize:'10px', fontWeight:700, color:'#8a9e9a',
+    textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 4px 2px',
+  }
   const PARENTS = [
     { key:'general', label:'Organizing' },
     { key:'move',    label:'Moving' },
@@ -19090,30 +19144,121 @@ export function NewLeadsSection({ realLocId, readOnly = false }) {
               <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(26,46,43,0.07)' }}>
                 {rows.map((g, i) => {
                   const h = handlerFor(g.label)
+                  const editing = senderEdit?.label === g.label
+                  const handlerPerson = h ? people.find(p => p.id === h.source_user_id) : null
                   return (
                     <div key={g.label} data-handler-row={g.label}
-                      style={{ background:'white', padding:'13px 14px', borderTop: i ? '0.5px solid rgba(26,46,43,0.07)' : 'none',
-                               display:'flex', flexWrap:'wrap', alignItems:'center', gap:'12px' }}>
-                      <div style={{ flex:'1 1 160px', minWidth:0 }}>
-                        <p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b' }}>{g.label}</p>
-                        <p style={{ fontSize:'11px', color:'#b0c0bc' }}>on your website form</p>
+                      style={{ background:'white', padding:'13px 14px', borderTop: i ? '0.5px solid rgba(26,46,43,0.07)' : 'none' }}>
+                      <div style={{ display:'flex', flexWrap:'wrap', alignItems:'flex-start', gap:'12px' }}>
+                        <div style={{ flex:'1 1 160px', minWidth:0 }}>
+                          <p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b' }}>{g.label}</p>
+                          <p style={{ fontSize:'11px', color:'#b0c0bc' }}>on your website form</p>
+                        </div>
+                        {/* The two questions, asked side by side and captioned.
+                            Neither is the exception to the other. */}
+                        <div style={{ flex:'0 1 auto', display:'flex', flexWrap:'wrap', gap:'12px' }}>
+                          <div>
+                            <label style={qLabel} htmlFor={`h-${g.label}`}>Who handles it</label>
+                            <select
+                              id={`h-${g.label}`}
+                              aria-label={`Who handles ${g.label}`}
+                              value={h?.source_user_id || ''}
+                              disabled={readOnly || busy===`h:${g.label}`}
+                              onChange={ev => pickHandler(g.label, ev.target.value)}
+                              style={sel}>
+                              <option value="">The location owner</option>
+                              {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <label style={qLabel} htmlFor={`s-${g.label}`}>What it sends as</label>
+                            <select
+                              id={`s-${g.label}`}
+                              aria-label={`What ${g.label} sends as`}
+                              value={h ? (h.sender_is_custom ? 'custom' : 'person') : ''}
+                              disabled={readOnly || !h || busy===`s:${g.label}`}
+                              onChange={ev => {
+                                if (ev.target.value === 'custom') openSenderEditor(g.label, h)
+                                else { setSenderEdit(null); saveSenderIdentity(g.label, { sender_is_custom:false }) }
+                              }}
+                              style={{ ...sel, ...(h ? null : { cursor:'default', color:'#8a9e9a' }) }}>
+                              {h
+                                ? <>
+                                    <option value="person">{handlerPerson?.name || h.sender_name} &mdash; their own address</option>
+                                    <option value="custom">A different name and address</option>
+                                  </>
+                                : <option value="">Your location&apos;s sending address</option>}
+                            </select>
+                            {h && !h.sender_is_custom && (
+                              <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'3px', maxWidth:CONTROL_W.select, wordBreak:'break-word' }}>{h.sender_email}</p>
+                            )}
+                            {h?.sender_is_custom && !editing && (
+                              <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'3px', maxWidth:CONTROL_W.select, wordBreak:'break-word' }}>
+                                {h.sender_name} &lt;{h.sender_email}&gt;
+                                {h.sender_reply_to ? <> &middot; replies to {h.sender_reply_to}</> : null}
+                                {' '}
+                                <button type="button" onClick={() => openSenderEditor(g.label, h)} disabled={readOnly}
+                                  style={{ background:'none', border:'none', padding:0, font:'inherit', fontSize:'11px', color:'#1a2e2b', textDecoration:'underline', cursor: readOnly ? 'default' : 'pointer' }}>
+                                  Edit
+                                </button>
+                              </p>
+                            )}
+                            {h?.domain_warning && (
+                              <p style={{ fontSize:'10px', color:'#b45309', marginTop:'3px', maxWidth:CONTROL_W.select }}>
+                                This address is on a different domain to your sending address, so it may not deliver.
+                              </p>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <div style={{ flex:'0 1 auto' }}>
-                        <select
-                          aria-label={`Who handles ${g.label}`}
-                          value={h?.source_user_id || ''}
-                          disabled={readOnly || busy===`h:${g.label}`}
-                          onChange={ev => pickHandler(g.label, ev.target.value)}
-                          style={sel}>
-                          <option value="">The location owner</option>
-                          {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
-                        {h?.domain_warning && (
-                          <p style={{ fontSize:'10px', color:'#b45309', marginTop:'3px', maxWidth:CONTROL_W.select }}>
-                            This address is on a different domain to your sending address, so it may not deliver.
+
+                      {editing && (
+                        <div data-sender-editor={g.label}
+                          style={{ marginTop:'12px', paddingTop:'12px', borderTop:'0.5px solid rgba(26,46,43,0.07)', display:'flex', flexWrap:'wrap', gap:'10px', alignItems:'flex-end' }}>
+                          <div>
+                            <label style={qLabel} htmlFor={`sn-${g.label}`}>Name on the email</label>
+                            <input id={`sn-${g.label}`} type="text" value={senderEdit.sender_name}
+                              placeholder="Bee Organized Moving"
+                              onChange={ev => setSenderEdit(s => ({ ...s, sender_name: ev.target.value }))}
+                              style={{ ...fieldStyle, maxWidth:CONTROL_W.select }} />
+                          </div>
+                          <div>
+                            <label style={qLabel} htmlFor={`se-${g.label}`}>Sends from</label>
+                            <input id={`se-${g.label}`} type="email" value={senderEdit.sender_email}
+                              placeholder="moving@beeorganized-kc.com"
+                              onChange={ev => setSenderEdit(s => ({ ...s, sender_email: ev.target.value }))}
+                              style={{ ...fieldStyle, maxWidth:CONTROL_W.select }} />
+                          </div>
+                          <div>
+                            <label style={qLabel} htmlFor={`sr-${g.label}`}>Replies go to</label>
+                            <input id={`sr-${g.label}`} type="email" value={senderEdit.sender_reply_to}
+                              placeholder="carol@beeorganized.com"
+                              onChange={ev => setSenderEdit(s => ({ ...s, sender_reply_to: ev.target.value }))}
+                              style={{ ...fieldStyle, maxWidth:CONTROL_W.select }} />
+                          </div>
+                          <div style={{ display:'flex', gap:'8px' }}>
+                            <button type="button" disabled={busy===`s:${g.label}`}
+                              onClick={() => saveSenderIdentity(g.label, {
+                                sender_is_custom: true,
+                                sender_name: senderEdit.sender_name.trim(),
+                                sender_email: senderEdit.sender_email.trim(),
+                                sender_reply_to: senderEdit.sender_reply_to.trim() || null,
+                              })}
+                              style={{ background:'#1a2e2b', color:'white', border:'none', borderRadius:'8px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, cursor:'pointer', maxWidth:CONTROL_W.action }}>
+                              Save
+                            </button>
+                            <button type="button" onClick={() => { setSenderEdit(null); setSenderErr('') }}
+                              style={{ background:'white', color:'#1a2e2b', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, cursor:'pointer', maxWidth:CONTROL_W.action }}>
+                              Cancel
+                            </button>
+                          </div>
+                          <p style={{ flexBasis:'100%', fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, margin:0, maxWidth:CONTROL_W.field }}>
+                            Replies go to a person even though the email comes from the mailbox. Leave it blank and
+                            replies follow your location&apos;s reply-to address instead.
                           </p>
-                        )}
-                      </div>
+                          {senderErr && <p style={{ flexBasis:'100%', fontSize:'11px', color:'#c96a6a', margin:0 }}>{senderErr}</p>}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
@@ -19125,9 +19270,11 @@ export function NewLeadsSection({ realLocId, readOnly = false }) {
             retired split_* flags' meaning, said per type instead of per
             location. */}
         <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, margin:'0 0 4px 2px' }}>
-          Whoever handles a job type has their name on that type&apos;s emails to the client, and new leads of
-          that type are assigned to them. Anything you leave on <strong style={{ fontWeight:600 }}>The location owner</strong> —
-          and any lead that doesn&apos;t match a job type — comes to the owner.
+          New leads of a job type are assigned to whoever handles it. Anything you leave on{' '}
+          <strong style={{ fontWeight:600 }}>The location owner</strong> — and any lead that doesn&apos;t match a
+          job type — comes to the owner. What a job type <em>sends as</em> is a separate choice: the person who
+          handles it, or a shared mailbox with its own reply-to. Either way the lead is still assigned to the
+          person who handles it.
         </p>
       </div>
 

@@ -65,8 +65,20 @@ const handlersMock = vi.hoisted(() => vi.fn(async () => new Map<string, any>()))
 const handlers = (pairs: Array<[string, string]>) =>
   new Map(pairs.map(([type, userId]) => [
     type.toLowerCase(),
-    { project_type: type, hub_user_id: userId, name: userId, email: `${userId}@bee.com`, reply_to: null },
+    {
+      project_type: type, hub_user_id: userId, name: userId,
+      email: `${userId}@bee.com`, reply_to: null, is_custom: false,
+    },
   ]))
+
+// issue 296 — a row whose person is disabled or gone. It still EXISTS (its
+// typed identity keeps sending) but hub_user_id is null, so there is nobody to
+// assign to. getLocationHandlers builds exactly this.
+const orphanedHandler = (type: string) =>
+  new Map([[type.toLowerCase(), {
+    project_type: type, hub_user_id: null, name: 'Bee Organized Moving',
+    email: 'moving@bee.com', reply_to: 'carol@bee.com', is_custom: true,
+  }]])
 
 vi.mock('@/lib/supabase-service', () => ({
   supabaseService: { from: (t: string) => h.makeBuilder(t) },
@@ -215,6 +227,42 @@ describe('a handler row assigns that person', () => {
     const r = await resolveLeadAssignees({ locationUuid: LOC, projectType: 'Moving/Relocation' })
     expect(r.hubUserIds).toEqual(['u1'])
     expect(r.basis).toBe('project_type')
+  })
+})
+
+// ─── issue 296 · what a type SENDS AS never moves the assignment ────────────
+describe('the sending identity does not change who is assigned', () => {
+  it('a type sending from a shared mailbox is still assigned to its handler', async () => {
+    // The core of the split: KC's Moving sends as moving@beeorganized-kc.com,
+    // and Carol still gets the lead. If this ever regressed to "typed sender →
+    // no assignee", the group-inbox feature would quietly undo issue 246.
+    queueVocabulary()
+    handlersMock.mockResolvedValue(new Map([['moving/relocation', {
+      project_type: 'Moving/Relocation', hub_user_id: 'u-carol',
+      name: 'Bee Organized Moving', email: 'moving@bee.com',
+      reply_to: 'carol@bee.com', is_custom: true,
+    }]]))
+    const r = await resolveLeadAssignees({ locationUuid: LOC, projectType: 'Moving/Relocation' })
+    expect(r.hubUserIds).toEqual(['u-carol'])
+    expect(r.basis).toBe('project_type')
+    expect(ownerMock).not.toHaveBeenCalled()
+  })
+
+  it('a typed-sender row whose handler is gone assigns to the OWNER, not nobody', async () => {
+    // The row survives so its mailbox keeps sending, but hub_user_id is null.
+    // Rule 2, not rule 3 — a lead must never land unassigned.
+    queueVocabulary()
+    handlersMock.mockResolvedValue(orphanedHandler('Moving/Relocation'))
+    const r = await resolveLeadAssignees({ locationUuid: LOC, projectType: 'Moving/Relocation' })
+    expect(r.hubUserIds).toEqual(['owner-1'])
+    expect(r.basis).toBe('location_owner')
+  })
+
+  it('the orphaned row still counts as configured handlers', async () => {
+    queueVocabulary()
+    handlersMock.mockResolvedValue(orphanedHandler('Moving/Relocation'))
+    const r = await resolveLeadAssignees({ locationUuid: LOC, projectType: 'Moving/Relocation' })
+    expect(r.splitEnabled).toBe(true)
   })
 })
 
