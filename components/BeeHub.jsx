@@ -64,7 +64,6 @@ import HowToGuideModal, { GuideEditor, CHAPTER_COLORS } from "@/components/guide
 // Pure presentational icon set (inline SVG, zero deps) — safe to import
 // statically like betaGate; it pulls no beta-chunk surface code with it.
 import { IconMessage } from "@/components/ui/icons"
-import FilterChips from "@/components/ui/FilterChips"
 import AdminFeedbackScreen from "@/components/admin/AdminFeedbackScreen"
 import AdminNotificationsScreen from "@/components/admin/AdminNotificationsScreen"
 import SystemHealthScreen from "@/components/admin/SystemHealthScreen"
@@ -25726,14 +25725,12 @@ export function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUp
   const [ownerStatus, setOwnerStatus]       = useState(null)
   const [ownerStatusError, setOwnerStatusError] = useState('')
   const [ownerStatusLoading, setOwnerStatusLoading] = useState(false)
-  // Seat roster for the location — used in Team tab to show scheduled removals.
-  const [locationSeats, setLocationSeats]   = useState([])
-  // Live tier prices — same context + fallbacks as every other pricing site.
-  // The restored demo Team list (36c2183) referenced these without bindings
-  // and would throw if it ever rendered (mock-id demo contexts only).
-  const tierPricesCtx = useContext(TierPricesContext)
-  const getTierPrice = tierPricesCtx?.getTierPrice ?? (() => 0)
-  const livePrices = tierPricesCtx?.livePrices ?? DEFAULT_TIER_PRICES
+  // issue 226 step 9 — locationSeats, tierPricesCtx, getTierPrice and
+  // livePrices were all removed here. The first fed a seat list this sheet no
+  // longer renders (SeatRosterSection fetches its own, step 5) and was still
+  // making an HTTP request on every open; the other three fed the mock
+  // "Team · $X/yr" block deleted in step 4. Nothing in this component reads
+  // tier prices any more — the roster does, and it takes the context itself.
   const [showInviteOwner, setShowInviteOwner]   = useState(false)
   const [pendingActionId, setPendingActionId]   = useState('') // resend | revoke
   const [pendingActionError, setPendingActionError] = useState('')
@@ -25771,14 +25768,6 @@ export function LocationDetailSheet({ loc, onClose, onStatusChange, onLocationUp
   }, [currentLoc?.id])
 
   React.useEffect(() => { fetchOwnerStatus() }, [fetchOwnerStatus])
-
-  React.useEffect(() => {
-    if (!currentLoc?.id) return
-    fetch(`/api/seats?location_id=${encodeURIComponent(currentLoc.id)}`)
-      .then(r => r.json().catch(() => []))
-      .then(data => { if (Array.isArray(data)) setLocationSeats(data) })
-      .catch(() => {})
-  }, [currentLoc?.id])
 
   async function revokeInvite(inviteId) {
     if (!inviteId) return
@@ -32930,9 +32919,9 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
   // issue 226 step 3: `filtered` went with LocationCard — LocationsTable owns
   // the search and the filter now, in both shells.
 
-  const totalRevenue   = locations.reduce((s,l)=>s+l.revenue,0)
-  const totalCollected = locations.reduce((s,l)=>s+l.collected,0)
-  const totalLeads     = locations.reduce((s,l)=>s+l.leads,0)
+  // issue 226 step 9 — three fleet totals were computed here and read by
+  // nothing. PRE-EXISTING (already dead at a7824fe, before this issue began),
+  // not orphaned by the redesign; removed while sweeping this shell.
   const activeCount    = locations.filter(l=>l.crmStatus==='active').length
   const onboardingCount = locations.filter(l=>l.crmStatus==='onboarding').length
   const pastDueCount   = locations.filter(l=>l.crmStatus==='pastdue').length
