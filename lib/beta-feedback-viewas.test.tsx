@@ -95,7 +95,9 @@ describe('feedback composer affordance (franchise mount only)', () => {
 
   it('the elevated admin mounts pass NO composer prop and NO location override', () => {
     const elevatedMounts = beehub.match(/<AdminFeedbackScreen[^/]*\/>/g) || []
-    const withPending = elevatedMounts.filter(m => m.includes('onPendingCountChange'))
+    // onOpenCountChange since issue 233 — the badge reports the OPEN count now,
+    // not the 'submitted'-only count that disagreed with the screen's header.
+    const withPending = elevatedMounts.filter(m => m.includes('onOpenCountChange'))
     expect(withPending.length).toBe(2) // the two elevated admin surfaces
     for (const m of withPending) {
       expect(m).not.toContain('onReportFeedback')

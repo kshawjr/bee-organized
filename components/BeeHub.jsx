@@ -65,6 +65,11 @@ import HowToGuideModal, { GuideEditor, CHAPTER_COLORS } from "@/components/guide
 // statically like betaGate; it pulls no beta-chunk surface code with it.
 import { IconMessage } from "@/components/ui/icons"
 import AdminFeedbackScreen from "@/components/admin/AdminFeedbackScreen"
+// ONE open-feedback count for the nav badges and the dashboard's action card —
+// the same helper the Feedback screen's header and queue cards read (issue
+// 233). The badges used to fetch ?status=submitted and report 17 while the
+// screen's own header said 28; both now come from here, so they cannot drift.
+import { summarizeFeedbackQueues } from "@/lib/feedback-queues"
 import AdminNotificationsScreen from "@/components/admin/AdminNotificationsScreen"
 import SystemHealthScreen from "@/components/admin/SystemHealthScreen"
 // The compact, Home-sized cut of System Health — stands in for the operational
@@ -174,6 +179,24 @@ function validateReviewsLink(raw) {
 // re-exported here for the existing test imports (beta-import-estimate
 // mounts ImportStepContent).
 export { CurrentUserContext }
+
+// Prime an open-feedback count for a nav badge. Fetches the whole list rather
+// than a ?status= slice because "open" is a derived state (issue 233) and the
+// derivation lives in ONE place — a server-side status filter could only ever
+// re-create the narrow count that disagreed with the screen. Returns null on
+// any failure so a caller leaves its badge alone rather than showing a zero it
+// hasn't verified.
+async function fetchFeedbackOpenCount() {
+  try {
+    const res = await fetch('/api/admin/feedback')
+    if (!res.ok) return null
+    const data = await res.json()
+    if (!data || !Array.isArray(data.items)) return null
+    return summarizeFeedbackQueues(data.items).open
+  } catch {
+    return null
+  }
+}
 
 // Real franchise location data from Supabase, populated for franchise owner
 // sign-ins (currentLocation prop). Null for super_admin / corporate (they
@@ -31920,10 +31943,12 @@ function AdminDashboard({ locations, users, role, onNavigate }) {
 
   useEffect(() => {
     let cancelled = false
-    fetch('/api/admin/feedback?status=submitted')
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (!cancelled) setActionCounts(a => ({ ...a, feedback: d?.items?.length ?? 0 })) })
-      .catch(() => {})
+    // issue 233 — the SAME open count the Feedback screen's header and the nav
+    // badge show. This card used to count status='submitted' alone and read
+    // "17 open feedback items" beside a screen that said 28, while eleven items
+    // that had been quiet for weeks were counted by neither.
+    fetchFeedbackOpenCount()
+      .then(n => { if (!cancelled) setActionCounts(a => ({ ...a, feedback: n ?? 0 })) })
     fetch('/api/admin/scheduled-removals')
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (!cancelled) setActionCounts(a => ({ ...a, removals: d?.count ?? 0 })) })
@@ -32067,7 +32092,7 @@ function AdminDashboard({ locations, users, role, onNavigate }) {
                   <span style={{ fontSize:'18px' }}>🐛</span>
                   <div style={{ flex:1 }}>
                     <p style={{ fontSize:'13px', fontWeight:600, color:'#991b1b', marginBottom:'2px' }}>{actionCounts.feedback} open feedback item{actionCounts.feedback !== 1 ? 's' : ''}</p>
-                    <p style={{ fontSize:'11px', color:'#dc2626' }}>Awaiting review</p>
+                    <p style={{ fontSize:'11px', color:'#dc2626' }}>Not yet answered or decided</p>
                   </div>
                   <button onClick={() => onNavigate('feedback')} style={{ padding:'5px 10px', background:'#ef4444', border:'none', borderRadius:'6px', fontSize:'11px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>Review</button>
                 </div>
@@ -32317,7 +32342,8 @@ function SuperAdminLayout({
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  // Feedback badge count (fetched on mount, kept fresh by AdminFeedbackScreen)
+  // Feedback badge count — OPEN items, the one definition (issue 233). Fetched
+  // on mount, kept fresh by AdminFeedbackScreen's onOpenCountChange.
   const [feedbackPending, setFeedbackPending] = useState(0)
   const handleFeedbackPending = React.useCallback(n => setFeedbackPending(n), [])
   const showFeedback = role === 'super_admin' || role === 'corporate' || role === 'admin'
@@ -32330,10 +32356,7 @@ function SuperAdminLayout({
   useEffect(() => {
     if (!showFeedback) return
     let cancelled = false
-    fetch('/api/admin/feedback?status=submitted')
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (!cancelled && d && Array.isArray(d.items)) setFeedbackPending(d.items.length) })
-      .catch(() => {})
+    fetchFeedbackOpenCount().then(n => { if (!cancelled && n != null) setFeedbackPending(n) })
     return () => { cancelled = true }
   }, [showFeedback])
 
@@ -32600,7 +32623,7 @@ function SuperAdminLayout({
           // now, so no serif h1 here like the sibling tabs — the wrapper
           // padding shrinks to offset the screen's internal padding.
           <div style={{ padding:'14px 8px 48px' }}>
-            <AdminFeedbackScreen onPendingCountChange={handleFeedbackPending} />
+            <AdminFeedbackScreen onOpenCountChange={handleFeedbackPending} />
           </div>
         )
 
@@ -32820,8 +32843,8 @@ function SuperAdminLayout({
 
 function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, onStatusChange, users=USERS_DATA, setUsers=()=>{}, people=[], setPeople=()=>{}, binPeople=[], setBinPeople=()=>{}, partners=[], setPartners=()=>{}, guideSlides=[], setGuideSlides=()=>{}, manualSlides=[], setManualSlides=()=>{}, initialLocations=null }) {
   const [adminTab, setAdminTab]   = useState('locations')
-  // Count of 'submitted' (unhandled) feedback items, reported up by
-  // AdminFeedbackScreen so the Feedback tab can show a badge + red dot.
+  // Count of OPEN feedback items (issue 233 — one definition, lib/feedback-queues),
+  // reported up by AdminFeedbackScreen so the Feedback tab can show a badge.
   const [feedbackPending, setFeedbackPending] = useState(0)
   const handleFeedbackPending = React.useCallback((n) => setFeedbackPending(n), [])
   const showFeedbackTab = role === 'super_admin' || role === 'corporate' || role === 'admin'
@@ -32841,16 +32864,13 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
       else if (t === 'feedback' && showFeedbackTab) setAdminTab('feedback')
     } catch {}
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  // Prime the badge count on mount so the unhandled-feedback indicator shows
-  // before the operator ever opens the Feedback tab. AdminFeedbackScreen keeps
-  // it fresh thereafter via onPendingCountChange.
+  // Prime the badge count on mount so the open-feedback indicator shows before
+  // the operator ever opens the Feedback tab. AdminFeedbackScreen keeps it
+  // fresh thereafter via onOpenCountChange.
   useEffect(() => {
     if (!showFeedbackTab) return
     let cancelled = false
-    fetch('/api/admin/feedback?status=submitted')
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (!cancelled && d && Array.isArray(d.items)) setFeedbackPending(d.items.length) })
-      .catch(() => {})
+    fetchFeedbackOpenCount().then(n => { if (!cancelled && n != null) setFeedbackPending(n) })
     return () => { cancelled = true }
   }, [showFeedbackTab])
   // Real Supabase locations when provided by App (super_admin/corporate
@@ -33063,7 +33083,7 @@ function AdminScreen({ role, locFilter='all', onViewLocation, locStatuses={}, on
             locations={locations}
           />
         ) : adminTab==='feedback' ? (
-          <AdminFeedbackScreen onPendingCountChange={handleFeedbackPending} />
+          <AdminFeedbackScreen onOpenCountChange={handleFeedbackPending} />
         ) : adminTab==='webhooks' ? (
           <AdminWebhookLogScreen />
         ) : adminTab==='notifications' ? (
@@ -34797,6 +34817,15 @@ export default function App({
   // the Feedback screen's composer button sets 'submit' (lands on the
   // Submit tab). One modal, one state, two entry intents.
   const [showFeedback, setShowFeedback]     = useState(false)
+  // Deep link from the reply email (issue 233): /?feedback=1 opens My Items on
+  // top of whatever screen the app restores. That tab is the one surface that
+  // renders a reply AS a reply, and it works for every role — the owner/manager
+  // Feedback nav does not exist for anyone else. Applied once, on mount.
+  useEffect(() => {
+    try {
+      if (new URLSearchParams(window.location.search).get('feedback')) setShowFeedback(true)
+    } catch {}
+  }, [])
   // Record-context seed for the feedback modal — set when the modal is opened
   // FROM a record (e.g. "Report a problem with this client"). Carries the
   // pre-fill + the id-only context; cleared when the modal closes.

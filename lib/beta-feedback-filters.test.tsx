@@ -8,14 +8,21 @@
 // ("under_review"). The redesign:
 //   - TYPE is a single-choice segmented control (Everything / Bugs / Ideas),
 //     each with a live count.
-//   - STATUS reads in plain words (New / Looking at it / Planned / In
-//     progress / Fixed), and only statuses present in the data are offered —
-//     'declined' is unused in prod, so it never appears.
 //   - "Just mine" is its OWN axis (by submitter), and it combines with the
 //     rest.
 //   - Counts are faceted: each chip shows exactly what it would reveal given
 //     the other filters, so no one clicks into an empty list.
 //   - A zero-result combination says so, never a blank area.
+//
+// ISSUE 233 RETIRED THE STATUS CHIP ROW. Status was never really the axis
+// anyone wanted — the questions are "what has nobody looked at", "what has gone
+// quiet", "what is being worked on", and a chip per database status answered
+// none of them. Three queue cards replaced the row, and closed items moved
+// behind a "Show N closed" toggle. Those are pinned in
+// lib/beta-feedback-queue-ui-233.test.tsx. What survives HERE is everything
+// that was never about status: the type control, the "just mine" axis, faceting
+// and the empty state — now asserted against the default view, which shows only
+// what is open.
 //
 // Nothing here is persisted — that's deliberate (a stored filter is the issue
 // 123 strand-someone-behind-an-old-view trap), so these tests mount fresh and
@@ -37,6 +44,10 @@ import { CurrentUserContext } from '@/components/hive/shared/currentUserContext'
 //   type:   bug   ×3 (i1, i2, i5)   feature ×2 (i3, i4)
 //   status: shipped ×2 (i1, i4)     under_review ×2 (i2, i5)   planned ×1 (i3)
 //   mine (u1): i1, i3, i5 (×3)      not mine (u2): i2, i4 (×2)
+//
+// THE DEFAULT VIEW HIDES THE TWO SHIPPED ONES (i1, i4) since issue 233, so the
+// counts these assert on are the OPEN three: i2 (bug, not mine), i3 (feature,
+// mine), i5 (bug, mine).
 const ITEMS = [
   { id: 'i1', title: 'Login button broken', type: 'bug',     status: 'shipped',      user_id: 'u1', submitter_name: 'Amy Owner',  submitter_email: 'amy@biz.com', created_at: '2026-07-01T00:00:00Z', attachments: [] },
   { id: 'i2', title: 'Report page is slow',  type: 'bug',     status: 'under_review', user_id: 'u2', submitter_name: 'Bob Manager', submitter_email: 'bob@biz.com', created_at: '2026-07-02T00:00:00Z', attachments: [] },
@@ -87,67 +98,50 @@ const rowTitles = (host: Element) =>
 beforeEach(() => { document.body.innerHTML = ''; vi.unstubAllGlobals() })
 
 describe('counts match what each filter would actually show', () => {
-  it('type counts are the real per-type totals up front (Bugs 3, Ideas 2, Everything 5)', async () => {
+  it('type counts are the real per-type totals for the OPEN items (Bugs 2, Ideas 1, Everything 3)', async () => {
     stubFetch()
     const { host, unmount } = await mount(screen())
+    expect(chipCount(host, 'Everything')).toBe(3)
+    expect(chipCount(host, 'Bugs')).toBe(2)   // i2, i5 — i1 is shipped
+    expect(chipCount(host, 'Ideas')).toBe(1)  // i3 — i4 is shipped
+    await unmount()
+  })
+
+  it('the type counts re-face when closed items are revealed', async () => {
+    // Faceting against the VISIBLE set is the contract: a chip must never
+    // promise rows the current view would not show.
+    stubFetch()
+    const { host, unmount } = await mount(screen())
+    await click(chip(host, 'Show 2 closed')!)
     expect(chipCount(host, 'Everything')).toBe(5)
     expect(chipCount(host, 'Bugs')).toBe(3)
     expect(chipCount(host, 'Ideas')).toBe(2)
     await unmount()
   })
-
-  it('status counts are faceted — picking Bugs re-counts each status against bugs only', async () => {
-    stubFetch()
-    const { host, unmount } = await mount(screen())
-    // Unfiltered: Fixed(shipped) 2, Looking at it(under_review) 2, Planned 1.
-    expect(chipCount(host, 'Fixed')).toBe(2)
-    expect(chipCount(host, 'Looking at it')).toBe(2)
-    expect(chipCount(host, 'Planned')).toBe(1)
-    // Select Bugs → Fixed should now count bug+shipped (i1) = 1, Looking at it
-    // bug+under_review (i2,i5) = 2, and Planned (only feature i3) drops out.
-    await click(chip(host, 'Bugs')!)
-    expect(chipCount(host, 'Fixed')).toBe(1)
-    expect(chipCount(host, 'Looking at it')).toBe(2)
-    expect(chip(host, 'Planned')).toBeUndefined()
-    await unmount()
-  })
 })
 
 describe('selecting a type shows only that type', () => {
-  it('Bugs → only the three bug rows; Ideas → only the two feature rows', async () => {
+  it('Bugs → only the open bug rows; Ideas → only the open feature row', async () => {
     stubFetch()
     const { host, unmount } = await mount(screen())
-    expect(rowTitles(host).length).toBe(5)
+    expect(rowTitles(host).length).toBe(3)
     await click(chip(host, 'Bugs')!)
-    expect(rowTitles(host).sort()).toEqual(
-      ['Login button broken', 'Report page is slow', 'Typo on invoice'].sort()
-    )
+    expect(rowTitles(host).sort()).toEqual(['Report page is slow', 'Typo on invoice'].sort())
     await click(chip(host, 'Ideas')!)
-    expect(rowTitles(host).sort()).toEqual(['Dark mode please', 'Export to CSV'].sort())
+    expect(rowTitles(host).sort()).toEqual(['Dark mode please'])
     await unmount()
   })
 })
 
-describe('status labels render the plain words, not the raw db values', () => {
-  it('offers Fixed / Looking at it / Planned and never the raw status strings', async () => {
+describe('status vocabulary stays in plain words wherever it appears', () => {
+  it('row badges read New / Looking at it / Planned, never the raw db values', async () => {
     stubFetch()
     const { host, unmount } = await mount(screen())
-    expect(chip(host, 'Fixed')).toBeTruthy()
-    expect(chip(host, 'Looking at it')).toBeTruthy()
-    expect(chip(host, 'Planned')).toBeTruthy()
     const text = host.textContent || ''
+    expect(text).toContain('Looking at it') // under_review ×2
+    expect(text).toContain('Planned')       // planned ×1
     expect(text).not.toContain('under_review')
-    expect(text).not.toContain('shipped')
     expect(text).not.toContain('in_progress')
-    await unmount()
-  })
-
-  it("does NOT offer statuses absent from the data (declined is unused → no chip)", async () => {
-    stubFetch()
-    const { host, unmount } = await mount(screen())
-    expect(chip(host, 'Not planned')).toBeUndefined() // declined
-    expect(chip(host, 'New')).toBeUndefined()          // submitted
-    expect(chip(host, 'In progress')).toBeUndefined()  // in_progress
     await unmount()
   })
 })
@@ -156,17 +150,16 @@ describe('"Just mine" filters by submitter and combines with type + status', () 
   it('Just mine → only u1 rows; then + Bugs → only u1 bugs', async () => {
     stubFetch()
     const { host, unmount } = await mount(screen())
-    // Everyone/Just mine counts are faceted: Everyone 5, Just mine 3.
-    expect(chipCount(host, 'Everyone')).toBe(5)
-    expect(chipCount(host, 'Just mine')).toBe(3)
+    // Faceted against the open set: Everyone 3, Just mine 2 (i3, i5 — i1 is
+    // u1's too but shipped, so it isn't in the default view).
+    expect(chipCount(host, 'Everyone')).toBe(3)
+    expect(chipCount(host, 'Just mine')).toBe(2)
 
     await click(chip(host, 'Just mine')!)
-    expect(rowTitles(host).sort()).toEqual(
-      ['Login button broken', 'Dark mode please', 'Typo on invoice'].sort()
-    )
-    // Combine with type: mine + Bugs = i1, i5.
+    expect(rowTitles(host).sort()).toEqual(['Dark mode please', 'Typo on invoice'].sort())
+    // Combine with type: mine + Bugs = i5 alone.
     await click(chip(host, 'Bugs')!)
-    expect(rowTitles(host).sort()).toEqual(['Login button broken', 'Typo on invoice'].sort())
+    expect(rowTitles(host).sort()).toEqual(['Typo on invoice'])
     await unmount()
   })
 
@@ -186,14 +179,13 @@ describe('"Just mine" filters by submitter and combines with type + status', () 
 })
 
 describe('a zero-result combination says so clearly', () => {
-  // The faceted status chips deliberately can't be clicked into an empty list
-  // (a zero-count status hides before you can select it). The reachable empty
-  // state is a genuine combination — a type plus a search that matches nobody.
+  // The reachable empty state is a genuine combination — a type plus a search
+  // that matches nothing.
   it('Bugs + a search that matches no one → zero rows and an explicit message', async () => {
     stubFetch()
     const { host, unmount } = await mount(screen())
     await click(chip(host, 'Bugs')!)
-    expect(rowTitles(host).length).toBe(3)
+    expect(rowTitles(host).length).toBe(2)
 
     const search = host.querySelector('input') as HTMLInputElement
     await act(async () => {

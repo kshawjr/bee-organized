@@ -72,7 +72,10 @@ export type BrandedEmailContext = {
   reviews_link?: string | null
 }
 
-function escHtml(s: string): string {
+// Exported so sibling email builders (lib/feedback-reply-email) escape through
+// the SAME implementation rather than re-rolling one each — issue 233. Escaping
+// duplicated is escaping that drifts.
+export function escHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -84,7 +87,7 @@ function escHtml(s: string): string {
 // URL for an href attribute: escape only the chars that could break out of the
 // quoted attribute. Ampersands in query strings become &amp; so the HTML is
 // well-formed; the browser/mail client decodes them back on click.
-function escAttr(url: string): string {
+export function escAttr(url: string): string {
   return url
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')

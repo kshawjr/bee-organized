@@ -5,6 +5,11 @@
 // FeedbackStatusBadge/AttachmentList/timeAgo; BeeHub.jsx keeps only timeAgo.
 'use client'
 import React, { useState } from 'react'
+// The plain-word status vocabulary moved to a server-safe module (issue 233) so
+// the reply email can speak the same words as the UI — an API route cannot
+// import this 'use client' file. Re-exported below, so every existing importer
+// of FEEDBACK_STATUS_PLAIN from here keeps working and there is still one home.
+import { FEEDBACK_STATUS_PLAIN } from '@/lib/feedback-queues'
 
 const FEEDBACK_STATUS_CONF = {
   submitted:    { label:'Submitted',    color:'#085041', bg:'#E1F5EE' },
@@ -15,20 +20,6 @@ const FEEDBACK_STATUS_CONF = {
   declined:     { label:'Declined',     color:'#444441', bg:'#F1EFE8' },
 }
 const FEEDBACK_STATUS_ORDER = ['submitted','under_review','planned','in_progress','shipped','declined']
-
-// Plain-English status labels for the owner-facing surfaces (issue 126). The
-// stored values in FEEDBACK_STATUS_ORDER / the DB are UNCHANGED — this is a
-// display map only. The audience is non-technical franchise owners, so the
-// filter chips, the row badge, and the triage dropdown all read in plain words
-// ("Looking at it") instead of the database vocabulary ("under_review").
-const FEEDBACK_STATUS_PLAIN = {
-  submitted:    'New',
-  under_review: 'Looking at it',
-  planned:      'Planned',
-  in_progress:  'In progress',
-  shipped:      'Fixed',
-  declined:     'Not planned',
-}
 
 function feedbackTimeAgo(iso) {
   if (!iso) return ''

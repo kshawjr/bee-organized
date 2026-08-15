@@ -16,13 +16,20 @@
 //      each site passes are pinned there, and every shape is then MOUNTED
 //      here and asserted on real DOM.
 //
-// Behavior contract (issue 126 redesign, unchanged by the extraction):
-//   - header = light headline + live "N items · M open" subtitle
+// Behavior contract:
+//   - header = light headline + live open-count subtitle
 //   - composer button on the FRANCHISE mount only (onReportFeedback prop)
 //   - franchise mount hides the location filter + row-meta location segment;
 //     the two elevated mounts show both
 //   - hairline rows in one container; closed rows dim; row click opens the
 //     triage detail modal whose Save PATCHes /api/admin/feedback/:id
+//
+// ISSUE 233 moved several of these without removing them. Closed items are now
+// hidden behind a "Show N closed" toggle, so the tests that assert on a closed
+// row reveal it first; the badge prop is onOpenCountChange and carries the OPEN
+// count; and the detail modal's status dropdown became a row of buttons. The
+// queue cards, the count reconciliation and next/previous are pinned in
+// lib/beta-feedback-queue-ui-233.test.tsx rather than duplicated here.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import React from 'react'
@@ -71,12 +78,21 @@ const withUser = (ui: React.ReactElement, user: any = { id: 'u1', email: 'amy@bi
 
 // The three REAL prop shapes (pinned against BeeHub source below).
 const franchiseProps = { locationId: null as string | null, onReportFeedback: () => {} }
-const elevatedProps = { onPendingCountChange: () => {} }
+const elevatedProps = { onOpenCountChange: () => {} }
 
 const rowButton = (host: Element, title: string) =>
   [...host.querySelectorAll('button')].find(b => (b.textContent || '').trim().startsWith(title))
+// The row's wrapper — closed-row dimming lives here now that the record link is
+// a sibling of the row button rather than nested inside it.
+const rowBox = (host: Element, title: string) => rowButton(host, title)?.parentElement as HTMLElement
 const locationSelect = (host: Element) =>
   [...host.querySelectorAll('select')].find(s => (s.textContent || '').includes('All locations'))
+// Closed items are hidden by default (issue 233); reveal them for the
+// assertions that are ABOUT a closed row.
+const showClosed = async (host: Element) => {
+  const btn = [...host.querySelectorAll('button')].find(b => (b.textContent || '').startsWith('Show '))
+  if (btn) await click(btn)
+}
 
 beforeEach(() => { document.body.innerHTML = ''; vi.unstubAllGlobals() })
 
@@ -109,9 +125,9 @@ describe('the three BeeHub mount sites pass the shapes mounted in this file', ()
     expect(BEEHUB_SRC).not.toContain('function AdminFeedbackDetailModal(')
   })
 
-  it('TWO elevated admin mounts: onPendingCountChange only — no composer, no location override', () => {
+  it('TWO elevated admin mounts: onOpenCountChange only — no composer, no location override', () => {
     const mounts = BEEHUB_SRC.match(/<AdminFeedbackScreen[^/]*\/>/g) || []
-    const withPending = mounts.filter(m => m.includes('onPendingCountChange'))
+    const withPending = mounts.filter(m => m.includes('onOpenCountChange'))
     expect(withPending.length).toBe(2) // SuperAdminLayout tab + legacy AdminScreen tab
     for (const m of withPending) {
       expect(m).not.toContain('onReportFeedback')
@@ -127,10 +143,12 @@ describe('the three BeeHub mount sites pass the shapes mounted in this file', ()
 
 // ── header ─────────────────────────────────────────────────────────
 describe('header — light headline + live count subtitle', () => {
-  it('renders "N items · M open" from the real data (open excludes shipped/declined)', async () => {
+  it('leads with the OPEN count and keeps the total behind it', async () => {
     stubFetch()
     const { host, unmount } = await mount(withUser(<AdminFeedbackScreen {...franchiseProps} />))
-    expect(host.textContent).toContain('3 items · 2 open') // i2 is shipped → closed
+    // i2 is shipped → closed, so 2 of the 3 are open. Issue 233 put the number
+    // that needs action first; the total is context, not the headline.
+    expect(host.textContent).toContain('2 open items · 3 in total')
     await unmount()
   })
 })
@@ -174,7 +192,7 @@ describe('franchise mount (onReportFeedback + locationId)', () => {
 // Both elevated sites pass the identical shape (pinned above), so one mount
 // exercises both — the point is that the shape they pass keeps the location
 // filter, keeps the row-meta location, and never grows a composer.
-describe('elevated admin mounts (onPendingCountChange only)', () => {
+describe('elevated admin mounts (onOpenCountChange only)', () => {
   it('SHOWS the location filter with the locations present in the data', async () => {
     stubFetch()
     const { host, unmount } = await mount(withUser(<AdminFeedbackScreen {...elevatedProps} />))
@@ -196,6 +214,9 @@ describe('elevated admin mounts (onPendingCountChange only)', () => {
   it('selecting a location narrows the list client-side', async () => {
     stubFetch()
     const { host, unmount } = await mount(withUser(<AdminFeedbackScreen {...elevatedProps} />))
+    // loc-2 holds only the shipped item, so reveal closed first — otherwise
+    // this would assert on a row the default view correctly hides.
+    await showClosed(host)
     const sel = locationSelect(host)!
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!
@@ -207,11 +228,11 @@ describe('elevated admin mounts (onPendingCountChange only)', () => {
     await unmount()
   })
 
-  it('reports the pending (status=submitted) count for the tab badge', async () => {
+  it('reports the OPEN count for the tab badge — the one number the dashboard also shows', async () => {
     stubFetch()
-    const onPending = vi.fn()
-    const { unmount } = await mount(withUser(<AdminFeedbackScreen onPendingCountChange={onPending} />))
-    expect(onPending).toHaveBeenLastCalledWith(2) // i1 + i3 are 'submitted'
+    const onOpen = vi.fn()
+    const { unmount } = await mount(withUser(<AdminFeedbackScreen onOpenCountChange={onOpen} />))
+    expect(onOpen).toHaveBeenLastCalledWith(2) // i1 + i3 open; i2 is shipped
     await unmount()
   })
 })
@@ -221,14 +242,16 @@ describe('rows and the detail modal', () => {
   it('closed rows (shipped/declined) dim to 0.72; open rows do not', async () => {
     stubFetch()
     const { host, unmount } = await mount(withUser(<AdminFeedbackScreen {...elevatedProps} />))
-    expect((rowButton(host, 'Export to CSV') as HTMLElement).style.opacity).toBe('0.72')
-    expect((rowButton(host, 'Login button broken') as HTMLElement).style.opacity).toBe('1')
+    await showClosed(host)
+    expect(rowBox(host, 'Export to CSV').style.opacity).toBe('0.72')
+    expect(rowBox(host, 'Login button broken').style.opacity).toBe('1')
     await unmount()
   })
 
   it('a row with attachments shows the paperclip count', async () => {
     stubFetch()
     const { host, unmount } = await mount(withUser(<AdminFeedbackScreen {...elevatedProps} />))
+    await showClosed(host)
     const row = rowButton(host, 'Export to CSV')!
     expect(row.querySelector('svg')).toBeTruthy() // type tile icon + paperclip render
     expect(row.textContent).toContain('1') // attachment count
@@ -238,7 +261,7 @@ describe('rows and the detail modal', () => {
   it('clicking a row opens the detail modal; Save PATCHes /api/admin/feedback/:id and updates the list', async () => {
     const f = vi.fn(async (url: any, init?: any) => {
       if (init?.method === 'PATCH') {
-        return { ok: true, status: 200, json: async () => ({ id: 'i1', status: 'in_progress', admin_response: 'On it' }) }
+        return { ok: true, status: 200, json: async () => ({ id: 'i1', status: 'in_progress', reply_email: null }) }
       }
       return { ok: true, status: 200, json: async () => ({ items: ITEMS }) }
     })
@@ -246,25 +269,27 @@ describe('rows and the detail modal', () => {
     const { host, unmount } = await mount(withUser(<AdminFeedbackScreen {...elevatedProps} />))
 
     await click(rowButton(host, 'Login button broken')!)
-    // Modal open: description label + the plain-word status vocabulary in the select.
     expect(host.textContent).toContain('Description')
-    const select = [...host.querySelectorAll('select')].find(s => (s.textContent || '').includes('Looking at it'))!
-    expect(select).toBeTruthy()
-    expect(select.textContent).not.toContain('under_review') // plain words, not db values
+    // Status is a ROW OF BUTTONS since issue 233, in plain words — a dropdown
+    // hid five of the six options behind a click.
+    const statusBtn = (label: string) =>
+      [...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === label)!
+    expect(statusBtn('Looking at it')).toBeTruthy()
+    expect(host.textContent).not.toContain('under_review') // plain words, not db values
 
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!
-      setter.call(select, 'in_progress')
-      select.dispatchEvent(new Event('change', { bubbles: true }))
-    })
+    await click(statusBtn('In progress'))
     const save = [...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'Save')!
     await click(save)
 
     const patch = f.mock.calls.find(c => c[1]?.method === 'PATCH')!
     expect(String(patch[0])).toBe('/api/admin/feedback/i1')
-    expect(JSON.parse(patch[1].body)).toEqual({ status: 'in_progress', admin_response: null })
-    // onSaved merged the update back into the list and closed the modal.
-    expect(host.textContent).not.toContain('Description')
+    // No reply was typed, so admin_response is OMITTED — a status-only save
+    // must not blank an existing reply, nor re-send one.
+    expect(JSON.parse(patch[1].body)).toEqual({ status: 'in_progress' })
+    // onSaved merged the update back into the list. The modal deliberately
+    // STAYS OPEN now (next/previous walks the queue without reopening).
+    expect(host.textContent).toContain('Description')
+    await click([...host.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'Close')!)
     expect(rowButton(host, 'Login button broken')!.textContent).toContain('In progress')
     await unmount()
   })

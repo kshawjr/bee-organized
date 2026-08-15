@@ -85,8 +85,39 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
+  // ── record context: resolve the pointer to a NAME (issue 233) ──────
+  // feedback_items.context stores IDS ONLY, on purpose (issue 110a) — the
+  // migration's own note says "the reader resolves lead_id → the live record".
+  // This is that reader. Triage renders the pointer as an "Open the record"
+  // card with the client's name and stage, so one batched lookup here replaces
+  // a row of naked uuids nobody could act on. Resolving live also means a
+  // renamed client reads correctly, which a stored copy of the name would not.
+  //
+  // Failure is NON-FATAL: if the lookup errors (or the context column predates
+  // its migration and every value is undefined), the items still return and the
+  // card falls back to the stage + link it already has.
+  const rows = data || []
+  // Array.from, not a spread — the tsconfig target predates iterable spread of
+  // a Set, and this is a .ts file so it is genuinely type-checked.
+  const contextLeadIds = Array.from(
+    new Set(
+      rows
+        .map((r: any) => r?.context?.lead_id)
+        .filter((v: any): v is string => typeof v === 'string' && !!v),
+    ),
+  )
+  const leadNameById = new Map<string, string>()
+  if (contextLeadIds.length) {
+    const { data: leads, error: leadErr } = await supabaseService
+      .from('leads')
+      .select('id, name')
+      .in('id', contextLeadIds)
+    if (leadErr) console.warn('[admin feedback GET] context lead lookup failed:', leadErr.message)
+    for (const l of leads || []) if (l?.id && l?.name) leadNameById.set(l.id, l.name)
+  }
+
   // Flatten the embeds into the shape the admin UI expects.
-  const items = (data || []).map((r: any) => ({
+  const items = rows.map((r: any) => ({
     ...r,
     submitter_name:
       r.submitter?.full_name?.trim() ||
@@ -95,6 +126,7 @@ export async function GET(req: NextRequest) {
       'Unknown',
     submitter_email: r.submitter?.email || null,
     location_name: r.location?.name || null,
+    context_client_name: r?.context?.lead_id ? leadNameById.get(r.context.lead_id) || null : null,
   }))
 
   return NextResponse.json({ items })
