@@ -16968,18 +16968,6 @@ const DEFAULT_SETTINGS = {
     generalDefault: 'organizing-a',
     active: ['moving-a','moving-b','moving-c','moving-d','organizing-a','organizing-b','organizing-c','organizing-d','custom'],
   },
-  notifications: {
-    newLead:true,          newLeadChannels:['email','sms'],
-    assessment:true,       assessmentChannels:['email','sms'], assessmentAdvance:'60',
-    invoicePaid:true,      invoicePaidChannels:['email'],
-    invoiceOverdue:true,   invoiceOverdueChannels:['email','sms'],
-    stuckLead:true,        stuckLeadChannels:['email'],         stuckDays:'7',
-    partnerActivity:false, partnerChannels:['email'],
-    weeklyDigest:true,     weeklyChannels:['email'],
-    monthlyReport:false,   monthlyChannels:['email'],
-    quietHours:false,      quietFrom:'21:00',                   quietTo:'08:00',
-    smsAlerts:false,
-  },
 }
 
 // The four styles of first email, on two dimensions: how the lead books
@@ -18549,76 +18537,6 @@ export function NewLeadNotifications({ realLocId, readOnly=false }) {
   )
 }
 
-// ─── SMS Add-on Card ──────────────────────────────────────────────────────────
-// getSMSPrice() pulled from add-on pricing
-function getSMSPrice() { return APP_ADDONS.find(a=>a.id==='sms')?.price || 100 }
-
-function SmsAddonCard({ settings, updateLocation }) {
-  const [showPayModal, setShowPayModal] = useState(false)
-  const enabled = settings.location.smsEnabled
-  const proration = calcProration(getSMSPrice())
-
-  return (
-    <>
-      <div style={{ background:'white' }}>
-        {/* Header */}
-        <div style={{ padding:'14px 16px', display:'flex', alignItems:'center', gap:'12px' }}>
-          <div style={{ width:'40px', height:'40px', borderRadius:'10px', background:'rgba(16,185,129,0.1)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-            <span style={{ fontSize:'20px' }}>💬</span>
-          </div>
-          <div style={{ flex:1 }}>
-            <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'2px' }}>
-              <p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b' }}>SMS Messaging</p>
-              <span style={{ fontSize:'10px', color:'#d4a046', background:'rgba(212,160,70,0.1)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>Add-on</span>
-              {enabled&&<span style={{ fontSize:'10px', color:'#22c55e', background:'rgba(34,197,94,0.1)', padding:'1px 7px', borderRadius:'20px', fontWeight:600 }}>✅ Active</span>}
-            </div>
-            <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{`Send automated texts to clients · $${getSMSPrice()}/yr`}</p>
-          </div>
-        </div>
-
-        {/* Active state */}
-        {enabled ? (
-          <div style={{ padding:'12px 16px 14px', borderTop:'1px solid rgba(0,0,0,0.05)' }}>
-            <p style={{ fontSize:'11px', color:'#8a9e9a', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>From Number</p>
-            <div style={{ display:'flex', gap:'8px' }}>
-              <input placeholder='Assigned on activation' style={{ flex:1, padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none', background:'rgba(0,0,0,0.02)' }} readOnly />
-              <button style={{ padding:'9px 14px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'white', cursor:'pointer', fontWeight:500 }}>Manage</button>
-            </div>
-            <p style={{ fontSize:'11px', color:'#8a9e9a', marginTop:'8px' }}>{`Renews March 1, 2027 · $${getSMSPrice()}/yr`}</p>
-          </div>
-        ) : (
-          <div style={{ padding:'12px 16px 14px', borderTop:'1px solid rgba(0,0,0,0.05)', background:'rgba(0,0,0,0.01)' }}>
-            <div style={{ display:'flex', gap:'12px', alignItems:'center', marginBottom:'10px' }}>
-              {[[`$${getSMSPrice()}/yr`,'Annual rate'],['$'+proration.prorated,'Due today'],['Mar 1, 2027','Renews']].map(([v,l])=>(
-                <div key={l} style={{ flex:1, textAlign:'center', padding:'8px', background:'white', borderRadius:'8px', border:'1px solid rgba(0,0,0,0.06)' }}>
-                  <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif' }}>{v.includes('$')?v:`$${v}`}</p>
-                  <p style={{ fontSize:'10px', color:'#8a9e9a' }}>{l}</p>
-                </div>
-              ))}
-            </div>
-            <p style={{ fontSize:'11px', color:'#8a9e9a', marginBottom:'10px', lineHeight:1.4 }}>SMS steps in sequences and templates are locked until activated. Prorated to your March 1 renewal.</p>
-            <button onClick={()=>setShowPayModal(true)} style={{ width:'100%', padding:'11px', background:'#1a2e2b', border:'none', borderRadius:'9px', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'white', cursor:'pointer' }}>
-              Activate SMS · ${proration.prorated} today →
-            </button>
-          </div>
-        )}
-      </div>
-
-      {showPayModal&&(
-        <SubscriptionPaymentModal
-          plan="SMS Messaging"
-          amount={proration.prorated}
-          annual={getSMSPrice()}
-          renewDate={proration.renewDate}
-          isProrated={true}
-          onClose={()=>setShowPayModal(false)}
-          onPaid={()=>{ updateLocation('smsEnabled',true); setShowPayModal(false) }}
-        />
-      )}
-    </>
-  )
-}
-
 // Format an integer cent amount as "$1,650.00".
 function fmtCents(cents) {
   return '$' + (Number(cents || 0) / 100).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 })
@@ -18864,49 +18782,6 @@ function SubscriptionPaymentModal({ plan, amount, annual, renewDate, isProrated,
           </div>
         )}
       </div>
-    </div>
-  )
-}
-
-function AlertRow({ icon, label, desc, value, onChange, channels, onChannels, smsEnabled, extra }) {
-  function toggleChannel(ch) {
-    const next = channels.includes(ch) ? channels.filter(c=>c!==ch) : [...channels, ch]
-    if (next.length > 0) onChannels(next)
-  }
-
-  const channelConf = [
-    { key:'email', icon:'📧', label:'Email', always:true },
-    { key:'sms',   icon:'💬', label:'SMS',   always:false },
-    { key:'push',  icon:'🔔', label:'Push',  always:false },
-  ]
-
-  return (
-    <div style={{ background:'white', borderBottom:'1px solid rgba(0,0,0,0.05)' }}>
-      <div style={{ padding:'12px 16px', display:'flex', alignItems:'center', gap:'12px' }}>
-        <span style={{ fontSize:'18px', flexShrink:0 }}>{icon}</span>
-        <div style={{ flex:1, minWidth:0 }}>
-          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>{label}</p>
-          <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{desc}</p>
-        </div>
-        <div onClick={()=>onChange(!value)} style={{ width:'44px', height:'24px', borderRadius:'12px', background:value?'#1a2e2b':'rgba(0,0,0,0.12)', position:'relative', flexShrink:0, cursor:'pointer', transition:'background 0.2s' }}>
-          <div style={{ position:'absolute', top:'3px', left:value?'23px':'3px', width:'18px', height:'18px', borderRadius:'50%', background:'white', boxShadow:'0 1px 3px rgba(0,0,0,0.2)', transition:'left 0.2s' }} />
-        </div>
-      </div>
-      {value&&(
-        <div style={{ padding:'0 16px 12px 46px', display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap' }}>
-          {channelConf.map(ch=>{
-            if (ch.key==='sms'&&!smsEnabled) return null
-            const active = channels.includes(ch.key)
-            return (
-              <button key={ch.key} onClick={()=>toggleChannel(ch.key)} style={{ display:'flex', alignItems:'center', gap:'4px', padding:'3px 9px', borderRadius:'20px', cursor:'pointer', border:'1.5px solid', borderColor:active?'#a8c9c4':'rgba(0,0,0,0.1)', background:active?'rgba(168,201,196,0.12)':'white', fontSize:'11px', fontFamily:'inherit', fontWeight:active?600:400, color:active?'#1a2e2b':'#8a9e9a' }}>
-                <span>{ch.icon}</span>{ch.label}
-                {active&&<span style={{ color:'#a8c9c4' }}>✓</span>}
-              </button>
-            )
-          })}
-          {extra&&<div style={{ marginLeft:'auto' }}>{extra}</div>}
-        </div>
-      )}
     </div>
   )
 }
@@ -19784,24 +19659,6 @@ function SavedViews({ views, onApply, onDelete, onSave, hasActiveFilters, active
   )
 }
 
-function AutomationStep({ step, color }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div style={{ background:'white', borderRadius:'10px', border:'1px solid rgba(0,0,0,0.07)', overflow:'hidden' }}>
-      <button onClick={()=>setOpen(o=>!o)} style={{ width:'100%', padding:'10px 12px', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', gap:'10px', textAlign:'left' }}>
-        <span style={{ fontSize:'16px', flexShrink:0 }}>{step.icon}</span>
-        <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', flex:1 }}>{step.label}</p>
-        <span style={{ fontSize:'11px', color:'#b0c0bc', flexShrink:0 }}>{open?'▲':'▼'}</span>
-      </button>
-      {open&&(
-        <div style={{ padding:'0 12px 12px', borderTop:'1px solid rgba(0,0,0,0.05)' }}>
-          <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6, paddingTop:'10px' }}>{step.detail}</p>
-        </div>
-      )}
-    </div>
-  )
-}
-
 function SectionHeader({ title, desc }) {
   return (
     <div style={{ padding:'20px 16px 8px' }}>
@@ -20519,7 +20376,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     setSettings(s=>({...s, location:{...s.location,[key]:val}}))
     if (key==='crmStatus' && onStatusChange) onStatusChange(val)
   }
-  function updateNotif(key, val) { setSettings(s=>({...s, notifications:{...s.notifications,[key]:val}})) }
   function togglePath(id) {
     setSettings(s=>{
       const active = s.paths.active.includes(id) ? s.paths.active.filter(x=>x!==id) : [...s.paths.active, id]
@@ -21277,11 +21133,12 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     // roster, so one section owns both. canViewBilling still gates the
     // billing footer inside it; 'billing' survives as a deep-link alias.
     ...(canManageTeam ? [{ key:'team', label:'Team & Billing', icon:'👥' }] : []),
+    // Automation and Alerts retired (issue 240 step 1). Automation was a
+    // hard-coded explainer describing emails that do not exist; Alerts
+    // rendered toggles that were never fetched and never saved.
     ...(ownerConfig ? [
       { key:'paths',     label:'Communication', icon:'📧' },
       { key:'templates', label:'Templates',  icon:'📝' },
-      { key:'automation',label:'Automation', icon:'⚡' },
-      { key:'notifs',    label:'Alerts',     icon:'🔔' },
     ] : []),
   ]
   // Deep-link / stale-state safety: if activeSection isn't one this role can
@@ -21314,8 +21171,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               gap + a solid divider injected at the cluster boundary. */}
           <div className="bee-tab-pills" style={{ display:'flex', alignItems:'stretch', gap:'2px', width:'100%' }}>
             {sections.map((sec,i)=>{
-              const SHORT = { profile:'Profile', location:'Location', team:'Team & Billing', paths:'Communication', templates:'Templates', automation:'Automation', notifs:'Alerts' }
-              const clusterOf = k => ['paths','templates','automation','notifs'].includes(k) ? 'customer' : 'foundation'
+              const SHORT = { profile:'Profile', location:'Location', team:'Team & Billing', paths:'Communication', templates:'Templates' }
+              const clusterOf = k => ['paths','templates'].includes(k) ? 'customer' : 'foundation'
               const isActive = activeSection===sec.key
               const showDivider = i>0 && clusterOf(sec.key)!==clusterOf(sections[i-1].key)
               return (
@@ -21720,7 +21577,13 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             { key:'moveDefault',    label:'Moving projects',     sub:'Move-in & move-out',           filter:'moving',     projectType:'move',    icon:'box',  accent:'#4f46e5', tint:'rgba(99,102,241,0.10)' },
             { key:'generalDefault', label:'Organizing projects', sub:'Closets, kitchens, whole home', filter:'organizing', projectType:'general', icon:'home', accent:'#0f8f6f', tint:'rgba(16,185,129,0.12)' },
           ]
-          const verified = !!settings.location.sendFromEmail
+          // Was `verified` and drove a green "Verified sender" badge (issue 240
+          // step 1). Nothing verified anything — a non-empty string flipped it,
+          // and all 20 active locations showed the tick. Real verification
+          // happens in Resend, out of band, and we never ask. The empty case
+          // stays: a blank send-from address genuinely fails sending closed
+          // (lib/resend.ts), so that warning is earned.
+          const senderAddressSet = !!settings.location.sendFromEmail
           const openSeq = SEQUENCES.find(s=>s.key===openSequence) || null
           return (
           <div style={{ paddingBottom:'12px' }}>
@@ -21740,11 +21603,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ display:'flex', alignItems:'center', gap:'8px', flexWrap:'wrap' }}>
                     <h2 style={{ fontSize:'16px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Sending identity</h2>
-                    {verified ? (
-                      <span style={{ display:'inline-flex', alignItems:'center', gap:'4px', fontSize:'10px', fontWeight:600, color:'#0a7d5f', background:'rgba(16,185,129,0.12)', padding:'3px 8px', borderRadius:'6px' }}>
-                        <CommsIcon name="check" size={12} color="#0a7d5f" stroke={2.25} />Verified sender
-                      </span>
-                    ) : (
+                    {!senderAddressSet && (
                       <span style={{ fontSize:'10px', fontWeight:600, color:'#b45309', background:'rgba(245,158,11,0.14)', padding:'3px 8px', borderRadius:'6px' }}>Not set</span>
                     )}
                   </div>
@@ -22195,224 +22054,6 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             </div>
           )
         })()}
-        {/* ── Notifications ── */}
-        {activeSection==='automation'&&(
-          <div style={{ padding:'0 12px 24px' }}>
-            <SectionHeader title="How Automation Works" desc="What Bee Hub does automatically - and when you need to step in" />
-
-            {/* Phase groups */}
-            {[
-              {
-                phase:'🌱 Getting clients in',
-                color:'#6366f1',
-                bg:'rgba(99,102,241,0.06)',
-                steps:[
-                  { icon:'✨', label:'New client arrives', detail:'New lead emails start within 24 hours automatically. No action needed.' },
-                  { icon:'📲', label:'No reply? Follow-ups continue', detail:'The rest of your new lead emails keep going out on schedule. Client moves to Attempting to Contact.' },
-                ]
-              },
-              {
-                phase:'⏸ Clients who need more time',
-                color:'#f97316',
-                bg:'rgba(249,115,22,0.06)',
-                steps:[
-                  { icon:'🌿', label:'Move to Nurturing manually', detail:'When a client says "not yet" - move them here. Light-touch emails every 3–4 weeks keep you top of mind.' },
-                  { icon:'⏳', label:'85 days → warning in Needs Attention', detail:'You\'ll see a red card on your home screen. Decide: re-engage or let it close.' },
-                  { icon:'❌', label:'90 days → auto-closes as Lost', detail:'System sends a final "closing your file" email first. Many clients re-engage at this point.' },
-                ]
-              },
-              {
-                phase:'✅ Booking & completing jobs',
-                color:'#10b981',
-                bg:'rgba(16,185,129,0.06)',
-                steps:[
-                  { icon:'📅', label:'Assessment booked in Jobber', detail:'Client auto-moves to Request. Confirmation email sends. Shows on your home dashboard.' },
-                  { icon:'🔨', label:'Job goes active in Jobber', detail:'Client moves to Job in Progress. Invoice tracking begins.' },
-                  { icon:'🏆', label:'Invoice paid → Closed Won', detail:'Client marked Won. Review request email sends automatically.' },
-                ]
-              },
-            ].map((group,gi)=>(
-              <div key={gi} style={{ marginBottom:'16px' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'8px', padding:'8px 10px', background:group.bg, borderRadius:'10px' }}>
-                  <p style={{ fontSize:'12px', fontWeight:700, color:group.color }}>{group.phase}</p>
-                </div>
-                <div style={{ marginLeft:'8px', borderLeft:`2px solid ${group.color}30`, paddingLeft:'14px', display:'grid', gap:'6px' }}>
-                  {group.steps.map((step,si)=>(
-                    <AutomationStep key={si} step={step} color={group.color} />
-                  ))}
-                </div>
-              </div>
-            ))}
-
-            <div style={{ background:'rgba(168,201,196,0.1)', border:'1px solid rgba(168,201,196,0.3)', borderRadius:'12px', padding:'14px', marginTop:'8px' }}>
-              <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.6 }}>📖 Full instruction guide coming soon. You only need to act when something appears in <strong>Needs Attention</strong> on your home screen - everything else runs on its own.</p>
-            </div>
-          </div>
-        )}
-
-
-        
-
-        {activeSection==='notifs'&&(
-          <>
-            {/* SMS alerts - coming soon notice */}
-            <div style={{ margin:'12px 12px 0', padding:'12px 14px', background:'rgba(212,160,70,0.06)', border:'1px solid rgba(212,160,70,0.2)', borderRadius:'10px', display:'flex', alignItems:'center', gap:'10px' }}>
-              <span style={{ fontSize:'20px' }}>💬</span>
-              <div style={{ flex:1 }}>
-                <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'2px' }}>SMS Alerts</p>
-                <p style={{ fontSize:'12px', color:'#8a9e9a' }}>SMS & Voice is coming soon - see My Location for details.</p>
-              </div>
-              <span style={{ fontSize:'10px', fontWeight:700, color:'#d4a046', background:'rgba(212,160,70,0.1)', border:'1px solid rgba(212,160,70,0.2)', padding:'2px 9px', borderRadius:'20px', flexShrink:0 }}>Coming Soon</span>
-            </div>
-
-            {/* Alert types */}
-            <SectionHeader title="Client Alerts" desc="Notify me when..." />
-            <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-              <AlertRow
-                icon="✨" label="New Client" desc="A new client enters the pipeline"
-                value={settings.notifications.newLead}
-                onChange={v=>updateNotif('newLead',v)}
-                channels={settings.notifications.newLeadChannels||['email','sms']}
-                onChannels={v=>updateNotif('newLeadChannels',v)}
-                smsEnabled={settings.location.smsEnabled}
-              />
-              <AlertRow
-                icon="📅" label="Assessment Reminder" desc="1 hour before a scheduled assessment"
-                value={settings.notifications.assessment}
-                onChange={v=>updateNotif('assessment',v)}
-                channels={settings.notifications.assessmentChannels||['email','sms']}
-                onChannels={v=>updateNotif('assessmentChannels',v)}
-                smsEnabled={settings.location.smsEnabled}
-                extra={
-                  <select value={settings.notifications.assessmentAdvance||'60'} onChange={e=>updateNotif('assessmentAdvance',e.target.value)}
-                    style={{ fontSize:'11px', color:'#6366f1', background:'rgba(99,102,241,0.06)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:'6px', padding:'3px 7px', fontFamily:'inherit', cursor:'pointer' }}>
-                    <option value="15">15 min before</option>
-                    <option value="30">30 min before</option>
-                    <option value="60">1 hr before</option>
-                    <option value="120">2 hrs before</option>
-                    <option value="1440">Day before</option>
-                  </select>
-                }
-              />
-              <AlertRow
-                icon="💰" label="Invoice Paid" desc="A client pays an invoice"
-                value={settings.notifications.invoicePaid}
-                onChange={v=>updateNotif('invoicePaid',v)}
-                channels={settings.notifications.invoicePaidChannels||['email']}
-                onChannels={v=>updateNotif('invoicePaidChannels',v)}
-                smsEnabled={settings.location.smsEnabled}
-              />
-              <AlertRow
-                icon="⏰" label="Invoice Overdue" desc="An invoice hasn't been paid"
-                value={settings.notifications.invoiceOverdue}
-                onChange={v=>updateNotif('invoiceOverdue',v)}
-                channels={settings.notifications.invoiceOverdueChannels||['email','sms']}
-                onChannels={v=>updateNotif('invoiceOverdueChannels',v)}
-                smsEnabled={settings.location.smsEnabled}
-              />
-              <AlertRow
-                icon="⏸" label="Stuck Client" desc="A client hasn't moved in several days"
-                value={settings.notifications.stuckLead}
-                onChange={v=>updateNotif('stuckLead',v)}
-                channels={settings.notifications.stuckLeadChannels||['email']}
-                onChannels={v=>updateNotif('stuckLeadChannels',v)}
-                smsEnabled={settings.location.smsEnabled}
-                extra={
-                  <select value={settings.notifications.stuckDays||'7'} onChange={e=>updateNotif('stuckDays',e.target.value)}
-                    style={{ fontSize:'11px', color:'#f59e0b', background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.2)', borderRadius:'6px', padding:'3px 7px', fontFamily:'inherit', cursor:'pointer' }}>
-                    <option value="3">After 3 days</option>
-                    <option value="5">After 5 days</option>
-                    <option value="7">After 7 days</option>
-                    <option value="14">After 14 days</option>
-                  </select>
-                }
-              />
-            </div>
-
-            <SectionHeader title="Partner & Reports" />
-            <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-              <AlertRow
-                icon="🤝" label="Partner Referral" desc="A partner sends a new client your way"
-                value={settings.notifications.partnerActivity}
-                onChange={v=>updateNotif('partnerActivity',v)}
-                channels={settings.notifications.partnerChannels||['email']}
-                onChannels={v=>updateNotif('partnerChannels',v)}
-                smsEnabled={settings.location.smsEnabled}
-              />
-              <AlertRow
-                icon="📊" label="Weekly Digest" desc="Pipeline summary every Monday morning"
-                value={settings.notifications.weeklyDigest}
-                onChange={v=>updateNotif('weeklyDigest',v)}
-                channels={settings.notifications.weeklyChannels||['email']}
-                onChannels={v=>updateNotif('weeklyChannels',v)}
-                smsEnabled={settings.location.smsEnabled}
-              />
-              <AlertRow
-                icon="📈" label="Monthly Report" desc="Full month recap on the 1st"
-                value={settings.notifications.monthlyReport}
-                onChange={v=>updateNotif('monthlyReport',v)}
-                channels={settings.notifications.monthlyChannels||['email']}
-                onChannels={v=>updateNotif('monthlyChannels',v)}
-                smsEnabled={settings.location.smsEnabled}
-              />
-            </div>
-
-            <SectionHeader title="Quiet Hours" desc="No alerts during these hours" />
-            <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-              <SettingsToggle
-                label="Enable Quiet Hours"
-                desc="Pause non-urgent alerts overnight"
-                value={settings.notifications.quietHours||false}
-                onChange={v=>updateNotif('quietHours',v)}
-              />
-              {settings.notifications.quietHours&&(
-                <div style={{ padding:'12px 16px', background:'white', borderTop:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:'12px' }}>
-                  <span style={{ fontSize:'13px', color:'#8a9e9a' }}>From</span>
-                  <select value={settings.notifications.quietFrom||'21'} onChange={e=>updateNotif('quietFrom',e.target.value)} style={{ padding:'6px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none' }}>
-                    {['18:00','19:00','20:00','21:00','22:00','23:00'].map(t=><option key={t} value={t}>{t}</option>)}
-                  </select>
-                  <span style={{ fontSize:'13px', color:'#8a9e9a' }}>to</span>
-                  <select value={settings.notifications.quietTo||'08'} onChange={e=>updateNotif('quietTo',e.target.value)} style={{ padding:'6px 10px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'7px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', background:'white', outline:'none' }}>
-                    {['06:00','07:00','08:00','09:00','10:00'].map(t=><option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
-              )}
-            </div>
-
-            <SectionHeader title="SMS" desc="Text message delivery" />
-            <div style={{ borderRadius:'12px', overflow:'hidden', margin:'0 12px', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>\n              {!settings.location.smsEnabled ? (
-                <div style={{ padding:'14px 16px', background:'rgba(212,160,70,0.06)', border:'1px solid rgba(212,160,70,0.2)', borderRadius:'12px', margin:'0 0 0 0', display:'flex', alignItems:'flex-start', gap:'12px' }}>
-                  <span style={{ fontSize:'20px', marginTop:'2px' }}>💬</span>
-                  <div style={{ flex:1 }}>
-                    <p style={{ fontSize:'13px', fontWeight:600, color:'#b07a20', marginBottom:'3px' }}>SMS is an add-on</p>
-                    <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>Enable it in <strong>My Location → Add-ons</strong> to unlock text alerts and SMS steps in your new lead emails.</p>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <SettingsToggle
-                    label="SMS Alerts"
-                    desc="Receive selected alerts via text message"
-                    value={settings.notifications.smsAlerts}
-                    onChange={v=>updateNotif('smsAlerts',v)}
-                  />
-                  {settings.notifications.smsAlerts&&(
-                    <div style={{ padding:'12px 16px', background:'white', borderTop:'1px solid rgba(0,0,0,0.05)' }}>
-                      <p style={{ fontSize:'11px', color:'#8a9e9a', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'6px' }}>Mobile Number</p>
-                      <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
-                        <input placeholder='(303) 555-0000' defaultValue={settings.profile.phone} style={{ flex:1, padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'16px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
-                        <button style={{ padding:'9px 14px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', color:'white', cursor:'pointer', fontWeight:500 }}>Verify</button>
-                      </div>
-                      <p style={{ fontSize:'11px', color:'#b0c0bc', marginTop:'6px' }}>Twilio integration required for production.</p>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-
-            <div style={{ height:'1rem' }} />
-          </>
-        )}
 
         </>)}
 

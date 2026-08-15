@@ -75,7 +75,12 @@ const sectionKeys = async (franchiseRole?: string): Promise<string[]> => {
 
 // 'billing' is gone as a standalone section (merged into 'team' — Team &
 // Billing); it survives only as an initialSection alias, pinned below.
-const ALL_SECTIONS = ['profile', 'location', 'team', 'paths', 'templates', 'automation', 'notifs']
+// 'automation' and 'notifs' are gone outright (issue 240 step 1) — the first
+// was a hard-coded explainer for emails that do not exist, the second rendered
+// toggles that were never fetched and never saved. Neither left an alias: a
+// deep link to either now falls through sectionAllowed to the no-access
+// notice, which is the honest outcome for a section that no longer exists.
+const ALL_SECTIONS = ['profile', 'location', 'team', 'paths', 'templates']
 
 describe('SettingsScreen sections by franchiseRole', () => {
   it("owner sees the full section list (and elevated mounts pass franchiseRole='owner', so this also covers admin/super_admin)", async () => {

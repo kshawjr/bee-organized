@@ -334,7 +334,13 @@ const slice = (src: string, from: string, to: string) => {
 }
 
 describe('UI — placement in the owner+super_admin-only Communication tab', () => {
-  const comp = slice(beehub, 'function NewLeadNotifications(', '// ─── SMS Add-on Card')
+  // End-marker was '// ─── SMS Add-on Card', which issue 240 step 1 deleted
+  // along with SmsAddonCard itself (defined, never mounted, unreachable
+  // behind a location flag nothing populated). Re-anchored to the next
+  // top-level declaration after this component. A missing marker makes slice
+  // return '' and every assertion below fails loudly — which is how this
+  // re-anchor got caught, so leave that behaviour alone.
+  const comp = slice(beehub, 'function NewLeadNotifications(', 'function fmtCents(')
 
   it('renders in the Communication tab, wired to the real location UUID', () => {
     expect(beehub).toContain('<NewLeadNotifications realLocId={realLocId}')
