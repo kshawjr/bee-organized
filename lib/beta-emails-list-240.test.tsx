@@ -56,7 +56,7 @@ const templates = [
 
 const build = (over: any = {}) => buildEmailList({
   pathSteps: { 'organizing-a': masterSteps },
-  templates, generalDefault:'organizing-a', ...over,
+  templates, pathKey:'organizing-a', ...over,
 })
 
 describe('the six rows unify across three rails', () => {
@@ -105,7 +105,7 @@ describe('rail A resolves content the way the sender does', () => {
       masterTemplateId:'t-other' }]
     const withTpl = [...templates, tpl({ dbId:'t-other', legacyId:'other', isMaster:true,
       subject:'Template subject', body:'Template body' })]
-    const { newLead } = buildEmailList({ pathSteps:{ p:steps }, templates:withTpl, generalDefault:'p' })
+    const { newLead } = buildEmailList({ pathSteps:{ p:steps }, templates:withTpl, pathKey:'p' })
     expect(newLead[0].subject).toBe('Inline subject')
   })
 
@@ -117,7 +117,7 @@ describe('rail A resolves content the way the sender does', () => {
       subject:null, body:null, masterTemplateId:'t-other' }]
     const withTpl = [...templates, tpl({ dbId:'t-other', legacyId:'other', isMaster:true,
       subject:'Template subject', body:'Template body\n\nSecond line.' })]
-    const { newLead } = buildEmailList({ pathSteps:{ p:steps }, templates:withTpl, generalDefault:'p' })
+    const { newLead } = buildEmailList({ pathSteps:{ p:steps }, templates:withTpl, pathKey:'p' })
     expect(newLead[0].subject).toBe('Template subject')
     expect(newLead[0].contentMissing).toBe(false)
   })
@@ -125,7 +125,7 @@ describe('rail A resolves content the way the sender does', () => {
   it('says so rather than faking it when nothing resolves', () => {
     const steps = [{ id:'s', dbId:'db1', order:1, type:'email', delay_days:0,
       subject:null, body:null, masterTemplateId:'t-missing' }]
-    const { newLead } = buildEmailList({ pathSteps:{ p:steps }, templates, generalDefault:'p' })
+    const { newLead } = buildEmailList({ pathSteps:{ p:steps }, templates, pathKey:'p' })
     expect(newLead[0].contentMissing).toBe(true)
   })
 
@@ -134,13 +134,13 @@ describe('rail A resolves content the way the sender does', () => {
       subject:null, body:null, masterTemplateId:'t-dead' }]
     const withTpl = [...templates, tpl({ dbId:'t-dead', legacyId:'dead', isMaster:true,
       isActive:false, subject:'Quarantined subject', body:'Body\n\nSecond.' })]
-    const { newLead } = buildEmailList({ pathSteps:{ p:steps }, templates:withTpl, generalDefault:'p' })
+    const { newLead } = buildEmailList({ pathSteps:{ p:steps }, templates:withTpl, pathKey:'p' })
     expect(newLead[0].subject).toBe('Quarantined subject')
   })
 
   it('non-email steps are not listed', () => {
     const steps = [...masterSteps, { id:'sms', order:4, type:'sms', delay_days:2, subject:'A text', body:'x', fromMaster:true }]
-    const { newLead } = buildEmailList({ pathSteps:{ p:steps }, templates, generalDefault:'p' })
+    const { newLead } = buildEmailList({ pathSteps:{ p:steps }, templates, pathKey:'p' })
     expect(newLead.some(r => r.subject === 'A text')).toBe(false)
   })
 })
@@ -180,7 +180,7 @@ describe('fork resolution matches the server rule', () => {
   it('a location-owned step reads as Your wording', () => {
     const own = [{ id:'db_1', dbId:'db1', order:1, type:'email', delay_days:0,
       subject:'Ours', body:'Ours\n\nSecond.' }]
-    const { newLead } = buildEmailList({ pathSteps:{ p:own }, templates, generalDefault:'p' })
+    const { newLead } = buildEmailList({ pathSteps:{ p:own }, templates, pathKey:'p' })
     expect(newLead[0].wording).toBe('yours')
   })
 })

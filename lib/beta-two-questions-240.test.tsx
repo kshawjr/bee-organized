@@ -224,7 +224,9 @@ describe('the Emails list carries the sentence and its Change link', () => {
     const props = {
       pathSteps: { 'organizing-b': STEPS }, masterSteps: { 'organizing-b': STEPS }, templates: [],
       generalDefault: 'organizing-b', moveDefault: 'moving-b', sendConfig: {},
-      variantAnswers: answersFromPathStyle(styleFromPathKey('organizing-b')),
+      // issue 240 step 7b — the prop is a RESOLVER now, so the sentence can
+      // describe whichever sequence the toggle is showing.
+      variantAnswersFor: (key: string) => answersFromPathStyle(styleFromPathKey(key)),
       actions: { edit: vi.fn(), reset: vi.fn(), add: vi.fn(), editTiming: vi.fn(), changeVariant: vi.fn() },
       ...over,
     }

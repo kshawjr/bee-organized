@@ -18420,9 +18420,9 @@ function templateRow(templates, legacyId, days, when) {
   }
 }
 
-export function buildEmailList({ pathSteps = {}, templates = [], generalDefault = null }) {
+export function buildEmailList({ pathSteps = {}, templates = [], pathKey = null }) {
   // RAIL A — the default organizing path's email steps, inline-first.
-  const steps = (generalDefault && pathSteps[generalDefault]) || []
+  const steps = (pathKey && pathSteps[pathKey]) || []
   const dripRows = steps
     .filter(s => (s.type || 'email') === 'email')
     .slice()
@@ -18440,7 +18440,7 @@ export function buildEmailList({ pathSteps = {}, templates = [], generalDefault 
         rail: 'drip',
         // issue 240 step 8b — rail A acts on (pathKey, order). step_order is
         // the identity that survives the bulk PATCH's delete-and-reinsert.
-        pathKey: generalDefault,
+        pathKey,
         order: Number(s.order ?? 0),
         days: Number(s.delay_days ?? 0),
         when: whenLabelForDays(s.delay_days ?? 0),
@@ -19122,11 +19122,36 @@ export function appendedStepPosition(steps) {
   return { order: maxOrder + 1, delay_days: prevDelay + ADD_STEP_INTERVAL_DAYS, prevDelay }
 }
 
-export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null, sendConfig = {}, variantAnswers = null }) {
+export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null, sendConfig = {}, variantAnswersFor = null }) {
   const [open, setOpen] = React.useState(null)  // { group, index }
+
+  // ─── issue 240 step 7b — which sequence is on screen ───
+  //
+  // A VIEW, never a variant. The toggle changes what is rendered and writes
+  // NOTHING; 9c's two questions remain the only way to change a variant, and
+  // they set both defaults together.
+  //
+  // This exists because step 11 retires the tiles, which were the only place
+  // the moving emails could be seen or edited. 12 leads are live on moving
+  // sequences, and 4 locations (carmel, northjersey, portland, test) hold a
+  // fork on their MOVING path while running the master on organizing — their
+  // edited wording is exactly what would have gone dark.
+  //
+  // Not combined mode: two sequences, one on screen at a time, each fully
+  // editable. A lead is on one or the other by project_type, so the toggle
+  // mirrors the data rather than inventing a merged view.
+  const [view, setView] = React.useState('organizing')
+  const activePathKey = view === 'moving' ? moveDefault : generalDefault
+  const hasMoving = !!moveDefault
+
+  // The sentence reads back the variant of the sequence being SHOWN. Reading
+  // back organizing while moving is on screen would be a lie for loc_kc, the
+  // one location whose letters differ (organizing-a / moving-c).
+  const activeAnswers = variantAnswersFor ? variantAnswersFor(activePathKey) : null
+
   const { newLead, afterJob } = React.useMemo(
-    () => buildEmailList({ pathSteps, templates, generalDefault }),
-    [pathSteps, templates, generalDefault])
+    () => buildEmailList({ pathSteps, templates, pathKey: activePathKey }),
+    [pathSteps, templates, activePathKey])
 
   // Step 10 decides what is editable; nothing here is a control.
   const withNotes = newLead.map((r, i) => ({
@@ -19139,8 +19164,8 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
   // issue 240 step 8b — one reason string, computed once per path, shown on
   // every row of that path. Never hidden silently.
   const dripShapeOk = dripShapeMatchesMaster(
-    (generalDefault && pathSteps[generalDefault]) || [],
-    (generalDefault && masterSteps[generalDefault]) || [])
+    (activePathKey && pathSteps[activePathKey]) || [],
+    (activePathKey && masterSteps[activePathKey]) || [])
   const resetBlockedFor = row =>
     row.rail === 'drip' && !dripShapeOk
       ? 'these emails have been added to or reordered, so we can no longer tell which one to put back'
@@ -19182,9 +19207,21 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
           link. This is the replacement for the sequence tiles' variant picker
           (persistDefault), which step 11 retires; without it an owner would
           have no way left to choose what their clients receive. */}
-      {variantAnswers && (
+      {/* issue 240 step 7b — the sequence toggle. A control: capped, sitting
+          left, not a full-width segmented bar. */}
+      {hasMoving && (
+        <div style={{ display:'flex', gap:'6px', marginBottom:'14px' }}>
+          {[['organizing', 'Organizing'], ['moving', 'Moving']].map(([k, label]) => (
+            <button key={k} onClick={() => { setView(k); setOpen(null) }}
+              style={{ flex:'0 0 auto', maxWidth:CONTROL_W.action, padding:'7px 15px', borderRadius:'20px', border:`1px solid ${view === k ? '#1a2e2b' : 'rgba(26,46,43,0.14)'}`, background: view === k ? '#1a2e2b' : 'white', color: view === k ? 'white' : '#4a5f5b', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', cursor:'pointer' }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {activeAnswers && (
         <div style={{ background:'white', borderRadius:'11px', padding:'14px 16px', marginBottom:'16px', display:'flex', gap:'12px', alignItems:'baseline', flexWrap:'wrap' }}>
-          <p style={{ flex:'1 1 320px', minWidth:0, fontSize:'13.5px', color:'#1a2e2b', margin:0, lineHeight:1.55 }}>{variantSentence(variantAnswers.booking, variantAnswers.rate)}</p>
+          <p style={{ flex:'1 1 320px', minWidth:0, fontSize:'13.5px', color:'#1a2e2b', margin:0, lineHeight:1.55 }}>{variantSentence(activeAnswers.booking, activeAnswers.rate)}</p>
           {actions && actions.changeVariant && (
             <button onClick={actions.changeVariant}
               style={{ flexShrink:0, background:'none', border:'none', padding:0, font:'inherit', fontSize:'13px', color:'#1a2e2b', textDecoration:'underline', cursor:'pointer', maxWidth:CONTROL_W.action }}>
@@ -19197,12 +19234,9 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
           not a sequence and has nothing to append to. */}
       <Group id="new" title="When someone new gets in touch"
         count={`${withNotes.length} email${withNotes.length === 1 ? '' : 's'}`}
-        note={moveDefault && moveDefault !== generalDefault
-          ? 'These are the organizing emails. Moving leads follow a different set — you can see it on the old Communication tab until this screen covers both.'
-          : null}
         rows={withNotes} />
       {actions && actions.add && (
-        <button onClick={actions.add}
+        <button onClick={() => actions.add(activePathKey)}
           style={{ width:'100%', maxWidth:CONTROL_W.action, padding:'9px', marginTop:'-14px', marginBottom:'22px', background:'transparent', border:'1px dashed rgba(26,46,43,0.22)', borderRadius:'10px', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#4a5f5b', cursor:'pointer' }}>
           + Add another email
         </button>
@@ -23257,8 +23291,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               masterSteps={masterSteps}
               generalDefault={settings.paths.generalDefault}
               moveDefault={settings.paths.moveDefault}
-              actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset, add: () => openAddEmail(settings.paths.generalDefault), editTiming: emailsRowEditTiming, changeVariant: openVariantQuestions } : null}
-              variantAnswers={answersFromPathStyle(styleFromPathKey(settings.paths.generalDefault))}
+              actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset, add: openAddEmail, editTiming: emailsRowEditTiming, changeVariant: openVariantQuestions } : null}
+              // issue 240 step 7b — resolves per sequence, so the sentence
+              // describes whichever one is on screen.
+              variantAnswersFor={key => answersFromPathStyle(styleFromPathKey(key))}
               // issue 240 step 9a — mirrors what the guards read at send time.
               // The owner link is the signed-in owner's; the send path also
               // consults the assigned user's, which has no meaning without a
