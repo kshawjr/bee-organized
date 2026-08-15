@@ -5,14 +5,30 @@
 //
 //   1. pathStyleFromAnswers / answersFromPathStyle — the pure 2x2 resolver,
 //      exported so onboarding and Settings can't drift apart.
-//   2. Settings → Communications drives its per-project-type default off that
-//      same resolver: answering the two questions PATCHes the correct path_key.
+//   2. The Settings surface drives its default off that SAME resolver:
+//      answering the two questions PATCHes the correct path_key.
+//
+// Part 2 used to drive the sequence tiles. Issue 240 step 11 retires those, so
+// it now drives their replacement — step 9c's two questions on the Emails tab.
+// The guard has to follow the surface, or retirement quietly removes it.
+//
+// WHY THIS SUITE MATTERS, named so the next person sees it: issue 240 step 9c
+// shipped a SECOND implementation of this 2x2 (variantLetterFor /
+// variantAnswersFor) while onboarding kept calling these originals. The two
+// happened to agree — verified across all four combinations, both directions —
+// so nothing broke, but the app was one edit away from onboarding and Settings
+// promising clients different things. The duplicate was deleted in 9c-fix and
+// this file is what stops a third appearing. Pin the RESOLVER, not just the UI.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   SettingsScreen,
+  variantPairFor,
+  styleFromPathKey,
   pathStyleFromAnswers,
   answersFromPathStyle,
   BOOKING_REPLY,
@@ -126,36 +142,58 @@ const mountPaths = async () => {
 const defaultPatches = () =>
   calls.filter(c => c.method === 'PATCH' && c.url.includes(`/api/locations/${LOC_UUID}/drip-paths`))
 
-describe('Settings → Communications drives the default off the same mapping', () => {
-  it('answering both questions for Moving PATCHes the resolved path_key (book online + rate in email → moving-b)', async () => {
-    await mountPaths()
-    await clickText('Moving projects')   // open the moving sequence editor
-    await clickText('They book online')  // question 1
-    await clickText('Yes, in the email') // question 2 → resolves + persists
-
-    const patch = defaultPatches().at(-1)
-    expect(patch, 'a default PATCH').toBeTruthy()
-    expect(patch!.body).toEqual({ default_move: 'moving-b' })
+describe('the two questions drive the default off the same resolver', () => {
+  it('every answer pair resolves to the pair of path_keys, organizing and moving together', () => {
+    // variantPairFor is a thin wrapper over pathStyleFromAnswers — it must not
+    // grow a mapping of its own.
+    const cases = [
+      [BOOKING_REPLY,  RATE_IN_EMAIL, 'organizing-a', 'moving-a'],
+      [BOOKING_ONLINE, RATE_IN_EMAIL, 'organizing-b', 'moving-b'],
+      [BOOKING_REPLY,  RATE_ON_CALL,  'organizing-c', 'moving-c'],
+      [BOOKING_ONLINE, RATE_ON_CALL,  'organizing-d', 'moving-d'],
+    ] as const
+    for (const [booking, rate, gen, mov] of cases) {
+      expect(variantPairFor(booking, rate), `${booking}/${rate}`).toEqual({ generalDefault: gen, moveDefault: mov })
+      // and it agrees with the resolver it delegates to
+      expect(variantPairFor(booking, rate).generalDefault.slice(-1))
+        .toBe(pathStyleFromAnswers(booking, rate).replace('path-', ''))
+    }
   })
 
-  it('Organizing writes the general default (reply + rate on the call → organizing-c)', async () => {
-    await mountPaths()
-    await clickText('Organizing projects')
-    await clickText('They reply to me')
-    await clickText('No, on the call')
-
-    const patch = defaultPatches().at(-1)
-    expect(patch!.body).toEqual({ default: 'organizing-c' })
+  it('organizing and moving never diverge — one answer pair, both sequences', () => {
+    for (const booking of [BOOKING_REPLY, BOOKING_ONLINE]) {
+      for (const rate of [RATE_IN_EMAIL, RATE_ON_CALL]) {
+        const p = variantPairFor(booking, rate)
+        expect(p.generalDefault.slice(-1)).toBe(p.moveDefault.slice(-1))
+      }
+    }
   })
 
-  it('the questions pre-seed from the stored default, so changing one answer moves to the adjacent path (moving-b → moving-d)', async () => {
-    defaultMove = 'moving-b'   // book online + rate in email
-    await mountPaths()
-    await clickText('Moving projects')
-    // Flip only the rate answer: online stays, rate → on the call ⇒ moving-d.
-    await clickText('No, on the call')
+  it('a stored path_key reads back as the answers that produced it', () => {
+    for (const l of ['a', 'b', 'c', 'd']) {
+      const back = answersFromPathStyle(styleFromPathKey(`organizing-${l}`))
+      expect(variantPairFor(back.booking, back.rate).generalDefault).toBe(`organizing-${l}`)
+    }
+  })
 
-    const patch = defaultPatches().at(-1)
-    expect(patch!.body).toEqual({ default_move: 'moving-d' })
+  it('an unrecognised path_key yields no style, so the questions start unanswered', () => {
+    expect(styleFromPathKey('custom')).toBe('')
+    expect(styleFromPathKey('')).toBe('')
+    expect(answersFromPathStyle(styleFromPathKey('custom'))).toEqual({ booking: null, rate: null })
+  })
+
+  it('THE DRIFT GUARD: there is exactly ONE 2x2 in the file', () => {
+    // A second resolver is how onboarding and Settings come apart. If this
+    // fails, someone has re-forked the mapping — extend the original instead.
+    const src = readFileSync(join(process.cwd(), 'components/BeeHub.jsx'), 'utf8')
+    // Assert on the DEFINITION, not the bare name: the comment explaining why
+    // these were deleted names them, and a name check would fail on the prose
+    // rather than the code.
+    for (const gone of ['variantLetterFor', 'variantAnswersFor']) {
+      expect(src, `${gone} was deleted in 9c-fix and must not come back`)
+        .not.toMatch(new RegExp(`function\\s+${gone}\\s*\\(`))
+    }
+    expect(src.match(/export function pathStyleFromAnswers\(/g)?.length ?? 0).toBe(1)
+    expect(src.match(/export function answersFromPathStyle\(/g)?.length ?? 0).toBe(1)
   })
 })

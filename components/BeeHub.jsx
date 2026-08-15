@@ -18595,39 +18595,40 @@ function EmailTemplateEditor({ row, onCancel, onSave }) {
 
 // ─── issue 240 step 9c — the two questions ───
 //
-// THE RULE, derived rather than tabulated. All eight master variants are
-// structurally identical — 3 steps at day 0/5/30, same three subjects. The
-// ONLY thing that varies is which merge tags the bodies quote, read from
-// production side by side:
+// THE MAPPING IS NOT DEFINED HERE. pathStyleFromAnswers /
+// answersFromPathStyle already own it, and issue 194 exported them precisely
+// so onboarding and Settings could not drift apart.
 //
-//        quotes {{rate_per_hour}}   quotes a booking-link tag
-//   a           yes                        no
-//   b           yes                        yes
-//   c           no                         no
-//   d           no                         yes      (also {{location_phone}})
+// Step 9c originally shipped its own variantLetterFor / variantAnswersFor —
+// a second, independent implementation of the same 2x2. Onboarding kept
+// calling the originals, so the app had two mappings that happened to agree
+// (verified across all four combinations, both directions, before the
+// duplicate was removed). Nothing had gone wrong yet; it was one edit away
+// from going wrong silently. Deleted, and this surface now calls the
+// originals. If a fifth variant is ever added, there is one place to add it.
 //
-// So variant selection is exactly two booleans. The letter is an encoding of
-// that pair, not a category in its own right, which is why this derives it
-// instead of hardcoding a lookup: if a ninth variant is ever seeded, the rule
-// still says what it is rather than the table going quietly stale.
-export function variantLetterFor({ quotesRate, quotesLink }) {
-  if (quotesRate && quotesLink) return 'b'
-  if (quotesRate && !quotesLink) return 'a'
-  if (!quotesRate && quotesLink) return 'd'
-  return 'c'
+// The vocabulary is the ORIGINAL's — booking: reply|online, rate: email|call —
+// rather than a local pair of booleans, so there is one language too, not one
+// function behind two dialects.
+
+// The path style is a LETTER; a location stores two path_keys. Onboarding did
+// this conversion inline ('organizing-' + id.replace('path-','')); it is
+// extracted here so both callers share it rather than each re-deriving it.
+export function pathKeysFromStyle(styleId) {
+  const letter = String(styleId || '').replace('path-', '')
+  return { generalDefault: `organizing-${letter}`, moveDefault: `moving-${letter}` }
 }
-export function variantAnswersFor(letter) {
-  const l = String(letter || '').trim().slice(-1)
-  return { quotesRate: l === 'a' || l === 'b', quotesLink: l === 'b' || l === 'd' }
+export function styleFromPathKey(pathKey) {
+  const letter = String(pathKey || '').trim().slice(-1)
+  return ['a', 'b', 'c', 'd'].includes(letter) ? `path-${letter}` : ''
 }
 
 // Organizing and moving are MIRRORS — same tags, same days, same subjects,
 // differing only in wording. One answer pair sets both, and they must never
 // diverge: a lead's project_type picks which sequence it enters, not which
 // promises it gets.
-export function variantPairFor(answers) {
-  const l = variantLetterFor(answers)
-  return { generalDefault: `organizing-${l}`, moveDefault: `moving-${l}` }
+export function variantPairFor(booking, rate) {
+  return pathKeysFromStyle(pathStyleFromAnswers(booking, rate))
 }
 
 // What an owner must already have for an answer to be honest. Saying "yes, we
@@ -18635,32 +18636,33 @@ export function variantPairFor(answers) {
 // on a rate-quoting variant whose every send is then HELD by lib/rate-guard —
 // which is loc_carmel's live state: organizing-a/moving-a, no rate, both
 // sequences silently sending nothing.
-export function variantPrerequisiteMissing(answers, cfg) {
+export function variantPrerequisiteMissing(booking, rate, cfg) {
   const blank = v => v == null || String(v).trim() === ''
   const out = []
-  if (answers.quotesRate && blank(cfg?.ratePerHour)) out.push('rate')
-  if (answers.quotesLink && blank(cfg?.locationCalendarLink)) out.push('link')
+  if (rate === RATE_IN_EMAIL && blank(cfg?.ratePerHour)) out.push('rate')
+  if (booking === BOOKING_ONLINE && blank(cfg?.locationCalendarLink)) out.push('link')
   return out
 }
 
 // The sentence, and the modal behind its Change link. Not a settings form:
 // two questions, read back as one line an owner can check at a glance.
-export function variantSentence(answers) {
-  const rate = answers.quotesRate
+export function variantSentence(booking, rate) {
+  const r = rate === RATE_IN_EMAIL
     ? 'Your clients are told your hourly rate'
     : 'Your rate is talked through on the call, not written in the email'
-  const link = answers.quotesLink
+  const b = booking === BOOKING_ONLINE
     ? 'and they can book a time themselves from a link'
     : 'and they reply to you to arrange a time'
-  return `${rate}, ${link}.`
+  return `${r}, ${b}.`
 }
 
 export function TwoQuestionsModal({ answers, cfg, ownsPathKeys, liveLeadCount, busy, err, onCancel, onConfirm }) {
-  const [a, setA] = React.useState(answers)
+  const [bookingA, setBookingA] = React.useState(answers.booking || BOOKING_REPLY)
+  const [rateA, setRateA] = React.useState(answers.rate || RATE_ON_CALL)
   const [rate, setRate] = React.useState(cfg.ratePerHour || '')
   const [link, setLink] = React.useState(cfg.locationCalendarLink || '')
-  const missing = variantPrerequisiteMissing(a, { ratePerHour: rate, locationCalendarLink: link })
-  const pair = variantPairFor(a)
+  const missing = variantPrerequisiteMissing(bookingA, rateA, { ratePerHour: rate, locationCalendarLink: link })
+  const pair = variantPairFor(bookingA, rateA)
   const changed = pair.generalDefault !== cfg.generalDefault || pair.moveDefault !== cfg.moveDefault
   const ok = missing.length === 0
   const btn = { background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'9px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', maxWidth:CONTROL_W.action }
@@ -18675,10 +18677,10 @@ export function TwoQuestionsModal({ answers, cfg, ownsPathKeys, liveLeadCount, b
 
           <p style={{ fontSize:'15px', fontWeight:600, color:'#1a2e2b', margin:'0 0 9px' }}>Do you tell clients your hourly rate?</p>
           <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'6px' }}>
-            <button onClick={() => setA(v => ({ ...v, quotesRate: true }))} style={opt(a.quotesRate)}>Yes, put it in the email</button>
-            <button onClick={() => setA(v => ({ ...v, quotesRate: false }))} style={opt(!a.quotesRate)}>No, I cover it on the call</button>
+            <button onClick={() => setRateA(RATE_IN_EMAIL)} style={opt(rateA === RATE_IN_EMAIL)}>Yes, put it in the email</button>
+            <button onClick={() => setRateA(RATE_ON_CALL)} style={opt(rateA === RATE_ON_CALL)}>No, I cover it on the call</button>
           </div>
-          {a.quotesRate && (
+          {rateA === RATE_IN_EMAIL && (
             <div style={{ background:'#fdf6e3', borderRadius:'10px', padding:'13px 15px', marginBottom:'16px' }}>
               <label style={{ display:'block', fontSize:'13px', fontWeight:600, color:'#5a460e', marginBottom:'7px' }}>Your hourly rate</label>
               <input value={rate} onChange={e => setRate(e.target.value)} placeholder="95" style={field} />
@@ -18690,10 +18692,10 @@ export function TwoQuestionsModal({ answers, cfg, ownsPathKeys, liveLeadCount, b
 
           <p style={{ fontSize:'15px', fontWeight:600, color:'#1a2e2b', margin:'12px 0 9px' }}>Do you have a booking link clients can use?</p>
           <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'6px' }}>
-            <button onClick={() => setA(v => ({ ...v, quotesLink: true }))} style={opt(a.quotesLink)}>Yes, they book themselves</button>
-            <button onClick={() => setA(v => ({ ...v, quotesLink: false }))} style={opt(!a.quotesLink)}>No, they reply to me</button>
+            <button onClick={() => setBookingA(BOOKING_ONLINE)} style={opt(bookingA === BOOKING_ONLINE)}>Yes, they book themselves</button>
+            <button onClick={() => setBookingA(BOOKING_REPLY)} style={opt(bookingA === BOOKING_REPLY)}>No, they reply to me</button>
           </div>
-          {a.quotesLink && (
+          {bookingA === BOOKING_ONLINE && (
             <div style={{ background:'#fdf6e3', borderRadius:'10px', padding:'13px 15px' }}>
               <label style={{ display:'block', fontSize:'13px', fontWeight:600, color:'#5a460e', marginBottom:'7px' }}>Your booking link</label>
               <input value={link} onChange={e => setLink(e.target.value)} placeholder="calendly.com/your-name" style={field} />
@@ -18719,7 +18721,7 @@ export function TwoQuestionsModal({ answers, cfg, ownsPathKeys, liveLeadCount, b
         </div>
         <div style={{ display:'flex', gap:'9px', padding:'15px 24px', borderTop:'1px solid rgba(26,46,43,0.10)', background:'#faf8f3', alignItems:'center', flexWrap:'wrap' }}>
           <button onClick={onCancel} disabled={busy} style={btn}>Cancel</button>
-          <button onClick={() => onConfirm(a, { rate, link })} disabled={busy || !ok}
+          <button onClick={() => onConfirm(bookingA, rateA, { rate, link })} disabled={busy || !ok}
             style={{ ...btn, background:(busy || !ok) ? '#c3cfcc' : '#1a2e2b', color:'white', border:'none', cursor:(busy || !ok) ? 'not-allowed' : 'pointer' }}>
             {busy ? 'Saving…' : 'Save'}
           </button>
@@ -19182,7 +19184,7 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
           have no way left to choose what their clients receive. */}
       {variantAnswers && (
         <div style={{ background:'white', borderRadius:'11px', padding:'14px 16px', marginBottom:'16px', display:'flex', gap:'12px', alignItems:'baseline', flexWrap:'wrap' }}>
-          <p style={{ flex:'1 1 320px', minWidth:0, fontSize:'13.5px', color:'#1a2e2b', margin:0, lineHeight:1.55 }}>{variantSentence(variantAnswers)}</p>
+          <p style={{ flex:'1 1 320px', minWidth:0, fontSize:'13.5px', color:'#1a2e2b', margin:0, lineHeight:1.55 }}>{variantSentence(variantAnswers.booking, variantAnswers.rate)}</p>
           {actions && actions.changeVariant && (
             <button onClick={actions.changeVariant}
               style={{ flexShrink:0, background:'none', border:'none', padding:0, font:'inherit', fontSize:'13px', color:'#1a2e2b', textDecoration:'underline', cursor:'pointer', maxWidth:CONTROL_W.action }}>
@@ -21885,13 +21887,13 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
     setVariantState({ liveLeadCount, ownsPathKeys, busy: false, err: '' })
   }
 
-  async function confirmVariant(answers, values) {
+  async function confirmVariant(booking, rateAnswer, values) {
     setVariantState(st => ({ ...st, busy: true, err: '' }))
     try {
       // Collect the prerequisite FIRST, through the existing My Location write
       // paths — persistRatePerHour and persistLocationField('bookingLink',
       // 'calendar_link', …) — rather than inventing a second way to set them.
-      const before = variantPrerequisiteMissing(answers, {
+      const before = variantPrerequisiteMissing(booking, rateAnswer, {
         ratePerHour: settings.location.ratePerHour,
         locationCalendarLink: settings.location.bookingLink,
       })
@@ -21902,16 +21904,14 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       // the guard that would have stopped loc_carmel landing on a rate-quoting
       // variant with no rate — both its sequences are held today, sending
       // nothing, and nothing in the product says so.
-      const still = variantPrerequisiteMissing(answers, {
+      const still = variantPrerequisiteMissing(booking, rateAnswer, {
         ratePerHour: before.includes('rate') ? values.rate : settings.location.ratePerHour,
         locationCalendarLink: before.includes('link') ? values.link : settings.location.bookingLink,
       })
       if (still.length) throw new Error('that needs a rate or a booking link first')
 
-      // BOTH defaults, together. Organizing and moving are mirrors and must
-      // never diverge — a lead's project_type picks which sequence it enters,
-      // not which promises it gets.
-      const pair = variantPairFor(answers)
+      // BOTH defaults, together, from the ONE shared resolver.
+      const pair = variantPairFor(booking, rateAnswer)
       await persistDefault('generalDefault', pair.generalDefault)
       await persistDefault('moveDefault', pair.moveDefault)
       setSettings(s => ({ ...s, paths: { ...s.paths, generalDefault: pair.generalDefault, moveDefault: pair.moveDefault } }))
@@ -23258,7 +23258,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               generalDefault={settings.paths.generalDefault}
               moveDefault={settings.paths.moveDefault}
               actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset, add: () => openAddEmail(settings.paths.generalDefault), editTiming: emailsRowEditTiming, changeVariant: openVariantQuestions } : null}
-              variantAnswers={variantAnswersFor(settings.paths.generalDefault)}
+              variantAnswers={answersFromPathStyle(styleFromPathKey(settings.paths.generalDefault))}
               // issue 240 step 9a — mirrors what the guards read at send time.
               // The owner link is the signed-in owner's; the send path also
               // consults the assigned user's, which has no meaning without a
@@ -23524,7 +23524,7 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
       {/* issue 240 step 9c — the two questions. */}
       {variantState && (
         <TwoQuestionsModal
-          answers={variantAnswersFor(settings.paths.generalDefault)}
+          answers={answersFromPathStyle(styleFromPathKey(settings.paths.generalDefault))}
           cfg={{ ratePerHour: settings.location.ratePerHour, locationCalendarLink: settings.location.bookingLink,
                  generalDefault: settings.paths.generalDefault, moveDefault: settings.paths.moveDefault }}
           ownsPathKeys={variantState.ownsPathKeys}

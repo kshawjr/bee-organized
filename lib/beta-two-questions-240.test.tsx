@@ -10,7 +10,11 @@
 // variants are structurally identical (3 steps, day 0/5/30, same subjects).
 // The only thing that varies is which tags the bodies quote:
 //   a = rate, no link    b = rate + link    c = neither    d = link, no rate
-// So the letter is an encoding of two booleans, and the code derives it.
+//
+// 9c-FIX: that mapping is NOT defined here or in 9c. pathStyleFromAnswers /
+// answersFromPathStyle already owned it (issue 194, exported so onboarding and
+// Settings could not drift apart). 9c shipped a duplicate; it is deleted, and
+// this surface delegates. The canonical pins live in path-wizard-mapping.
 //
 // TWO FINDINGS THE COPY DEPENDS ON, both confirmed from lib/drip-lifecycle.ts:
 //   * enrolment PINS the path row, so a switch is future-only
@@ -24,8 +28,9 @@ import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import {
   EmailsList, TwoQuestionsModal,
-  variantLetterFor, variantAnswersFor, variantPairFor,
-  variantPrerequisiteMissing, variantSentence,
+  variantPairFor, variantPrerequisiteMissing, variantSentence,
+  pathStyleFromAnswers, answersFromPathStyle, styleFromPathKey,
+  BOOKING_REPLY, BOOKING_ONLINE, RATE_IN_EMAIL, RATE_ON_CALL,
 } from '@/components/BeeHub'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
@@ -44,37 +49,44 @@ beforeEach(() => { container = document.createElement('div'); document.body.appe
 afterEach(() => { act(() => root.unmount()); container.remove() })
 
 // ───────────── the rule ─────────────
-describe('the 2x2, derived not tabulated', () => {
-  it('maps both booleans to the right letter', () => {
-    expect(variantLetterFor({ quotesRate: true,  quotesLink: false })).toBe('a')
-    expect(variantLetterFor({ quotesRate: true,  quotesLink: true  })).toBe('b')
-    expect(variantLetterFor({ quotesRate: false, quotesLink: false })).toBe('c')
-    expect(variantLetterFor({ quotesRate: false, quotesLink: true  })).toBe('d')
-  })
-
-  it('reads a letter back into the same two booleans', () => {
-    for (const [key, want] of [
-      ['organizing-a', { quotesRate: true,  quotesLink: false }],
-      ['organizing-b', { quotesRate: true,  quotesLink: true  }],
-      ['moving-c',     { quotesRate: false, quotesLink: false }],
-      ['moving-d',     { quotesRate: false, quotesLink: true  }],
-    ] as const) {
-      expect(variantAnswersFor(key), key).toEqual(want)
+describe('the 2x2 comes from the SHARED resolver, not a local copy', () => {
+  // 9c-fix: this suite no longer owns a mapping of its own either. The
+  // canonical pins live in path-wizard-mapping; these assert that the two
+  // questions delegate rather than re-derive.
+  it('every answer pair produces both path_keys', () => {
+    const cases = [
+      [BOOKING_REPLY,  RATE_IN_EMAIL, 'organizing-a', 'moving-a'],
+      [BOOKING_ONLINE, RATE_IN_EMAIL, 'organizing-b', 'moving-b'],
+      [BOOKING_REPLY,  RATE_ON_CALL,  'organizing-c', 'moving-c'],
+      [BOOKING_ONLINE, RATE_ON_CALL,  'organizing-d', 'moving-d'],
+    ] as const
+    for (const [b, r, gen, mov] of cases) {
+      expect(variantPairFor(b, r), `${b}/${r}`).toEqual({ generalDefault: gen, moveDefault: mov })
     }
   })
 
-  it('round-trips every letter', () => {
+  it('delegates to pathStyleFromAnswers rather than deciding for itself', () => {
+    for (const b of [BOOKING_REPLY, BOOKING_ONLINE]) {
+      for (const r of [RATE_IN_EMAIL, RATE_ON_CALL]) {
+        expect(variantPairFor(b, r).generalDefault.slice(-1))
+          .toBe(pathStyleFromAnswers(b, r).replace('path-', ''))
+      }
+    }
+  })
+
+  it('organizing and moving never diverge', () => {
+    for (const b of [BOOKING_REPLY, BOOKING_ONLINE]) {
+      for (const r of [RATE_IN_EMAIL, RATE_ON_CALL]) {
+        const p = variantPairFor(b, r)
+        expect(p.generalDefault.slice(-1)).toBe(p.moveDefault.slice(-1))
+      }
+    }
+  })
+
+  it('a stored path_key reads back through the shared reverse map', () => {
     for (const l of ['a', 'b', 'c', 'd']) {
-      expect(variantLetterFor(variantAnswersFor(`organizing-${l}`))).toBe(l)
-    }
-  })
-
-  it('sets BOTH sequences to the same letter — they are mirrors', () => {
-    expect(variantPairFor({ quotesRate: true, quotesLink: true }))
-      .toEqual({ generalDefault: 'organizing-b', moveDefault: 'moving-b' })
-    for (const a of [{ quotesRate: false, quotesLink: false }, { quotesRate: false, quotesLink: true }]) {
-      const p = variantPairFor(a)
-      expect(p.generalDefault.slice(-1), 'organizing and moving must not diverge').toBe(p.moveDefault.slice(-1))
+      const back = answersFromPathStyle(styleFromPathKey(`organizing-${l}`))
+      expect(variantPairFor(back.booking, back.rate).generalDefault).toBe(`organizing-${l}`)
     }
   })
 })
@@ -83,37 +95,37 @@ describe('the prerequisite rule', () => {
   const set = { ratePerHour: '95', locationCalendarLink: 'https://cal/x' }
 
   it('a rate-quoting answer needs a rate', () => {
-    expect(variantPrerequisiteMissing({ quotesRate: true, quotesLink: false }, { ...set, ratePerHour: '' }))
+    expect(variantPrerequisiteMissing(BOOKING_REPLY, RATE_IN_EMAIL, { ...set, ratePerHour: '' }))
       .toEqual(['rate'])
   })
 
   it('a link-quoting answer needs a link', () => {
-    expect(variantPrerequisiteMissing({ quotesRate: false, quotesLink: true }, { ...set, locationCalendarLink: '' }))
+    expect(variantPrerequisiteMissing(BOOKING_ONLINE, RATE_ON_CALL, { ...set, locationCalendarLink: '' }))
       .toEqual(['link'])
   })
 
   it('b needs both, and reports both', () => {
-    expect(variantPrerequisiteMissing({ quotesRate: true, quotesLink: true }, { ratePerHour: '', locationCalendarLink: '' }))
+    expect(variantPrerequisiteMissing(BOOKING_ONLINE, RATE_IN_EMAIL, { ratePerHour: '', locationCalendarLink: '' }))
       .toEqual(['rate', 'link'])
   })
 
   it('c needs nothing — that is the point of c', () => {
-    expect(variantPrerequisiteMissing({ quotesRate: false, quotesLink: false }, { ratePerHour: '', locationCalendarLink: '' }))
+    expect(variantPrerequisiteMissing(BOOKING_REPLY, RATE_ON_CALL, { ratePerHour: '', locationCalendarLink: '' }))
       .toEqual([])
   })
 
   it('whitespace is not a value', () => {
-    expect(variantPrerequisiteMissing({ quotesRate: true, quotesLink: false }, { ratePerHour: '   ' }))
+    expect(variantPrerequisiteMissing(BOOKING_REPLY, RATE_IN_EMAIL, { ratePerHour: '   ' }))
       .toEqual(['rate'])
   })
 })
 
 describe('the sentence reads back what is set', () => {
   it('says both halves, either way round', () => {
-    expect(variantSentence({ quotesRate: true, quotesLink: true })).toContain('told your hourly rate')
-    expect(variantSentence({ quotesRate: true, quotesLink: true })).toContain('book a time themselves')
-    expect(variantSentence({ quotesRate: false, quotesLink: false })).toContain('talked through on the call')
-    expect(variantSentence({ quotesRate: false, quotesLink: false })).toContain('reply to you')
+    expect(variantSentence(BOOKING_ONLINE, RATE_IN_EMAIL)).toContain('told your hourly rate')
+    expect(variantSentence(BOOKING_ONLINE, RATE_IN_EMAIL)).toContain('book a time themselves')
+    expect(variantSentence(BOOKING_REPLY, RATE_ON_CALL)).toContain('talked through on the call')
+    expect(variantSentence(BOOKING_REPLY, RATE_ON_CALL)).toContain('reply to you')
   })
 })
 
@@ -121,7 +133,7 @@ describe('the sentence reads back what is set', () => {
 describe('the modal collects what an answer needs before it will save', () => {
   const mount = async (over: any = {}) => {
     const props = {
-      answers: { quotesRate: false, quotesLink: false },
+      answers: { booking: BOOKING_REPLY, rate: RATE_ON_CALL },
       cfg: { ratePerHour: '', locationCalendarLink: '', generalDefault: 'organizing-c', moveDefault: 'moving-c' },
       ownsPathKeys: [], liveLeadCount: 0, busy: false, err: '',
       onCancel: vi.fn(), onConfirm: vi.fn(), ...over,
@@ -164,12 +176,13 @@ describe('the modal collects what an answer needs before it will save', () => {
 
   it('answering no needs nothing and saves straight away', async () => {
     const props = await mount({ cfg: { ratePerHour: '', locationCalendarLink: '', generalDefault: 'organizing-a', moveDefault: 'moving-a' },
-      answers: { quotesRate: true, quotesLink: false } })
+      answers: { booking: BOOKING_REPLY, rate: RATE_IN_EMAIL } })
     await act(async () => { byText('No, I cover it on the call').click() })
     expect(save().disabled).toBe(false)
     await act(async () => { save().click() })
     expect(props.onConfirm).toHaveBeenCalled()
-    expect(props.onConfirm.mock.calls[0][0]).toEqual({ quotesRate: false, quotesLink: false })
+    expect(props.onConfirm.mock.calls[0][0]).toBe(BOOKING_REPLY)
+    expect(props.onConfirm.mock.calls[0][1]).toBe(RATE_ON_CALL)
   })
 
   it('says it replaces all three emails in BOTH sequences', async () => {
@@ -211,7 +224,7 @@ describe('the Emails list carries the sentence and its Change link', () => {
     const props = {
       pathSteps: { 'organizing-b': STEPS }, masterSteps: { 'organizing-b': STEPS }, templates: [],
       generalDefault: 'organizing-b', moveDefault: 'moving-b', sendConfig: {},
-      variantAnswers: variantAnswersFor('organizing-b'),
+      variantAnswers: answersFromPathStyle(styleFromPathKey('organizing-b')),
       actions: { edit: vi.fn(), reset: vi.fn(), add: vi.fn(), editTiming: vi.fn(), changeVariant: vi.fn() },
       ...over,
     }
