@@ -11,7 +11,18 @@
 //
 // Channel must be 'email' or 'sms' per the drip_path_steps CHECK constraint.
 //
-// Auth matches /api/drip-paths/[id]: super_admin or owner of the location.
+// Auth: owner of the path's location. STRICTER than its siblings — corp
+// masters are refused for EVERYONE here, admins included. Two reasons:
+//   1. The write below is a whole-set DELETE-then-INSERT, not a field update.
+//      A master's steps are shared by every location that hasn't cloned it,
+//      so one bad call rewrites the live content for all of them and issues
+//      fresh step ids while it's at it.
+//   2. Nothing legitimately needs it. The only caller is commitSteps
+//      (components/BeeHub.jsx), which clones to a location-owned path before
+//      it ever PATCHes; the admin master editor edits masters one step at a
+//      time via PATCH /api/drip-path-steps/:stepId.
+// So /api/drip-paths/[id] lets super_admin through on a master and this route
+// does not — deliberate, not drift.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
@@ -39,7 +50,7 @@ export async function PATCH(
 
   const { data: path } = await supabaseService
     .from('drip_paths')
-    .select('id, location_uuid')
+    .select('id, location_uuid, is_master')
     .eq('id', pathId)
     .maybeSingle()
   if (!path) return NextResponse.json({ error: 'path_not_found' }, { status: 404 })
@@ -48,6 +59,15 @@ export async function PATCH(
   // and manager (operational lead; no drip/template config).
   if (hubUser.role === 'lite_user' || hubUser.role === 'manager') {
     return NextResponse.json({ error: 'forbidden_read_only' }, { status: 403 })
+  }
+  // Corp masters: refused outright (see the header). This must be explicit
+  // rather than left to the location comparison below — a master's
+  // location_uuid is NULL, so a caller whose own location_id is ALSO null
+  // compares equal and would otherwise fall straight through to the
+  // delete-then-insert. Same hole that forbidden_master_path closed on
+  // /api/drip-paths/[id]; this route was missed by that fix.
+  if (path.is_master) {
+    return NextResponse.json({ error: 'forbidden_master_path' }, { status: 403 })
   }
   if (!isAdmin(hubUser.role) && hubUser.location_id !== path.location_uuid) {
     return NextResponse.json({ error: 'forbidden_wrong_location' }, { status: 403 })
