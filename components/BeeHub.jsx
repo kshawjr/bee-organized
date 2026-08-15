@@ -18593,6 +18593,143 @@ function EmailTemplateEditor({ row, onCancel, onSave }) {
   )
 }
 
+// ─── issue 240 step 9c — the two questions ───
+//
+// THE RULE, derived rather than tabulated. All eight master variants are
+// structurally identical — 3 steps at day 0/5/30, same three subjects. The
+// ONLY thing that varies is which merge tags the bodies quote, read from
+// production side by side:
+//
+//        quotes {{rate_per_hour}}   quotes a booking-link tag
+//   a           yes                        no
+//   b           yes                        yes
+//   c           no                         no
+//   d           no                         yes      (also {{location_phone}})
+//
+// So variant selection is exactly two booleans. The letter is an encoding of
+// that pair, not a category in its own right, which is why this derives it
+// instead of hardcoding a lookup: if a ninth variant is ever seeded, the rule
+// still says what it is rather than the table going quietly stale.
+export function variantLetterFor({ quotesRate, quotesLink }) {
+  if (quotesRate && quotesLink) return 'b'
+  if (quotesRate && !quotesLink) return 'a'
+  if (!quotesRate && quotesLink) return 'd'
+  return 'c'
+}
+export function variantAnswersFor(letter) {
+  const l = String(letter || '').trim().slice(-1)
+  return { quotesRate: l === 'a' || l === 'b', quotesLink: l === 'b' || l === 'd' }
+}
+
+// Organizing and moving are MIRRORS — same tags, same days, same subjects,
+// differing only in wording. One answer pair sets both, and they must never
+// diverge: a lead's project_type picks which sequence it enters, not which
+// promises it gets.
+export function variantPairFor(answers) {
+  const l = variantLetterFor(answers)
+  return { generalDefault: `organizing-${l}`, moveDefault: `moving-${l}` }
+}
+
+// What an owner must already have for an answer to be honest. Saying "yes, we
+// publish our rate" while locations.rate_per_hour is empty puts the location
+// on a rate-quoting variant whose every send is then HELD by lib/rate-guard —
+// which is loc_carmel's live state: organizing-a/moving-a, no rate, both
+// sequences silently sending nothing.
+export function variantPrerequisiteMissing(answers, cfg) {
+  const blank = v => v == null || String(v).trim() === ''
+  const out = []
+  if (answers.quotesRate && blank(cfg?.ratePerHour)) out.push('rate')
+  if (answers.quotesLink && blank(cfg?.locationCalendarLink)) out.push('link')
+  return out
+}
+
+// The sentence, and the modal behind its Change link. Not a settings form:
+// two questions, read back as one line an owner can check at a glance.
+export function variantSentence(answers) {
+  const rate = answers.quotesRate
+    ? 'Your clients are told your hourly rate'
+    : 'Your rate is talked through on the call, not written in the email'
+  const link = answers.quotesLink
+    ? 'and they can book a time themselves from a link'
+    : 'and they reply to you to arrange a time'
+  return `${rate}, ${link}.`
+}
+
+export function TwoQuestionsModal({ answers, cfg, ownsPathKeys, liveLeadCount, busy, err, onCancel, onConfirm }) {
+  const [a, setA] = React.useState(answers)
+  const [rate, setRate] = React.useState(cfg.ratePerHour || '')
+  const [link, setLink] = React.useState(cfg.locationCalendarLink || '')
+  const missing = variantPrerequisiteMissing(a, { ratePerHour: rate, locationCalendarLink: link })
+  const pair = variantPairFor(a)
+  const changed = pair.generalDefault !== cfg.generalDefault || pair.moveDefault !== cfg.moveDefault
+  const ok = missing.length === 0
+  const btn = { background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'9px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', maxWidth:CONTROL_W.action }
+  const opt = on => ({ border:`1.5px solid ${on ? '#1a2e2b' : 'rgba(26,46,43,0.12)'}`, background: on ? '#fafcfb' : 'white', borderRadius:'10px', padding:'10px 15px', font:'inherit', fontSize:'14px', fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', textAlign:'left' })
+  const field = { width:'100%', maxWidth:CONTROL_W.field, padding:'10px 12px', border:'1px solid #e4d5a8', borderRadius:'8px', font:'inherit', fontSize:'15px', background:'white', color:'#1a2e2b' }
+  return (
+    <div onClick={onCancel} style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:80 }}>
+      <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="How these emails work"
+        style={{ maxWidth:'640px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
+        <div style={{ padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)', fontSize:'12px', color:'#8a9e9a' }}>How these emails work</div>
+        <div style={{ padding:'20px 24px 22px' }}>
+
+          <p style={{ fontSize:'15px', fontWeight:600, color:'#1a2e2b', margin:'0 0 9px' }}>Do you tell clients your hourly rate?</p>
+          <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'6px' }}>
+            <button onClick={() => setA(v => ({ ...v, quotesRate: true }))} style={opt(a.quotesRate)}>Yes, put it in the email</button>
+            <button onClick={() => setA(v => ({ ...v, quotesRate: false }))} style={opt(!a.quotesRate)}>No, I cover it on the call</button>
+          </div>
+          {a.quotesRate && (
+            <div style={{ background:'#fdf6e3', borderRadius:'10px', padding:'13px 15px', marginBottom:'16px' }}>
+              <label style={{ display:'block', fontSize:'13px', fontWeight:600, color:'#5a460e', marginBottom:'7px' }}>Your hourly rate</label>
+              <input value={rate} onChange={e => setRate(e.target.value)} placeholder="95" style={field} />
+              <p style={{ margin:'8px 0 0', fontSize:'12.5px', color:'#6b5310', lineHeight:1.5 }}>
+                {String(rate).trim() ? 'This appears in the first email.' : 'We need this before those emails can send — the rate is written into them, so without it they wait.'}
+              </p>
+            </div>
+          )}
+
+          <p style={{ fontSize:'15px', fontWeight:600, color:'#1a2e2b', margin:'12px 0 9px' }}>Do you have a booking link clients can use?</p>
+          <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'6px' }}>
+            <button onClick={() => setA(v => ({ ...v, quotesLink: true }))} style={opt(a.quotesLink)}>Yes, they book themselves</button>
+            <button onClick={() => setA(v => ({ ...v, quotesLink: false }))} style={opt(!a.quotesLink)}>No, they reply to me</button>
+          </div>
+          {a.quotesLink && (
+            <div style={{ background:'#fdf6e3', borderRadius:'10px', padding:'13px 15px' }}>
+              <label style={{ display:'block', fontSize:'13px', fontWeight:600, color:'#5a460e', marginBottom:'7px' }}>Your booking link</label>
+              <input value={link} onChange={e => setLink(e.target.value)} placeholder="calendly.com/your-name" style={field} />
+              <p style={{ margin:'8px 0 0', fontSize:'12.5px', color:'#6b5310', lineHeight:1.5 }}>
+                {String(link).trim() ? 'The emails link straight to this.' : 'We need this before those emails can send — they ask people to click it, so without it they wait.'}
+              </p>
+            </div>
+          )}
+
+          {changed && (
+            <div style={{ background:'#fdf6e3', borderRadius:'10px', padding:'13px 15px', marginTop:'18px', fontSize:'13px', color:'#8a6a0e', lineHeight:1.6 }}>
+              <b>This replaces all three emails, in both sequences.</b> The organizing and moving versions change together — they say the same things in different words, and they stay in step.
+              <br /><br />
+              {liveLeadCount > 0
+                ? <>The <b>{liveLeadCount} {liveLeadCount === 1 ? 'person' : 'people'}</b> partway through right now carry on with the emails they started on. Only people who come in from now on get the new set.</>
+                : <>Nobody is partway through at the moment, so this affects people who come in from now on.</>}
+              {ownsPathKeys.length > 0 && (
+                <><br /><br />You’ve reworded {ownsPathKeys.length === 1 ? 'one of these sequences' : 'these sequences'} before. Those edits aren’t deleted — they stay with the set you’re leaving, and come back if you switch back to it. They just won’t be in use.</>
+              )}
+            </div>
+          )}
+          {err && <p style={{ marginTop:'10px', fontSize:'12.5px', color:'#c0554e' }}>{err}</p>}
+        </div>
+        <div style={{ display:'flex', gap:'9px', padding:'15px 24px', borderTop:'1px solid rgba(26,46,43,0.10)', background:'#faf8f3', alignItems:'center', flexWrap:'wrap' }}>
+          <button onClick={onCancel} disabled={busy} style={btn}>Cancel</button>
+          <button onClick={() => onConfirm(a, { rate, link })} disabled={busy || !ok}
+            style={{ ...btn, background:(busy || !ok) ? '#c3cfcc' : '#1a2e2b', color:'white', border:'none', cursor:(busy || !ok) ? 'not-allowed' : 'pointer' }}>
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+          {!ok && <span style={{ fontSize:'12.5px', color:'#8a6a0e' }}>Fill in the {missing.includes('rate') ? 'rate' : ''}{missing.length === 2 ? ' and ' : ''}{missing.includes('link') ? 'booking link' : ''} first, or answer no.</span>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── issue 240 step 10 — timing ───
 //
 // delay_days is ABSOLUTE FROM THE START of the sequence, not relative to the
@@ -18983,7 +19120,7 @@ export function appendedStepPosition(steps) {
   return { order: maxOrder + 1, delay_days: prevDelay + ADD_STEP_INTERVAL_DAYS, prevDelay }
 }
 
-export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null, sendConfig = {} }) {
+export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null, sendConfig = {}, variantAnswers = null }) {
   const [open, setOpen] = React.useState(null)  // { group, index }
   const { newLead, afterJob } = React.useMemo(
     () => buildEmailList({ pathSteps, templates, generalDefault }),
@@ -19039,6 +19176,21 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, 
 
   return (
     <div style={{ margin:'0 12px' }}>
+      {/* issue 240 step 9c — the two questions, as ONE sentence with a Change
+          link. This is the replacement for the sequence tiles' variant picker
+          (persistDefault), which step 11 retires; without it an owner would
+          have no way left to choose what their clients receive. */}
+      {variantAnswers && (
+        <div style={{ background:'white', borderRadius:'11px', padding:'14px 16px', marginBottom:'16px', display:'flex', gap:'12px', alignItems:'baseline', flexWrap:'wrap' }}>
+          <p style={{ flex:'1 1 320px', minWidth:0, fontSize:'13.5px', color:'#1a2e2b', margin:0, lineHeight:1.55 }}>{variantSentence(variantAnswers)}</p>
+          {actions && actions.changeVariant && (
+            <button onClick={actions.changeVariant}
+              style={{ flexShrink:0, background:'none', border:'none', padding:0, font:'inherit', fontSize:'13px', color:'#1a2e2b', textDecoration:'underline', cursor:'pointer', maxWidth:CONTROL_W.action }}>
+              Change how this works
+            </button>
+          )}
+        </div>
+      )}
       {/* Append only, and only on the sequence group — the closed-job pair is
           not a sequence and has nothing to append to. */}
       <Group id="new" title="When someone new gets in touch"
@@ -21701,6 +21853,77 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // point — so the confirm modal states it, not just the standing banner.
   // proceed(steps) receives the steps the mutation should build on: the
   // location's own rows when they exist, else the freshly-cloned copy.
+  // ─── issue 240 step 9c — set the variant from the two answers ───
+  //
+  // WHAT THIS REPLACES: persistDefault, reachable only from the sequence tiles
+  // that step 11 retires. Without this an owner loses the ability to choose
+  // what their clients receive at all.
+  //
+  // ENROLMENT IS PINNED. startDripForLead resolves the path at enrolment and
+  // stores drip_path_id on lead_drip_progress; nothing re-resolves it. So a
+  // variant switch is FUTURE-ONLY — leads already in a sequence finish the one
+  // they started. The confirmation says exactly that.
+  //
+  // A FORK IS NOT LOST. Resolution is (location_uuid, path_key) -> fork, else
+  // master by path_key. Switching away leaves the fork row untouched; it is
+  // orphaned, not deleted, and switching back resumes using it. 9 of 20 active
+  // locations currently run at least one forked default, so this is the common
+  // case, not an edge one.
+  const [variantState, setVariantState] = useState(null)
+
+  async function openVariantQuestions() {
+    const key = settings.paths.generalDefault
+    let liveLeadCount = 0
+    try {
+      if (dbPaths[key]?.id) {
+        const res = await fetch(`/api/drip-paths/${dbPaths[key].id}/active-lead-count`)
+        if (res.ok) liveLeadCount = (await res.json())?.count ?? 0
+      }
+    } catch { /* unknown, not zero */ }
+    const ownsPathKeys = [settings.paths.generalDefault, settings.paths.moveDefault]
+      .filter(k => k && dbPaths[k])
+    setVariantState({ liveLeadCount, ownsPathKeys, busy: false, err: '' })
+  }
+
+  async function confirmVariant(answers, values) {
+    setVariantState(st => ({ ...st, busy: true, err: '' }))
+    try {
+      // Collect the prerequisite FIRST, through the existing My Location write
+      // paths — persistRatePerHour and persistLocationField('bookingLink',
+      // 'calendar_link', …) — rather than inventing a second way to set them.
+      const before = variantPrerequisiteMissing(answers, {
+        ratePerHour: settings.location.ratePerHour,
+        locationCalendarLink: settings.location.bookingLink,
+      })
+      if (before.includes('rate')) await persistRatePerHour(values.rate)
+      if (before.includes('link')) await persistLocationField('bookingLink', 'calendar_link', values.link, 'booking link')
+
+      // Refuse the write outright if a prerequisite is still missing. This is
+      // the guard that would have stopped loc_carmel landing on a rate-quoting
+      // variant with no rate — both its sequences are held today, sending
+      // nothing, and nothing in the product says so.
+      const still = variantPrerequisiteMissing(answers, {
+        ratePerHour: before.includes('rate') ? values.rate : settings.location.ratePerHour,
+        locationCalendarLink: before.includes('link') ? values.link : settings.location.bookingLink,
+      })
+      if (still.length) throw new Error('that needs a rate or a booking link first')
+
+      // BOTH defaults, together. Organizing and moving are mirrors and must
+      // never diverge — a lead's project_type picks which sequence it enters,
+      // not which promises it gets.
+      const pair = variantPairFor(answers)
+      await persistDefault('generalDefault', pair.generalDefault)
+      await persistDefault('moveDefault', pair.moveDefault)
+      setSettings(s => ({ ...s, paths: { ...s.paths, generalDefault: pair.generalDefault, moveDefault: pair.moveDefault } }))
+      setDefaultPathId(pair.generalDefault)
+      setDefaultMovePathId(pair.moveDefault)
+      await loadLocationPaths()
+      setVariantState(null)
+    } catch (e) {
+      setVariantState(st => st && ({ ...st, busy: false, err: 'Could not save that: ' + (e?.message || e) }))
+    }
+  }
+
   // ─── issue 240 step 10 — edit a drip step's timing ───
   //
   // Drip rows only. The welcome and closed-job offsets are code constants and
@@ -23034,7 +23257,8 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               masterSteps={masterSteps}
               generalDefault={settings.paths.generalDefault}
               moveDefault={settings.paths.moveDefault}
-              actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset, add: () => openAddEmail(settings.paths.generalDefault), editTiming: emailsRowEditTiming } : null}
+              actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset, add: () => openAddEmail(settings.paths.generalDefault), editTiming: emailsRowEditTiming, changeVariant: openVariantQuestions } : null}
+              variantAnswers={variantAnswersFor(settings.paths.generalDefault)}
               // issue 240 step 9a — mirrors what the guards read at send time.
               // The owner link is the signed-in owner's; the send path also
               // consults the assigned user's, which has no meaning without a
@@ -23297,6 +23521,20 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
 
       </div>
 
+      {/* issue 240 step 9c — the two questions. */}
+      {variantState && (
+        <TwoQuestionsModal
+          answers={variantAnswersFor(settings.paths.generalDefault)}
+          cfg={{ ratePerHour: settings.location.ratePerHour, locationCalendarLink: settings.location.bookingLink,
+                 generalDefault: settings.paths.generalDefault, moveDefault: settings.paths.moveDefault }}
+          ownsPathKeys={variantState.ownsPathKeys}
+          liveLeadCount={variantState.liveLeadCount}
+          busy={variantState.busy}
+          err={variantState.err}
+          onCancel={() => setVariantState(null)}
+          onConfirm={confirmVariant}
+        />
+      )}
       {/* issue 240 step 10 — timing, drip rows only. */}
       {timingEditState && (
         <TimingEditModal
