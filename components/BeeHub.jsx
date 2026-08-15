@@ -18322,6 +18322,276 @@ function RecipientTypePicker({ category, projectTypes, readOnly, onChange }) {
 // SMS is wired up.
 const TEXT_PREVIEW = "Hi {{first_name}}, it's {{owner_name}} from Bee Organized — thanks for reaching out! I'll follow up by email too, but happy to answer anything here."
 
+// ─── issue 240 step 7 — one list, three rails ───
+//
+// Six rows that a client experiences as one sequence, and which the database
+// keeps in three unrelated shapes. This builder is the seam, kept pure so the
+// unification is testable without mounting anything.
+//
+//   RAIL A  drip steps      drip_path_steps rows on the location's default
+//                           path. Timing is a real per-location column
+//                           (delay_days). Content is EITHER inline on the step
+//                           OR on a template the step points at.
+//   RAIL B  welcome         a templates row (legacy_id 'welcome'). Timing is
+//                           WELCOME_DELAY_MS in lib/welcome-email.ts — a code
+//                           constant, 24h, not a column.
+//   RAIL C  closed job      two templates rows (legacy_id opp_closed_job_3mo /
+//                           _12mo). Timing is CLOSED_WON_TRIGGERS in
+//                           lib/stage-emails.ts — [90, 365], also constants.
+//
+// WHERE THE SEAMS SHOW, deliberately not papered over:
+//
+// 1. Only rail A's timing is data. The other three rows are constants, which
+//    is why step 10 can offer to change one and not the others. The rows carry
+//    `timingIsData` so the UI never implies otherwise.
+// 2. Rail A content resolves inline-first, mirroring lib/drip-send.ts
+//    (`step.subject ?? linkedTpl?.subject`). Get that order wrong and the
+//    preview shows something the client will never receive.
+// 3. GET /api/locations/:id/drip-paths selects the linked template's subject
+//    and body but flattens only name + legacy_id, so a step whose content
+//    lives on a template arrives here with NO body. It is resolved against the
+//    separately-fetched templates array instead — which is why this needs both
+//    fetches and cannot be done from the paths route alone.
+// 4. Resolving a location's fork duplicates server logic (cloned_from_id →
+//    master.id, newest active fork wins) that really lives in
+//    lib/stage-emails.ts and lib/welcome-email.ts. Two implementations of one
+//    rule is a genuine risk; it is marked here rather than hidden.
+// 5. Quarantined templates are NOT filtered out. The Templates surface hides
+//    is_active=false rows, but the send path still resolves them, so hiding
+//    one here would show an owner something other than what sends.
+// 6. A location has a separate moving path. This list shows the ORGANIZING
+//    default only; the moving set is named but not expanded, because
+//    pretending one list covers both is exactly the lie step 11 exists to fix.
+
+const CLOSED_JOB_ROWS = [
+  { legacyId:'opp_closed_job_3mo',  days:90,  when:'3 months later' },
+  { legacyId:'opp_closed_job_12mo', days:365, when:'A year later' },
+]
+
+// The greeting line is almost always "{{first_name}}," which tells an owner
+// nothing, so the preview is the first line WITH something in it after that.
+function firstMeaningfulLine(body) {
+  const lines = String(body || '').split('\n').map(l => l.trim()).filter(Boolean)
+  return lines[1] || lines[0] || ''
+}
+
+function whenLabelForDays(d) {
+  const n = Number(d)
+  if (!Number.isFinite(n)) return ''
+  if (n === 0) return 'Right away'
+  if (n === 1) return 'Next day'
+  // <= 30, not < 30: day 30 is the last drip step and reads as "Day 30".
+  // The exclusive bound sent it to the months branch as "1 months later".
+  if (n <= 30) return `Day ${n}`
+  if (n % 365 === 0) return n / 365 === 1 ? 'A year later' : `${n / 365} years later`
+  if (n % 30 === 0) return `${n / 30} months later`
+  return `Day ${n}`
+}
+
+// A location's own copy of a master, by the server's rule: cloned_from_id
+// points at the master, same location, active, most recently updated wins.
+function resolveFork(templates, master) {
+  if (!master) return null
+  const forks = (templates || []).filter(t =>
+    t.isOwnCustom && t.isActive && t.clonedFromId && t.clonedFromId === master.dbId)
+  if (!forks.length) return null
+  return forks.slice().sort((a, b) =>
+    String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0]
+}
+
+function templateRow(templates, legacyId, days, when) {
+  const master = (templates || []).find(t => t.isMaster && t.legacyId === legacyId) || null
+  if (!master) return null
+  const fork = resolveFork(templates, master)
+  const use = fork || master
+  return {
+    key: legacyId,
+    rail: legacyId === 'welcome' ? 'welcome' : 'stage',
+    days, when,
+    timingIsData: false,
+    subject: use.subject || '',
+    body: use.body || '',
+    firstLine: firstMeaningfulLine(use.body),
+    wording: fork ? 'yours' : 'master',
+  }
+}
+
+export function buildEmailList({ pathSteps = {}, templates = [], generalDefault = null }) {
+  // RAIL A — the default organizing path's email steps, inline-first.
+  const steps = (generalDefault && pathSteps[generalDefault]) || []
+  const dripRows = steps
+    .filter(s => (s.type || 'email') === 'email')
+    .slice()
+    .sort((a, b) => (a.order || 0) - (b.order || 0))
+    .map(s => {
+      // Mirrors lib/drip-send.ts: the step's own text wins, the linked
+      // template is the fallback. Deliberately does NOT filter on isActive.
+      const linked = (templates || []).find(t =>
+        (s.masterTemplateId && t.dbId === s.masterTemplateId) ||
+        (s.templateId && t.legacyId === s.templateId))
+      const subject = s.subject ?? linked?.subject ?? ''
+      const body = s.body ?? linked?.body ?? ''
+      return {
+        key: `step-${s.dbId ?? s.order}`,
+        rail: 'drip',
+        days: Number(s.delay_days ?? 0),
+        when: whenLabelForDays(s.delay_days ?? 0),
+        timingIsData: true,
+        subject, body,
+        firstLine: firstMeaningfulLine(body),
+        // NOT "does the step carry inline text" — master steps carry inline
+        // text too, so that test marks everything as edited. The honest signal
+        // is which map the row came from: masterStepsToUi stamps fromMaster,
+        // loadLocationPaths gives real location rows a dbId.
+        wording: s.fromMaster ? 'master' : 'yours',
+        contentMissing: !subject && !body,
+      }
+    })
+
+  // RAIL B — welcome, 24h after the first drip email.
+  const welcome = templateRow(templates, 'welcome', 1, 'Next day')
+
+  const newLead = [...dripRows, ...(welcome ? [welcome] : [])]
+    .sort((a, b) => a.days - b.days)
+
+  // RAIL C — the closed-job pair.
+  const afterJob = CLOSED_JOB_ROWS
+    .map(r => templateRow(templates, r.legacyId, r.days, r.when))
+    .filter(Boolean)
+
+  return { newLead, afterJob }
+}
+
+// ─── issue 240 step 7 — the read-only Emails list ───
+//
+// Read only. No Edit, no fork, no writes — step 8 owns those. The one control
+// per row is Read, and it opens a modal that navigates the group it belongs to.
+function EmailReadModal({ rows, index, onClose, onStep }) {
+  const row = rows[index]
+  React.useEffect(() => {
+    const onKey = e => {
+      if (e.key === 'Escape') onClose()
+      if (e.key === 'ArrowLeft' && index > 0) onStep(index - 1)
+      if (e.key === 'ArrowRight' && index < rows.length - 1) onStep(index + 1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [index, rows.length, onClose, onStep])
+  if (!row) return null
+  const btn = { background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'8px', padding:'5px 11px', font:'inherit', fontSize:'12px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer' }
+  const dim = { ...btn, opacity:0.35, cursor:'default' }
+  return (
+    <div onClick={onClose} style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:60 }}>
+      <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={`Read: ${row.subject}`}
+        style={{ maxWidth:'640px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)' }}>
+          <div style={{ display:'flex', gap:'7px' }}>
+            <button onClick={() => onStep(index - 1)} disabled={index === 0} style={index === 0 ? dim : btn}>← Previous</button>
+            <button onClick={() => onStep(index + 1)} disabled={index === rows.length - 1} style={index === rows.length - 1 ? dim : btn}>Next →</button>
+          </div>
+          <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{row.when} · {index + 1} of {rows.length}</span>
+          <button onClick={onClose} aria-label="Close" style={{ background:'none', border:'none', fontSize:'19px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>✕</button>
+        </div>
+        <div style={{ padding:'20px 24px 22px' }}>
+          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 6px' }}>Subject</p>
+          <h2 style={{ fontSize:'19px', fontWeight:600, fontFamily:'Georgia,serif', color:'#1a2e2b', margin:'0 0 16px' }}>{row.subject || <span style={{ color:'#b0c0bc' }}>No subject</span>}</h2>
+          {row.contentMissing ? (
+            <div style={{ background:'#fdf6e3', border:'1px solid rgba(212,160,70,0.3)', borderRadius:'10px', padding:'16px 18px', fontSize:'13px', color:'#8a6a0e', lineHeight:1.6 }}>
+              We can't show this one. It points at a template whose wording we couldn't load, so anything shown here might not be what actually sends.
+            </div>
+          ) : (
+            <div style={{ background:'#fbfaf7', border:'1px solid rgba(26,46,43,0.10)', borderRadius:'10px', padding:'19px 21px', fontSize:'14px', lineHeight:1.65, color:'#4a5f5b', whiteSpace:'pre-line' }}>{row.body}</div>
+          )}
+          <p style={{ marginTop:'12px', fontSize:'12px', color:'#8a9e9a', lineHeight:1.6 }}>
+            The bits in braces get filled in for each person — <code style={{ background:'#efede6', borderRadius:'5px', padding:'2px 7px', fontFamily:'ui-monospace,Menlo,monospace', fontSize:'12px', color:'#1a2e2b' }}>{'{{first_name}}'}</code> becomes their first name.
+          </p>
+        </div>
+        <div style={{ display:'flex', gap:'9px', padding:'15px 24px', borderTop:'1px solid rgba(26,46,43,0.10)', background:'#faf8f3' }}>
+          <button onClick={onClose} style={{ ...btn, padding:'9px 16px', fontSize:'13px', maxWidth:CONTROL_W.action }}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EmailRow({ row, onRead }) {
+  return (
+    <div style={{ background:'white', borderRadius:'11px', padding:'14px 16px', marginBottom:'8px', display:'flex', gap:'14px', alignItems:'flex-start' }}>
+      <div style={{ flex:'0 0 96px', fontSize:'12px', color:'#8a9e9a', paddingTop:'2px', lineHeight:1.35 }}>
+        {row.when}
+        {row.fixedNote && <><br /><span style={{ fontSize:'11px', opacity:0.75 }}>{row.fixedNote}</span></>}
+      </div>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ display:'flex', alignItems:'baseline', gap:'8px', flexWrap:'wrap', marginBottom:'2px' }}>
+          <b style={{ fontSize:'14.5px', fontWeight:600, color:'#1a2e2b' }}>{row.subject || 'No subject'}</b>
+          <span style={{ fontSize:'10px', fontWeight:600, padding:'2px 7px', borderRadius:'20px', whiteSpace:'nowrap',
+            background: row.wording === 'yours' ? '#fdf6e3' : '#efede6', color: row.wording === 'yours' ? '#8a6a0e' : '#7a8b87' }}>
+            {row.wording === 'yours' ? 'Your wording' : 'Bee Organized wording'}
+          </span>
+        </div>
+        <p style={{ fontSize:'13px', color:'#4a5f5b', margin:0, overflow:'hidden', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' }}>
+          {row.contentMissing ? <span style={{ color:'#b45309' }}>We couldn't load this one's wording.</span> : row.firstLine}
+        </p>
+      </div>
+      <div style={{ flexShrink:0 }}>
+        <button onClick={onRead} style={{ background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'8px', padding:'6px 12px', fontSize:'12px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', whiteSpace:'nowrap' }}>Read</button>
+      </div>
+    </div>
+  )
+}
+
+// Two groups, never interleaved. They are measured from different moments —
+// the first from the lead arriving, the second from the job closing — so a
+// single sorted axis across all six would claim day 90 comes after day 30 on
+// the same timeline, which is false.
+export function EmailsList({ pathSteps, templates, generalDefault, moveDefault }) {
+  const [open, setOpen] = React.useState(null)  // { group, index }
+  const { newLead, afterJob } = React.useMemo(
+    () => buildEmailList({ pathSteps, templates, generalDefault }),
+    [pathSteps, templates, generalDefault])
+
+  // Step 10 decides what is editable; nothing here is a control.
+  const withNotes = newLead.map((r, i) => ({
+    ...r,
+    fixedNote: i === 0 ? 'always first' : (r.rail === 'welcome' ? 'always second' : null),
+  }))
+  const groups = { new: withNotes, job: afterJob }
+  const openRows = open ? groups[open.group] : []
+
+  const Group = ({ id, title, count, note, rows }) => (
+    <div style={{ marginBottom:'22px' }}>
+      <div style={{ display:'flex', alignItems:'baseline', gap:'10px', flexWrap:'wrap', margin:'0 2px 4px' }}>
+        <h2 style={{ fontSize:'16px', fontWeight:600, fontFamily:'Georgia,serif', color:'#1a2e2b', margin:0 }}>{title}</h2>
+        <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{count}</span>
+      </div>
+      {note && <p style={{ fontSize:'12.5px', color:'#4a5f5b', margin:'0 2px 10px', lineHeight:1.5 }}>{note}</p>}
+      {rows.length === 0
+        ? <div style={{ background:'white', borderRadius:'11px', padding:'16px', fontSize:'13px', color:'#8a9e9a' }}>Nothing here yet.</div>
+        : rows.map((r, i) => <EmailRow key={r.key} row={r} onRead={() => setOpen({ group:id, index:i })} />)}
+    </div>
+  )
+
+  return (
+    <div style={{ margin:'0 12px' }}>
+      <Group id="new" title="When someone new gets in touch"
+        count={`${withNotes.length} email${withNotes.length === 1 ? '' : 's'}`}
+        note={moveDefault && moveDefault !== generalDefault
+          ? 'These are the organizing emails. Moving leads follow a different set — you can see it on the old Communication tab until this screen covers both.'
+          : null}
+        rows={withNotes} />
+      <Group id="job" title="After a job is finished"
+        count={`${afterJob.length} email${afterJob.length === 1 ? '' : 's'}`}
+        note="These go out long after the work is done, so they're easy to forget about. Counted from the day the job closes, not from when the lead arrived."
+        rows={afterJob} />
+      {open && (
+        <EmailReadModal rows={openRows} index={open.index}
+          onClose={() => setOpen(null)}
+          onStep={i => setOpen(o => ({ ...o, index: Math.max(0, Math.min(openRows.length - 1, i)) }))} />
+      )}
+    </div>
+  )
+}
+
 export function TextsComingSoon() {
   // A GSM-7 message is 160 characters; past that it bills as two. Merge tags
   // expand at send time, so this is indicative, not a promise — hence "about".
@@ -22059,6 +22329,19 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
               <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>Emails</h1>
               <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>What a client receives automatically, and the templates behind it.</p>
             </div>
+
+            {/* ── issue 240 step 7 — every email a client can receive, one list ──
+                Read-only. The sequence tiles and the Email Templates section
+                below are untouched and still own every write; step 11 retires
+                them once this list can do the same work. Until then both are
+                deliberately present, showing the same emails two ways. */}
+            <CommsLabel>Every email a client can receive</CommsLabel>
+            <EmailsList
+              pathSteps={pathSteps}
+              templates={templates}
+              generalDefault={settings.paths.generalDefault}
+              moveDefault={settings.paths.moveDefault}
+            />
 
             {/* ── TIER 3 · PAIRED — new lead emails, one set per project type ── */}
             <CommsLabel>New lead emails</CommsLabel>

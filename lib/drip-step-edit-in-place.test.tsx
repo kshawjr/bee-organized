@@ -335,7 +335,19 @@ describe('preview parity — all 14 send-time variables render', () => {
     await clickText('Preview')   // step 1 carries the all-14-tags body
     await act(async () => {})
 
-    const t = container.textContent || ''
+    // Scoped to the PREVIEW MODAL, which is what this test is about. It used
+    // to scrape the whole screen, which worked only because nothing else
+    // rendered a raw body. Issue 240 step 7 added the read-only Emails list,
+    // which shows bodies with their {{tokens}} INTACT on purpose — it explains
+    // them rather than filling them, because a settings list has no lead to
+    // fill them from. A screen-wide scrape would now fail on that, testing the
+    // wrong surface.
+    // TemplatePreviewModal carries no role attribute, so scope by its own
+    // caption: everything from there on is the modal.
+    const all = container.textContent || ''
+    const at = all.indexOf('variables filled the way a real send fills them')
+    expect(at, 'the preview modal is open').toBeGreaterThan(-1)
+    const t = all.slice(at)
     // Every one of the 14 rendered as key=[value]; a hole would read key=[].
     for (const key of ALL_14) {
       expect(t, `hole for {{${key}}}`).not.toContain(`${key}=[]`)
