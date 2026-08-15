@@ -377,6 +377,54 @@ describe('the detail modal', () => {
     await unmount()
   })
 
+  // ── issue 236 ──────────────────────────────────────────────
+  // Marking something Fixed sends on its own now, so this screen has to say so
+  // BEFORE the press. Getting this wrong would be issue 235's defect B in
+  // reverse: mail leaving under a button that still read "Save".
+  const pickStatus = (host: HTMLElement, label: string) =>
+    click(buttons(host).find(b => (b.textContent || '').trim() === label)!)
+
+  it('promises the email when Fixed is chosen with the box EMPTY', async () => {
+    const { host, unmount } = await screenFor()
+    // n2 is Lynette's, so the viewer is not the submitter.
+    await click(buttons(host).find(b => (b.textContent || '').startsWith('Client not moving'))!)
+    await pickStatus(host, 'Fixed')
+    expect(host.textContent).toContain('Saving marks this Fixed and emails lynette@kc.com to tell them')
+    expect(byText(host, 'Save and send')).toBeTruthy()
+    // …and it must not also carry the line that says the opposite.
+    expect(host.textContent).not.toContain('Saving with the box empty changes the status only')
+    await unmount()
+  })
+
+  it('still says nothing is sent for the MIDDLE statuses', async () => {
+    const { host, unmount } = await screenFor()
+    await click(buttons(host).find(b => (b.textContent || '').startsWith('Client not moving'))!)
+    await pickStatus(host, 'Planned')
+    expect(host.textContent).not.toContain('emails lynette@kc.com to tell them')
+    expect(byText(host, 'Save and send')).toBeFalsy()
+    await unmount()
+  })
+
+  it('does not promise an email for Fixed on your OWN report', async () => {
+    const { host, unmount } = await screenFor()
+    await click(buttons(host).find(b => (b.textContent || '').startsWith('Snooze Button'))!)
+    await pickStatus(host, 'Fixed')
+    expect(host.textContent).toContain('This is your own report — saving marks it Fixed, and no email is sent.')
+    expect(byText(host, 'Save and send')).toBeFalsy()
+    await unmount()
+  })
+
+  it('promises nothing when the item is ALREADY Fixed — the send is a transition', async () => {
+    const { host, unmount } = await screenFor()
+    await click(byText(host, 'Show 1 closed')!)
+    // c1 is already shipped and belongs to Lynette; re-opening it and leaving
+    // the status where it is must not read as an outgoing email.
+    await click(buttons(host).find(b => (b.textContent || '').startsWith('Archived clients'))!)
+    expect(host.textContent).not.toContain('emails lynette@kc.com to tell them')
+    expect(byText(host, 'Save and send')).toBeFalsy()
+    await unmount()
+  })
+
   it('a status-only save omits admin_response entirely — it cannot blank or re-send a reply', async () => {
     const f = stubFetch()
     const { host, unmount } = await mount(

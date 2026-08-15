@@ -170,8 +170,19 @@ describe('an owner gets no write controls at all', () => {
 
 // ── the reply is the point ────────────────────────────────────
 describe('the reply renders as text, as the body of the card', () => {
+  // a4 is open-and-answered, so it is on the default (Open) tab since issue
+  // 236. a1's reply says the same thing about a shipped item and is asserted
+  // through the Done tab below.
   it('quotes the team words with when they arrived', async () => {
     const { host, unmount } = await mountScreen()
+    expect(host.textContent).toContain('Reproduced it on an iPhone — on the list to fix.')
+    expect(host.textContent).toContain('The team replied, 14 days ago')
+    await unmount()
+  })
+
+  it('quotes them on a finished item too', async () => {
+    const { host, unmount } = await mountScreen()
+    await click(buttons(host).find(b => (b.textContent || '').startsWith('Done · '))!)
     expect(host.textContent).toContain('Good catch — closed clients now stay out of the inbox.')
     expect(host.textContent).toContain('The team replied, 2 days ago')
     await unmount()
@@ -185,10 +196,13 @@ describe('the reply renders as text, as the body of the card', () => {
 
   it('shows the four plain words, never the database ones', async () => {
     const { host, unmount } = await mountScreen()
-    expect(host.textContent).toContain('Fixed')
+    // The open vocabulary is on the landing tab…
     expect(host.textContent).toContain('Being looked at')
     expect(host.textContent).toContain('Planned')
     expect(host.textContent).toContain('Sent')
+    // …and the finished word is one tab away (issue 236 moved it there).
+    await click(buttons(host).find(b => (b.textContent || '').startsWith('Done · '))!)
+    expect(host.textContent).toContain('Fixed')
     await unmount()
   })
 })
@@ -251,7 +265,8 @@ describe('the unread-replies banner', () => {
     expect(host.textContent).not.toContain('new reply')
     expect(seenCalls.length).toBe(0)
     // The replies themselves still render — nothing is hidden by the absence.
-    expect(host.textContent).toContain('Good catch — closed clients now stay out of the inbox.')
+    // (a4's, since the default tab is Open since issue 236; a1's is on Done.)
+    expect(host.textContent).toContain('Reproduced it on an iPhone — on the list to fix.')
     await unmount()
   })
 })

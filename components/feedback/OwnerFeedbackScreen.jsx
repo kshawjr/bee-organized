@@ -27,6 +27,14 @@
 //     things are the evidence that reporting works, and evidence that reporting
 //     works is what makes someone report again
 //
+// WHAT IT OPENS ON (issue 236). Not everything — the open items. The first
+// build's default tab was "Everything", so the Palm Beach owner's default view
+// was thirty-one cards, nineteen of them already fixed, and the four things
+// still owed an answer were scattered among them. That is the same fault issue
+// 233 fixed on the triage side by hiding closed items, arrived at from the
+// other direction. Done stays a tab — the evidence still matters, it just
+// should not be the first thing in the way.
+//
 // READS ONLY. The one write in the whole file is POST /api/feedback/seen, which
 // stamps "I have seen this reply" and exists solely to turn the banner off.
 'use client'
@@ -93,6 +101,22 @@ export function isUnreadReply(item, myId) {
 // Owner-facing age. Stays in DAYS rather than flipping to a calendar date at
 // thirty the way the triage formatter does: "58 days ago" is the fact that
 // matters to someone waiting, and "Jun 17, 2026" makes them do the subtraction.
+// WHICH TAB THIS SCREEN OPENS ON. Issue 236.
+//
+// Open, except when there is nothing open and something finished — then Done.
+// That exception is the whole reason this is a function rather than a constant.
+// Ten of the twenty-one owners have filed once or twice; an owner whose single
+// report was fixed last month has zero open items and one done one, and
+// defaulting them to an empty "Nothing open" card would be a worse first screen
+// than the crowded list this change is fixing. They land on their fixed thing.
+//
+// Note it never returns 'done' for someone with NOTHING at all — that case has
+// no tab row and gets the invitation-to-report empty state instead.
+export function defaultTabFor(counts) {
+  if (counts.open === 0 && counts.done > 0) return 'done'
+  return 'open'
+}
+
 export function agoPhrase(iso) {
   if (!iso) return ''
   const then = new Date(iso).getTime()
@@ -270,6 +294,13 @@ const EMPTY = {
     title: 'Nothing here yet',
     body: 'When something looks wrong, or you think of something that would make the work easier, tell us. We read every one and write back — and the reply turns up right here.',
   },
+  // Only reachable by CLICKING Open when it is empty — an owner whose items are
+  // all finished is landed on Done instead (see defaultTabFor), because opening
+  // onto an empty tab is worse than the crowding issue 236 set out to fix.
+  open: {
+    title: 'Nothing open',
+    body: 'Everything you’ve sent us has been dealt with. It’s all under Done.',
+  },
   answered: {
     title: 'No replies yet',
     body: 'When the team writes back about something you’ve sent, their answer appears here.',
@@ -314,7 +345,11 @@ export default function OwnerFeedbackScreen({
   const [items, setItems]     = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
-  const [tab, setTab]         = useState('all')
+  // null means "the reader has not chosen a tab yet", NOT a tab. The default is
+  // derived from counts the moment they arrive (issue 236) — as a derivation
+  // rather than an effect that writes state, so nothing can race the fetch and
+  // nothing can overwrite a tab the reader has since clicked.
+  const [tab, setTab]         = useState(null)
   const [expanded, setExpanded] = useState(() => new Set())
   // The unread set is SNAPSHOTTED at load, before we mark anything seen —
   // otherwise stamping would erase the banner in the same render that earned
@@ -376,25 +411,30 @@ export default function OwnerFeedbackScreen({
     return { answered, waiting, done, open: answered + waiting, total: items.length }
   }, [items])
 
+  const activeTab = tab || defaultTabFor(counts)
+
+  // Open first, and it carries a count now that it is the landing tab — the
+  // reader should see how much is actually outstanding without doing the
+  // subtraction. Answered and Waiting split Open; Done is everything decided.
   const TABS = [
-    { key: 'all',      label: 'Everything', count: null },
-    { key: 'answered', label: 'Answered',   count: counts.answered },
-    { key: 'waiting',  label: 'Waiting',    count: counts.waiting },
-    { key: 'done',     label: 'Done',       count: counts.done },
+    { key: 'open',     label: 'Open',     count: counts.open },
+    { key: 'answered', label: 'Answered', count: counts.answered },
+    { key: 'waiting',  label: 'Waiting',  count: counts.waiting },
+    { key: 'done',     label: 'Done',     count: counts.done },
   ]
 
   const shown = useMemo(() => {
     const rows = items.filter(i => {
-      if (tab === 'all') return true
-      if (tab === 'done') return isDoneItem(i)
-      if (tab === 'answered') return !isDoneItem(i) && hasReply(i)
-      return !isDoneItem(i) && !hasReply(i)
+      if (activeTab === 'done') return isDoneItem(i)
+      if (activeTab === 'answered') return !isDoneItem(i) && hasReply(i)
+      if (activeTab === 'waiting') return !isDoneItem(i) && !hasReply(i)
+      return !isDoneItem(i)
     })
     // Newest first. There is no "longest waiting" sort here on purpose — that
     // ordering exists on the triage screen because it is a work queue. This is
     // someone's own history and it reads as one.
     return [...rows].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-  }, [items, tab])
+  }, [items, activeTab])
 
   const unreadItems = useMemo(
     () => items.filter(i => unreadIds.includes(i.id)),
@@ -466,7 +506,7 @@ export default function OwnerFeedbackScreen({
       {!loading && !error && counts.total > 0 && (
         <div style={{ display: 'flex', gap: '7px', marginBottom: '16px', flexWrap: 'wrap' }}>
           {TABS.map(t => {
-            const on = tab === t.key
+            const on = activeTab === t.key
             return (
               <button
                 key={t.key}
@@ -496,7 +536,7 @@ export default function OwnerFeedbackScreen({
           <button onClick={load} style={{ padding: '8px 16px', background: T.accent.fg, border: 'none', borderRadius: T.radius.control, fontSize: '12px', fontFamily: 'inherit', fontWeight: 600, color: T.accent.onFill, cursor: 'pointer' }}>Retry</button>
         </div>
       ) : shown.length === 0 ? (
-        <EmptyCard kind={counts.total === 0 ? 'none' : tab === 'all' ? 'none' : tab} />
+        <EmptyCard kind={counts.total === 0 ? 'none' : activeTab} />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '11px' }}>
           {shown.map(it => (

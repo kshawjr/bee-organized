@@ -109,7 +109,7 @@ describe('a new reply sends', () => {
     expect(call.email_kind).toBe('feedback_reply')      // the notification_log label
     expect(call.location_id).toBe('loc-1')              // …filed under the right franchise
     expect(call.html).toContain('Good catch')
-    expect(body.reply_email).toEqual({ sent: true, to: SUBMITTER.email })
+    expect(body.reply_email).toEqual({ sent: true, to: SUBMITTER.email, kind: 'reply' })
   })
 
   it('names the new status only when it moved in the same save', async () => {
@@ -132,9 +132,17 @@ describe('a status change with NO new reply sends nothing', () => {
     expect(body.reply_email).toBeNull()
   })
 
-  it('even a move all the way to Fixed stays silent', async () => {
-    await patch({ status: 'shipped' })
-    expect(direct.fn).not.toHaveBeenCalled()
+  // This block used to end with "even a move all the way to Fixed stays
+  // silent". Issue 236 overturned exactly that one case — Fixed is the news the
+  // reporter is waiting for and the one status where silence is the wrong
+  // answer — and lib/beta-feedback-fixed-notify-236.test.ts now owns it. Rule 2
+  // still holds for every OTHER status, which is what the remaining cases pin.
+  it('the middle statuses all stay silent', async () => {
+    for (const status of ['under_review', 'planned', 'in_progress']) {
+      h.state.rows.feedback_items = { ...ITEM }
+      await patch({ status })
+      expect(direct.fn).not.toHaveBeenCalled()
+    }
   })
 })
 

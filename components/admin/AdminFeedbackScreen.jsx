@@ -213,7 +213,15 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem 
   // Does Save actually send? The button used to read "Save and send" whenever
   // anything was typed, including the two cases the route refuses to mail —
   // your own item (rule 4) and a submitter with no address on file.
-  const willSend = response.trim().length > 0 && !isOwnItem && !!item.submitter_email
+  //
+  // Marking something Fixed now sends on its own (issue 236), so the button has
+  // to know that too — otherwise this screen would have the inverse of the
+  // defect issue 235 just fixed: mail leaving under a button that said "Save".
+  // The transition test mirrors the route's exactly (INTO shipped, not AT it),
+  // so the button and the send agree about re-saving an already-fixed item.
+  const shipsNow = status === 'shipped' && item.status !== 'shipped'
+  const canNotify = !isOwnItem && !!item.submitter_email
+  const willSend = (response.trim().length > 0 || shipsNow) && canNotify
 
   async function save() {
     setSaving(true)
@@ -257,7 +265,13 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem 
   // route, named plainly — "saved" alone would hide a reply that never sent.
   const resultLine = (() => {
     if (!result) return null
-    if (result.sent) return { tone: 'ok', text: `Saved. We emailed your reply to ${result.to}.` }
+    if (result.sent) {
+      // The route says WHICH email went — it is the only party that knows,
+      // since "is this reply new?" is decided against the stored text.
+      return result.kind === 'shipped'
+        ? { tone: 'ok', text: `Saved. We emailed ${result.to} to tell them it’s fixed.` }
+        : { tone: 'ok', text: `Saved. We emailed your reply to ${result.to}.` }
+    }
     if (result.error) return { tone: 'bad', text: `Saved — but the email did not go out (${result.error}). Your reply is stored.` }
     if (result.skipped === 'no_submitter_email') return { tone: 'bad', text: 'Saved. No email on file for this person, so nothing was sent.' }
     if (result.skipped === 'replied_to_own_item') return { tone: 'ok', text: 'Saved. This is your own report, so no email was sent.' }
@@ -365,6 +379,20 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem 
                 )
               })}
             </div>
+            {/* Fixed sends by itself (issue 236), so it says so BEFORE the
+                press — and here rather than under the textarea, because the
+                textarea is not always open and this send does not need it.
+                Suppressed once a reply is typed: that case is one email, not
+                two, and the composer's own line already describes it. */}
+            {shipsNow && !response.trim() && (
+              <p style={{ fontSize: '11px', color: T.ink.muted, marginTop: '8px', lineHeight: 1.5 }}>
+                {isOwnItem
+                  ? 'This is your own report — saving marks it Fixed, and no email is sent.'
+                  : item.submitter_email
+                    ? `Saving marks this Fixed and emails ${item.submitter_email} to tell them — no reply needed.`
+                    : 'No email on file for this person — saving marks it Fixed but sends nothing.'}
+              </p>
+            )}
           </div>
 
           {/* ── THE REPLY ──────────────────────────────────────────
@@ -405,16 +433,22 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem 
                   style={{ width: '100%', padding: '10px 12px', border: T.border.control, borderRadius: T.radius.control, fontSize: '13px', fontFamily: 'inherit', color: T.ink.primary, background: T.surface.raised, boxSizing: 'border-box', outline: 'none', resize: 'vertical', lineHeight: 1.5 }}
                 />
                 {/* Says exactly what Save will do. The old copy claimed the box
-                    was "shown to the submitter" while nothing was sent. */}
-                <p style={{ fontSize: '11px', color: T.ink.muted, marginTop: '6px', lineHeight: 1.5 }}>
-                  {response.trim()
-                    ? (isOwnItem
-                        ? 'This is your own report — saving stores the reply, but no email is sent.'
-                        : item.submitter_email
-                          ? `Saving emails this to ${item.submitter_email}.`
-                          : 'No email on file for this person — saving stores the reply but sends nothing.')
-                    : 'Saving with the box empty changes the status only. No email is sent.'}
-                </p>
+                    was "shown to the submitter" while nothing was sent.
+                    Silent in exactly one case (issue 236): an empty box with
+                    Fixed chosen DOES send, the line under the status row is
+                    already saying so, and repeating it here would read as two
+                    emails rather than one. */}
+                {!(shipsNow && !response.trim()) && (
+                  <p style={{ fontSize: '11px', color: T.ink.muted, marginTop: '6px', lineHeight: 1.5 }}>
+                    {response.trim()
+                      ? (isOwnItem
+                          ? 'This is your own report — saving stores the reply, but no email is sent.'
+                          : item.submitter_email
+                            ? `Saving emails this to ${item.submitter_email}.`
+                            : 'No email on file for this person — saving stores the reply but sends nothing.')
+                      : 'Saving with the box empty changes the status only. No email is sent.'}
+                  </p>
+                )}
               </>
             )}
           </div>

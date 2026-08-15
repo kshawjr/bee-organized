@@ -33,6 +33,14 @@
 // AUDIENCE. A 45-65 non-technical franchise owner. No product vocabulary, no
 // status jargon in the lede, no "your ticket has been updated". One idea per
 // line: someone answered you, here is what they said, here is where to look.
+//
+// TWO BUILDS, ONE RAIL (issue 236). Marking an item Fixed now notifies the
+// submitter whether or not anyone wrote a sentence, so this module builds a
+// second shape: the announcement, which has no reply to quote. It is the same
+// module, the same sender, the same notification_log kind and the same
+// never-throws send — the only thing that forks is the copy, because an email
+// that says "What we said back:" above an empty box would be worse than the
+// silence it replaces.
 
 import { sendEmailDirect } from './resend'
 import type { SendResult } from './resend'
@@ -78,7 +86,7 @@ export interface FeedbackReplyEmailArgs {
   itemTitle: string
   /** 'bug' | 'feature' — only shifts one noun ("problem" vs "idea"). */
   itemType?: string | null
-  /** The reply text exactly as typed in triage. */
+  /** The reply text exactly as typed in triage. Empty for a bare Fixed announcement. */
   replyText: string
   /**
    * Plain-word status, ONLY when the status moved in the same save. Null when
@@ -87,6 +95,12 @@ export interface FeedbackReplyEmailArgs {
    * invent a status line to fill space.
    */
   statusLabel?: string | null
+  /**
+   * This send exists BECAUSE the item just shipped (issue 236). With reply text
+   * it changes nothing — the reply leads, and the status line already names
+   * "Fixed". With NO reply text it selects the announcement build below.
+   */
+  shipped?: boolean
   link?: string
 }
 
@@ -102,16 +116,47 @@ export function buildFeedbackReplyEmail(args: FeedbackReplyEmailArgs): BuiltEmai
   const link = args.link ?? feedbackReplyLink()
   const first = firstNameOf(args.recipientName)
   const greeting = first ? `Hi ${first},` : 'Hi there,'
-  const noun = args.itemType === 'feature' ? 'idea' : 'report'
+  const feature = args.itemType === 'feature'
+  const noun = feature ? 'idea' : 'report'
   const title = String(args.itemTitle || '').trim() || 'your feedback'
   const reply = String(args.replyText || '').trim()
+
+  // ── THE ANNOUNCEMENT BUILD (issue 236) ──────────────────────────
+  // Marking something Fixed sends even when nobody wrote a sentence, so this
+  // email has to work with NO words to quote. It therefore says the one thing
+  // it actually knows — the thing you reported is done — and drops the "What we
+  // said back:" block entirely rather than quoting an empty rule, and drops the
+  // status line too, because "We've also marked it: Fixed" is not an ALSO when
+  // it is the entire message.
+  //
+  // The verb forks where the on-screen pill does not: the owner screen shows one
+  // "Fixed" pill for both types, but "We fixed 'A way to export the list'" is
+  // the wrong sentence about a request that was BUILT.
+  const announceOnly = !reply && !!args.shipped
+  const verb = feature ? 'built' : 'fixed'
 
   // Subject carries their own words back to them — an owner with several open
   // reports can tell which one this is from the inbox list alone.
   const shortTitle = title.length > 60 ? `${title.slice(0, 57)}…` : title
-  const subject = `We replied about "${shortTitle}"`
+  const subject = announceOnly
+    ? `We ${verb} "${shortTitle}"`
+    : `We replied about "${shortTitle}"`
 
-  const statusLine = args.statusLabel
+  const lede = announceOnly
+    ? (feature
+        ? 'Good news — the idea you sent in is built, and it is live in Bee Hub now.'
+        : 'Good news — the problem you reported is fixed, and the fix is live in Bee Hub now.')
+    : `Someone on the Bee Organized team has replied to the ${noun} you sent in.`
+
+  // The invitation to push back. It matters more here than under a reply: a
+  // reply is a person you can answer, whereas this arrives unattended, and the
+  // claim it makes ("it's fixed") is one the reader is the first to be able to
+  // check.
+  const closing = announceOnly
+    ? 'Everything you’ve sent us is in Bee Hub under Feedback. If it still doesn’t look right on your end, just reply to this email and tell us — we would rather hear it twice than not at all.'
+    : "Everything you've sent us — and anything we've said back — is in Bee Hub under Feedback. Just reply to this email if you'd like to tell us more."
+
+  const statusLine = !announceOnly && args.statusLabel
     ? `We've also marked it: ${args.statusLabel}.`
     : null
 
@@ -122,8 +167,19 @@ export function buildFeedbackReplyEmail(args: FeedbackReplyEmailArgs): BuiltEmai
     .map(para => `<p style="margin:0 0 10px;font-size:16px;line-height:1.7;color:#2b2b28;">${escHtml(para).replace(/\n/g, '<br>')}</p>`)
     .join('')
 
+  // Present only when there are words to present. This is the difference
+  // between the two builds.
+  const quotedReplyHtml = announceOnly ? '' : `<p style="margin:0 0 10px;font-size:13px;line-height:1.5;color:#61615C;">What we said back:</p>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;">
+                <tr>
+                  <td style="border-left:3px solid ${DRIP_BRAND_TEAL};padding:2px 0 2px 16px;">
+                    ${quoteBlock}
+                  </td>
+                </tr>
+              </table>`
+
   const cardContentHtml = `<p style="${P}">${escHtml(greeting)}</p>
-              <p style="${P}">Someone on the Bee Organized team has replied to the ${escHtml(noun)} you sent in.</p>
+              <p style="${P}">${escHtml(lede)}</p>
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;">
                 <tr>
                   <td style="background:#f7f6f4;border-radius:6px;padding:16px 18px;">
@@ -132,14 +188,7 @@ export function buildFeedbackReplyEmail(args: FeedbackReplyEmailArgs): BuiltEmai
                   </td>
                 </tr>
               </table>
-              <p style="margin:0 0 10px;font-size:13px;line-height:1.5;color:#61615C;">What we said back:</p>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;">
-                <tr>
-                  <td style="border-left:3px solid ${DRIP_BRAND_TEAL};padding:2px 0 2px 16px;">
-                    ${quoteBlock}
-                  </td>
-                </tr>
-              </table>
+              ${quotedReplyHtml}
               ${statusLine ? `<p style="${P}">${escHtml(statusLine)}</p>` : ''}
               ${link ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;">
                 <tr>
@@ -148,7 +197,7 @@ export function buildFeedbackReplyEmail(args: FeedbackReplyEmailArgs): BuiltEmai
                   </td>
                 </tr>
               </table>` : ''}
-              <p style="margin:0;font-size:15px;line-height:1.7;color:#61615C;">Everything you've sent us — and anything we've said back — is in Bee Hub under Feedback. Just reply to this email if you'd like to tell us more.</p>`
+              <p style="margin:0;font-size:15px;line-height:1.7;color:#61615C;">${escHtml(closing)}</p>`
 
   const footerInner = `Bee Organized&nbsp;&nbsp;|&nbsp;&nbsp;<a href="${DRIP_WEBSITE_URL}" style="color:#ffffff;text-decoration:underline;">${DRIP_WEBSITE_LABEL}</a>`
 
@@ -158,17 +207,15 @@ export function buildFeedbackReplyEmail(args: FeedbackReplyEmailArgs): BuiltEmai
   const text = [
     greeting,
     '',
-    `Someone on the Bee Organized team has replied to the ${noun} you sent in.`,
+    lede,
     '',
     'You told us:',
     title,
-    '',
-    'What we said back:',
-    reply,
+    ...(announceOnly ? [] : ['', 'What we said back:', reply]),
     ...(statusLine ? ['', statusLine] : []),
     ...(link ? ['', `See it in Bee Hub: ${link}`] : []),
     '',
-    "Everything you've sent us — and anything we've said back — is in Bee Hub under Feedback. Just reply to this email if you'd like to tell us more.",
+    closing,
     '',
     'Bee Organized',
     DRIP_WEBSITE_URL,
