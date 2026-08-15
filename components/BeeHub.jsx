@@ -18409,6 +18409,9 @@ function templateRow(templates, legacyId, days, when) {
     rail: legacyId === 'welcome' ? 'welcome' : 'stage',
     days, when,
     timingIsData: false,
+    // issue 240 step 8b — what the write paths need to act on this row.
+    masterDbId: master.dbId,
+    forkDbId: fork ? fork.dbId : null,
     subject: use.subject || '',
     body: use.body || '',
     firstLine: firstMeaningfulLine(use.body),
@@ -18434,6 +18437,10 @@ export function buildEmailList({ pathSteps = {}, templates = [], generalDefault 
       return {
         key: `step-${s.dbId ?? s.order}`,
         rail: 'drip',
+        // issue 240 step 8b — rail A acts on (pathKey, order). step_order is
+        // the identity that survives the bulk PATCH's delete-and-reinsert.
+        pathKey: generalDefault,
+        order: Number(s.order ?? 0),
         days: Number(s.delay_days ?? 0),
         when: whenLabelForDays(s.delay_days ?? 0),
         timingIsData: true,
@@ -18466,7 +18473,7 @@ export function buildEmailList({ pathSteps = {}, templates = [], generalDefault 
 //
 // Read only. No Edit, no fork, no writes — step 8 owns those. The one control
 // per row is Read, and it opens a modal that navigates the group it belongs to.
-function EmailReadModal({ rows, index, onClose, onStep }) {
+function EmailReadModal({ rows, index, onClose, onStep, onEdit, onReset, resetBlockedReason }) {
   const row = rows[index]
   React.useEffect(() => {
     const onKey = e => {
@@ -18493,6 +18500,16 @@ function EmailReadModal({ rows, index, onClose, onStep }) {
           <button onClick={onClose} aria-label="Close" style={{ background:'none', border:'none', fontSize:'19px', color:'#8a9e9a', cursor:'pointer', lineHeight:1 }}>✕</button>
         </div>
         <div style={{ padding:'20px 24px 22px' }}>
+          {row.wording === 'yours' && (
+            <div style={{ background:'#fdf6e3', borderRadius:'9px', padding:'11px 14px', marginBottom:'15px', fontSize:'13px', color:'#8a6a0e', display:'flex', gap:'9px', alignItems:'center', flexWrap:'wrap' }}>
+              <span>You've changed this one.</span>
+              {onReset && (
+                resetBlockedReason
+                  ? <span title={resetBlockedReason} style={{ marginLeft:'auto', opacity:0.6, fontSize:'12px', whiteSpace:'nowrap' }}>Can't undo this — {resetBlockedReason}</span>
+                  : <button onClick={onReset} style={{ marginLeft:'auto', background:'none', border:'none', color:'#8a6a0e', textDecoration:'underline', cursor:'pointer', font:'inherit', fontSize:'12.5px', padding:0, whiteSpace:'nowrap' }}>Put the Bee Organized wording back</button>
+              )}
+            </div>
+          )}
           <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 6px' }}>Subject</p>
           <h2 style={{ fontSize:'19px', fontWeight:600, fontFamily:'Georgia,serif', color:'#1a2e2b', margin:'0 0 16px' }}>{row.subject || <span style={{ color:'#b0c0bc' }}>No subject</span>}</h2>
           {row.contentMissing ? (
@@ -18508,13 +18525,60 @@ function EmailReadModal({ rows, index, onClose, onStep }) {
         </div>
         <div style={{ display:'flex', gap:'9px', padding:'15px 24px', borderTop:'1px solid rgba(26,46,43,0.10)', background:'#faf8f3' }}>
           <button onClick={onClose} style={{ ...btn, padding:'9px 16px', fontSize:'13px', maxWidth:CONTROL_W.action }}>Close</button>
+          {onEdit && (
+            <button onClick={onEdit} style={{ ...btn, padding:'9px 16px', fontSize:'13px', maxWidth:CONTROL_W.action, background:'#1a2e2b', color:'white', border:'none' }}>Edit this email</button>
+          )}
         </div>
       </div>
     </div>
   )
 }
 
-function EmailRow({ row, onRead }) {
+// ─── issue 240 step 8b — rail B/C editor ───
+// Subject + body only, matching what reset restores and what
+// mergeForkOverMaster overrides at send time. The owner never sees
+// "duplicate", "master" or "custom template"; the fork is plumbing.
+function EmailTemplateEditor({ row, onCancel, onSave }) {
+  const [subject, setSubject] = React.useState(row.subject || '')
+  const [body, setBody] = React.useState(row.body || '')
+  const [busy, setBusy] = React.useState(false)
+  const [err, setErr] = React.useState('')
+  const changed = subject !== (row.subject || '') || body !== (row.body || '')
+  const field = { width:'100%', maxWidth:CONTROL_W.field, padding:'10px 12px', border:'1px solid rgba(26,46,43,0.14)', borderRadius:'9px', font:'inherit', fontSize:'14px', background:'white', color:'#1a2e2b' }
+  return (
+    <div onClick={onCancel} style={{ position:'fixed', inset:0, background:'rgba(26,46,43,0.4)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'26px 16px', overflowY:'auto', zIndex:70 }}>
+      <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Edit this email"
+        style={{ maxWidth:'640px', width:'100%', background:'white', borderRadius:'14px', overflow:'hidden', boxShadow:'0 10px 40px rgba(0,0,0,0.22)' }}>
+        <div style={{ padding:'11px 18px', background:'#faf8f3', borderBottom:'1px solid rgba(26,46,43,0.10)', fontSize:'12px', color:'#8a9e9a' }}>Editing · {row.when}</div>
+        <div style={{ padding:'20px 24px 22px' }}>
+          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 6px' }}>Subject</p>
+          <input value={subject} onChange={e => setSubject(e.target.value)} style={{ ...field, marginBottom:'14px', fontWeight:600 }} />
+          <p style={{ fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 6px' }}>Message</p>
+          {/* The body is CONTENT — it may use the width. */}
+          <textarea value={body} onChange={e => setBody(e.target.value)}
+            style={{ width:'100%', minHeight:'200px', padding:'16px 18px', border:'1px solid rgba(26,46,43,0.14)', borderRadius:'10px', font:'inherit', fontSize:'14px', lineHeight:1.65, resize:'vertical', background:'white', color:'#1a2e2b' }} />
+          <p style={{ marginTop:'10px', fontSize:'12px', color:'#8a9e9a' }}>The bits in braces get filled in for each person.</p>
+          {err && <p style={{ marginTop:'8px', fontSize:'12.5px', color:'#c0554e' }}>{err}</p>}
+        </div>
+        <div style={{ display:'flex', gap:'9px', padding:'15px 24px', borderTop:'1px solid rgba(26,46,43,0.10)', background:'#faf8f3', alignItems:'center', flexWrap:'wrap' }}>
+          <button onClick={onCancel} disabled={busy} style={{ background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'9px', padding:'9px 16px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', maxWidth:CONTROL_W.action }}>Cancel</button>
+          <button
+            onClick={async () => {
+              setBusy(true); setErr('')
+              try { await onSave(subject, body) }
+              catch (e) { setErr(String(e?.message || e)); setBusy(false) }
+            }}
+            disabled={busy || !changed}
+            style={{ background: (busy || !changed) ? '#c3cfcc' : '#1a2e2b', border:'none', borderRadius:'9px', padding:'9px 17px', font:'inherit', fontSize:'13px', fontWeight:600, fontFamily:'inherit', color:'white', cursor:(busy || !changed) ? 'not-allowed' : 'pointer', maxWidth:CONTROL_W.action }}>
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EmailRow({ row, onRead, onEdit }) {
   return (
     <div style={{ background:'white', borderRadius:'11px', padding:'14px 16px', marginBottom:'8px', display:'flex', gap:'14px', alignItems:'flex-start' }}>
       <div style={{ flex:'0 0 96px', fontSize:'12px', color:'#8a9e9a', paddingTop:'2px', lineHeight:1.35 }}>
@@ -18533,8 +18597,11 @@ function EmailRow({ row, onRead }) {
           {row.contentMissing ? <span style={{ color:'#b45309' }}>We couldn't load this one's wording.</span> : row.firstLine}
         </p>
       </div>
-      <div style={{ flexShrink:0 }}>
+      <div style={{ display:'flex', gap:'7px', flexShrink:0 }}>
         <button onClick={onRead} style={{ background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'8px', padding:'6px 12px', fontSize:'12px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', whiteSpace:'nowrap' }}>Read</button>
+        {onEdit && (
+          <button onClick={onEdit} style={{ background:'white', border:'1px solid rgba(26,46,43,0.12)', borderRadius:'8px', padding:'6px 12px', fontSize:'12px', fontWeight:600, fontFamily:'inherit', color:'#1a2e2b', cursor:'pointer', whiteSpace:'nowrap' }}>Edit</button>
+        )}
       </div>
     </div>
   )
@@ -18544,7 +18611,30 @@ function EmailRow({ row, onRead }) {
 // the first from the lead arriving, the second from the job closing — so a
 // single sorted axis across all six would claim day 90 comes after day 30 on
 // the same timeline, which is false.
-export function EmailsList({ pathSteps, templates, generalDefault, moveDefault }) {
+// issue 240 step 8b — the shape guard.
+//
+// Rail A reset restores ONE row, but the only anchor between a fork's step and
+// the master step it came from is ordinal position: drip_path_steps has no
+// per-step link, the clone copies none, and the first inline edit clears
+// master_template_id. A cloned_from_step_id column was considered and rejected
+// — the bulk PATCH's delete-and-reinsert would null it on the very first save
+// and reset would silently fall back to position, which is the bug.
+//
+// So reset is offered only when the fork's step_order sequence matches its
+// master's EXACTLY. A mid-sequence insert and an append are indistinguishable
+// afterwards, so a mismatch disables reset for EVERY row on that path, not
+// just the suspect one. Partial trust is not available.
+//
+// The master is found by path_key where is_master — NOT by cloned_from_id.
+// Two live Seattle defaults have no cloned_from_id and must still resolve.
+export function dripShapeMatchesMaster(forkSteps, masterStepsForKey) {
+  const f = (forkSteps || []).map(s => Number(s.order)).sort((a, b) => a - b)
+  const m = (masterStepsForKey || []).map(s => Number(s.order)).sort((a, b) => a - b)
+  if (!m.length) return false          // no master to restore from
+  return JSON.stringify(f) === JSON.stringify(m)
+}
+
+export function EmailsList({ pathSteps, templates, generalDefault, moveDefault, masterSteps = {}, actions = null }) {
   const [open, setOpen] = React.useState(null)  // { group, index }
   const { newLead, afterJob } = React.useMemo(
     () => buildEmailList({ pathSteps, templates, generalDefault }),
@@ -18558,6 +18648,18 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault }
   const groups = { new: withNotes, job: afterJob }
   const openRows = open ? groups[open.group] : []
 
+  // issue 240 step 8b — one reason string, computed once per path, shown on
+  // every row of that path. Never hidden silently.
+  const dripShapeOk = dripShapeMatchesMaster(
+    (generalDefault && pathSteps[generalDefault]) || [],
+    (generalDefault && masterSteps[generalDefault]) || [])
+  const resetBlockedFor = row =>
+    row.rail === 'drip' && !dripShapeOk
+      ? 'these emails have been added to or reordered, so we can no longer tell which one to put back'
+      : null
+  const canEdit = !!actions
+  const canReset = row => !!actions && row.wording === 'yours'
+
   const Group = ({ id, title, count, note, rows }) => (
     <div style={{ marginBottom:'22px' }}>
       <div style={{ display:'flex', alignItems:'baseline', gap:'10px', flexWrap:'wrap', margin:'0 2px 4px' }}>
@@ -18567,7 +18669,11 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault }
       {note && <p style={{ fontSize:'12.5px', color:'#4a5f5b', margin:'0 2px 10px', lineHeight:1.5 }}>{note}</p>}
       {rows.length === 0
         ? <div style={{ background:'white', borderRadius:'11px', padding:'16px', fontSize:'13px', color:'#8a9e9a' }}>Nothing here yet.</div>
-        : rows.map((r, i) => <EmailRow key={r.key} row={r} onRead={() => setOpen({ group:id, index:i })} />)}
+        : rows.map((r, i) => (
+            <EmailRow key={r.key} row={r}
+              onRead={() => setOpen({ group:id, index:i })}
+              onEdit={canEdit ? () => actions.edit(r) : null} />
+          ))}
     </div>
   )
 
@@ -18586,7 +18692,10 @@ export function EmailsList({ pathSteps, templates, generalDefault, moveDefault }
       {open && (
         <EmailReadModal rows={openRows} index={open.index}
           onClose={() => setOpen(null)}
-          onStep={i => setOpen(o => ({ ...o, index: Math.max(0, Math.min(openRows.length - 1, i)) }))} />
+          onStep={i => setOpen(o => ({ ...o, index: Math.max(0, Math.min(openRows.length - 1, i)) }))}
+          onEdit={canEdit ? () => { const r = openRows[open.index]; setOpen(null); actions.edit(r) } : null}
+          onReset={canReset(openRows[open.index]) ? () => { const r = openRows[open.index]; setOpen(null); actions.reset(r) } : null}
+          resetBlockedReason={resetBlockedFor(openRows[open.index])} />
       )}
     </div>
   )
@@ -20870,41 +20979,49 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   const [templates, setTemplates]   = useState([])
   const [templatesLoading, setTemplatesLoading] = useState(true)
   const [templatesError, setTemplatesError]     = useState(null)
+  // issue 240 step 8b — extracted from the mount effect so a write can refresh
+  // the list. `updatedAt` is now mapped too: the fork rule is "newest active
+  // fork wins", and the client mirror in buildEmailList sorts on it, so
+  // dropping it here made every fork look equally old.
+  const reloadTemplates = React.useCallback(async () => {
+    const r = await fetch('/api/templates', { credentials: 'include' })
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const j = await r.json()
+    const rows = Array.isArray(j?.templates) ? j.templates : []
+    setTemplates(rows.map(r => ({
+      id: r.legacy_id || r.id, // prefer legacy for path step refs
+      dbId: r.id,
+      legacyId: r.legacy_id,
+      name: r.name,
+      type: r.type,
+      tag: r.tag || '',
+      subject: r.subject || '',
+      body: r.body || '',
+      isActive: r.is_active !== false,
+      locationUuid: r.location_uuid || null,
+      isMaster: r.is_master === true,
+      isOwnCustom: r.is_own_custom === true,
+      clonedFromId: r.cloned_from_id || null,
+      updatedAt: r.updated_at || null,
+      usedIn: [],
+    })))
+    setTemplatesError(null)
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     setTemplatesLoading(true)
-    fetch('/api/templates', { credentials: 'include' })
-      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-      .then(j => {
-        if (cancelled) return
-        const rows = Array.isArray(j?.templates) ? j.templates : []
-        if (rows.length === 0) return
-        setTemplates(rows.map(r => ({
-          id: r.legacy_id || r.id, // prefer legacy for path step refs
-          dbId: r.id,
-          legacyId: r.legacy_id,
-          name: r.name,
-          type: r.type,
-          tag: r.tag || '',
-          subject: r.subject || '',
-          body: r.body || '',
-          isActive: r.is_active !== false,
-          locationUuid: r.location_uuid || null,
-          isMaster: r.is_master === true,
-          isOwnCustom: r.is_own_custom === true,
-          clonedFromId: r.cloned_from_id || null,
-          usedIn: [],
-        })))
-        setTemplatesError(null)
-      })
+    reloadTemplates()
       .catch(e => { if (!cancelled) setTemplatesError(String(e?.message || e)) })
       .finally(() => { if (!cancelled) setTemplatesLoading(false) })
     return () => { cancelled = true }
-  }, [])
+  }, [reloadTemplates])
   // Starts EMPTY and is filled from the DB: master previews for path_keys this
   // location hasn't customized, real location steps for the ones it has. It used
   // to start as DEFAULT_PATH_STEPS (prototype copy), which is what savePathToDb
   // then materialized into live per-location paths.
+  // issue 240 step 8b — rail B/C editor target: { row, saving } or null.
+  const [emailTemplateEditor, setEmailTemplateEditor] = useState(null)
   const [pathSteps, setPathSteps]   = useState({})
   // dbPaths is keyed by path_key (e.g. 'organizing-a') so the UI's existing
   // pathId mental model maps 1:1. Each entry holds the DB row's id so
@@ -21209,6 +21326,96 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
   // point — so the confirm modal states it, not just the standing banner.
   // proceed(steps) receives the steps the mutation should build on: the
   // location's own rows when they exist, else the freshly-cloned copy.
+  // ─── issue 240 step 8b — Edit and reset for the Emails list ───
+  //
+  // TWO RAILS, and they fork differently. Getting this wrong makes an owner's
+  // edit either do nothing or change what ANOTHER location receives.
+  //
+  //   Rail A (drip steps)  the PATH is shared. Editing clones the path — no
+  //                        master drip step points at a template (24 of 24 are
+  //                        inline in production), so there is nothing to fork
+  //                        and nothing to repoint. This reuses the flow Seattle
+  //                        and KC already proved: ensureOwnedThen ->
+  //                        ForkConfirmModal if unowned -> clone route ->
+  //                        commitSteps writes the inline text.
+  //   Rail B/C (welcome,   the TEMPLATE row is shared. Editing duplicates it
+  //   closed job)          (legacy_id NULL, cloned_from_id = master,
+  //                        location_uuid = this location) and patches the copy.
+  //                        The send path resolves fresh through
+  //                        resolveLocationTemplateFork, so no step is touched.
+  //
+  // RESET OVERRIDES SUBJECT AND BODY ONLY, on BOTH rails, deliberately — so it
+  // can be one promise on every row. That mirrors mergeForkOverMaster, which
+  // overrides exactly those two fields and leaves everything else to the
+  // master. In particular rail A's reset leaves delay_days alone: timing is
+  // step 10's, and a reset that also moved a send date would be a second,
+  // unasked-for write.
+  async function emailsRowEdit(row) {
+    if (row.rail === 'drip') {
+      // Existing proven flow; ensureOwnedThen raises the fork confirm itself.
+      ensureOwnedThen(row.pathKey, (steps) => {
+        const target = steps.find(s => Number(s.order) === Number(row.order))
+        if (!target) { alert('Could not find that email to edit.'); return }
+        setStepContentEditor({ pathId: row.pathKey, step: target })
+      })
+      return
+    }
+    // Rail B/C — edit the location's own copy, making one first if needed.
+    setEmailTemplateEditor({ row, saving:false })
+  }
+
+  // Create-or-reuse the location's fork of a master template, then patch it.
+  // Shaped exactly as POST /api/templates/:id/duplicate shapes a fork.
+  async function emailsSaveTemplateEdit(row, subject, body) {
+    let forkId = row.forkDbId
+    if (!forkId) {
+      const dup = await fetch(`/api/templates/${row.masterDbId}/duplicate`, { method:'POST' })
+      if (!dup.ok) throw new Error('could not create your copy')
+      const j = await dup.json()
+      forkId = j?.template?.dbId || j?.template?.id || j?.id
+      if (!forkId) throw new Error('could not create your copy')
+    }
+    const res = await fetch(`/api/templates/${forkId}`, {
+      method:'PATCH', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ subject, body }),
+    })
+    if (!res.ok) throw new Error('could not save your wording')
+    await reloadTemplates()
+  }
+
+  async function emailsRowReset(row) {
+    try {
+      if (row.rail !== 'drip') {
+        // Deleting the fork is the whole reset — the send path falls back to
+        // the master on the next resolve. Proven end to end at loc_test.
+        if (!row.forkDbId) return
+        const res = await fetch(`/api/templates/${row.forkDbId}`, { method:'DELETE' })
+        if (!res.ok) throw new Error('could not undo that')
+        await reloadTemplates()
+        return
+      }
+      // Rail A. The WRITE is path-wide — commitSteps replaces the whole set —
+      // even though the EFFECT is one row. So the payload is built from a
+      // FRESH read, never from stale client state, or a concurrent edit
+      // elsewhere on the path would be silently reverted by this reset.
+      const fresh = await loadLocationPaths()
+      const steps = (fresh?.steps?.[row.pathKey]) || pathSteps[row.pathKey] || []
+      const master = masterSteps[row.pathKey] || []
+      if (!dripShapeMatchesMaster(steps, master)) {
+        alert('These emails have been added to or reordered, so we can no longer tell which one to put back.')
+        return
+      }
+      const src = master.find(m => Number(m.order) === Number(row.order))
+      if (!src) return
+      const next = steps.map(s => Number(s.order) === Number(row.order)
+        ? { ...s, subject: src.subject, body: src.body, name: src.subject || s.name }
+        : s)
+      await commitSteps(row.pathKey, next)
+    } catch (e) {
+      alert('Could not undo that: ' + (e?.message || e))
+    }
+  }
+
   function ensureOwnedThen(pathId, proceed) {
     if (!realLocId) {
       // Demo session: no DB, no fork — mutate the local preview directly.
@@ -22339,8 +22546,10 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             <EmailsList
               pathSteps={pathSteps}
               templates={templates}
+              masterSteps={masterSteps}
               generalDefault={settings.paths.generalDefault}
               moveDefault={settings.paths.moveDefault}
+              actions={realLocId ? { edit: emailsRowEdit, reset: emailsRowReset } : null}
             />
 
             {/* ── TIER 3 · PAIRED — new lead emails, one set per project type ── */}
@@ -22594,6 +22803,17 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
 
       </div>
 
+      {/* issue 240 step 8b — rail B/C edit (welcome, closed job). */}
+      {emailTemplateEditor && (
+        <EmailTemplateEditor
+          row={emailTemplateEditor.row}
+          onCancel={() => setEmailTemplateEditor(null)}
+          onSave={async (subject, body) => {
+            await emailsSaveTemplateEdit(emailTemplateEditor.row, subject, body)
+            setEmailTemplateEditor(null)
+          }}
+        />
+      )}
       {/* Template editor popup */}
       {/* Quick-peek from the Paths overview step rows — Close-only, no selection. */}
       <TemplateQuickPeekModal template={peekTemplate} settings={settings} onClose={()=>setPeekTemplate(null)} />

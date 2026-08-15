@@ -135,13 +135,26 @@ describe('Templates tab — Gen 2 master grouping', () => {
     await act(async () => {})
     await openEmailSection()
 
-    const labels = Array.from(container.querySelectorAll('button'))
-      .map(b => b.textContent?.trim())
-    expect(labels).toContain('Preview')
-    expect(labels).toContain('Duplicate')
-    // No custom templates in this fixture, so any Edit/Delete button on screen
-    // could only belong to a master row.
-    expect(labels).not.toContain('Edit')
-    expect(labels).not.toContain('Delete')
+    // Scoped PER MASTER ROW. This used to scrape every button on the screen,
+    // relying on "no custom templates in this fixture, so any Edit/Delete could
+    // only belong to a master row". Issue 240 step 8b broke that assumption:
+    // the Emails list on this same tab now offers Edit on its own rows, which
+    // are not template rows at all. Asserting per-row tests what this is
+    // actually about — a master cannot be edited or deleted in place.
+    const rowButtonsFor = (name: string) => {
+      const label = Array.from(container.querySelectorAll('p'))
+        .find(el => el.textContent?.trim() === name)
+      expect(label, `row for ${name}`).toBeTruthy()
+      let node: HTMLElement | null = label!.parentElement
+      while (node && node.querySelectorAll('button').length === 0) node = node.parentElement
+      return Array.from(node!.querySelectorAll('button')).map(b => b.textContent?.trim())
+    }
+    for (const master of ['GEN2 Welcome Email', 'GEN2 Closed Job 3mo', 'GEN1 How We Help']) {
+      const labels = rowButtonsFor(master)
+      expect(labels, `${master} actions`).toContain('Preview')
+      expect(labels, `${master} actions`).toContain('Duplicate')
+      expect(labels, `${master} is not editable in place`).not.toContain('Edit')
+      expect(labels, `${master} is not deletable`).not.toContain('Delete')
+    }
   })
 })
