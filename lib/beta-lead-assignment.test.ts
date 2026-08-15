@@ -59,6 +59,14 @@ const recipientsMock = vi.hoisted(() =>
   vi.fn(async () => ({ users: [] as any[], externals: [] as any[] })),
 )
 const splitMock = vi.hoisted(() => vi.fn(async () => false))
+// issue 246 step 2 — assignment reads the HANDLER table, not the notification
+// config. One handler per type, so this returns a Map<lowercased label, handler>.
+const handlersMock = vi.hoisted(() => vi.fn(async () => new Map<string, any>()))
+const handlers = (pairs: Array<[string, string]>) =>
+  new Map(pairs.map(([type, userId]) => [
+    type.toLowerCase(),
+    { project_type: type, hub_user_id: userId, name: userId, email: `${userId}@bee.com`, reply_to: null },
+  ]))
 
 vi.mock('@/lib/supabase-service', () => ({
   supabaseService: { from: (t: string) => h.makeBuilder(t) },
@@ -69,8 +77,8 @@ vi.mock('./supabase-service', () => ({
 vi.mock('./owner-resolution', () => ({ getPrimaryOwnerForLocation: ownerMock }))
 vi.mock('./notification-recipients', () => ({
   getManageableRecipients: recipientsMock,
-  isSplitNotificationsEnabled: splitMock,
 }))
+vi.mock('./project-type-handlers', () => ({ getLocationHandlers: handlersMock }))
 
 import {
   resolveLeadAssignees,
@@ -120,63 +128,70 @@ beforeEach(() => {
   ownerMock.mockResolvedValue({ id: 'owner-1', email: 'owner@bee.com', full_name: 'Owner One', phone: null } as any)
   recipientsMock.mockResolvedValue({ users: [], externals: [] })
   splitMock.mockResolvedValue(false)
+  handlersMock.mockClear()
+  handlersMock.mockResolvedValue(new Map())
 })
 
-describe('rule 1 — split OFF assigns the location owner', () => {
+describe('no handler rows → the location owner (issue 246 step 2)', () => {
   it('assigns the owner regardless of project type', async () => {
-    splitMock.mockResolvedValue(false)
+    queueVocabulary()
     const r = await resolveLeadAssignees({ locationUuid: LOC, projectType: 'Moving/Relocation' })
     expect(r.hubUserIds).toEqual(['owner-1'])
     expect(r.basis).toBe('location_owner')
     expect(r.splitEnabled).toBe(false)
   })
 
-  it('does NOT read the recipient list at all — several recipients is not several assignees', async () => {
-    splitMock.mockResolvedValue(false)
+  it('does NOT read the NOTIFICATION list at all — who is told is not who does the work', async () => {
+    // The load-bearing assertion, and the whole point of step 2. Before it,
+    // this resolver read lead_notification_prefs.category, so "three people are
+    // notified" could turn into "three people are assigned".
+    queueVocabulary()
     recipientsMock.mockResolvedValue({
       users: [user('u1', 'all'), user('u2', 'all'), user('u3', 'all')],
       externals: [external('hive@bee.com', 'all')],
     })
     const r = await resolveLeadAssignees({ locationUuid: LOC, projectType: 'Other' })
     expect(r.hubUserIds).toEqual(['owner-1'])
-    // The load-bearing assertion: the config was never consulted, so a
-    // three-recipient location cannot accidentally become three assignees.
     expect(recipientsMock).not.toHaveBeenCalled()
+  })
+
+  it('does not read a split_* flag either — there is no flag left', async () => {
+    queueVocabulary()
+    await resolveLeadAssignees({ locationUuid: LOC, projectType: 'Moving/Relocation' })
+    expect(splitMock).not.toHaveBeenCalled()
   })
 })
 
-describe('rule 2 — split ON assigns whoever claims the type', () => {
-  it('assigns the single claimant', async () => {
-    splitMock.mockResolvedValue(true)
+describe('a handler row assigns that person', () => {
+  it('assigns the handler for the type', async () => {
     queueVocabulary()
-    recipientsMock.mockResolvedValue({
-      users: [user('u1', '["Home or Office Organizing"]'), user('u2', '["Moving/Relocation"]')],
-      externals: [],
-    })
+    handlersMock.mockResolvedValue(handlers([
+      ['Home or Office Organizing', 'u1'],
+      ['Moving/Relocation', 'u2'],
+    ]))
     const r = await resolveLeadAssignees({ locationUuid: LOC, projectType: 'Moving/Relocation' })
     expect(r.hubUserIds).toEqual(['u2'])
     expect(r.basis).toBe('project_type')
     expect(ownerMock).not.toHaveBeenCalled()
   })
 
-  it('MULTI-ASSIGNS when several people claim the same type', async () => {
-    splitMock.mockResolvedValue(true)
+  it('ONE person per type — multi-assign moved to the lead, it is not inferred from config', async () => {
+    // This used to MULTI-ASSIGN whenever several people claimed a type in the
+    // notification config. A type now has exactly one handler (the table's
+    // UNIQUE). Several people can still be assigned to a LEAD via the
+    // lead_assignees junction and the masthead picker — set on the lead, which
+    // is where a fact about that lead belongs.
     queueVocabulary()
-    recipientsMock.mockResolvedValue({
-      users: [
-        user('u1', '["Moving/Relocation"]'),
-        user('u2', '["Moving/Relocation","Other"]'),
-        user('u3', '["Home or Office Organizing"]'),
-      ],
-      externals: [],
-    })
+    handlersMock.mockResolvedValue(handlers([['Moving/Relocation', 'u1']]))
     const r = await resolveLeadAssignees({ locationUuid: LOC, projectType: 'Moving/Relocation' })
-    expect(r.hubUserIds).toEqual(['u1', 'u2'])
-    expect(r.basis).toBe('project_type')
+    expect(r.hubUserIds).toEqual(['u1'])
+    expect(r.hubUserIds).toHaveLength(1)
   })
 
-  it("an 'all' recipient is NOT a claimant — cross-cutting means notified, not assigned", async () => {
-    splitMock.mockResolvedValue(true)
+  it('being NOTIFIED about everything does not make you a handler', async () => {
+    // The old asymmetry that needed a paragraph of excuse: 'all' notified you
+    // about everything but did not make you an assignee. It needs no excuse
+    // now — the notification config is not consulted.
     queueVocabulary()
     recipientsMock.mockResolvedValue({
       users: [user('u-all', 'all'), user('u-legacy', 'moving')],
@@ -187,36 +202,34 @@ describe('rule 2 — split ON assigns whoever claims the type', () => {
     expect(r.basis).toBe('location_owner')
   })
 
-  it('an UNSUBSCRIBED claimant is excluded — the owner cut them off from this flow', async () => {
-    splitMock.mockResolvedValue(true)
+  it('a handler who is NOT notified is still the handler', async () => {
+    // The inverse of the old rule, and deliberate. Unsubscribing someone used
+    // to also strip their assignments; the two are independent now, and the UI
+    // says so on the row.
     queueVocabulary()
+    handlersMock.mockResolvedValue(handlers([['Moving/Relocation', 'u1']]))
     recipientsMock.mockResolvedValue({
-      users: [user('u1', '["Moving/Relocation"]', false)],
+      users: [user('u1', 'all', false)],
       externals: [],
     })
     const r = await resolveLeadAssignees({ locationUuid: LOC, projectType: 'Moving/Relocation' })
-    expect(r.hubUserIds).toEqual(['owner-1'])
-    expect(r.basis).toBe('location_owner')
+    expect(r.hubUserIds).toEqual(['u1'])
+    expect(r.basis).toBe('project_type')
   })
 })
 
-describe('rule 3 — split ON, nobody claims the type → owner', () => {
-  it('falls back when the type is claimed by no one', async () => {
-    splitMock.mockResolvedValue(true)
+describe('a type with no handler → owner', () => {
+  it('falls back when the type has no handler', async () => {
     queueVocabulary()
-    recipientsMock.mockResolvedValue({
-      users: [user('u1', '["Home or Office Organizing"]')],
-      externals: [],
-    })
+    handlersMock.mockResolvedValue(handlers([['Home or Office Organizing', 'u1']]))
     const r = await resolveLeadAssignees({ locationUuid: LOC, projectType: 'Concierge Services' })
     expect(r.hubUserIds).toEqual(['owner-1'])
     expect(r.basis).toBe('location_owner')
   })
 
   it('falls back when the lead carries NO project type at all', async () => {
-    splitMock.mockResolvedValue(true)
     queueVocabulary()
-    recipientsMock.mockResolvedValue({ users: [user('u1', '["Other"]')], externals: [] })
+    handlersMock.mockResolvedValue(handlers([['Other', 'u1']]))
     const r = await resolveLeadAssignees({ locationUuid: LOC, projectType: null })
     expect(r.hubUserIds).toEqual(['owner-1'])
     expect(r.basis).toBe('location_owner')
@@ -225,47 +238,48 @@ describe('rule 3 — split ON, nobody claims the type → owner', () => {
   })
 })
 
-describe('rule 4 — externals are notified, never assigned', () => {
-  it('a type claimed ONLY by an external falls to the owner, and names the external', async () => {
-    splitMock.mockResolvedValue(true)
+describe('externals are notified, never assigned', () => {
+  it('an external cannot be a handler at all — the type falls to the owner', async () => {
+    // Structurally impossible since migrations/new_lead_handlers.sql: a handler
+    // row's source_user_id is NOT NULL, and an outside address has no
+    // hub_users row. externalClaimants is therefore always empty now; the
+    // field stays so the shape does not change under callers.
     queueVocabulary()
+    handlersMock.mockResolvedValue(handlers([['Home or Office Organizing', 'u1']]))
     recipientsMock.mockResolvedValue({
-      users: [user('u1', '["Home or Office Organizing"]')],
-      externals: [external('hive@beeorganized.com', '["Moving/Relocation"]')],
+      users: [user('u1', 'all')],
+      externals: [external('hive@beeorganized.com', 'all')],
     })
     const r = await resolveLeadAssignees({ locationUuid: LOC, projectType: 'Moving/Relocation' })
     expect(r.hubUserIds).toEqual(['owner-1'])
     expect(r.basis).toBe('location_owner')
-    // Recorded so "why did the owner get this?" is answerable.
-    expect(r.externalClaimants).toEqual(['hive@beeorganized.com'])
+    expect(r.externalClaimants).toEqual([])
   })
 
-  it('a hub_user claimant still wins even when an external claims the same type', async () => {
-    splitMock.mockResolvedValue(true)
+  it('a handler wins whatever the notification list says', async () => {
     queueVocabulary()
+    handlersMock.mockResolvedValue(handlers([['Moving/Relocation', 'u1']]))
     recipientsMock.mockResolvedValue({
-      users: [user('u1', '["Moving/Relocation"]')],
-      externals: [external('hive@beeorganized.com', '["Moving/Relocation"]')],
+      users: [user('u1', 'all')],
+      externals: [external('hive@beeorganized.com', 'all')],
     })
     const r = await resolveLeadAssignees({ locationUuid: LOC, projectType: 'Moving/Relocation' })
     expect(r.hubUserIds).toEqual(['u1'])
     expect(r.basis).toBe('project_type')
   })
 
-  it("a seeded external TWIN of the claimant (same email, category 'all') does not cancel their claim", async () => {
+  it('a seeded external TWIN of the handler cannot affect assignment', async () => {
     // The Zoho top-up duplicated owner emails into lead_notification_externals
-    // (39 rows in prod, seeded 2026-07-19). The twin carries 'all' and claims
-    // nothing — it must be invisible to assignment: the owner's hub_user claim
-    // stands, assigned exactly once.
-    splitMock.mockResolvedValue(true)
+    // (39 rows in prod, seeded 2026-07-19). Assignment no longer reads that
+    // table at all, so the twin is not merely collapsed — it is irrelevant.
     queueVocabulary()
+    handlersMock.mockResolvedValue(handlers([['Moving/Relocation', 'u1']]))
     recipientsMock.mockResolvedValue({
-      users: [user('u1', '["Moving/Relocation"]')],
-      externals: [external('u1@bee.com', 'all')], // same address as user('u1')
+      users: [user('u1', 'all')],
+      externals: [external('u1@bee.com', 'all')],
     })
     const r = await resolveLeadAssignees({ locationUuid: LOC, projectType: 'Moving/Relocation' })
     expect(r.hubUserIds).toEqual(['u1'])
-    expect(r.basis).toBe('project_type')
     expect(ownerMock).not.toHaveBeenCalled()
   })
 })
@@ -303,13 +317,12 @@ describe('label drift — exact-match would silently miss every claim', () => {
     expect(canonicalProjectType(null, VOCAB)).toBeNull()
   })
 
-  it("a legacy 'organizing' lead still reaches the claimant it should", async () => {
-    splitMock.mockResolvedValue(true)
+  it("a legacy 'organizing' lead still reaches the handler it should", async () => {
+    // 2 real leads carry this token, both at loc_test. It is the one place the
+    // three old matching rules visibly disagreed on live data: assign aliased
+    // it and routed, notify and send did an exact compare and did not.
     queueVocabulary()
-    recipientsMock.mockResolvedValue({
-      users: [user('u1', '["Home or Office Organizing"]')],
-      externals: [],
-    })
+    handlersMock.mockResolvedValue(handlers([['Home or Office Organizing', 'u1']]))
     const r = await resolveLeadAssignees({ locationUuid: LOC, projectType: 'organizing' })
     expect(r.hubUserIds).toEqual(['u1'])
     expect(r.basis).toBe('project_type')
@@ -317,9 +330,8 @@ describe('label drift — exact-match would silently miss every claim', () => {
   })
 
   it('unrecognized drift falls back to the owner and FLAGS itself', async () => {
-    splitMock.mockResolvedValue(true)
     queueVocabulary()
-    recipientsMock.mockResolvedValue({ users: [user('u1', '["Other"]')], externals: [] })
+    handlersMock.mockResolvedValue(handlers([['Other', 'u1']]))
     const r = await resolveLeadAssignees({ locationUuid: LOC, projectType: 'Client' })
     expect(r.hubUserIds).toEqual(['owner-1'])
     expect(r.basis).toBe('location_owner')
@@ -401,15 +413,11 @@ describe('resolveAndPersistLeadAssigneesIfEmpty (issue 150)', () => {
   const leadAssigneeUpsert = () =>
     h.state.calls.find(c => c.table === 'lead_assignees' && c.ops.some(([m]) => m === 'upsert'))
 
-  it('a fresh lead with a CLAIMED project type resolves and persists the claimant', async () => {
-    // Empty junction → resolve runs. Split ON with a specific claimant.
+  it('a fresh lead with a HANDLED project type resolves and persists the handler', async () => {
+    // Empty junction → resolve runs, and lands on the type's handler.
     h.enqueue('lead_assignees', []) // the empty-check read
-    splitMock.mockResolvedValue(true)
     queueVocabulary()
-    recipientsMock.mockResolvedValue({
-      users: [user('claimer-1', 'Moving/Relocation')],
-      externals: [],
-    })
+    handlersMock.mockResolvedValue(handlers([['Moving/Relocation', 'claimer-1']]))
     await resolveAndPersistLeadAssigneesIfEmpty({
       leadId: 'lead-1', locationUuid: LOC, projectType: 'Moving/Relocation',
     })
@@ -421,9 +429,8 @@ describe('resolveAndPersistLeadAssigneesIfEmpty (issue 150)', () => {
 
   it('an UNCLAIMED type falls back to the location owner (and persists the owner)', async () => {
     h.enqueue('lead_assignees', [])
-    splitMock.mockResolvedValue(true)
     queueVocabulary()
-    recipientsMock.mockResolvedValue({ users: [], externals: [] }) // nobody claims it
+    handlersMock.mockResolvedValue(new Map()) // nobody handles it
     await resolveAndPersistLeadAssigneesIfEmpty({
       leadId: 'lead-1', locationUuid: LOC, projectType: 'Moving/Relocation',
     })

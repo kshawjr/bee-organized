@@ -56,23 +56,35 @@ const base = {
   sender_name: 'Bee Organized Boulder',
   reply_to_email: 'reply@boulder.beeorganized.com',
 }
+// A HANDLER row (issue 246 step 2): it carries the type it handles and the
+// person who handles it, because the same row now decides the assignee too.
 const movingSender = {
+  project_type: 'Local Move',
   sender_name: 'Bree Mover',
   sender_email: 'bree@boulder.beeorganized.com',
   sender_reply_to: 'bree-reply@boulder.beeorganized.com',
+  source_user_id: 'u-bree',
 }
+const VOCAB = [
+  { label: 'Local Move', sort_order: 10, attrs: { drip_category: 'move' } },
+  { label: 'Estate Cleanout', sort_order: 20, attrs: { drip_category: 'general' } },
+]
+const BREE = [{ id: 'u-bree', is_active: true, disabled_at: null }]
 const sendArgs = { locationId: LOC_ID, to: 'sarah@email.com', subject: 'Hi', html: '<p>hi</p>', text: 'hi' }
 
-// Enqueue the base-sender lookup + (optionally) the split-enabled gate.
+// Enqueue the base-sender lookup, then the vocabulary the canonicalizer reads.
+// There is no split-enabled gate any more (issue 246 step 2) — "no handler row"
+// is the off state.
 const enqueueBase = () => h.enqueue('locations', base)
-const enqueueEnabled = (enabled: boolean) => h.enqueue('locations', { split_senders_enabled: enabled })
+const enqueueVocab = () => h.enqueue('lookups', VOCAB)
 
 beforeEach(() => { h.reset(); vi.clearAllMocks() })
 
 describe('sendEmail — per-project-type sender', () => {
-  it('enabled + type assigned → sends AS the assigned sender', async () => {
-    enqueueBase(); enqueueEnabled(true)
-    h.enqueue('location_project_type_senders', movingSender)
+  it('a handler for the type → sends AS them, with no flag involved', async () => {
+    enqueueBase(); enqueueVocab()
+    h.enqueue('location_project_type_senders', [movingSender])
+    h.enqueue('hub_users', BREE)
 
     const res = await sendEmail({ ...sendArgs, senderProjectType: 'Local Move' })
 
@@ -83,9 +95,10 @@ describe('sendEmail — per-project-type sender', () => {
     })
   })
 
-  it('assigned sender with null reply-to → reply-to falls back to base', async () => {
-    enqueueBase(); enqueueEnabled(true)
-    h.enqueue('location_project_type_senders', { ...movingSender, sender_reply_to: null })
+  it('handler with null reply-to → reply-to falls back to base', async () => {
+    enqueueBase(); enqueueVocab()
+    h.enqueue('location_project_type_senders', [{ ...movingSender, sender_reply_to: null }])
+    h.enqueue('hub_users', BREE)
 
     await sendEmail({ ...sendArgs, senderProjectType: 'Local Move' })
 
@@ -95,9 +108,9 @@ describe('sendEmail — per-project-type sender', () => {
     })
   })
 
-  it('enabled + type UNASSIGNED → base sender, still sends', async () => {
-    enqueueBase(); enqueueEnabled(true)
-    h.enqueue('location_project_type_senders', null) // no row for this type
+  it('no handler for the type → base sender, still sends', async () => {
+    enqueueBase(); enqueueVocab()
+    h.enqueue('location_project_type_senders', []) // no handler rows
 
     const res = await sendEmail({ ...sendArgs, senderProjectType: 'Estate Cleanout' })
 
@@ -107,30 +120,47 @@ describe('sendEmail — per-project-type sender', () => {
     })
   })
 
-  it('split DISABLED → base sender, assignments table NOT queried', async () => {
-    enqueueBase(); enqueueEnabled(false)
+  it('a DISABLED handler → base sender, never sends as an offboarded person', async () => {
+    enqueueBase(); enqueueVocab()
+    h.enqueue('location_project_type_senders', [movingSender])
+    h.enqueue('hub_users', [{ id: 'u-bree', is_active: true, disabled_at: '2026-08-01T00:00:00Z' }])
 
     await sendEmail({ ...sendArgs, senderProjectType: 'Local Move' })
 
-    expect(h.callsFor('location_project_type_senders')).toHaveLength(0)
     expect(sendSpy.mock.calls[0][0]).toMatchObject({
       from: `${base.sender_name} <${base.send_from_email}>`,
     })
   })
 
-  it('migration not run — split_senders_enabled column errors → base sender, never drops', async () => {
-    enqueueBase()
-    h.enqueue('locations', null, { message: 'column locations.split_senders_enabled does not exist' })
+  it('a project type that canonicalizes to NOTHING → base sender', async () => {
+    // 'Client' — 53 real leads carry it; it is not a project type at all.
+    enqueueBase(); enqueueVocab()
 
-    const res = await sendEmail({ ...sendArgs, senderProjectType: 'Local Move' })
+    const res = await sendEmail({ ...sendArgs, senderProjectType: 'Client' })
 
     expect(res).toEqual({ success: true, id: 're-1' })
     expect(h.callsFor('location_project_type_senders')).toHaveLength(0)
     expect(sendSpy.mock.calls[0][0]).toMatchObject({ from: `${base.sender_name} <${base.send_from_email}>` })
   })
 
+  it('a CASE-VARIANT project type still finds the handler — one matching rule', async () => {
+    // The send path used to do .eq('project_type', raw): exact and
+    // case-sensitive, while assignment canonicalized. Same table, same
+    // question, two answers — so a lead could be assigned to Bree and still
+    // send as the location default.
+    enqueueBase(); enqueueVocab()
+    h.enqueue('location_project_type_senders', [movingSender])
+    h.enqueue('hub_users', BREE)
+
+    await sendEmail({ ...sendArgs, senderProjectType: '  local MOVE ' })
+
+    expect(sendSpy.mock.calls[0][0]).toMatchObject({
+      from: 'Bree Mover <bree@boulder.beeorganized.com>',
+    })
+  })
+
   it('migration not run — assignments table errors → base sender, never drops', async () => {
-    enqueueBase(); enqueueEnabled(true)
+    enqueueBase(); enqueueVocab()
     h.enqueue('location_project_type_senders', null, { message: 'relation "location_project_type_senders" does not exist' })
 
     const res = await sendEmail({ ...sendArgs, senderProjectType: 'Local Move' })
@@ -139,15 +169,22 @@ describe('sendEmail — per-project-type sender', () => {
     expect(sendSpy.mock.calls[0][0]).toMatchObject({ from: `${base.sender_name} <${base.send_from_email}>` })
   })
 
-  it('one person assigned MULTIPLE types → every type routes to them', async () => {
+  it('one person handling MULTIPLE types → every type routes to them', async () => {
+    // Lynette's real shape at loc_kc: three of the four types.
+    const both = [
+      movingSender,
+      { ...movingSender, project_type: 'Estate Cleanout' },
+    ]
     // Type A
-    enqueueBase(); enqueueEnabled(true)
-    h.enqueue('location_project_type_senders', movingSender)
+    enqueueBase(); enqueueVocab()
+    h.enqueue('location_project_type_senders', both)
+    h.enqueue('hub_users', BREE)
     await sendEmail({ ...sendArgs, senderProjectType: 'Local Move' })
-    // Type B → same sender row
-    enqueueBase(); enqueueEnabled(true)
-    h.enqueue('location_project_type_senders', movingSender)
-    await sendEmail({ ...sendArgs, senderProjectType: 'Long-Distance Move' })
+    // Type B → same person, second handler row
+    enqueueBase(); enqueueVocab()
+    h.enqueue('location_project_type_senders', both)
+    h.enqueue('hub_users', BREE)
+    await sendEmail({ ...sendArgs, senderProjectType: 'Estate Cleanout' })
 
     expect(sendSpy).toHaveBeenCalledTimes(2)
     for (const call of sendSpy.mock.calls) {

@@ -340,10 +340,13 @@ describe('UI — placement in the owner+super_admin-only Communication tab', () 
   // top-level declaration after this component. A missing marker makes slice
   // return '' and every assertion below fails loudly — which is how this
   // re-anchor got caught, so leave that behaviour alone.
-  const comp = slice(beehub, 'function NewLeadNotifications(', 'function fmtCents(')
+  // issue 246 step 2 — NewLeadNotifications and TeamRouting were replaced by a
+  // single NewLeadsSection: two independent lists (who HANDLES a job type, who
+  // is TOLD about a lead) where there used to be one fused `category` field.
+  const comp = slice(beehub, 'export function NewLeadsSection(', 'function fmtCents(')
 
   it('renders in the Communication tab, wired to the real location UUID', () => {
-    expect(beehub).toContain('<NewLeadNotifications realLocId={realLocId}')
+    expect(beehub).toContain('<NewLeadsSection realLocId={realLocId}')
   })
   it('lives under the composed "Who hears about new leads" tier alongside the sending-identity hero', () => {
     // The unified new-lead emails block moved out of My Location into the
@@ -372,24 +375,32 @@ describe('UI — placement in the owner+super_admin-only Communication tab', () 
     expect(beehub).not.toContain('function LeadNotifCategorySelect(')
   })
   it('readOnly hides every editable control', () => {
-    expect(comp).toContain('function NewLeadNotifications({ realLocId, readOnly')
-    // subscribe/remove + add form are all behind !readOnly / readOnly ?
+    expect(comp).toContain('export function NewLeadsSection({ realLocId, readOnly')
     expect(comp).toContain('readOnly ?')
     expect(comp).toContain('{!readOnly && (adding')
   })
-  it('the basic recipient list + subscribe/remove works with the toggle OFF', () => {
-    // Team subscribe/remove and the outside-email add are NOT gated on advanced.
-    expect(comp).toContain('patchUser(u.hub_user_id, { subscribed: !u.subscribed })')
+  it('the recipient list carries subscribe + the outside-email add', () => {
+    expect(comp).toContain('toggleUser(u)')
     expect(comp).toContain('+ Add outside email')
     expect(comp).toContain('LEAD_NOTIF_EMAIL_RE.test(email)')
   })
-  it('the per-part advanced toggle persists split_enabled', () => {
-    expect(comp).toContain('Notify different people by project type')
-    expect(comp).toContain("JSON.stringify({ split_enabled: on })")
+  it('there is NO advanced toggle — the split flag is retired', () => {
+    // Both of these strings were the toggle that fused "who is told" to job
+    // types. Behaviour is mount-pinned in lib/beta-new-leads-246b.test.tsx.
+    expect(comp).not.toContain('Notify different people by project type')
+    expect(comp).not.toContain('split_enabled')
   })
-  it('advanced shows per-recipient project-type pills + the everything-else row', () => {
-    expect(comp).toContain('RecipientTypePicker')
-    expect(comp).toContain('Everything else → whole team')
+  it('who is told is a plain switch — no per-recipient project-type pills', () => {
+    expect(comp).not.toContain('RecipientTypePicker')
+    expect(comp).not.toContain('Everything else → whole team')
+    // …and the switch writes `subscribed`, not a category.
+    expect(comp).toContain('subscribed: next')
+  })
+  it('muting an outside address PATCHes rather than deleting it', () => {
+    // The whole point of lead_notification_externals.subscribed: a DELETE
+    // loses the record and the nightly Zoho top-up re-adds the address.
+    expect(comp).toContain('toggleExternal')
+    expect(comp).toContain("method:'PATCH'")
   })
 })
 

@@ -18014,85 +18014,20 @@ function ProjectTypeSenders({ realLocId, readOnly=false, embedded=false }) {
 // is rejected even on a direct hit). readOnly hides all controls.
 const LEAD_NOTIF_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-// JS mirror of parseCategory/serializeCategory/selectedTypes (kept inline so
-// the component is self-contained; the TS lib is the send-side source of truth).
-function parseCatJS(raw) {
-  if (raw == null) return { all:true, types:[] }
-  const s = String(raw).trim()
-  if (s === '' || s === 'all') return { all:true, types:[] }
-  if (s === 'moving') return { all:false, types:[], legacy:'moving' }
-  if (s === 'organizing') return { all:false, types:[], legacy:'organizing' }
-  if (s.startsWith('[')) {
-    try { const a = JSON.parse(s); if (Array.isArray(a)) return { all:false, types:a.filter(x=>typeof x==='string') } } catch {}
-  }
-  const t = s.split(',').map(x=>x.trim()).filter(Boolean)
-  return t.length ? { all:false, types:t } : { all:true, types:[] }
-}
-function serializeCatJS(all, types) {
-  if (all) return 'all'
-  const t = Array.from(new Set((types||[]).map(x=>x.trim()).filter(Boolean))).sort()
-  return t.length ? JSON.stringify(t) : 'all'
-}
-function catSummaryJS(raw) {
-  const p = parseCatJS(raw)
-  if (p.all) return 'All leads'
-  if (p.legacy) return p.legacy === 'moving' ? 'Moving leads' : 'Organizing leads'
-  return p.types.length ? `${p.types.length} project type${p.types.length!==1?'s':''}` : 'All leads'
-}
-
-// A single tappable project-type pill (assigned = filled teal, unassigned =
-// greyed). Shared by team + external rows. Tight: 11px / 3px 9px / radius 20.
-function TypePill({ label, on, disabled, muted, onClick }) {
-  return (
-    <span
-      onClick={disabled ? undefined : onClick}
-      title={label}
-      style={{
-        fontSize:'11px', padding:'3px 9px', borderRadius:'8px', fontWeight:600,
-        cursor: disabled ? 'default' : 'pointer',
-        border:'1px solid',
-        borderColor: on ? 'rgba(168,201,196,0.9)' : 'rgba(0,0,0,0.10)',
-        background: on ? 'rgba(168,201,196,0.20)' : (muted ? 'rgba(0,0,0,0.04)' : 'transparent'),
-        color: on ? '#3a5e58' : '#a2b0ad',
-        whiteSpace:'nowrap',
-      }}>
-      {on ? '✓ ' : ''}{label}
-    </span>
-  )
-}
-
-// The per-recipient project-type picker shown when Advanced is ON: an "All
-// leads" pill + one pill per master project type. "All leads" and specific
-// types are mutually exclusive (one-per-recipient bucket). Tapping a type while
-// in All mode switches to specific-with-just-that-type.
-function RecipientTypePicker({ category, projectTypes, readOnly, onChange }) {
-  const p = parseCatJS(category)
-  const legacyNote = p.legacy ? (p.legacy === 'moving' ? 'Moving leads (legacy)' : 'Organizing leads (legacy)') : null
-  function toggleType(t) {
-    if (readOnly) return
-    const cur = p.all ? [] : p.types.slice()
-    const next = cur.includes(t) ? cur.filter(x=>x!==t) : [...cur, t]
-    onChange(serializeCatJS(next.length===0, next))
-  }
-  return (
-    <div style={{ marginTop:'7px', paddingTop:'7px', borderTop:'1px dashed rgba(0,0,0,0.07)' }}>
-      <div style={{ display:'flex', flexWrap:'wrap', gap:'5px', alignItems:'center' }}>
-        <span
-          onClick={readOnly ? undefined : ()=>onChange('all')}
-          style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'8px', fontWeight:600, cursor: readOnly?'default':'pointer', border:'1px solid', borderColor: p.all ? '#a8c9c4' : 'rgba(0,0,0,0.10)', background: p.all ? 'rgba(168,201,196,0.28)' : 'transparent', color: p.all ? '#2f5049' : '#8a9e9a', whiteSpace:'nowrap' }}>
-          {p.all ? '✓ ' : ''}All leads
-        </span>
-        <span style={{ width:'1px', height:'16px', background:'rgba(0,0,0,0.08)', margin:'0 2px' }} />
-        {projectTypes.length === 0 ? (
-          <span style={{ fontSize:'11px', color:'#b0c0bc' }}>No project types configured.</span>
-        ) : projectTypes.map(t => (
-          <TypePill key={t} label={t} on={!p.all && p.types.includes(t)} disabled={readOnly} onClick={()=>toggleType(t)} />
-        ))}
-      </div>
-      {legacyNote && <p style={{ fontSize:'10px', color:'#b07d3a', marginTop:'5px' }}>Currently: {legacyNote} — pick specific types or All leads to update.</p>}
-    </div>
-  )
-}
+// ── RETIRED IN ISSUE 246 STEP 2 ─────────────────────────────────────────────
+// parseCatJS / serializeCatJS / catSummaryJS / TypePill / RecipientTypePicker.
+//
+// All five existed to let an owner tap project-type pills onto a NOTIFICATION
+// recipient — the fused model where `category` decided both who heard about a
+// lead and who was assigned it. Step 2 splits those apart: job types are set on
+// the handler list, and "who is told" is a plain on/off switch, so there is no
+// per-recipient type picker left to render.
+//
+// DELETED rather than left in place unused. Nothing referenced them after
+// NewLeadsSection replaced TeamRouting and NewLeadNotifications, and this file
+// has already paid for that mistake once — 240 step 4 left TemplatePreviewModal's
+// Preview buttons wired to a mount it had removed, dead for seven commits with
+// no lint or type error to show it.
 
 // ─── issue 240 step 5 — job-type routing table ───
 //
@@ -19147,474 +19082,384 @@ export function MailchimpNotConnected() {
   )
 }
 
-export function TeamRouting({ realLocId, readOnly = false }) {
-  const [types, setTypes] = React.useState(null)      // [{label, dripCategory}]
-  const [senders, setSenders] = React.useState(null)
-  const [notif, setNotif] = React.useState(null)
+// ─── New leads (issue 246 step 2) ─────────────────────────────────────────────
+//
+// Replaces TeamRouting + NewLeadNotifications, which 246 step 1 rehoused here
+// from the old "Your team" tab. Those two rendered ONE fused idea across two
+// cards: a recipient's `category` decided both which leads they heard about and
+// which leads they were assigned, and two per-location split_* flags gated the
+// whole thing. This section is the un-fusing, and it is deliberately two lists:
+//
+//   WHO HANDLES WHAT — one person per job type, single-select. Their name goes
+//     on that type's client emails AND a new lead of that type is assigned to
+//     them. Writes location_project_type_senders. Nothing set → the owner.
+//
+//   WHO IS TOLD — per person, on/off, nothing to do with job types. Writes
+//     lead_notification_prefs.subscribed for team members and
+//     lead_notification_externals.subscribed for outside addresses.
+//
+// NO MASTER TOGGLE. Both split_* flags are retired: "no handler row" is the off
+// state and it says so per type, which is both simpler and truthful — the old
+// flags let a location hold handler rows that silently did nothing.
+export function NewLeadsSection({ realLocId, readOnly = false }) {
+  const [handlers, setHandlers] = React.useState(null)   // sender/handler config
+  const [notif, setNotif] = React.useState(null)         // recipients config
   const [busy, setBusy] = React.useState(null)
   const [err, setErr] = React.useState('')
+  const [adding, setAdding] = React.useState(false)
+  const [form, setForm] = React.useState({ first_name:'', last_name:'', email:'', phone:'' })
+  const [formErr, setFormErr] = React.useState('')
+  const [addBusy, setAddBusy] = React.useState(false)
 
   const load = React.useCallback(async () => {
     if (!realLocId) return
     try {
-      const [lkRes, sRes, nRes] = await Promise.all([
-        fetch('/api/lookups?category=project_types'),
-        fetch(`/api/locations/${realLocId}/project-type-senders`),
-        fetch(`/api/locations/${realLocId}/notification-recipients`),
+      const [hRes, nRes] = await Promise.all([
+        fetch(`/api/locations/${realLocId}/project-type-senders`, { credentials:'include' }),
+        fetch(`/api/locations/${realLocId}/notification-recipients`, { credentials:'include' }),
       ])
-      const lk = lkRes.ok ? await lkRes.json() : { lookups: [] }
-      setTypes((lk.lookups || []).map(r => ({
-        label: r.label,
-        dripCategory: r?.attrs?.drip_category === 'move' ? 'move' : 'general',
-      })))
-      if (sRes.ok) setSenders(await sRes.json())
+      if (hRes.ok) setHandlers(await hRes.json())
       if (nRes.ok) setNotif(await nRes.json())
+      if (!hRes.ok || !nRes.ok) setErr('Could not load your new-lead settings.')
+      else setErr('')
     } catch {
-      setErr('Could not load your routing settings.')
+      setErr('Could not load your new-lead settings.')
     }
   }, [realLocId])
   React.useEffect(() => { load() }, [load])
 
-  if (!realLocId || !types || !senders || !notif) return null
+  if (!realLocId) {
+    return (
+      <div style={{ margin:'0 12px', borderRadius:'12px', border:'1px solid rgba(0,0,0,0.09)', background:'white', padding:'12px 14px' }}>
+        <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>New-lead settings become available once your location is saved.</p>
+      </div>
+    )
+  }
+  if (!handlers || !notif) {
+    return (
+      <div style={{ margin:'0 12px', borderRadius:'12px', border:'1px solid rgba(0,0,0,0.09)', background:'white', padding:'14px' }}>
+        <p style={{ fontSize:'12px', color:'#8a9e9a' }}>{err || 'Loading…'}</p>
+      </div>
+    )
+  }
 
-  const people = senders.people || []
+  const people = handlers.people || []
+  const assignments = handlers.assignments || []
+  const groups = handlers.project_type_groups || []
   const users = notif.users || []
   const externals = notif.externals || []
-  const sendersOn = senders.enabled === true
-  const notifyOn = notif.split_enabled === true
 
-  // Does this recipient's stored category cover this type? 'all' covers
-  // everything; the legacy moving/organizing values map through the parent.
-  const covers = (raw, t) => {
-    const p = parseCatJS(raw)
-    if (p.all) return true
-    if (p.legacy) return (p.legacy === 'moving') === (t.dripCategory === 'move')
-    return p.types.includes(t.label)
-  }
-  const claimsSpecifically = (raw, t) => {
-    const p = parseCatJS(raw)
-    return !p.all && !p.legacy && p.types.includes(t.label)
-  }
+  // (location, project_type) → the person handling it. Keyed lowercased: the
+  // server canonicalizes labels on write and the DB's case-insensitive unique
+  // index guarantees at most one row per type, so this cannot be ambiguous.
+  const handlerFor = label =>
+    assignments.find(a => (a.project_type || '').trim().toLowerCase() === label.trim().toLowerCase()) || null
 
-  const senderFor = t => (senders.assignments || []).find(a => a.project_type === t.label) || null
-  // The dropdown shows the first team member with a SPECIFIC claim. Anyone
-  // else notified — extra claimants, 'all' subscribers, externals — is
-  // counted in the line underneath instead of vanishing.
-  const notifyFor = t => users.find(u => u.subscribed && claimsSpecifically(u.category, t)) || null
-  const alsoTold = (t, chosen) => {
-    const others = users.filter(u => u.subscribed && covers(u.category, t) && u.hub_user_id !== (chosen?.hub_user_id))
-    const ext = externals.filter(e => covers(e.category, t))
-    return others.length + ext.length
-  }
+  // Which types does this person handle? Drives the "Handles …" line in WHO IS
+  // TOLD — an owner switching off someone who handles Moving should be able to
+  // see that before they do it, not discover it afterwards.
+  const typesHandledBy = hubUserId =>
+    assignments.filter(a => a.source_user_id === hubUserId).map(a => a.project_type)
 
-  async function pickSender(t, personId) {
-    setBusy(`s:${t.label}`); setErr('')
+  async function pickHandler(label, personId) {
+    setBusy(`h:${label}`); setErr('')
     try {
       const url = `/api/locations/${realLocId}/project-type-senders`
       const res = personId
-        ? await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify((() => {
-              const p = people.find(x => x.id === personId)
-              return { sender_name: p.name, sender_email: p.email, source_user_id: p.id, project_types: [t.label] }
-            })()) })
-        : await fetch(url, { method:'DELETE', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ project_types: [t.label] }) })
+        ? await (async () => {
+            const p = people.find(x => x.id === personId)
+            return fetch(url, {
+              method:'POST', credentials:'include', headers:{ 'Content-Type':'application/json' },
+              body: JSON.stringify({
+                sender_name: p.name, sender_email: p.email,
+                source_user_id: p.id, project_types: [label],
+              }),
+            })
+          })()
+        : await fetch(url, {
+            method:'DELETE', credentials:'include', headers:{ 'Content-Type':'application/json' },
+            body: JSON.stringify({ project_types: [label] }),
+          })
       if (!res.ok) throw new Error()
       await load()
     } catch { setErr('That did not save. Try again.') } finally { setBusy(null) }
   }
 
-  async function pickNotify(t, hubUserId) {
-    setBusy(`n:${t.label}`); setErr('')
+  async function toggleUser(u) {
+    setBusy(`u:${u.hub_user_id}`); setErr('')
+    const next = !u.subscribed
+    setNotif(n => ({ ...n, users: n.users.map(x => x.hub_user_id===u.hub_user_id ? { ...x, subscribed: next } : x) }))
     try {
-      const url = `/api/locations/${realLocId}/notification-recipients`
-      const current = notifyFor(t)
-      // Clearing: drop the type from whoever specifically holds it. Setting:
-      // add it to the chosen person. Never touches anyone else's set.
-      const edit = async (u, next) => {
-        const res = await fetch(url, { method:'PATCH', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ hub_user_id: u.hub_user_id, category: next }) })
-        if (!res.ok) throw new Error()
-      }
-      if (!hubUserId) {
-        if (current) {
-          const p = parseCatJS(current.category)
-          await edit(current, serializeCatJS(false, p.types.filter(x => x !== t.label)))
-        }
-      } else {
-        const u = users.find(x => x.hub_user_id === hubUserId)
-        const p = parseCatJS(u.category)
-        // A person on 'all' already hears everything; narrowing them to this
-        // one type would SILENTLY stop their other leads, so leave them be.
-        if (!p.all) await edit(u, serializeCatJS(false, [...p.types, t.label]))
-      }
-      await load()
-    } catch { setErr('That did not save. Try again.') } finally { setBusy(null) }
+      const res = await fetch(`/api/locations/${realLocId}/notification-recipients`, {
+        method:'PATCH', credentials:'include', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ hub_user_id: u.hub_user_id, subscribed: next }),
+      })
+      if (!res.ok) throw new Error()
+    } catch { setErr('That did not save. Try again.'); await load() } finally { setBusy(null) }
   }
 
-  const PARENTS = [
-    { key:'general', label:'Organizing' },
-    { key:'move',    label:'Moving' },
-  ]
-  // Capped, not stretched (issue 240 step 4's CONTROL_W). Two of these sit
-  // side by side per row; left to flex they would each take half the page.
+  // MUTE, NOT DELETE. Before lead_notification_externals.subscribed existed the
+  // only way to stop an outside address was to remove the row — which lost the
+  // record AND let the nightly Zoho recipient top-up add the address straight
+  // back the next morning. Removing is still offered, separately, for an
+  // address that genuinely does not belong on the list.
+  async function toggleExternal(e) {
+    setBusy(`e:${e.id}`); setErr('')
+    const next = !e.subscribed
+    setNotif(n => ({ ...n, externals: n.externals.map(x => x.id===e.id ? { ...x, subscribed: next } : x) }))
+    try {
+      const res = await fetch(`/api/locations/${realLocId}/notification-recipients/externals/${e.id}`, {
+        method:'PATCH', credentials:'include', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ subscribed: next }),
+      })
+      if (!res.ok) throw new Error()
+    } catch { setErr('That did not save. Try again.'); await load() } finally { setBusy(null) }
+  }
+
+  async function removeExternal(id) {
+    setBusy(`e:${id}`); setErr('')
+    setNotif(n => ({ ...n, externals: n.externals.filter(x => x.id !== id) }))
+    try {
+      const res = await fetch(`/api/locations/${realLocId}/notification-recipients/externals/${id}`, {
+        method:'DELETE', credentials:'include',
+      })
+      if (!res.ok) throw new Error()
+    } catch { setErr('That did not save. Try again.'); await load() } finally { setBusy(null) }
+  }
+
+  async function addExternal() {
+    const email = form.email.trim()
+    if (!LEAD_NOTIF_EMAIL_RE.test(email)) { setFormErr('Enter a valid email address.'); return }
+    setFormErr(''); setAddBusy(true)
+    try {
+      const res = await fetch(`/api/locations/${realLocId}/notification-recipients`, {
+        method:'POST', credentials:'include', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({
+          first_name: form.first_name.trim() || null,
+          last_name: form.last_name.trim() || null,
+          email, phone: form.phone.trim() || null,
+        }),
+      })
+      if (!res.ok) { setFormErr('Could not add that address.'); return }
+      setForm({ first_name:'', last_name:'', email:'', phone:'' })
+      setAdding(false)
+      await load()
+    } finally { setAddBusy(false) }
+  }
+
+  // Capped and left, never stretched (CONTROL_W, issue 240 step 4).
   const sel = {
-    width:'100%', maxWidth:CONTROL_W.select, minWidth:'150px',
+    width:'100%', maxWidth:CONTROL_W.select, minWidth:'160px',
     padding:'8px 10px', borderRadius:'8px', border:'1.5px solid rgba(0,0,0,0.1)',
     background:'#f7f5f0', color:'#1a2e2b', fontFamily:'inherit', fontSize:'13px',
     fontWeight:600, cursor:'pointer',
   }
+  const fieldStyle = {
+    width:'100%', maxWidth:CONTROL_W.field, padding:'9px 12px',
+    border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px',
+    fontFamily:'inherit', color:'#1a2e2b', outline:'none',
+  }
+  const PARENTS = [
+    { key:'general', label:'Organizing' },
+    { key:'move',    label:'Moving' },
+  ]
 
-  return (
-    <div style={{ margin:'0 12px' }}>
-      {err && <p style={{ fontSize:'12px', color:'#c96a6a', margin:'0 0 8px' }}>{err}</p>}
-      {PARENTS.map(parent => {
-        const rows = types.filter(t => t.dripCategory === parent.key)
-        if (!rows.length) return null
-        return (
-          <div key={parent.key} style={{ marginBottom:'14px' }}>
-            <p style={{ fontSize:'11px', fontWeight:700, color:'#6b7c79', textTransform:'uppercase', letterSpacing:'0.6px', margin:'0 0 6px 2px' }}>{parent.label}</p>
-            <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(26,46,43,0.07)' }}>
-              {rows.map((t, i) => {
-                const assigned = senderFor(t)
-                const chosen = notifyFor(t)
-                const n = alsoTold(t, chosen)
-                return (
-                  <div key={t.label} style={{ background:'white', padding:'13px 14px', borderTop: i ? '0.5px solid rgba(26,46,43,0.07)' : 'none', display:'flex', flexWrap:'wrap', alignItems:'flex-start', gap:'12px' }}>
-                    <div style={{ flex:'1 1 180px', minWidth:0 }}>
-                      <p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b' }}>{t.label}</p>
-                      <p style={{ fontSize:'11px', color:'#b0c0bc' }}>on your website form</p>
-                    </div>
-
-                    <div style={{ flex:'0 1 auto' }}>
-                      <label style={{ display:'block', fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Emails come from</label>
-                      <select
-                        value={assigned?.source_user_id || ''}
-                        disabled={readOnly || !sendersOn || busy===`s:${t.label}`}
-                        onChange={e => pickSender(t, e.target.value)}
-                        style={sel}>
-                        <option value="">{sendersOn ? 'Your location default' : 'Your location default (per-type is off)'}</option>
-                        {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                      </select>
-                      {assigned?.domain_warning && (
-                        <p style={{ fontSize:'10px', color:'#b45309', marginTop:'3px', maxWidth:CONTROL_W.select }}>This address is on a different domain to your sending address, so it may not deliver.</p>
-                      )}
-                    </div>
-
-                    <div style={{ flex:'0 1 auto' }}>
-                      <label style={{ display:'block', fontSize:'10px', fontWeight:700, color:'#8a9e9a', textTransform:'uppercase', letterSpacing:'0.4px', marginBottom:'4px' }}>Lead goes to</label>
-                      <select
-                        value={chosen?.hub_user_id || ''}
-                        disabled={readOnly || !notifyOn || busy===`n:${t.label}`}
-                        onChange={e => pickNotify(t, e.target.value)}
-                        style={sel}>
-                        <option value="">{notifyOn ? 'Everyone on the team' : 'Everyone on the team (per-type is off)'}</option>
-                        {users.filter(u => u.subscribed).map(u => <option key={u.hub_user_id} value={u.hub_user_id}>{u.name}</option>)}
-                      </select>
-                      {n > 0 && (
-                        <p style={{ fontSize:'10px', color:'#8a9e9a', marginTop:'3px', maxWidth:CONTROL_W.select }}>
-                          also told: {n} other{n===1?'':'s'}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )
-      })}
-      {(!sendersOn || !notifyOn) && (
-        <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, margin:'0 0 4px 2px' }}>
-          {!sendersOn && !notifyOn
-            ? 'Both are off, so every email comes from your location address and everyone subscribed hears about every lead.'
-            : !sendersOn
-              ? 'Per-type senders are off, so every email comes from your location address.'
-              : 'Per-type notifications are off, so everyone subscribed hears about every lead.'}
-          {' '}Turn them on in the cards below — each switch changes every job type at once.
-        </p>
-      )}
-    </div>
+  const Switch = ({ on, onClick, disabled, label }) => (
+    <button
+      type="button" role="switch" aria-checked={on} aria-label={label}
+      disabled={disabled} onClick={onClick}
+      style={{ flexShrink:0, width:'34px', height:'19px', borderRadius:'20px', border:'none',
+               cursor: disabled ? 'default' : 'pointer', position:'relative',
+               background: on ? '#a8c9c4' : 'rgba(0,0,0,0.15)',
+               transition:'background 0.15s', opacity: disabled ? 0.5 : 1 }}>
+      <span style={{ position:'absolute', top:'2px', left: on ? '17px' : '2px', width:'15px', height:'15px',
+                     borderRadius:'50%', background:'white', transition:'left 0.15s',
+                     boxShadow:'0 1px 2px rgba(0,0,0,0.2)' }} />
+    </button>
   )
-}
-
-export function NewLeadNotifications({ realLocId, readOnly=false }) {
-  const [users, setUsers] = useState([])
-  const [externals, setExternals] = useState([])
-  const [projectTypes, setProjectTypes] = useState([])
-  const [splitEnabled, setSplitEnabled] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [adding, setAdding] = useState(false)
-  const [form, setForm] = useState({ first_name:'', last_name:'', email:'', phone:'' })
-  const [formErr, setFormErr] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  const base = realLocId ? `/api/locations/${realLocId}/notification-recipients` : null
-  const advanced = splitEnabled
-
-  async function load() {
-    if (!base) { setLoading(false); return }
-    setLoading(true); setError(null)
-    try {
-      const r = await fetch(base, { credentials:'include' })
-      if (!r.ok) throw new Error('load_failed')
-      const data = await r.json()
-      setUsers(data.users || [])
-      setExternals(data.externals || [])
-      setProjectTypes(data.project_types || [])
-      setSplitEnabled(!!data.split_enabled)
-    } catch {
-      setError('Could not load recipients.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { load() /* eslint-disable-next-line */ }, [realLocId])
-
-  async function setAdvanced(on) {
-    if (!base) return
-    setSplitEnabled(on) // optimistic
-    const r = await fetch(base, {
-      method:'PATCH', credentials:'include', headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ split_enabled: on }),
-    })
-    if (!r.ok) load()
-  }
-
-  async function patchUser(hubUserId, patch) {
-    if (!base) return
-    setUsers(prev => prev.map(u => u.hub_user_id===hubUserId ? { ...u, ...patch } : u))
-    const r = await fetch(base, {
-      method:'PATCH', credentials:'include',
-      headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ hub_user_id: hubUserId, ...patch }),
-    })
-    if (!r.ok) load()
-  }
-
-  async function addExternal() {
-    if (!base) return
-    const email = form.email.trim()
-    if (!LEAD_NOTIF_EMAIL_RE.test(email)) { setFormErr('Enter a valid email address.'); return }
-    setFormErr(''); setBusy(true)
-    try {
-      const r = await fetch(base, {
-        method:'POST', credentials:'include',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({
-          first_name: form.first_name.trim() || null,
-          last_name: form.last_name.trim() || null,
-          email,
-          phone: form.phone.trim() || null,
-          category: 'all',
-        }),
-      })
-      if (!r.ok) { setFormErr('Could not add recipient.'); return }
-      const { external } = await r.json()
-      setExternals(prev => [...prev, {
-        type:'external', id: external.id,
-        first_name: external.first_name, last_name: external.last_name,
-        name: [external.first_name, external.last_name].filter(Boolean).join(' ') || external.email,
-        email: external.email, phone: external.phone, category: external.category,
-      }])
-      setForm({ first_name:'', last_name:'', email:'', phone:'' })
-      setAdding(false)
-    } finally { setBusy(false) }
-  }
-
-  async function patchExternal(id, patch) {
-    if (!base) return
-    setExternals(prev => prev.map(e => e.id===id ? { ...e, ...patch } : e))
-    const r = await fetch(`${base}/externals/${id}`, {
-      method:'PATCH', credentials:'include',
-      headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify(patch),
-    })
-    if (!r.ok) load()
-  }
-
-  async function removeExternal(id) {
-    if (!base) return
-    setExternals(prev => prev.filter(e => e.id !== id))
-    const r = await fetch(`${base}/externals/${id}`, { method:'DELETE', credentials:'include' })
-    if (!r.ok) load()
-  }
-
-  if (!realLocId) {
-    return (
-      <div style={{ margin:'0 12px', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.09)', background:'white', padding:'12px 14px' }}>
-        <p style={{ fontSize:'12px', color:'#8a9e9a', lineHeight:1.5 }}>Recipients become available once your location is saved.</p>
-      </div>
-    )
-  }
-
-  const subCount = users.filter(u => u.subscribed).length + externals.length
-  // Types no recipient SPECIFICALLY claims → "Everything else → whole team".
-  const claimed = new Set()
-  for (const u of users) { if (u.subscribed) { const p = parseCatJS(u.category); if (!p.all) p.types.forEach(t=>claimed.add(t)) } }
-  for (const e of externals) { const p = parseCatJS(e.category); if (!p.all) p.types.forEach(t=>claimed.add(t)) }
-  const leftoverTypes = projectTypes.filter(t => !claimed.has(t))
-  const subscribedUsers = users.filter(u => u.subscribed)
 
   return (
-    <div style={{ margin:'0 12px', borderRadius:'10px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.09)', background:'white' }}>
+    <div>
+      {err && <p style={{ fontSize:'12px', color:'#c96a6a', margin:'0 12px 8px' }}>{err}</p>}
 
-      {/* Advanced toggle (project-type routing) */}
-      <div style={{ background:'white', padding:'10px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
-        <div style={{ flex:1, minWidth:0 }}>
-          <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b' }}>Notify different people by project type</p>
-          <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>
-            {advanced ? 'Assign project types to specific people; unassigned types notify the whole team and are assigned to the location owner.' : 'Off — everyone below is notified for every new lead.'}
-          </p>
-        </div>
-        <button
-          disabled={readOnly || loading || projectTypes.length===0}
-          onClick={()=>setAdvanced(!advanced)}
-          role="switch" aria-checked={advanced}
-          title={projectTypes.length===0 ? 'No project types configured yet' : undefined}
-          style={{ flexShrink:0, width:'34px', height:'19px', borderRadius:'20px', border:'none', cursor:(readOnly||projectTypes.length===0)?'default':'pointer', background: advanced ? '#a8c9c4' : 'rgba(0,0,0,0.15)', position:'relative', transition:'background 0.15s', opacity:(readOnly||projectTypes.length===0)?0.5:1 }}>
-          <span style={{ position:'absolute', top:'2px', left: advanced ? '17px' : '2px', width:'15px', height:'15px', borderRadius:'50%', background:'white', transition:'left 0.15s', boxShadow:'0 1px 2px rgba(0,0,0,0.2)' }} />
-        </button>
+      {/* ── 1 · WHO HANDLES WHAT ─────────────────────────────────────────── */}
+      <CommsLabel>Who handles what</CommsLabel>
+      <div style={{ margin:'0 12px' }}>
+        {groups.length === 0 ? (
+          <div style={{ borderRadius:'12px', background:'white', padding:'14px', boxShadow:'0 1px 4px rgba(26,46,43,0.07)' }}>
+            <p style={{ fontSize:'12px', color:'#8a9e9a' }}>No job types are configured yet.</p>
+          </div>
+        ) : PARENTS.map(parent => {
+          const rows = groups.filter(g => g.drip_category === parent.key)
+          if (!rows.length) return null
+          return (
+            <div key={parent.key} style={{ marginBottom:'14px' }}>
+              <p style={{ fontSize:'11px', fontWeight:700, color:'#6b7c79', textTransform:'uppercase', letterSpacing:'0.6px', margin:'0 0 6px 2px' }}>{parent.label}</p>
+              <div style={{ borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 4px rgba(26,46,43,0.07)' }}>
+                {rows.map((g, i) => {
+                  const h = handlerFor(g.label)
+                  return (
+                    <div key={g.label} data-handler-row={g.label}
+                      style={{ background:'white', padding:'13px 14px', borderTop: i ? '0.5px solid rgba(26,46,43,0.07)' : 'none',
+                               display:'flex', flexWrap:'wrap', alignItems:'center', gap:'12px' }}>
+                      <div style={{ flex:'1 1 160px', minWidth:0 }}>
+                        <p style={{ fontSize:'14px', fontWeight:600, color:'#1a2e2b' }}>{g.label}</p>
+                        <p style={{ fontSize:'11px', color:'#b0c0bc' }}>on your website form</p>
+                      </div>
+                      <div style={{ flex:'0 1 auto' }}>
+                        <select
+                          aria-label={`Who handles ${g.label}`}
+                          value={h?.source_user_id || ''}
+                          disabled={readOnly || busy===`h:${g.label}`}
+                          onChange={ev => pickHandler(g.label, ev.target.value)}
+                          style={sel}>
+                          <option value="">The location owner</option>
+                          {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        {h?.domain_warning && (
+                          <p style={{ fontSize:'10px', color:'#b45309', marginTop:'3px', maxWidth:CONTROL_W.select }}>
+                            This address is on a different domain to your sending address, so it may not deliver.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+        {/* The fallback, stated rather than implied. This is the whole of the
+            retired split_* flags' meaning, said per type instead of per
+            location. */}
+        <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5, margin:'0 0 4px 2px' }}>
+          Whoever handles a job type has their name on that type&apos;s emails to the client, and new leads of
+          that type are assigned to them. Anything you leave on <strong style={{ fontWeight:600 }}>The location owner</strong> —
+          and any lead that doesn&apos;t match a job type — comes to the owner.
+        </p>
       </div>
 
-      {/* INERT-SPLIT notice: split is ON but no recipient claims any project
-          type, so the toggle currently changes nothing — every lead still
-          notifies everyone and (since assignment reads this same config) is
-          assigned to the location owner. Informational, so it renders in
-          readOnly too; only the tap instruction is owner-only. */}
-      {advanced && !loading && !error && claimed.size === 0 && (
-        <div style={{ background:'#fbf1de', borderBottom:'1px solid rgba(0,0,0,0.06)', padding:'8px 14px' }}>
-          <p style={{ fontSize:'11px', color:'#b07d3a', lineHeight:1.5 }}>
-            Split is on, but no one is assigned to a project type yet — every lead still notifies everyone and is assigned to the location owner.
-            {!readOnly && ' Tap project types on a person below to assign them.'}
+      {/* ── 2 · WHO IS TOLD ──────────────────────────────────────────────── */}
+      <CommsLabel>Who is told about a new lead</CommsLabel>
+      <div style={{ margin:'0 12px', borderRadius:'12px', overflow:'hidden', border:'1px solid rgba(0,0,0,0.09)', background:'white' }}>
+
+        <div style={{ padding:'9px 14px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
+          <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.5 }}>
+            Separate from who handles the work. Someone can hear about every lead while handling none,
+            or handle a job type and hear about nothing.
           </p>
         </div>
-      )}
 
-      {/* Team members */}
-      <div style={{ background:'white' }}>
         <div style={{ padding:'7px 14px 4px', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
-          <p style={{ fontSize:'10px', fontWeight:700, color:'#a3aeaa', textTransform:'uppercase', letterSpacing:'0.045em' }}>Team Members</p>
+          <p style={{ fontSize:'10px', fontWeight:700, color:'#a3aeaa', textTransform:'uppercase', letterSpacing:'0.045em' }}>Your team</p>
         </div>
-        {loading ? (
-          <div style={{ padding:'16px', fontSize:'12px', color:'#8a9e9a' }}>Loading…</div>
-        ) : error ? (
-          <div style={{ padding:'16px', fontSize:'12px', color:'#e5a0a0' }}>{error}</div>
-        ) : users.length === 0 ? (
+        {users.length === 0 ? (
           <div style={{ padding:'16px', fontSize:'12px', color:'#8a9e9a' }}>No team members at this location yet.</div>
         ) : users.map((u, i) => {
           const rc = FRANCHISE_ROLES.find(r => r.key === u.role)
+          const handled = typesHandledBy(u.hub_user_id)
           return (
-            <div key={u.hub_user_id} style={{ padding:'8px 14px', borderBottom: i < users.length - 1 ? '1px solid rgba(0,0,0,0.06)' : 'none', opacity: u.subscribed ? 1 : 0.55 }}>
+            <div key={u.hub_user_id} data-recipient={u.email}
+              style={{ padding:'9px 14px', borderBottom: i < users.length - 1 ? '1px solid rgba(0,0,0,0.06)' : 'none' }}>
               <div style={{ display:'flex', alignItems:'center', gap:'12px' }}>
-                <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ flex:1, minWidth:0, opacity: u.subscribed ? 1 : 0.55 }}>
                   <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{u.name}</p>
                   <p title={u.email} style={{ fontSize:'11px', color:'#8a9e9a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{u.email}</p>
                 </div>
                 {rc && <span style={{ fontSize:'10px', padding:'3px 9px', borderRadius:'8px', background:rc.bg, color:rc.color, fontWeight:600, flexShrink:0 }}>{rc.icon} {rc.label}</span>}
-                {readOnly ? (
-                  <span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{u.subscribed ? (advanced ? catSummaryJS(u.category) : 'On') : 'Off'}</span>
-                ) : (
-                  <button
-                    onClick={()=>patchUser(u.hub_user_id, { subscribed: !u.subscribed })}
-                    title={u.subscribed ? 'Unsubscribe from lead emails' : 'Re-subscribe to lead emails'}
-                    style={{ flexShrink:0, padding:0, border:'none', background:'none', color: u.subscribed ? '#c0554e' : '#2f7d6f', fontFamily:'inherit', fontSize:'13px', fontWeight:600, cursor:'pointer' }}>
-                    {u.subscribed ? 'Remove' : 'Add back'}
-                  </button>
-                )}
+                {readOnly
+                  ? <span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{u.subscribed ? 'On' : 'Off'}</span>
+                  : <Switch on={u.subscribed} disabled={busy===`u:${u.hub_user_id}`} onClick={()=>toggleUser(u)}
+                      label={`Tell ${u.name} about new leads`} />}
               </div>
-              {advanced && u.subscribed && (
-                <RecipientTypePicker category={u.category} projectTypes={projectTypes} readOnly={readOnly}
-                  onChange={v=>patchUser(u.hub_user_id, { category:v })} />
+              {/* Deliberately OUTSIDE the dimmed block and shown whether the
+                  switch is on or off: an owner turning off someone who handles
+                  Moving needs to see that they will still be ASSIGNED those
+                  leads, they just won't be emailed about them. */}
+              {handled.length > 0 && (
+                <p data-handles={u.email} style={{ fontSize:'11px', color:'#3a5e58', marginTop:'4px' }}>
+                  Handles {handled.join(', ')}
+                  {!u.subscribed && <span style={{ color:'#b07d3a' }}> — still assigned these, just not emailed</span>}
+                </p>
               )}
             </div>
           )
         })}
+
+        {externals.length > 0 && (
+          <>
+            <div style={{ padding:'7px 14px 4px', borderTop:'1px solid rgba(0,0,0,0.06)', borderBottom:'1px solid rgba(0,0,0,0.06)' }}>
+              <p style={{ fontSize:'10px', fontWeight:700, color:'#a3aeaa', textTransform:'uppercase', letterSpacing:'0.045em' }}>Outside emails</p>
+            </div>
+            {externals.map((e, i) => (
+              <div key={e.id} data-recipient={e.email}
+                style={{ padding:'9px 14px', borderBottom: i < externals.length - 1 ? '1px solid rgba(0,0,0,0.06)' : 'none' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+                  <span aria-hidden="true" style={{ fontSize:'14px', flexShrink:0, opacity: e.subscribed ? 1 : 0.5 }}>✉️</span>
+                  <div style={{ flex:1, minWidth:0, opacity: e.subscribed ? 1 : 0.55 }}>
+                    {e.name && e.name !== e.email && <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{e.name}</p>}
+                    <p title={e.email} style={{ fontSize:'12px', color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{e.email}</p>
+                    {e.phone && <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{e.phone}</p>}
+                  </div>
+                  {readOnly ? (
+                    <span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{e.subscribed ? 'On' : 'Off'}</span>
+                  ) : (
+                    <>
+                      <Switch on={e.subscribed} disabled={busy===`e:${e.id}`} onClick={()=>toggleExternal(e)}
+                        label={`Tell ${e.email} about new leads`} />
+                      <button onClick={()=>removeExternal(e.id)} title="Remove this address from the list entirely"
+                        style={{ flexShrink:0, padding:0, border:'none', background:'none', color:'#c0554e', fontFamily:'inherit', fontSize:'12px', fontWeight:600, cursor:'pointer' }}>Remove</button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+
+        {!readOnly && (adding ? (
+          <div style={{ background:'#f7f5f0', padding:'12px 14px', borderTop:'1px solid rgba(0,0,0,0.06)', display:'grid', gap:'8px' }}>
+            <div style={{ display:'flex', gap:'8px', maxWidth:CONTROL_W.field }}>
+              <input value={form.first_name} onChange={ev=>setForm(f=>({...f,first_name:ev.target.value}))} placeholder="First name" style={{ ...fieldStyle, flex:1 }} />
+              <input value={form.last_name} onChange={ev=>setForm(f=>({...f,last_name:ev.target.value}))} placeholder="Last name" style={{ ...fieldStyle, flex:1 }} />
+            </div>
+            <input value={form.email} onChange={ev=>{ setForm(f=>({...f,email:ev.target.value})); setFormErr('') }}
+              placeholder="email@example.com *" type="email"
+              style={{ ...fieldStyle, border:`1.5px solid ${formErr?'#e5a0a0':'rgba(0,0,0,0.1)'}` }} />
+            <input value={form.phone} onChange={ev=>setForm(f=>({...f,phone:ev.target.value}))} placeholder="Phone (optional)" type="tel" style={fieldStyle} />
+            {formErr && <p style={{ fontSize:'11px', color:'#c96a6a' }}>{formErr}</p>}
+            <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>
+              Outside addresses are told about new leads only. They never handle a job type and never send client emails.
+            </p>
+            <div style={{ display:'flex', gap:'8px', justifyContent:'flex-end' }}>
+              <button onClick={()=>{ setAdding(false); setFormErr('') }} style={{ padding:'9px 14px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', color:'#8a9e9a', cursor:'pointer', fontFamily:'inherit' }}>Cancel</button>
+              <button onClick={addExternal} disabled={addBusy} style={{ padding:'9px 16px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor: addBusy?'default':'pointer', opacity: addBusy?0.6:1 }}>{addBusy ? 'Adding…' : 'Add email'}</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ background:'#fafbfa', borderTop:'1px solid rgba(0,0,0,0.06)', padding:'9px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px' }}>
+            <span style={{ fontSize:'12px', color:'#8a9e9a' }}>
+              {users.filter(u=>u.subscribed).length + externals.filter(e=>e.subscribed).length} told about new leads
+            </span>
+            <button onClick={()=>setAdding(true)} style={{ padding:0, background:'none', border:'none', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#2f7d6f', cursor:'pointer' }}>+ Add outside email</button>
+          </div>
+        ))}
       </div>
 
-      {/* External recipients */}
-      {externals.length > 0 && (
-        <div style={{ background:'white', borderTop:'1px solid rgba(0,0,0,0.06)' }}>
-          <div style={{ padding:'7px 14px 4px' }}>
-            <p style={{ fontSize:'10px', fontWeight:700, color:'#a3aeaa', textTransform:'uppercase', letterSpacing:'0.045em' }}>Outside Emails</p>
-          </div>
-          {externals.map((e) => (
-            <div key={e.id} style={{ padding:'8px 14px', borderTop:'1px solid rgba(0,0,0,0.06)' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-                <span style={{ fontSize:'14px', flexShrink:0 }}>✉️</span>
-                <div style={{ flex:1, minWidth:0 }}>
-                  {e.name && e.name !== e.email && <p style={{ fontSize:'13px', fontWeight:600, color:'#1a2e2b', marginBottom:'1px' }}>{e.name}</p>}
-                  <p title={e.email} style={{ fontSize:'12px', color:'#1a2e2b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{e.email}</p>
-                  {e.phone && <p style={{ fontSize:'11px', color:'#8a9e9a' }}>{e.phone}</p>}
-                </div>
-                {readOnly ? (
-                  advanced && <span style={{ fontSize:'11px', color:'#8a9e9a', flexShrink:0 }}>{catSummaryJS(e.category)}</span>
-                ) : (
-                  <button onClick={()=>removeExternal(e.id)} title="Remove recipient" style={{ flexShrink:0, padding:0, border:'none', background:'none', color:'#c0554e', fontFamily:'inherit', fontSize:'13px', fontWeight:600, cursor:'pointer' }}>Remove</button>
-                )}
-              </div>
-              {advanced && (
-                <RecipientTypePicker category={e.category} projectTypes={projectTypes} readOnly={readOnly}
-                  onChange={v=>patchExternal(e.id, { category:v })} />
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Everything else → whole team (advanced only) */}
-      {advanced && projectTypes.length > 0 && (
-        <div style={{ background:'#fafbfa', borderTop:'1px solid rgba(0,0,0,0.06)', padding:'8px 14px' }}>
-          <p style={{ fontSize:'10px', fontWeight:700, color:'#a3aeaa', textTransform:'uppercase', letterSpacing:'0.045em', marginBottom:'6px' }}>Everything else → whole team</p>
-          {leftoverTypes.length === 0 ? (
-            <p style={{ fontSize:'11px', color:'#8a9e9a' }}>Every project type is assigned to someone specific.</p>
-          ) : (
-            <>
-              {/* Ownership half — this config also drives lead ASSIGNMENT
-                  (lib/lead-assignment.ts): unclaimed types notify the whole team
-                  but the lead itself is assigned to the location owner. */}
-              <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4, marginBottom:'6px' }}>Leads of these types notify the whole team and are assigned to the location owner.</p>
-              <div style={{ display:'flex', flexWrap:'wrap', gap:'5px', marginBottom:'8px' }}>
-                {leftoverTypes.map(t => (
-                  <span key={t} style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'8px', background:'rgba(0,0,0,0.05)', color:'#8a9e9a', fontWeight:600 }}>{t}</span>
-                ))}
-              </div>
-              <div style={{ display:'flex', flexWrap:'wrap', gap:'5px' }}>
-                {subscribedUsers.length === 0 ? (
-                  <span style={{ fontSize:'11px', color:'#c96a6a' }}>No subscribed team members — these leads fall back to the full list.</span>
-                ) : subscribedUsers.map(u => (
-                  <span key={u.hub_user_id} style={{ fontSize:'11px', padding:'3px 9px', borderRadius:'8px', background:'rgba(168,201,196,0.18)', color:'#3a5e58', fontWeight:600 }}>{u.name}</span>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Add outside email — available in BASIC state (no toggle needed) */}
-      {!readOnly && (adding ? (
-        <div style={{ background:'#f7f5f0', padding:'12px 14px', borderTop:'1px solid rgba(0,0,0,0.05)', display:'grid', gap:'8px' }}>
-          <div style={{ display:'flex', gap:'8px', maxWidth:CONTROL_W.field }}>
-            <input value={form.first_name} onChange={e=>setForm(f=>({...f,first_name:e.target.value}))} placeholder="First name" style={{ flex:1, padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
-            <input value={form.last_name} onChange={e=>setForm(f=>({...f,last_name:e.target.value}))} placeholder="Last name" style={{ flex:1, padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
-          </div>
-          <input value={form.email} onChange={e=>{ setForm(f=>({...f,email:e.target.value})); setFormErr('') }} placeholder="email@example.com *" type="email" style={{ width:'100%', maxWidth:CONTROL_W.field, padding:'9px 12px', border:`1.5px solid ${formErr?'#e5a0a0':'rgba(0,0,0,0.1)'}`, borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
-          <input value={form.phone} onChange={e=>setForm(f=>({...f,phone:e.target.value}))} placeholder="Phone (optional)" type="tel" style={{ width:'100%', maxWidth:CONTROL_W.field, padding:'9px 12px', border:'1.5px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'13px', fontFamily:'inherit', color:'#1a2e2b', outline:'none' }} />
-          {formErr && <p style={{ fontSize:'11px', color:'#c96a6a' }}>{formErr}</p>}
-          <p style={{ fontSize:'11px', color:'#8a9e9a', lineHeight:1.4 }}>Outside emails are notify-only — they never send follow-up emails.{advanced ? ' Set which project types they get after adding.' : ''}</p>
-          <div style={{ display:'flex', gap:'8px', justifyContent:'flex-end' }}>
-            <button onClick={()=>{ setAdding(false); setFormErr('') }} style={{ padding:'9px 14px', background:'transparent', border:'1px solid rgba(0,0,0,0.1)', borderRadius:'8px', fontSize:'12px', color:'#8a9e9a', cursor:'pointer', fontFamily:'inherit' }}>Cancel</button>
-            <button onClick={addExternal} disabled={busy} style={{ padding:'9px 16px', background:'#1a2e2b', border:'none', borderRadius:'8px', fontSize:'12px', fontFamily:'inherit', fontWeight:600, color:'white', cursor: busy?'default':'pointer', opacity: busy?0.6:1 }}>{busy ? 'Adding…' : 'Add email'}</button>
-          </div>
-        </div>
-      ) : (
-        <div style={{ background:'#fafbfa', borderTop:'1px solid rgba(0,0,0,0.06)', padding:'8px 14px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-          <span style={{ fontSize:'12px', color:'#8a9e9a' }}>{subCount} active recipient{subCount !== 1 ? 's' : ''}</span>
-          <button onClick={()=>setAdding(true)} style={{ padding:0, background:'none', border:'none', fontSize:'13px', fontFamily:'inherit', fontWeight:600, color:'#2f7d6f', cursor:'pointer' }}>+ Add outside email</button>
-        </div>
-      ))}
+      {/* ── 3 · SLACK ────────────────────────────────────────────────────── */}
+      {/* Stated, not built. Slack is a CHANNEL broadcast: the app posts to the
+          location's channel and everyone in it sees the message. There is no
+          per-user routing to offer, so putting per-person switches here would
+          be an interface promising control the integration cannot deliver.
+          Saying so in one line is the honest version. */}
+      <CommsLabel>Slack</CommsLabel>
+      <div style={{ margin:'0 12px 4px', borderRadius:'12px', border:'1px solid rgba(0,0,0,0.09)', background:'white', padding:'12px 14px' }}>
+        <p style={{ fontSize:'12px', color:'#4a5e5a', lineHeight:1.55 }}>
+          If your Slack channel is connected, <strong style={{ fontWeight:600 }}>every</strong> new lead posts there —
+          whatever you set above. A channel goes to everyone in it, so there is nothing to set per person.
+          Connect or disconnect it under <strong style={{ fontWeight:600 }}>Connections › Slack</strong>.
+        </p>
+      </div>
     </div>
   )
 }
@@ -23101,31 +22946,19 @@ export function SettingsScreen({ onStatusChange, selectedLoc=null, initialSectio
             unchanged: the routing table and the notification recipients. What
             left it went to Emails (sending identity) and Connections (Slack).
 
-            Step 2 REBUILDS this section. Everything here still writes exactly
-            what it wrote on the Your team tab, including what is inert at most
-            locations — the "also told: N others" count, the derived-default
-            dropdown and the split flag are step 2's, deliberately not this
-            step's. Rehousing and rebuilding in one commit is how you lose the
-            ability to tell which of the two broke something. */}
+            Step 2 (this) REBUILT it. TeamRouting and NewLeadNotifications are
+            gone, replaced by NewLeadsSection: two independent lists — who
+            HANDLES each job type, and who is TOLD about a lead — where there
+            used to be one fused `category` field and two split_* flags. */}
         {activeSection==='newleads'&&(
           <div style={{ paddingBottom:'12px' }}>
 
             <div style={{ padding:'18px 16px 2px' }}>
               <h1 style={{ fontSize:'21px', fontWeight:700, color:'#1a2e2b', fontFamily:'Georgia,serif', margin:0 }}>New leads</h1>
-              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Who hears about a new lead, and which kinds of job reach them.</p>
+              <p style={{ fontSize:'12px', color:'#8a9e9a', marginTop:'3px', lineHeight:1.5 }}>Who handles each kind of job, and who hears about a new lead. Two separate things.</p>
             </div>
 
-            {/* ── issue 240 step 5 — the routing table leads the screen ─────
-                A row per job type the website form offers. The cards below it
-                are unchanged and still own everything this table does not:
-                the master toggles, adding an outside email, unsubscribing,
-                and assigning one sender to several types at once. */}
-            <CommsLabel>Every kind of job</CommsLabel>
-            <TeamRouting realLocId={realLocId} readOnly={false} />
-
-            {/* ── TIER 2 · MEDIUM — who's notified about new leads ─────────── */}
-            <CommsLabel>Who hears about new leads</CommsLabel>
-            <NewLeadNotifications realLocId={realLocId} readOnly={false} />
+            <NewLeadsSection realLocId={realLocId} readOnly={false} />
 
           </div>
         )}

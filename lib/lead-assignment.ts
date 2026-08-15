@@ -2,28 +2,41 @@
 // ─────────────────────────────────────────────────────────────
 // WHO OWNS AN INCOMING LEAD — resolution + the write.
 //
-// THE RULE (Kevin, 2026-07-24). Deliberately NOT the same rule as the
-// notification fan-out, even though it reads the same config:
+// THE RULE (Kevin, 2026-08-15 — issue 246 step 2). Assignment now reads the
+// HANDLER table and nothing else:
 //
-//   1. locations.split_notifications_enabled OFF → the LOCATION OWNER.
-//      Several notification recipients does NOT mean several assignees. A
-//      location that hasn't split by project type has one owner of the work.
-//   2. split ON → whoever SPECIFICALLY claims the lead's project type, i.e.
-//      carries that project-type label in their notification category set.
-//      MULTI-ASSIGN: if several people claim it, all of them are assigned.
-//   3. split ON but nobody claims the type → the LOCATION OWNER.
-//   4. EXTERNAL recipients (lead_notification_externals — outside email
-//      addresses) are notified exactly as today and are NEVER assigned. They
-//      have no hub_users row, so there is nothing to assign. A type claimed
-//      ONLY by externals therefore falls to rule 3.
-//   5. NEVER NOBODY. If every tier comes up empty the resolver says so loudly
+//   1. The lead's project_type canonicalizes to a lookups label, and that
+//      location has a HANDLER for it → that person. One person per type,
+//      single-select, by construction (the table's UNIQUE).
+//   2. No handler for the type, no usable project_type, or a project_type that
+//      canonicalizes to nothing → the LOCATION OWNER.
+//   3. NEVER NOBODY. If both tiers come up empty the resolver says so loudly
 //      (console.error + basis 'none') rather than returning a silent blank.
 //
-// Note the asymmetry with lib/notification-recipients.ts on purpose: an 'all'
-// recipient is notified about everything but is NOT thereby "configured to
-// receive that project type", so 'all' does not make someone an assignee. It
-// only ever falls through to the owner tier — which, at 8 of 9 active
-// locations today, is the same person anyway.
+// WHAT CHANGED, AND WHY IT IS SIMPLER. The old rule read the NOTIFICATION
+// config: a person was assigned a type if their lead_notification_prefs
+// category set named it, gated by locations.split_notifications_enabled. That
+// fused two unrelated questions — "who hears about this" and "who does this" —
+// into one field, and produced the asymmetry the old comment had to spend a
+// paragraph excusing ('all' notifies you about everything but does not make
+// you an assignee). Both are gone. Job types decide who HANDLES; a per-person
+// switch decides who is TOLD; neither reads the other.
+//
+// NO FLAG. split_notifications_enabled is not read here any more. "No handler
+// row" is the off state, and it is expressed per type instead of per location.
+//
+// MULTI-ASSIGN moved, it did not disappear. The old rule could return several
+// hub_user ids when several people claimed a type. A type now has exactly one
+// handler, so this resolver returns at most one. Several people can still be
+// assigned to a LEAD — that is what the lead_assignees junction is for, and it
+// is set ON THE LEAD via the masthead picker, not inferred from config.
+//
+// EXTERNAL recipients (outside email addresses) are still never assigned:
+// they have no hub_users row, and as of migrations/new_lead_handlers.sql a
+// handler must be a person (source_user_id NOT NULL), so an external cannot be
+// one. A disabled or deactivated handler is treated as absent — see
+// lib/project-type-handlers.ts — so their types fall to rule 2 rather than
+// being assigned to someone who has been offboarded.
 //
 // WHERE THE RESULT LANDS — see writeLeadAssignment(). Two places, deliberately:
 // the lead_assignees junction (the plural truth) and leads.assigned_to (the
@@ -36,11 +49,17 @@
 
 import { supabaseService } from './supabase-service'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
+import { getLocationHandlers } from './project-type-handlers'
 import {
-  getManageableRecipients,
-  isSplitNotificationsEnabled,
-} from './notification-recipients'
-import { isSpecificSelection, selectedTypes } from './notification-project-types'
+  canonicalProjectType,
+  getProjectTypeVocabulary,
+} from './project-type-vocabulary'
+
+// Re-exported so the many existing importers of canonicalProjectType from this
+// module keep working; the implementation moved to project-type-vocabulary.ts
+// so the SEND path can share the one rule without importing the assignment
+// chain. See that module's header.
+export { canonicalProjectType }
 
 // How an assignment was decided. Mirrors lead_assignees.assigned_via.
 export type AssignmentBasis = 'project_type' | 'location_owner' | 'none'
@@ -48,7 +67,9 @@ export type AssignmentBasis = 'project_type' | 'location_owner' | 'none'
 export type ResolvedAssignment = {
   hubUserIds: string[]
   basis: AssignmentBasis
-  // Was the location splitting notifications by project type at all?
+  // Retained for callers/telemetry that read it. Since issue 246 step 2 there
+  // is no per-location split flag: this reports whether the location has ANY
+  // handler rows at all, which is the nearest true statement.
   splitEnabled: boolean
   // The lead's project_type after canonicalization (see canonicalProjectType).
   // null when the lead carries none, or carries a value that is not a known
@@ -57,83 +78,11 @@ export type ResolvedAssignment = {
   // TRUE when the lead HAD a project_type but it could not be resolved to a
   // known lookups label — the drift case. Not an error (we fall back to the
   // owner, which is correct), but the caller logs it so drift is visible
-  // instead of silently degrading. See the LABEL DRIFT note below.
+  // instead of silently degrading.
   projectTypeUnrecognized: boolean
-  // Type-claiming recipients that could NOT be assigned because they are
-  // external email addresses with no hub_users row. Diagnostic only.
+  // Kept at [] — externals can no longer claim a type at all (a handler must
+  // be a person). Retained so the shape does not change under callers.
   externalClaimants: string[]
-}
-
-// ── LABEL DRIFT ────────────────────────────────────────────────────────────
-// Matching a claim is EXACT-LABEL against the global lookups list
-// (category='project_types'), so a lead whose project_type does not equal a
-// label can never match a claim and silently falls to the owner. Two real
-// shapes of drift exist in prod (audited 2026-07-23, n=7,235 leads):
-//
-//   · CASE / WHITESPACE — handled: matching is trim + case-insensitive against
-//     the live lookups list, ACTIVE and INACTIVE alike. Inactive labels
-//     (Garage, Kitchen + Pantry, Move-In Organization, …) still resolve to
-//     themselves; they simply won't be claimed by anyone, so they land on the
-//     owner, which is right.
-//   · LEGACY LOWERCASE TOKENS — 'organizing' / 'moving' (2 rows). These are the
-//     pre-unification drip-category vocabulary, not labels, and they predate
-//     the project-type pills. Aliased below to the labels carrying the matching
-//     attrs.drip_category. Without the alias, a loc_test 'organizing' lead
-//     would miss the one real project-type claim in production.
-//
-// Anything else (e.g. project_type='Client', 16 rows written by the manual
-// create path) resolves to null → owner. That is the correct outcome, and
-// projectTypeUnrecognized makes it visible rather than silent.
-const LEGACY_PROJECT_TYPE_ALIASES: Record<string, 'move' | 'general'> = {
-  moving: 'move',
-  organizing: 'general',
-}
-
-// The project-type vocabulary, ACTIVE and INACTIVE. Inactive labels are
-// included on purpose: a lead captured months ago against a since-retired label
-// must still canonicalize to that label rather than reading as drift.
-async function getProjectTypeVocabulary(): Promise<
-  Array<{ label: string; dripCategory: 'move' | 'general' }>
-> {
-  try {
-    const res = await supabaseService
-      .from('lookups')
-      .select('label, attrs, sort_order')
-      .eq('category', 'project_types')
-      .order('sort_order', { ascending: true })
-    return ((res as any)?.data || [])
-      .map((r: any) => ({
-        label: String(r.label || '').trim(),
-        dripCategory: (r?.attrs?.drip_category === 'move' ? 'move' : 'general') as
-          | 'move'
-          | 'general',
-      }))
-      .filter((r: { label: string }) => !!r.label)
-  } catch {
-    return []
-  }
-}
-
-// Raw leads.project_type → the canonical lookups label, or null.
-export function canonicalProjectType(
-  raw: string | null | undefined,
-  vocabulary: Array<{ label: string; dripCategory: 'move' | 'general' }>,
-): string | null {
-  const s = (raw || '').trim()
-  if (!s) return null
-
-  const exact = vocabulary.find((v) => v.label.toLowerCase() === s.toLowerCase())
-  if (exact) return exact.label
-
-  const legacy = LEGACY_PROJECT_TYPE_ALIASES[s.toLowerCase()]
-  if (legacy) {
-    // The first (lowest sort_order) label carrying that drip category — the
-    // vocabulary is ordered, so this is the primary label for the family:
-    // 'organizing' → "Home or Office Organizing", 'moving' → "Moving/Relocation".
-    const fam = vocabulary.find((v) => v.dripCategory === legacy)
-    if (fam) return fam.label
-  }
-  return null
 }
 
 // Resolve WHO should be assigned. Pure read — writes nothing.
@@ -150,70 +99,44 @@ export async function resolveLeadAssignees(args: {
     if (owner?.id) {
       return { ...partial, hubUserIds: [owner.id], basis: 'location_owner' }
     }
-    // Rule 5 — never nobody, and never silently. A location with no resolvable
+    // Rule 3 — never nobody, and never silently. A location with no resolvable
     // owner is a data problem someone has to see.
     console.error(
-      `[lead-assignment] location ${locationUuid} resolved to ZERO assignees — no project-type claim and no primary owner`,
+      `[lead-assignment] location ${locationUuid} resolved to ZERO assignees — no project-type handler and no primary owner`,
     )
     return { ...partial, hubUserIds: [], basis: 'none' }
   }
 
-  const splitEnabled = await isSplitNotificationsEnabled(locationUuid)
-
-  // Rule 1 — split off. The owner owns the work, full stop. Deliberately does
-  // NOT read the recipient list: several notification recipients is not several
-  // assignees.
-  if (!splitEnabled) {
-    return ownerFallback({
-      splitEnabled: false,
-      resolvedProjectType: null,
-      projectTypeUnrecognized: false,
-      externalClaimants: [],
-    })
-  }
-
-  const vocabulary = await getProjectTypeVocabulary()
+  // ONE MATCHING RULE: canonicalize the raw project_type to a lookups label
+  // here, at the boundary, then match exactly. The handler map is keyed on the
+  // lowercased label and the DB's ..._loc_type_ci_idx guarantees no two handler
+  // rows differ only in case, so the match downstream is unambiguous.
+  const [vocabulary, handlers] = await Promise.all([
+    getProjectTypeVocabulary(),
+    getLocationHandlers(locationUuid),
+  ])
   const resolvedProjectType = canonicalProjectType(args.projectType, vocabulary)
   const hadRawType = !!(args.projectType || '').trim()
-  const projectTypeUnrecognized = hadRawType && !resolvedProjectType
 
   const partial = {
-    splitEnabled: true,
+    // No flag any more — report whether this location configures handlers at
+    // all, which is the nearest true thing this field can say.
+    splitEnabled: handlers.size > 0,
     resolvedProjectType,
-    projectTypeUnrecognized,
+    projectTypeUnrecognized: hadRawType && !resolvedProjectType,
     externalClaimants: [] as string[],
   }
 
-  // No usable project type → nothing can be claimed → rule 3.
+  // Rule 2 (first half) — no usable project type → the owner.
   if (!resolvedProjectType) return ownerFallback(partial)
 
-  const { users, externals } = await getManageableRecipients(locationUuid)
-
-  const claims = (category: string | null | undefined) =>
-    isSpecificSelection(category) &&
-    selectedTypes(category).some(
-      (t) => t.trim().toLowerCase() === resolvedProjectType.toLowerCase(),
-    )
-
-  // Rule 4 (diagnostic half) — externals that claim this type but cannot be
-  // assigned. They are still notified by the notification path; recorded here
-  // only so the caller can explain WHY the owner got it.
-  partial.externalClaimants = externals.filter((e) => claims(e.category)).map((e) => e.email)
-
-  // Rule 2 — hub_users specifically claiming this type. An UNSUBSCRIBED user is
-  // excluded: the owner has explicitly cut them off from this location's lead
-  // flow, so handing them the work would contradict that.
-  const claimants = users.filter((u) => u.subscribed && claims(u.category))
-
-  if (claimants.length > 0) {
-    return {
-      ...partial,
-      hubUserIds: claimants.map((u) => u.hub_user_id),
-      basis: 'project_type',
-    }
+  // Rule 1 — the handler for this type, if there is one and they are usable.
+  const handler = handlers.get(resolvedProjectType.trim().toLowerCase())
+  if (handler) {
+    return { ...partial, hubUserIds: [handler.hub_user_id], basis: 'project_type' }
   }
 
-  // Rule 3 — split on, nobody (assignable) claims it.
+  // Rule 2 (second half) — a real type with nobody handling it → the owner.
   return ownerFallback(partial)
 }
 

@@ -35,8 +35,6 @@ import { fetchRateHealth } from '@/lib/rate-health'
 import { fetchBookingLinkHealth } from '@/lib/booking-link-health'
 import { fetchLatestDigestRun, DIGEST_STALE_MS } from '@/lib/digest-runs'
 import { isJobParked } from '@/lib/import-phase'
-import { getManageableRecipients } from '@/lib/notification-recipients'
-import { isSpecificSelection } from '@/lib/notification-project-types'
 import { LOC_OTHER_SLUG } from '@/lib/hub-scope'
 
 export const runtime = 'nodejs'
@@ -107,8 +105,7 @@ export async function GET(req: NextRequest) {
       .from('locations')
       .select(
         'id, location_id, slug, name, jobber_connected, jobber_access_token, ' +
-          'jobber_refresh_token, token_expiry, last_sync_status, lifecycle_status, ' +
-          'split_notifications_enabled',
+          'jobber_refresh_token, token_expiry, last_sync_status, lifecycle_status',
       )
       .order('name', { ascending: true })
     if (error) throw new Error(error.message)
@@ -351,19 +348,16 @@ export async function GET(req: NextRequest) {
     }),
   ])
 
-  // ── split-notifications ON with no project types claimed. Split-enabled
-  // locations are rare (one today), so a per-location recipients read is a
-  // couple of tiny queries, not a fan-out. location arg is the UUID. ──
-  const splitUnclaimed = await safe('split unclaimed', async () => {
-    const enabled = activeLocations.filter((l: any) => l.split_notifications_enabled === true)
-    const out: { name: string }[] = []
-    for (const loc of enabled) {
-      const { users, externals } = await getManageableRecipients(loc.id)
-      const claimed = [...users, ...externals].some(r => isSpecificSelection(r.category))
-      if (!claimed) out.push({ name: loc.name || loc.location_id })
-    }
-    return out
-  })
+  // ── RETIRED IN ISSUE 246 STEP 2 — the "split notifications on but nothing
+  // claimed" check. It reported an inert configuration: split ON with zero
+  // project-type claims behaved identically to split OFF. Both halves of that
+  // sentence are now gone — the flag drives nothing, and a recipient's
+  // `category` no longer claims anything, so the check could only ever report
+  // a state that has no consequence. A health signal for a dead concept is
+  // worse than no signal: it sends someone to fix something that cannot break.
+  //
+  // The flag COLUMN still exists (Part 3 drops it), which is why this file no
+  // longer selects it either — see the locations select above.
 
   // ── quiet locations: active, non-corporate, zero leads in 7d. Absence is
   // the one signal only this cross-location view can see. ──
@@ -446,12 +440,6 @@ export async function GET(req: NextRequest) {
   }
   for (const q of quietLocations || []) {
     needsALook.push({ key: 'quiet', label: `${q.name} — no new leads in the last 7 days` })
-  }
-  for (const s of splitUnclaimed || []) {
-    needsALook.push({
-      key: 'split',
-      label: `${s.name} — split notifications are on, but no project types are claimed`,
-    })
   }
   if (expiredInvites && expiredInvites > 0) {
     needsALook.push({

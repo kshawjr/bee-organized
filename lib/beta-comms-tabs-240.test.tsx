@@ -120,7 +120,7 @@ describe('the sections exist and render', () => {
     expect(await mount('emails')).toContain('what a client receives automatically')
     expect(await mount('texts')).toContain('Texts are on their way')
     // The three addresses Your team's contents moved to (issue 246 step 1).
-    expect(await mount('newleads')).toContain('Who hears about a new lead')
+    expect(await mount('newleads')).toContain('Who handles each kind of job')
     expect(await mount('slack')).toContain('New leads also post to your Slack channel')
     expect(await mount('jobber')).toContain('the client import that runs from it')
   })
@@ -144,10 +144,24 @@ describe('nothing that worked before is unreachable', () => {
     expect(text).toContain('Reply-To Email')
   })
 
-  it('the routing table and the notification recipients landed on New leads', async () => {
+  it('New leads renders its own body at its own address', async () => {
+    // issue 246 step 2 rebuilt this section: TeamRouting + NewLeadNotifications
+    // became NewLeadsSection.
+    //
+    // This used to assert 'Every kind of job' / 'Who hears about new leads' and
+    // looked like a content guarantee. It was not: those were CommsLabels the
+    // SETTINGS SECTION rendered around the components, so they appeared whether
+    // the components rendered anything or not — and at this mount they never
+    // did, because there is no resolved location UUID here. The labels now live
+    // with their lists inside NewLeadsSection, which is where they belong.
+    //
+    // What this address can honestly promise without a location is that the
+    // section is its own live surface. The real content guarantee — both lists,
+    // with fixtures — is lib/beta-new-leads-246b.test.tsx.
     const text = await mount('newleads')
-    expect(text).toContain('Every kind of job')
-    expect(text).toContain('Who hears about new leads')
+    expect(text).not.toContain(NO_ACCESS)
+    expect(text).toContain('Who handles each kind of job')
+    expect(text).toContain('New-lead settings become available once your location is saved')
   })
 
   it('SlackCard landed on Connections › Slack', async () => {
@@ -221,7 +235,7 @@ describe('deep links to the old sections still resolve', () => {
     // "who hears about a new lead".
     const text = await mount('yourteam')
     expect(text).not.toContain(NO_ACCESS)
-    expect(text).toContain('Who hears about new leads')
+    expect(text).toContain('Who handles each kind of job')
   })
 
   it('the step-1 retirements still hit the guard — deleted is not moved', async () => {

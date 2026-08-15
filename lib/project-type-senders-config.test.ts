@@ -47,7 +47,6 @@ import {
   getSenderConfig,
   assignSenderToTypes,
   unassignTypes,
-  setSplitEnabled,
 } from '@/lib/project-type-senders'
 import { notificationRecipientsManageableServer } from '@/lib/notification-access'
 
@@ -73,11 +72,13 @@ describe('verified-domain heuristic', () => {
 })
 
 describe('getSenderConfig', () => {
-  it('assembles toggle + base + types + assignments + people, with domain warnings', async () => {
-    h.enqueue('locations', { split_senders_enabled: true, send_from_email: 'org@boulder.beeorganized.com' })
+  it('assembles base + types + assignments + people, with domain warnings', async () => {
+    // issue 246 step 2 — no `enabled` in the payload: split_senders_enabled is
+    // retired and "no handler row" is the off state, per type.
+    h.enqueue('locations', { send_from_email: 'org@boulder.beeorganized.com' })
     h.enqueue('lookups', [
-      { label: 'Local Move', sort_order: 10 },
-      { label: 'Home Organizing', sort_order: 20 },
+      { label: 'Local Move', sort_order: 10, attrs: { drip_category: 'move' } },
+      { label: 'Home Organizing', sort_order: 20, attrs: { drip_category: 'general' } },
     ])
     h.enqueue('location_project_type_senders', [
       { id: 'a1', project_type: 'Local Move', sender_name: 'Bree', sender_email: 'bree@boulder.beeorganized.com', sender_reply_to: null, source_user_id: 'u1' },
@@ -89,9 +90,14 @@ describe('getSenderConfig', () => {
 
     const cfg = await getSenderConfig(LOC)
 
-    expect(cfg.enabled).toBe(true)
+    expect(cfg).not.toHaveProperty('enabled')
     expect(cfg.base_sender_domain).toBe('boulder.beeorganized.com')
     expect(cfg.project_types).toEqual(['Local Move', 'Home Organizing'])
+    // Grouped for the section's Organizing / Moving split, from lookups attrs.
+    expect(cfg.project_type_groups).toEqual([
+      { label: 'Local Move', drip_category: 'move' },
+      { label: 'Home Organizing', drip_category: 'general' },
+    ])
     expect(cfg.assignments).toHaveLength(1)
     expect(cfg.assignments[0]).toMatchObject({ project_type: 'Local Move', domain_warning: false })
     // Person on gmail is flagged; person on the base domain is not.
@@ -101,19 +107,25 @@ describe('getSenderConfig', () => {
     expect(bree?.domain_warning).toBe(false)
   })
 
-  it('defaults enabled to false when the column/row is absent', async () => {
+  it('degrades cleanly when the location row is absent', async () => {
     h.enqueue('locations', null)
     h.enqueue('lookups', [])
     h.enqueue('location_project_type_senders', [])
     h.enqueue('hub_users', [])
     const cfg = await getSenderConfig(LOC)
-    expect(cfg.enabled).toBe(false)
     expect(cfg.base_sender_email).toBeNull()
+    expect(cfg.assignments).toEqual([])
   })
 })
 
 describe('assignSenderToTypes — one-per-type upsert', () => {
   it('upserts ONE row per type on the (location_id, project_type) conflict key', async () => {
+    // issue 246 step 2 — labels are canonicalized against lookups before the
+    // write, so the stored value is exactly what lookups spells.
+    h.enqueue('lookups', [
+      { label: 'Local Move', sort_order: 10, attrs: { drip_category: 'move' } },
+      { label: 'Long-Distance Move', sort_order: 20, attrs: { drip_category: 'move' } },
+    ])
     h.enqueue('location_project_type_senders', null) // upsert result
     await assignSenderToTypes(
       LOC,
@@ -136,13 +148,46 @@ describe('assignSenderToTypes — one-per-type upsert', () => {
   })
 
   it('no-ops on an empty type list', async () => {
-    await assignSenderToTypes(LOC, { sender_name: 'x', sender_email: 'x@x.com', sender_reply_to: null, source_user_id: null }, [])
+    await assignSenderToTypes(LOC, { sender_name: 'x', sender_email: 'x@x.com', sender_reply_to: null, source_user_id: 'u1' }, [])
     expect(h.callsFor('location_project_type_senders')).toHaveLength(0)
+  })
+
+  it('a case-variant label is stored CANONICALLY, not as typed', async () => {
+    // The write half of "canonicalize at the boundary, then match exactly".
+    // Without it the DB's ..._loc_type_ci_idx would be the only thing between
+    // two case-variant handler rows and a silently broken one-per-type rule.
+    h.enqueue('lookups', [{ label: 'Local Move', sort_order: 10, attrs: { drip_category: 'move' } }])
+    h.enqueue('location_project_type_senders', null)
+    await assignSenderToTypes(
+      LOC,
+      { sender_name: 'Bree', sender_email: 'bree@x.com', sender_reply_to: null, source_user_id: 'u1' },
+      ['  local MOVE '],
+    )
+    expect(h.upsertPayloads('location_project_type_senders')[0][0].project_type).toBe('Local Move')
+  })
+
+  it('REJECTS an unknown project type rather than storing an unmatchable row', async () => {
+    h.enqueue('lookups', [{ label: 'Local Move', sort_order: 10, attrs: { drip_category: 'move' } }])
+    await expect(assignSenderToTypes(
+      LOC,
+      { sender_name: 'Bree', sender_email: 'bree@x.com', sender_reply_to: null, source_user_id: 'u1' },
+      ['Nonsense Type'],
+    )).rejects.toThrow(/unknown project type/)
+    expect(h.callsFor('location_project_type_senders')).toHaveLength(0)
+  })
+
+  it('REJECTS a handler with no person — an assignee cannot be an email address', async () => {
+    await expect(assignSenderToTypes(
+      LOC,
+      { sender_name: 'Bree', sender_email: 'bree@x.com', sender_reply_to: null, source_user_id: '' as any },
+      ['Local Move'],
+    )).rejects.toThrow(/must be a person/)
   })
 })
 
-describe('unassignTypes + setSplitEnabled', () => {
+describe('unassignTypes', () => {
   it('unassignTypes deletes the given types for the location', async () => {
+    h.enqueue('lookups', [{ label: 'Local Move', sort_order: 10, attrs: { drip_category: 'move' } }])
     h.enqueue('location_project_type_senders', null)
     await unassignTypes(LOC, ['Local Move'])
     const call = h.callsFor('location_project_type_senders')[0]
@@ -150,10 +195,11 @@ describe('unassignTypes + setSplitEnabled', () => {
     expect(call.ops).toContainEqual(['in', ['project_type', ['Local Move']]])
   })
 
-  it('setSplitEnabled writes the toggle', async () => {
-    h.enqueue('locations', null)
-    await setSplitEnabled(LOC, true)
-    expect(h.updatePayloads('locations')).toEqual([{ split_senders_enabled: true }])
+  it('nothing writes a split_* flag any more', async () => {
+    h.enqueue('lookups', [{ label: 'Local Move', sort_order: 10, attrs: { drip_category: 'move' } }])
+    h.enqueue('location_project_type_senders', null)
+    await unassignTypes(LOC, ['Local Move'])
+    expect(h.updatePayloads('locations')).toEqual([])
   })
 })
 

@@ -18,6 +18,10 @@
 // ─────────────────────────────────────────────────────────────
 
 import { supabaseService } from './supabase-service'
+import {
+  canonicalProjectType,
+  getProjectTypeVocabulary,
+} from './project-type-vocabulary'
 
 // hub_users roles offered as assignable senders — the location's operational
 // people, same set B1 auto-lists as notification recipients.
@@ -27,7 +31,11 @@ export type SenderIdentity = {
   sender_name: string
   sender_email: string
   sender_reply_to: string | null
-  source_user_id: string | null
+  // issue 246 step 2 — NOT NULL, matching the column. A handler is a person:
+  // you can send AS a typed address, but you cannot assign a lead to one.
+  // Narrowing this from `string | null` is deliberate — it turns every caller
+  // that used to pass null into a compile error rather than a runtime 23502.
+  source_user_id: string
 }
 
 export type ProjectTypeAssignment = SenderIdentity & {
@@ -45,10 +53,12 @@ export type SenderPerson = {
 }
 
 export type SenderConfig = {
-  enabled: boolean
   base_sender_email: string | null
   base_sender_domain: string | null
+  // Active project types with their drip family, so the config UI can group
+  // them Organizing / Moving without a second lookups round-trip.
   project_types: string[]
+  project_type_groups: Array<{ label: string; drip_category: 'move' | 'general' }>
   assignments: ProjectTypeAssignment[]
   people: SenderPerson[]
 }
@@ -89,12 +99,14 @@ export async function getSenderConfig(locationId: string): Promise<SenderConfig>
   const [locRes, typesRes, assignRes, peopleRes] = await Promise.all([
     supabaseService
       .from('locations')
-      .select('split_senders_enabled, send_from_email')
+      // split_senders_enabled is NO LONGER READ (issue 246 step 2) — "no
+      // handler row" is the off state. The column survives until Part 3.
+      .select('send_from_email')
       .eq('id', locationId)
       .maybeSingle(),
     supabaseService
       .from('lookups')
-      .select('label, sort_order')
+      .select('label, sort_order, attrs')
       .eq('category', 'project_types')
       .eq('is_active', true)
       .order('sort_order', { ascending: true }),
@@ -111,9 +123,16 @@ export async function getSenderConfig(locationId: string): Promise<SenderConfig>
   ])
 
   const baseSenderEmail = (locRes.data?.send_from_email as string | null) ?? null
-  const enabled = locRes.data?.split_senders_enabled === true
 
-  const projectTypes = (typesRes.data || []).map((r: any) => r.label).filter(Boolean)
+  const projectTypeGroups = (typesRes.data || [])
+    .map((r: any) => ({
+      label: String(r.label || '').trim(),
+      drip_category: (r?.attrs?.drip_category === 'move' ? 'move' : 'general') as
+        | 'move'
+        | 'general',
+    }))
+    .filter((r: { label: string }) => !!r.label)
+  const projectTypes = projectTypeGroups.map((r: { label: string }) => r.label)
 
   const assignments: ProjectTypeAssignment[] = (assignRes.data || []).map((a: any) => ({
     id: a.id,
@@ -134,42 +153,58 @@ export async function getSenderConfig(locationId: string): Promise<SenderConfig>
   }))
 
   return {
-    enabled,
     base_sender_email: baseSenderEmail,
     base_sender_domain: emailDomain(baseSenderEmail),
     project_types: projectTypes,
+    project_type_groups: projectTypeGroups,
     assignments,
     people,
   }
 }
 
-export async function setSplitEnabled(locationId: string, enabled: boolean): Promise<void> {
-  const { error } = await supabaseService
-    .from('locations')
-    .update({ split_senders_enabled: enabled })
-    .eq('id', locationId)
-  if (error) throw new Error(`set_split_enabled: ${error.message}`)
-}
+// setSplitEnabled() retired with the flag it wrote (issue 246 step 2). Nothing
+// sets locations.split_senders_enabled any more; Part 3 drops the column.
 
-// Assign a sender to a set of project types. Upserts one row per type on the
+// Assign a HANDLER to a set of project types. Upserts one row per type on the
 // (location_id, project_type) unique key, so reassigning a type MOVES it to
-// this sender — a type is never on two senders at once (one-per-type). Types
-// already owned by this same sender are refreshed. Returns nothing; caller
+// this person — a type is never on two handlers at once (one-per-type). Types
+// already owned by this same person are refreshed. Returns nothing; caller
 // re-reads config.
+//
+// CANONICALIZES ON WRITE (issue 246 step 2). Labels are stored exactly as
+// lookups spells them, so the read side never has to guess. This is the write
+// half of "canonicalize at the boundary, then match exactly" — with it, the
+// DB's ..._loc_type_ci_idx should never actually fire, and if it ever does
+// (23505) that is a real bug surfacing loudly rather than two case-variant
+// handler rows quietly coexisting. A label that resolves to nothing is
+// REJECTED rather than stored: an unmatchable handler row is a control the
+// owner sets and that then does nothing.
 export async function assignSenderToTypes(
   locationId: string,
   sender: SenderIdentity,
   projectTypes: string[],
 ): Promise<void> {
   if (projectTypes.length === 0) return
+  if (!sender.source_user_id) {
+    throw new Error('assign_sender: a handler must be a person (source_user_id required)')
+  }
+
+  const vocabulary = await getProjectTypeVocabulary()
+  const canonical: string[] = []
+  for (const pt of projectTypes) {
+    const label = canonicalProjectType(pt, vocabulary)
+    if (!label) throw new Error(`assign_sender: unknown project type ${JSON.stringify(pt)}`)
+    canonical.push(label)
+  }
+
   const nowIso = new Date().toISOString()
-  const rows = projectTypes.map((pt) => ({
+  const rows = Array.from(new Set(canonical)).map((pt) => ({
     location_id: locationId,
     project_type: pt,
     sender_name: sender.sender_name,
     sender_email: sender.sender_email,
     sender_reply_to: sender.sender_reply_to ?? null,
-    source_user_id: sender.source_user_id ?? null,
+    source_user_id: sender.source_user_id,
     updated_at: nowIso,
   }))
   const { error } = await supabaseService
@@ -178,17 +213,25 @@ export async function assignSenderToTypes(
   if (error) throw new Error(`assign_sender: ${error.message}`)
 }
 
-// Remove the assignment(s) for the given project types → they fall back to the
-// base sender.
+// Remove the handler(s) for the given project types → those types fall back to
+// the location owner (assignment) and the base sender (email identity).
+//
+// Canonicalizes before deleting for the same reason the write does: a caller
+// passing 'moving/relocation' must delete the 'Moving/Relocation' row, not
+// silently match nothing and leave the handler in place while the UI shows it
+// cleared. An unknown label deletes nothing, which is already correct.
 export async function unassignTypes(
   locationId: string,
   projectTypes: string[],
 ): Promise<void> {
   if (projectTypes.length === 0) return
+  const vocabulary = await getProjectTypeVocabulary()
+  const canonical = projectTypes
+    .map((pt) => canonicalProjectType(pt, vocabulary) ?? pt)
   const { error } = await supabaseService
     .from('location_project_type_senders')
     .delete()
     .eq('location_id', locationId)
-    .in('project_type', projectTypes)
+    .in('project_type', Array.from(new Set(canonical)))
   if (error) throw new Error(`unassign_types: ${error.message}`)
 }

@@ -28,7 +28,6 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { notificationRecipientsManageableServer } from '@/lib/notification-access'
 import {
   getSenderConfig,
-  setSplitEnabled,
   assignSenderToTypes,
   unassignTypes,
 } from '@/lib/project-type-senders'
@@ -73,31 +72,9 @@ export async function GET(
   }
 }
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
-  const auth = await authForLocation(params.id)
-  if ('error' in auth) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status })
-  }
-  let body: any
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
-  }
-  if (typeof body?.enabled !== 'boolean') {
-    return NextResponse.json({ error: 'enabled must be a boolean' }, { status: 400 })
-  }
-  try {
-    await setSplitEnabled(params.id, body.enabled)
-    return NextResponse.json({ ok: true, enabled: body.enabled })
-  } catch (e: any) {
-    console.error('[project-type-senders PATCH]', e?.message || e)
-    return NextResponse.json({ error: 'save_failed' }, { status: 500 })
-  }
-}
+// PATCH retired with the split_senders_enabled flag it flipped (issue 246
+// step 2). "No handler row" is the off state, so there is no master toggle
+// left to set — clearing a type's handler is a DELETE of that type.
 
 export async function POST(
   req: NextRequest,
@@ -132,6 +109,15 @@ export async function POST(
   if (!EMAIL_RE.test(senderEmail)) {
     return NextResponse.json({ error: 'sender_email must be a valid email' }, { status: 400 })
   }
+  // issue 246 step 2 — a handler must be a PERSON. Without this the DB's NOT
+  // NULL would still catch it, but as an opaque 500 rather than something the
+  // UI can act on.
+  if (!sourceUserId) {
+    return NextResponse.json(
+      { error: 'source_user_id is required — a handler must be a person' },
+      { status: 400 },
+    )
+  }
   if (projectTypes.length === 0) {
     return NextResponse.json({ error: 'project_types must be a non-empty array' }, { status: 400 })
   }
@@ -145,7 +131,13 @@ export async function POST(
     const data = await getSenderConfig(params.id)
     return NextResponse.json(data)
   } catch (e: any) {
-    console.error('[project-type-senders POST]', e?.message || e)
+    const msg = String(e?.message || e)
+    console.error('[project-type-senders POST]', msg)
+    // An unknown project type is the caller's mistake, not a server fault —
+    // assignSenderToTypes rejects it rather than storing an unmatchable row.
+    if (msg.includes('unknown project type')) {
+      return NextResponse.json({ error: 'unknown_project_type' }, { status: 400 })
+    }
     return NextResponse.json({ error: 'save_failed' }, { status: 500 })
   }
 }

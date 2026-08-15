@@ -20,7 +20,6 @@
 
 import { supabaseService } from './supabase-service'
 import { getZohoLocationNotificationContacts } from './zoho'
-import { categoryMatchesLead, isSpecificSelection } from './notification-project-types'
 
 // Legacy single-value categories (B1). Retained for the API's backward-compat
 // validation and for tests; the unified UI now writes a project-type SET (or
@@ -62,6 +61,13 @@ export type ExternalRecipient = {
   email: string
   phone: string | null
   category: string
+  // issue 246 step 2 — the on/off switch interface users always had. Muting an
+  // outside address used to mean DELETING the row, which lost the record and
+  // guaranteed the nightly Zoho top-up (cron 05:00) put a Zoho-sourced address
+  // straight back the next morning. REQUIRED, not optional: making it optional
+  // would let every drop point in the chain (the two .select() lists, the two
+  // route allowlists) compile clean while silently never carrying the value.
+  subscribed: boolean
 }
 
 export type ManageableRecipients = {
@@ -108,7 +114,7 @@ export async function getManageableRecipients(
       .eq('location_id', locationId),
     supabaseService
       .from('lead_notification_externals')
-      .select('id, first_name, last_name, email, phone, category')
+      .select('id, first_name, last_name, email, phone, category, subscribed')
       .eq('location_id', locationId)
       .order('created_at', { ascending: true }),
   ])
@@ -144,6 +150,13 @@ export async function getManageableRecipients(
     email: e.email,
     phone: e.phone,
     category: e.category ? String(e.category) : DEFAULT_CATEGORY,
+    // FORWARD-SAFE: `!== false` rather than `=== true`. If this ever runs
+    // against a database where the column is missing (a rolled-back migration,
+    // a stale branch DB), undefined reads as SUBSCRIBED — the pre-migration
+    // behaviour — rather than silently muting all 50 existing recipients.
+    // Defaulting the other way would turn a schema mismatch into a location
+    // that stops hearing about its leads and never says so.
+    subscribed: (e as any).subscribed !== false,
   }))
 
   return { users, externals }
@@ -167,148 +180,50 @@ export async function getNotificationProjectTypes(): Promise<string[]> {
   }
 }
 
-// Forward-safe read of the per-location notify split toggle. Returns false if
-// the column doesn't exist yet (migration not run) or the read errors, so the
-// section degrades to basic (notify-everyone) behavior with no error. Uses
-// array access (not .single()) to stay defensive.
-export async function isSplitNotificationsEnabled(locationId: string): Promise<boolean> {
-  try {
-    const res = await supabaseService
-      .from('locations')
-      .select('split_notifications_enabled')
-      .eq('id', locationId)
-    if ((res as any)?.error) return false
-    const row = (res.data || [])[0] as any
-    return row?.split_notifications_enabled === true
-  } catch {
-    return false
-  }
-}
+// ── RETIRED IN ISSUE 246 STEP 2 ─────────────────────────────────────────────
+//
+//   isSplitNotificationsEnabled()      read locations.split_notifications_enabled
+//   resolveLeadDripCategory()          resolved a lead's 'move'|'general' family
+//   filterRecipientsByProjectType()    filtered the send list by category set
+//
+// All three existed to serve one idea — that WHO IS TOLD could depend on the
+// job type — and that idea is what step 2 removes. Deleted rather than left
+// exported-and-unused: an unused resolver is an invitation to wire it back in,
+// and 240 step 4 already showed what a live-looking-but-dead code path costs.
+//
+// The COLUMN survives (Part 3 drops it). Nothing in the notify or assign path
+// reads it any more. The only remaining reader in the codebase is
+// app/api/admin/system-health/route.ts, which reports on it; that read is
+// harmless and goes with the column.
 
-// Mirror of resolveDripCategory (lib/stage-emails.ts) — inlined here to keep the
-// notification send path off the heavy stage-emails/drip-send import chain and
-// fully mockable via supabaseService. project_type label → 'move' | 'general';
-// defaults to 'general' when the label isn't found. Only consulted to resolve
-// LEGACY 'moving'/'organizing' recipients against a lead.
-async function resolveLeadDripCategory(
-  projectType: string | null,
-): Promise<'move' | 'general'> {
-  if (!projectType) return 'general'
-  try {
-    const res = await supabaseService
-      .from('lookups')
-      .select('attrs')
-      .eq('category', 'project_types')
-      .eq('label', projectType)
-      .eq('is_active', true)
-    const row = (res.data || [])[0] as any
-    return row?.attrs?.drip_category === 'move' ? 'move' : 'general'
-  } catch {
-    return 'general'
-  }
-}
-
-// Full config payload for the unified section's PART 1 (notifications): the
-// manageable recipients, the global project-type list, and the current split
-// toggle state.
+// Full config payload for the New leads section: the manageable recipients and
+// the global project-type list. `split_enabled` is GONE from this payload —
+// there is no toggle left for the UI to render.
 export type NotificationConfig = ManageableRecipients & {
   project_types: string[]
-  split_enabled: boolean
 }
 
 export async function getNotificationConfig(
   locationId: string,
 ): Promise<NotificationConfig> {
-  const [recipients, project_types, split_enabled] = await Promise.all([
+  const [recipients, project_types] = await Promise.all([
     getManageableRecipients(locationId),
     getNotificationProjectTypes(),
-    isSplitNotificationsEnabled(locationId),
   ])
-  return { ...recipients, project_types, split_enabled }
+  return { ...recipients, project_types }
 }
 
-// Persist the per-location notify split toggle.
-export async function setSplitNotificationsEnabled(
-  locationId: string,
-  enabled: boolean,
-): Promise<void> {
-  const { error } = await supabaseService
-    .from('locations')
-    .update({ split_notifications_enabled: enabled })
-    .eq('id', locationId)
-  if (error) throw new Error(`set_split_notifications: ${error.message}`)
-}
-
-// PART 1 send-time routing. Given the base send list (already subscribed-
-// filtered) and the lead, return who should actually be notified when the
-// split toggle is ON:
+// setSplitNotificationsEnabled() retired with the toggle it wrote (issue 246
+// step 2). The column is still there; nothing sets it any more.
 //
-//   • A recipient matches if their project-type set includes the lead's type,
-//     OR they are 'all' (legacy 'moving'/'organizing' match on drip category).
-//   • "Everything else → whole team": if NO recipient SPECIFICALLY claims this
-//     lead's type, the type is unassigned and the WHOLE team (all subscribed
-//     interface users) is notified — plus any cross-cutting 'all' recipients.
-//   • NEVER-DROP: if the filter would notify nobody, fall back to the whole
-//     team; if there are no interface users at all, fall back to the full base
-//     list. A lead notification must never silently reach no one.
-export function filterRecipientsByProjectType(
-  base: EffectiveRecipient[],
-  leadProjectType: string | null,
-  leadDripCategory: 'move' | 'general',
-): EffectiveRecipient[] {
-  // TWIN COLLAPSE — one person, one entry, BEFORE any routing decision. The
-  // Zoho seed/top-up put owner emails into lead_notification_externals that
-  // also belong to a hub_user at the location, so `base` can carry the same
-  // person twice: once as source 'user' (with the category the owner actually
-  // configured) and once as source 'external' (seeded category 'all'). Left
-  // in, the 'all' twin matches EVERY lead — so a person whose hub_user row
-  // claims specific types could never be routed away from anything, defeating
-  // the split. Collapse by lowercased email; the hub_user entry WINS over the
-  // external (a real app user and their configured preference outrank a seeded
-  // address). Rows with no email are kept as-is — they can't collide.
-  const at = new Map<string, number>()
-  const people: EffectiveRecipient[] = []
-  for (const r of base) {
-    const key = r.email?.trim().toLowerCase()
-    if (!key) {
-      people.push(r)
-      continue
-    }
-    const i = at.get(key)
-    if (i === undefined) {
-      at.set(key, people.length)
-      people.push(r)
-    } else if (people[i].source !== 'user' && r.source === 'user') {
-      people[i] = r
-    }
-  }
-
-  const matched = people.filter((r) =>
-    categoryMatchesLead(r.category, leadProjectType, leadDripCategory),
-  )
-  // The type is "claimed" iff a SPECIFIC (type-set) recipient matched it.
-  const claimed = matched.some((r) => isSpecificSelection(r.category))
-  const team = people.filter((r) => r.source === 'user')
-
-  let result: EffectiveRecipient[]
-  if (claimed) {
-    result = matched
-  } else {
-    // Unassigned type → everything-else bucket → whole team ∪ cross-cutting.
-    const seen = new Set(matched.map((r) => r.email))
-    result = [...matched]
-    for (const u of team) {
-      if (!seen.has(u.email)) {
-        seen.add(u.email)
-        result.push(u)
-      }
-    }
-  }
-
-  // NEVER-DROP backstop.
-  if (result.length === 0) result = team.length ? team : people
-  return result
-}
+// filterRecipientsByProjectType() retired with the routing it performed. Its
+// TWIN COLLAPSE (one person, one entry, when the Zoho seed put an owner's
+// address into lead_notification_externals as well) is NOT lost — that guard
+// already exists, and earlier, in resolveBaseLeadRecipients below, which
+// suppresses any external sharing an interface user's address keyed on the
+// same lowercased email. The collapse in the routing filter was the second of
+// two passes; the first one survives and is the one that matters, because it
+// also stops a twin from defeating an unsubscribe.
 
 // Effective SEND list (B2 calls this). PRECEDENCE:
 //   1. If the location has ANY in-interface recipients (owner/manager hub_users
@@ -323,23 +238,28 @@ export function filterRecipientsByProjectType(
 // FAIL LOUD: a Zoho fetch failure, or a location that resolves to zero
 // recipients, is logged with the location id — a location must never SILENTLY
 // receive no notification.
+// issue 246 step 2 — NO PROJECT-TYPE ROUTING, AND NO FLAG.
+//
+// This used to read locations.split_notifications_enabled and, when on, filter
+// the list by each recipient's category set. Both are gone. "Who is told" is
+// now one thing only: a per-person on/off switch (prefs.subscribed for
+// interface users, externals.subscribed for outside addresses), already
+// applied by resolveBaseLeadRecipients. Job types decide who HANDLES a lead
+// (lib/project-type-handlers.ts), never who hears about it.
+//
+// The `lead` parameter is retained and deliberately unused: every caller
+// passes it, the signature is load-bearing across the send path, and removing
+// it would be a wider change than this step wants. It is documented as ignored
+// rather than quietly dropped.
+//
+// Verified against production 2026-08-15: this changes who is notified at ZERO
+// locations. The flag was true at only loc_scottsdale (0 prefs, 0 claims — the
+// filter already resolved to everyone, so it was inert) and loc_test.
 export async function resolveLeadRecipients(
   locationId: string,
-  lead?: { project_type?: string | null } | null,
+  _lead?: { project_type?: string | null } | null,
 ): Promise<EffectiveRecipient[]> {
-  const base = await resolveBaseLeadRecipients(locationId)
-
-  // PART 1 project-type routing is applied ONLY when the split toggle is ON and
-  // we were given a lead to route on. Otherwise behavior is unchanged: every
-  // subscribed recipient is returned (B1/B2 semantics). The toggle read is
-  // forward-safe — a missing column reads false → basic behavior.
-  if (!lead) return base
-  const splitOn = await isSplitNotificationsEnabled(locationId)
-  if (!splitOn) return base
-
-  const projectType = lead.project_type?.trim() || null
-  const dripCategory = await resolveLeadDripCategory(projectType)
-  return filterRecipientsByProjectType(base, projectType, dripCategory)
+  return resolveBaseLeadRecipients(locationId)
 }
 
 // The unfiltered send list: subscribed interface users + all externals, or the
@@ -382,6 +302,15 @@ async function resolveBaseLeadRecipients(
       })
     }
     for (const e of externals) {
+      // issue 246 step 2 — THE MUTE, HONOURED AT SEND TIME.
+      //
+      // This one line is the whole point of adding the column. Without it the
+      // owner flips the switch, the UI shows the address as off, the row says
+      // subscribed=false — and the send path, which never asked, keeps mailing
+      // them. Nothing errors, nothing logs, and the interface is simply lying.
+      // Pinned by lib/beta-new-leads-246b.test.ts ("the SEND path honours a
+      // muted external"), which fails if this line is removed.
+      if (!e.subscribed) continue
       if (e.email && interfaceEmails.has(e.email.trim().toLowerCase())) continue
       out.push({
         source: 'external',

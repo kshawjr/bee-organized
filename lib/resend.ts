@@ -13,6 +13,7 @@
 import { Resend } from 'resend'
 import { supabaseService } from './supabase-service'
 import { logNotificationFanout, type NotificationContext } from './notification-log'
+import { resolveHandlerForRawType } from './project-type-handlers'
 
 let _resend: import('resend').Resend | null = null
 function getResend() {
@@ -210,12 +211,31 @@ export async function sendEmail(args: SendEmailArgs): Promise<SendResult> {
   })
 }
 
-// Resolve a location's assigned sender for a project type (B-split routing).
-// Defensive and forward-compatible: gated on locations.split_senders_enabled,
-// then the location_project_type_senders row. If the split is off, the type is
-// unassigned, OR the column/table doesn't exist yet (migration not run —
-// PostgREST returns a "does not exist" error), we swallow it and return null so
-// the caller uses the base sender. Never throws.
+// Resolve a location's HANDLER for a project type, and send as them.
+//
+// issue 246 step 2 — two changes, both about ending a fusion:
+//
+//   NO FLAG. This used to short-circuit on locations.split_senders_enabled
+//   before looking at the table. That flag is retired: "no handler row for
+//   this type" IS the off state, and it says it per type instead of per
+//   location. Reading both meant a location could hold handler rows that
+//   silently did nothing — which is precisely what loc_kc's four rows did on
+//   the assignment side while the notify flag was off.
+//
+//   ONE MATCHING RULE. This used to do .eq('project_type', projectType) on the
+//   RAW value: an exact, case-sensitive SQL comparison, while the assignment
+//   path canonicalized case-insensitively with legacy aliases. Same table, same
+//   question, two answers — so a lead could be assigned to Carol and still send
+//   as the location default. The raw value is now canonicalized to a lookups
+//   label first (lib/project-type-vocabulary.ts), and the handler lookup is by
+//   that label. The sender and the assignee cannot disagree because they now
+//   resolve through the same function.
+//
+// Still defensive and still never throws: any miss — no handler, unknown type,
+// disabled handler, table absent, read error — returns null and the caller
+// uses the location's base sender. A drip is NEVER dropped for want of a
+// per-type sender. That silence is by design, which is why the routing is
+// covered by tests rather than trusted to a code read.
 type ProjectTypeSenderOverride = {
   sender_name: string | null
   sender_email: string | null
@@ -226,23 +246,13 @@ async function resolveProjectTypeSenderOverride(
   projectType: string,
 ): Promise<ProjectTypeSenderOverride | null> {
   try {
-    // Master toggle first — the common single-sender location short-circuits
-    // here without touching the assignments table.
-    const { data: loc, error: locErr } = await supabaseService
-      .from('locations')
-      .select('split_senders_enabled')
-      .eq('id', locationId)
-      .single()
-    if (locErr || loc?.split_senders_enabled !== true) return null
-
-    const { data, error } = await supabaseService
-      .from('location_project_type_senders')
-      .select('sender_name, sender_email, sender_reply_to')
-      .eq('location_id', locationId)
-      .eq('project_type', projectType)
-      .maybeSingle()
-    if (error || !data) return null
-    return data as ProjectTypeSenderOverride
+    const handler = await resolveHandlerForRawType(locationId, projectType)
+    if (!handler) return null
+    return {
+      sender_name: handler.name,
+      sender_email: handler.email,
+      sender_reply_to: handler.reply_to,
+    }
   } catch {
     return null
   }

@@ -111,12 +111,27 @@ export async function PATCH(
   if (body.phone !== undefined) {
     patch.phone = typeof body.phone === 'string' ? body.phone.trim() || null : null
   }
+  // issue 246 step 2 — THE MUTE. This route is the ONLY way an outside address
+  // can be turned off; before the column existed the UI's only option was
+  // DELETE, which lost the record and let the nightly Zoho top-up (cron 05:00)
+  // re-add the address the next morning.
+  //
+  // `patch` is an explicit allowlist: a `subscribed` in the body that is not
+  // named here is dropped with a 200 OK and no error. Rejecting a non-boolean
+  // rather than coercing it — a truthy string silently meaning "on" is how a
+  // mute fails open.
+  if (body.subscribed !== undefined) {
+    if (typeof body.subscribed !== 'boolean') {
+      return NextResponse.json({ error: 'invalid subscribed' }, { status: 400 })
+    }
+    patch.subscribed = body.subscribed
+  }
 
   const { data, error } = await supabaseService
     .from('lead_notification_externals')
     .update(patch)
     .eq('id', params.extId)
-    .select('id, first_name, last_name, email, phone, category')
+    .select('id, first_name, last_name, email, phone, category, subscribed')
     .single()
   if (error) {
     // 23505 = the edited email collides with another recipient already at this

@@ -28,7 +28,6 @@ import { supabaseService } from '@/lib/supabase-service'
 import { notificationRecipientsManageableServer } from '@/lib/notification-access'
 import {
   getNotificationConfig,
-  setSplitNotificationsEnabled,
   DEFAULT_CATEGORY,
 } from '@/lib/notification-recipients'
 
@@ -106,17 +105,8 @@ export async function PATCH(
 
   const body = await req.json().catch(() => null)
 
-  // Split-toggle flip: { split_enabled: boolean }, no hub_user_id. This is the
-  // PART 1 Advanced toggle ("Notify different people by project type").
-  if (body && typeof body.split_enabled === 'boolean') {
-    try {
-      await setSplitNotificationsEnabled(params.id, body.split_enabled)
-      return NextResponse.json({ ok: true, split_enabled: body.split_enabled })
-    } catch (e: any) {
-      console.error('[notification-recipients PATCH split]', e?.message || e)
-      return NextResponse.json({ error: 'save_failed' }, { status: 500 })
-    }
-  }
+  // The { split_enabled } branch retired with the flag (issue 246 step 2).
+  // "Who is told" is a per-person switch; there is no per-location toggle.
 
   const hubUserId = body?.hub_user_id
   if (!hubUserId || typeof hubUserId !== 'string') {
@@ -194,7 +184,10 @@ export async function POST(
     return NextResponse.json({ error: 'invalid category' }, { status: 400 })
   }
 
-  const SELECT_COLS = 'id, first_name, last_name, email, phone, category'
+  // issue 246 step 2 — `subscribed` MUST be in this list. It is the shape the
+  // UI renders the freshly-added row from; omitting it is a silent drop (200
+  // OK, undefined toggle) with nothing to catch it.
+  const SELECT_COLS = 'id, first_name, last_name, email, phone, category, subscribed'
 
   // Idempotent add — the PRIMARY dedup guard, and the one that works BEFORE the
   // (location_id, email) unique index exists (this route ships ahead of the
@@ -217,6 +210,11 @@ export async function POST(
     email,
     phone: typeof body.phone === 'string' ? body.phone.trim() || null : null,
     category: body.category !== undefined ? body.category : DEFAULT_CATEGORY,
+    // issue 246 step 2. This object is an explicit allowlist: a `subscribed`
+    // in the body that is not named here is dropped with a 200 OK and no
+    // error — the exact `origin`-column failure from issue 240. A newly added
+    // recipient defaults to ON, which is what "I just added them" means.
+    subscribed: typeof body.subscribed === 'boolean' ? body.subscribed : true,
   }
 
   const { data, error } = await supabaseService

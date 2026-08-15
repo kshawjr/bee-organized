@@ -54,7 +54,6 @@ import {
   selectedTypes,
 } from '@/lib/notification-project-types'
 import {
-  filterRecipientsByProjectType,
   resolveLeadRecipients,
   type EffectiveRecipient,
 } from '@/lib/notification-recipients'
@@ -116,34 +115,6 @@ const E = (email: string, category = 'all'): EffectiveRecipient => ({
   source: 'external', hub_user_id: null, name: email.split('@')[0], email, category,
 })
 
-describe('filterRecipientsByProjectType', () => {
-  it('a CLAIMED type goes only to its assignee (+ all-leads recipients), not the whole team', () => {
-    const base = [U('owner@x.com', '["Moving"]'), U('mgr@x.com', 'all'), U('other@x.com', '["Downsizing"]')]
-    const out = filterRecipientsByProjectType(base, 'Moving', 'move').map(r => r.email).sort()
-    expect(out).toEqual(['mgr@x.com', 'owner@x.com']) // other@ (Downsizing only) excluded
-  })
-  it('an UNCLAIMED type falls to the whole team (everything-else) + all-leads externals', () => {
-    const base = [U('owner@x.com', '["Moving"]'), U('mgr@x.com', '["Moving"]'), E('ext@x.com', 'all')]
-    // 'Downsizing' is claimed by nobody → everything-else → whole team (both users) + ext(all)
-    const out = filterRecipientsByProjectType(base, 'Downsizing', 'general').map(r => r.email).sort()
-    expect(out).toEqual(['ext@x.com', 'mgr@x.com', 'owner@x.com'])
-  })
-  it('NEVER-DROP: a filter that would empty falls back to the full list when there are no users', () => {
-    // Only externals, each claiming a type none of which match, no users →
-    // fall back to the full base list (never zero).
-    const out = filterRecipientsByProjectType(
-      [E('a@x.com', '["Moving"]'), E('b@x.com', '["Estate"]')],
-      'Downsizing', 'general',
-    )
-    expect(out.map(r => r.email).sort()).toEqual(['a@x.com', 'b@x.com'])
-  })
-  it('never-drop prefers the whole team over the full list when users exist', () => {
-    const base = [U('owner@x.com', '["Moving"]'), E('ext@x.com', '["Estate"]')]
-    const out = filterRecipientsByProjectType(base, 'Downsizing', 'general').map(r => r.email).sort()
-    // Downsizing unclaimed → everything-else → whole team (owner). ext (Estate) excluded.
-    expect(out).toEqual(['owner@x.com'])
-  })
-})
 
 // ── Cross-table twin collapse ───────────────────────────────────────────────
 // The Zoho seed/top-up put owner emails into lead_notification_externals that
@@ -151,42 +122,6 @@ describe('filterRecipientsByProjectType', () => {
 // twin arrives with category 'all', so left in the array it matches every lead
 // — the person could never be routed away from anything. One person, one
 // entry: hub_user wins, their configured claim survives.
-describe('filterRecipientsByProjectType — duplicated owner (hub_user + external twin)', () => {
-  it('a duplicated owner resolves to ONE recipient — source user, claim intact', () => {
-    const out = filterRecipientsByProjectType(
-      [U('angie@x.com', '["Moving"]'), E('angie@x.com', 'all')],
-      'Moving', 'move',
-    )
-    expect(out).toHaveLength(1)
-    expect(out[0].source).toBe('user')
-    expect(out[0].hub_user_id).toBe('id-angie@x.com')
-    expect(out[0].category).toBe('["Moving"]')
-  })
-  it("the 'all' twin cannot leak them into a type someone ELSE claims", () => {
-    const base = [
-      U('angie@x.com', '["Moving"]'),
-      U('bob@x.com', '["Organizing"]'),
-      E('angie@x.com', 'all'), // the seeded twin — without collapse it matches everything
-    ]
-    const out = filterRecipientsByProjectType(base, 'Organizing', 'general').map(r => r.email)
-    expect(out).toEqual(['bob@x.com'])
-  })
-  it('collapse is case-insensitive and order-independent — external listed first still loses', () => {
-    const out = filterRecipientsByProjectType(
-      [E('Angie@X.com', 'all'), U('angie@x.com', '["Moving"]')],
-      'Moving', 'move',
-    )
-    expect(out).toHaveLength(1)
-    expect(out[0].source).toBe('user')
-  })
-  it('a genuine external with no hub_user twin is untouched', () => {
-    const out = filterRecipientsByProjectType(
-      [U('owner@x.com', '["Moving"]'), E('outside@x.com', 'all')],
-      'Moving', 'move',
-    ).map(r => r.email).sort()
-    expect(out).toEqual(['outside@x.com', 'owner@x.com'])
-  })
-})
 
 // ── resolveLeadRecipients: toggle gating (integration via mock) ──────────────
 function seed(splitEnabled: boolean) {
@@ -213,85 +148,6 @@ function seed(splitEnabled: boolean) {
 }
 beforeEach(() => vi.clearAllMocks())
 
-describe('resolveLeadRecipients — split toggle gating', () => {
-  it('split OFF → every subscribed recipient (project type ignored)', async () => {
-    seed(false)
-    const eff = await resolveLeadRecipients('loc1', { project_type: 'Closet' })
-    expect(eff.map(r => r.email).sort()).toEqual(['ext@x.com', 'manny@x.com', 'olivia@x.com'])
-  })
-  it('no lead passed → unchanged base behavior even if split ON', async () => {
-    seed(true)
-    const eff = await resolveLeadRecipients('loc1')
-    expect(eff.map(r => r.email).sort()).toEqual(['ext@x.com', 'manny@x.com', 'olivia@x.com'])
-  })
-  it('split ON + Moving lead → owner (claimed Moving) + all-leads recipients; NOT the whole team', async () => {
-    seed(true)
-    const eff = await resolveLeadRecipients('loc1', { project_type: 'Moving' })
-    // owner claims Moving; manny(all) + ext(all) are cross-cutting. Moving is
-    // claimed → whole team is NOT pulled in beyond the all-leads matches.
-    expect(eff.map(r => r.email).sort()).toEqual(['ext@x.com', 'manny@x.com', 'olivia@x.com'])
-  })
-  it('split ON + Closet lead (unclaimed) → everything-else → whole team + all-leads externals', async () => {
-    seed(true)
-    const eff = await resolveLeadRecipients('loc1', { project_type: 'Closet' })
-    // Closet claimed by nobody → whole team (olivia, manny) + ext(all).
-    expect(eff.map(r => r.email).sort()).toEqual(['ext@x.com', 'manny@x.com', 'olivia@x.com'])
-  })
-  it('split ON, owner-only claim, unmatched lead → never-drop to whole team', async () => {
-    seed(true)
-    // Make manny specific too so no one is 'all' among users; ext stays all.
-    tableData.current.lead_notification_prefs = [
-      { location_id: 'loc1', hub_user_id: 'u-owner', category: '["Moving"]', subscribed: true },
-      { location_id: 'loc1', hub_user_id: 'u-mgr', category: '["Moving"]', subscribed: true },
-    ]
-    tableData.current.lead_notification_externals = []
-    const eff = await resolveLeadRecipients('loc1', { project_type: 'Closet' })
-    // Closet unclaimed → whole team (both users).
-    expect(eff.map(r => r.email).sort()).toEqual(['manny@x.com', 'olivia@x.com'])
-  })
-  it('split ON + duplicated owner: one entry, hub_user wins, claim survives', async () => {
-    seed(true)
-    // Olivia (owner, claims Moving) also exists as a seeded external twin —
-    // different casing, category 'all', exactly what the top-up wrote.
-    tableData.current.lead_notification_externals.push({
-      id: 'e-twin', location_id: 'loc1', first_name: 'Olivia', last_name: 'O',
-      email: 'OLIVIA@x.com', phone: null, category: 'all', created_at: '2026-07-19',
-    })
-    const eff = await resolveLeadRecipients('loc1', { project_type: 'Moving' })
-    const olivias = eff.filter(r => r.email.toLowerCase() === 'olivia@x.com')
-    expect(olivias).toHaveLength(1)
-    expect(olivias[0].source).toBe('user')
-    expect(olivias[0].hub_user_id).toBe('u-owner')
-    expect(olivias[0].category).toBe('["Moving"]')
-  })
-  it("split ON + duplicated owner: the twin does not leak them into another claimant's type", async () => {
-    seed(true)
-    tableData.current.lead_notification_prefs = [
-      { location_id: 'loc1', hub_user_id: 'u-owner', category: '["Moving"]', subscribed: true },
-      { location_id: 'loc1', hub_user_id: 'u-mgr', category: '["Closet"]', subscribed: true },
-    ]
-    tableData.current.lead_notification_externals = [
-      { id: 'e-twin', location_id: 'loc1', first_name: 'Olivia', last_name: 'O',
-        email: 'olivia@x.com', phone: null, category: 'all', created_at: '2026-07-19' },
-    ]
-    const eff = await resolveLeadRecipients('loc1', { project_type: 'Closet' })
-    // Closet is Manny's claim. Olivia's 'all' twin must not pull her back in.
-    expect(eff.map(r => r.email)).toEqual(['manny@x.com'])
-  })
-  it('legacy moving row still resolves under split ON', async () => {
-    seed(true)
-    tableData.current.lead_notification_prefs = [
-      { location_id: 'loc1', hub_user_id: 'u-owner', category: 'moving', subscribed: true },
-      { location_id: 'loc1', hub_user_id: 'u-mgr', category: '["Closet"]', subscribed: true },
-    ]
-    tableData.current.lead_notification_externals = []
-    const eff = await resolveLeadRecipients('loc1', { project_type: 'Moving' })
-    // Moving lead: owner(legacy moving) matches on drip 'move'. Closet-only mgr
-    // excluded. Moving is not "claimed" by a specific type-set (legacy isn't
-    // specific), so everything-else pulls in the whole team too.
-    expect(eff.map(r => r.email).sort()).toEqual(['manny@x.com', 'olivia@x.com'])
-  })
-})
 
 // ── Externals are never senders ─────────────────────────────────────────────
 const read = (p: string) => readFileSync(join(process.cwd(), p), 'utf8')
@@ -314,10 +170,16 @@ describe('migration + routes', () => {
     expect(mig).toContain('drop constraint if exists lead_notification_externals_category_check')
     expect(mig).toContain('NOT YET APPLIED')
   })
-  it('the route accepts the split_enabled flip and a JSON-array category', () => {
-    expect(mainRoute).toContain("typeof body.split_enabled === 'boolean'")
-    expect(mainRoute).toContain('setSplitNotificationsEnabled')
+  it('the route no longer offers a split_enabled flip, and still validates category', () => {
+    // issue 246 step 2 — the flag is retired, so the PATCH branch that flipped
+    // it is gone. `category` validation stays: the column still exists and the
+    // legacy values still have to round-trip until the Part 3 cleanup.
+    expect(mainRoute).not.toContain("typeof body.split_enabled === 'boolean'")
+    expect(mainRoute).not.toContain('setSplitNotificationsEnabled')
     expect(mainRoute).toContain('isValidCategoryField')
     expect(mainRoute).toContain('getNotificationConfig')
+    // And the new field is carried through the add path — the drop point that
+    // would otherwise 200-OK a `subscribed` into the void.
+    expect(mainRoute).toContain('subscribed')
   })
 })

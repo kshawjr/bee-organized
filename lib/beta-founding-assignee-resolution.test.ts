@@ -54,6 +54,13 @@ const recipientsMock = vi.hoisted(() =>
   vi.fn(async () => ({ users: [] as any[], externals: [] as any[] })),
 )
 const splitMock = vi.hoisted(() => vi.fn(async () => false))
+// issue 246 step 2 — assignment resolves through the HANDLER table.
+const handlersMock = vi.hoisted(() => vi.fn(async () => new Map<string, any>()))
+const handlers = (pairs: Array<[string, string]>) =>
+  new Map(pairs.map(([type, userId]) => [
+    type.toLowerCase(),
+    { project_type: type, hub_user_id: userId, name: userId, email: `${userId}@bee.com`, reply_to: null },
+  ]))
 
 vi.mock('@/lib/supabase-service', () => ({
   supabaseService: { from: (t: string) => h.makeBuilder(t) },
@@ -64,8 +71,8 @@ vi.mock('./supabase-service', () => ({
 vi.mock('./owner-resolution', () => ({ getPrimaryOwnerForLocation: ownerMock }))
 vi.mock('./notification-recipients', () => ({
   getManageableRecipients: recipientsMock,
-  isSplitNotificationsEnabled: splitMock,
 }))
+vi.mock('./project-type-handlers', () => ({ getLocationHandlers: handlersMock }))
 vi.mock('@/lib/sync-log', () => ({ writeSyncLog: vi.fn(async () => {}) }))
 vi.mock('./sync-log', () => ({ writeSyncLog: vi.fn(async () => {}) }))
 
@@ -102,16 +109,16 @@ beforeEach(() => {
   ownerMock.mockResolvedValue({ id: 'owner-1', email: 'owner@bee.com', full_name: 'Owner One', phone: null } as any)
   recipientsMock.mockResolvedValue({ users: [], externals: [] })
   splitMock.mockResolvedValue(false)
+  handlersMock.mockClear(); handlersMock.mockResolvedValue(new Map())
 })
 
 describe('issue 149 — empty lead junction re-resolves at founding', () => {
-  it('empty junction + a CLAIMED project type seeds the claimer', async () => {
-    splitMock.mockResolvedValue(true)
+  it('empty junction + a HANDLED project type seeds the handler', async () => {
     queueVocabulary()
-    recipientsMock.mockResolvedValue({
-      users: [user('u1', '["Home or Office Organizing"]'), user('u2', '["Moving/Relocation"]')],
-      externals: [],
-    })
+    handlersMock.mockResolvedValue(handlers([
+      ['Home or Office Organizing', 'u1'],
+      ['Moving/Relocation', 'u2'],
+    ]))
     h.enqueue('lead_assignees', []) // lead never carried assignees
 
     const n = await seedEngagementAssigneesFromLead(ENG, LEAD, {
@@ -122,29 +129,27 @@ describe('issue 149 — empty lead junction re-resolves at founding', () => {
     expect(seededIds()).toEqual(['u2'])
     // Every seeded row hangs on THIS engagement.
     expect(seededRows().every((r: any) => r.engagement_id === ENG)).toBe(true)
-    expect(ownerMock).not.toHaveBeenCalled() // a claimant won, not the owner
+    expect(ownerMock).not.toHaveBeenCalled() // the handler won, not the owner
   })
 
-  it('MULTI-ASSIGNS when several claim the type', async () => {
-    splitMock.mockResolvedValue(true)
+  it('seeds exactly ONE person — a type has one handler', async () => {
+    // This used to MULTI-ASSIGN when several people claimed a type in the
+    // notification config. Several assignees on a lead is now set ON the lead,
+    // not inferred from configuration (issue 246 step 2).
     queueVocabulary()
-    recipientsMock.mockResolvedValue({
-      users: [user('u1', '["Moving/Relocation"]'), user('u2', '["Moving/Relocation"]')],
-      externals: [],
-    })
+    handlersMock.mockResolvedValue(handlers([['Moving/Relocation', 'u1']]))
     h.enqueue('lead_assignees', [])
 
     const n = await seedEngagementAssigneesFromLead(ENG, LEAD, {
       locationUuid: LOC, projectType: 'Moving/Relocation',
     })
-    expect(n).toBe(2)
-    expect(seededIds()).toEqual(['u1', 'u2'])
+    expect(n).toBe(1)
+    expect(seededIds()).toEqual(['u1'])
   })
 
-  it('empty junction + an UNCLAIMED type seeds the owner', async () => {
-    splitMock.mockResolvedValue(true)
+  it('empty junction + an UNHANDLED type seeds the owner', async () => {
     queueVocabulary()
-    recipientsMock.mockResolvedValue({ users: [user('u1', '["Home or Office Organizing"]')], externals: [] })
+    handlersMock.mockResolvedValue(handlers([['Home or Office Organizing', 'u1']]))
     h.enqueue('lead_assignees', [])
 
     const n = await seedEngagementAssigneesFromLead(ENG, LEAD, {
