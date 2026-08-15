@@ -27,6 +27,7 @@ import { bodyToHtml } from './drip-send'
 import { buildBrandedDripHtml, buildBrandedDripText, type BrandedEmailContext } from './drip-email-layout'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
 import { appendCanSpamFooter } from './marketing-unsubscribe'
+import { resolveLocationTemplateFork } from './template-fork'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -254,27 +255,6 @@ export type SendStageEmailResult = {
 // active forks of the same master; the most-recently-updated one wins — that
 // is the copy the owner is actively editing. A DB error is swallowed to null
 // so a transient failure degrades to the master rather than dropping the send.
-async function resolveLocationStageTemplate(
-  masterId: string,
-  locationUuid: string,
-): Promise<{ subject: string | null; body: string | null } | null> {
-  const { data, error } = await supabaseService
-    .from('templates')
-    .select('subject, body')
-    .eq('cloned_from_id', masterId)
-    .eq('location_uuid', locationUuid)
-    .eq('is_active', true)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-
-  if (error) {
-    console.warn('[stage-emails] fork lookup failed — falling back to master', {
-      masterId, locationUuid, error,
-    })
-    return null
-  }
-  return data && data.length > 0 ? data[0] : null
-}
 
 export async function sendStageEmail(scheduledRowId: string): Promise<SendStageEmailResult> {
   // Scheduled row
@@ -342,7 +322,7 @@ export async function sendStageEmail(scheduledRowId: string): Promise<SendStageE
   // restyle a commercial email as transactional nor strip its compliance
   // footer. The rate / booking-link holds run against this `tpl`, so a
   // customized body referencing an unfilled token holds rather than sends broken.
-  const fork = await resolveLocationStageTemplate(master.id, lead.location_uuid)
+  const fork = await resolveLocationTemplateFork(master.id, lead.location_uuid)
   const tpl = {
     subject: fork?.subject ?? master.subject,
     body: fork?.body ?? master.body,

@@ -18,6 +18,7 @@ import { resolveOwnerBookingLink, blockedOnMissingBookingLink } from './booking-
 import { bodyToHtml } from './drip-send'
 import { getPrimaryOwnerForLocation } from './owner-resolution'
 import { appendCanSpamFooter } from './marketing-unsubscribe'
+import { resolveLocationTemplateFork } from './template-fork'
 
 const WELCOME_LEGACY_ID = 'welcome'
 const WELCOME_DELAY_MS = 24 * 60 * 60 * 1000  // 24 hours
@@ -115,27 +116,6 @@ export type SendWelcomeResult = {
 // cloned_from_id → master.id. Prefer the active fork; fall back to the master
 // on an inactive/deleted fork, no fork, or a DB error. Most-recently-updated
 // active fork wins when Duplicate was pressed more than once.
-async function resolveLocationWelcomeTemplate(
-  masterId: string,
-  locationUuid: string,
-): Promise<{ subject: string | null; body: string | null } | null> {
-  const { data, error } = await supabaseService
-    .from('templates')
-    .select('subject, body')
-    .eq('cloned_from_id', masterId)
-    .eq('location_uuid', locationUuid)
-    .eq('is_active', true)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-
-  if (error) {
-    console.warn('[welcome] fork lookup failed — falling back to master', {
-      masterId, locationUuid, error,
-    })
-    return null
-  }
-  return data && data.length > 0 ? data[0] : null
-}
 
 export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResult> {
   // Lead
@@ -211,7 +191,7 @@ export async function sendWelcomeEmail(leadId: string): Promise<SendWelcomeResul
   // The CAN-SPAM footer below stays unconditional for Welcome (a commercial
   // email), and the rate / booking-link holds run against this `tpl` — so a
   // customized body can neither strip the footer nor ship an unfilled token.
-  const fork = await resolveLocationWelcomeTemplate(master.id, loc.id)
+  const fork = await resolveLocationTemplateFork(master.id, loc.id)
   const tpl = {
     subject: fork?.subject ?? master.subject,
     body: fork?.body ?? master.body,

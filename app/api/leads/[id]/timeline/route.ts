@@ -18,6 +18,7 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseService } from '@/lib/supabase-service'
+import { resolveLocationTemplateForks } from '@/lib/template-fork'
 import { isAdmin } from '@/lib/auth'
 
 export async function GET(
@@ -108,19 +109,16 @@ export async function GET(
     // the master name as the touchpoint label once the email actually sends.
     const masterIds = Object.keys(masterIdToKey)
     if (masterIds.length > 0 && lead.location_uuid) {
-      const { data: forks } = await supabaseService
-        .from('templates')
-        .select('subject, cloned_from_id, updated_at')
-        .eq('location_uuid', lead.location_uuid)
-        .eq('is_active', true)
-        .in('cloned_from_id', masterIds)
-        .order('updated_at', { ascending: false })
-      const overridden = new Set<string>()
-      for (const f of forks ?? []) {
-        const key = masterIdToKey[f.cloned_from_id]
-        if (!key || overridden.has(key) || !templByKey[key]) continue
-        overridden.add(key)
-        templByKey[key] = { ...templByKey[key], subject: f.subject ?? null }
+      // issue 240 step 8 — was a fourth inline copy of the fork rule.
+      const forks = await resolveLocationTemplateForks(masterIds, lead.location_uuid, '[timeline]')
+      // Walk masterIds rather than the Map: this tsconfig's target cannot
+      // iterate a Map without downlevelIteration, and vitest transpiles it
+      // happily so only `npm run build` catches it.
+      for (const masterId of masterIds) {
+        const fork = forks.get(masterId)
+        const key = masterIdToKey[masterId]
+        if (!fork || !key || !templByKey[key]) continue
+        templByKey[key] = { ...templByKey[key], subject: fork.subject ?? null }
       }
     }
   }
