@@ -63,6 +63,18 @@
 //   5. A MAIL FAILURE NEVER FAILS THE SAVE. The row is already written when the
 //      send runs. The outcome rides back on the response as `reply_email` so
 //      triage can say "saved, but the email didn't go" instead of pretending.
+//   6. AN INTERNAL ITEM NOTIFIES NOBODY (issue 247 step 2). Internal items are
+//      engineering-to-engineering and the people involved are already in this
+//      console. The reply email is owner-facing prose and deep-links to
+//      /?feedback=1 — a screen that EXCLUDES internal items — so a send here
+//      points someone at something they cannot open. Sits above rule 4, which
+//      only covers replying to your OWN item; see the guard for the two cases
+//      rule 4 lets through.
+//
+// TYPE IS NOT PATCHABLE, and neither is is_internal. This route accepts status
+// and admin_response, nothing else. Flipping an existing item's visibility is
+// therefore not possible through the app — a deliberate choice, not an
+// oversight; the reasoning is in the issue 247 step 2 report.
 //
 // notification_log records the send by construction — logging is hooked inside
 // sendEmailDirect, so this rail lands in the notebook exactly like invites and
@@ -239,7 +251,7 @@ async function maybeNotifySubmitter(args: {
   statusChanged: boolean
   shippedNow: boolean
   callerId: string
-  target: { user_id: string; location_id: string | null; title: string; type: string }
+  target: { user_id: string; location_id: string | null; title: string; type: string; is_internal?: unknown }
   newStatus: string
 }): Promise<ReplyEmailOutcome | null> {
   const { newReplyText, statusChanged, shippedNow, callerId, target, newStatus } = args
@@ -251,6 +263,29 @@ async function maybeNotifySubmitter(args: {
   // notification was ever in question", the ordinary case, which shouldn't read
   // as a suppressed send in the UI.
   if (!newReplyText && !shippedNow) return null
+
+  // ─── RULE 6: AN INTERNAL ITEM NOTIFIES NOBODY (issue 247 step 2) ────
+  // Above rule 4, because rule 4 only covers the case where the replier IS the
+  // submitter. Both cases this catches are ones rule 4 lets through:
+  //
+  //   · KEVIN FILES, SOMEONE ELSE SHIPS IT. rule 4 compares user_id to the
+  //     caller; a corporate admin marking Kevin's internal item Fixed is not
+  //     Kevin, so the issue-236 announcement fires and mails him owner-facing
+  //     prose ("the thing you reported is fixed") about a Jobber token race.
+  //     Noise, in a voice written for franchise owners.
+  //
+  //   · AN OWNER'S REPORT IS LATER FLIPPED INTERNAL. Worse, and the reason this
+  //     is a guard rather than a preference: the submitter is still the owner,
+  //     so the announcement mails THEM — about an item that is now hidden from
+  //     every owner-facing read. The mail deep-links to /?feedback=1, they
+  //     follow it, and the item they were just told about is not there. We would
+  //     have advertised something we had removed. (Step 2 does not build that
+  //     flip — see the route header — but the guard must not depend on that
+  //     staying true.)
+  //
+  // A skip reason rather than null: a null means "no notification was ever in
+  // question", and triage should see that we deliberately held one back.
+  if (isInternalItem(target)) return { sent: false, skipped: 'internal_item' }
 
   // Which of the two this is. A save that ships AND writes a reply is a reply —
   // the words lead, and the status rides along as "We've also marked it: Fixed"

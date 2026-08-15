@@ -57,8 +57,14 @@ import BeeLoader from '@/components/hive/shared/BeeLoader'
 import { CurrentUserContext } from '@/components/hive/shared/currentUserContext'
 import {
   IconBug, IconBulb, IconPlus, IconPaperclip, IconExternalLink,
-  IconChevronRight, IconCheck, IconAlertTriangle,
+  IconChevronRight, IconCheck, IconAlertTriangle, IconSelector,
 } from '@/components/ui/icons'
+// The four-value type vocabulary (issue 247 step 2). Labels and the
+// known-value predicate only — the write validators live in their routes and
+// are deliberately not shared; see lib/feedback-types.
+import {
+  INTERNAL_ONLY_TYPES, FEEDBACK_TYPE_TAB_LABEL, isKnownFeedbackType,
+} from '@/lib/feedback-types'
 // The feedback chip anatomy + status vocabulary live in feedbackShared (one
 // home for this surface's My-Items cards, the modal, and this screen); the
 // queue arithmetic lives in lib/feedback-queues, shared with the nav badge and
@@ -87,6 +93,43 @@ const TONES = {
   info:    { bg: T.state.info.bg,    ink: T.state.info.deep,    edge: T.state.info.mid },
   warning: { bg: T.state.warning.bg, ink: T.state.warning.deep, edge: T.state.warning.fg },
   accent:  { bg: T.accent.soft,      ink: T.accent.deep,        edge: T.accent.fg },
+}
+
+// ── the type glyph ───────────────────────────────────────────
+// ONE place decides the icon and its tone, for all four types and for anything
+// unrecognised. Replaces the two `bug ? IconBug : IconBulb` pairs, which gave a
+// hazard the lightbulb an idea wears (issue 247 step 2).
+//
+// bug and feature keep their EXACT existing token pair, so this change adds two
+// tones and shifts nothing that was already on screen. decision takes the
+// purple family — its own category, not an urgency — and hazard takes the
+// warning family, which is what a known risk should read as. An unrecognised
+// value gets the neutral family and the generic glyph: quiet, never another
+// type's colour.
+const TYPE_ICON = {
+  bug: IconBug, feature: IconBulb, decision: IconSelector, hazard: IconAlertTriangle,
+}
+const TYPE_TONE = {
+  bug:      { bg: T.state.danger.soft,  fg: T.state.danger.fg },
+  feature:  { bg: T.state.info.soft,    fg: T.state.info.mid },
+  decision: { bg: T.family.purple.bg,   fg: T.family.purple.text },
+  hazard:   { bg: T.state.warning.soft, fg: T.state.warning.fg },
+}
+const TYPE_TONE_FALLBACK = { bg: T.family.gray.bg, fg: T.family.gray.text }
+
+function TypeGlyph({ type, size = 13, box = 24, style = null }) {
+  const key = String(type || '')
+  const Icon = TYPE_ICON[key] || IconBulb
+  const tone = TYPE_TONE[key] || TYPE_TONE_FALLBACK
+  return (
+    <span style={{
+      width: `${box}px`, height: `${box}px`, borderRadius: T.radius.chip,
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      flexShrink: 0, background: tone.bg, color: tone.fg, ...(style || {}),
+    }}>
+      <Icon size={size} />
+    </span>
+  )
 }
 
 function plural(n, one, many) { return `${n} ${n === 1 ? one : many}` }
@@ -258,7 +301,6 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem 
   }
 
   const fieldLabel = { display: 'block', fontSize: '12px', fontWeight: 700, color: T.ink.primary, marginBottom: '6px' }
-  const bug = item.type === 'bug'
   const submitted = feedbackAgeDays(item.created_at)
 
   // What the confirmation line says. Each branch is a real outcome from the
@@ -303,9 +345,7 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem 
         <div style={{ padding: '16px 20px 12px', borderBottom: T.border.divider, flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
             <h2 style={{ fontSize: '16px', fontFamily: 'Georgia,serif', color: T.ink.primary, margin: 0, lineHeight: 1.35, display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ width: '24px', height: '24px', borderRadius: T.radius.chip, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, background: bug ? T.state.danger.soft : T.state.info.soft, color: bug ? T.state.danger.fg : T.state.info.mid }}>
-                {bug ? <IconBug size={13} /> : <IconBulb size={13} />}
-              </span>
+              <TypeGlyph type={item.type} size={13} box={24} />
               {item.title}
             </h2>
             <button onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', color: T.ink.muted, cursor: 'pointer', fontSize: '24px', lineHeight: 1, padding: 0, flexShrink: 0 }}>×</button>
@@ -472,6 +512,185 @@ function AdminFeedbackDetailModal({ item, walkLabel, position, total, isOwnItem 
   )
 }
 
+// ── FILE AN INTERNAL ITEM ─────────────────────────────────────
+// The composer for work WE found. Issue 247 step 2.
+//
+// Until this existed, filing an internal item meant hand-run SQL: steps 1 and 2
+// part 1 built the is_internal column, the owner-side exclusion and the widened
+// type domain, but nothing that could write one.
+//
+// WHY IT LIVES HERE and not in FeedbackModal: FeedbackModal is the OWNER's
+// composer, reachable from the owner nav, and it must keep offering exactly two
+// types. This one is a different form for a different person on a screen
+// already gated to the corp tier — and every row it writes is is_internal,
+// which is a property of POST /api/admin/feedback, not a checkbox anyone here
+// can get wrong.
+//
+// THE LOCATION TAG is the reason one tracker beats two. Tagging "Palm Beach
+// import is stuck" with Palm Beach is how it lines up with the report an owner
+// files a week later. It is optional because plenty of internal work belongs to
+// no single location, and it is SAFE because step 1 excludes internal rows from
+// owner reads whatever their location — so here the tag means "this is about
+// Palm Beach", never "Palm Beach sent this".
+//
+// LAYOUT: hive tokens throughout (this file carries no color literal of its
+// own — see the sweep in lib/beta-feedback-triage-ui.test.tsx), and controls
+// take their natural width. The type row and the footer buttons size to their
+// content; only the text fields fill the column, because a half-width message
+// box reads as broken rather than as restraint.
+// Singular, sentence-shaped labels — the filter chips are plural ("Bugs"),
+// which is the wrong voice on a form asking what this one thing is.
+const TYPE_COMPOSE_LABEL = { bug: 'Bug', feature: 'Idea', decision: 'Decision', hazard: 'Hazard' }
+// What each word MEANS. The two new ones need saying: the whole reason they
+// exist is that filing them as bugs made the open-bug count wrong.
+const TYPE_COMPOSE_HINT = {
+  bug: 'Something is broken.',
+  feature: 'Something that would make the work easier.',
+  decision: 'A call waiting on a person — not broken, blocked.',
+  hazard: 'A known risk that has not gone wrong yet.',
+}
+
+function InternalComposeModal({ onClose, onFiled }) {
+  const [type, setType] = useState('bug')
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [locationId, setLocationId] = useState('')
+  const [locations, setLocations] = useState([])
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+
+  // Every real location, not just the ones that already have feedback. The
+  // screen's own locOptions is derived from the loaded items, so it could not
+  // offer a location that has never filed anything — and "Portland's import is
+  // broken" is exactly the item you want to tag before Portland has ever
+  // reported. This endpoint already exists, is corp-gated, and excludes the
+  // loc_other holding pen.
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/locations/transfer-targets')
+      .then(r => (r.ok ? r.json() : { targets: [] }))
+      .then(d => { if (!cancelled) setLocations(Array.isArray(d.targets) ? d.targets : []) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  const canSave = title.trim().length > 0 && description.trim().length > 0 && !saving
+
+  const save = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/admin/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type,
+          title: title.trim(),
+          description: description.trim(),
+          location_id: locationId || null,
+        }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || `HTTP ${res.status}`)
+      }
+      onFiled()
+    } catch (e) {
+      setError(e.message === 'unknown_location' ? "That location wasn't recognised." : "Couldn't file it. Please try again.")
+      setSaving(false)
+    }
+  }
+
+  const field = {
+    width: '100%', padding: '9px 11px', border: T.border.control,
+    borderRadius: T.radius.control, fontSize: '13px', fontFamily: 'inherit',
+    color: T.ink.primary, background: T.surface.raised,
+  }
+  const label = { display: 'block', fontSize: '12px', fontWeight: 700, color: T.ink.primary, marginBottom: '6px' }
+
+  return (
+    <div onMouseDown={e => { if (e.target === e.currentTarget) onClose() }} style={{ position: 'fixed', inset: 0, zIndex: 10130, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', background: T.surface.scrim, fontFamily: '"DM Sans",system-ui,sans-serif' }}>
+      <div style={{ background: T.surface.raised, borderRadius: T.radius.card, width: '100%', maxWidth: '560px', maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: T.shadow.overlay, overflow: 'hidden' }}>
+
+        <div style={{ padding: '16px 20px 12px', borderBottom: T.border.divider, flexShrink: 0, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
+          <div>
+            <h2 style={{ fontSize: '16px', fontFamily: 'Georgia,serif', color: T.ink.primary, margin: 0, lineHeight: 1.35 }}>File an internal item</h2>
+            <p style={{ fontSize: '12px', color: T.ink.muted, margin: '3px 0 0' }}>
+              Only the team sees this. It never appears on an owner&rsquo;s screen.
+            </p>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', color: T.ink.muted, cursor: 'pointer', fontSize: '24px', lineHeight: 1, padding: 0, flexShrink: 0 }}>×</button>
+        </div>
+
+        <div style={{ padding: '16px 20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div>
+            <span style={label}>What is it?</span>
+            {/* Natural-width buttons in a wrapping row — not a stretched segmented bar. */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px' }}>
+              {['bug', 'feature', 'decision', 'hazard'].map(t => {
+                const on = type === t
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setType(t)}
+                    aria-pressed={on}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '7px',
+                      padding: '7px 13px', borderRadius: T.radius.pill,
+                      border: on ? `1px solid ${T.ink.primary}` : T.border.control,
+                      background: on ? T.ink.primary : T.surface.raised,
+                      color: on ? T.ink.inverse : T.ink.secondary,
+                      fontSize: '13px', fontFamily: 'inherit', fontWeight: on ? 600 : 500,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <TypeGlyph type={t} size={11} box={18} />
+                    {TYPE_COMPOSE_LABEL[t]}
+                  </button>
+                )
+              })}
+            </div>
+            <p style={{ fontSize: '11.5px', color: T.ink.quiet, margin: '7px 0 0' }}>
+              {TYPE_COMPOSE_HINT[type]}
+            </p>
+          </div>
+
+          <div>
+            <label style={label} htmlFor="internal-title">Title</label>
+            <input id="internal-title" value={title} maxLength={100} onChange={e => setTitle(e.target.value)} style={field} placeholder="Jobber token rotation race" />
+          </div>
+
+          <div>
+            <label style={label} htmlFor="internal-desc">What&rsquo;s going on</label>
+            <textarea id="internal-desc" value={description} maxLength={2000} onChange={e => setDescription(e.target.value)} rows={5} style={{ ...field, resize: 'vertical', lineHeight: 1.5 }} placeholder="What you saw, where, and what it affects." />
+          </div>
+
+          <div>
+            <label style={label} htmlFor="internal-loc">Location <span style={{ fontWeight: 500, color: T.ink.quiet }}>— optional</span></label>
+            <select id="internal-loc" value={locationId} onChange={e => setLocationId(e.target.value)} style={{ ...field, cursor: 'pointer' }}>
+              <option value="">No location — this is platform-wide</option>
+              {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+            <p style={{ fontSize: '11.5px', color: T.ink.quiet, margin: '7px 0 0' }}>
+              Tagging a location is how this lines up with a report an owner files later. They still never see it.
+            </p>
+          </div>
+
+          {error && <p style={{ fontSize: '12.5px', color: T.state.danger.strong, margin: 0 }}>{error}</p>}
+        </div>
+
+        <div style={{ padding: '12px 20px 16px', borderTop: T.border.divider, flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '9px' }}>
+          <button onClick={onClose} style={{ padding: '10px 16px', background: 'transparent', border: T.border.control, borderRadius: T.radius.control, fontSize: '13px', fontFamily: 'inherit', fontWeight: 600, color: T.ink.secondary, cursor: 'pointer' }}>Cancel</button>
+          <button onClick={save} disabled={!canSave} style={{ padding: '10px 18px', background: T.accent.fg, border: 'none', borderRadius: T.radius.control, fontSize: '13px', fontFamily: 'inherit', fontWeight: 700, color: T.accent.onFill, cursor: canSave ? 'pointer' : 'default', opacity: canSave ? 1 : 0.6 }}>
+            {saving ? 'Filing…' : 'File it'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function AdminFeedbackScreen({
   // Reports the ONE open count (lib/feedback-queues) up to the nav badge. Named
   // for what it now carries: it used to report the 'submitted' count only,
@@ -504,6 +723,8 @@ export default function AdminFeedbackScreen({
   const [userQuery, setUserQuery]     = useState('')
   // The open modal, as an id plus the snapshot of the queue it was opened from.
   const [walk, setWalk] = useState(null)
+  // The internal composer (issue 247 step 2). Elevated mounts only.
+  const [composing, setComposing] = useState(false)
 
   // "Just mine" matches the viewer's own submissions by user_id. Deliberately
   // NOT persisted — every filter here resets on navigation (issue 126). A
@@ -547,7 +768,13 @@ export default function AdminFeedbackScreen({
   // FACETED — each chip's number is exactly what that choice would show given
   // the other active filters, so the count never lies and no one clicks into an
   // empty list (the issue 119 lesson).
-  const matchType   = (i, t) => t === 'all' || i.type === t
+  // 'other' is the catch-all: anything whose type is outside the four the
+  // database allows. It exists so the chips can ALWAYS reconcile with
+  // Everything — see typeItems (issue 247 step 2).
+  const matchType   = (i, t) =>
+    t === 'all' ? true
+    : t === 'other' ? !isKnownFeedbackType(i.type)
+    : i.type === t
   const matchMine   = (i, m) => !m || (!!myId && i.user_id === myId)
   const matchLoc    = (i)    => locFilter === 'all' || i.location_id === locFilter
   // Search now covers what the item SAYS, not just who sent it. Searching for
@@ -600,10 +827,35 @@ export default function AdminFeedbackScreen({
   const countMine = m => visibleForType.filter(i =>
     matchType(i, typeFilter) && matchMine(i, m) && matchLoc(i) && matchQuery(i)).length
 
+  // WHICH TYPE CHIPS EXIST, and why it is not just a fixed list of four.
+  //
+  // Bugs and Ideas are always offered — the established vocabulary, and the two
+  // an owner can file. The internal-only types appear once one actually exists,
+  // so the screen does not carry two permanently-zero chips before Kevin has
+  // filed anything. "Other" is the honesty valve: it catches any value outside
+  // the four, so the chips and Everything RECONCILE no matter what is in the
+  // column. Without it a fifth type added to the database would silently make
+  // the chips sum to less than the total — the same class of quietly-disagreeing
+  // numbers issue 233 existed to end, which is why inHand exists on the queue
+  // cards above.
+  //
+  // Presence is computed from the UNFILTERED list, never from the faceted count,
+  // so a chip cannot vanish mid-search and take its rows out of the sum with it.
+  const presentTypes = useMemo(() => {
+    const seen = new Set()
+    for (const i of items) seen.add(String(i.type || ''))
+    return seen
+  }, [items])
+  const hasUnknownType = useMemo(() => items.some(i => !isKnownFeedbackType(i.type)), [items])
+
   const typeItems = [
     { key: 'all',     label: 'Everything', count: countType('all') },
     { key: 'bug',     label: 'Bugs',       count: countType('bug') },
     { key: 'feature', label: 'Ideas',      count: countType('feature') },
+    ...INTERNAL_ONLY_TYPES
+      .filter(t => presentTypes.has(t))
+      .map(t => ({ key: t, label: FEEDBACK_TYPE_TAB_LABEL[t], count: countType(t) })),
+    ...(hasUnknownType ? [{ key: 'other', label: 'Other', count: countType('other') }] : []),
   ]
   const mineItems = [
     { key: 'everyone', label: 'Everyone',  count: countMine(false) },
@@ -657,6 +909,21 @@ export default function AdminFeedbackScreen({
             style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '36px', padding: '0 14px', borderRadius: T.radius.control, border: 'none', background: T.state.info.soft, color: T.state.info.mid, fontSize: '13px', fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
           >
             <IconPlus size={13} /> Report a bug or share an idea
+          </button>
+        )}
+        {/* THE INTERNAL COMPOSER — ELEVATED MOUNTS ONLY. onReportFeedback is
+            passed by the franchise mount and only by it (see the file header),
+            so its ABSENCE is this file's existing signal for "an admin shell".
+            That is a rendering choice, not the security boundary: the real gate
+            is POST /api/admin/feedback, which is 403 for owner and manager no
+            matter what got rendered. */}
+        {!onReportFeedback && (
+          <button
+            onClick={() => setComposing(true)}
+            aria-label="File an internal item"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '36px', padding: '0 14px', borderRadius: T.radius.control, border: 'none', background: T.accent.soft, color: T.accent.deep, fontSize: '13px', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
+          >
+            <IconPlus size={13} /> File an internal item
           </button>
         )}
       </div>
@@ -752,7 +1019,6 @@ export default function AdminFeedbackScreen({
         <div style={{ background: T.surface.raised, border: T.border.thin, borderRadius: '12px', overflow: 'hidden' }}>
           {filtered.map((it, idx) => {
             const closed = isClosedFeedback(it.status)
-            const bug = it.type === 'bug'
             const stranded = isAnsweredButUnmoved(it)
             const answered = !!(it.admin_response && String(it.admin_response).trim())
             const href = contextHref(it)
@@ -767,9 +1033,7 @@ export default function AdminFeedbackScreen({
                     background: 'transparent', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
                   }}
                 >
-                  <span style={{ width: '28px', height: '28px', borderRadius: T.radius.chip, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: '1px', background: bug ? T.state.danger.soft : T.state.info.soft, color: bug ? T.state.danger.fg : T.state.info.mid }}>
-                    {bug ? <IconBug size={15} /> : <IconBulb size={15} />}
-                  </span>
+                  <TypeGlyph type={it.type} size={15} box={28} style={{ marginTop: '1px' }} />
                   <span style={{ flex: 1, minWidth: 0 }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
                       <span style={{ fontSize: '13px', fontWeight: 500, color: T.ink.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.title}</span>
@@ -857,6 +1121,17 @@ export default function AdminFeedbackScreen({
             const { reply_email: _ignored, ...row } = updated
             setItems(prev => prev.map(i => (i.id === row.id ? { ...i, ...row } : i)))
           }}
+        />
+      )}
+
+      {composing && (
+        <InternalComposeModal
+          onClose={() => setComposing(false)}
+          // Refetch rather than splicing the new row in: the list is server-
+          // ordered and server-scoped, and a filed item should appear exactly
+          // where the next load would put it. It also keeps the open count and
+          // the type chips honest without a second code path computing them.
+          onFiled={() => { setComposing(false); load() }}
         />
       )}
     </div>

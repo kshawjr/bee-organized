@@ -22,6 +22,10 @@ import { T, sage } from '@/components/hive/shared/tokens'
 import { SECTION_LABEL, SECTION_COUNT, GREEN_FILL } from '@/components/ui/tokens'
 import FilterChips from '@/components/ui/FilterChips'
 import StatusChip from '@/components/ui/StatusChip'
+// The type chip used to be `type === 'bug' ? 'bug' : 'feature'`, which printed
+// the word "feature" on a hazard — a falsehood, not a missing render. One
+// vocabulary now decides both the word and the family (issue 247 step 2).
+import { feedbackTypeChipLabel, feedbackTypeChipStyle } from '@/lib/feedback-types'
 import BeeLoader from '@/components/hive/shared/BeeLoader'
 
 const WINDOWS = [
@@ -370,7 +374,7 @@ export default function SystemHealthScreen({ onNavigate = null, role = null }) {
           <div style={{ display: 'grid', gap: '2px', marginTop: '8px' }}>
             {fbItems.slice(0, 3).map((item) => (
               <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '7px 0', borderTop: T.border.divider, fontSize: '13px', color: T.ink.primary }}>
-                <StatusChip label={item.type === 'bug' ? 'bug' : 'feature'} styleKey={item.type === 'bug' ? 'red' : 'blue'} />
+                <StatusChip label={feedbackTypeChipLabel(item.type)} styleKey={feedbackTypeChipStyle(item.type)} />
                 <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</span>
                 <span style={{ ...SECTION_COUNT, whiteSpace: 'nowrap' }}>
                   {(item.locationName || item.location_name) ? `${item.locationName || item.location_name} · ` : ''}{fmtAgo(item.createdAt || item.created_at)}

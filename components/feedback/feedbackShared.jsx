@@ -103,6 +103,20 @@ function FeedbackAttachmentList({ attachments, thumb = 80 }) {
   )
 }
 
+// The glyph per type (issue 247 step 2). Was `type === 'bug' ? '🐛' : '✨'`,
+// which gave a hazard the sparkle an idea wears.
+//
+// AN OWNER CANNOT REACH THE NEW GLYPHS — decision and hazard exist only on
+// internal rows, which every owner-facing read excludes server-side. This card
+// still needs them because the SAME card renders in the "My Items" tab for an
+// ELEVATED viewer, where Kevin's own internal items do appear.
+//
+// An unrecognised type gets a neutral pin, never another type's glyph.
+const FEEDBACK_TYPE_EMOJI = { bug: '🐛', feature: '✨', decision: '🔀', hazard: '⚠️' }
+function feedbackTypeEmoji(type) {
+  return FEEDBACK_TYPE_EMOJI[String(type || '')] || '📌'
+}
+
 // One card in the "My Items" tab — handles its own show-more collapse.
 function FeedbackItemCard({ item }) {
   const [expanded, setExpanded] = useState(false)
@@ -112,7 +126,7 @@ function FeedbackItemCard({ item }) {
     <div style={{ border:'1px solid rgba(0,0,0,0.08)', borderRadius:'12px', padding:'14px', background:'white' }}>
       <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:'10px', marginBottom:'6px' }}>
         <div style={{ display:'flex', alignItems:'flex-start', gap:'8px', minWidth:0 }}>
-          <span style={{ fontSize:'18px', lineHeight:1.2, flexShrink:0 }}>{item.type === 'bug' ? '🐛' : '✨'}</span>
+          <span style={{ fontSize:'18px', lineHeight:1.2, flexShrink:0 }}>{feedbackTypeEmoji(item.type)}</span>
           <p style={{ fontSize:'14px', fontWeight:700, color:'#1a2e2b', lineHeight:1.35, wordBreak:'break-word' }}>{item.title}</p>
         </div>
         <FeedbackStatusBadge status={item.status} />

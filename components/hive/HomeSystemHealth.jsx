@@ -35,6 +35,9 @@ import { SECTION_LABEL, SECTION_COUNT, GREEN_FILL } from '@/components/ui/tokens
 import StatusChip from '@/components/ui/StatusChip'
 import BeeLoader from '@/components/hive/shared/BeeLoader'
 import useIsMobile from '@/components/hive/shared/useIsMobile'
+// Same fix as the deep System Health panel: the old expression printed the word
+// "feature" on any type it did not recognise (issue 247 step 2).
+import { feedbackTypeChipLabel, feedbackTypeChipStyle } from '@/lib/feedback-types'
 
 const fmtAgo = (iso) => {
   if (!iso) return '—'
@@ -333,7 +336,7 @@ export default function HomeSystemHealth({ onOpenFull = null }) {
           <div style={{ ...twoCol, gap: '6px 16px', marginTop: '9px' }}>
             {fbShown.map((item) => (
               <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, fontSize: '13px', color: T.ink.primary }}>
-                <StatusChip label={item.type === 'bug' ? 'bug' : 'feature'} styleKey={item.type === 'bug' ? 'red' : 'blue'} />
+                <StatusChip label={feedbackTypeChipLabel(item.type)} styleKey={feedbackTypeChipStyle(item.type)} />
                 <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</span>
                 <span style={{ ...SECTION_COUNT, whiteSpace: 'nowrap' }}>
                   {item.locationName ? `${item.locationName} · ` : ''}{fmtAgo(item.createdAt)}
